@@ -49,7 +49,7 @@ Losing the key while keeping the database means losing every encrypted secret wi
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `pi` (pi-mono), `devin` (Devin), or `claude-managed` (Anthropic Managed Agents). See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `pi` (pi-mono), `devin` (Devin), `claude-managed` (Anthropic Managed Agents), or `opencode` (opencode SDK). See [Harness Configuration](/docs/guides/harness-configuration) |
 
 ### Credentials
 
@@ -112,6 +112,16 @@ Starter env file: `.env.docker-devin.example` at the repo root.
 | `MANAGED_GITHUB_TOKEN` | No | — | Literal GitHub PAT injected as `authorization_token` on `github_repository` resources (dev-only fallback) |
 
 Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your laptop to bootstrap the Anthropic-side Agent + Environment and persist IDs into `swarm_config`. See [Harness Configuration § Claude Managed Agents](/docs/guides/harness-configuration#claude-managed-agents).
+
+**opencode** (`HARNESS_PROVIDER=opencode`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key (preferred when present) |
+| `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key |
+| `OPENAI_API_KEY` | One of* | — | OpenAI API key |
+
+\* At least one API key OR a populated `~/.local/share/opencode/auth.json` is required. `validateOpencodeCredentials` checks them in priority order (`OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → auth file) and fails fast at boot if none are found. The opencode adapter is currently being rolled out across DES-295 → DES-299 — treat as experimental.
 
 ### General Worker Settings
 

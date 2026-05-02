@@ -1,6 +1,6 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code, Codex, pi-mono, Devin, or Claude Managed Agents) that powers your agents
+description: Configure the AI provider (Claude Code, Codex, pi-mono, Devin, Claude Managed Agents, or opencode) that powers your agents
 ---
 
 Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
@@ -14,6 +14,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
 | **Devin** | `devin` | Cognition's Devin via the `/sessions` API — session executes in Devin's managed cloud, ACU-based cost tracking |
 | **Claude Managed Agents** | `claude-managed` | Anthropic's managed cloud sandbox — sessions execute outside the worker. Requires one-time setup CLI to create the Anthropic-side Agent + Environment |
+| **opencode** | `opencode` | [opencode](https://opencode.ai) via the in-process `@opencode-ai/sdk` server. Accepts OpenRouter, Anthropic, or OpenAI API keys (or `~/.local/share/opencode/auth.json`). Experimental — currently being rolled out across DES-295 → DES-299 |
 
 ## How It Works
 
@@ -28,6 +29,9 @@ HARNESS_PROVIDER=devin           →  DevinAdapter          →  POSTs /sessions
 HARNESS_PROVIDER=claude-managed  →  ClaudeManagedAdapter  →  opens SSE stream against
                                                             Anthropic's managed sandbox
                                                             (session executes server-side)
+HARNESS_PROVIDER=opencode        →  OpencodeAdapter       →  starts in-process opencode
+                                                            server, subscribes to SSE,
+                                                            accumulates per-message cost
 ```
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.

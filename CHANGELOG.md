@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **opencode harness provider foundations** — `HARNESS_PROVIDER=opencode` is now wired into `createProviderAdapter` (#399, #400, #403, #412). Rolling out across DES-295 → DES-299:
+  - **DES-295** (#399): `ProviderNameSchema` adds `"opencode"`; new `CostData.provider` discriminator (`"claude" | "codex" | "pi" | "opencode"`) so the API can route Codex's pricing-table recompute vs. trust the harness-reported `totalCostUsd`. Migration `048_agent_provider.sql` adds an `agents.provider` column for per-agent provider pinning. `openapi.json` regenerated
+  - **DES-296** (#400): `fetchInstalledMcpServers` extracted from `claude-adapter.ts` into shared `src/utils/mcp-server-fetcher.ts` so non-claude adapters (opencode, future ones) can reuse the swarm-MCP install discovery
+  - **DES-297** (#412): `validateOpencodeCredentials(env)` in `src/utils/credentials.ts` checks `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → `~/.local/share/opencode/auth.json` in priority order and fail-fasts at boot when none are present. `PROVIDER_CREDENTIAL_VARS` map now includes `opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]` so a worker pinned to opencode doesn't stamp unrelated credentials onto its task records
+  - **DES-299** (#403): `OpencodeAdapter` + `OpencodeSession` now spin up an in-process `@opencode-ai/sdk` server, subscribe to its SSE event stream, map events to the swarm's `ProviderEvent` union, accumulate per-`AssistantMessage` cost into `CostData`, and persist every event as a `raw_log` row through `scrubSecrets`. Idempotent `abort()` closes the server cleanly
+- **[Receipts](/docs/receipts) section in docs-site with a [Ralph Loop](/docs/receipts/workflows/ralph-loop) workflow recipe** (#411). Public JSON workflow definition at `docs-site/public/receipts/workflows/ralph-loop.json` so it can be imported via the templates flow
+
+### Changed
+- README "Multi-provider" line + docs-site Harness Configuration / Harness Providers / Environment Variables / Overview pages now list `opencode` alongside the existing five providers
+- SEO-tuned descriptions on top architecture pages — overview, agents, memory (#408)
+
 ## [1.73.4] - 2026-04-30
 
 ### Fixed
