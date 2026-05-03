@@ -77,6 +77,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         success: z.boolean(),
         message: z.string(),
         task: AgentTaskSchema.optional(),
+        yourAgentId: z.string().optional(),
         wasNoOp: z
           .boolean()
           .optional()

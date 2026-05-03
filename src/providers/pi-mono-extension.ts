@@ -572,10 +572,6 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
         console.log(
           "Task sent successfully. Monitor progress using the get-task-details tool periodically.",
         );
-      } else if (!config.isLead) {
-        console.log(
-          "Remember to call store-progress periodically to update the lead agent on your progress.",
-        );
       }
 
       return undefined;

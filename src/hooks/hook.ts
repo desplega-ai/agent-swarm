@@ -691,12 +691,6 @@ export async function handleHook(): Promise<void> {
         console.log(tray);
       }
     }
-
-    if (!agentInfo.isLead && agentInfo.status === "busy") {
-      console.log(
-        `Remember to call store-progress periodically to update the lead agent on your progress as you are currently marked as busy. The comments you leave will be helpful for the lead agent to monitor your work.`,
-      );
-    }
   } else {
     console.log(
       `You are not registered in the agent swarm yet. Use the join-swarm tool to register yourself, then check your status with my-agent-info.
@@ -995,10 +989,6 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
               `Task sent successfully.${maybeTaskId ? ` Task ID: ${maybeTaskId}.` : ""} Monitor progress using the get-task-details tool periodically.`,
             );
           }
-        } else {
-          console.log(
-            `Remember to call store-progress periodically to update the lead agent on your progress.`,
-          );
         }
       }
       break;
