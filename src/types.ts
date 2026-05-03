@@ -268,6 +268,9 @@ export const AgentSchema = z.object({
   // Last session activity timestamp (updated on tool calls, task updates, etc.)
   lastActivityAt: z.iso.datetime().optional(),
 
+  // Harness provider this agent runs (claude, opencode, codex, ...)
+  provider: ProviderNameSchema.optional(),
+
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
 });

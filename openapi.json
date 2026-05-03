@@ -315,6 +315,17 @@
                   },
                   "maxTasks": {
                     "type": "integer"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode"
+                    ]
                   }
                 },
                 "required": [
@@ -5127,7 +5138,8 @@
                     "enum": [
                       "claude",
                       "codex",
-                      "pi"
+                      "pi",
+                      "opencode"
                     ]
                   },
                   "createdAt": {
@@ -6847,6 +6859,9 @@
                           "devin"
                         ]
                       },
+                      "model": {
+                        "type": "string"
+                      },
                       "providerMeta": {
                         "type": "object",
                         "properties": {
@@ -6887,6 +6902,9 @@
                           "claude-managed",
                           "opencode"
                         ]
+                      },
+                      "model": {
+                        "type": "string"
                       },
                       "providerMeta": {
                         "type": "object",

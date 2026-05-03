@@ -549,6 +549,7 @@ type AgentRow = {
   toolsMd: string | null;
   heartbeatMd: string | null;
   lastActivityAt: string | null;
+  provider: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -571,6 +572,7 @@ function rowToAgent(row: AgentRow): Agent {
     toolsMd: row.toolsMd ?? undefined,
     heartbeatMd: row.heartbeatMd ?? undefined,
     lastActivityAt: row.lastActivityAt ?? undefined,
+    provider: (row.provider as ProviderName | null) ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -578,8 +580,8 @@ function rowToAgent(row: AgentRow): Agent {
 
 export const agentQueries = {
   insert: () =>
-    getDb().prepare<AgentRow, [string, string, number, AgentStatus, number]>(
-      "INSERT INTO agents (id, name, isLead, status, maxTasks, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
+    getDb().prepare<AgentRow, [string, string, number, AgentStatus, number, string | null]>(
+      "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
     ),
 
   getById: () => getDb().prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?"),
@@ -601,7 +603,7 @@ export function createAgent(
   const maxTasks = agent.maxTasks ?? 1;
   const row = agentQueries
     .insert()
-    .get(id, agent.name, agent.isLead ? 1 : 0, agent.status, maxTasks);
+    .get(id, agent.name, agent.isLead ? 1 : 0, agent.status, maxTasks, agent.provider ?? null);
   if (!row) throw new Error("Failed to create agent");
   try {
     createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
@@ -646,6 +648,16 @@ export function updateAgentMaxTasks(id: string, maxTasks: number): Agent | null 
        WHERE id = ? RETURNING *`,
     )
     .get(maxTasks, id);
+  return row ? rowToAgent(row) : null;
+}
+
+export function updateAgentProvider(id: string, provider: ProviderName): Agent | null {
+  const row = getDb()
+    .prepare<AgentRow, [string, string]>(
+      `UPDATE agents SET provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    )
+    .get(provider, id);
   return row ? rowToAgent(row) : null;
 }
 
@@ -1078,6 +1090,7 @@ export function updateTaskClaudeSessionId(
   claudeSessionId: string,
   provider?: ProviderName,
   providerMeta?: Record<string, unknown>,
+  model?: string,
 ): AgentTask | null {
   const setClauses = ["claudeSessionId = ?", "lastUpdatedAt = ?"];
   const params: (string | null)[] = [claudeSessionId, new Date().toISOString()];
@@ -1089,6 +1102,10 @@ export function updateTaskClaudeSessionId(
   if (providerMeta !== undefined) {
     setClauses.push("providerMeta = ?");
     params.push(JSON.stringify(providerMeta));
+  }
+  if (model !== undefined) {
+    setClauses.push("model = ?");
+    params.push(model);
   }
 
   params.push(taskId);
