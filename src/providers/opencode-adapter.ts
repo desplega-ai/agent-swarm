@@ -12,6 +12,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessage, Config, Event as OpencodeEvent } from "@opencode-ai/sdk";
 import { createOpencode } from "@opencode-ai/sdk";
+import { getContextWindowSize } from "../utils/context-window";
 import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -75,6 +76,10 @@ class OpencodeSession implements ProviderSession {
   private agentFilePath: string;
   private configFilePath: string;
   private dataHomePath: string;
+
+  // Track which tool callIDs have already emitted tool_start, so transitions
+  // through pending → running → completed don't fire duplicate events.
+  private toolStartsEmitted = new Set<string>();
 
   constructor(
     sessionId: string,
@@ -180,6 +185,67 @@ class OpencodeSession implements ProviderSession {
         this.cacheWriteTokens += msg.tokens?.cache?.write ?? 0;
         this.numTurns += 1;
         if (!this.model && msg.modelID) this.model = msg.modelID;
+
+        // Emit context_usage so the runner can POST /api/tasks/:id/context
+        // (drives the dashboard's context-usage progress bar) and the
+        // dashboard's activity timeline shows per-turn progress.
+        const turnInput = msg.tokens?.input ?? 0;
+        const turnOutput = msg.tokens?.output ?? 0;
+        const turnCacheRead = msg.tokens?.cache?.read ?? 0;
+        const turnCacheWrite = msg.tokens?.cache?.write ?? 0;
+        const contextUsed = turnInput + turnCacheRead + turnCacheWrite;
+        const contextTotal = getContextWindowSize(this.model || msg.modelID || "default");
+        if (contextTotal > 0) {
+          this.emit({
+            type: "context_usage",
+            contextUsedTokens: contextUsed,
+            contextTotalTokens: contextTotal,
+            contextPercent: (contextUsed / contextTotal) * 100,
+            outputTokens: turnOutput,
+          });
+        }
+        break;
+      }
+
+      case "message.part.updated": {
+        // Bridge opencode's part.state lifecycle to swarm's tool_start/tool_end
+        // so the dashboard's Activity timeline mirrors what other providers
+        // emit. We fire tool_start the first time we see a tool part (any
+        // status); tool_end fires once when state transitions to "completed".
+        const props = (ev as unknown as { properties: { sessionID?: string; part?: unknown } })
+          .properties;
+        if (props.sessionID !== this._sessionId) break;
+        const part = props.part as
+          | {
+              type?: string;
+              tool?: string;
+              callID?: string;
+              id?: string;
+              state?: { status?: string; input?: unknown; output?: unknown };
+            }
+          | undefined;
+        if (!part || part.type !== "tool") break;
+        const callId = part.callID ?? part.id ?? "";
+        if (!callId) break;
+        const toolName = part.tool ?? "tool";
+
+        if (!this.toolStartsEmitted.has(callId)) {
+          this.toolStartsEmitted.add(callId);
+          this.emit({
+            type: "tool_start",
+            toolCallId: callId,
+            toolName,
+            args: part.state?.input,
+          });
+        }
+        if (part.state?.status === "completed") {
+          this.emit({
+            type: "tool_end",
+            toolCallId: callId,
+            toolName,
+            result: part.state.output,
+          });
+        }
         break;
       }
 

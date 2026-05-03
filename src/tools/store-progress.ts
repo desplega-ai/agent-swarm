@@ -21,7 +21,13 @@ import { AgentTaskSchema } from "@/types";
 import "./templates";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
-// Schema for optional cost data that agents can self-report
+// Schema for optional cost data that agents can self-report.
+// In practice the harness adapter (claude/codex/opencode/etc.) is the
+// authoritative source of cost data — it gets written via
+// POST /api/session-costs from the runner. Agents calling store-progress
+// rarely know the real numbers and have been observed echoing the example
+// values from this schema (e.g. model="opus" on a gpt-5-nano run). The
+// handler below silently drops payloads where every numeric field is zero.
 const CostDataSchema = z
   .object({
     totalCostUsd: z.number().min(0).describe("Total cost in USD"),
@@ -31,9 +37,16 @@ const CostDataSchema = z
     cacheWriteTokens: z.number().int().min(0).optional().describe("Cache write tokens"),
     durationMs: z.number().int().min(0).optional().describe("Duration in milliseconds"),
     numTurns: z.number().int().min(1).optional().describe("Number of turns/iterations"),
-    model: z.string().optional().describe("Model used (e.g., 'opus', 'sonnet')"),
+    model: z
+      .string()
+      .optional()
+      .describe(
+        "Model identifier reported by the agent (only set if the agent has the real ID; do NOT echo the schema example).",
+      ),
   })
-  .describe("Optional cost data for tracking session costs");
+  .describe(
+    "Optional self-reported cost data. The harness adapter writes the authoritative cost record automatically — only pass this if you have real, non-zero numbers from a model that doesn't surface usage to the harness.",
+  );
 
 export const registerStoreProgressTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -237,8 +250,20 @@ export const registerStoreProgressTool = (server: McpServer) => {
           }
         }
 
-        // Store cost data if provided (agents can self-report costs)
-        if (costData && requestInfo.agentId) {
+        // Store cost data only if the agent provided non-trivial numbers.
+        // Agents observed copying the schema example (e.g. model="opus"
+        // on a gpt-5-nano run) with all-zero token/cost fields, producing
+        // duplicate noise rows in session_costs alongside the harness's
+        // authoritative entry. Drop those silently.
+        const hasRealCost =
+          costData &&
+          (costData.totalCostUsd > 0 ||
+            (costData.inputTokens ?? 0) > 0 ||
+            (costData.outputTokens ?? 0) > 0 ||
+            (costData.cacheReadTokens ?? 0) > 0 ||
+            (costData.cacheWriteTokens ?? 0) > 0);
+
+        if (hasRealCost && requestInfo.agentId) {
           createSessionCost({
             sessionId: `mcp-${taskId}-${Date.now()}`, // Generate unique session ID for MCP-based tasks
             taskId,
