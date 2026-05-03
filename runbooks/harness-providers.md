@@ -1,6 +1,17 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, pi, codex, devin, future).
+Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, future).
+
+## Supported providers
+
+| Provider | `HARNESS_PROVIDER` | Adapter | Notes |
+|----------|--------------------|---------|-------|
+| Claude Code | `claude` | `ClaudeAdapter` | Default; spawns `claude` CLI |
+| Codex | `codex` | `CodexAdapter` | Spawns `codex` CLI; OpenAI/ChatGPT OAuth |
+| opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary; agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) |
+| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter or Anthropic |
+| Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
+| Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 
 **Canonical conceptual reference:** [docs-site/.../guides/harness-providers.mdx](../docs-site/content/docs/(documentation)/guides/harness-providers.mdx). That guide is the source of truth for how the `ProviderAdapter` interface, the runner's poll→spawn→events→finish flow, system-prompt composition, entrypoint credential restoration, and OAuth flows fit together. Read it before non-trivial work.
 
