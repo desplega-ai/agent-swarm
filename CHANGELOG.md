@@ -6,11 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **opencode harness provider foundations** — `HARNESS_PROVIDER=opencode` is now wired into `createProviderAdapter` (#399, #400, #403, #412). Rolling out across DES-295 → DES-299:
+  - **DES-295** (#399): `ProviderNameSchema` adds `"opencode"`; new `CostData.provider` discriminator (`"claude" | "codex" | "pi" | "opencode"`) so the API can route Codex's pricing-table recompute vs. trust the harness-reported `totalCostUsd`. Migration `048_agent_provider.sql` adds an `agents.provider` column for per-agent provider pinning. `openapi.json` regenerated
+  - **DES-296** (#400): `fetchInstalledMcpServers` extracted from `claude-adapter.ts` into shared `src/utils/mcp-server-fetcher.ts` so non-claude adapters (opencode, future ones) can reuse the swarm-MCP install discovery
+  - **DES-297** (#412): `validateOpencodeCredentials(env)` in `src/utils/credentials.ts` checks `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → `~/.local/share/opencode/auth.json` in priority order and fail-fasts at boot when none are present. `PROVIDER_CREDENTIAL_VARS` map now includes `opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]` so a worker pinned to opencode doesn't stamp unrelated credentials onto its task records
+  - **DES-299** (#403): `OpencodeAdapter` + `OpencodeSession` now spin up an in-process `@opencode-ai/sdk` server, subscribe to its SSE event stream, map events to the swarm's `ProviderEvent` union, accumulate per-`AssistantMessage` cost into `CostData`, and persist every event as a `raw_log` row through `scrubSecrets`. Idempotent `abort()` closes the server cleanly
+- **[Receipts](/docs/receipts) section in docs-site with a [Ralph Loop](/docs/receipts/workflows/ralph-loop) workflow recipe** (#411). Public JSON workflow definition at `docs-site/public/receipts/workflows/ralph-loop.json` so it can be imported via the templates flow
+
+### Changed
+- README "Multi-provider" line + docs-site Harness Configuration / Harness Providers / Environment Variables / Overview pages now list `opencode` alongside the existing five providers
+- SEO-tuned descriptions on top architecture pages — overview, agents, memory (#408)
+
 ## [1.73.4] - 2026-04-30
 
 ### Fixed
-- **Worker auto-clone leaves repos owned by `root:root`, breaking subsequent runner sessions with `fatal: detected dubious ownership`.** `docker-entrypoint.sh` runs as root until the final `gosu worker` exec, so the auto-clone block was cloning repos as root and the worker user couldn't run `git` against them on later boots. The auto-clone loop now invokes `gh repo clone` / `git pull` via `gosu worker bash -c …` so `.git` ends up owned by `worker:worker`. The `2>/dev/null` mask on `git pull` (which had been hiding this exact failure on subsequent boots) is also removed
-- **Defense-in-depth: `git config --system --add safe.directory '*'` early in entrypoint** so any other root-vs-worker uid mismatch on `/workspace` (Archil/FUSE mounts, host-mounted volumes, manually-created paths) no longer trips the "dubious ownership" check
+- **Worker auto-clone leaves repos owned by `root:root`, breaking subsequent runner sessions with `fatal: detected dubious ownership`.** `docker-entrypoint.sh` runs as root until the final `gosu worker` exec, so the auto-clone block was cloning repos as root and the worker user couldn't run `git` against them on later boots. The auto-clone loop now invokes `gh repo clone` / `git pull` via `gosu worker bash -c …` so `.git` ends up owned by `worker:worker`. The `2>/dev/null` mask on `git pull` (which had been hiding this exact failure on subsequent boots) is also removed (#398)
+- **Defense-in-depth: `git config --system --add safe.directory '*'` early in entrypoint** so any other root-vs-worker uid mismatch on `/workspace` (Archil/FUSE mounts, host-mounted volumes, manually-created paths) no longer trips the "dubious ownership" check (#398)
+- **Slack `event_id` idempotency on the task-creation path (DES-293).** Slack retries event deliveries on 3s timeout / 5xx, so a slow handler (e.g. one that fetches thread context before calling `createTaskExtended`) was producing N duplicate task rows from a single user message — root cause of the 2026-04-30 multi-session race (1 user message → 3 task rows → 3 Researcher sessions → 3 duplicate Jira pushes). New in-memory cache `src/slack/event-dedup.ts` keyed by `body.event_id` (5-min TTL, `unref`-ed cleanup timer) is checked at the top of `app.event("message")` and the assistant `userMessage` middleware. On a hit the handler logs `dropping Slack retry: event_id=…` and returns early so Bolt acks 200 OK and Slack stops retrying. Single-process design — Socket Mode means all events flow through one WebSocket; if we ever horizontally scale the API, swap in a DB- or Redis-backed cache (#396)
+- **Terminal-status idempotency in `completeTask` / `failTask` / `store-progress` (DES-292).** Re-completing or re-failing a terminal task was overwriting `output`/`finishedAt`, re-emitting `task.completed` / `task.failed` on `workflowEventBus`, inserting duplicate `task_status_change` log rows, triggering `business-use ensure` with a now-failing validator, indexing duplicate memory entries, and **creating duplicate follow-up tasks to lead** — the downstream noise from the same 2026-04-30 race. `src/be/db.ts` `completeTask` / `failTask` now early-return `null` when the task is already terminal (mirrors `cancelTask`); `src/tools/store-progress.ts` short-circuits before any side-effects with `wasNoOp: true`, so the post-transaction memory-write and follow-up-task-creation blocks are gated on `!wasNoOp`. First-call-wins (#397)
+- **Partial task-ID search on the new-UI tasks list page (DES-286).** `getAllTasks` and `getTasksCount` in `src/be/db.ts` now match `(task LIKE ? OR id LIKE ?)`, and the search-input placeholder reads `Search by description or ID...`. Pasting the first 6–8 characters of a task UUID surfaces it (#394)
+
+## [1.73.3] - 2026-04-30
+
+### Added
+- **Memory dashboard at `/memory`** in the new-UI. New router page, sidebar entry, `useMemory` hook, and shared `<CollapsibleDescription>` component. Surfaces memory entries with scope, source, tags, and per-row delete; lists agents and recent indexing activity
+- **Memory HTTP API** — new `src/http/memory.ts` exposing `POST /api/memory/index`, `POST /api/memory/search`, `POST /api/memory/re-embed`, `GET /api/memory`, and `DELETE /api/memory/:id`. All routes registered via the `route()` factory and surfaced in `openapi.json` + `docs-site/content/docs/api-reference/memory.mdx`
+- **Workflows-detail page improvements** in the new-UI — richer node/run rendering on `/workflows/:id` and surfaced workflow context on `/tasks/:id`
+
+### Changed
+- `scripts/seed.ts` + `scripts/seed.default.json` extended with memory + workflow fixtures used by the new dashboard
+
+## [1.73.2] - 2026-04-30
+
+### Changed
+- Regenerated `openapi.json` and `docs-site/content/docs/api-reference/**` to track route metadata (no functional changes)
 
 ## [1.73.1] - 2026-04-30
 
