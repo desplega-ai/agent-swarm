@@ -404,10 +404,10 @@ const plugin: Plugin = async (_input) => {
       }
     },
 
-    // tool.execute.after: fire-and-forget heartbeat
+    // tool.execute.after: fire-and-forget activity heartbeat
     "tool.execute.after": async (_input, _output) => {
       if (!config.isLead && config.taskId) {
-        fireAndForget(`${config.apiUrl}/api/agents/${config.agentId}/heartbeat`, {
+        fireAndForget(`${config.apiUrl}/api/agents/${config.agentId}/activity`, {
           method: "PUT",
           headers: apiHeaders(config),
         });

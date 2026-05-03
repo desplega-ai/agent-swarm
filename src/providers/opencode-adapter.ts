@@ -8,7 +8,7 @@
  * heartbeat, identity sync, system.transform, compacting, and idle hooks.
  */
 
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessage, Config, Event as OpencodeEvent } from "@opencode-ai/sdk";
 import { createOpencode } from "@opencode-ai/sdk";
@@ -34,9 +34,25 @@ function isAssistantMessage(msg: unknown): msg is AssistantMessage {
   );
 }
 
+const DOCKER_PLUGIN_PATH = "/home/worker/.config/opencode/plugins/agent-swarm.ts";
+
+function resolvePluginPath(): string {
+  const override = process.env.OPENCODE_SWARM_PLUGIN_PATH;
+  if (override) return override;
+  if (existsSync(DOCKER_PLUGIN_PATH)) return DOCKER_PLUGIN_PATH;
+  return join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
+}
+
 class OpencodeSession implements ProviderSession {
   private _sessionId: string;
   private listeners: Array<(event: ProviderEvent) => void> = [];
+  // Buffer for events emitted before any listener is attached.
+  // The runner attaches its listener after `await adapter.createSession(...)`
+  // resolves, but events queued via Promise.resolve().then(...) inside
+  // createSession fire on the next microtask — *before* that listener call —
+  // so the runner would miss session_init and never PUT /claude-session,
+  // leaving agent_tasks.provider/.model NULL. Buffer + flush on first attach.
+  private pendingEvents: ProviderEvent[] = [];
   private completionResolve!: (result: ProviderResult) => void;
   private completionReject!: (err: Error) => void;
   private completionPromise: Promise<ProviderResult>;
@@ -88,13 +104,27 @@ class OpencodeSession implements ProviderSession {
     return this._sessionId;
   }
 
+  /** Emit the synthetic session_init event. Called by the adapter immediately
+   * after construction; buffers if no listener is attached yet. */
+  emitSessionInit(provider: "opencode"): void {
+    this.emit({ type: "session_init", sessionId: this._sessionId, provider });
+  }
+
   onEvent(listener: (event: ProviderEvent) => void): void {
+    const wasEmpty = this.listeners.length === 0;
     this.listeners.push(listener);
+    if (wasEmpty && this.pendingEvents.length > 0) {
+      const buffered = this.pendingEvents;
+      this.pendingEvents = [];
+      for (const ev of buffered) listener(ev);
+    }
   }
 
   private emit(event: ProviderEvent): void {
-    for (const l of this.listeners) {
-      l(event);
+    if (this.listeners.length === 0) {
+      this.pendingEvents.push(event);
+    } else {
+      for (const l of this.listeners) l(event);
     }
     // Also emit a raw_log for every event (scrubbed)
     if (event.type !== "raw_log") {
@@ -104,9 +134,11 @@ class OpencodeSession implements ProviderSession {
   }
 
   private emitDirect(event: ProviderEvent): void {
-    for (const l of this.listeners) {
-      l(event);
+    if (this.listeners.length === 0) {
+      this.pendingEvents.push(event);
+      return;
     }
+    for (const l of this.listeners) l(event);
   }
 
   /** Best-effort cleanup of per-task isolation files and directories. */
@@ -291,8 +323,17 @@ export class OpencodeAdapter implements ProviderAdapter {
       ...installedMcp,
     };
 
-    // Resolve the agent-swarm plugin path (absolute, works in dev and Docker)
-    const pluginPath = join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
+    // Resolve the agent-swarm plugin path. Three layers, in priority order:
+    //   1. OPENCODE_SWARM_PLUGIN_PATH env (explicit override)
+    //   2. The well-known Docker location (Dockerfile.worker COPYs the plugin
+    //      to /home/worker/.config/opencode/plugins/agent-swarm.ts)
+    //   3. The dev path relative to this source file
+    // The previous one-liner used `import.meta.dir` only, which resolves to
+    // `/usr/local/bin` for the bundled binary and produced the non-existent
+    // `/plugin/opencode-plugins/agent-swarm.ts`. Docker only worked because
+    // opencode auto-discovers plugins from ~/.config/opencode/plugins/ —
+    // an accident, not a contract.
+    const pluginPath = resolvePluginPath();
 
     // Build per-task opencode config (plugin field carries the swarm plugin)
     const opencodeConfig: Config & { plugin?: string[] } = {
@@ -382,18 +423,9 @@ export class OpencodeAdapter implements ProviderAdapter {
       dataHomePath,
     );
 
-    // Emit session_init immediately after listeners are attached
-    Promise.resolve().then(() => {
-      for (const l of (session as unknown as { listeners: Array<(e: ProviderEvent) => void> })
-        .listeners) {
-        l({ type: "session_init", sessionId, provider: "opencode" });
-      }
-      const raw = scrubSecrets(JSON.stringify({ type: "session_init", sessionId }));
-      for (const l of (session as unknown as { listeners: Array<(e: ProviderEvent) => void> })
-        .listeners) {
-        l({ type: "raw_log", content: raw });
-      }
-    });
+    // Emit session_init synchronously; the session buffers events until the
+    // runner's `onEvent(listener)` call attaches a listener.
+    session.emitSessionInit("opencode");
 
     // Subscribe to SSE events and drive the session
     client.event

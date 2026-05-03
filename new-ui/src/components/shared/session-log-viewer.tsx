@@ -180,6 +180,128 @@ function parseCodexLog(log: SessionLog): ParsedMessage | null {
   };
 }
 
+/**
+ * Parse a single opencode event row into a ParsedMessage.
+ *
+ * opencode's protocol streams the same logical message many times: a text part
+ * grows delta-by-delta via `message.part.updated`, a tool call cycles through
+ * pending → running → completed. To avoid 50 "partial" frames per message we
+ * dedupe in the caller via `latestByPart` and only render when the log row
+ * we're handed IS the latest entry for that part.id.
+ *
+ * Events we render:
+ *   - message.part.updated (text)        → assistant/user text
+ *   - message.part.updated (reasoning)   → thinking
+ *   - message.part.updated (tool, completed) → tool_use [+ tool_result if output]
+ *   - session.error                      → system error message
+ * Everything else (deltas, heartbeats, status, file watcher) returns null.
+ */
+function parseOpencodeLog(
+  log: SessionLog,
+  latestByPart: Map<string, SessionLog>,
+): ParsedMessage | null {
+  let evt: {
+    type?: string;
+    properties?: {
+      sessionID?: string;
+      part?: {
+        id?: string;
+        type?: string;
+        text?: string;
+        messageID?: string;
+        tool?: string;
+        callID?: string;
+        state?: {
+          status?: string;
+          input?: unknown;
+          output?: string;
+        };
+      };
+      info?: {
+        role?: string;
+        time?: { created?: number };
+      };
+      error?: { name?: string; data?: { message?: string } };
+    };
+  } | null = null;
+  try {
+    evt = JSON.parse(log.content);
+  } catch {
+    return null;
+  }
+
+  if (evt?.type === "session.error") {
+    const msg =
+      evt.properties?.error?.data?.message ?? evt.properties?.error?.name ?? "session error";
+    return {
+      id: log.id,
+      role: "system",
+      content: [{ type: "text", text: `opencode error: ${msg}` }],
+      iteration: log.iteration,
+      timestamp: log.createdAt,
+    };
+  }
+
+  if (evt?.type !== "message.part.updated") return null;
+  const part = evt.properties?.part;
+  if (!part?.id) return null;
+
+  // Dedup: only render when this row is the latest update for the part.
+  if (latestByPart.get(part.id)?.id !== log.id) return null;
+
+  const blocks: ContentBlock[] = [];
+
+  switch (part.type) {
+    case "text": {
+      if (part.text) blocks.push({ type: "text", text: part.text });
+      break;
+    }
+    case "reasoning": {
+      if (part.text) blocks.push({ type: "thinking", thinking: part.text });
+      break;
+    }
+    case "tool": {
+      if (part.state?.status !== "completed") return null;
+      blocks.push({
+        type: "tool_use",
+        id: part.callID ?? part.id,
+        name: part.tool ?? "tool",
+        input: part.state.input,
+      });
+      if (part.state.output !== undefined) {
+        const text =
+          typeof part.state.output === "string"
+            ? part.state.output
+            : JSON.stringify(part.state.output);
+        blocks.push({
+          type: "tool_result",
+          tool_use_id: part.callID ?? part.id,
+          content: text,
+        });
+      }
+      break;
+    }
+    default:
+      return null;
+  }
+
+  if (blocks.length === 0) return null;
+
+  // Best-effort role inference: text and tool parts are assistant-emitted unless
+  // we explicitly know the message was the user prompt. The user's prompt is
+  // almost always the first text part of the session — for QA purposes calling
+  // it "assistant" is fine, since the prompt is duplicated in the task header.
+  // (We can add finer-grained user/assistant separation by looking up the
+  // parent message's role from a separate event, but that's a follow-up.)
+  return {
+    id: log.id,
+    role: "assistant",
+    content: blocks,
+    iteration: log.iteration,
+    timestamp: log.createdAt,
+  };
+}
+
 function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
   // Sort chronologically: by timestamp first, then lineNumber as tiebreaker
   // lineNumber represents parallel messages within the same turn (e.g. parallel tool calls)
@@ -190,6 +312,24 @@ function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
     return a.lineNumber - b.lineNumber;
   });
 
+  // opencode emits one event per part-update during streaming (text grows
+  // delta-by-delta, tool calls go pending → running → completed). Collapse
+  // to the last update per partId before rendering so we don't show 50
+  // intermediate "partial" frames of the same message.
+  const opencodeLatestByPart = new Map<string, SessionLog>();
+  for (const log of sorted) {
+    if (log.cli !== "opencode") continue;
+    let evt: { type?: string; properties?: { part?: { id?: string } } } | null = null;
+    try {
+      evt = JSON.parse(log.content);
+    } catch {
+      continue;
+    }
+    if (evt?.type !== "message.part.updated") continue;
+    const partId = evt.properties?.part?.id;
+    if (partId) opencodeLatestByPart.set(partId, log);
+  }
+
   const messages: ParsedMessage[] = [];
 
   for (const log of sorted) {
@@ -199,6 +339,12 @@ function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
     if (log.cli === "codex") {
       const codexMsg = parseCodexLog(log);
       if (codexMsg) messages.push(codexMsg);
+      continue;
+    }
+
+    if (log.cli === "opencode") {
+      const ocMsg = parseOpencodeLog(log, opencodeLatestByPart);
+      if (ocMsg) messages.push(ocMsg);
       continue;
     }
 
