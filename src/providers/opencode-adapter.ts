@@ -8,10 +8,11 @@
  * heartbeat, identity sync, system.transform, compacting, and idle hooks.
  */
 
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessage, Config, Event as OpencodeEvent } from "@opencode-ai/sdk";
 import { createOpencode } from "@opencode-ai/sdk";
+import { getContextWindowSize } from "../utils/context-window";
 import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -34,9 +35,25 @@ function isAssistantMessage(msg: unknown): msg is AssistantMessage {
   );
 }
 
+const DOCKER_PLUGIN_PATH = "/home/worker/.config/opencode/plugins/agent-swarm.ts";
+
+function resolvePluginPath(): string {
+  const override = process.env.OPENCODE_SWARM_PLUGIN_PATH;
+  if (override) return override;
+  if (existsSync(DOCKER_PLUGIN_PATH)) return DOCKER_PLUGIN_PATH;
+  return join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
+}
+
 class OpencodeSession implements ProviderSession {
   private _sessionId: string;
   private listeners: Array<(event: ProviderEvent) => void> = [];
+  // Buffer for events emitted before any listener is attached.
+  // The runner attaches its listener after `await adapter.createSession(...)`
+  // resolves, but events queued via Promise.resolve().then(...) inside
+  // createSession fire on the next microtask — *before* that listener call —
+  // so the runner would miss session_init and never PUT /claude-session,
+  // leaving agent_tasks.provider/.model NULL. Buffer + flush on first attach.
+  private pendingEvents: ProviderEvent[] = [];
   private completionResolve!: (result: ProviderResult) => void;
   private completionReject!: (err: Error) => void;
   private completionPromise: Promise<ProviderResult>;
@@ -59,6 +76,10 @@ class OpencodeSession implements ProviderSession {
   private agentFilePath: string;
   private configFilePath: string;
   private dataHomePath: string;
+
+  // Track which tool callIDs have already emitted tool_start, so transitions
+  // through pending → running → completed don't fire duplicate events.
+  private toolStartsEmitted = new Set<string>();
 
   constructor(
     sessionId: string,
@@ -88,13 +109,27 @@ class OpencodeSession implements ProviderSession {
     return this._sessionId;
   }
 
+  /** Emit the synthetic session_init event. Called by the adapter immediately
+   * after construction; buffers if no listener is attached yet. */
+  emitSessionInit(provider: "opencode"): void {
+    this.emit({ type: "session_init", sessionId: this._sessionId, provider });
+  }
+
   onEvent(listener: (event: ProviderEvent) => void): void {
+    const wasEmpty = this.listeners.length === 0;
     this.listeners.push(listener);
+    if (wasEmpty && this.pendingEvents.length > 0) {
+      const buffered = this.pendingEvents;
+      this.pendingEvents = [];
+      for (const ev of buffered) listener(ev);
+    }
   }
 
   private emit(event: ProviderEvent): void {
-    for (const l of this.listeners) {
-      l(event);
+    if (this.listeners.length === 0) {
+      this.pendingEvents.push(event);
+    } else {
+      for (const l of this.listeners) l(event);
     }
     // Also emit a raw_log for every event (scrubbed)
     if (event.type !== "raw_log") {
@@ -104,9 +139,11 @@ class OpencodeSession implements ProviderSession {
   }
 
   private emitDirect(event: ProviderEvent): void {
-    for (const l of this.listeners) {
-      l(event);
+    if (this.listeners.length === 0) {
+      this.pendingEvents.push(event);
+      return;
     }
+    for (const l of this.listeners) l(event);
   }
 
   /** Best-effort cleanup of per-task isolation files and directories. */
@@ -148,6 +185,67 @@ class OpencodeSession implements ProviderSession {
         this.cacheWriteTokens += msg.tokens?.cache?.write ?? 0;
         this.numTurns += 1;
         if (!this.model && msg.modelID) this.model = msg.modelID;
+
+        // Emit context_usage so the runner can POST /api/tasks/:id/context
+        // (drives the dashboard's context-usage progress bar) and the
+        // dashboard's activity timeline shows per-turn progress.
+        const turnInput = msg.tokens?.input ?? 0;
+        const turnOutput = msg.tokens?.output ?? 0;
+        const turnCacheRead = msg.tokens?.cache?.read ?? 0;
+        const turnCacheWrite = msg.tokens?.cache?.write ?? 0;
+        const contextUsed = turnInput + turnCacheRead + turnCacheWrite;
+        const contextTotal = getContextWindowSize(this.model || msg.modelID || "default");
+        if (contextTotal > 0) {
+          this.emit({
+            type: "context_usage",
+            contextUsedTokens: contextUsed,
+            contextTotalTokens: contextTotal,
+            contextPercent: (contextUsed / contextTotal) * 100,
+            outputTokens: turnOutput,
+          });
+        }
+        break;
+      }
+
+      case "message.part.updated": {
+        // Bridge opencode's part.state lifecycle to swarm's tool_start/tool_end
+        // so the dashboard's Activity timeline mirrors what other providers
+        // emit. We fire tool_start the first time we see a tool part (any
+        // status); tool_end fires once when state transitions to "completed".
+        const props = (ev as unknown as { properties: { sessionID?: string; part?: unknown } })
+          .properties;
+        if (props.sessionID !== this._sessionId) break;
+        const part = props.part as
+          | {
+              type?: string;
+              tool?: string;
+              callID?: string;
+              id?: string;
+              state?: { status?: string; input?: unknown; output?: unknown };
+            }
+          | undefined;
+        if (!part || part.type !== "tool") break;
+        const callId = part.callID ?? part.id ?? "";
+        if (!callId) break;
+        const toolName = part.tool ?? "tool";
+
+        if (!this.toolStartsEmitted.has(callId)) {
+          this.toolStartsEmitted.add(callId);
+          this.emit({
+            type: "tool_start",
+            toolCallId: callId,
+            toolName,
+            args: part.state?.input,
+          });
+        }
+        if (part.state?.status === "completed") {
+          this.emit({
+            type: "tool_end",
+            toolCallId: callId,
+            toolName,
+            result: part.state.output,
+          });
+        }
         break;
       }
 
@@ -291,8 +389,17 @@ export class OpencodeAdapter implements ProviderAdapter {
       ...installedMcp,
     };
 
-    // Resolve the agent-swarm plugin path (absolute, works in dev and Docker)
-    const pluginPath = join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
+    // Resolve the agent-swarm plugin path. Three layers, in priority order:
+    //   1. OPENCODE_SWARM_PLUGIN_PATH env (explicit override)
+    //   2. The well-known Docker location (Dockerfile.worker COPYs the plugin
+    //      to /home/worker/.config/opencode/plugins/agent-swarm.ts)
+    //   3. The dev path relative to this source file
+    // The previous one-liner used `import.meta.dir` only, which resolves to
+    // `/usr/local/bin` for the bundled binary and produced the non-existent
+    // `/plugin/opencode-plugins/agent-swarm.ts`. Docker only worked because
+    // opencode auto-discovers plugins from ~/.config/opencode/plugins/ —
+    // an accident, not a contract.
+    const pluginPath = resolvePluginPath();
 
     // Build per-task opencode config (plugin field carries the swarm plugin)
     const opencodeConfig: Config & { plugin?: string[] } = {
@@ -382,18 +489,9 @@ export class OpencodeAdapter implements ProviderAdapter {
       dataHomePath,
     );
 
-    // Emit session_init immediately after listeners are attached
-    Promise.resolve().then(() => {
-      for (const l of (session as unknown as { listeners: Array<(e: ProviderEvent) => void> })
-        .listeners) {
-        l({ type: "session_init", sessionId, provider: "opencode" });
-      }
-      const raw = scrubSecrets(JSON.stringify({ type: "session_init", sessionId }));
-      for (const l of (session as unknown as { listeners: Array<(e: ProviderEvent) => void> })
-        .listeners) {
-        l({ type: "raw_log", content: raw });
-      }
-    });
+    // Emit session_init synchronously; the session buffers events until the
+    // runner's `onEvent(listener)` call attaches a listener.
+    session.emitSessionInit("opencode");
 
     // Subscribe to SSE events and drive the session
     client.event

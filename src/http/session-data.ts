@@ -72,10 +72,10 @@ const createSessionCostRoute = route({
     isError: z.boolean().optional(),
     /**
      * Phase 6: when present, drives the codex pricing-table recompute path.
-     * Other providers ('claude' / 'pi') always trust harness-reported USD.
+     * Other providers ('claude' / 'pi' / 'opencode') always trust harness-reported USD.
      * Optional / undefined keeps back-compat for existing callers.
      */
-    provider: z.enum(["claude", "codex", "pi"]).optional(),
+    provider: z.enum(["claude", "codex", "pi", "opencode"]).optional(),
     /**
      * Phase 6: epoch-ms timestamp used as the "active price at time T" lookup
      * basis. Defaults to `Date.now()` when omitted. Including it lets
@@ -193,7 +193,7 @@ export async function handleSessionData(
       // time, recompute `totalCostUsd` from tokens × DB prices and tag the
       // row as 'pricing-table'. If any class has no row, fall back to the
       // worker-reported value with `costSource='harness'` (back-compat for
-      // unseeded models). Claude / pi paths always use 'harness'.
+      // unseeded models). Claude / pi / opencode paths always use 'harness'.
       let totalCostUsd = parsed.body.totalCostUsd;
       let costSource: SessionCostSource = "harness";
 

@@ -166,8 +166,9 @@ export const AgentTaskSchema = z.object({
   parentTaskId: z.uuid().optional(),
   claudeSessionId: z.string().optional(),
 
-  // Model selection (optional — defaults to "opus" via runner)
-  model: z.enum(["haiku", "sonnet", "opus"]).optional(),
+  // Model selection (optional — provider-specific; can be "opus", "gpt-4o",
+  // "openrouter/openai/gpt-5-nano", etc. depending on HARNESS_PROVIDER).
+  model: z.string().optional(),
 
   // Schedule linking (optional — set when task was created by a schedule)
   scheduleId: z.uuid().optional(),
@@ -267,6 +268,9 @@ export const AgentSchema = z.object({
 
   // Last session activity timestamp (updated on tool calls, task updates, etc.)
   lastActivityAt: z.iso.datetime().optional(),
+
+  // Harness provider this agent runs (claude, opencode, codex, ...)
+  provider: ProviderNameSchema.optional(),
 
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
@@ -559,7 +563,7 @@ export const ScheduledTaskSchema = z
     consecutiveErrors: z.number().int().min(0).default(0),
     lastErrorAt: z.iso.datetime().optional(),
     lastErrorMessage: z.string().optional(),
-    model: z.enum(["haiku", "sonnet", "opus"]).optional(),
+    model: z.string().optional(),
     scheduleType: z.enum(["recurring", "one_time"]).default("recurring"),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
