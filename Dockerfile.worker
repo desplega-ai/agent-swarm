@@ -123,8 +123,14 @@ RUN mkdir -p /home/worker/.codex && \
     chown -R worker:worker /home/worker/.codex
 
 # Install opencode CLI + SDK (alternative harness, selected via HARNESS_PROVIDER=opencode)
-ARG OPENCODE_VERSION=0.5.10
+# CLI version must match SDK version — the SDK spawns `opencode serve` and parses
+# its stdout for the listening URL (see node_modules/@opencode-ai/sdk/dist/server.js).
+# The installer drops the binary at ~/.opencode/bin/opencode and only modifies
+# ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
+# update, so we extend ENV PATH explicitly.
+ARG OPENCODE_VERSION=1.14.30
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
+ENV PATH="/home/worker/.opencode/bin:$PATH"
 ARG OPENCODE_SDK_VERSION=1.14.30
 RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
 
@@ -171,6 +177,11 @@ RUN npm install -g \
     @desplega.ai/qa-use@2.14.0 \
     @desplega.ai/agent-fs@0.4.0 \
     && qa-use install-deps
+
+# Re-assert worker ownership of $HOME — the root-side npm/qa-use installs above
+# (and earlier claude-plugin steps) seed cache/config dirs as root, which breaks
+# runtime tools that expect to write under $HOME (e.g. opencode's ~/.cache/opencode).
+RUN chown -R worker:worker /home/worker
 
 # Install archil CLI for FUSE/R2-backed disk mounts
 RUN curl https://s3.amazonaws.com/archil-client/install | sh

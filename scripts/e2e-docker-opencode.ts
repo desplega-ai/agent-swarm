@@ -161,6 +161,9 @@ async function startOpencodeWorker(
   if (orKey) envFlags.push("-e", `OPENROUTER_API_KEY=${orKey}`);
   if (antKey) envFlags.push("-e", `ANTHROPIC_API_KEY=${antKey}`);
 
+  const modelOverride = process.env.MODEL_OVERRIDE;
+  if (modelOverride) envFlags.push("-e", `MODEL_OVERRIDE=${modelOverride}`);
+
   for (const [k, v] of Object.entries(extraEnv)) {
     envFlags.push("-e", `${k}=${v}`);
   }
