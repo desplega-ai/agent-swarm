@@ -286,7 +286,7 @@ Wire `startWaitPoller(registry)` from `src/workflows/index.ts:43-61` (`initWorkf
 
 #### Automated QA:
 - [x] Sub-agent walkthrough: start `bun run dev:http`, create a workflow definition with a 10s `wait` node via `create-workflow` MCP tool (or direct HTTP), trigger it, observe via `get-workflow-run` that step is `waiting` for ~10s, then `completed`. Capture timestamps. — verified live 2026-05-04, evidence in `thoughts/taras/qa/2026-05-04-wait-node-workflow-engine.md` § A
-- [ ] Long-wait persistence: create a wait of 60s, restart the API server mid-wait (`bun run pm2-restart`), confirm the run still completes after the original `wakeUpAt`. — skipped in live QA (would disrupt user's PM2 stack); covered by `src/tests/workflow-wait-recovery.test.ts`
+- [x] Long-wait persistence: create a wait of 60s, restart the API server mid-wait (`bun run pm2-restart`), confirm the run still completes after the original `wakeUpAt`. — verified live 2026-05-05 against a throwaway server on `:3517` with `kill -9` mid-wait; recovery resumed past the original `wakeUpAt`. Evidence in `thoughts/taras/qa/2026-05-04-wait-node-workflow-engine.md` § E. Also covered deterministically by `src/tests/workflow-wait-recovery.test.ts`
 
 #### Manual Verification:
 - [ ] Confirm 5s poller cadence is acceptable for the demo durations (no surprise drift)

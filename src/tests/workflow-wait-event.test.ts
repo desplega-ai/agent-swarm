@@ -280,6 +280,74 @@ describe("WaitExecutor — event mode end-to-end", () => {
     expect(noStep?.status).toBe("completed");
   });
 
+  test("fan-out: a single bus event resolves N concurrent waits subscribed to the same name", async () => {
+    const registry = createExecutorRegistry(deps);
+
+    const makeFanoutWorkflow = (id: string) => {
+      const def: WorkflowDefinition = {
+        nodes: [
+          {
+            id: "w1",
+            type: "wait",
+            config: { mode: "event", eventName: "fanout.signal", scope: "global" },
+            next: { event: "done" },
+          },
+          { id: "done", type: "notify", config: { channel: "swarm", template: id } },
+        ],
+      };
+      return makeWorkflow(`wait-fanout-${id}`, def);
+    };
+
+    // Two concurrent runs, each waiting on the SAME eventName. Both must be
+    // registered with the bus before we emit (subscribeWaitToBus is called
+    // inside WaitExecutor.execute, but initWaitBusSubscriptions wires the
+    // resume side of the bridge — call it once after both runs are paused).
+    const wfA = makeFanoutWorkflow("A");
+    const wfB = makeFanoutWorkflow("B");
+    const runIdA = await startWorkflowExecution(wfA, {}, registry);
+    const runIdB = await startWorkflowExecution(wfB, {}, registry);
+
+    expect(getWorkflowRun(runIdA)?.status).toBe("waiting");
+    expect(getWorkflowRun(runIdB)?.status).toBe("waiting");
+
+    const stepsA = getWorkflowRunStepsByRunId(runIdA);
+    const stepsB = getWorkflowRunStepsByRunId(runIdB);
+    const w1A = stepsA.find((s) => s.nodeId === "w1");
+    const w1B = stepsB.find((s) => s.nodeId === "w1");
+
+    initWaitBusSubscriptions(registry);
+
+    // Single emit — both waits should resolve.
+    workflowEventBus.emit("fanout.signal", { broadcast: true, sequence: 42 });
+
+    await waitFor(
+      () =>
+        getWaitStateByStepId(w1A!.id)?.status === "fired" &&
+        getWaitStateByStepId(w1B!.id)?.status === "fired",
+      2000,
+    );
+
+    // Both wait_states flipped to fired with firedPayload populated.
+    for (const stepId of [w1A!.id, w1B!.id]) {
+      const fired = getWaitStateByStepId(stepId);
+      expect(fired?.status).toBe("fired");
+      const payload = fired?.firedPayload as { broadcast?: boolean; sequence?: number };
+      expect(payload?.broadcast).toBe(true);
+      expect(payload?.sequence).toBe(42);
+      expect(fired?.resolvedAt).toBeTruthy();
+    }
+
+    // Both runs advanced via the `event` port and the downstream notify ran.
+    for (const runId of [runIdA, runIdB]) {
+      const finalSteps = getWorkflowRunStepsByRunId(runId);
+      const w1After = finalSteps.find((s) => s.nodeId === "w1");
+      expect(w1After?.status).toBe("completed");
+      expect(w1After?.nextPort).toBe("event");
+      const doneStep = finalSteps.find((s) => s.nodeId === "done");
+      expect(doneStep?.status).toBe("completed");
+    }
+  });
+
   test("64KB cap: oversized payload is replaced with a truncation marker", async () => {
     const registry = createExecutorRegistry(deps);
 

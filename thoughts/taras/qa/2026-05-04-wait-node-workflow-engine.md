@@ -81,7 +81,44 @@ D:t=2.0s            run=completed w1=completed (nextPort=event) done=completed
 Note: full fan-out flow (real `agent-task` finishing → built-in `task.completed` bus emit → wait resume) is already covered by `src/tests/workflow-wait-builtin-events.test.ts`. This walkthrough verified the HTTP signal-injection path and the `event`-port resolution against a live server, which the unit test does not exercise.
 
 ## Skipped
-- **Phase 2 long-wait persistence (60s + pm2-restart)** — covered by `src/tests/workflow-wait-recovery.test.ts` (inserts a past-`wakeUpAt` row, calls `recoverIncompleteRuns`, asserts resume). Live walkthrough would require restarting the user's PM2 stack which is destructive (`cope-*` services running).
+- ~~**Phase 2 long-wait persistence (60s + pm2-restart)**~~ — initially deferred; now executed live in scenario E below against an isolated `:3517` server with a throwaway DB (no PM2 disruption). Unit-test coverage continues in `src/tests/workflow-wait-recovery.test.ts`.
+
+### E. Phase 2 — long-wait persistence (live, after kill -9 + restart)
+Status: **PASS**
+
+Workflow: single 60s time-wait (`durationMs: 60000`) → `notify`. Isolated server: `PORT=3517 DATABASE_PATH=/tmp/wait-persist-qa.sqlite bun run start:http`. Auth: `Bearer 123123`. User's main API on `:3013` and PM2 stack untouched.
+
+```
+E:create     => 201 wfId=a15688c6-2b7f-4d64-8dbe-a94dc2915abb
+E:trigger    => 201 runId=8f45d9b1-7a66-4b10-8c5d-e90be3c0492e
+E:t=10s         run=waiting w1=waiting
+E:wait_state    wakeUpAt=2026-05-04T22:28:51.985Z status=pending
+E:kill -9       PID 92657 (bun)         @ ~2026-05-04T22:28:31Z
+E:port-free + pgrep returns nothing → process gone
+E:sleep until ~5s past wakeUpAt
+E:restart       new bun PID 92665       @ ~2026-05-04T22:28:59Z
+E:health-check  /api/workflows 200 OK   @ 2026-05-04T22:29:10.065Z
+E:poll run      run=completed w1=completed (nextPort=default) done=completed
+                firedAt=2026-05-04T22:29:05.369Z (~6s after restart, recovered an overdue wait)
+E:wait_state    status=fired resolvedAt=2026-05-04T22:29:05.369Z
+```
+
+Key timestamps:
+- Original `wakeUpAt`: `2026-05-04T22:28:51.985Z`
+- Server SIGKILL: `~2026-05-04T22:28:31Z` (~20s **before** wakeUpAt — wait was still pending in DB)
+- Server restart: `~2026-05-04T22:28:59Z` (~7s **after** wakeUpAt — recovery picks up an overdue wait)
+- Run completion (`firedAt`): `2026-05-04T22:29:05.369Z`
+
+Recovery log line (verbatim from `/tmp/wait-persist-qa-server.log`):
+
+```
+[workflows] Recovered 1 incomplete run(s) on startup
+```
+
+DB confirms: `SELECT id, status, wakeUpAt, resolvedAt FROM wait_states;` →
+`3bde2177-...|fired|2026-05-04T22:28:51.985Z|2026-05-04T22:29:05.369Z`.
+
+Cleanup: both bun PIDs killed, `:3517` confirmed free, `/tmp/wait-persist-qa.sqlite{,-wal,-shm}` removed; `/tmp/wait-persist-qa-server.log` left as evidence.
 
 ## Findings
 - All four live walkthroughs passed against a real HTTP server with a clean DB. End-to-end timings match the documented 5s wait-poller granularity.
