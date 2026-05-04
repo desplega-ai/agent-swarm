@@ -5,10 +5,10 @@ branch: main
 repository: agent-swarm
 topic: "Wait Node for Workflow Engine"
 tags: [plan, workflow, wait, scheduler, events]
-status: in-progress
+status: completed
 autonomy: critical
 last_updated: 2026-05-04
-last_updated_by: Claude (phase-3 agent)
+last_updated_by: Claude (orchestrator)
 ---
 
 # Wait Node for Workflow Engine Implementation Plan
@@ -442,12 +442,12 @@ Run it; complete the upstream `agent-task`; assert the wait resolves via the exi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
-- [ ] All tests: `bun test`
-- [ ] Built-in event integration test: `bun test src/tests/workflow-wait-builtin-events.test.ts` — passes with NO production-code changes outside of Phases 1–3
-- [ ] OpenAPI drift: `bun run docs:openapi` then `git diff --exit-code openapi.json docs-site/content/docs/api-reference` (defensive — fails the merge gate if any version bump or route touch slipped in past Phase 3)
-- [ ] `create-workflow` accepts a wait-node definition: round-trip test in suite
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
+- [x] All tests: `bun test`
+- [x] Built-in event integration test: `bun test src/tests/workflow-wait-builtin-events.test.ts` — passes with NO production-code changes outside of Phases 1–3
+- [x] OpenAPI drift: `bun run docs:openapi` then `git diff --exit-code openapi.json docs-site/content/docs/api-reference` (defensive — fails the merge gate if any version bump or route touch slipped in past Phase 3)
+- [x] `create-workflow` accepts a wait-node definition: round-trip test in suite
 
 #### Automated QA:
 - [ ] Sub-agent walkthrough: define and run a 2-node workflow (`agent-task` → `wait` keyed on `task.completed` filtered by `taskId`). Capture run trace showing the wait fires when the upstream task completes — no manual signal POST required.

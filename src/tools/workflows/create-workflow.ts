@@ -24,7 +24,9 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation.\n" +
         "- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. " +
         "Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n" +
-        "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.",
+        "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.\n" +
+        "- WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. " +
+        "See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.",
       inputSchema: z.object({
         name: z.string().describe("Unique name for the workflow"),
         description: z.string().optional().describe("Description of what this workflow does"),
