@@ -258,7 +258,7 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
             eventName: "demo.signal",
             filter: { ok: true },
             scope: "run",
-            timeout: { seconds: 60 },
+            timeoutMs: 60_000,
           },
           next: { event: "yay", timeout: "nay" },
         },
@@ -274,6 +274,6 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
     expect((timeWait?.config as { mode?: string })?.mode).toBe("time");
     const eventWait = wf.definition.nodes.find((n) => n.id === "event-wait");
     expect((eventWait?.config as { mode?: string })?.mode).toBe("event");
-    expect((eventWait?.config as { timeout?: { seconds: number } })?.timeout?.seconds).toBe(60);
+    expect((eventWait?.config as { timeoutMs?: number })?.timeoutMs).toBe(60_000);
   });
 });

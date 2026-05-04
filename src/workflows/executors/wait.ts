@@ -32,11 +32,15 @@ const WaitConfigSchema = z.discriminatedUnion("mode", [
     eventName: z.string().min(1),
     filter: z.union([z.record(z.string(), z.unknown()), z.string().max(2048)]).optional(),
     scope: z.enum(["run", "global"]).default("run"),
-    timeout: z
-      .object({
-        seconds: z.number().int().min(1),
-      })
-      .optional(),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(1)
+      .max(31_536_000_000)
+      .optional()
+      .describe(
+        "Timeout in milliseconds (effective resolution ~5s) — when reached, routes via 'timeout' port",
+      ),
   }),
 ]);
 
@@ -122,8 +126,8 @@ export class WaitExecutor extends BaseExecutor<typeof WaitConfigSchema, typeof W
     }
 
     const waitId = crypto.randomUUID();
-    const expiresAt = config.timeout
-      ? new Date(Date.now() + config.timeout.seconds * 1000).toISOString()
+    const expiresAt = config.timeoutMs
+      ? new Date(Date.now() + config.timeoutMs).toISOString()
       : null;
 
     db.createWaitState({

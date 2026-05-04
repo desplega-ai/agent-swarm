@@ -241,7 +241,7 @@ describe("WaitExecutor — event mode end-to-end", () => {
             mode: "event",
             eventName: "never.fires",
             scope: "global",
-            timeout: { seconds: 1 },
+            timeoutMs: 1000,
           },
           next: { event: "yes", timeout: "no" },
         },

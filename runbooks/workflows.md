@@ -61,11 +61,13 @@ A `wait` node pauses a workflow until either a duration elapses or a named event
     eventName: github.pull_request.merged
     filter: { number: "{{trigger.pr.number}}" }
     scope: run                       # 'run' (default) | 'global'
-    timeout: { seconds: 86400, action: timeout }
+    timeoutMs: 86400000              # 24h — when reached, routes via 'timeout' port below
   next:
     event:   downstream-on-event
     timeout: downstream-on-timeout
 ```
+
+`timeoutMs` accepts integers from `1` to `31_536_000_000` (1 year). Effective resolution is ~5s (poller cadence). Omit it for an unbounded wait (no `timeout` port needed).
 
 `scope` semantics:
 
