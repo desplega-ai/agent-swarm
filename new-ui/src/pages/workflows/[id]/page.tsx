@@ -1,6 +1,8 @@
+import Editor from "@monaco-editor/react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import {
   ArrowLeft,
+  Bell,
   Check,
   ChevronDown,
   ChevronRight,
@@ -9,10 +11,14 @@ import {
   EyeOff,
   FolderGit2,
   GitBranch,
+  Mail,
   Maximize2,
+  MessageSquare,
   Play,
   Trash2,
   User,
+  Webhook,
+  X,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -35,7 +41,6 @@ import type {
 } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
-import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -50,13 +55,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -65,6 +64,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
+import { useTheme } from "@/hooks/use-theme";
 import { getConfig } from "@/lib/config";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
@@ -237,15 +237,15 @@ export default function WorkflowDetailPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0">
           <TabsTrigger value="definition">Definition</TabsTrigger>
+          <TabsTrigger value="triggers">Triggers ({workflow.triggers.length})</TabsTrigger>
           <TabsTrigger value="runs">Runs ({runs?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
         </TabsList>
 
         {/* Definition tab */}
         <TabsContent value="definition" className="flex flex-col flex-1 min-h-0 gap-4">
-          {/* Workflow metadata */}
-          <WorkflowMeta
-            workflowId={workflow.id}
+          {/* Single-line summary; full detail lives in the Triggers tab */}
+          <WorkflowMetaSummary
             triggers={workflow.triggers}
             cooldown={workflow.cooldown}
             input={workflow.input}
@@ -277,10 +277,23 @@ export default function WorkflowDetailPage() {
 
             {/* Node inspector panel */}
             <div className="flex-[2] min-h-0 flex flex-col rounded-lg border bg-card">
-              <div className="shrink-0 px-4 py-3 border-b">
+              <div className="shrink-0 px-4 py-3 border-b flex items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold">
                   {selectedNode ? "Node Inspector" : "Inspector"}
                 </h2>
+                {selectedNode && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => setSelectedNodeId(null)}
+                    aria-label="Close inspector"
+                    title="Close inspector"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
               {selectedNode ? (
                 <NodeInspector node={selectedNode} allNodes={workflow.definition.nodes} />
@@ -293,6 +306,17 @@ export default function WorkflowDetailPage() {
               )}
             </div>
           </div>
+        </TabsContent>
+
+        {/* Triggers tab */}
+        <TabsContent value="triggers" className="flex flex-col flex-1 min-h-0">
+          <TriggersDetailPanel
+            workflowId={workflow.id}
+            triggers={workflow.triggers}
+            cooldown={workflow.cooldown}
+            input={workflow.input}
+            triggerSchema={workflow.triggerSchema}
+          />
         </TabsContent>
 
         {/* Runs tab */}
@@ -417,11 +441,13 @@ function NodeInspector({ node, allNodes }: { node: WorkflowNode; allNodes: Workf
           <HitlNodeConfig config={node.config} />
         ) : node.type === "notify" ? (
           <NotifyNodeConfig config={node.config} />
-        ) : (
+        ) : node.type === "property-match" ? (
+          <PropertyMatchConfig config={node.config} />
+        ) : Object.keys(node.config ?? {}).length > 0 ? (
           <InspectorSection label="Configuration">
             <JsonTree data={node.config} defaultExpandDepth={2} maxHeight="250px" />
           </InspectorSection>
-        )}
+        ) : null}
 
         {/* Node-level inputSchema / outputSchema */}
         {node.inputSchema != null && Object.keys(node.inputSchema).length > 0 && (
@@ -589,26 +615,176 @@ function AgentTaskConfig({ config }: { config: Record<string, unknown> }) {
   );
 }
 
+const GITHUB_LIGHT_THEME = {
+  base: "vs" as const,
+  inherit: true,
+  rules: [
+    { token: "comment", foreground: "6a737d", fontStyle: "italic" },
+    { token: "string", foreground: "032f62" },
+    { token: "keyword", foreground: "d73a49" },
+    { token: "number", foreground: "005cc5" },
+    { token: "type", foreground: "d73a49" },
+    { token: "function", foreground: "6f42c1" },
+    { token: "variable", foreground: "e36209" },
+    { token: "constant", foreground: "005cc5" },
+    { token: "operator", foreground: "d73a49" },
+  ],
+  colors: {
+    "editor.background": "#ffffff",
+    "editor.foreground": "#24292f",
+    "editor.lineHighlightBackground": "#f6f8fa",
+    "editorLineNumber.foreground": "#6e7781",
+    "editorLineNumber.activeForeground": "#24292f",
+    "editor.selectionBackground": "#0366d625",
+    "editorCursor.foreground": "#24292f",
+    "editor.inactiveSelectionBackground": "#0366d610",
+  },
+};
+
+const GITHUB_DARK_THEME = {
+  base: "vs-dark" as const,
+  inherit: true,
+  rules: [
+    { token: "comment", foreground: "8b949e", fontStyle: "italic" },
+    { token: "string", foreground: "a5d6ff" },
+    { token: "keyword", foreground: "ff7b72" },
+    { token: "number", foreground: "79c0ff" },
+    { token: "type", foreground: "ffa657" },
+    { token: "function", foreground: "d2a8ff" },
+    { token: "variable", foreground: "ffa657" },
+    { token: "constant", foreground: "79c0ff" },
+    { token: "operator", foreground: "ff7b72" },
+  ],
+  colors: {
+    "editor.background": "#0d1117",
+    "editor.foreground": "#c9d1d9",
+    "editor.lineHighlightBackground": "#161b22",
+    "editorLineNumber.foreground": "#6e7681",
+    "editorLineNumber.activeForeground": "#c9d1d9",
+    "editor.selectionBackground": "#388bfd44",
+    "editorCursor.foreground": "#c9d1d9",
+    "editor.inactiveSelectionBackground": "#388bfd22",
+  },
+};
+
 function ScriptConfig({ config }: { config: Record<string, unknown> }) {
-  const command = typeof config.command === "string" ? config.command : null;
+  const { theme } = useTheme();
+  // Schema uses `script` (the code) + `runtime` ("bash" | "ts" | "python").
+  // Tolerate `command` as a fallback for older/looser configs.
+  const code =
+    typeof config.script === "string"
+      ? config.script
+      : typeof config.command === "string"
+        ? config.command
+        : null;
+  const runtime = typeof config.runtime === "string" ? config.runtime : null;
   const timeout = typeof config.timeout === "number" ? config.timeout : null;
+  const cwd = typeof config.cwd === "string" ? config.cwd : null;
+  const args = Array.isArray(config.args) ? (config.args as string[]) : null;
+  const language = runtimeToLanguage(runtime, code ?? "");
+  const lineCount = code ? code.split("\n").length : 0;
+  const editorHeight = Math.min(Math.max(lineCount * 19 + 16, 100), 400);
 
   return (
     <InspectorSection label="Configuration">
-      <div className="space-y-3">
-        {command && (
-          <pre className="bg-muted rounded-md p-3 font-mono text-xs whitespace-pre-wrap overflow-auto">
-            {command}
-          </pre>
+      <div className="space-y-2">
+        {code && (
+          <div
+            className={cn(
+              "rounded-md border overflow-hidden",
+              theme === "dark" ? "bg-[#0d1117]" : "bg-white",
+            )}
+          >
+            <div
+              className={cn(
+                "flex items-center justify-between px-3 py-1.5 border-b",
+                theme === "dark"
+                  ? "border-white/10 bg-black/20 text-white/60"
+                  : "border-zinc-200 bg-zinc-50 text-zinc-600",
+              )}
+            >
+              <span className="text-[10px] font-mono uppercase tracking-wide">
+                {runtime ?? language}
+              </span>
+              <div className="flex items-center gap-3">
+                <span
+                  className={cn(
+                    "text-[10px] font-mono",
+                    theme === "dark" ? "text-white/40" : "text-zinc-400",
+                  )}
+                >
+                  {lineCount} {lineCount === 1 ? "line" : "lines"}
+                </span>
+                <CopyIconButton value={code} darkMode={theme === "dark"} />
+              </div>
+            </div>
+            <Editor
+              language={language}
+              theme={theme === "dark" ? "github-dark" : "github-light"}
+              value={code}
+              height={`${editorHeight}px`}
+              beforeMount={(monaco) => {
+                monaco.editor.defineTheme("github-light", GITHUB_LIGHT_THEME);
+                monaco.editor.defineTheme("github-dark", GITHUB_DARK_THEME);
+              }}
+              options={{
+                readOnly: true,
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                fontSize: 12,
+                lineNumbers: "on",
+                wordWrap: "on",
+                automaticLayout: true,
+                padding: { top: 8, bottom: 8 },
+                folding: false,
+                renderLineHighlight: "none",
+                scrollbar: { vertical: "auto", horizontal: "auto" },
+                overviewRulerLanes: 0,
+              }}
+            />
+          </div>
         )}
-        {timeout != null && (
-          <Badge variant="outline" size="tag">
-            timeout: {timeout}ms
-          </Badge>
+        <div className="flex flex-wrap gap-1.5">
+          {runtime && (
+            <Badge variant="outline" size="tag" className="font-mono">
+              runtime: {runtime}
+            </Badge>
+          )}
+          {timeout != null && (
+            <Badge variant="outline" size="tag">
+              timeout: {timeout}ms
+            </Badge>
+          )}
+          {cwd && (
+            <Badge variant="outline" size="tag" className="font-mono">
+              cwd: {cwd}
+            </Badge>
+          )}
+        </div>
+        {args && args.length > 0 && (
+          <div className="text-xs">
+            <span className="text-muted-foreground">Args: </span>
+            <span className="font-mono">{args.join(" ")}</span>
+          </div>
         )}
       </div>
     </InspectorSection>
   );
+}
+
+function runtimeToLanguage(runtime: string | null, code: string): string {
+  if (runtime === "bash") return "shell";
+  if (runtime === "python") return "python";
+  if (runtime === "ts") return "typescript";
+  // Fallback: shebang sniffing
+  const trimmed = code.trimStart();
+  if (trimmed.startsWith("#!/usr/bin/env python") || trimmed.startsWith("#!/usr/bin/python"))
+    return "python";
+  if (trimmed.startsWith("#!/usr/bin/env node") || trimmed.startsWith("#!/usr/bin/node"))
+    return "javascript";
+  if (trimmed.startsWith("#!/usr/bin/env bun") || trimmed.startsWith("#!/usr/bin/env ts"))
+    return "typescript";
+  return "shell";
 }
 
 function RawLlmConfig({ config }: { config: Record<string, unknown> }) {
@@ -699,22 +875,84 @@ function HitlNodeConfig({ config }: { config: Record<string, unknown> }) {
 
 function NotifyNodeConfig({ config }: { config: Record<string, unknown> }) {
   const channel = typeof config.channel === "string" ? config.channel : null;
-  const message = typeof config.message === "string" ? config.message : null;
+  // Schema field is `template`. Tolerate `message` as a legacy alias.
+  const template =
+    typeof config.template === "string"
+      ? config.template
+      : typeof config.message === "string"
+        ? config.message
+        : null;
   const target = typeof config.target === "string" ? config.target : null;
+  const ChannelIcon = channelIcon(channel);
 
   return (
     <InspectorSection label="Configuration">
       <div className="space-y-3">
-        {channel && (
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Channel:</span>
-            <Badge variant="outline" size="tag">
-              {channel}
-            </Badge>
-            {target && <span className="font-mono text-muted-foreground">{target}</span>}
+        {template && <HighlightedTemplate text={template} />}
+
+        {(channel || target) && (
+          <div className="flex items-center gap-2 text-xs flex-wrap">
+            {ChannelIcon && <ChannelIcon className="h-3.5 w-3.5 text-teal-400 shrink-0" />}
+            {channel && (
+              <>
+                <span className="text-muted-foreground">Channel:</span>
+                <Badge variant="outline" size="tag" className="font-mono">
+                  {channel}
+                </Badge>
+              </>
+            )}
+            {target && (
+              <span className="font-mono text-muted-foreground truncate" title={target}>
+                {target}
+              </span>
+            )}
           </div>
         )}
-        {message && <HighlightedTemplate text={message} />}
+      </div>
+    </InspectorSection>
+  );
+}
+
+function channelIcon(channel: string | null): React.ElementType | null {
+  if (!channel) return null;
+  const c = channel.toLowerCase();
+  if (c === "slack") return MessageSquare;
+  if (c === "email" || c === "mail") return Mail;
+  if (c === "webhook" || c === "http") return Webhook;
+  return Bell;
+}
+
+function PropertyMatchConfig({ config }: { config: Record<string, unknown> }) {
+  const conditions = Array.isArray(config.conditions)
+    ? (config.conditions as Array<{ field?: string; op?: string; value?: unknown }>)
+    : null;
+  const mode = typeof config.mode === "string" ? config.mode : "all";
+
+  return (
+    <InspectorSection label="Configuration">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Mode:</span>
+          <Badge variant="outline" size="tag">
+            {mode.toUpperCase()}
+          </Badge>
+        </div>
+        {conditions && conditions.length > 0 && (
+          <div className="space-y-1.5">
+            {conditions.map((cond, i) => (
+              <div
+                key={i}
+                className="rounded-md bg-muted px-3 py-2 font-mono text-xs flex items-center gap-2 flex-wrap"
+              >
+                <span className="text-foreground">{cond.field ?? "?"}</span>
+                <span className="text-amber-500">{cond.op ?? "?"}</span>
+                {cond.value !== undefined && (
+                  <span className="text-muted-foreground">{JSON.stringify(cond.value)}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </InspectorSection>
   );
@@ -779,7 +1017,81 @@ function InspectorSection({ label, children }: { label: string; children: React.
 
 // --- Workflow Metadata ---
 
-function WorkflowMeta({
+/**
+ * Single-line metadata strip shown at the top of the Definition tab. Just a
+ * pulse-check — full details (HMAC secrets, trigger schema, etc.) live in the
+ * Triggers tab.
+ */
+function WorkflowMetaSummary({
+  triggers,
+  cooldown,
+  input,
+  triggerSchema,
+}: {
+  triggers: TriggerConfig[];
+  cooldown?: CooldownConfig;
+  input?: Record<string, string>;
+  triggerSchema?: Record<string, unknown>;
+}) {
+  const hasAny =
+    triggers.length > 0 ||
+    cooldown != null ||
+    (input != null && Object.keys(input).length > 0) ||
+    triggerSchema != null;
+  if (!hasAny) return null;
+
+  const triggerSummary =
+    triggers.length === 0
+      ? null
+      : triggers
+          .map((t) => {
+            if (t.type === "webhook") return "webhook";
+            if (t.type === "schedule")
+              return t.scheduleId ? `schedule ${t.scheduleId}` : "schedule";
+            return t.type;
+          })
+          .join(", ");
+
+  const inputCount = input != null ? Object.keys(input).length : 0;
+
+  return (
+    <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      {triggerSummary && (
+        <div className="flex items-center gap-1.5">
+          <span className="uppercase tracking-wide text-[10px]">Triggers:</span>
+          <span className="font-mono text-foreground">{triggerSummary}</span>
+        </div>
+      )}
+      {cooldown != null && (
+        <div className="flex items-center gap-1.5">
+          <span className="uppercase tracking-wide text-[10px]">Cooldown:</span>
+          <span className="font-mono text-foreground">{formatCooldown(cooldown)}</span>
+        </div>
+      )}
+      {inputCount > 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="uppercase tracking-wide text-[10px]">Input:</span>
+          <span className="font-mono text-foreground">
+            {inputCount} {inputCount === 1 ? "variable" : "variables"}
+          </span>
+        </div>
+      )}
+      {triggerSchema != null && (
+        <div className="flex items-center gap-1.5">
+          <span className="uppercase tracking-wide text-[10px]">Schema:</span>
+          <span className="font-mono text-foreground">defined</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Full Triggers tab — one card per trigger plus cooldown, input variables, and
+ * the trigger schema. Webhook triggers reuse the existing badge/modal so the
+ * URL + HMAC secret remain copy-able.
+ */
+function TriggersDetailPanel({
   workflowId,
   triggers,
   cooldown,
@@ -792,66 +1104,116 @@ function WorkflowMeta({
   input?: Record<string, string>;
   triggerSchema?: Record<string, unknown>;
 }) {
-  const hasMeta =
-    triggers.length > 0 ||
-    cooldown != null ||
-    (input != null && Object.keys(input).length > 0) ||
-    triggerSchema != null;
-  if (!hasMeta) return null;
-
   return (
-    <div className="shrink-0 space-y-3">
-      <div className="flex flex-wrap items-start gap-4">
-        {/* Triggers */}
-        {triggers.length > 0 && (
-          <MetaBlock label="Triggers">
-            <div className="flex flex-wrap gap-1.5">
-              {triggers.map((t, i) =>
-                t.type === "webhook" ? (
-                  <WebhookTriggerBadge key={i} workflowId={workflowId} trigger={t} />
-                ) : (
-                  <Badge key={i} variant="outline" size="tag" className="font-mono">
-                    {t.type}
-                    {t.type === "schedule" && t.scheduleId ? ` ${t.scheduleId}` : ""}
-                  </Badge>
-                ),
-              )}
+    <ScrollArea className="flex-1 min-h-0">
+      <div className="p-4 space-y-4">
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold">Triggers ({triggers.length})</h3>
+          {triggers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No triggers configured. The workflow can only be invoked manually.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {triggers.map((t, i) => (
+                <TriggerCard key={i} workflowId={workflowId} trigger={t} />
+              ))}
             </div>
-          </MetaBlock>
-        )}
+          )}
+        </section>
 
-        {/* Cooldown */}
         {cooldown != null && (
-          <MetaBlock label="Cooldown">
-            <Badge variant="outline" size="tag" className="font-mono">
-              {formatCooldown(cooldown)}
-            </Badge>
-          </MetaBlock>
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">Cooldown</h3>
+            <div className="rounded-lg border bg-card p-3 text-xs">
+              <span className="text-muted-foreground">Minimum interval between runs: </span>
+              <span className="font-mono font-medium">{formatCooldown(cooldown)}</span>
+            </div>
+          </section>
         )}
 
-        {/* Input variables */}
         {input != null && Object.keys(input).length > 0 && (
-          <MetaBlock label="Input">
-            <JsonTree data={input} defaultExpandDepth={1} maxHeight="100px" />
-          </MetaBlock>
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">Input variables</h3>
+            <div className="rounded-lg border bg-card p-3">
+              <JsonTree data={input} defaultExpandDepth={2} maxHeight="200px" />
+            </div>
+          </section>
+        )}
+
+        {triggerSchema != null && (
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">Trigger schema</h3>
+            <p className="text-xs text-muted-foreground">
+              Validates the payload sent to this workflow before any node runs.
+            </p>
+            <div className="rounded-lg border bg-card p-3">
+              <JsonTree data={triggerSchema} defaultExpandDepth={2} maxHeight="400px" />
+            </div>
+          </section>
         )}
       </div>
-
-      {/* Trigger Schema (collapsible) */}
-      {triggerSchema != null && (
-        <CollapsibleSection title="Trigger Schema">
-          <JsonTree data={triggerSchema} defaultExpandDepth={2} maxHeight="250px" />
-        </CollapsibleSection>
-      )}
-    </div>
+    </ScrollArea>
   );
 }
 
-function MetaBlock({ label, children }: { label: string; children: React.ReactNode }) {
+function TriggerCard({ workflowId, trigger }: { workflowId: string; trigger: TriggerConfig }) {
+  if (trigger.type === "webhook") {
+    const apiUrl = getConfig().apiUrl.replace(/\/$/, "");
+    const webhookUrl = `${apiUrl}/api/webhooks/${workflowId}`;
+    const hmacHeader = trigger.hmacHeader ?? "X-Hub-Signature-256";
+    return (
+      <div className="rounded-lg border bg-card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Webhook className="h-4 w-4 text-emerald-500" />
+          <Badge variant="outline" size="tag" className="font-mono">
+            webhook
+          </Badge>
+        </div>
+        <div className="space-y-3">
+          <CopyableField label="POST URL" value={webhookUrl} />
+          {trigger.hmacSecret ? (
+            <>
+              <CopyableField label="HMAC header" value={hmacHeader} />
+              <SecretField label="HMAC secret" value={trigger.hmacSecret} />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Sign the raw request body with HMAC-SHA256 using the secret, then send the digest as{" "}
+                <code className="font-mono">{hmacHeader}: sha256=&lt;hex&gt;</code>.
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No HMAC secret is configured for this trigger.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (trigger.type === "schedule") {
+    return (
+      <div className="rounded-lg border bg-card p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" size="tag" className="font-mono">
+            schedule
+          </Badge>
+          {trigger.scheduleId && <span className="font-mono text-xs">{trigger.scheduleId}</span>}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {trigger.scheduleId
+            ? "Runs on the cron schedule defined by the linked schedule entry."
+            : "Schedule trigger without a schedule ID — link a schedule to activate it."}
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-1">
-      <span className="text-xs text-muted-foreground uppercase tracking-wide">{label}</span>
-      {children}
+    <div className="rounded-lg border bg-card p-4">
+      <Badge variant="outline" size="tag" className="font-mono">
+        {(trigger as TriggerConfig).type}
+      </Badge>
     </div>
   );
 }
@@ -923,11 +1285,6 @@ function VersionEntry({ version }: { version: WorkflowVersion }) {
   );
 }
 
-function maskSecret(secret: string): string {
-  if (secret.length <= 4) return "****";
-  return `${secret.slice(0, 2)}${"*".repeat(Math.min(secret.length - 4, 8))}${secret.slice(-2)}`;
-}
-
 function formatCooldown(c: CooldownConfig): string {
   const parts: string[] = [];
   if (c.hours) parts.push(`${c.hours}h`);
@@ -936,67 +1293,32 @@ function formatCooldown(c: CooldownConfig): string {
   return parts.length > 0 ? parts.join(" ") : "none";
 }
 
-// --- Webhook Trigger Badge + Modal ---
-
-function WebhookTriggerBadge({
-  workflowId,
-  trigger,
-}: {
-  workflowId: string;
-  trigger: TriggerConfig;
-}) {
-  const [open, setOpen] = useState(false);
-  const apiUrl = getConfig().apiUrl.replace(/\/$/, "");
-  const webhookUrl = `${apiUrl}/api/webhooks/${workflowId}`;
-  const hmacHeader = trigger.hmacHeader ?? "X-Hub-Signature-256";
-
+function CopyIconButton({ value, darkMode }: { value: string; darkMode: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore — clipboard not available
+    }
+  };
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40 rounded-sm"
-      >
-        <Badge
-          variant="outline"
-          size="tag"
-          className="font-mono hover:border-primary/50 hover:text-foreground transition-colors"
-        >
-          webhook
-          {trigger.hmacSecret ? ` (hmac: ${maskSecret(trigger.hmacSecret)})` : ""}
-        </Badge>
-      </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Webhook trigger</DialogTitle>
-            <DialogDescription>
-              Send a <code className="font-mono text-foreground">POST</code> request to this URL to
-              trigger the workflow. The request body is forwarded as{" "}
-              <code className="font-mono text-foreground">triggerData</code>.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <CopyableField label="Webhook URL" value={webhookUrl} />
-            <CopyableField label="Method" value="POST" mono />
-            {trigger.hmacSecret ? (
-              <>
-                <CopyableField label="HMAC header" value={hmacHeader} />
-                <SecretField label="HMAC secret" value={trigger.hmacSecret} />
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Sign the raw request body with HMAC-SHA256 using the secret, then send the digest
-                  as <code className="font-mono">{hmacHeader}: sha256=&lt;hex&gt;</code>.
-                </p>
-              </>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                No HMAC secret is configured for this trigger.
-              </p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? "Copied" : "Copy code"}
+      title={copied ? "Copied" : "Copy code"}
+      className={cn(
+        "rounded p-1 transition-colors focus:outline-none focus:ring-1",
+        darkMode
+          ? "text-white/50 hover:text-white hover:bg-white/10 focus:ring-white/30"
+          : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200 focus:ring-zinc-400",
+      )}
+    >
+      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+    </button>
   );
 }
 
