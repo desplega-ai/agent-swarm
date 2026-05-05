@@ -1,6 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById } from "@/be/db";
 import { executeReadOnlyQuery } from "@/http/db-query";
 import { createToolRegistrar } from "@/tools/utils";
 
@@ -12,7 +11,7 @@ export const registerDbQueryTool = (server: McpServer) => {
     {
       title: "Execute database query",
       description:
-        "Execute a read-only SQL query against the swarm database. Lead-only. Results capped at 100 rows.",
+        "Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (oauth_tokens, configs). Results capped at 100 rows.",
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         sql: z.string().describe("SQL query (read-only only — writes are rejected)"),
@@ -27,22 +26,7 @@ export const registerDbQueryTool = (server: McpServer) => {
         truncated: z.boolean(),
       }),
     },
-    async ({ sql, params }, requestInfo, _meta) => {
-      const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
-      if (!callerAgent?.isLead) {
-        return {
-          content: [{ type: "text" as const, text: "Only the lead agent can use this tool." }],
-          structuredContent: {
-            success: false,
-            columns: [],
-            rows: [],
-            elapsed: 0,
-            total: 0,
-            truncated: false,
-          },
-        };
-      }
-
+    async ({ sql, params }, _requestInfo, _meta) => {
       try {
         const result = executeReadOnlyQuery(sql, params, MCP_MAX_ROWS);
         const truncated = result.total > MCP_MAX_ROWS;

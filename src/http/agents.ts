@@ -14,8 +14,10 @@ import {
   updateAgentMaxTasks,
   updateAgentName,
   updateAgentProfile,
+  updateAgentProvider,
   updateAgentStatus,
 } from "../be/db";
+import { ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
 
@@ -34,6 +36,7 @@ const registerAgent = route({
     role: z.string().optional(),
     capabilities: z.array(z.string()).optional(),
     maxTasks: z.number().int().optional(),
+    provider: ProviderNameSchema.optional(),
   }),
   responses: {
     200: { description: "Agent re-registered (already existed)" },
@@ -163,6 +166,9 @@ export async function handleAgentRegister(
         if (parsed.body.maxTasks !== undefined && parsed.body.maxTasks !== existingAgent.maxTasks) {
           updateAgentMaxTasks(existingAgent.id, parsed.body.maxTasks);
         }
+        if (parsed.body.provider && parsed.body.provider !== existingAgent.provider) {
+          updateAgentProvider(existingAgent.id, parsed.body.provider);
+        }
         resetEmptyPollCount(existingAgent.id);
         return { agent: getAgentById(agentId), created: false };
       }
@@ -176,6 +182,7 @@ export async function handleAgentRegister(
         role: parsed.body.role,
         capabilities: parsed.body.capabilities ?? [],
         maxTasks: parsed.body.maxTasks ?? 1,
+        provider: parsed.body.provider,
       });
 
       return { agent, created: true };

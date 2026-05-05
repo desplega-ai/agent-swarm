@@ -1,0 +1,252 @@
+{
+  "name": "ralph-loop",
+  "description": "Ralph Wiggum loop — GENERIC iterative agent loop. Required trigger params: goal (string), maxIterations (int). Optional: slug (string). State persists in agent-fs at ralph/YYYY-MM-DD/<slug>/. Each iteration: bump → work → max-check → analyst decision → continue/done/max-reached.",
+  "enabled": true,
+  "definition": {
+    "nodes": [
+      {
+        "id": "validate-trigger",
+        "type": "script",
+        "label": "Validate required trigger params",
+        "config": {
+          "runtime": "bash",
+          "timeout": 5000,
+          "script": "set -e\nGOAL='{{trigger.goal}}'\nMAX='{{trigger.maxIterations}}'\nif [ -z \"$GOAL\" ] || [ \"$GOAL\" = \"null\" ]; then\n  echo 'ERROR: trigger.goal is required (string)' >&2\n  exit 1\nfi\nif [ -z \"$MAX\" ] || [ \"$MAX\" = \"null\" ]; then\n  echo 'ERROR: trigger.maxIterations is required (int)' >&2\n  exit 1\nfi\nif ! [[ \"$MAX\" =~ ^[0-9]+$ ]]; then\n  echo \"ERROR: trigger.maxIterations must be a positive integer (got: $MAX)\" >&2\n  exit 1\nfi\njq -n --arg g \"$GOAL\" --argjson m \"$MAX\" '{ok:true, goal:$g, maxIterations:$m}'\n"
+        },
+        "next": {
+          "success": "init",
+          "failure": "validation-failed"
+        }
+      },
+      {
+        "id": "validation-failed",
+        "type": "notify",
+        "label": "Notify validation failure",
+        "config": {
+          "channel": "slack",
+          "target": "<your-slack-channel-id>",
+          "template": "🚫 Ralph loop validation FAILED — trigger must include `goal` (string) and `maxIterations` (int)."
+        }
+      },
+      {
+        "id": "init",
+        "type": "agent-task",
+        "label": "Init — create agent-fs run dir + meta.json",
+        "config": {
+          "model": "haiku",
+          "agentId": "<your-coder-agent-id>",
+          "priority": 70,
+          "template": "# Ralph init\n\nCreate the run directory and meta file in agent-fs (shared drive, org `<your-org-id>`).\n\n## Goal (from trigger)\n{{trigger.goal}}\n\n## Steps\n1. Compute today's date in `YYYY-MM-DD` format (UTC).\n2. Pick a short slug (URL-safe, lowercase, kebab-case): use `{{trigger.slug}}` if non-empty, else derive a 2-3 word slug from the goal. If `ralph/<DATE>/<SLUG>/` already exists in agent-fs, append `-2`, `-3`, etc until free.\n3. Use the `agent-fs` CLI to write `ralph/<DATE>/<SLUG>/meta.json` to the SHARED drive (`agent-fs --org <your-org-id> write ...`). The JSON must be:\n   ```json\n   {\n     \"goal\": \"{{trigger.goal}}\",\n     \"maxIterations\": {{trigger.maxIterations}},\n     \"startedAt\": \"<ISO 8601 UTC>\",\n     \"status\": \"running\",\n     \"triggerExtras\": {{trigger}}\n   }\n   ```\n   (Embed the full trigger object as `triggerExtras` so iteration steps can read goal-specific params like targetCounter, linearProjectId, etc.)\n\n## Output\nReturn ONLY this JSON:\n```json\n{\n  \"date\": \"<YYYY-MM-DD>\",\n  \"slug\": \"<slug>\",\n  \"basePath\": \"ralph/<DATE>/<SLUG>\",\n  \"maxIterations\": <int>\n}\n```\n",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "date": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "basePath": {
+                "type": "string"
+              },
+              "maxIterations": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "date",
+              "slug",
+              "basePath",
+              "maxIterations"
+            ]
+          }
+        },
+        "next": "bump-iteration",
+        "inputs": {
+          "trigger": "trigger"
+        }
+      },
+      {
+        "id": "bump-iteration",
+        "type": "agent-task",
+        "label": "Bump iteration — write iteration-N.md template",
+        "config": {
+          "model": "haiku",
+          "agentId": "<your-coder-agent-id>",
+          "priority": 70,
+          "template": "# Ralph bump-iteration\n\nDetermine the next iteration number and write a fresh template file for it in agent-fs.\n\n## Context\n- basePath: `{{base.taskOutput.basePath}}` (shared drive, org `<your-org-id>`)\n- goal: {{trigger.goal}}\n\n## Steps\n1. `agent-fs --org <your-org-id> ls {{base.taskOutput.basePath}}/` — find the highest existing `iteration-NNN.md` (zero-padded to 3 digits). If none, start at 1.\n2. Let `N = <highest> + 1`.\n3. Write `{{base.taskOutput.basePath}}/iteration-<NNN>.md` with this template:\n   ```markdown\n   # Iteration <N>\n   - started_at: <ISO 8601 UTC>\n   - goal: {{trigger.goal}}\n\n   ## Plan\n   _TBD — to be filled by ralph-iteration_\n\n   ## Work log\n   _TBD_\n\n   ## Output\n   _TBD_\n\n   ## Self-assessment\n   - progress_made: TBD\n   - blockers: TBD\n   - believe_complete: TBD\n   ```\n\n## Output\nReturn ONLY this JSON:\n```json\n{\n  \"iteration\": <N>,\n  \"path\": \"{{base.taskOutput.basePath}}/iteration-<NNN>.md\"\n}\n```\n",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "iteration": {
+                "type": "integer"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "iteration",
+              "path"
+            ]
+          }
+        },
+        "next": "ralph-iteration",
+        "inputs": {
+          "trigger": "trigger",
+          "base": "init"
+        }
+      },
+      {
+        "id": "ralph-iteration",
+        "type": "agent-task",
+        "label": "Ralph iteration — do ONE step of work",
+        "config": {
+          "model": "sonnet",
+          "agentId": "<your-coder-agent-id>",
+          "priority": 70,
+          "template": "# Ralph iteration\n\nYou are running iteration **{{bump.taskOutput.iteration}}** of a Ralph loop.\n\n## Goal\n{{trigger.goal}}\n\n## Trigger context (raw — may contain extras like targetCounter, linearProjectId, etc.)\n```json\n{{trigger}}\n```\n\n## Workdir\nbasePath = `{{base.taskOutput.basePath}}` (agent-fs shared drive, org `<your-org-id>`)\nThis iteration's log: `{{bump.taskOutput.path}}`\n\n## Steps\n1. Read `{{base.taskOutput.basePath}}/meta.json` and any existing `iteration-*.md` summaries to get prior context.\n2. Do exactly ONE meaningful step of work toward the goal. Write any artifacts to agent-fs under `basePath/`.\n3. Read this iteration's template at `{{bump.taskOutput.path}}`, fill in Plan / Work log / Output / Self-assessment, write it back. The Self-assessment `believe_complete` should be true ONLY if you genuinely think the goal is met.\n\n## Output\nReturn ONLY this JSON:\n```json\n{\n  \"iteration\": {{bump.taskOutput.iteration}},\n  \"summary\": \"<one-line description of what you did this iteration>\",\n  \"believeComplete\": <bool>\n}\n```\n",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "iteration": {
+                "type": "integer"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "believeComplete": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "iteration",
+              "summary",
+              "believeComplete"
+            ]
+          }
+        },
+        "next": "max-check",
+        "inputs": {
+          "trigger": "trigger",
+          "base": "init",
+          "bump": "bump-iteration"
+        }
+      },
+      {
+        "id": "max-check",
+        "type": "script",
+        "label": "Max-iterations gate",
+        "config": {
+          "runtime": "bash",
+          "timeout": 10000,
+          "script": "set -e\nITER={{iter.taskOutput.iteration}}\nMAX={{trigger.maxIterations}}\nif [ \"$ITER\" -ge \"$MAX\" ]; then\n  jq -n --argjson i $ITER --argjson m $MAX '{atMax:true, iteration:$i, max:$m}'\n  exit 1\nfi\njq -n --argjson i $ITER --argjson m $MAX '{atMax:false, iteration:$i, max:$m}'\n"
+        },
+        "next": {
+          "success": "analysis",
+          "failure": "max-reached"
+        },
+        "inputs": {
+          "trigger": "trigger",
+          "iter": "ralph-iteration"
+        }
+      },
+      {
+        "id": "analysis",
+        "type": "agent-task",
+        "label": "Analysis — done? continue? unsure?",
+        "config": {
+          "model": "haiku",
+          "agentId": "<your-coder-agent-id>",
+          "priority": 70,
+          "template": "# Ralph analysis\n\nYou are the analyst. The iterator is biased; you are not. Independently decide whether the goal is met.\n\n## CRITICAL: agent-fs drive\nALL agent-fs commands MUST include `--org <your-org-id>` (the SHARED drive). Without this flag, agent-fs reads/writes go to your PERSONAL drive, where the iterator's artifacts do NOT exist — you would falsely conclude 'file missing'. Every `agent-fs ls/cat/write/fts` call below must use this flag.\n\n## Goal\n{{trigger.goal}}\n\n## Trigger context\n```json\n{{trigger}}\n```\n\n## Latest iteration\n- iteration: {{iter.taskOutput.iteration}}\n- iterator's summary: {{iter.taskOutput.summary}}\n- iterator's self-assessment of completion: {{iter.taskOutput.believeComplete}}\n\n## Steps\n1. List the workdir to confirm artifacts exist:\n   `agent-fs --org <your-org-id> ls {{base.taskOutput.basePath}}/`\n2. Read meta.json and the latest iteration log:\n   `agent-fs --org <your-org-id> cat {{base.taskOutput.basePath}}/meta.json`\n   `agent-fs --org <your-org-id> cat {{base.taskOutput.basePath}}/iteration-<NNN>.md`\n3. Verify the iterator's claim against the artifacts.\n4. Decide:\n   - `done` if the goal is genuinely met based on the artifacts.\n   - `continue` if not yet.\n   - `unsure` only if there's a real ambiguity AFTER you've successfully read the files (NEVER use 'unsure' or 'continue' just because you couldn't find files — re-check that you used `--org`).\n5. Write your reasoning to the SHARED drive:\n   `agent-fs --org <your-org-id> write {{base.taskOutput.basePath}}/analysis-<NNN>.md --content \"<your reasoning>\" -m \"analysis iter <N>\"`\n\n## Output\nReturn ONLY this JSON:\n```json\n{\n  \"decision\": \"done\" | \"continue\" | \"unsure\",\n  \"reason\": \"<one-line>\",\n  \"confidence\": <float 0..1>\n}\n```\n",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "done",
+                  "continue",
+                  "unsure"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "decision",
+              "reason",
+              "confidence"
+            ]
+          }
+        },
+        "next": "route",
+        "inputs": {
+          "trigger": "trigger",
+          "base": "init",
+          "iter": "ralph-iteration"
+        }
+      },
+      {
+        "id": "route",
+        "type": "property-match",
+        "label": "Route on analysis.decision",
+        "config": {
+          "conditions": [
+            {
+              "field": "an.taskOutput.decision",
+              "op": "eq",
+              "value": "done"
+            }
+          ],
+          "mode": "all"
+        },
+        "next": {
+          "true": "success",
+          "false": "bump-iteration"
+        },
+        "inputs": {
+          "an": "analysis"
+        }
+      },
+      {
+        "id": "success",
+        "type": "notify",
+        "label": "Notify success",
+        "config": {
+          "channel": "slack",
+          "target": "<your-slack-channel-id>",
+          "template": "🟢 Ralph loop COMPLETED in {{iter.taskOutput.iteration}} iterations\nGoal: {{trigger.goal}}\nLast iteration: {{iter.taskOutput.summary}}\nAnalyst: {{an.taskOutput.reason}}\nWorkdir: agent-fs `{{base.taskOutput.basePath}}/`"
+        },
+        "inputs": {
+          "trigger": "trigger",
+          "base": "init",
+          "iter": "ralph-iteration",
+          "an": "analysis"
+        }
+      },
+      {
+        "id": "max-reached",
+        "type": "notify",
+        "label": "Notify max iterations",
+        "config": {
+          "channel": "slack",
+          "target": "<your-slack-channel-id>",
+          "template": "🔴 Ralph loop HIT MAX ITERATIONS ({{trigger.maxIterations}})\nGoal: {{trigger.goal}}\nLast iteration: {{iter.taskOutput.summary}}\nWorkdir: agent-fs `{{base.taskOutput.basePath}}/`"
+        },
+        "inputs": {
+          "trigger": "trigger",
+          "base": "init",
+          "iter": "ralph-iteration"
+        }
+      }
+    ],
+    "onNodeFailure": "fail"
+  },
+  "triggers": []
+}

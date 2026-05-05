@@ -10,6 +10,13 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
         echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
         exit 1
     fi
+elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
+    # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or auth.json must exist
+    OPENCODE_AUTH_FILE="${HOME}/.local/share/opencode/auth.json"
+    if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ ! -f "$OPENCODE_AUTH_FILE" ]; then
+        echo "Error: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or ~/.local/share/opencode/auth.json required for opencode provider"
+        exit 1
+    fi
 elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     # Claude Managed Agents — sessions run in Anthropic's cloud sandbox.
     # No CLI binary needed; the worker process is a thin SSE relay.
@@ -154,6 +161,14 @@ elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     echo "Claude Managed Agents: no local CLI required (sessions run in Anthropic cloud)"
 elif [ "$HARNESS_PROVIDER" = "devin" ]; then
     echo "Devin: cloud API (no local binary required)"
+elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
+    OPENCODE_BIN="${OPENCODE_BINARY:-opencode}"
+    if ! command -v "$OPENCODE_BIN" > /dev/null 2>&1; then
+        echo "FATAL: opencode CLI not found: '$OPENCODE_BIN'"
+        echo "  PATH=$PATH"
+        exit 1
+    fi
+    echo "opencode CLI: $(command -v "$OPENCODE_BIN")"
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
     if ! command -v "$CLAUDE_BIN" > /dev/null 2>&1; then
@@ -168,6 +183,13 @@ elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     fi
     echo "Claude CLI: $(command -v "$CLAUDE_BIN")"
 fi
+
+# ---- Git safe.directory backstop ----
+# Avoid "dubious ownership" when /workspace dirs are owned by a different uid
+# (Archil/FUSE mounts, root-owned auto-clone, host-mounted volumes, etc.).
+# --system writes to /etc/gitconfig and applies to ALL users, so the worker
+# user inherits this after the gosu drop below.
+git config --system --add safe.directory '*' 2>/dev/null || true
 
 # ---- Archil disk mounts ----
 # Skipped when ARCHIL_MOUNT_TOKEN is not set (local dev / environments without Archil)
@@ -542,16 +564,21 @@ if [ -n "$AGENT_ID" ]; then
                 REPO_BRANCH=$(echo "$repo" | jq -r '.defaultBranch // "main"')
                 REPO_DIR=$(echo "$repo" | jq -r '.clonePath')
 
-                # Ensure parent directory exists
+                # Ensure parent directory exists and is owned by worker so the
+                # gosu-dropped clone/pull below can write into it. Lenient chown
+                # mirrors the pattern used for /workspace/personal subdirs above.
                 mkdir -p "$(dirname "$REPO_DIR")"
+                chown worker:worker "$(dirname "$REPO_DIR")" 2>/dev/null || true
 
+                # Run clone/pull as the worker user so .git ends up worker-owned
+                # — otherwise the runner (post-gosu) hits "dubious ownership".
+                # gosu inherits env, so GH_TOKEN/GITHUB_TOKEN propagate to gh.
                 if [ -d "${REPO_DIR}/.git" ]; then
                     echo "  Pulling ${REPO_NAME} (${REPO_BRANCH}) at ${REPO_DIR}..."
-                    cd "$REPO_DIR" && git pull origin "$REPO_BRANCH" --ff-only 2>/dev/null || echo "  Warning: Could not pull ${REPO_NAME}"
-                    cd /workspace
+                    gosu worker bash -c "cd '$REPO_DIR' && git pull origin '$REPO_BRANCH' --ff-only" || echo "  Warning: Could not pull ${REPO_NAME}"
                 else
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
-                    gh repo clone "$REPO_URL" "$REPO_DIR" -- --branch "$REPO_BRANCH" --single-branch 2>/dev/null || echo "  Warning: Could not clone ${REPO_NAME}"
+                    gosu worker bash -c "gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" || echo "  Warning: Could not clone ${REPO_NAME}"
                 fi
             done
         else

@@ -19,9 +19,10 @@ import {
   type AgentSession,
   createAgentSession,
   DefaultResourceLoader,
+  getAgentDir,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
-import { type TSchema, Type } from "@sinclair/typebox";
+import { type TSchema, Type } from "typebox";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient } from "./pi-mono-mcp-client";
@@ -508,6 +509,8 @@ export class PiMonoAdapter implements ProviderAdapter {
 
     // 5. Create resource loader with system prompt + extension
     const resourceLoader = new DefaultResourceLoader({
+      cwd: config.cwd,
+      agentDir: getAgentDir(),
       appendSystemPrompt: config.systemPrompt ? [config.systemPrompt] : undefined,
       extensionFactories: [swarmExtension],
     });

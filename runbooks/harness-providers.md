@@ -1,8 +1,36 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, pi, codex, devin, future).
+Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, future).
+
+## Supported providers
+
+| Provider | `HARNESS_PROVIDER` | Adapter | Notes |
+|----------|--------------------|---------|-------|
+| Claude Code | `claude` | `ClaudeAdapter` | Default; spawns `claude` CLI |
+| Codex | `codex` | `CodexAdapter` | Spawns `codex` CLI; OpenAI/ChatGPT OAuth |
+| opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary; agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) |
+| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter or Anthropic |
+| Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
+| Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 
 **Canonical conceptual reference:** [docs-site/.../guides/harness-providers.mdx](../docs-site/content/docs/(documentation)/guides/harness-providers.mdx). That guide is the source of truth for how the `ProviderAdapter` interface, the runner's poll→spawn→events→finish flow, system-prompt composition, entrypoint credential restoration, and OAuth flows fit together. Read it before non-trivial work.
+
+## Per-task `outputSchema` support
+
+Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOptions` in `src/be/db.ts`). Enforcement depends on the harness:
+
+| Provider | Supported | Notes |
+|----------|-----------|-------|
+| `claude` | Yes | Via MCP + `claude -p --json-schema` extraction fallback in `handleStructuredOutputFallback` |
+| `claude-managed` | Yes | Via MCP |
+| `codex` | Yes | Via MCP |
+| `opencode` | Yes | Via MCP |
+| `pi` (`pi-mono`) | Yes | Via MCP |
+| `devin` | Conditional | Only when `HAS_MCP=true`. In default mode the schema is **not** enforced — Devin's free-form output is stored as-is. |
+
+When supported, validation happens in the `store-progress` MCP tool (see `src/tools/store-progress.ts:159-190`). When the schema is missing or violated, the tool call fails and the agent is asked to retry.
+
+**Caveat for default-mode Devin:** `ensureTaskFinished` in `src/commands/runner.ts` writes Devin's `providerOutput` directly into `task.output` without schema validation. Callers consuming a schema'd task's output should not assume `JSON.parse(task.output)` will succeed when the task ran on default-mode Devin.
 
 ## Same-PR doc-update rule
 

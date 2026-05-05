@@ -1,23 +1,86 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react";
-import { ListTodo, MessageSquare, Users } from "lucide-react";
+import { Bell, Bot, ListPlus, MessageCircle, Share2, Terminal, UserCheck, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { FlowNodeData } from "./graph-utils";
 import { statusBorderColor } from "./node-styles";
 
-const iconMap: Record<string, typeof ListTodo> = {
-  "create-task": ListTodo,
-  "send-message": MessageSquare,
-  "delegate-to-agent": Users,
+type NodeStyle = {
+  border: string;
+  bg: string;
+  text: string;
+  handle: string;
+  icon: React.ElementType;
 };
 
-const ASYNC_TYPES = ["create-task", "delegate-to-agent"];
+const nodeStyleMap: Record<string, NodeStyle> = {
+  "agent-task": {
+    border: "border-violet-500/50",
+    bg: "bg-violet-500/10",
+    text: "text-violet-400",
+    handle: "!bg-violet-500",
+    icon: Bot,
+  },
+  script: {
+    border: "border-cyan-500/50",
+    bg: "bg-cyan-500/10",
+    text: "text-cyan-400",
+    handle: "!bg-cyan-500",
+    icon: Terminal,
+  },
+  notify: {
+    border: "border-teal-500/50",
+    bg: "bg-teal-500/10",
+    text: "text-teal-400",
+    handle: "!bg-teal-500",
+    icon: Bell,
+  },
+  "human-in-the-loop": {
+    border: "border-orange-500/50",
+    bg: "bg-orange-500/10",
+    text: "text-orange-400",
+    handle: "!bg-orange-500",
+    icon: UserCheck,
+  },
+  "create-task": {
+    border: "border-indigo-500/50",
+    bg: "bg-indigo-500/10",
+    text: "text-indigo-400",
+    handle: "!bg-indigo-500",
+    icon: ListPlus,
+  },
+  "send-message": {
+    border: "border-pink-500/50",
+    bg: "bg-pink-500/10",
+    text: "text-pink-400",
+    handle: "!bg-pink-500",
+    icon: MessageCircle,
+  },
+  "delegate-to-agent": {
+    border: "border-purple-500/50",
+    bg: "bg-purple-500/10",
+    text: "text-purple-400",
+    handle: "!bg-purple-500",
+    icon: Share2,
+  },
+};
+
+const defaultStyle: NodeStyle = {
+  border: "border-blue-500/50",
+  bg: "bg-blue-500/10",
+  text: "text-blue-400",
+  handle: "!bg-blue-500",
+  icon: Zap,
+};
+
+const ASYNC_TYPES = new Set(["agent-task", "create-task", "delegate-to-agent"]);
 
 export function ActionNode({ data }: NodeProps) {
   const d = data as unknown as FlowNodeData;
-  const Icon = iconMap[d.nodeType] || ListTodo;
-  const borderColor = d.stepStatus ? statusBorderColor[d.stepStatus] : "border-blue-500/50";
-  const isAsync = ASYNC_TYPES.includes(d.nodeType);
+  const style = nodeStyleMap[d.nodeType] ?? defaultStyle;
+  const Icon = style.icon;
+  const borderColor = d.stepStatus ? statusBorderColor[d.stepStatus] : style.border;
+  const isAsync = ASYNC_TYPES.has(d.nodeType);
   const ports = d.outputPorts.length > 0 ? d.outputPorts : ["default"];
 
   return (
@@ -28,10 +91,10 @@ export function ActionNode({ data }: NodeProps) {
         d.selected && "ring-2 ring-amber-500 ring-offset-1 ring-offset-background",
       )}
     >
-      <Handle type="target" position={Position.Top} id="input" className="!bg-blue-500" />
+      <Handle type="target" position={Position.Top} id="input" className={style.handle} />
       <div className="flex items-center gap-2">
-        <div className="p-1 rounded bg-blue-500/10">
-          <Icon className="h-4 w-4 text-blue-500" />
+        <div className={cn("p-1 rounded", style.bg)}>
+          <Icon className={cn("h-4 w-4", style.text)} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
@@ -57,14 +120,14 @@ export function ActionNode({ data }: NodeProps) {
                 type="source"
                 position={Position.Bottom}
                 id={port}
-                className="!bg-blue-500"
+                className={style.handle}
                 style={{ left: `${((i + 1) / (ports.length + 1)) * 100}%` }}
               />
             </div>
           ))}
         </div>
       ) : (
-        <Handle type="source" position={Position.Bottom} id="default" className="!bg-blue-500" />
+        <Handle type="source" position={Position.Bottom} id="default" className={style.handle} />
       )}
     </div>
   );

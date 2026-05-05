@@ -551,6 +551,10 @@ export async function ensureTaskFinished(
     body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
   } else if (providerOutput) {
     // Provider already supplied structured output (e.g. Devin) — use directly.
+    // NOTE: providerOutput is NOT validated against task.outputSchema here.
+    // Known gap for default-mode Devin; see runbooks/harness-providers.md
+    // ("Per-task outputSchema support"). Schema enforcement only happens on
+    // the MCP path via store-progress.
     body.output = providerOutput;
   } else {
     // Try structured output fallback if the task has an outputSchema
@@ -1050,12 +1054,14 @@ async function saveProviderSessionId(
   claudeSessionId: string,
   provider?: ProviderName,
   providerMeta?: Record<string, unknown>,
+  model?: string,
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   const body: Record<string, unknown> = { claudeSessionId };
   if (provider !== undefined) body.provider = provider;
   if (providerMeta !== undefined) body.providerMeta = providerMeta;
+  if (model !== undefined && model !== "") body.model = model;
   await fetch(`${apiUrl}/api/tasks/${taskId}/claude-session`, {
     method: "PUT",
     headers,
@@ -1338,6 +1344,8 @@ async function registerAgent(opts: {
     headers.Authorization = `Bearer ${opts.apiKey}`;
   }
 
+  const provider = (process.env.HARNESS_PROVIDER || "claude") as ProviderName;
+
   const response = await fetch(`${opts.apiUrl}/api/agents`, {
     method: "POST",
     headers,
@@ -1347,6 +1355,7 @@ async function registerAgent(opts: {
       role: opts.role,
       capabilities: opts.capabilities,
       maxTasks: opts.maxTasks,
+      provider,
     }),
   });
 
@@ -1745,6 +1754,7 @@ async function spawnProviderProcess(
             event.sessionId,
             event.provider,
             event.providerMeta,
+            model,
           ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
         } else {
           // Pool task: save provider session ID on active session so it can be

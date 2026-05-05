@@ -21,7 +21,13 @@ import { AgentTaskSchema } from "@/types";
 import "./templates";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
-// Schema for optional cost data that agents can self-report
+// Schema for optional cost data that agents can self-report.
+// In practice the harness adapter (claude/codex/opencode/etc.) is the
+// authoritative source of cost data — it gets written via
+// POST /api/session-costs from the runner. Agents calling store-progress
+// rarely know the real numbers and have been observed echoing the example
+// values from this schema (e.g. model="opus" on a gpt-5-nano run). The
+// handler below silently drops payloads where every numeric field is zero.
 const CostDataSchema = z
   .object({
     totalCostUsd: z.number().min(0).describe("Total cost in USD"),
@@ -31,9 +37,16 @@ const CostDataSchema = z
     cacheWriteTokens: z.number().int().min(0).optional().describe("Cache write tokens"),
     durationMs: z.number().int().min(0).optional().describe("Duration in milliseconds"),
     numTurns: z.number().int().min(1).optional().describe("Number of turns/iterations"),
-    model: z.string().optional().describe("Model used (e.g., 'opus', 'sonnet')"),
+    model: z
+      .string()
+      .optional()
+      .describe(
+        "Model identifier reported by the agent (only set if the agent has the real ID; do NOT echo the schema example).",
+      ),
   })
-  .describe("Optional cost data for tracking session costs");
+  .describe(
+    "Optional self-reported cost data. The harness adapter writes the authoritative cost record automatically — only pass this if you have real, non-zero numbers from a model that doesn't surface usage to the harness.",
+  );
 
 export const registerStoreProgressTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -64,6 +77,13 @@ export const registerStoreProgressTool = (server: McpServer) => {
         success: z.boolean(),
         message: z.string(),
         task: AgentTaskSchema.optional(),
+        yourAgentId: z.string().optional(),
+        wasNoOp: z
+          .boolean()
+          .optional()
+          .describe(
+            "True when the call was a no-op because the task was already in a terminal state (completed/failed/cancelled). First-call-wins.",
+          ),
       }),
     },
     async ({ taskId, progress, status, output, failureReason, costData }, requestInfo, _meta) => {
@@ -104,6 +124,22 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         let updatedTask = existingTask;
         const isTerminal = ["completed", "failed", "cancelled"].includes(existingTask.status);
+
+        // Idempotency guard: short-circuit terminal-status writes (completed/failed)
+        // BEFORE any side-effects fire (event emission, memory write, follow-up task,
+        // business-use ensure). Without this, a multi-session race causes duplicate
+        // follow-up tasks to lead, vector index pollution, and spurious BU events.
+        // First-call-wins: existing output / finishedAt are preserved.
+        if (status && isTerminal) {
+          return {
+            success: true,
+            message:
+              `Task "${taskId}" is already ${existingTask.status}; treating as no-op. ` +
+              `Existing output preserved (first-call-wins).`,
+            task: existingTask,
+            wasNoOp: true,
+          };
+        }
 
         // Update progress if provided (with deduplication)
         // Skip for tasks already in a terminal state to prevent zombie revival
@@ -215,8 +251,20 @@ export const registerStoreProgressTool = (server: McpServer) => {
           }
         }
 
-        // Store cost data if provided (agents can self-report costs)
-        if (costData && requestInfo.agentId) {
+        // Store cost data only if the agent provided non-trivial numbers.
+        // Agents observed copying the schema example (e.g. model="opus"
+        // on a gpt-5-nano run) with all-zero token/cost fields, producing
+        // duplicate noise rows in session_costs alongside the harness's
+        // authoritative entry. Drop those silently.
+        const hasRealCost =
+          costData &&
+          (costData.totalCostUsd > 0 ||
+            (costData.inputTokens ?? 0) > 0 ||
+            (costData.outputTokens ?? 0) > 0 ||
+            (costData.cacheReadTokens ?? 0) > 0 ||
+            (costData.cacheWriteTokens ?? 0) > 0);
+
+        if (hasRealCost && requestInfo.agentId) {
           createSessionCost({
             sessionId: `mcp-${taskId}-${Date.now()}`, // Generate unique session ID for MCP-based tasks
             taskId,
@@ -244,8 +292,15 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
       const result = txn();
 
-      // Index completed and failed tasks as memory (async, non-blocking)
-      if ((status === "completed" || status === "failed") && result.success && result.task) {
+      // Index completed and failed tasks as memory (async, non-blocking).
+      // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate
+      // memory entries / vector index pollution.
+      if (
+        (status === "completed" || status === "failed") &&
+        result.success &&
+        result.task &&
+        !("wasNoOp" in result && result.wasNoOp)
+      ) {
         (async () => {
           try {
             const taskContent =
@@ -306,7 +361,14 @@ export const registerStoreProgressTool = (server: McpServer) => {
       // Create follow-up task for the lead when a worker task finishes.
       // This replaces the old poll-based tasks_finished trigger which was unreliable.
       // Skip for workflow-managed tasks — the workflow engine handles sequencing via resume.ts.
-      if (status && result.success && result.task && !result.task.workflowRunId) {
+      // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate follow-ups.
+      if (
+        status &&
+        result.success &&
+        result.task &&
+        !result.task.workflowRunId &&
+        !("wasNoOp" in result && result.wasNoOp)
+      ) {
         try {
           const taskAgent = getAgentById(result.task.agentId ?? "");
           // Only create follow-ups for worker tasks (not lead's own tasks)

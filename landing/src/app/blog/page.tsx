@@ -59,6 +59,22 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-mcp-tool-caching-core-deferred",
+    title:
+      "We Hid 75 of Our Agent's 90 MCP Tools — And It Got Smarter",
+    description:
+      "Why tool inflation breaks agent accuracy and how we implemented core/deferred tool caching to fix it.",
+    date: "May 4, 2026",
+    readTime: "13 min read",
+    tags: [
+      "MCP",
+      "tool selection",
+      "context window",
+      "agent architecture",
+      "LLM caching",
+    ],
+  },
+  {
     slug: "deep-dive-anthropic-cache-ttl-polling-optimization",
     title:
       "Why Our Agents Sleep for 4 Minutes 30 Seconds (And Yours Should Too)",

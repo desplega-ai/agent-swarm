@@ -34,6 +34,7 @@ const SkillsPage = lazy(() => import("@/pages/skills/page"));
 const SkillDetailPage = lazy(() => import("@/pages/skills/[id]/page"));
 const ApiKeysPage = lazy(() => import("@/pages/api-keys/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
+const MemoryPage = lazy(() => import("@/pages/memory/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
 export const router = createBrowserRouter([
@@ -72,6 +73,7 @@ export const router = createBrowserRouter([
       { path: "repos/:id", element: <RepoDetailPage /> },
       { path: "keys", element: <ApiKeysPage /> },
       { path: "debug", element: <DebugPage /> },
+      { path: "memory", element: <MemoryPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

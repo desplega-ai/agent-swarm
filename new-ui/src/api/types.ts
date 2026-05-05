@@ -899,3 +899,47 @@ export interface PricingRow {
 export interface PricingResponse {
   rows: PricingRow[];
 }
+
+// ============================================================================
+// Memory
+// ============================================================================
+
+export type MemoryScope = "agent" | "swarm";
+export type MemoryScopeFilter = MemoryScope | "all";
+export type MemorySource = "manual" | "file_index" | "session_summary" | "task_completion";
+
+export interface MemoryListRequest {
+  query?: string;
+  agentId?: string;
+  scope?: MemoryScopeFilter;
+  source?: MemorySource;
+  sourcePath?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface MemoryEntry {
+  id: string;
+  name: string;
+  content: string;
+  agentId: string | null;
+  scope: MemoryScope;
+  source: MemorySource;
+  similarity?: number;
+  createdAt: string;
+  accessedAt: string;
+  accessCount: number;
+  expiresAt: string | null;
+  embeddingModel: string | null;
+  sourceTaskId: string | null;
+  sourcePath: string | null;
+  chunkIndex: number;
+  totalChunks: number;
+  tags: string[];
+}
+
+export interface MemoryListResponse {
+  results: MemoryEntry[];
+  total: number;
+  mode: "semantic" | "list";
+}

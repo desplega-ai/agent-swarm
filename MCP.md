@@ -225,7 +225,7 @@ Create, update, delete, or list user profiles in the user registry. Lead-only.
 
 **Execute database query**
 
-Execute a read-only SQL query against the swarm database. Lead-only. Results capped at 100 rows.
+Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (oauth_tokens, configs). Results capped at 100 rows.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

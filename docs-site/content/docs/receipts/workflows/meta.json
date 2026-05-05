@@ -1,0 +1,5 @@
+{
+  "title": "Workflows",
+  "description": "Workflow recipes — copy-pasteable workflow JSONs for common patterns",
+  "pages": ["ralph-loop"]
+}

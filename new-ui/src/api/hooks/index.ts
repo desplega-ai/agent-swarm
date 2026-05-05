@@ -53,6 +53,7 @@ export {
   useUninstallMcpServer,
   useUpdateMcpServer,
 } from "./use-mcp-servers";
+export { useDeleteMemory, useMemoryList } from "./use-memory";
 export type { PromptTemplateFilters } from "./use-prompt-templates";
 export {
   useCheckoutTemplate,

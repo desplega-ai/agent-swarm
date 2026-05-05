@@ -83,6 +83,7 @@ const updateClaudeSession = route({
     z.object({
       claudeSessionId: z.string().min(1),
       provider: z.literal("devin"),
+      model: z.string().optional(),
       providerMeta: z.object({
         sessionUrl: z.string(),
         maxAcuLimit: z.number().optional(),
@@ -92,6 +93,7 @@ const updateClaudeSession = route({
     z.object({
       claudeSessionId: z.string().min(1),
       provider: ProviderNameSchema.exclude(["devin"]).optional(),
+      model: z.string().optional(),
       providerMeta: z.object({}).optional(),
     }),
   ]),
@@ -312,6 +314,7 @@ export async function handleTasks(
       parsed.body.claudeSessionId,
       parsed.body.provider,
       parsed.body.providerMeta,
+      parsed.body.model,
     );
     if (!task) {
       jsonError(res, "Task not found", 404);

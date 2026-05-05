@@ -49,7 +49,7 @@ Losing the key while keeping the database means losing every encrypted secret wi
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `pi` (pi-mono), `devin` (Devin), or `claude-managed` (Anthropic Managed Agents). See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `opencode`, `pi` (pi-mono), `devin` (Devin), or `claude-managed` (Anthropic Managed Agents). See [Harness Configuration](/docs/guides/harness-configuration) |
 
 ### Credentials
 
@@ -84,6 +84,18 @@ Which credentials you need depends on your selected harness provider:
 | `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
 
 Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAuth restored from the swarm config store. See [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
+
+**opencode** (`HARNESS_PROVIDER=opencode`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key (primary — unlocks 100+ models at [openrouter.ai](https://openrouter.ai)) |
+| `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
+| `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
+| `OPENCODE_BINARY` | No | `opencode` | Path to the opencode CLI binary (if not in `$PATH`) |
+| `MODEL_OVERRIDE` | No | `openrouter/qwen/qwen3-coder-flash` | Model string passed to opencode. Use `provider/model-id` format (e.g. `anthropic/claude-sonnet-4-6`, `openai/gpt-4o`) |
+
+\* At least one of `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `~/.local/share/opencode/auth.json` is required.
 
 **Devin** (`HARNESS_PROVIDER=devin`):
 

@@ -1,21 +1,22 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react";
-import { GitBranch, Globe, ListTodo, Mail, MessageSquare } from "lucide-react";
+import { Clock, Globe, ListTodo, Mail, MessageSquare, Webhook } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FlowNodeData } from "./graph-utils";
 import { statusBorderColor } from "./node-styles";
 
-const iconMap: Record<string, typeof ListTodo> = {
+const iconMap: Record<string, React.ElementType> = {
   "trigger-new-task": ListTodo,
   "trigger-task-completed": ListTodo,
-  "trigger-webhook": Globe,
+  "trigger-webhook": Webhook,
   "trigger-email": Mail,
   "trigger-slack-message": MessageSquare,
-  "trigger-github-event": GitBranch,
+  "trigger-github-event": Globe,
+  "trigger-schedule": Clock,
 };
 
 export function TriggerNode({ data }: NodeProps) {
   const d = data as unknown as FlowNodeData;
-  const Icon = iconMap[d.nodeType] || ListTodo;
+  const Icon = iconMap[d.nodeType] ?? ListTodo;
   const borderColor = d.stepStatus ? statusBorderColor[d.stepStatus] : "border-emerald-500/50";
 
   return (

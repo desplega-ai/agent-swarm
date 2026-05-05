@@ -6,6 +6,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.74.1] - 2026-05-05
+
+### Changed
+- Regenerated `openapi.json` and `docs-site/content/docs/api-reference/**` to embed the bumped `package.json` version (no functional API changes)
+
+## [1.74.0] - 2026-05-05
+
+### Added
+- **Per-task `outputSchema` support documented across harness providers** (#6faabc9d). `docs-site/content/docs/(documentation)/guides/harness-providers.mdx` and `runbooks/harness-providers.md` now carry a supported-providers table for `outputSchema` enforcement: `claude`, `claude-managed`, `codex`, `opencode`, `pi` enforce the schema via the `store-progress` MCP tool; `devin` only enforces when `HAS_MCP=true`, and the runner now carries an explicit NOTE in `ensureTaskFinished` (`src/commands/runner.ts:551`) that default-mode Devin's `providerOutput` is **not** validated against `task.outputSchema` and is stored as-is. Callers should not assume `JSON.parse(task.output)` will succeed when the task ran on default-mode Devin
+- **Marketplace plugin pin** — Claude marketplace plugin install in `Dockerfile.worker` now pins `desplega-ai/ai-toolbox@cc-desplega-2.0.0` (was floating)
+
+### Changed
+- **Bumped pinned harness CLIs in `Dockerfile.worker`**:
+  - `CLAUDE_CODE_VERSION` 2.1.112 → 2.1.126
+  - `PI_CODING_AGENT_VERSION` 0.67.2 → 0.73.0
+  - `CODEX_VERSION` 0.118.0 → 0.125.0
+- **Bumped global npm tooling in `Dockerfile.worker`**:
+  - `@desplega.ai/qa-use` 2.14.0 → 2.15.3
+  - `@desplega.ai/agent-fs` 0.4.0 → 0.5.1
+- **Bumped pinned dependencies in `package.json`**:
+  - `@anthropic-ai/sdk` `latest` → `^0.93.0`
+  - `@mariozechner/pi-agent-core` / `pi-ai` / `pi-coding-agent` ^0.67.2 → ^0.73.0
+  - `@openai/codex-sdk` ^0.118.0 → ^0.125.0
+- **`pi-mono` adapter now passes `cwd` and `agentDir` to `DefaultResourceLoader`** (`src/providers/pi-mono-adapter.ts`) — uses the new `getAgentDir()` export from `@mariozechner/pi-coding-agent` so the resource loader resolves task-local paths correctly. Adapter switched from `@sinclair/typebox` to the bare `typebox` re-export to track the upstream pi-mono package's bundled types
+
+## [1.73.5] - 2026-05-04
+
+### Added
+- **opencode harness provider foundations** — `HARNESS_PROVIDER=opencode` is now wired into `createProviderAdapter` (#399, #400, #403, #412). Rolling out across DES-295 → DES-304:
+  - **DES-295** (#399): `ProviderNameSchema` adds `"opencode"`; new `CostData.provider` discriminator (`"claude" | "codex" | "pi" | "opencode"`) so the API can route Codex's pricing-table recompute vs. trust the harness-reported `totalCostUsd`. Migration `048_agent_provider.sql` adds an `agents.provider` column for per-agent provider pinning. `openapi.json` regenerated
+  - **DES-296** (#400): `fetchInstalledMcpServers` extracted from `claude-adapter.ts` into shared `src/utils/mcp-server-fetcher.ts` so non-claude adapters (opencode, future ones) can reuse the swarm-MCP install discovery
+  - **DES-297** (#412): `validateOpencodeCredentials(env)` in `src/utils/credentials.ts` checks `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → `~/.local/share/opencode/auth.json` in priority order and fail-fasts at boot when none are present. `PROVIDER_CREDENTIAL_VARS` map now includes `opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]` so a worker pinned to opencode doesn't stamp unrelated credentials onto its task records
+  - **DES-299** (#403): `OpencodeAdapter` + `OpencodeSession` now spin up an in-process `@opencode-ai/sdk` server, subscribe to its SSE event stream, map events to the swarm's `ProviderEvent` union, accumulate per-`AssistantMessage` cost into `CostData`, and persist every event as a `raw_log` row through `scrubSecrets`. Idempotent `abort()` closes the server cleanly
+  - **DES-300** (#413): Per-task agent file for opencode plus environment isolation via `OPENCODE_CONFIG` and `OPENCODE_DATA_HOME` so concurrent opencode tasks no longer share config/state (`src/providers/opencode-adapter.ts`, tests in `src/tests/opencode-adapter.test.ts`). Supersedes the auto-closed #405 after the parent `feat/des-294-des-299` branch was deleted on #403's merge — content unchanged, only the base branch was retargeted
+  - **DES-301** (#406): Self-contained opencode plugin at `plugin/opencode-plugins/agent-swarm.ts` (~290 LOC) ports every swarm hook behavior — `tool.execute.before` does the cancellation poll + ScheduleWakeup polling-block check, `tool.execute.after` heartbeats `/api/agents/<id>/heartbeat`, `experimental.chat.system.transform` injects the lead concurrent-tasks context, `experimental.session.compacting` re-injects the task goal (PreCompact parity), `event:file.edited` syncs SOUL/IDENTITY/TOOLS/CLAUDE.md and auto-indexes `/memory/` writes, `event:session.idle` does the final identity sync + session summary + `/api/sessions/<id>/close`. `OpencodeAdapter` now resolves the plugin absolute path via `import.meta.dir`, attaches it via the per-task config, and sets `SWARM_API_URL` / `SWARM_API_KEY` / `SWARM_AGENT_ID` / `SWARM_TASK_ID` / `SWARM_IS_LEAD` env vars for the spawned process (restored in `finally` to prevent cross-task contamination). `@opencode-ai/plugin@1.14.30` added as devDependency for the `Plugin` type
+  - **DES-302** (#407): `Dockerfile.worker` installs the opencode CLI (`ARG OPENCODE_VERSION` + curl installer) and SDK (`ARG OPENCODE_SDK_VERSION` + `npm install -g @opencode-ai/sdk`), and copies `plugin/opencode-plugins/agent-swarm.ts` into the image at `/home/worker/.config/opencode/plugins/`. `docker-entrypoint.sh` gains an `elif HARNESS_PROVIDER=opencode` branch in the credential validation block (one of `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `~/.local/share/opencode/auth.json` must be present) and in the binary-check section. `docker-compose.example.yml` ships a commented `worker-opencode` service block as a starting point
+  - **DES-303** (#409): Added `## Opencode` section, provider-comparison-table column, adapter-dispatch block, and Docker config example to `docs-site/.../guides/harness-configuration.mdx`. `docs-site/.../reference/environment-variables.mdx` adds `opencode` to the `HARNESS_PROVIDER` allowed-values plus a credentials sub-table (OPENROUTER primary, ANTHROPIC, OPENAI, `auth.json` fallback). `runbooks/harness-providers.md` gains a supported-providers summary table that includes opencode
+  - **DES-304** (#410): `scripts/e2e-docker-opencode.ts` — focused end-to-end Docker smoke for the opencode harness. `basic` builds the worker image, runs an `HARNESS_PROVIDER=opencode` container, posts a write-file task, asserts `unassigned → in_progress → completed`, the resulting `/workspace/hello.txt` content, and `tasks.provider = 'opencode'`. `isolation` runs two concurrent containers and verifies independent completion plus per-task `OPENCODE_DATA_HOME` isolation. CLI flags: `--test basic|isolation`, `--skip-build`, `MODEL_OVERRIDE=…`
+- **[Receipts](/docs/receipts) section in docs-site with a [Ralph Loop](/docs/receipts/workflows/ralph-loop) workflow recipe** (#411). Public JSON workflow definition at `docs-site/public/receipts/workflows/ralph-loop.json` so it can be imported via the templates flow
+
+### Changed
+- README "Multi-provider" line + docs-site Harness Configuration / Harness Providers / Environment Variables / Overview pages now list `opencode` alongside the existing five providers
+- SEO-tuned descriptions on top architecture pages — overview, agents, memory (#408)
+- **`db-query` MCP tool no longer lead-only** (#415) — drops the `callerAgent.isLead` gate so any authenticated agent (workers included) can issue read-only queries against the swarm DB. Unblocks the 4-week-stale worker → Linear interaction path: workers can now fetch their own `oauth_tokens` row and hit Linear's GraphQL API via the `linear-interaction` skill without round-tripping through the lead. Acknowledged trade-off: workers gain full read access to `oauth_tokens`, `configs` (still encrypted at rest), and every other DB row. Long-term path is dedicated `linear-*` MCP tools so the trust boundary can shrink back to lead-only `db-query`. HTTP `/api/db-query` remains API-key gated as before. Tool description and `MCP.md` / `docs-site/.../reference/mcp-tools.mdx` synced
+
+### Fixed
+- **Docker `Build + Publish + Deploy` workflow has been red on every push to `main` since #407** (#416, DES-294). Three latent bugs in `Dockerfile.worker` shipped together because CI's only opencode-touching signal was the build itself, which hit the version-pin failure long before the runtime issues could surface:
+  1. `OPENCODE_VERSION` bumped `0.5.10 → 1.14.30` to match the `@opencode-ai/sdk` pin. `opencode.ai/install` resolves versions via `anomalyco/opencode`, whose earliest tag is `v1.3.17`. The old pin's release page 301'd (so the installer kept going) but the tarball returned a 9-byte HTTP 404 body that `tar xz` rejected with `gzip: stdin: not in gzip format`
+  2. `ENV PATH="/home/worker/.opencode/bin:$PATH"` set immediately after the install — the opencode installer only patches `~/.bashrc`, so non-interactive shells (the entrypoint, gosu drops, the SDK's `cross-spawn`) missed it and `docker-entrypoint.sh:166`'s `command -v opencode` would `FATAL` in production
+  3. `chown -R worker:worker /home/worker` after the root-side `npm install -g` + `qa-use install-deps` block, so opencode (running as worker uid 1001) doesn't `EACCES` on its first `mkdir /home/worker/.cache/opencode`
+  Plus `MODEL_OVERRIDE` is now forwarded through `scripts/e2e-docker-opencode.ts` so the Docker test can pin a model without editing the script. Four follow-up bugs uncovered during end-to-end verification (plugin path resolves to a non-existent location in the bundled binary; `agent_tasks.provider` / `.model` and `agents.provider` / `.lastActivityAt` not persisted; runner `Failed to save cost data: 400`) are documented in `thoughts/taras/qa/2026-05-03-opencode-integration-des294.md` for separate follow-up
+
+## [1.73.4] - 2026-04-30
+
+### Fixed
+- **Worker auto-clone leaves repos owned by `root:root`, breaking subsequent runner sessions with `fatal: detected dubious ownership`.** `docker-entrypoint.sh` runs as root until the final `gosu worker` exec, so the auto-clone block was cloning repos as root and the worker user couldn't run `git` against them on later boots. The auto-clone loop now invokes `gh repo clone` / `git pull` via `gosu worker bash -c …` so `.git` ends up owned by `worker:worker`. The `2>/dev/null` mask on `git pull` (which had been hiding this exact failure on subsequent boots) is also removed (#398)
+- **Defense-in-depth: `git config --system --add safe.directory '*'` early in entrypoint** so any other root-vs-worker uid mismatch on `/workspace` (Archil/FUSE mounts, host-mounted volumes, manually-created paths) no longer trips the "dubious ownership" check (#398)
+- **Slack `event_id` idempotency on the task-creation path (DES-293).** Slack retries event deliveries on 3s timeout / 5xx, so a slow handler (e.g. one that fetches thread context before calling `createTaskExtended`) was producing N duplicate task rows from a single user message — root cause of the 2026-04-30 multi-session race (1 user message → 3 task rows → 3 Researcher sessions → 3 duplicate Jira pushes). New in-memory cache `src/slack/event-dedup.ts` keyed by `body.event_id` (5-min TTL, `unref`-ed cleanup timer) is checked at the top of `app.event("message")` and the assistant `userMessage` middleware. On a hit the handler logs `dropping Slack retry: event_id=…` and returns early so Bolt acks 200 OK and Slack stops retrying. Single-process design — Socket Mode means all events flow through one WebSocket; if we ever horizontally scale the API, swap in a DB- or Redis-backed cache (#396)
+- **Terminal-status idempotency in `completeTask` / `failTask` / `store-progress` (DES-292).** Re-completing or re-failing a terminal task was overwriting `output`/`finishedAt`, re-emitting `task.completed` / `task.failed` on `workflowEventBus`, inserting duplicate `task_status_change` log rows, triggering `business-use ensure` with a now-failing validator, indexing duplicate memory entries, and **creating duplicate follow-up tasks to lead** — the downstream noise from the same 2026-04-30 race. `src/be/db.ts` `completeTask` / `failTask` now early-return `null` when the task is already terminal (mirrors `cancelTask`); `src/tools/store-progress.ts` short-circuits before any side-effects with `wasNoOp: true`, so the post-transaction memory-write and follow-up-task-creation blocks are gated on `!wasNoOp`. First-call-wins (#397)
+- **Partial task-ID search on the new-UI tasks list page (DES-286).** `getAllTasks` and `getTasksCount` in `src/be/db.ts` now match `(task LIKE ? OR id LIKE ?)`, and the search-input placeholder reads `Search by description or ID...`. Pasting the first 6–8 characters of a task UUID surfaces it (#394)
+
+## [1.73.3] - 2026-04-30
+
+### Added
+- **Memory dashboard at `/memory`** in the new-UI. New router page, sidebar entry, `useMemory` hook, and shared `<CollapsibleDescription>` component. Surfaces memory entries with scope, source, tags, and per-row delete; lists agents and recent indexing activity
+- **Memory HTTP API** — new `src/http/memory.ts` exposing `POST /api/memory/index`, `POST /api/memory/search`, `POST /api/memory/re-embed`, `GET /api/memory`, and `DELETE /api/memory/:id`. All routes registered via the `route()` factory and surfaced in `openapi.json` + `docs-site/content/docs/api-reference/memory.mdx`
+- **Workflows-detail page improvements** in the new-UI — richer node/run rendering on `/workflows/:id` and surfaced workflow context on `/tasks/:id`
+
+### Changed
+- `scripts/seed.ts` + `scripts/seed.default.json` extended with memory + workflow fixtures used by the new dashboard
+
+## [1.73.2] - 2026-04-30
+
+### Changed
+- Regenerated `openapi.json` and `docs-site/content/docs/api-reference/**` to track route metadata (no functional changes)
+
 ## [1.73.1] - 2026-04-30
 
 ### Fixed

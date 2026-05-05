@@ -80,7 +80,7 @@ RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/in
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.112
+ARG CLAUDE_CODE_VERSION=2.1.126
 RUN sudo npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # Verify claude binary is findable after install
 RUN which claude && claude --version
@@ -89,7 +89,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=0.67.2
+ARG PI_CODING_AGENT_VERSION=0.73.0
 RUN sudo npm install -g @mariozechner/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
     && mkdir -p /home/worker/.pi/agent
 ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@mariozechner/pi-coding-agent
@@ -97,7 +97,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@mariozechner/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match @openai/codex-sdk in package.json — enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.118.0
+ARG CODEX_VERSION=0.125.0
 RUN sudo npm install -g @openai/codex@${CODEX_VERSION}
 RUN which codex && codex --version
 
@@ -122,15 +122,32 @@ RUN mkdir -p /home/worker/.codex && \
       > /home/worker/.codex/config.toml && \
     chown -R worker:worker /home/worker/.codex
 
+# Install opencode CLI + SDK (alternative harness, selected via HARNESS_PROVIDER=opencode)
+# CLI version must match SDK version — the SDK spawns `opencode serve` and parses
+# its stdout for the listening URL (see node_modules/@opencode-ai/sdk/dist/server.js).
+# The installer drops the binary at ~/.opencode/bin/opencode and only modifies
+# ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
+# update, so we extend ENV PATH explicitly.
+ARG OPENCODE_VERSION=1.14.30
+RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
+ENV PATH="/home/worker/.opencode/bin:$PATH"
+ARG OPENCODE_SDK_VERSION=1.14.30
+RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
+
 # Install Claude marketplace plugins (build-time cache)
 RUN mkdir -p /home/worker/.claude \
-    && claude plugin marketplace add desplega-ai/ai-toolbox || true \
+    # Main desplega toolbox plugin
+    && claude plugin marketplace add desplega-ai/ai-toolbox@cc-desplega-2.0.0 || true \
     && claude plugin install desplega@desplega-ai-toolbox --scope user || true \
+    # Worktree management
     && claude plugin install wts@desplega-ai-toolbox --scope user || true \
+    # desplega.ai qa-use CLI
     && claude plugin marketplace add desplega-ai/qa-use || true \
     && claude plugin install qa-use@desplega.ai --scope user || true \
+    # context-mode to improve the
     && claude plugin marketplace add mksglu/claude-context-mode || true \
     && claude plugin install context-mode@context-mode --scope user || true \
+    # agent-fs goodies
     && claude plugin marketplace add desplega-ai/agent-fs || true \
     && claude plugin install agent-fs@agent-fs --scope user || true
 
@@ -162,9 +179,14 @@ RUN npm install -g \
     @sentry/cli@3.3.4 \
     @desplega.ai/wts@0.2.3 \
     @desplega.ai/localtunnel@2.2.0 \
-    @desplega.ai/qa-use@2.14.0 \
-    @desplega.ai/agent-fs@0.4.0 \
+    @desplega.ai/qa-use@2.15.3 \
+    @desplega.ai/agent-fs@0.5.1 \
     && qa-use install-deps
+
+# Re-assert worker ownership of $HOME — the root-side npm/qa-use installs above
+# (and earlier claude-plugin steps) seed cache/config dirs as root, which breaks
+# runtime tools that expect to write under $HOME (e.g. opencode's ~/.cache/opencode).
+RUN chown -R worker:worker /home/worker
 
 # Install archil CLI for FUSE/R2-backed disk mounts
 RUN curl https://s3.amazonaws.com/archil-client/install | sh
@@ -193,6 +215,16 @@ RUN mkdir -p /home/worker/.codex/skills && \
     done && \
     rm -rf /tmp/codex-skills-src && \
     chown -R worker:worker /home/worker/.codex/skills
+
+# Copy opencode plugin (used when HARNESS_PROVIDER=opencode).
+# OPENCODE_SWARM_PLUGIN_PATH tells OpencodeAdapter exactly where to find the
+# plugin — the bundled binary's `import.meta.dir` is /usr/local/bin which
+# doesn't help, and relying on opencode's auto-discovery is implicit (it
+# silently breaks if discovery rules change or OPENCODE_CONFIG suppresses it).
+RUN mkdir -p /home/worker/.config/opencode/plugins && \
+    chown -R worker:worker /home/worker/.config
+COPY --chown=worker:worker plugin/opencode-plugins/agent-swarm.ts /home/worker/.config/opencode/plugins/agent-swarm.ts
+ENV OPENCODE_SWARM_PLUGIN_PATH=/home/worker/.config/opencode/plugins/agent-swarm.ts
 
 # Create directories and copy entrypoint
 RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
