@@ -20,10 +20,10 @@ import {
   Webhook,
   X,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { TriggerSchemaApiError } from "@/api/client";
+import { api, TriggerSchemaApiError } from "@/api/client";
 import {
   useDeleteWorkflow,
   useExecutorType,
@@ -64,7 +64,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
@@ -1122,33 +1121,25 @@ function TopBarTriggerButton({
   const requiresPayload = required.length > 0;
 
   if (requiresPayload) {
+    // Instead of disabling, route the click to the Triggers tab where the
+    // payload tester lets the user craft a matching payload. Tooltip names
+    // the required fields so the intent is visible without a click.
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          {/* span wrapper: tooltips on disabled buttons need a non-disabled host. */}
-          <span className="inline-flex">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled
-              data-testid="top-bar-trigger-button-guarded"
-              aria-disabled
-            >
-              <Play className="h-3 w-3 mr-1" /> Trigger
-            </Button>
-          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onSchemaRequired}
+            data-testid="top-bar-trigger-button-guarded"
+          >
+            <Play className="h-3 w-3 mr-1" /> Trigger
+          </Button>
         </TooltipTrigger>
         <TooltipContent>
           <p className="max-w-xs">
-            Trigger schema requires {required.join(", ")}.{" "}
-            <button
-              type="button"
-              onClick={onSchemaRequired}
-              className="underline font-medium hover:no-underline"
-            >
-              Open the Triggers tab
-            </button>{" "}
-            to craft a matching payload.
+            Trigger schema requires {required.join(", ")}. Opens the Triggers tab so you can craft a
+            matching payload.
           </p>
         </TooltipContent>
       </Tooltip>
@@ -1230,13 +1221,112 @@ function TriggersDetailPanel({
 }
 
 /**
+ * Editable Monaco JSON editor with the same theming as the read-only Editors
+ * elsewhere in this file. Used by the trigger-schema editor and the payload
+ * tester so both surfaces get JSON syntax highlighting + bracket matching.
+ */
+function JsonMonacoEditor({
+  value,
+  onChange,
+  height,
+  readOnly = false,
+  testId,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  height: number;
+  readOnly?: boolean;
+  testId?: string;
+}) {
+  const { theme } = useTheme();
+  return (
+    <div
+      className={cn(
+        "rounded-md overflow-hidden border",
+        theme === "dark" ? "border-white/10" : "border-zinc-200",
+      )}
+      data-testid={testId}
+    >
+      <Editor
+        language="json"
+        theme={theme === "dark" ? "github-dark" : "github-light"}
+        value={value}
+        height={`${height}px`}
+        onChange={(v) => onChange(v ?? "")}
+        beforeMount={(monaco) => {
+          monaco.editor.defineTheme("github-light", GITHUB_LIGHT_THEME);
+          monaco.editor.defineTheme("github-dark", GITHUB_DARK_THEME);
+        }}
+        options={{
+          readOnly,
+          minimap: { enabled: false },
+          scrollBeyondLastLine: false,
+          fontSize: 12,
+          lineNumbers: "on",
+          wordWrap: "on",
+          automaticLayout: true,
+          padding: { top: 8, bottom: 8 },
+          folding: false,
+          renderLineHighlight: "none",
+          scrollbar: { vertical: "auto", horizontal: "auto" },
+          overviewRulerLanes: 0,
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * Generate a placeholder JSON value that satisfies the supported subset of our
+ * `triggerSchema` validator (`type`/`required`/`properties`/`enum`/`const`/`items`).
+ * Honors `const` and the first `enum` value when present; otherwise picks a
+ * type-appropriate default. Recurses into objects + arrays. Returns `null` for
+ * unknown types so the user can spot what to fill in. This is a hint, not a
+ * guarantee — the user is expected to edit before sending.
+ */
+function sampleFromSchema(schema: unknown): unknown {
+  if (schema == null || typeof schema !== "object") return null;
+  const s = schema as Record<string, unknown>;
+  if ("const" in s) return s.const;
+  if (Array.isArray(s.enum) && s.enum.length > 0) return s.enum[0];
+  const type = typeof s.type === "string" ? s.type : "object";
+  switch (type) {
+    case "object": {
+      const out: Record<string, unknown> = {};
+      const props = (s.properties as Record<string, unknown> | undefined) ?? {};
+      const required = Array.isArray(s.required)
+        ? s.required.filter((k): k is string => typeof k === "string")
+        : Object.keys(props);
+      for (const key of required) {
+        out[key] = sampleFromSchema(props[key]);
+      }
+      return out;
+    }
+    case "array":
+      return [sampleFromSchema(s.items)];
+    case "string":
+      return "example";
+    case "number":
+    case "integer":
+      return 0;
+    case "boolean":
+      return false;
+    case "null":
+      return null;
+    default:
+      return null;
+  }
+}
+
+/**
  * Trigger-schema editor + payload tester for a workflow.
  *
  * Always rendered (so a schema-less workflow can have one added). Splits into:
  *   - Read view: `JsonTree` of the current schema, plus Edit / Clear buttons.
- *   - Edit view: a JSON `<textarea>` with Save / Cancel and inline parse errors.
- *   - Tester (only when a schema is set): `<textarea>` payload + Test button +
- *     bulleted error list rendered from `TriggerSchemaApiError.details`.
+ *   - Edit view: Monaco JSON editor with Save / Cancel and inline parse errors.
+ *   - Tester (only when a schema is set): Monaco JSON payload + debounced
+ *     dry-run validation (calls `/trigger/validate`) + Send trigger button
+ *     (creates a real run) + bulleted error list from `TriggerSchemaApiError`.
  */
 function TriggerSchemaSection({
   workflowId,
@@ -1258,6 +1348,53 @@ function TriggerSchemaSection({
   const [testValidationDetails, setTestValidationDetails] = useState<string[] | null>(null);
   const [testGenericError, setTestGenericError] = useState<string | null>(null);
   const [testSuccessRunId, setTestSuccessRunId] = useState<string | null>(null);
+
+  // Live (debounced) dry-run validation as the user edits the payload.
+  type LiveStatus = "idle" | "syntax-error" | "validating" | "valid" | "invalid";
+  const [liveStatus, setLiveStatus] = useState<LiveStatus>("idle");
+  const [liveDetails, setLiveDetails] = useState<string[]>([]);
+  const liveSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (triggerSchema == null) {
+      setLiveStatus("idle");
+      setLiveDetails([]);
+      return;
+    }
+    // Try to parse first — if invalid JSON, mark syntax-error without hitting the server.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(testPayload);
+    } catch {
+      setLiveStatus("syntax-error");
+      setLiveDetails([]);
+      return;
+    }
+    setLiveStatus("validating");
+    const mySeq = ++liveSeqRef.current;
+    const handle = setTimeout(() => {
+      api
+        .validateTriggerData(workflowId, parsed)
+        .then(() => {
+          if (mySeq === liveSeqRef.current) {
+            setLiveStatus("valid");
+            setLiveDetails([]);
+          }
+        })
+        .catch((err) => {
+          if (mySeq !== liveSeqRef.current) return;
+          if (err instanceof TriggerSchemaApiError) {
+            setLiveStatus("invalid");
+            setLiveDetails(err.details.length > 0 ? err.details : [err.validationMessage]);
+          } else {
+            // Network or other error — don't block sending; clear live status.
+            setLiveStatus("idle");
+            setLiveDetails([]);
+          }
+        });
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [testPayload, triggerSchema, workflowId]);
 
   function startEdit() {
     setDraft(JSON.stringify(triggerSchema ?? {}, null, 2));
@@ -1376,16 +1513,14 @@ function TriggerSchemaSection({
 
       {editing ? (
         <div className="space-y-2">
-          <Textarea
+          <JsonMonacoEditor
             value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
+            onChange={(v) => {
+              setDraft(v);
               if (parseError) setParseError(null);
             }}
-            rows={14}
-            className="font-mono text-xs"
-            spellCheck={false}
-            data-testid="trigger-schema-editor"
+            height={280}
+            testId="trigger-schema-editor"
           />
           {parseError && (
             <p
@@ -1423,28 +1558,93 @@ function TriggerSchemaSection({
         >
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Test trigger
+              Send trigger
             </h4>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const sample = sampleFromSchema(triggerSchema);
+                setTestPayload(JSON.stringify(sample, null, 2));
+                setTestParseError(null);
+              }}
+              data-testid="trigger-schema-use-sample"
+              title="Generate a sample payload that matches the current trigger schema"
+            >
+              Use sample
+            </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Send a sample payload through the validator + engine. Validation errors render below;
-            successful runs link to the run-detail page.
-          </p>
-          <Textarea
+          <div
+            className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-900 dark:text-amber-200"
+            data-testid="trigger-schema-real-run-warning"
+          >
+            <strong className="font-semibold">Heads up:</strong> clicking <em>Send trigger</em>{" "}
+            starts a <strong>real workflow run</strong> with this payload — any nodes (Slack
+            messages, GitHub actions, agent tasks, etc.) will fire. Use the live validator below to
+            check the payload before sending; nothing runs until you click the button.
+          </div>
+          <JsonMonacoEditor
             value={testPayload}
-            onChange={(e) => {
-              setTestPayload(e.target.value);
+            onChange={(v) => {
+              setTestPayload(v);
               if (testParseError) setTestParseError(null);
             }}
-            rows={8}
-            className="font-mono text-xs"
-            spellCheck={false}
-            data-testid="trigger-schema-test-payload"
+            height={200}
+            testId="trigger-schema-test-payload"
           />
+          {/* Live (debounced) dry-run validation result */}
+          {liveStatus === "syntax-error" && (
+            <p
+              className="text-xs text-destructive font-mono"
+              data-testid="trigger-schema-live-syntax-error"
+            >
+              Invalid JSON syntax — fix before sending.
+            </p>
+          )}
+          {liveStatus === "validating" && (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="trigger-schema-live-validating"
+            >
+              Validating…
+            </p>
+          )}
+          {liveStatus === "valid" && (
+            <p
+              className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1"
+              data-testid="trigger-schema-live-valid"
+            >
+              <Check className="h-3 w-3" /> Payload matches the schema. Safe to send.
+            </p>
+          )}
+          {liveStatus === "invalid" && liveDetails.length > 0 && (
+            <div
+              className="rounded-md border border-destructive/40 bg-destructive/5 p-2"
+              data-testid="trigger-schema-live-invalid"
+            >
+              <p className="text-xs font-semibold text-destructive mb-1">
+                Payload would be rejected:
+              </p>
+              <ul className="list-disc list-inside text-xs text-destructive font-mono space-y-0.5">
+                {liveDetails.map((d, i) => (
+                  <li key={`${i}-${d}`}>{d}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="flex items-center gap-1.5">
-            <Button size="sm" onClick={runTest} disabled={triggerWorkflow.isPending}>
+            <Button
+              size="sm"
+              onClick={runTest}
+              disabled={
+                triggerWorkflow.isPending ||
+                liveStatus === "syntax-error" ||
+                liveStatus === "invalid"
+              }
+              data-testid="trigger-schema-send-button"
+            >
               <Play className="h-3 w-3 mr-1" />
-              {triggerWorkflow.isPending ? "Testing…" : "Test trigger"}
+              {triggerWorkflow.isPending ? "Sending…" : "Send trigger"}
             </Button>
           </div>
           {testParseError && (

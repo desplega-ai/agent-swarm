@@ -8925,6 +8925,40 @@
         }
       }
     },
+    "/api/workflows/{id}/trigger/validate": {
+      "post": {
+        "summary": "Validate a payload against the workflow's triggerSchema (no run)",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payload matches the workflow's triggerSchema (or workflow has none)"
+          },
+          "400": {
+            "description": "Payload failed validation; body matches the TriggerSchemaError contract"
+          },
+          "404": {
+            "description": "Workflow not found"
+          }
+        }
+      }
+    },
     "/api/workflows/{id}/runs": {
       "get": {
         "summary": "List runs for a workflow",

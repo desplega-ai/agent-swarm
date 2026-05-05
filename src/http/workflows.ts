@@ -24,6 +24,7 @@ import {
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { applyDefinitionPatch, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
+import { validateJsonSchema } from "../workflows/json-schema-validator";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotWorkflow } from "../workflows/version";
@@ -159,6 +160,20 @@ const triggerWorkflowRoute = route({
     201: { description: "Workflow run started (or skipped if cooldown active)" },
     400: { description: "Workflow is disabled" },
     401: { description: "Unauthorized" },
+    404: { description: "Workflow not found" },
+  },
+});
+
+const validateTriggerRoute = route({
+  method: "post",
+  path: "/api/workflows/{id}/trigger/validate",
+  pattern: ["api", "workflows", null, "trigger", "validate"],
+  summary: "Validate a payload against the workflow's triggerSchema (no run)",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Payload matches the workflow's triggerSchema (or workflow has none)" },
+    400: { description: "Payload failed validation; body matches the TriggerSchemaError contract" },
     404: { description: "Workflow not found" },
   },
 });
@@ -588,6 +603,34 @@ export async function handleWorkflows(
       return true;
     }
     res.end();
+    return true;
+  }
+
+  if (validateTriggerRoute.match(req.method, pathSegments)) {
+    const parsed = await validateTriggerRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const workflow = getWorkflow(parsed.params.id);
+    if (!workflow) {
+      res.writeHead(404);
+      res.end();
+      return true;
+    }
+    const body = await parseBody<Record<string, unknown>>(req);
+    const triggerData = (body?.triggerData ?? body) as unknown;
+    if (!workflow.triggerSchema) {
+      json(res, { valid: true, schema: null });
+      return true;
+    }
+    const errors = validateJsonSchema(workflow.triggerSchema, triggerData);
+    if (errors.length > 0) {
+      triggerSchemaErrorResponse(
+        res,
+        `Trigger schema validation failed: ${errors.join("; ")}`,
+        errors,
+      );
+      return true;
+    }
+    json(res, { valid: true });
     return true;
   }
 

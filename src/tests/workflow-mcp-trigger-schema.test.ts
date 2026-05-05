@@ -526,4 +526,92 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect(Array.isArray(body.details)).toBe(true);
     expect(body.details).toEqual(['root: missing required property "pr"']);
   });
+
+  // ─── /trigger/validate dry-run ──────────────────────────────
+
+  test("HTTP POST /trigger/validate with passing payload → 200 { valid: true }", async () => {
+    const triggerSchema: Record<string, unknown> = {
+      type: "object",
+      required: ["pr"],
+      properties: {
+        pr: {
+          type: "object",
+          required: ["number"],
+          properties: { number: { type: "number" } },
+        },
+      },
+    };
+    const created = await tools.callCreate({
+      name: uniqueName("http-trigger-validate-pass"),
+      definition: minimalDefinition,
+      triggerSchema,
+    });
+    const workflowId = created.structuredContent?.workflow?.id as string;
+    expect(workflowId).toBeTruthy();
+    createdWorkflowIds.push(workflowId);
+
+    const res = await fetch(
+      `http://localhost:${TEST_PORT}/api/workflows/${workflowId}/trigger/validate`,
+      {
+        method: "POST",
+        headers: httpHeaders,
+        body: JSON.stringify({ pr: { number: 42 } }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { valid: boolean };
+    expect(body.valid).toBe(true);
+  });
+
+  test("HTTP POST /trigger/validate with failing payload → 400 + frozen contract", async () => {
+    const triggerSchema: Record<string, unknown> = {
+      type: "object",
+      required: ["pr"],
+      properties: { pr: { type: "object" } },
+    };
+    const created = await tools.callCreate({
+      name: uniqueName("http-trigger-validate-fail"),
+      definition: minimalDefinition,
+      triggerSchema,
+    });
+    const workflowId = created.structuredContent?.workflow?.id as string;
+    expect(workflowId).toBeTruthy();
+    createdWorkflowIds.push(workflowId);
+
+    const res = await fetch(
+      `http://localhost:${TEST_PORT}/api/workflows/${workflowId}/trigger/validate`,
+      {
+        method: "POST",
+        headers: httpHeaders,
+        body: JSON.stringify({}),
+      },
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; message: string; details: string[] };
+    expect(body.error).toBe("TriggerSchemaError");
+    expect(body.details).toEqual(['root: missing required property "pr"']);
+  });
+
+  test("HTTP POST /trigger/validate on workflow without schema → 200 { valid: true, schema: null }", async () => {
+    const created = await tools.callCreate({
+      name: uniqueName("http-trigger-validate-noschema"),
+      definition: minimalDefinition,
+    });
+    const workflowId = created.structuredContent?.workflow?.id as string;
+    expect(workflowId).toBeTruthy();
+    createdWorkflowIds.push(workflowId);
+
+    const res = await fetch(
+      `http://localhost:${TEST_PORT}/api/workflows/${workflowId}/trigger/validate`,
+      {
+        method: "POST",
+        headers: httpHeaders,
+        body: JSON.stringify({ anything: "goes" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { valid: boolean; schema: null };
+    expect(body.valid).toBe(true);
+    expect(body.schema).toBe(null);
+  });
 });
