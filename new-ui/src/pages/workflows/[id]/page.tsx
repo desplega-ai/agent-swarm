@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { TriggerSchemaApiError } from "@/api/client";
 import {
   useDeleteWorkflow,
   useExecutorType,
@@ -62,6 +64,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { useTheme } from "@/hooks/use-theme";
@@ -184,14 +188,13 @@ export default function WorkflowDetailPage() {
             {workflow.definition.edges?.length ?? 0} edges
           </Badge>
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => triggerWorkflow.mutate({ id: workflow.id })}
-              disabled={!workflow.enabled || triggerWorkflow.isPending}
-            >
-              <Play className="h-3 w-3 mr-1" /> Trigger
-            </Button>
+            <TopBarTriggerButton
+              workflowId={workflow.id}
+              enabled={workflow.enabled}
+              triggerSchema={workflow.triggerSchema}
+              triggerWorkflow={triggerWorkflow}
+              onSchemaRequired={() => setActiveTab("triggers")}
+            />
             <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
               <Trash2 className="h-3 w-3 mr-1" /> Delete
             </Button>
@@ -1087,6 +1090,85 @@ function WorkflowMetaSummary({
 }
 
 /**
+ * Top-bar Trigger button.
+ *
+ * If the workflow has a `triggerSchema` with `required` fields, sending the
+ * default `{}` payload is guaranteed to fail the validator → 400. We disable
+ * the button and surface a tooltip pointing the user at the Triggers tab,
+ * where the payload tester (Phase 5) lets them craft a matching object.
+ *
+ * If `triggerSchema == null` OR is present but has no `required` array, the
+ * empty payload is accepted by the validator and the button keeps its
+ * pre-existing one-click behavior.
+ */
+function TopBarTriggerButton({
+  workflowId,
+  enabled,
+  triggerSchema,
+  triggerWorkflow,
+  onSchemaRequired,
+}: {
+  workflowId: string;
+  enabled: boolean;
+  triggerSchema?: Record<string, unknown>;
+  triggerWorkflow: ReturnType<typeof useTriggerWorkflow>;
+  onSchemaRequired: () => void;
+}) {
+  const required = useMemo<string[]>(() => {
+    if (triggerSchema == null) return [];
+    const r = (triggerSchema as { required?: unknown }).required;
+    return Array.isArray(r) ? r.filter((x): x is string => typeof x === "string") : [];
+  }, [triggerSchema]);
+  const requiresPayload = required.length > 0;
+
+  if (requiresPayload) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* span wrapper: tooltips on disabled buttons need a non-disabled host. */}
+          <span className="inline-flex">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled
+              data-testid="top-bar-trigger-button-guarded"
+              aria-disabled
+            >
+              <Play className="h-3 w-3 mr-1" /> Trigger
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p className="max-w-xs">
+            Trigger schema requires {required.join(", ")}.{" "}
+            <button
+              type="button"
+              onClick={onSchemaRequired}
+              className="underline font-medium hover:no-underline"
+            >
+              Open the Triggers tab
+            </button>{" "}
+            to craft a matching payload.
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => triggerWorkflow.mutate({ id: workflowId })}
+      disabled={!enabled || triggerWorkflow.isPending}
+      data-testid="top-bar-trigger-button"
+    >
+      <Play className="h-3 w-3 mr-1" /> Trigger
+    </Button>
+  );
+}
+
+/**
  * Full Triggers tab — one card per trigger plus cooldown, input variables, and
  * the trigger schema. Webhook triggers reuse the existing badge/modal so the
  * URL + HMAC secret remain copy-able.
@@ -1141,19 +1223,296 @@ function TriggersDetailPanel({
           </section>
         )}
 
-        {triggerSchema != null && (
-          <section className="space-y-2">
-            <h3 className="text-sm font-semibold">Trigger schema</h3>
-            <p className="text-xs text-muted-foreground">
-              Validates the payload sent to this workflow before any node runs.
-            </p>
-            <div className="rounded-lg border bg-card p-3">
-              <JsonTree data={triggerSchema} defaultExpandDepth={2} maxHeight="400px" />
-            </div>
-          </section>
-        )}
+        <TriggerSchemaSection workflowId={workflowId} triggerSchema={triggerSchema} />
       </div>
     </ScrollArea>
+  );
+}
+
+/**
+ * Trigger-schema editor + payload tester for a workflow.
+ *
+ * Always rendered (so a schema-less workflow can have one added). Splits into:
+ *   - Read view: `JsonTree` of the current schema, plus Edit / Clear buttons.
+ *   - Edit view: a JSON `<textarea>` with Save / Cancel and inline parse errors.
+ *   - Tester (only when a schema is set): `<textarea>` payload + Test button +
+ *     bulleted error list rendered from `TriggerSchemaApiError.details`.
+ */
+function TriggerSchemaSection({
+  workflowId,
+  triggerSchema,
+}: {
+  workflowId: string;
+  triggerSchema?: Record<string, unknown>;
+}) {
+  const updateWorkflow = useUpdateWorkflow();
+  const triggerWorkflow = useTriggerWorkflow();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  // Tester state — only meaningful when a schema is set.
+  const [testPayload, setTestPayload] = useState("{}");
+  const [testParseError, setTestParseError] = useState<string | null>(null);
+  const [testValidationDetails, setTestValidationDetails] = useState<string[] | null>(null);
+  const [testGenericError, setTestGenericError] = useState<string | null>(null);
+  const [testSuccessRunId, setTestSuccessRunId] = useState<string | null>(null);
+
+  function startEdit() {
+    setDraft(JSON.stringify(triggerSchema ?? {}, null, 2));
+    setParseError(null);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setParseError(null);
+  }
+
+  function saveEdit() {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(draft);
+    } catch (e) {
+      setParseError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      setParseError("triggerSchema must be a JSON object (use 'Clear schema' to remove it).");
+      return;
+    }
+    setParseError(null);
+    updateWorkflow.mutate(
+      { id: workflowId, data: { triggerSchema: parsed as Record<string, unknown> } },
+      {
+        onSuccess: () => {
+          toast.success("Trigger schema saved");
+          setEditing(false);
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : "Failed to save trigger schema");
+        },
+      },
+    );
+  }
+
+  function confirmClearSchema() {
+    updateWorkflow.mutate(
+      { id: workflowId, data: { triggerSchema: null } },
+      {
+        onSuccess: () => {
+          toast.success("Trigger schema cleared");
+          setConfirmClear(false);
+          setEditing(false);
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : "Failed to clear trigger schema");
+        },
+      },
+    );
+  }
+
+  function runTest() {
+    setTestParseError(null);
+    setTestValidationDetails(null);
+    setTestGenericError(null);
+    setTestSuccessRunId(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(testPayload);
+    } catch (e) {
+      setTestParseError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      setTestParseError("Payload must be a JSON object.");
+      return;
+    }
+    triggerWorkflow.mutate(
+      { id: workflowId, triggerData: parsed as Record<string, unknown> },
+      {
+        onSuccess: (data) => {
+          setTestSuccessRunId(data.runId);
+          toast.success("Workflow triggered");
+        },
+        onError: (err) => {
+          if (err instanceof TriggerSchemaApiError) {
+            setTestValidationDetails(
+              err.details.length > 0 ? err.details : [err.validationMessage],
+            );
+          } else {
+            setTestGenericError(err instanceof Error ? err.message : String(err));
+          }
+        },
+      },
+    );
+  }
+
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Trigger schema</h3>
+        {!editing && (
+          <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" onClick={startEdit}>
+              Edit
+            </Button>
+            {triggerSchema != null && (
+              <Button variant="destructive-outline" size="sm" onClick={() => setConfirmClear(true)}>
+                Clear schema
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Validates the payload sent to this workflow before any node runs. Validator supports{" "}
+        <code className="font-mono">type</code>, <code className="font-mono">required</code>,{" "}
+        <code className="font-mono">properties</code>, <code className="font-mono">enum</code>,{" "}
+        <code className="font-mono">const</code>, <code className="font-mono">items</code>. Other
+        JSON-Schema keywords are silently ignored.
+      </p>
+
+      {editing ? (
+        <div className="space-y-2">
+          <Textarea
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (parseError) setParseError(null);
+            }}
+            rows={14}
+            className="font-mono text-xs"
+            spellCheck={false}
+            data-testid="trigger-schema-editor"
+          />
+          {parseError && (
+            <p
+              className="text-xs text-destructive font-mono"
+              data-testid="trigger-schema-parse-error"
+            >
+              {parseError}
+            </p>
+          )}
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" onClick={saveEdit} disabled={updateWorkflow.isPending}>
+              {updateWorkflow.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={cancelEdit}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : triggerSchema != null ? (
+        <div className="rounded-lg border bg-card p-3">
+          <JsonTree data={triggerSchema} defaultExpandDepth={2} maxHeight="400px" />
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed bg-card p-3 text-xs text-muted-foreground">
+          No trigger schema set — this workflow accepts any payload. Click{" "}
+          <span className="font-medium">Edit</span> to add one.
+        </div>
+      )}
+
+      {/* Payload tester — only meaningful when a schema is set. */}
+      {triggerSchema != null && !editing && (
+        <div
+          className="space-y-2 rounded-lg border bg-card p-3"
+          data-testid="trigger-schema-tester"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Test trigger
+            </h4>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Send a sample payload through the validator + engine. Validation errors render below;
+            successful runs link to the run-detail page.
+          </p>
+          <Textarea
+            value={testPayload}
+            onChange={(e) => {
+              setTestPayload(e.target.value);
+              if (testParseError) setTestParseError(null);
+            }}
+            rows={8}
+            className="font-mono text-xs"
+            spellCheck={false}
+            data-testid="trigger-schema-test-payload"
+          />
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" onClick={runTest} disabled={triggerWorkflow.isPending}>
+              <Play className="h-3 w-3 mr-1" />
+              {triggerWorkflow.isPending ? "Testing…" : "Test trigger"}
+            </Button>
+          </div>
+          {testParseError && (
+            <p
+              className="text-xs text-destructive font-mono"
+              data-testid="trigger-schema-test-parse-error"
+            >
+              {testParseError}
+            </p>
+          )}
+          {testValidationDetails && (
+            <div
+              className="rounded-md border border-destructive/40 bg-destructive/5 p-2"
+              data-testid="trigger-schema-test-validation-error"
+            >
+              <p className="text-xs font-semibold text-destructive mb-1">
+                Trigger schema validation failed
+              </p>
+              <ul className="list-disc list-inside text-xs text-destructive font-mono space-y-0.5">
+                {testValidationDetails.map((d, i) => (
+                  <li key={`${i}-${d}`}>{d}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {testGenericError && (
+            <p
+              className="text-xs text-destructive font-mono"
+              data-testid="trigger-schema-test-generic-error"
+            >
+              {testGenericError}
+            </p>
+          )}
+          {testSuccessRunId && (
+            <div
+              className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2 text-xs"
+              data-testid="trigger-schema-test-success"
+            >
+              <span className="text-muted-foreground">Run started: </span>
+              <a
+                className="font-mono text-emerald-600 dark:text-emerald-400 hover:underline"
+                href={`/workflow-runs/${testSuccessRunId}`}
+              >
+                {testSuccessRunId}
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
+      <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear trigger schema?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The workflow will accept any payload until a new schema is set. Existing trigger
+              configurations are unaffected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmClearSchema} disabled={updateWorkflow.isPending}>
+              {updateWorkflow.isPending ? "Clearing…" : "Clear schema"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </section>
   );
 }
 

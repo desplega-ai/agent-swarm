@@ -8,7 +8,7 @@ topic: "Workflow `triggerSchema` end-to-end coverage"
 tags: [workflows, triggerSchema, mcp-tools, frontend, validation]
 status: in-progress
 last_updated: 2026-05-05
-last_updated_by: Claude (phase 3.5)
+last_updated_by: Claude (phases 4+5)
 autonomy: critical
 commit_per_phase: true
 research: thoughts/taras/research/2026-05-05-workflow-triggerschema-coverage.md
@@ -341,11 +341,11 @@ Make the existing read-only `TriggersDetailPanel` editable: widen the update hoo
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd new-ui && pnpm exec tsc -b` passes (matches CI; not `--noEmit`)
-- [ ] `cd new-ui && pnpm lint` passes
-- [ ] `bun run tsc:check` passes (root)
-- [ ] `bun run lint` passes (root)
-- [ ] No raw `bun:sqlite` import added (DB boundary check: `bash scripts/check-db-boundary.sh`)
+- [x] `cd new-ui && pnpm exec tsc -b` passes (matches CI; not `--noEmit`)
+- [x] `cd new-ui && pnpm lint` passes
+- [x] `bun run tsc:check` passes (root)
+- [x] `bun run lint` passes (root)
+- [x] No raw `bun:sqlite` import added (DB boundary check: `bash scripts/check-db-boundary.sh`)
 
 #### Automated QA:
 - [ ] `/qa-use:verify` session covers the three scenarios above with screenshots stored under `thoughts/taras/qa/`
@@ -406,10 +406,10 @@ Add a "Test trigger" panel on the Triggers tab so users can send a sample payloa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd new-ui && pnpm exec tsc -b` passes
-- [ ] `cd new-ui && pnpm lint` passes
-- [ ] `bun run tsc:check` passes
-- [ ] `bun run lint` passes
+- [x] `cd new-ui && pnpm exec tsc -b` passes
+- [x] `cd new-ui && pnpm lint` passes
+- [x] `bun run tsc:check` passes
+- [x] `bun run lint` passes
 
 #### Automated QA:
 - [ ] `/qa-use:verify` session covers the three scenarios above with screenshots

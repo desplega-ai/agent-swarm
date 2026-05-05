@@ -9,7 +9,7 @@ source_verification: null
 related_pr: null
 environment: local
 last_updated: 2026-05-05
-last_updated_by: Claude (phase 3)
+last_updated_by: Claude (phases 4+5 scaffold)
 ---
 
 # Workflow `triggerSchema` end-to-end coverage — QA Report
@@ -121,7 +121,27 @@ Plan: `thoughts/taras/plans/2026-05-05-workflow-triggerschema-coverage.md`
 1. Open a workflow with `triggerSchema = null`.
 2. Inspect Triggers tab.
 
-**Expected Result:** Tester is hidden, OR shows an "accept any payload" message. Top-bar Trigger button still works (sends `{}`).
+**Expected Result:** Tester is hidden (only renders when `triggerSchema != null`). Read view shows the "No trigger schema set — accepts any payload" empty-state with an Edit button. Top-bar Trigger button still works (sends `{}`) — guard does not engage.
+
+**Actual Result:** _[fill in during implementation]_
+
+**Status:** _[in-progress]_
+
+### TC-8: Top-bar Trigger button guard (Phase 5.3)
+
+**Setup**: Workflow with `triggerSchema = { type: "object", required: ["pr"], properties: { pr: { type: "object" } } }`.
+
+**Steps:**
+1. Open the workflow detail page.
+2. Inspect the top-bar Trigger button.
+3. Hover the button to surface the tooltip.
+4. Click the "Open the Triggers tab" link inside the tooltip.
+
+**Expected Result:**
+- Top-bar Trigger button is rendered disabled (`data-testid="top-bar-trigger-button-guarded"`).
+- Tooltip names the required field(s) (e.g. "Trigger schema requires pr.") and offers a clickable link to the Triggers tab.
+- Clicking the in-tooltip link switches the active tab to "triggers" via `setActiveTab`.
+- For a workflow whose `triggerSchema.required` is empty or absent, the guard does NOT engage (button stays clickable, sends `{}`).
 
 **Actual Result:** _[fill in during implementation]_
 
@@ -145,6 +165,7 @@ _[populate during Phase 4/5 implementation]_
 - `triggerSchema-tester-failing.png` — TC-5 inline 400 error
 - `triggerSchema-tester-passing.png` — TC-6 success toast
 - `triggerSchema-no-schema.png` — TC-7 fallthrough
+- `triggerSchema-topbar-guard.png` — TC-8 disabled top-bar button + tooltip with link
 
 ### Logs & Output
 
