@@ -7,7 +7,6 @@ import {
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
-import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type {
   CostData,
@@ -24,6 +23,127 @@ interface TaskFileData {
   agentId: string;
   startedAt: string;
 }
+
+/**
+ * Thrown when the installed-MCP-servers API call fails after all retries.
+ * Caller is expected to refuse spawning the session — a Claude session without
+ * swarm tools cannot call store-progress and ends up auto-completed by the
+ * runner with "no output captured", wasting tokens and losing task work.
+ */
+class ClaudeMcpFetchError extends Error {
+  constructor(
+    message: string,
+    readonly cause: { status?: number; statusText?: string; error?: unknown },
+  ) {
+    super(message);
+    this.name = "ClaudeMcpFetchError";
+  }
+}
+
+const MCP_FETCH_MAX_ATTEMPTS = 3;
+const MCP_FETCH_BASE_BACKOFF_MS = 250;
+
+function isRetriableMcpStatus(status: number): boolean {
+  return status >= 500 || status === 408 || status === 425 || status === 429;
+}
+
+/**
+ * Fetch the agent's installed MCP servers with retry + logging.
+ *
+ * Returns a (possibly empty) record on success — empty means the agent has
+ * no active MCP servers configured, which is a valid steady state.
+ * Throws `ClaudeMcpFetchError` after `MCP_FETCH_MAX_ATTEMPTS` on transient
+ * failures (5xx, network) or immediately on non-retriable 4xx.
+ *
+ * Inlined here (rather than in `src/utils/mcp-server-fetcher.ts`) because the
+ * Claude adapter is the only caller that needs the strict throw-on-failure
+ * semantics — opencode adds the swarm endpoint explicitly and tolerates an
+ * empty installed set.
+ */
+async function fetchInstalledMcpServersForClaude(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+): Promise<Record<string, Record<string, unknown>>> {
+  const url = `${apiUrl}/api/agents/${agentId}/mcp-servers?resolveSecrets=true`;
+
+  let lastError: { status?: number; statusText?: string; error?: unknown } = {};
+  for (let attempt = 1; attempt <= MCP_FETCH_MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${apiKey}`, "X-Agent-ID": agentId },
+      });
+
+      if (!res.ok) {
+        lastError = { status: res.status, statusText: res.statusText };
+        const retriable = isRetriableMcpStatus(res.status);
+        console.warn(
+          `\x1b[33m[claude/mcp-fetch]\x1b[0m attempt ${attempt}/${MCP_FETCH_MAX_ATTEMPTS} GET ${url} -> ${res.status} ${res.statusText}${retriable ? " (will retry)" : " (fatal)"}`,
+        );
+        if (!retriable) break;
+        if (attempt < MCP_FETCH_MAX_ATTEMPTS)
+          await new Promise((r) => setTimeout(r, MCP_FETCH_BASE_BACKOFF_MS * 2 ** (attempt - 1)));
+        continue;
+      }
+
+      const data = (await res.json()) as {
+        servers: Array<{
+          name: string;
+          transport: string;
+          isActive: boolean;
+          isEnabled: boolean;
+          command?: string;
+          args?: string;
+          url?: string;
+          headers?: string;
+          resolvedEnv?: Record<string, string>;
+          resolvedHeaders?: Record<string, string>;
+        }>;
+      };
+
+      const entries: Record<string, Record<string, unknown>> = {};
+      for (const srv of data.servers.filter((s) => s.isActive && s.isEnabled)) {
+        if (srv.transport === "stdio" && srv.command) {
+          let args: string[] = [];
+          try {
+            args = srv.args ? JSON.parse(srv.args) : [];
+          } catch {
+            // invalid JSON — use empty args
+          }
+          entries[srv.name] = { command: srv.command, args, env: srv.resolvedEnv || {} };
+        } else if ((srv.transport === "http" || srv.transport === "sse") && srv.url) {
+          let parsedHeaders: Record<string, string> = {};
+          try {
+            parsedHeaders = srv.headers ? JSON.parse(srv.headers) : {};
+          } catch {
+            // invalid JSON — use empty headers
+          }
+          entries[srv.name] = {
+            type: srv.transport,
+            url: srv.url,
+            headers: { ...parsedHeaders, ...(srv.resolvedHeaders || {}) },
+          };
+        }
+      }
+      return entries;
+    } catch (err) {
+      lastError = { error: err };
+      console.warn(
+        `\x1b[33m[claude/mcp-fetch]\x1b[0m attempt ${attempt}/${MCP_FETCH_MAX_ATTEMPTS} GET ${url} threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (attempt < MCP_FETCH_MAX_ATTEMPTS)
+        await new Promise((r) => setTimeout(r, MCP_FETCH_BASE_BACKOFF_MS * 2 ** (attempt - 1)));
+    }
+  }
+
+  throw new ClaudeMcpFetchError(
+    `Failed to fetch installed MCP servers from ${url} after ${MCP_FETCH_MAX_ATTEMPTS} attempts`,
+    lastError,
+  );
+}
+
+// Exported for unit tests.
+export const __test = { fetchInstalledMcpServersForClaude, ClaudeMcpFetchError };
 
 function getTaskFilePath(pid: number): string {
   return `/tmp/agent-swarm-task-${pid}.json`;
@@ -526,22 +646,42 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     console.log(`\x1b[2m[${config.role}]\x1b[0m Task file written: ${taskFilePath}`);
 
-    // Fetch installed MCP servers from API for this agent
-    const installedServers =
-      config.apiUrl && config.apiKey && config.agentId
-        ? await fetchInstalledMcpServers(config.apiUrl, config.apiKey, config.agentId, "claude")
-        : null;
-    if (installedServers) {
+    // Fetch installed MCP servers from API for this agent.
+    // If the fetch fails (network / 5xx after retries) we refuse to spawn —
+    // a session without swarm tools (join-swarm, store-progress, send-task, …)
+    // can't actually report progress, so it would auto-complete with no output.
+    let installedServers: Record<string, Record<string, unknown>> | null = null;
+    if (config.apiUrl && config.apiKey && config.agentId) {
+      try {
+        installedServers = await fetchInstalledMcpServersForClaude(
+          config.apiUrl,
+          config.apiKey,
+          config.agentId,
+        );
+      } catch (err) {
+        if (err instanceof ClaudeMcpFetchError) {
+          await cleanupTaskFile(taskFilePid);
+          throw new Error(
+            `[claude] Refusing to spawn session for task ${config.taskId.slice(0, 8)} — MCP server fetch failed: ${err.message}. Worker would have no swarm tools.`,
+          );
+        }
+        throw err;
+      }
+      const count = Object.keys(installedServers).length;
       console.log(
-        `\x1b[2m[${config.role}]\x1b[0m Merging ${Object.keys(installedServers).length} installed MCP server(s) into session config`,
+        `\x1b[2m[${config.role}]\x1b[0m Merging ${count} installed MCP server(s) into session config`,
       );
     }
 
     // Create per-session MCP config with X-Source-Task-Id header + installed servers (no shared-file race condition)
+    // Pass null (not {}) when no installed servers exist — keeps the existing
+    // "no .mcp.json + no installed servers → skip --mcp-config" behavior.
+    const installedForMerge =
+      installedServers && Object.keys(installedServers).length > 0 ? installedServers : null;
     const sessionMcpConfig = await createSessionMcpConfig(
       config.cwd,
       config.taskId,
-      installedServers,
+      installedForMerge,
     );
 
     return new ClaudeSession(
