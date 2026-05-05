@@ -220,6 +220,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `LINEAR_CLIENT_SECRET` | OAuth app client secret (shown once on creation) |
 | `LINEAR_REDIRECT_URI` | OAuth callback URL (e.g., `http://localhost:3013/api/trackers/linear/callback`) |
 | `LINEAR_SIGNING_SECRET` | Webhook signing secret from Linear app settings |
+| `LINEAR_ALLOWED_STATES` | CSV of `WorkflowState.type` values that trigger task creation. Default: `unstarted,started,completed,canceled` (i.e. skip Backlog & Triage). Set to empty to lock down everything but the label override. See [Linear integration → State gate](/docs/integrations/linear#state-gate). |
+| `LINEAR_SWARM_READY_LABEL` | Label name (case-insensitive) that bypasses the state gate. Default: `swarm-ready`. |
 
 ### Setup Steps
 

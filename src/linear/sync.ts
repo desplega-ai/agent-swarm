@@ -10,7 +10,12 @@ import { ensureToken } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { linearContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { buildSkipMessage, type LinearGateInput, shouldCreateTaskFromLinearEvent } from "./gate";
+import {
+  buildSkipMessage,
+  getLinearGateConfig,
+  type LinearGateInput,
+  shouldCreateTaskFromLinearEvent,
+} from "./gate";
 // Side-effect import: registers all Linear event templates in the in-memory registry
 import "./templates";
 
@@ -419,18 +424,21 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     );
   }
 
-  // State gate: only trigger task creation when the issue is in a "ready"
-  // workflow state (Todo / In Progress / etc). Backlog and Triage issues are
-  // skipped unless the swarm-ready label is attached.
+  // State gate: only trigger task creation when the issue is in an allowed
+  // workflow state (Todo / In Progress / etc). States outside the allowlist
+  // (Backlog, Triage by default) are skipped unless the swarm-ready label
+  // override is attached. Both the allowlist and the override label name are
+  // configurable via LINEAR_ALLOWED_STATES and LINEAR_SWARM_READY_LABEL.
+  const gateConfig = getLinearGateConfig();
   const inlineGate = extractInlineGateInput(issue);
   const gateInput = inlineGate ?? (await _fetchIssueGatingInfo(issueId));
-  const decision = shouldCreateTaskFromLinearEvent(gateInput);
+  const decision = shouldCreateTaskFromLinearEvent(gateInput, gateConfig);
   if (!decision.create) {
     console.log(
       `[Linear Sync] Issue ${issueIdentifier} skipped — workflow state "${decision.reason}" is gated (labels: [${gateInput.labelNames.join(", ")}])`,
     );
     if (sessionId) {
-      const skipMsg = buildSkipMessage(decision.reason);
+      const skipMsg = buildSkipMessage(decision.reason, gateConfig.swarmReadyLabel);
       // Use response so the AgentSession auto-completes — leaves a visible
       // comment on the issue without orphaning the session in pending state.
       endAgentSession(sessionId, skipMsg, "response").catch((err) => {

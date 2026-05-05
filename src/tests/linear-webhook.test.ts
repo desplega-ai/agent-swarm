@@ -3,7 +3,14 @@ import { createHmac } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { closeDb, createTaskExtended, getTaskById, initDb } from "../be/db";
 import { createTrackerSync, getTrackerSyncByExternalId } from "../be/db-queries/tracker";
-import { SWARM_READY_LABEL, shouldCreateTaskFromLinearEvent } from "../linear/gate";
+import {
+  buildSkipMessage,
+  DEFAULT_ALLOWED_STATE_TYPES,
+  DEFAULT_SWARM_READY_LABEL,
+  getLinearGateConfig,
+  SWARM_READY_LABEL,
+  shouldCreateTaskFromLinearEvent,
+} from "../linear/gate";
 import {
   handleAgentSessionEvent,
   handleIssueDelete,
@@ -509,7 +516,7 @@ describe("handleIssueDelete", () => {
 
 // ─── shouldCreateTaskFromLinearEvent (gate) ──────────────────────────────────
 
-describe("shouldCreateTaskFromLinearEvent", () => {
+describe("shouldCreateTaskFromLinearEvent (default config)", () => {
   test("creates task for unstarted (Todo) state", () => {
     const decision = shouldCreateTaskFromLinearEvent({
       stateType: "unstarted",
@@ -575,8 +582,8 @@ describe("shouldCreateTaskFromLinearEvent", () => {
     expect(decision).toEqual({ create: false, reason: "backlog" });
   });
 
-  test("unknown state types fall through to allow", () => {
-    // E.g. completed, canceled — these aren't gated; they trigger as today.
+  test("allowed state types pass through", () => {
+    // E.g. completed, canceled — included in default allowlist, trigger as today.
     expect(shouldCreateTaskFromLinearEvent({ stateType: "completed", labelNames: [] }).create).toBe(
       true,
     );
@@ -593,6 +600,137 @@ describe("shouldCreateTaskFromLinearEvent", () => {
       labelNames: [],
     });
     expect(decision.create).toBe(true);
+  });
+
+  test("DEFAULT_SWARM_READY_LABEL matches today's hardcoded value", () => {
+    expect(DEFAULT_SWARM_READY_LABEL).toBe("swarm-ready");
+    expect(SWARM_READY_LABEL).toBe(DEFAULT_SWARM_READY_LABEL);
+  });
+
+  test("DEFAULT_ALLOWED_STATE_TYPES covers Linear enum minus triage/backlog", () => {
+    expect([...DEFAULT_ALLOWED_STATE_TYPES].sort()).toEqual(
+      ["canceled", "completed", "started", "unstarted"].sort(),
+    );
+  });
+});
+
+describe("shouldCreateTaskFromLinearEvent (env-driven overrides)", () => {
+  const envKeys = ["LINEAR_ALLOWED_STATES", "LINEAR_SWARM_READY_LABEL"] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of envKeys) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+
+  // Re-snapshot only this scope's env state on cleanup.
+  function restore() {
+    for (const k of envKeys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+
+  test("LINEAR_ALLOWED_STATES expands the allowlist (e.g. include backlog)", () => {
+    process.env.LINEAR_ALLOWED_STATES = "unstarted,started,backlog";
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "backlog",
+      labelNames: [],
+    });
+    expect(decision).toEqual({ create: true, reason: "ready" });
+    restore();
+  });
+
+  test("LINEAR_ALLOWED_STATES restricts the allowlist (drop completed)", () => {
+    process.env.LINEAR_ALLOWED_STATES = "unstarted,started";
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "completed",
+      labelNames: [],
+    });
+    expect(decision).toEqual({ create: false, reason: "completed" });
+    restore();
+  });
+
+  test("LINEAR_ALLOWED_STATES handles whitespace and case", () => {
+    process.env.LINEAR_ALLOWED_STATES = "  Unstarted ,  STARTED  ,backlog";
+    expect(shouldCreateTaskFromLinearEvent({ stateType: "backlog", labelNames: [] }).create).toBe(
+      true,
+    );
+    expect(shouldCreateTaskFromLinearEvent({ stateType: "completed", labelNames: [] }).create).toBe(
+      false,
+    );
+    restore();
+  });
+
+  test("empty LINEAR_ALLOWED_STATES locks down everything but label override", () => {
+    process.env.LINEAR_ALLOWED_STATES = "";
+    expect(shouldCreateTaskFromLinearEvent({ stateType: "started", labelNames: [] })).toEqual({
+      create: false,
+      reason: "started",
+    });
+    expect(
+      shouldCreateTaskFromLinearEvent({
+        stateType: "started",
+        labelNames: [SWARM_READY_LABEL],
+      }).create,
+    ).toBe(true);
+    restore();
+  });
+
+  test("LINEAR_SWARM_READY_LABEL overrides the bypass label", () => {
+    process.env.LINEAR_SWARM_READY_LABEL = "go-now";
+    // The default label no longer triggers.
+    expect(
+      shouldCreateTaskFromLinearEvent({
+        stateType: "backlog",
+        labelNames: [SWARM_READY_LABEL],
+      }),
+    ).toEqual({ create: false, reason: "backlog" });
+    // The configured label does.
+    expect(
+      shouldCreateTaskFromLinearEvent({
+        stateType: "backlog",
+        labelNames: ["go-now"],
+      }),
+    ).toEqual({ create: true, reason: "label-override" });
+    restore();
+  });
+
+  test("LINEAR_SWARM_READY_LABEL match is case-insensitive", () => {
+    process.env.LINEAR_SWARM_READY_LABEL = "GO-NOW";
+    expect(
+      shouldCreateTaskFromLinearEvent({
+        stateType: "backlog",
+        labelNames: ["Go-Now"],
+      }).create,
+    ).toBe(true);
+    restore();
+  });
+
+  test("getLinearGateConfig reflects env at call time", () => {
+    process.env.LINEAR_ALLOWED_STATES = "started";
+    process.env.LINEAR_SWARM_READY_LABEL = "ship-it";
+    const cfg = getLinearGateConfig();
+    expect(cfg.allowedStateTypes).toEqual(new Set(["started"]));
+    expect(cfg.swarmReadyLabel).toBe("ship-it");
+    restore();
+  });
+
+  test("getLinearGateConfig falls back to defaults when env is unset", () => {
+    const cfg = getLinearGateConfig();
+    expect(cfg.allowedStateTypes).toEqual(new Set(DEFAULT_ALLOWED_STATE_TYPES));
+    expect(cfg.swarmReadyLabel).toBe(DEFAULT_SWARM_READY_LABEL);
+  });
+
+  test("buildSkipMessage uses the configured override label", () => {
+    process.env.LINEAR_SWARM_READY_LABEL = "go-now";
+    const msg = buildSkipMessage("backlog", getLinearGateConfig().swarmReadyLabel);
+    expect(msg).toContain("Backlog");
+    expect(msg).toContain("`go-now`");
+    expect(msg).not.toContain("`swarm-ready`");
+    restore();
   });
 });
 
@@ -673,6 +811,58 @@ describe("handleAgentSessionEvent — state gate", () => {
     const task = getTaskById(sync!.swarmId);
     expect(task).not.toBeNull();
     expect(task!.source).toBe("linear");
+  });
+
+  test("LINEAR_ALLOWED_STATES env override widens the allowlist end-to-end", async () => {
+    process.env.LINEAR_ALLOWED_STATES = "unstarted,started,backlog";
+    try {
+      const event = {
+        type: "AgentSession",
+        action: "create",
+        agentSession: {
+          id: "session-gate-env-allow-001",
+          issue: {
+            id: "issue-gate-env-allow-001",
+            identifier: "ENG-510",
+            title: "Backlog ticket allowed via env",
+            url: "https://linear.app/team/issue/ENG-510",
+            state: { type: "backlog" },
+            labels: [],
+          },
+        },
+      };
+      await handleAgentSessionEvent(event);
+      const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-env-allow-001");
+      expect(sync).not.toBeNull();
+    } finally {
+      delete process.env.LINEAR_ALLOWED_STATES;
+    }
+  });
+
+  test("LINEAR_SWARM_READY_LABEL env override is honored end-to-end", async () => {
+    process.env.LINEAR_SWARM_READY_LABEL = "go-now";
+    try {
+      const event = {
+        type: "AgentSession",
+        action: "create",
+        agentSession: {
+          id: "session-gate-env-label-001",
+          issue: {
+            id: "issue-gate-env-label-001",
+            identifier: "ENG-511",
+            title: "Backlog ticket with custom override label",
+            url: "https://linear.app/team/issue/ENG-511",
+            state: { type: "backlog" },
+            labels: { nodes: [{ name: "go-now" }] },
+          },
+        },
+      };
+      await handleAgentSessionEvent(event);
+      const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-env-label-001");
+      expect(sync).not.toBeNull();
+    } finally {
+      delete process.env.LINEAR_SWARM_READY_LABEL;
+    }
   });
 
   test("creates task when issue is in unstarted (Todo) state", async () => {

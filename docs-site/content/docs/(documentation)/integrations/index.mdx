@@ -1,0 +1,42 @@
+---
+title: Integrations
+description: External tools the swarm can talk to — issue trackers, chat platforms, error monitoring, email, and more.
+---
+
+Agent Swarm is built to live inside an existing toolchain. Tasks can come in from issue trackers and chat, agent activity flows back as comments and replies, and incidents from observability tools become triage work automatically.
+
+This section is the canonical home for each integration's setup, behavior, and operational notes. As we add more, each one gets its own page with the same shape:
+
+- **What it does** — direction of sync, trigger surfaces, what becomes a swarm task.
+- **Setup** — OAuth/app config, env vars, webhooks.
+- **How it works** — gates, filters, lifecycle mapping, outbound updates.
+- **Outbound updates** — how to push state back to the external system (skill, MCP tool, or API call).
+- **Reference** — link to the canonical API docs / SDK.
+
+## Supported integrations
+
+### Issue trackers
+
+- [**Linear**](/docs/integrations/linear) — inbound webhook → swarm tasks. Workflow-state gate plus `swarm-ready` label override. Outbound updates via the `linear-interaction` skill.
+- [**Jira Cloud**](/docs/guides/jira-integration) — OAuth 3LO + dynamic webhooks. Assignee or @-mention triggers a task; lifecycle events post back as Jira comments.
+- [**GitHub**](/docs/guides/github-integration) — App + webhooks. Issues, PRs, and review threads create or update swarm tasks; the agent comments back inline.
+- [**GitLab**](/docs/guides/gitlab-integration) — token-based webhooks. Merge requests and issues map to swarm tasks the same way GitHub does.
+
+### Chat & email
+
+- [**Slack**](/docs/guides/slack-integration) — bot mentions, slash commands, and thread replies. The swarm uses Slack as its primary human-in-the-loop surface.
+- [**AgentMail**](/docs/guides/agentmail-integration) — per-agent inboxes for email-driven workflows.
+
+### Observability
+
+- [**Sentry**](/docs/guides/sentry-integration) — error issues become triage tasks.
+
+## Adding a new integration
+
+The page structure under `integrations/` is intentionally generic. To add a new one:
+
+1. Drop a new `<provider>.mdx` here with the same section layout (What it does → Setup → How it works → Outbound updates → Reference).
+2. Add the page slug to `integrations/meta.json`.
+3. Cross-link from the supported list above.
+
+Existing integrations that still live under `guides/` will be migrated here over time.
