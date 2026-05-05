@@ -15,14 +15,8 @@ import {
   updateTaskProgress,
 } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
-import {
-  getRaterWeightMultiplier,
-  getRegisteredRaters,
-  SERVER_RATERS,
-} from "@/be/memory/raters/registry";
 import { getRetrievalsForTask } from "@/be/memory/raters/retrieval";
-import { applyRating } from "@/be/memory/raters/store";
-import type { RatingEvent } from "@/be/memory/raters/types";
+import { runServerRaters } from "@/be/memory/raters/run-server-raters";
 import { resolveTemplate } from "@/prompts/resolver";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
@@ -369,10 +363,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // Memory rater v1.5 — fire server-side raters on task completion.
         // Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-2.md §5
         //
-        // Read `memory_retrieval` rows for this task + concatenated session_logs,
-        // run every registered rater whose name is in SERVER_RATERS (currently
-        // just `implicit-citation`), stamp `source = rater.name`, apply the
-        // configured weight multiplier, and `applyRating(events, { taskId })`.
+        // Read `memory_retrieval` rows for this task + concatenated session_logs
+        // and hand both to `runServerRaters`, which iterates the allow-listed
+        // server raters (currently just `implicit-citation`), stamps source,
+        // applies the configured weight multiplier, and persists via
+        // `applyRating`. The orchestration is extracted so it can be unit-tested
+        // with stub raters (see `src/tests/run-server-raters.test.ts`).
         //
         // Fire-and-forget: rater failure must NEVER affect task status.
         (async () => {
@@ -384,24 +380,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
             const logs = getSessionLogsByTaskId(taskId);
             const evidence = logs.map((l) => l.content).join("\n");
 
-            const serverRaters = getRegisteredRaters().filter((r) => SERVER_RATERS.has(r.name));
-            for (const rater of serverRaters) {
-              const events = await rater.rate({
-                taskId,
-                agentId: requestInfo.agentId ?? "",
-                retrievedMemoryIds,
-                evidence,
-              });
-              if (events.length === 0) continue;
-
-              const multiplier = getRaterWeightMultiplier(rater.name);
-              const stamped: RatingEvent[] = events.map((e) => ({
-                ...e,
-                source: rater.name,
-                weight: Math.max(0, Math.min(1, e.weight * multiplier)),
-              }));
-              applyRating(stamped, { taskId });
-            }
+            await runServerRaters({
+              taskId,
+              agentId: requestInfo.agentId ?? "",
+              retrievedMemoryIds,
+              evidence,
+            });
           } catch (err) {
             console.error(
               "[store-progress] server-rater fire failed:",
