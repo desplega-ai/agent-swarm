@@ -8,7 +8,7 @@ topic: "Workflow `triggerSchema` end-to-end coverage"
 tags: [workflows, triggerSchema, mcp-tools, frontend, validation]
 status: in-progress
 last_updated: 2026-05-05
-last_updated_by: Claude (phase 3)
+last_updated_by: Claude (phase 3.5)
 autonomy: critical
 commit_per_phase: true
 research: thoughts/taras/research/2026-05-05-workflow-triggerschema-coverage.md
@@ -254,6 +254,52 @@ Phase 3's evidence (formatted error message + payload + schema) feeds the same e
 **QA Doc**: `thoughts/taras/qa/2026-05-05-workflow-triggerschema-coverage.md` (generated via `desplega:qa` at handoff time; Phase 3 appends a `## Phase 3` section, Phases 4–5 append their UI scenarios).
 
 **Implementation Note**: Commit `[phase 3] trigger-workflow surfaces TriggerSchemaError details`.
+
+---
+
+## Phase 3.5: HTTP 400 contract for `TriggerSchemaError`
+
+### Overview
+
+The plan's Desired End State froze the HTTP 400 response shape as `{ error: "TriggerSchemaError", message: string, details: string[] }`, but the routes were actually returning `{ error: "<prefixed message>" }` via the generic `jsonError` helper — `TriggerSchemaError.validationErrors` was being dropped on the floor. This was caught when Phase 4+5 went to land: Phase 5's bulleted-list tester reads `body.details`, which didn't exist on the wire.
+
+This phase ships the contract for real so Phase 5 can rely on it. Symmetric with Phase 3 (which exposed the same per-field array on the MCP path).
+
+### Changes Required
+
+#### 1. Add a dedicated helper
+**File**: `src/http/utils.ts`
+**Changes**:
+- Add `triggerSchemaErrorResponse(res, message, details)` that writes a 400 with body `{ error: "TriggerSchemaError", message, details }`. Keeps the contract in one place.
+
+#### 2. Wire both call sites
+**File**: `src/http/workflows.ts`
+**Changes**:
+- Manual trigger handler (~line 613): replace `jsonError(res, err.message, 400)` with `triggerSchemaErrorResponse(res, err.message, err.validationErrors)`.
+- Webhook handler (~line 351): same swap.
+
+#### 3. Regression test
+**File**: `src/tests/workflow-mcp-trigger-schema.test.ts` (extends existing harness)
+**Changes**:
+- Add an HTTP-level test that POSTs an empty `triggerData` to `/api/workflows/{id}/trigger` for a workflow with `triggerSchema: { type:"object", required:["pr"], properties:{ pr:{ type:"object", required:["number"], ... } } }` and asserts:
+  - Status `400`
+  - `body.error === "TriggerSchemaError"`
+  - `body.message` is a string containing `"Trigger schema validation failed"`
+  - `body.details` is `['root: missing required property "pr"']`
+
+### Success Criteria
+
+#### Automated Verification:
+- [x] `bun run tsc:check` passes
+- [x] `bun run lint` passes
+- [x] `bun test src/tests/workflow-mcp-trigger-schema.test.ts` passes (Phases 1+2+3 + new HTTP 400 test = 11 tests)
+- [x] `bun test src/tests/workflow-trigger-schema.test.ts` (engine-level) still passes (no regressions)
+- [x] `grep -n triggerSchemaErrorResponse src/http/{utils,workflows}.ts` returns the new helper at definition + both call sites
+
+#### Manual Verification:
+- [ ] _None — Phase 5's QA session implicitly exercises the contract end-to-end._
+
+**Implementation Note**: Inserted mid-implementation when Phase 4+5 surfaced the gap. Commit `[phase 3.5] HTTP 400 contract for TriggerSchemaError (precursor to FE tester)`.
 
 ---
 

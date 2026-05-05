@@ -28,7 +28,7 @@ import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotWorkflow } from "../workflows/version";
 import { route } from "./route-def";
-import { json, jsonError, parseBody } from "./utils";
+import { json, jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -349,7 +349,7 @@ export async function handleWorkflows(
       json(res, result, 201);
     } catch (err) {
       if (err instanceof TriggerSchemaError) {
-        jsonError(res, err.message, 400);
+        triggerSchemaErrorResponse(res, err.message, err.validationErrors);
       } else if (err instanceof WebhookError) {
         jsonError(res, err.message, err.statusCode);
       } else {
@@ -611,7 +611,7 @@ export async function handleWorkflows(
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry());
     } catch (err) {
       if (err instanceof TriggerSchemaError) {
-        jsonError(res, err.message, 400);
+        triggerSchemaErrorResponse(res, err.message, err.validationErrors);
         return true;
       }
       throw err;

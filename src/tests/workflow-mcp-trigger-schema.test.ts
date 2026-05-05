@@ -481,4 +481,49 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect(text).not.toMatch(/^Error:/);
     expect(text).not.toContain("at ");
   });
+
+  // ─── Phase 3.5: HTTP 400 contract for TriggerSchemaError ────
+
+  test("HTTP POST /api/workflows/{id}/trigger with bad payload → 400 { error, message, details[] }", async () => {
+    const triggerSchema: Record<string, unknown> = {
+      type: "object",
+      required: ["pr"],
+      properties: {
+        pr: {
+          type: "object",
+          required: ["number"],
+          properties: { number: { type: "number" } },
+        },
+      },
+    };
+
+    // Seed via MCP create-workflow so we don't reimplement validation hoops here
+    const created = await tools.callCreate({
+      name: uniqueName("http-trigger-400-contract"),
+      definition: minimalDefinition,
+      triggerSchema,
+    });
+    const workflowId = created.structuredContent?.workflow?.id as string;
+    expect(workflowId).toBeTruthy();
+    createdWorkflowIds.push(workflowId);
+
+    const res = await fetch(`http://localhost:${TEST_PORT}/api/workflows/${workflowId}/trigger`, {
+      method: "POST",
+      headers: httpHeaders,
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: string;
+      message: string;
+      details: string[];
+    };
+    // Frozen contract — tester (FE) reads these field names verbatim
+    expect(body.error).toBe("TriggerSchemaError");
+    expect(typeof body.message).toBe("string");
+    expect(body.message).toContain("Trigger schema validation failed");
+    expect(Array.isArray(body.details)).toBe(true);
+    expect(body.details).toEqual(['root: missing required property "pr"']);
+  });
 });

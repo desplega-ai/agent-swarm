@@ -58,6 +58,21 @@ export function jsonError(res: ServerResponse, error: string, status = 400) {
 }
 
 /**
+ * Send a 400 response for a workflow `triggerSchema` validation failure.
+ * Frozen wire shape: `{ error: "TriggerSchemaError", message, details: string[] }`.
+ * `details` carries the per-field validator output so callers can render
+ * field-level diagnostics (FE tester, MCP, etc.).
+ */
+export function triggerSchemaErrorResponse(
+  res: ServerResponse,
+  message: string,
+  details: string[],
+) {
+  res.writeHead(400, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "TriggerSchemaError", message, details }));
+}
+
+/**
  * Derive the API base URL for outbound-facing values (webhook URLs, OAuth
  * redirect URIs). Returns a URL with no trailing slash.
  *
