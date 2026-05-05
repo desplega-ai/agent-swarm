@@ -25,12 +25,12 @@ interface TaskFileData {
 }
 
 /**
- * Thrown when the installed-MCP-servers API call fails after all retries.
- * Caller is expected to refuse spawning the session — a Claude session without
- * swarm tools cannot call store-progress and ends up auto-completed by the
- * runner with "no output captured", wasting tokens and losing task work.
+ * Thrown when the installed-MCP-servers fetch fails after retries.
+ * `createSession` catches this and refuses to spawn — a Claude session without
+ * swarm tools (join-swarm, store-progress, …) silently auto-completes with
+ * no output, wasting tokens.
  */
-class ClaudeMcpFetchError extends Error {
+export class ClaudeMcpFetchError extends Error {
   constructor(
     message: string,
     readonly cause: { status?: number; statusText?: string; error?: unknown },
@@ -49,18 +49,12 @@ function isRetriableMcpStatus(status: number): boolean {
 
 /**
  * Fetch the agent's installed MCP servers with retry + logging.
+ * Returns `{}` when the API succeeds with no active servers (valid state).
+ * Throws `ClaudeMcpFetchError` after retries on 5xx / network / non-retriable 4xx.
  *
- * Returns a (possibly empty) record on success — empty means the agent has
- * no active MCP servers configured, which is a valid steady state.
- * Throws `ClaudeMcpFetchError` after `MCP_FETCH_MAX_ATTEMPTS` on transient
- * failures (5xx, network) or immediately on non-retriable 4xx.
- *
- * Inlined here (rather than in `src/utils/mcp-server-fetcher.ts`) because the
- * Claude adapter is the only caller that needs the strict throw-on-failure
- * semantics — opencode adds the swarm endpoint explicitly and tolerates an
- * empty installed set.
+ * Exported for unit testing.
  */
-async function fetchInstalledMcpServersForClaude(
+export async function fetchInstalledMcpServersForClaude(
   apiUrl: string,
   apiKey: string,
   agentId: string,
@@ -141,9 +135,6 @@ async function fetchInstalledMcpServersForClaude(
     lastError,
   );
 }
-
-// Exported for unit tests.
-export const __test = { fetchInstalledMcpServersForClaude, ClaudeMcpFetchError };
 
 function getTaskFilePath(pid: number): string {
   return `/tmp/agent-swarm-task-${pid}.json`;
@@ -646,10 +637,6 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     console.log(`\x1b[2m[${config.role}]\x1b[0m Task file written: ${taskFilePath}`);
 
-    // Fetch installed MCP servers from API for this agent.
-    // If the fetch fails (network / 5xx after retries) we refuse to spawn —
-    // a session without swarm tools (join-swarm, store-progress, send-task, …)
-    // can't actually report progress, so it would auto-complete with no output.
     let installedServers: Record<string, Record<string, unknown>> | null = null;
     if (config.apiUrl && config.apiKey && config.agentId) {
       try {
@@ -660,22 +647,21 @@ export class ClaudeAdapter implements ProviderAdapter {
         );
       } catch (err) {
         if (err instanceof ClaudeMcpFetchError) {
+          // Refuse to spawn: a session without swarm tools auto-completes silently.
           await cleanupTaskFile(taskFilePid);
           throw new Error(
-            `[claude] Refusing to spawn session for task ${config.taskId.slice(0, 8)} — MCP server fetch failed: ${err.message}. Worker would have no swarm tools.`,
+            `[claude] Refusing to spawn session for task ${config.taskId.slice(0, 8)} — MCP server fetch failed: ${err.message}`,
           );
         }
         throw err;
       }
-      const count = Object.keys(installedServers).length;
       console.log(
-        `\x1b[2m[${config.role}]\x1b[0m Merging ${count} installed MCP server(s) into session config`,
+        `\x1b[2m[${config.role}]\x1b[0m Merging ${Object.keys(installedServers).length} installed MCP server(s) into session config`,
       );
     }
 
     // Create per-session MCP config with X-Source-Task-Id header + installed servers (no shared-file race condition)
-    // Pass null (not {}) when no installed servers exist — keeps the existing
-    // "no .mcp.json + no installed servers → skip --mcp-config" behavior.
+    // Normalize {} → null so createSessionMcpConfig keeps its no-op short-circuit.
     const installedForMerge =
       installedServers && Object.keys(installedServers).length > 0 ? installedServers : null;
     const sessionMcpConfig = await createSessionMcpConfig(

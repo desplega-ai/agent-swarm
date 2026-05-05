@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { __test } from "../providers/claude-adapter";
-
-const { fetchInstalledMcpServersForClaude, ClaudeMcpFetchError } = __test;
+import {
+  ClaudeMcpFetchError,
+  fetchInstalledMcpServersForClaude,
+} from "../providers/claude-adapter";
 
 const realFetch = globalThis.fetch;
 
@@ -98,7 +99,7 @@ describe("claude-adapter fetchInstalledMcpServersForClaude", () => {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(ClaudeMcpFetchError);
-    expect((thrown as InstanceType<typeof ClaudeMcpFetchError>).cause.status).toBe(503);
+    expect((thrown as ClaudeMcpFetchError).cause.status).toBe(503);
     expect(calls.length).toBe(3);
   });
 
