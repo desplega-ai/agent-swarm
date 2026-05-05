@@ -29,6 +29,7 @@ import {
 // Memory capability
 import { registerMemoryDeleteTool } from "./tools/memory-delete";
 import { registerMemoryGetTool } from "./tools/memory-get";
+import { registerMemoryRateTool } from "./tools/memory-rate";
 import { registerMemorySearchTool } from "./tools/memory-search";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerPollTaskTool } from "./tools/poll-task";
@@ -241,6 +242,7 @@ export function createServer() {
     registerMemorySearchTool(server);
     registerMemoryGetTool(server);
     registerMemoryDeleteTool(server);
+    registerMemoryRateTool(server);
     registerInjectLearningTool(server);
   }
 

@@ -9,6 +9,7 @@ import {
   generateDefaultSoulMd,
   generateDefaultToolsMd,
 } from "../prompts/defaults.ts";
+import { renderMemoriesPrompt } from "../prompts/memories.ts";
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
 import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
 import {
@@ -1569,14 +1570,7 @@ async function fetchRelevantMemories(
       results: Array<{ id: string; name: string; content: string; similarity: number }>;
     };
 
-    const useful = (data.results || []).filter((m) => m.similarity > 0.4);
-    if (useful.length === 0) return null;
-
-    const memoryContext = useful
-      .map((m) => `- **${m.name}** (id: ${m.id}): ${m.content.substring(0, 300)}`)
-      .join("\n");
-
-    return `\n\n### Relevant Past Knowledge\n\nThese memories from your previous sessions may be useful. Use \`memory-get\` with the memory ID to retrieve full details.\n\n${memoryContext}\n`;
+    return renderMemoriesPrompt(data.results || []);
   } catch {
     // Non-blocking — don't fail task start because of memory search
     return null;
