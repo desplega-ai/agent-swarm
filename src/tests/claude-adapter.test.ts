@@ -1,5 +1,8 @@
-import { describe, expect, test } from "bun:test";
-import { ClaudeAdapter, mergeMcpConfig } from "../providers/claude-adapter";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ClaudeAdapter, createSessionMcpConfig, mergeMcpConfig } from "../providers/claude-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
 
 /** Minimal config for testing — sessions won't actually spawn in these unit tests */
@@ -242,6 +245,162 @@ describe("mergeMcpConfig (issue #369)", () => {
   test("empty base + empty installed yields empty mcpServers", () => {
     const merged = mergeMcpConfig({ mcpServers: {} }, {}, TASK_ID);
     expect(Object.keys(merged.mcpServers)).toHaveLength(0);
+  });
+});
+
+describe("createSessionMcpConfig", () => {
+  let sandbox: string;
+
+  beforeEach(async () => {
+    sandbox = await mkdtemp(join(tmpdir(), "mcp-cfg-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(sandbox, { recursive: true, force: true });
+  });
+
+  async function readWritten(path: string) {
+    return JSON.parse(await Bun.file(path).text()) as {
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
+  }
+
+  test("returns null when no .mcp.json found and no installed servers", async () => {
+    const cwd = join(sandbox, "empty");
+    await mkdir(cwd, { recursive: true });
+    const path = await createSessionMcpConfig(cwd, "task-empty");
+    expect(path).toBeNull();
+  });
+
+  test("ancestor-only .mcp.json is found via walk-up (Docker layout)", async () => {
+    await writeFile(
+      join(sandbox, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          "agent-swarm": {
+            type: "http",
+            url: "http://swarm/mcp",
+            headers: { Authorization: "Bearer SWARM", "X-Agent-ID": "a1" },
+          },
+        },
+      }),
+    );
+    const cwd = join(sandbox, "repos", "foo");
+    await mkdir(cwd, { recursive: true });
+
+    const path = await createSessionMcpConfig(cwd, "task-anc");
+    expect(path).toBe("/tmp/mcp-task-anc.json");
+    const written = await readWritten(path!);
+    expect(written.mcpServers["agent-swarm"]).toBeDefined();
+    expect(
+      (written.mcpServers["agent-swarm"].headers as Record<string, string>)["X-Source-Task-Id"],
+    ).toBe("task-anc");
+  });
+
+  test("merges repo-local + ancestor when server names differ", async () => {
+    await writeFile(
+      join(sandbox, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          "agent-swarm": {
+            type: "http",
+            url: "http://swarm/mcp",
+            headers: { Authorization: "Bearer SWARM", "X-Agent-ID": "a1" },
+          },
+        },
+      }),
+    );
+    const repo = join(sandbox, "repos", "client-monorepo");
+    await mkdir(repo, { recursive: true });
+    await writeFile(
+      join(repo, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: { Datadog: { command: "npx", args: ["-y", "@winor30/mcp-server-datadog"] } },
+      }),
+    );
+
+    const path = await createSessionMcpConfig(repo, "task-merge");
+    const written = await readWritten(path!);
+    expect(written.mcpServers["agent-swarm"]).toBeDefined();
+    expect(written.mcpServers.Datadog).toBeDefined();
+    expect(Object.keys(written.mcpServers).sort()).toEqual(["Datadog", "agent-swarm"]);
+  });
+
+  test("ancestor wins over repo-local on agent-swarm key conflict", async () => {
+    await writeFile(
+      join(sandbox, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          "agent-swarm": {
+            type: "http",
+            url: "http://swarm/mcp",
+            headers: { Authorization: "Bearer SWARM", "X-Agent-ID": "a1" },
+          },
+        },
+      }),
+    );
+    const repo = join(sandbox, "repos", "foo");
+    await mkdir(repo, { recursive: true });
+    await writeFile(
+      join(repo, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          "agent-swarm": {
+            type: "http",
+            url: "http://stale/mcp",
+            headers: { Authorization: "Bearer STALE", "X-Agent-ID": "stale-agent" },
+          },
+        },
+      }),
+    );
+
+    const path = await createSessionMcpConfig(repo, "task-conflict");
+    const written = await readWritten(path!);
+    const swarm = written.mcpServers["agent-swarm"] as Record<string, unknown>;
+    const headers = swarm.headers as Record<string, string>;
+    expect(swarm.url).toBe("http://swarm/mcp");
+    expect(headers.Authorization).toBe("Bearer SWARM");
+    expect(headers["X-Agent-ID"]).toBe("a1");
+    expect(headers["X-Source-Task-Id"]).toBe("task-conflict");
+  });
+
+  test("malformed repo-local .mcp.json is skipped without poisoning ancestor entries", async () => {
+    await writeFile(
+      join(sandbox, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          "agent-swarm": {
+            type: "http",
+            url: "http://swarm/mcp",
+            headers: { "X-Agent-ID": "a1" },
+          },
+        },
+      }),
+    );
+    const repo = join(sandbox, "repos", "foo");
+    await mkdir(repo, { recursive: true });
+    await writeFile(join(repo, ".mcp.json"), "{ this is not valid json");
+
+    const path = await createSessionMcpConfig(repo, "task-malformed");
+    expect(path).not.toBeNull();
+    const written = await readWritten(path!);
+    expect(written.mcpServers["agent-swarm"]).toBeDefined();
+  });
+
+  test("only installedServers, no .mcp.json on disk", async () => {
+    const cwd = join(sandbox, "no-mcp");
+    await mkdir(cwd, { recursive: true });
+
+    const path = await createSessionMcpConfig(cwd, "task-installed", {
+      "from-api": {
+        type: "http",
+        url: "http://api.test/mcp",
+        headers: { Authorization: "Bearer API" },
+      },
+    });
+    expect(path).toBe("/tmp/mcp-task-installed.json");
+    const written = await readWritten(path!);
+    expect(written.mcpServers["from-api"]).toBeDefined();
   });
 });
 

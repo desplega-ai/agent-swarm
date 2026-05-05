@@ -6,6 +6,7 @@ import { clearJiraMetadata, getJiraMetadata } from "../../jira/metadata";
 import { getJiraAuthorizationUrl, handleJiraCallback } from "../../jira/oauth";
 import { handleJiraWebhook } from "../../jira/webhook";
 import { deleteJiraWebhook, registerJiraWebhook } from "../../jira/webhook-lifecycle";
+import { ensureTokenOrThrow } from "../../oauth/ensure-token";
 import { route } from "../route-def";
 import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 
@@ -55,6 +56,21 @@ const jiraStatus = route({
   tags: ["Trackers"],
   responses: {
     200: { description: "Connection status" },
+    503: { description: "Jira integration not configured" },
+  },
+});
+
+const jiraRefresh = route({
+  method: "post",
+  path: "/api/trackers/jira/refresh",
+  pattern: ["api", "trackers", "jira", "refresh"],
+  summary:
+    "Force a Jira OAuth token refresh and return the updated status payload. Useful when an agent observes an expired token via tracker-status / db-query and wants to recover without restarting the server or re-running 3LO.",
+  tags: ["Trackers"],
+  responses: {
+    200: { description: "Token refreshed; returns same shape as /status" },
+    409: { description: "Jira not connected (no refresh token stored)" },
+    500: { description: "Refresh failed (e.g. revoked grant, network error)" },
     503: { description: "Jira integration not configured" },
   },
 });
@@ -144,6 +160,38 @@ function getRedirectUri(req: IncomingMessage): string {
   return `${deriveApiBaseUrl(req)}/api/trackers/jira/callback`;
 }
 
+function buildJiraStatusPayload(req: IncomingMessage): Record<string, unknown> {
+  const tokens = getOAuthTokens("jira");
+  const meta = getJiraMetadata();
+  const scope = tokens?.scope ?? null;
+  // Atlassian returns scopes space-separated in the token response.
+  const scopeList = scope ? scope.split(/[\s,]+/).filter(Boolean) : [];
+  const hasManageWebhookScope = scopeList.includes("manage:jira-webhook");
+
+  const status: Record<string, unknown> = {
+    provider: "jira",
+    connected: !!tokens,
+    cloudId: meta.cloudId ?? null,
+    siteUrl: meta.siteUrl ?? null,
+    tokenExpiresAt: tokens?.expiresAt ?? null,
+    scope,
+    hasManageWebhookScope,
+    webhookTokenConfigured: Boolean(process.env.JIRA_WEBHOOK_TOKEN),
+    webhookUrl: getWebhookUrl(req),
+    redirectUri: getRedirectUri(req),
+    webhookIds: meta.webhookIds ?? [],
+  };
+
+  // Phase 5: surface manual-webhook instructions when the OAuth grant
+  // doesn't include `manage:jira-webhook` (admin must register webhooks
+  // manually in the Atlassian UI).
+  if (!hasManageWebhookScope) {
+    status.manualWebhookInstructions = MANUAL_WEBHOOK_INSTRUCTIONS;
+  }
+
+  return status;
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleJiraTracker(
@@ -222,37 +270,46 @@ export async function handleJiraTracker(
       return true;
     }
 
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(buildJiraStatusPayload(req)));
+    return true;
+  }
+
+  // POST /api/trackers/jira/refresh — force-refresh the access token and
+  // return the same shape as /status. Useful when an agent observes a stale
+  // token (via tracker-status / db-query MCP) and needs to recover in-band.
+  if (jiraRefresh.match(req.method, pathSegments)) {
+    if (!isJiraEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Jira integration not configured" }));
+      return true;
+    }
+
     const tokens = getOAuthTokens("jira");
-    const meta = getJiraMetadata();
-    const scope = tokens?.scope ?? null;
-    // Atlassian returns scopes space-separated in the token response.
-    const scopeList = scope ? scope.split(/[\s,]+/).filter(Boolean) : [];
+    if (!tokens?.refreshToken) {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "Jira not connected — no refresh token stored. Run 3LO via /authorize.",
+        }),
+      );
+      return true;
+    }
 
-    const hasManageWebhookScope = scopeList.includes("manage:jira-webhook");
-
-    const status: Record<string, unknown> = {
-      provider: "jira",
-      connected: !!tokens,
-      cloudId: meta.cloudId ?? null,
-      siteUrl: meta.siteUrl ?? null,
-      tokenExpiresAt: tokens?.expiresAt ?? null,
-      scope,
-      hasManageWebhookScope,
-      webhookTokenConfigured: Boolean(process.env.JIRA_WEBHOOK_TOKEN),
-      webhookUrl: getWebhookUrl(req),
-      redirectUri: getRedirectUri(req),
-      webhookIds: meta.webhookIds ?? [],
-    };
-
-    // Phase 5: surface manual-webhook instructions when the OAuth grant
-    // doesn't include `manage:jira-webhook` (admin must register webhooks
-    // manually in the Atlassian UI).
-    if (!hasManageWebhookScope) {
-      status.manualWebhookInstructions = MANUAL_WEBHOOK_INSTRUCTIONS;
+    try {
+      // Pass a buffer larger than any plausible token lifetime so
+      // isTokenExpiringSoon() always returns true and a refresh always fires.
+      await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[Jira] Forced token refresh failed:", message);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Token refresh failed", details: message }));
+      return true;
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(status));
+    res.end(JSON.stringify(buildJiraStatusPayload(req)));
     return true;
   }
 

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.74.1",
+    "version": "1.74.3",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -7343,6 +7343,33 @@
         }
       }
     },
+    "/api/trackers/jira/refresh": {
+      "post": {
+        "summary": "Force a Jira OAuth token refresh and return the updated status payload. Useful when an agent observes an expired token via tracker-status / db-query and wants to recover without restarting the server or re-running 3LO.",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token refreshed; returns same shape as /status"
+          },
+          "409": {
+            "description": "Jira not connected (no refresh token stored)"
+          },
+          "500": {
+            "description": "Refresh failed (e.g. revoked grant, network error)"
+          },
+          "503": {
+            "description": "Jira integration not configured"
+          }
+        }
+      }
+    },
     "/api/trackers/jira/webhook/{token}": {
       "post": {
         "summary": "Receive Jira webhook events (URL-token authenticated). Phase 2 stub — Phase 3 fills in dispatch.",
@@ -7540,6 +7567,33 @@
         "responses": {
           "200": {
             "description": "Connection status"
+          },
+          "503": {
+            "description": "Linear integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/refresh": {
+      "post": {
+        "summary": "Force a Linear OAuth token refresh and return the updated status payload. Useful when an agent observes an expired token and wants to recover without restarting the server or re-running OAuth.",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token refreshed; returns same shape as /status"
+          },
+          "409": {
+            "description": "Linear not connected (no refresh token stored)"
+          },
+          "500": {
+            "description": "Refresh failed"
           },
           "503": {
             "description": "Linear integration not configured"

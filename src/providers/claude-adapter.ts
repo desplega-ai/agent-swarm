@@ -91,51 +91,55 @@ export function mergeMcpConfig(
 
 /**
  * Create a per-session MCP config file with X-Source-Task-Id header injected
- * and installed MCP servers merged in.
- * Each session gets its own copy to avoid race conditions when multiple concurrent
- * Claude sessions share the same cwd. The session-specific config is passed to
- * Claude CLI via --mcp-config, so the shared .mcp.json is never modified.
- * Returns the path to the per-session config, or null if no config exists.
+ * and installed MCP servers merged in. Each session gets its own copy at
+ * `/tmp/mcp-<taskId>.json`, passed to Claude via `--mcp-config`, so the shared
+ * `.mcp.json` is never modified. Returns the path, or null if there's nothing
+ * to write.
+ *
+ * Exported for unit testing.
  */
-async function createSessionMcpConfig(
+export async function createSessionMcpConfig(
   cwd: string,
   taskId: string,
   installedServers?: Record<string, Record<string, unknown>> | null,
 ): Promise<string | null> {
-  // Walk up from cwd to find .mcp.json (mirrors Claude CLI's project-level config discovery).
-  // In Docker, .mcp.json lives at /workspace/.mcp.json but tasks often run with cwd set to
-  // a subdirectory like /workspace/repos/<repo>, so a single-directory check misses it.
+  // Collect every .mcp.json from cwd up to filesystem root. Stopping at the first
+  // match silently drops the swarm-managed /workspace/.mcp.json when the cloned
+  // repo ships its own .mcp.json (e.g. Datadog) — so we merge all layers, with
+  // rootmost winning on key conflicts.
+  const mcpJsonPaths: string[] = [];
   let searchDir = cwd;
-  let mcpJsonPath: string | null = null;
   while (true) {
     const candidate = join(searchDir, ".mcp.json");
     if (await Bun.file(candidate).exists()) {
-      mcpJsonPath = candidate;
-      break;
+      mcpJsonPaths.push(candidate);
     }
     const parent = dirname(searchDir);
-    if (parent === searchDir) break; // reached filesystem root
+    if (parent === searchDir) break;
     searchDir = parent;
   }
 
-  if (!mcpJsonPath && !installedServers) return null;
+  if (mcpJsonPaths.length === 0 && !installedServers) return null;
+
+  // Merge deepest → rootmost so rootmost (swarm) overrides cwd-ward layers.
+  const mergedServers: Record<string, unknown> = {};
+  for (const path of mcpJsonPaths) {
+    try {
+      const layer = (await Bun.file(path).json()) as { mcpServers?: Record<string, unknown> };
+      if (layer?.mcpServers) Object.assign(mergedServers, layer.mcpServers);
+    } catch (err) {
+      console.warn(`\x1b[33m[claude]\x1b[0m Skipping malformed ${path}: ${err}`);
+    }
+  }
+
+  if (Object.keys(mergedServers).length === 0 && !installedServers) return null;
 
   try {
-    let baseConfig: { mcpServers?: Record<string, unknown> } = { mcpServers: {} };
-    if (mcpJsonPath) {
-      const file = Bun.file(mcpJsonPath);
-      baseConfig = await file.json();
-    }
-    if (!baseConfig?.mcpServers && !installedServers) return null;
-
-    const config = mergeMcpConfig(baseConfig, installedServers ?? null, taskId);
-
-    // Write per-session config to /tmp — no race, each session has its own file
+    const config = mergeMcpConfig({ mcpServers: mergedServers }, installedServers ?? null, taskId);
     const sessionConfigPath = `/tmp/mcp-${taskId}.json`;
     await writeFile(sessionConfigPath, JSON.stringify(config, null, 2));
     return sessionConfigPath;
   } catch (err) {
-    // Non-fatal — if creation fails, sourceTaskId won't be sent and Slack metadata won't auto-inherit
     console.warn(`\x1b[33m[claude]\x1b[0m Failed to create session MCP config: ${err}`);
     return null;
   }

@@ -75,17 +75,30 @@ export async function resolveBotAccountId(): Promise<string | null> {
 
   try {
     await ensureToken("jira");
-    const tokens = getOAuthTokens("jira");
+    let tokens = getOAuthTokens("jira");
     if (!tokens?.accessToken) {
       console.warn("[Jira Sync] No Jira access token; cannot resolve bot accountId");
       return null;
     }
-    const res = await fetch("https://api.atlassian.com/me", {
-      headers: {
-        Authorization: `Bearer ${tokens.accessToken}`,
-        Accept: "application/json",
-      },
-    });
+    const callMe = async (accessToken: string) =>
+      fetch("https://api.atlassian.com/me", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+      });
+    let res = await callMe(tokens.accessToken);
+    // Mirror jiraFetch's 401-retry pattern: a token may go stale between the
+    // proactive ensureToken call and the request reaching Atlassian.
+    if (res.status === 401) {
+      await ensureToken("jira", 0);
+      tokens = getOAuthTokens("jira");
+      if (!tokens?.accessToken) {
+        console.warn("[Jira Sync] /me returned 401 and refresh produced no token");
+        return null;
+      }
+      res = await callMe(tokens.accessToken);
+    }
     if (!res.ok) {
       console.warn(`[Jira Sync] /me returned ${res.status}; cannot resolve bot accountId`);
       return null;

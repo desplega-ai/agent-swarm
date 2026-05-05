@@ -233,4 +233,37 @@ describe("ensureTokenOrThrow", () => {
   test("stays silent (no throw) when provider is not configured", async () => {
     await expect(ensureTokenOrThrow("nonexistent-provider")).resolves.toBeUndefined();
   });
+
+  test("forces a refresh when bufferMs is wider than any plausible expiry", async () => {
+    // Pattern used by the POST /api/trackers/{provider}/refresh route to
+    // guarantee a rotation regardless of how far the current token is from
+    // expiry.
+    storeOAuthTokens("test-provider", {
+      accessToken: "old-token",
+      refreshToken: "refresh-token",
+      expiresAt: new Date(Date.now() + 50 * 60 * 1000).toISOString(), // 50 min ahead
+    });
+
+    const fetchSpy = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "rotated-token",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "rotated-refresh",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    globalThis.fetch = fetchSpy;
+
+    await ensureTokenOrThrow("test-provider", Number.MAX_SAFE_INTEGER);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const tokens = getOAuthTokens("test-provider");
+    expect(tokens?.accessToken).toBe("rotated-token");
+    expect(tokens?.refreshToken).toBe("rotated-refresh");
+  });
 });

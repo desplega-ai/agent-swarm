@@ -8,6 +8,7 @@ import {
   revokeLinearToken,
 } from "../../linear/oauth";
 import { handleLinearWebhook } from "../../linear/webhook";
+import { ensureTokenOrThrow } from "../../oauth/ensure-token";
 import { route } from "../route-def";
 import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 
@@ -57,6 +58,21 @@ const linearStatus = route({
   },
 });
 
+const linearRefresh = route({
+  method: "post",
+  path: "/api/trackers/linear/refresh",
+  pattern: ["api", "trackers", "linear", "refresh"],
+  summary:
+    "Force a Linear OAuth token refresh and return the updated status payload. Useful when an agent observes an expired token and wants to recover without restarting the server or re-running OAuth.",
+  tags: ["Trackers"],
+  responses: {
+    200: { description: "Token refreshed; returns same shape as /status" },
+    409: { description: "Linear not connected (no refresh token stored)" },
+    500: { description: "Refresh failed" },
+    503: { description: "Linear integration not configured" },
+  },
+});
+
 const linearWebhook = route({
   method: "post",
   path: "/api/trackers/linear/webhook",
@@ -85,6 +101,22 @@ const linearDisconnect = route({
     503: { description: "Linear not configured" },
   },
 });
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function buildLinearStatusPayload(req: IncomingMessage): Record<string, unknown> {
+  const tokens = getOAuthTokens("linear");
+  const baseUrl = deriveApiBaseUrl(req);
+
+  return {
+    provider: "linear",
+    connected: !!tokens,
+    tokenExpiry: tokens?.expiresAt ?? null,
+    scope: tokens?.scope ?? null,
+    webhookUrl: `${baseUrl}/api/trackers/linear/webhook`,
+    redirectUri: `${baseUrl}/api/trackers/linear/callback`,
+  };
+}
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -164,20 +196,44 @@ export async function handleLinearTracker(
       return true;
     }
 
-    const tokens = getOAuthTokens("linear");
-    const baseUrl = deriveApiBaseUrl(req);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(buildLinearStatusPayload(req)));
+    return true;
+  }
 
-    const status = {
-      provider: "linear",
-      connected: !!tokens,
-      tokenExpiry: tokens?.expiresAt ?? null,
-      scope: tokens?.scope ?? null,
-      webhookUrl: `${baseUrl}/api/trackers/linear/webhook`,
-      redirectUri: `${baseUrl}/api/trackers/linear/callback`,
-    };
+  // POST /api/trackers/linear/refresh — force-refresh the Linear access token.
+  // Mirrors the Jira refresh route; recovery path for agents that observe a
+  // stale token in oauth_tokens.
+  if (linearRefresh.match(req.method, pathSegments)) {
+    if (!isLinearEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Linear integration not configured" }));
+      return true;
+    }
+
+    const tokens = getOAuthTokens("linear");
+    if (!tokens?.refreshToken) {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "Linear not connected — no refresh token stored. Run OAuth via /authorize.",
+        }),
+      );
+      return true;
+    }
+
+    try {
+      await ensureTokenOrThrow("linear", Number.MAX_SAFE_INTEGER);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[Linear] Forced token refresh failed:", message);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Token refresh failed", details: message }));
+      return true;
+    }
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(status));
+    res.end(JSON.stringify(buildLinearStatusPayload(req)));
     return true;
   }
 

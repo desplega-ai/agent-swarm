@@ -1,7 +1,20 @@
 import { ensureTokenOrThrow } from "./ensure-token";
 
-const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
-const THIRTEEN_HOURS_MS = 13 * 60 * 60 * 1000;
+// Tick every 50 minutes with a 65-minute "expiring soon" buffer.
+//
+// Atlassian (and Linear) issue 1h access tokens. With this cadence the DB row
+// is always rotated before its current access token expires, so anything that
+// reads oauth_tokens.accessToken directly without going through jiraFetch /
+// linear-outbound (e.g. agents using the read-only db-query MCP) sees a
+// not-yet-expired token. The 65-min buffer is wider than the access-token
+// lifetime, so isTokenExpiringSoon always returns true and every tick rotates.
+//
+// Touching the row this often also serves the original "keep the refresh
+// token alive" goal — Atlassian expires inactive refresh tokens after 90 days,
+// and Linear's behavior is similar; refreshing every 50 min trivially keeps
+// both providers active.
+const KEEPALIVE_INTERVAL_MS = 50 * 60 * 1000;
+const KEEPALIVE_BUFFER_MS = 65 * 60 * 1000;
 const SLACK_ALERTS_CHANNEL = process.env.SLACK_ALERTS_CHANNEL || "C08JCRURPBV";
 
 const KEEPALIVE_PROVIDERS = ["linear", "jira"] as const;
@@ -9,20 +22,25 @@ const KEEPALIVE_PROVIDERS = ["linear", "jira"] as const;
 let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Proactively refresh OAuth tokens on a schedule to prevent expiry.
- * If refresh fails, posts a Slack notification so someone can re-auth manually.
+ * Proactively refresh OAuth tokens on a schedule.
  *
- * Why both Linear and Jira: Atlassian rotates refresh tokens and expires them
- * after 90 days of inactivity, so a swarm that doesn't touch Jira for a long
- * stretch will silently lose the ability to refresh. Touching the token every
- * 12h keeps the refresh token alive and surfaces a dead one as an alert
- * instead of a runtime 401.
+ * Two purposes, both served by the same tick:
+ *
+ *  1. Access-token freshness in the DB. Anything that reads
+ *     `oauth_tokens.accessToken` directly (db-query MCP, future MCP servers,
+ *     `tracker-status`) needs a not-yet-expired value. The 50-min cadence
+ *     keeps the row ahead of the 1h access-token lifetime.
+ *  2. Refresh-token liveness. Atlassian rotates refresh tokens and expires
+ *     them after ~90 days of inactivity, so silent gaps in usage would kill
+ *     the integration. Refreshing on every tick keeps the refresh token
+ *     active and surfaces a dead one as a Slack alert instead of a runtime
+ *     401 in the middle of an agent task.
  */
 async function runKeepalive(): Promise<void> {
   for (const provider of KEEPALIVE_PROVIDERS) {
     console.log(`[OAuth Keepalive] Running scheduled token refresh for ${provider}...`);
     try {
-      await ensureTokenOrThrow(provider, THIRTEEN_HOURS_MS);
+      await ensureTokenOrThrow(provider, KEEPALIVE_BUFFER_MS);
       console.log(`[OAuth Keepalive] ${provider} token check completed successfully`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -56,7 +74,8 @@ async function notifySlack(text: string): Promise<void> {
 }
 
 /**
- * Start the OAuth keepalive timer. Runs immediately then every 12 hours.
+ * Start the OAuth keepalive timer. Runs once shortly after startup, then on
+ * KEEPALIVE_INTERVAL_MS thereafter.
  */
 export function startOAuthKeepalive(): void {
   if (keepaliveInterval) {
@@ -64,14 +83,16 @@ export function startOAuthKeepalive(): void {
     return;
   }
 
-  console.log("[OAuth Keepalive] Starting (12h interval)");
+  console.log(
+    `[OAuth Keepalive] Starting (interval ${Math.round(KEEPALIVE_INTERVAL_MS / 60_000)}min, buffer ${Math.round(KEEPALIVE_BUFFER_MS / 60_000)}min)`,
+  );
 
   // Run once after a short delay (let server finish startup)
   setTimeout(() => runKeepalive(), 10_000);
 
   keepaliveInterval = setInterval(() => {
     runKeepalive();
-  }, TWELVE_HOURS_MS);
+  }, KEEPALIVE_INTERVAL_MS);
 }
 
 /**
