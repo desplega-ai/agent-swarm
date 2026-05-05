@@ -13,6 +13,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
 import { registerCreateWorkflowTool } from "../tools/workflows/create-workflow";
 import { registerPatchWorkflowTool } from "../tools/workflows/patch-workflow";
+import { registerTriggerWorkflowTool } from "../tools/workflows/trigger-workflow";
 import { registerUpdateWorkflowTool } from "../tools/workflows/update-workflow";
 import type { Workflow, WorkflowDefinition } from "../types";
 import { initWorkflows, stopRetryPoller } from "../workflows";
@@ -36,6 +37,10 @@ type ToolResult = {
     message: string;
     workflow?: { id: string; triggerSchema?: Record<string, unknown> } & Record<string, unknown>;
     versionCreated?: number;
+    runId?: string;
+    skipped?: boolean;
+    validationErrors?: string[];
+    triggerSchema?: Record<string, unknown>;
   };
 };
 
@@ -47,6 +52,7 @@ function buildServerWithTools() {
   registerCreateWorkflowTool(server);
   registerUpdateWorkflowTool(server);
   registerPatchWorkflowTool(server);
+  registerTriggerWorkflowTool(server);
 
   const registeredTools = (server as unknown as Record<string, unknown>)._registeredTools as Record<
     string,
@@ -69,6 +75,7 @@ function buildServerWithTools() {
     callCreate: callTool("create-workflow"),
     callUpdate: callTool("update-workflow"),
     callPatch: callTool("patch-workflow"),
+    callTrigger: callTool("trigger-workflow"),
   };
 }
 
@@ -394,5 +401,84 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     // Verify persistence at the DB layer
     const loaded = getWorkflow(createBody.id);
     expect(loaded?.triggerSchema).toEqual(newSchema);
+  });
+
+  // ─── Phase 3: trigger-workflow surfaces TriggerSchemaError ──
+
+  test("trigger-workflow with missing required field → structured TriggerSchemaError", async () => {
+    const triggerSchema: Record<string, unknown> = {
+      type: "object",
+      required: ["foo"],
+      properties: { foo: { type: "string" } },
+    };
+
+    const created = await tools.callCreate({
+      name: uniqueName("mcp-trigger-error-missing"),
+      definition: minimalDefinition,
+      triggerSchema,
+    });
+    const workflowId = created.structuredContent?.workflow?.id as string;
+    expect(workflowId).toBeTruthy();
+    createdWorkflowIds.push(workflowId);
+
+    const triggered = await tools.callTrigger({ id: workflowId, triggerData: {} });
+
+    // Structured signal: not success, validationErrors carries the validator output verbatim,
+    // triggerSchema is echoed for self-correction.
+    expect(triggered.structuredContent?.success).toBe(false);
+    expect(triggered.structuredContent?.runId).toBeUndefined();
+    expect(triggered.structuredContent?.validationErrors).toEqual([
+      'root: missing required property "foo"',
+    ]);
+    expect(triggered.structuredContent?.triggerSchema).toEqual(triggerSchema);
+
+    // Human-facing text contains the exact validator phrase from json-schema-validator.ts:39
+    const text = triggered.content[0]?.text ?? "";
+    expect(text).toContain('root: missing required property "foo"');
+    // Failing field name appears
+    expect(text).toContain("foo");
+    // No leaked stack trace or generic Failed: prefix
+    expect(text).not.toContain("Failed:");
+    expect(text).not.toMatch(/^Error:/);
+    expect(text).not.toContain("at ");
+    // Schema is echoed for the agent to self-correct
+    expect(text).toContain('"required"');
+    expect(text).toContain('"foo"');
+  });
+
+  test("trigger-workflow with type-mismatched payload → structured TriggerSchemaError", async () => {
+    const triggerSchema: Record<string, unknown> = {
+      type: "object",
+      required: ["foo"],
+      properties: { foo: { type: "string" } },
+    };
+
+    const created = await tools.callCreate({
+      name: uniqueName("mcp-trigger-error-type"),
+      definition: minimalDefinition,
+      triggerSchema,
+    });
+    const workflowId = created.structuredContent?.workflow?.id as string;
+    expect(workflowId).toBeTruthy();
+    createdWorkflowIds.push(workflowId);
+
+    const triggered = await tools.callTrigger({ id: workflowId, triggerData: { foo: 42 } });
+
+    expect(triggered.structuredContent?.success).toBe(false);
+    expect(triggered.structuredContent?.runId).toBeUndefined();
+    expect(triggered.structuredContent?.validationErrors).toEqual([
+      'foo: expected type "string", got number',
+    ]);
+    expect(triggered.structuredContent?.triggerSchema).toEqual(triggerSchema);
+
+    const text = triggered.content[0]?.text ?? "";
+    // Exact validator phrase from json-schema-validator.ts:29
+    expect(text).toContain('foo: expected type "string", got number');
+    // Failing field name appears
+    expect(text).toContain("foo");
+    // No leaked stack trace or generic Failed: prefix
+    expect(text).not.toContain("Failed:");
+    expect(text).not.toMatch(/^Error:/);
+    expect(text).not.toContain("at ");
   });
 });

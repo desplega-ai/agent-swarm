@@ -9,7 +9,7 @@ source_verification: null
 related_pr: null
 environment: local
 last_updated: 2026-05-05
-last_updated_by: Claude
+last_updated_by: Claude (phase 3)
 ---
 
 # Workflow `triggerSchema` end-to-end coverage — QA Report
@@ -51,9 +51,9 @@ Plan: `thoughts/taras/plans/2026-05-05-workflow-triggerschema-coverage.md`
 
 **Expected Result:** Both responses name the failing field (`foo`) and the failure mode (missing required, then type mismatch). No stack trace or generic `Failed: Error:` prefix.
 
-**Actual Result:** _[fill in during implementation — paste verbatim message in the Logs & Output section below]_
+**Actual Result:** Both calls return a structured error from the MCP `trigger-workflow` tool. `content[0].text` is a human-facing bulleted list naming the failing field (`foo`) plus the workflow's `triggerSchema` for self-correction. `structuredContent` carries `success: false`, the validator's exact strings under `validationErrors: string[]`, and the schema under `triggerSchema`. No stack trace, no `Failed:` prefix, no leading `Error:`. See verbatim capture under `## Phase 3 — TriggerSchemaError formatting` and Logs & Output below.
 
-**Status:** _[in-progress]_
+**Status:** PASS
 
 ### TC-2: FE editor — edit, save, persist (Phase 4)
 
@@ -150,14 +150,84 @@ _[populate during Phase 4/5 implementation]_
 
 #### Phase 3 — captured `mcp:trigger-workflow` error (missing required)
 
+`content[0].text` (verbatim from `src/tools/workflows/trigger-workflow.ts` handler):
+
 ```
-[paste verbatim during Phase 3 implementation]
+Trigger payload did not match the workflow's triggerSchema:
+- root: missing required property "foo"
+
+Expected triggerSchema:
+```json
+{
+  "type": "object",
+  "required": [
+    "foo"
+  ],
+  "properties": {
+    "foo": {
+      "type": "string"
+    }
+  }
+}
+```
+```
+
+`structuredContent`:
+
+```json
+{
+  "success": false,
+  "message": "Trigger payload did not match the workflow's triggerSchema (1 error).",
+  "validationErrors": [
+    "root: missing required property \"foo\""
+  ],
+  "triggerSchema": {
+    "type": "object",
+    "required": ["foo"],
+    "properties": { "foo": { "type": "string" } }
+  }
+}
 ```
 
 #### Phase 3 — captured `mcp:trigger-workflow` error (type mismatch)
 
+`content[0].text`:
+
 ```
-[paste verbatim during Phase 3 implementation]
+Trigger payload did not match the workflow's triggerSchema:
+- foo: expected type "string", got number
+
+Expected triggerSchema:
+```json
+{
+  "type": "object",
+  "required": [
+    "foo"
+  ],
+  "properties": {
+    "foo": {
+      "type": "string"
+    }
+  }
+}
+```
+```
+
+`structuredContent`:
+
+```json
+{
+  "success": false,
+  "message": "Trigger payload did not match the workflow's triggerSchema (1 error).",
+  "validationErrors": [
+    "foo: expected type \"string\", got number"
+  ],
+  "triggerSchema": {
+    "type": "object",
+    "required": ["foo"],
+    "properties": { "foo": { "type": "string" } }
+  }
+}
 ```
 
 ### External Links
@@ -172,6 +242,108 @@ _[fill in once PR is opened]_
 
 **Status**: _[set to PASS / FAIL once all test cases are filled in]_
 **Summary**: _[1–2 sentences after implementation]_
+
+## Phase 3 — TriggerSchemaError formatting
+
+This section consolidates the Phase 3 evidence required by the plan's Automated QA item 2 ("Sub-agent appends the captured error message verbatim, alongside the input payload and the workflow's `triggerSchema`, so future readers can judge whether the message is self-correcting").
+
+**Workflow `triggerSchema`** (used for both cases below):
+
+```json
+{
+  "type": "object",
+  "required": ["foo"],
+  "properties": { "foo": { "type": "string" } }
+}
+```
+
+### Case A — missing required field
+
+**Input payload** (`triggerData` arg to `mcp:trigger-workflow`):
+
+```json
+{}
+```
+
+**Returned `content[0].text`** (verbatim from the live handler in `src/tools/workflows/trigger-workflow.ts`):
+
+```
+Trigger payload did not match the workflow's triggerSchema:
+- root: missing required property "foo"
+
+Expected triggerSchema:
+```json
+{
+  "type": "object",
+  "required": [
+    "foo"
+  ],
+  "properties": {
+    "foo": {
+      "type": "string"
+    }
+  }
+}
+```
+```
+
+**Returned `structuredContent.validationErrors`**:
+
+```json
+["root: missing required property \"foo\""]
+```
+
+**Self-correcting checks** (per plan's Phase 3 Automated QA item 3):
+
+- (a) Failing field name appears: `foo` is named explicitly in the bullet line and re-shown in the echoed schema. PASS
+- (b) Type-mismatch info: not applicable to this case (covered by Case B).
+- (c) No stack trace, no `Failed:` prefix, no leading `Error:` prefix. PASS
+
+### Case B — type mismatch
+
+**Input payload**:
+
+```json
+{ "foo": 42 }
+```
+
+**Returned `content[0].text`**:
+
+```
+Trigger payload did not match the workflow's triggerSchema:
+- foo: expected type "string", got number
+
+Expected triggerSchema:
+```json
+{
+  "type": "object",
+  "required": [
+    "foo"
+  ],
+  "properties": {
+    "foo": {
+      "type": "string"
+    }
+  }
+}
+```
+```
+
+**Returned `structuredContent.validationErrors`**:
+
+```json
+["foo: expected type \"string\", got number"]
+```
+
+**Self-correcting checks**:
+
+- (a) Failing field name `foo` appears in both the bullet line and the echoed schema. PASS
+- (b) Expected vs actual type both appear: `expected type "string", got number`. PASS
+- (c) No stack trace, no `Failed:` prefix, no leading `Error:` prefix. PASS
+
+### How this evidence was produced
+
+Captured by exercising the production tool handler directly via the MCP SDK's `_registeredTools` map (the same path the test harness uses) against a fresh in-process API + DB. The same wiring is asserted in `src/tests/workflow-mcp-trigger-schema.test.ts` tests `trigger-workflow with missing required field → structured TriggerSchemaError` and `trigger-workflow with type-mismatched payload → structured TriggerSchemaError`.
 
 ## Appendix
 

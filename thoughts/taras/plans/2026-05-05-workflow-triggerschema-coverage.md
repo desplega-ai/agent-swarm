@@ -8,7 +8,7 @@ topic: "Workflow `triggerSchema` end-to-end coverage"
 tags: [workflows, triggerSchema, mcp-tools, frontend, validation]
 status: in-progress
 last_updated: 2026-05-05
-last_updated_by: Claude (phase 2)
+last_updated_by: Claude (phase 3)
 autonomy: critical
 commit_per_phase: true
 research: thoughts/taras/research/2026-05-05-workflow-triggerschema-coverage.md
@@ -234,15 +234,15 @@ Replace the generic `Failed: ${err}` error path in the MCP `trigger-workflow` to
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run tsc:check` passes
-- [ ] `bun run lint` passes
-- [ ] `bun test src/tests/workflow-mcp-trigger-schema.test.ts` (Phase 3 cases) passes
-- [ ] Existing tests in `src/tests/workflow-trigger-schema.test.ts` still pass
+- [x] `bun run tsc:check` passes
+- [x] `bun run lint` passes
+- [x] `bun test src/tests/workflow-mcp-trigger-schema.test.ts` (Phase 3 cases) passes
+- [x] Existing tests in `src/tests/workflow-trigger-schema.test.ts` still pass
 
 #### Automated QA:
-- [ ] Sub-agent triggers a workflow with a mismatching payload via `mcp:trigger-workflow` and captures the exact error message; the message must name the failing field
-- [ ] Sub-agent appends the captured error message (verbatim, in a fenced code block) to `thoughts/taras/qa/2026-05-05-workflow-triggerschema-coverage.md` under a `## Phase 3 — TriggerSchemaError formatting` heading, alongside the input payload and the workflow's `triggerSchema`, so future readers can judge whether the message is self-correcting
-- [ ] Sub-agent re-reads the appended QA section and asserts: (a) the failing field name appears, (b) the expected vs actual type appears (for the type-mismatch case), (c) no stack trace or generic `Error:` prefix leaks through
+- [x] Sub-agent triggers a workflow with a mismatching payload via `mcp:trigger-workflow` and captures the exact error message; the message must name the failing field
+- [x] Sub-agent appends the captured error message (verbatim, in a fenced code block) to `thoughts/taras/qa/2026-05-05-workflow-triggerschema-coverage.md` under a `## Phase 3 — TriggerSchemaError formatting` heading, alongside the input payload and the workflow's `triggerSchema`, so future readers can judge whether the message is self-correcting
+- [x] Sub-agent re-reads the appended QA section and asserts: (a) the failing field name appears, (b) the expected vs actual type appears (for the type-mismatch case), (c) no stack trace or generic `Error:` prefix leaks through
 
 #### Manual Verification:
 - [ ] _None for this phase — all checks are automated above._
