@@ -3031,6 +3031,129 @@
         }
       }
     },
+    "/api/memory/rate": {
+      "post": {
+        "summary": "Submit RatingEvents to update memory usefulness posteriors",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "memoryId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "signal": {
+                          "type": "number",
+                          "minimum": -1,
+                          "maximum": 1
+                        },
+                        "weight": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "llm",
+                            "explicit-self"
+                          ]
+                        },
+                        "reasoning": {
+                          "type": "string",
+                          "maxLength": 500
+                        },
+                        "taskId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "required": [
+                        "memoryId",
+                        "signal",
+                        "weight",
+                        "source"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 50
+                  }
+                },
+                "required": [
+                  "events"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ratings applied; per-event rejections returned in body"
+          },
+          "400": {
+            "description": "Validation error or explicit-self R6 spam-guard rejection"
+          },
+          "409": {
+            "description": "Duplicate explicit-self rating for (taskId, memoryId)"
+          }
+        }
+      }
+    },
+    "/api/memory/retrievals": {
+      "get": {
+        "summary": "List memories retrieved for a task or session (rater input)",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "sessionId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieval rows joined with agent_memory"
+          },
+          "400": {
+            "description": "Missing taskId/sessionId or X-Agent-ID"
+          }
+        }
+      }
+    },
     "/api/prompt-templates/resolved": {
       "get": {
         "summary": "Resolve a prompt template for a given event type and scope chain",
