@@ -52,6 +52,9 @@ export interface MemoryCandidate extends AgentMemory {
   accessCount: number;
   expiresAt: string | null;
   embeddingModel: string | null;
+  /** Beta-Binomial usefulness posterior. Default Beta(1,1) → reranker no-op. */
+  alpha: number;
+  beta: number;
 }
 
 export interface MemorySearchOptions {

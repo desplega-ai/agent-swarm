@@ -30,6 +30,8 @@ type AgentMemoryRow = {
   expiresAt: string | null;
   accessCount: number;
   embeddingModel: string | null;
+  alpha: number;
+  beta: number;
 };
 
 function rowToAgentMemory(row: AgentMemoryRow): AgentMemory {
@@ -61,6 +63,8 @@ function rowToCandidate(row: AgentMemoryRow, similarity: number): MemoryCandidat
     accessCount: row.accessCount ?? 0,
     expiresAt: row.expiresAt ?? null,
     embeddingModel: row.embeddingModel ?? null,
+    alpha: row.alpha ?? 1.0,
+    beta: row.beta ?? 1.0,
   };
 }
 
