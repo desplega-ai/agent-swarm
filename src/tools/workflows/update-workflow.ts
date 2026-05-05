@@ -18,7 +18,11 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
       title: "Update Workflow",
       annotations: { destructiveHint: false },
       description:
-        "Update an existing workflow's name, description, definition, triggers, cooldown, input, or enabled state. Creates a version snapshot before applying changes.",
+        "Update an existing workflow's name, description, definition, triggers, cooldown, input, triggerSchema, or enabled state. " +
+        "Creates a version snapshot before applying changes. " +
+        "TRIGGER SCHEMA: pass 'triggerSchema' as a JSON-Schema object to set/replace, or 'null' to clear. " +
+        "Supported JSON-Schema keywords: type, required, properties, enum, const, items (recursive into arrays). " +
+        "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.",
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow ID to update"),
         name: z.string().optional().describe("New name for the workflow"),
@@ -47,6 +51,15 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           .nullable()
           .describe("Default VCS repo for all agent-task nodes (null to remove)"),
         enabled: z.boolean().optional().describe("Enable or disable the workflow"),
+        triggerSchema: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .nullable()
+          .describe(
+            "New trigger payload JSON-Schema (null to clear). " +
+              "Supported keywords: type, required, properties, enum, const, items. " +
+              "Other JSON-Schema keywords are silently ignored.",
+          ),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -56,7 +69,19 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
       }),
     },
     async (
-      { id, name, description, definition, triggers, cooldown, input, dir, vcsRepo, enabled },
+      {
+        id,
+        name,
+        description,
+        definition,
+        triggers,
+        cooldown,
+        input,
+        dir,
+        vcsRepo,
+        enabled,
+        triggerSchema,
+      },
       requestInfo,
     ) => {
       try {
@@ -101,6 +126,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           dir: dir === null ? null : dir,
           vcsRepo: vcsRepo === null ? null : vcsRepo,
           enabled,
+          triggerSchema: triggerSchema === null ? null : triggerSchema,
         });
         if (!workflow) {
           return {
