@@ -28,6 +28,7 @@ import "../src/http/tasks";
 import "../src/http/trackers/jira";
 import "../src/http/trackers/linear";
 import "../src/http/webhooks";
+import "../src/http/workflow-events";
 import "../src/http/workflows";
 
 const version = (await Bun.file("package.json").json()).version;

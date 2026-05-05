@@ -14,3 +14,4 @@ export { createExecutorRegistry, ExecutorRegistry } from "./registry";
 export { ScriptExecutor } from "./script";
 export { ValidateExecutor } from "./validate";
 export { VcsExecutor } from "./vcs";
+export { WaitExecutor } from "./wait";

@@ -7644,6 +7644,108 @@
         }
       }
     },
+    "/api/workflow-runs/{runId}/events": {
+      "post": {
+        "summary": "Fire a run-scoped event signal",
+        "description": "Emits an event onto the workflow event bus with `_runId` injected. Used by wait nodes in `event` mode with `scope: 'run'`. The body's `name` is the bus event name; `payload` is forwarded as-is plus `_runId`.",
+        "tags": [
+          "WorkflowEvents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event emitted"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Workflow run not found"
+          }
+        }
+      }
+    },
+    "/api/workflow-events": {
+      "post": {
+        "summary": "Fire a global workflow event signal",
+        "description": "Emits an event onto the workflow event bus. Wait-states with `scope: 'global'` may match. Run-scoped waits will NOT match this broadcast unless the payload carries a matching `workflowRunId`.",
+        "tags": [
+          "WorkflowEvents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event emitted"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
     "/api/workflows": {
       "get": {
         "summary": "List all workflows",

@@ -5,8 +5,10 @@ branch: main
 repository: agent-swarm
 topic: "Wait Node for Workflow Engine"
 tags: [plan, workflow, wait, scheduler, events]
-status: draft
+status: completed
 autonomy: critical
+last_updated: 2026-05-04
+last_updated_by: Claude (orchestrator)
 ---
 
 # Wait Node for Workflow Engine Implementation Plan
@@ -87,7 +89,7 @@ A new `wait` async executor is registered. Workflow authors can:
     mode: event
     eventName: github.pull_request.merged
     filter: { number: "{{trigger.pr.number}}" }
-    timeout: { seconds: 86400, action: timeout }
+    timeoutMs: 86400000                            # 24h
   next:
     event:   downstream-on-event
     timeout: downstream-on-timeout
@@ -99,7 +101,7 @@ A new `wait` async executor is registered. Workflow authors can:
     mode: event
     eventName: github.pull_request.merged
     filter: "(payload) => payload.labels.some(l => l.name === 'release') && payload.number > 1000"
-    timeout: { seconds: 3600 }
+    timeoutMs: 3600000                             # 1h
   next:
     event:   release-pipeline
     timeout: give-up
@@ -205,15 +207,15 @@ CREATE INDEX IF NOT EXISTS idx_wait_states_event ON wait_states(eventName) WHERE
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
-- [ ] DB-boundary check: `bash scripts/check-db-boundary.sh`
-- [ ] New migration applies cleanly to a fresh DB: `rm agent-swarm-db.sqlite && bun run start:http` (server boots without error; `wait_states` table exists)
-- [ ] New migration applies to an existing DB: `bun run start:http` against a pre-existing DB shows no migration errors
-- [ ] Unit test: `bun test src/tests/workflow-wait-state-queries.test.ts` (new file) — covers create / get-by-step / get-due / resolve race-safety / get-stuck
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
+- [x] DB-boundary check: `bash scripts/check-db-boundary.sh`
+- [x] New migration applies cleanly to a fresh DB: `rm agent-swarm-db.sqlite && bun run start:http` (server boots without error; `wait_states` table exists)
+- [x] New migration applies to an existing DB: `bun run start:http` against a pre-existing DB shows no migration errors
+- [x] Unit test: `bun test src/tests/workflow-wait-state-queries.test.ts` (new file) — covers create / get-by-step / get-due / resolve race-safety / get-stuck
 
 #### Automated QA:
-- [ ] Sub-agent: open a SQLite shell on a freshly-bootstrapped DB and verify the schema matches the migration (tables + indexes)
+- [x] Sub-agent: open a SQLite shell on a freshly-bootstrapped DB and verify the schema matches the migration (tables + indexes)
 
 #### Manual Verification:
 - [ ] Confirm the chosen migration number doesn't collide with anything in flight on `main`
@@ -276,15 +278,15 @@ Wire `startWaitPoller(registry)` from `src/workflows/index.ts:43-61` (`initWorkf
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
-- [ ] All workflow tests pass: `bun test src/tests/workflow-*.test.ts`
-- [ ] New unit test: `bun test src/tests/workflow-wait-time.test.ts` — exercises a full workflow with a time-wait node, asserts step transitions `pending → waiting → completed`, asserts run finishes after `wakeUpAt + poll-tick`
-- [ ] Recovery test: `bun test src/tests/workflow-wait-recovery.test.ts` — simulate a "server died while waiting" scenario by inserting a `wait_states` row with `wakeUpAt` in the past, call `recoverIncompleteRuns`, assert run completes
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
+- [x] All workflow tests pass: `bun test src/tests/workflow-*.test.ts`
+- [x] New unit test: `bun test src/tests/workflow-wait-time.test.ts` — exercises a full workflow with a time-wait node, asserts step transitions `pending → waiting → completed`, asserts run finishes after `wakeUpAt + poll-tick`
+- [x] Recovery test: `bun test src/tests/workflow-wait-recovery.test.ts` — simulate a "server died while waiting" scenario by inserting a `wait_states` row with `wakeUpAt` in the past, call `recoverIncompleteRuns`, assert run completes
 
 #### Automated QA:
-- [ ] Sub-agent walkthrough: start `bun run dev:http`, create a workflow definition with a 10s `wait` node via `create-workflow` MCP tool (or direct HTTP), trigger it, observe via `get-workflow-run` that step is `waiting` for ~10s, then `completed`. Capture timestamps.
-- [ ] Long-wait persistence: create a wait of 60s, restart the API server mid-wait (`bun run pm2-restart`), confirm the run still completes after the original `wakeUpAt`.
+- [x] Sub-agent walkthrough: start `bun run dev:http`, create a workflow definition with a 10s `wait` node via `create-workflow` MCP tool (or direct HTTP), trigger it, observe via `get-workflow-run` that step is `waiting` for ~10s, then `completed`. Capture timestamps. — verified live 2026-05-04, evidence in `thoughts/taras/qa/2026-05-04-wait-node-workflow-engine.md` § A
+- [x] Long-wait persistence: create a wait of 60s, restart the API server mid-wait (`bun run pm2-restart`), confirm the run still completes after the original `wakeUpAt`. — verified live 2026-05-05 against a throwaway server on `:3517` with `kill -9` mid-wait; recovery resumed past the original `wakeUpAt`. Evidence in `thoughts/taras/qa/2026-05-04-wait-node-workflow-engine.md` § E. Also covered deterministically by `src/tests/workflow-wait-recovery.test.ts`
 
 #### Manual Verification:
 - [ ] Confirm 5s poller cadence is acceptable for the demo durations (no surprise drift)
@@ -313,11 +315,11 @@ configSchema = z.discriminatedUnion("mode", [
     eventName: z.string().min(1),
     filter: z.union([z.record(z.string(), z.unknown()), z.string()]).optional(),
     scope: z.enum(["run", "global"]).default("run"),
-    timeout: z.object({ seconds: z.number().int().min(1) }).optional(),
+    timeoutMs: z.number().int().min(1).max(31_536_000_000).optional(),
   }),
 ]);
 ```
-Insert `wait_states` row with `eventName`, `eventFilter`, `expiresAt = now + timeout.seconds * 1000` (or NULL).
+Insert `wait_states` row with `eventName`, `eventFilter`, `expiresAt = now + timeoutMs` (or NULL).
 
 **`scope` semantics** (the listener enforces this — without it the field is dead config):
 - `scope: "run"` (default): the wait listener only matches if `payload._runId === waitState.workflowRunId`. The run-scoped HTTP endpoint (Step 3 below) injects `_runId` into the payload; built-in events emitted from `src/be/db.ts` already include `workflowRunId` (use that field name as the equivalent) — the matcher accepts either `_runId` or `workflowRunId` and compares against `waitState.workflowRunId`.
@@ -361,9 +363,9 @@ No filter ⇒ matches anything. Zod schema for the filter field: `z.union([z.rec
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
-- [ ] Unit test: `bun test src/tests/workflow-wait-filter.test.ts` — must cover ALL of:
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
+- [x] Unit test: `bun test src/tests/workflow-wait-filter.test.ts` — must cover ALL of:
   - **(a) Object form** — exact equality, dot-path nested keys (`pr.number`), array equality (deep), missing keys → no-match, type-mismatch (string vs number) → no-match, no-filter → match-everything, multiple keys must all match.
   - **(b) String form — happy path** — arrow-fn evaluates correctly, returns boolean directly, returns truthy non-boolean (coerced via `!!`), throws → no-match, undefined return → no-match.
   - **(c) String form — sandbox penetration** (each is its own test case, must all return no-match without throwing into caller):
@@ -376,13 +378,13 @@ No filter ⇒ matches anything. Zod schema for the filter field: `z.union([z.rec
     - Side-effect attempts: `(p) => { p.injected = true; return true }` — assert the original payload is structurally unchanged after the call (defensive copy or freeze).
   - **(d) Zod-boundary rejections** — filter string >2KB rejected at parse, filter string that isn't a valid arrow-fn expression rejected at executor init (not at first event).
   - **(e) `scope` enforcement** — run-scope rejects mismatched `_runId`/`workflowRunId`, global-scope ignores it; both forms tested with the same scope matrix.
-- [ ] Integration test: `bun test src/tests/workflow-wait-event.test.ts` — workflow with event-wait, fire signal via direct function call, assert run completes via `event` port
-- [ ] Timeout test: same file, with `timeout.seconds: 1`, fire poller manually (or wait), assert routing to `timeout` port
-- [ ] HTTP test: `bun test src/tests/workflow-wait-http.test.ts` — start server (or use existing test harness), POST to both endpoints, assert paused run completes
-- [ ] OpenAPI freshness: `bun run docs:openapi` then `git diff --exit-code openapi.json` — must be clean after regen
+- [x] Integration test: `bun test src/tests/workflow-wait-event.test.ts` — workflow with event-wait, fire signal via direct function call, assert run completes via `event` port
+- [x] Timeout test: same file, with `timeout.seconds: 1`, fire poller manually (or wait), assert routing to `timeout` port
+- [x] HTTP test: `bun test src/tests/workflow-wait-http.test.ts` — start server (or use existing test harness), POST to both endpoints, assert paused run completes
+- [x] OpenAPI freshness: `bun run docs:openapi` then `git diff --exit-code openapi.json` — must be clean after regen
 
 #### Automated QA:
-- [ ] Sub-agent walkthrough: create a workflow with an event-wait node + 30s timeout. Curl `POST /api/workflow-runs/<run-id>/events` with matching payload, observe completion via `event` port. Repeat with non-matching filter; observe timeout via `timeout` port.
+- [x] Sub-agent walkthrough: create a workflow with an event-wait node + 30s timeout. Curl `POST /api/workflow-runs/<run-id>/events` with matching payload, observe completion via `event` port. Repeat with non-matching filter; observe timeout via `timeout` port. — verified live 2026-05-04, evidence in `thoughts/taras/qa/2026-05-04-wait-node-workflow-engine.md` §§ B, C
 
 #### Manual Verification:
 - [ ] Race scenario inspection: have two concurrent runs waiting on the same `eventName`, fire a global signal, confirm both fire and `firedPayload` is recorded on each row
@@ -440,15 +442,15 @@ Run it; complete the upstream `agent-task`; assert the wait resolves via the exi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
-- [ ] All tests: `bun test`
-- [ ] Built-in event integration test: `bun test src/tests/workflow-wait-builtin-events.test.ts` — passes with NO production-code changes outside of Phases 1–3
-- [ ] OpenAPI drift: `bun run docs:openapi` then `git diff --exit-code openapi.json docs-site/content/docs/api-reference` (defensive — fails the merge gate if any version bump or route touch slipped in past Phase 3)
-- [ ] `create-workflow` accepts a wait-node definition: round-trip test in suite
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
+- [x] All tests: `bun test`
+- [x] Built-in event integration test: `bun test src/tests/workflow-wait-builtin-events.test.ts` — passes with NO production-code changes outside of Phases 1–3
+- [x] OpenAPI drift: `bun run docs:openapi` then `git diff --exit-code openapi.json docs-site/content/docs/api-reference` (defensive — fails the merge gate if any version bump or route touch slipped in past Phase 3)
+- [x] `create-workflow` accepts a wait-node definition: round-trip test in suite
 
 #### Automated QA:
-- [ ] Sub-agent walkthrough: define and run a 2-node workflow (`agent-task` → `wait` keyed on `task.completed` filtered by `taskId`). Capture run trace showing the wait fires when the upstream task completes — no manual signal POST required.
+- [x] Sub-agent walkthrough: define and run a 2-node workflow (`agent-task` → `wait` keyed on `task.completed` filtered by `taskId`). Capture run trace showing the wait fires when the upstream task completes — no manual signal POST required. — verified DEGRADED 2026-05-04 via `POST /api/workflow-events` signal injection (real agent-task spawn requires worker container); full fan-out flow covered by `src/tests/workflow-wait-builtin-events.test.ts`. Evidence in `thoughts/taras/qa/2026-05-04-wait-node-workflow-engine.md` § D
 
 #### Manual Verification:
 - [ ] Read the runbook update top-to-bottom; confirm a workflow author could write a wait node from the docs alone, including using built-in events
@@ -503,7 +505,7 @@ curl -X POST http://localhost:3013/api/workflows -H "Authorization: Bearer 12312
         { "id": "w1", "type": "wait",
           "config": { "mode": "event", "eventName": "demo.signal",
                       "filter": { "ok": true },
-                      "timeout": { "seconds": 60 } },
+                      "timeoutMs": 60000 },
           "next": { "event": "yay", "timeout": "nay" } },
         { "id": "yay", "type": "notify", "config": { "message": "got it" } },
         { "id": "nay", "type": "notify", "config": { "message": "timed out" } }
@@ -581,6 +583,11 @@ All findings below were verified against the codebase before being applied.
 - [x] Executor count `10 total` → `9 total` (verified against `src/workflows/executors/registry.ts:64-75`).
 - [x] Test file names `wait-state-queries.test.ts`, `wait-filter.test.ts` → `workflow-wait-state-queries.test.ts`, `workflow-wait-filter.test.ts` to match the existing `workflow-*.test.ts` convention.
 - [x] `wait-filter.test.ts` test now also covers `scope: run/global` enforcement.
+
+### Applied — Post-implementation
+
+- [x] **Migration `050_wait_states_scope.sql`** — Phase 3's `scope: "run" | "global"` field needed a dedicated DB column for the bus listener to enforce in O(1) without parsing JSON on every event. Original Phase 1 schema didn't include it (Phase 1 shipped time-mode only), so a follow-up migration was added during Phase 3. The column is `eventScope TEXT NOT NULL DEFAULT 'run' CHECK (eventScope IN ('run', 'global'))`. Existing time-mode rows safely default to `'run'` (never traverses the bus path).
+- [x] **`timeout: { seconds: N }` → `timeoutMs: N`** — original Phase 3 schema used `{ seconds: number }`, inconsistent with time-mode's `durationMs`. Renamed for symmetry and to make UI formatting trivial (raw ms → pretty-print + absolute timestamp). All examples (Desired End State YAML, Phase 3 Zod, Manual E2E JSON), tests (`workflow-wait-event.test.ts`, `workflow-wait-builtin-events.test.ts`), runbook, and executor updated. Schema also gained the `.max(31_536_000_000)` (1 year) ceiling that `durationMs` already had.
 
 ### Applied — File-review pass
 

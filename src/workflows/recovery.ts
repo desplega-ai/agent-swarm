@@ -2,6 +2,7 @@ import {
   getCompletedStepNodeIds,
   getDb,
   getStuckApprovalRuns,
+  getStuckWaitRuns,
   getStuckWorkflowRuns,
   getWorkflow,
   getWorkflowRun,
@@ -13,7 +14,7 @@ import { checkpointStep } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
-import { finalizeOrWait } from "./resume";
+import { finalizeOrWait, resumeWaitState } from "./resume";
 
 /**
  * Recover incomplete workflow runs on server startup.
@@ -35,6 +36,9 @@ export async function recoverIncompleteRuns(registry: ExecutorRegistry): Promise
 
   // --- Case 3: Waiting runs whose approval requests may have resolved ---
   recovered += await recoverApprovalWaitingRuns(registry);
+
+  // --- Case 4: Waiting runs whose wait_states are overdue or already resolved ---
+  recovered += await recoverWaitStates(registry);
 
   if (recovered > 0) {
     console.log(`[workflows] Recovered ${recovered} incomplete run(s) on startup`);
@@ -198,6 +202,56 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
   }
 
   return recovered;
+}
+
+/**
+ * Recover waiting runs whose `wait_states` rows are either already resolved
+ * (case a — signal arrived / timeout fired while the API was down and the
+ * in-memory bus event was lost) or pending-but-overdue (case b — `wakeUpAt`
+ * or `expiresAt` already past; the wait poller would catch these on its first
+ * tick, but explicit recovery avoids the up-to-5s startup latency window).
+ *
+ * Mirrors `recoverApprovalWaitingRuns`. Time-mode overdue rows resume as
+ * `fired`. Event-mode overdue-but-pending rows resume as `timeout`. Already-
+ * resolved rows resume with their stored status (and stored `firedPayload`
+ * for fired event waits).
+ */
+async function recoverWaitStates(registry: ExecutorRegistry): Promise<number> {
+  const stuckRuns = getStuckWaitRuns();
+  let recovered = 0;
+
+  for (const stuck of stuckRuns) {
+    try {
+      // Decide what status to (re)apply.
+      let resumeStatus: "fired" | "timeout";
+      let payload: unknown;
+
+      if (stuck.waitStatus === "fired") {
+        resumeStatus = "fired";
+        payload = stuck.firedPayload != null ? safeJsonParse(stuck.firedPayload) : undefined;
+      } else if (stuck.waitStatus === "timeout") {
+        resumeStatus = "timeout";
+      } else {
+        // pending + overdue
+        resumeStatus = stuck.waitMode === "time" ? "fired" : "timeout";
+      }
+
+      await resumeWaitState(stuck.waitId, resumeStatus, payload, registry);
+      recovered++;
+    } catch (err) {
+      console.error(`[workflows] Failed to recover wait-state ${stuck.waitId}:`, err);
+    }
+  }
+
+  return recovered;
+}
+
+function safeJsonParse(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
 }
 
 /**

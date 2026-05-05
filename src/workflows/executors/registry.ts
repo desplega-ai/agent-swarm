@@ -9,6 +9,7 @@ import { RawLlmExecutor } from "./raw-llm";
 import { ScriptExecutor } from "./script";
 import { ValidateExecutor } from "./validate";
 import { VcsExecutor } from "./vcs";
+import { WaitExecutor } from "./wait";
 
 export interface ExecutorTypeInfo {
   type: string;
@@ -73,6 +74,7 @@ export function createExecutorRegistry(deps: ExecutorDependencies): ExecutorRegi
   // Async executors (Phase 4)
   registry.register(new AgentTaskExecutor(deps));
   registry.register(new HumanInTheLoopExecutor(deps));
+  registry.register(new WaitExecutor(deps));
 
   return registry;
 }

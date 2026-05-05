@@ -697,7 +697,7 @@ describe("ValidateExecutor", () => {
 // ─── Registry Wiring ─────────────────────────────────────────
 
 describe("createExecutorRegistry", () => {
-  test("registers all 9 executors (7 instant + 2 async)", () => {
+  test("registers all 10 executors (7 instant + 3 async)", () => {
     const registry = createExecutorRegistry(mockDeps);
     const types = registry.types();
 
@@ -710,7 +710,8 @@ describe("createExecutorRegistry", () => {
     expect(types).toContain("validate");
     expect(types).toContain("agent-task");
     expect(types).toContain("human-in-the-loop");
-    expect(types).toHaveLength(9);
+    expect(types).toContain("wait");
+    expect(types).toHaveLength(10);
   });
 
   test("instant executors have mode instant, async executors have mode async", () => {
@@ -729,6 +730,7 @@ describe("createExecutorRegistry", () => {
     }
     expect(registry.get("agent-task").mode).toBe("async");
     expect(registry.get("human-in-the-loop").mode).toBe("async");
+    expect(registry.get("wait").mode).toBe("async");
   });
 
   test("get() retrieves the correct executor by type", () => {

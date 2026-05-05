@@ -1004,6 +1004,41 @@ export const WorkflowRunStepSchema = z.object({
 });
 export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;
 
+// --- Wait State (workflow `wait` node side table) ---
+
+export const WaitModeSchema = z.enum(["time", "event"]);
+export type WaitMode = z.infer<typeof WaitModeSchema>;
+
+export const WaitStateStatusSchema = z.enum(["pending", "fired", "timeout"]);
+export type WaitStateStatus = z.infer<typeof WaitStateStatusSchema>;
+
+/**
+ * Row shape for `wait_states` table — keep in sync with
+ * `src/be/migrations/049_wait_states.sql`.
+ *
+ * - `mode='time'`: `wakeUpAt` is set; `eventName`/`eventFilter`/`expiresAt` are null.
+ * - `mode='event'`: `eventName` is set; `eventFilter` is optional (flat
+ *   key/dot-path object OR arrow-fn body string); `expiresAt` is set when the
+ *   wait carries a timeout.
+ */
+export const WaitStateRowSchema = z.object({
+  id: z.string(),
+  workflowRunId: z.string(),
+  workflowRunStepId: z.string(),
+  mode: WaitModeSchema,
+  wakeUpAt: z.string().nullable(),
+  eventName: z.string().nullable(),
+  eventFilter: z.union([z.record(z.string(), z.unknown()), z.string()]).nullable(),
+  expiresAt: z.string().nullable(),
+  status: WaitStateStatusSchema,
+  firedPayload: z.unknown().nullable(),
+  resolvedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  eventScope: z.enum(["run", "global"]),
+});
+export type WaitStateRow = z.infer<typeof WaitStateRowSchema>;
+
 // ============================================================================
 // Prompt Template Types
 // ============================================================================
