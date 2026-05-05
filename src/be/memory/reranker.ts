@@ -32,13 +32,41 @@ export function accessBoost(accessedAt: string, accessCount: number, now: Date):
 }
 
 /**
- * Final score combining similarity, recency decay, and access boost.
+ * Beta-Binomial usefulness factor for reranking.
+ *
+ * Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-1.md §5
+ *
+ * At Beta(1,1) (default prior) returns 1.0 exactly — strict no-op vs.
+ * pre-rater behaviour. Proven memories climb up to 2.0. Floored at the value
+ * of MEMORY_DEMOTION_FLOOR (default 1.0 = no demotion) — the default preserves
+ * brainstorm intent (memories are demoted toward the floor but never deleted
+ * on the reranker path) and is configurable per deployment.
+ */
+function readDemotionFloor(): number {
+  const raw = process.env.MEMORY_DEMOTION_FLOOR;
+  const n = raw == null || raw === "" ? 1.0 : Number(raw);
+  return Number.isFinite(n) ? n : 1.0;
+}
+
+export function usefulness(alpha: number, beta: number): number {
+  const denom = alpha + beta;
+  if (denom <= 0) return 1.0;
+  const mean = alpha / denom;
+  return Math.max(readDemotionFloor(), Math.min(2.0, 2 * mean));
+}
+
+/**
+ * Final score combining similarity, recency decay, access boost, and
+ * Beta-Binomial usefulness. With default Beta(1,1) and default
+ * MEMORY_DEMOTION_FLOOR=1.0, the usefulness factor is exactly 1.0 and this
+ * computation matches the pre-rater behaviour byte-for-byte.
  */
 export function computeScore(candidate: MemoryCandidate, now: Date): number {
   return (
     candidate.similarity *
     recencyDecay(candidate.createdAt, now) *
-    accessBoost(candidate.accessedAt, candidate.accessCount, now)
+    accessBoost(candidate.accessedAt, candidate.accessCount, now) *
+    usefulness(candidate.alpha, candidate.beta)
   );
 }
 
