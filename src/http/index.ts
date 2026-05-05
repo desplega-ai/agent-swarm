@@ -46,6 +46,7 @@ import { handleTasks } from "./tasks";
 import { handleTrackers } from "./trackers";
 import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
 import { handleWebhooks } from "./webhooks";
+import { handleWorkflowEvents } from "./workflow-events";
 import { handleWorkflows } from "./workflows";
 
 // Last-line-of-defense: never let a single bad request (e.g. a SQLITE_BUSY
@@ -129,6 +130,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handlePricing(req, res, pathSegments, queryParams, myAgentId),
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
     () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
+    () => handleWorkflowEvents(req, res, pathSegments, queryParams),
     () => handleApprovalRequests(req, res, pathSegments, queryParams),
     () => handleConfig(req, res, pathSegments, queryParams),
     () => handleIntegrations(req, res, pathSegments),

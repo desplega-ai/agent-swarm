@@ -29,6 +29,7 @@
     "tasks",
     "trackers",
     "webhooks",
+    "workflowevents",
     "workflows"
   ]
 }

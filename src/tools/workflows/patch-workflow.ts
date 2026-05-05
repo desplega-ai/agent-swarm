@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getWorkflow, updateWorkflow } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import type { WorkflowDefinitionPatch } from "@/types";
+import type { WorkflowPatch } from "@/types";
 import { WorkflowNodePatchSchema } from "@/types";
 import { applyDefinitionPatch, validateDefinition } from "@/workflows/definition";
 import { snapshotWorkflow } from "@/workflows/version";
@@ -14,8 +14,13 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
       title: "Patch Workflow Definition",
       annotations: { destructiveHint: false },
       description:
-        "Partially update a workflow definition by creating, updating, or deleting individual nodes. " +
-        "Operations are applied in order: delete → create → update. " +
+        "Partially update a workflow by creating, updating, or deleting individual nodes, " +
+        "and/or by setting/clearing the trigger payload schema. " +
+        "DAG operations are applied in order: delete → create → update. " +
+        "`triggerSchema` is independent of DAG ops: pass an object to set/replace, " +
+        "pass null to clear, or omit to leave unchanged. " +
+        "Validator subset for `triggerSchema`: type, required, properties, enum, const, items. " +
+        "Other JSON-Schema keywords are silently ignored. " +
         "Creates a version snapshot before applying changes.",
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow ID to patch"),
@@ -48,6 +53,15 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
           .enum(["fail", "continue"])
           .optional()
           .describe("Update onNodeFailure behavior"),
+        triggerSchema: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .nullable()
+          .describe(
+            "Optional JSON-Schema describing the expected trigger payload. " +
+              "Pass an object to set/replace; pass null to clear; omit to leave unchanged. " +
+              "Validator subset: type, required, properties, enum, const, items.",
+          ),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -59,7 +73,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
         nodesDeleted: z.number().optional(),
       }),
     },
-    async ({ id, update, delete: del, create, onNodeFailure }, requestInfo) => {
+    async ({ id, update, delete: del, create, onNodeFailure, triggerSchema }, requestInfo) => {
       try {
         const existing = getWorkflow(id);
         if (!existing) {
@@ -72,7 +86,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
         const patchResult = applyDefinitionPatch(existing.definition, {
           update,
           delete: del,
-          create: create as WorkflowDefinitionPatch["create"],
+          create: create as WorkflowPatch["create"],
           onNodeFailure,
         });
         if (patchResult.errors.length > 0) {
@@ -94,7 +108,13 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
 
         const version = snapshotWorkflow(id, requestInfo.agentId);
 
-        const workflow = updateWorkflow(id, { definition: patchResult.definition });
+        const updateArgs: Parameters<typeof updateWorkflow>[1] = {
+          definition: patchResult.definition,
+        };
+        if (triggerSchema !== undefined) {
+          updateArgs.triggerSchema = triggerSchema;
+        }
+        const workflow = updateWorkflow(id, updateArgs);
         if (!workflow) {
           return {
             content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],

@@ -2,21 +2,30 @@ export { findEntryNodes, getSuccessors } from "./definition";
 export { startWorkflowExecution } from "./engine";
 export { workflowEventBus } from "./event-bus";
 export { recoverIncompleteRuns } from "./recovery";
-export { cancelWorkflowRun, retryFailedRun, setupWorkflowResumeListener } from "./resume";
+export {
+  cancelWorkflowRun,
+  initWaitBusSubscriptions,
+  resumeWaitState,
+  retryFailedRun,
+  setupWorkflowResumeListener,
+  subscribeWaitToBus,
+} from "./resume";
 export { startRetryPoller, stopRetryPoller } from "./retry-poller";
 export { interpolate } from "./template";
 export { instantiateTemplate, validateTemplateVariables } from "./templates";
 export { handleScheduleTrigger, handleWebhookTrigger } from "./triggers";
 export { snapshotWorkflow } from "./version";
+export { startWaitPoller, stopWaitPoller } from "./wait-poller";
 
 import * as db from "../be/db";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
 import { createExecutorRegistry } from "./executors/registry";
 import { recoverIncompleteRuns } from "./recovery";
-import { setupWorkflowResumeListener } from "./resume";
+import { initWaitBusSubscriptions, setupWorkflowResumeListener } from "./resume";
 import { startRetryPoller } from "./retry-poller";
 import { interpolate } from "./template";
+import { startWaitPoller } from "./wait-poller";
 
 // ─── Module-level singleton ────────────────────────────────
 
@@ -58,4 +67,11 @@ export function initWorkflows(): void {
 
   // 4. Start retry poller for failed steps with nextRetryAt
   startRetryPoller(_registry);
+
+  // 5. Start wait poller for time-mode waits + event-mode timeouts
+  startWaitPoller(_registry);
+
+  // 6. Initialize wait-bus subscriptions for event-mode waits (Phase 3).
+  // Re-attaches one bus listener per distinct pending eventName from the DB.
+  initWaitBusSubscriptions(_registry);
 }

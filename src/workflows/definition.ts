@@ -1,9 +1,9 @@
 import type {
   PatchResult,
   WorkflowDefinition,
-  WorkflowDefinitionPatch,
   WorkflowEdge,
   WorkflowNode,
+  WorkflowPatch,
 } from "../types";
 import type { ExecutorRegistry } from "./executors/registry";
 
@@ -249,10 +249,7 @@ export function validateDefinition(
  * even if earlier ones have errors. Validation of the resulting definition
  * (next refs, entry nodes, etc.) is the caller's responsibility.
  */
-export function applyDefinitionPatch(
-  def: WorkflowDefinition,
-  patch: WorkflowDefinitionPatch,
-): PatchResult {
+export function applyDefinitionPatch(def: WorkflowDefinition, patch: WorkflowPatch): PatchResult {
   const errors: string[] = [];
   let nodes = [...def.nodes];
 

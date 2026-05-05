@@ -48,7 +48,14 @@ export function useUpdateWorkflow() {
       data,
     }: {
       id: string;
-      data: Partial<{ name: string; description: string; enabled: boolean }>;
+      data: Partial<{
+        name: string;
+        description: string;
+        enabled: boolean;
+        // null = clear the schema, object = set/replace, undefined/omitted = unchanged.
+        // Mirrors the backend semantics shared by PUT and PATCH.
+        triggerSchema: Record<string, unknown> | null;
+      }>;
     }) => api.updateWorkflow(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workflows"] });

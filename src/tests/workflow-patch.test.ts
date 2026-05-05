@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { WorkflowDefinition, WorkflowDefinitionPatch } from "../types";
+import type { WorkflowDefinition, WorkflowPatch } from "../types";
 import { applyDefinitionPatch } from "../workflows/definition";
 
 // ─── Helper ──────────────────────────────────────────────────
@@ -22,7 +22,7 @@ describe("applyDefinitionPatch", () => {
   // --- Delete ---
 
   test("delete removes nodes", () => {
-    const patch: WorkflowDefinitionPatch = { delete: ["b"] };
+    const patch: WorkflowPatch = { delete: ["b"] };
     const result = applyDefinitionPatch(baseDef, patch);
     expect(result.errors).toEqual([]);
     expect(result.definition.nodes).toHaveLength(1);
@@ -30,7 +30,7 @@ describe("applyDefinitionPatch", () => {
   });
 
   test("delete returns error for non-existent node", () => {
-    const patch: WorkflowDefinitionPatch = { delete: ["nonexistent"] };
+    const patch: WorkflowPatch = { delete: ["nonexistent"] };
     const result = applyDefinitionPatch(baseDef, patch);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toContain("non-existent");
@@ -40,7 +40,7 @@ describe("applyDefinitionPatch", () => {
   // --- Create ---
 
   test("create adds nodes", () => {
-    const patch: WorkflowDefinitionPatch = {
+    const patch: WorkflowPatch = {
       create: [{ id: "c", type: "agent-task", config: { template: "New" } }],
     };
     const result = applyDefinitionPatch(baseDef, patch);
@@ -50,7 +50,7 @@ describe("applyDefinitionPatch", () => {
   });
 
   test("create returns error for duplicate ID", () => {
-    const patch: WorkflowDefinitionPatch = {
+    const patch: WorkflowPatch = {
       create: [{ id: "a", type: "agent-task", config: { template: "Dup" } }],
     };
     const result = applyDefinitionPatch(baseDef, patch);
@@ -62,7 +62,7 @@ describe("applyDefinitionPatch", () => {
   // --- Update ---
 
   test("update merges fields (shallow)", () => {
-    const patch: WorkflowDefinitionPatch = {
+    const patch: WorkflowPatch = {
       update: [{ nodeId: "b", node: { label: "Updated", config: { template: "Changed" } } }],
     };
     const result = applyDefinitionPatch(baseDef, patch);
@@ -74,7 +74,7 @@ describe("applyDefinitionPatch", () => {
   });
 
   test("update returns error for non-existent node", () => {
-    const patch: WorkflowDefinitionPatch = {
+    const patch: WorkflowPatch = {
       update: [{ nodeId: "nonexistent", node: { label: "Nope" } }],
     };
     const result = applyDefinitionPatch(baseDef, patch);
@@ -86,7 +86,7 @@ describe("applyDefinitionPatch", () => {
   // --- Combined operations ---
 
   test("delete → create → update ordering works in single patch", () => {
-    const patch: WorkflowDefinitionPatch = {
+    const patch: WorkflowPatch = {
       delete: ["b"],
       create: [{ id: "c", type: "script", config: {} }],
       update: [{ nodeId: "a", node: { next: "c" } }],
@@ -101,7 +101,7 @@ describe("applyDefinitionPatch", () => {
   });
 
   test("delete + create same ID in one patch works (delete runs first)", () => {
-    const patch: WorkflowDefinitionPatch = {
+    const patch: WorkflowPatch = {
       delete: ["b"],
       create: [{ id: "b", type: "script", config: { template: "Replacement" } }],
     };
@@ -116,7 +116,7 @@ describe("applyDefinitionPatch", () => {
   // --- Multiple errors ---
 
   test("collects multiple errors in one patch", () => {
-    const patch: WorkflowDefinitionPatch = {
+    const patch: WorkflowPatch = {
       delete: ["nonexistent1"],
       create: [{ id: "a", type: "script", config: {} }], // duplicate
       update: [{ nodeId: "nonexistent2", node: { label: "Nope" } }],
@@ -129,7 +129,7 @@ describe("applyDefinitionPatch", () => {
 
   test("preserves onNodeFailure when not patched", () => {
     const def = makeDef([{ id: "a", type: "agent-task", config: {} }], "continue");
-    const patch: WorkflowDefinitionPatch = {
+    const patch: WorkflowPatch = {
       update: [{ nodeId: "a", node: { label: "Labeled" } }],
     };
     const result = applyDefinitionPatch(def, patch);
@@ -138,7 +138,7 @@ describe("applyDefinitionPatch", () => {
   });
 
   test("patches onNodeFailure when provided", () => {
-    const patch: WorkflowDefinitionPatch = { onNodeFailure: "continue" };
+    const patch: WorkflowPatch = { onNodeFailure: "continue" };
     const result = applyDefinitionPatch(baseDef, patch);
     expect(result.errors).toEqual([]);
     expect(result.definition.onNodeFailure).toBe("continue");
@@ -147,7 +147,7 @@ describe("applyDefinitionPatch", () => {
   // --- Empty patch ---
 
   test("empty patch returns definition unchanged with no errors", () => {
-    const patch: WorkflowDefinitionPatch = {};
+    const patch: WorkflowPatch = {};
     const result = applyDefinitionPatch(baseDef, patch);
     expect(result.errors).toEqual([]);
     expect(result.definition.nodes).toEqual(baseDef.nodes);
@@ -159,7 +159,7 @@ describe("applyDefinitionPatch", () => {
   test("does not mutate original definition", () => {
     const original = makeDef([{ id: "a", type: "agent-task", config: { template: "Hello" } }]);
     const originalNodes = [...original.nodes];
-    const patch: WorkflowDefinitionPatch = {
+    const patch: WorkflowPatch = {
       create: [{ id: "b", type: "script", config: {} }],
     };
     applyDefinitionPatch(original, patch);

@@ -811,8 +811,8 @@ export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
 export const WorkflowNodePatchSchema = WorkflowNodeSchema.partial().omit({ id: true });
 export type WorkflowNodePatch = z.infer<typeof WorkflowNodePatchSchema>;
 
-/** Bulk workflow definition patch */
-export const WorkflowDefinitionPatchSchema = z.object({
+/** Bulk workflow patch — DAG operations plus optional metadata fields like triggerSchema */
+export const WorkflowPatchSchema = z.object({
   update: z
     .array(
       z.object({
@@ -828,8 +828,18 @@ export const WorkflowDefinitionPatchSchema = z.object({
     .enum(["fail", "continue"])
     .optional()
     .describe("Update the definition-level onNodeFailure behavior"),
+  triggerSchema: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .nullable()
+    .describe(
+      "Optional JSON-Schema describing the expected trigger payload shape. " +
+        "Pass an object to set/replace; pass null to clear; omit to leave unchanged. " +
+        "Validator subset: type, required, properties, enum, const, items. " +
+        "Other JSON-Schema keywords are silently ignored.",
+    ),
 });
-export type WorkflowDefinitionPatch = z.infer<typeof WorkflowDefinitionPatchSchema>;
+export type WorkflowPatch = z.infer<typeof WorkflowPatchSchema>;
 
 /** Result of applying a patch — collects all errors instead of throwing on the first */
 export interface PatchResult {
@@ -1003,6 +1013,41 @@ export const WorkflowRunStepSchema = z.object({
   nextPort: z.string().optional(),
 });
 export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;
+
+// --- Wait State (workflow `wait` node side table) ---
+
+export const WaitModeSchema = z.enum(["time", "event"]);
+export type WaitMode = z.infer<typeof WaitModeSchema>;
+
+export const WaitStateStatusSchema = z.enum(["pending", "fired", "timeout"]);
+export type WaitStateStatus = z.infer<typeof WaitStateStatusSchema>;
+
+/**
+ * Row shape for `wait_states` table — keep in sync with
+ * `src/be/migrations/049_wait_states.sql`.
+ *
+ * - `mode='time'`: `wakeUpAt` is set; `eventName`/`eventFilter`/`expiresAt` are null.
+ * - `mode='event'`: `eventName` is set; `eventFilter` is optional (flat
+ *   key/dot-path object OR arrow-fn body string); `expiresAt` is set when the
+ *   wait carries a timeout.
+ */
+export const WaitStateRowSchema = z.object({
+  id: z.string(),
+  workflowRunId: z.string(),
+  workflowRunStepId: z.string(),
+  mode: WaitModeSchema,
+  wakeUpAt: z.string().nullable(),
+  eventName: z.string().nullable(),
+  eventFilter: z.union([z.record(z.string(), z.unknown()), z.string()]).nullable(),
+  expiresAt: z.string().nullable(),
+  status: WaitStateStatusSchema,
+  firedPayload: z.unknown().nullable(),
+  resolvedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  eventScope: z.enum(["run", "global"]),
+});
+export type WaitStateRow = z.infer<typeof WaitStateRowSchema>;
 
 // ============================================================================
 // Prompt Template Types

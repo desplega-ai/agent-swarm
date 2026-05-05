@@ -24,15 +24,15 @@ import {
 } from "@/components/ui/command";
 
 const NAV_ITEMS = [
-  { label: "Dashboard", path: "/", icon: LayoutDashboard, shortcut: "1" },
-  { label: "Agents", path: "/agents", icon: Bot, shortcut: "2" },
-  { label: "Tasks", path: "/tasks", icon: ClipboardList, shortcut: "3" },
-  { label: "Chat", path: "/chat", icon: MessageSquare, shortcut: "4" },
-  { label: "Schedules", path: "/schedules", icon: Clock, shortcut: "5" },
-  { label: "Usage", path: "/usage", icon: BarChart3, shortcut: "6" },
-  { label: "Config", path: "/config", icon: Settings, shortcut: "7" },
-  { label: "Repos", path: "/repos", icon: FolderGit2, shortcut: "8" },
-  { label: "Services", path: "/services", icon: Server, shortcut: "9" },
+  { label: "Dashboard", path: "/", icon: LayoutDashboard },
+  { label: "Agents", path: "/agents", icon: Bot },
+  { label: "Tasks", path: "/tasks", icon: ClipboardList },
+  { label: "Chat", path: "/chat", icon: MessageSquare },
+  { label: "Schedules", path: "/schedules", icon: Clock },
+  { label: "Usage", path: "/usage", icon: BarChart3 },
+  { label: "Config", path: "/config", icon: Settings },
+  { label: "Repos", path: "/repos", icon: FolderGit2 },
+  { label: "Services", path: "/services", icon: Server },
 ];
 
 export function CommandMenu() {
@@ -70,7 +70,6 @@ export function CommandMenu() {
             <CommandItem key={item.path} onSelect={() => handleSelect(item.path)}>
               <item.icon className="h-4 w-4" />
               <span>{item.label}</span>
-              <span className="ml-auto text-xs text-muted-foreground">{item.shortcut}</span>
             </CommandItem>
           ))}
         </CommandGroup>

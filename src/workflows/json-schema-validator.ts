@@ -1,10 +1,17 @@
 /**
  * Minimal hand-rolled JSON Schema validator.
  *
- * Supports the subset needed for workflow I/O schemas:
+ * Supports the subset needed for workflow I/O schemas and `triggerSchema`:
  * - `type`: "object", "string", "number", "boolean", "array"
  * - `required`: array of required property names
  * - `properties`: map of property name → schema (recursive)
+ * - `enum`: array of allowed primitive values (strict equality)
+ * - `const`: a single allowed value (strict equality)
+ * - `items`: schema applied to every element of an array (recursive)
+ *
+ * Other JSON-Schema keywords (`oneOf`, `anyOf`, `$ref`, `pattern`, `format`,
+ * `additionalProperties`, etc.) are silently ignored. Document any new
+ * authoring surface for `triggerSchema` accordingly.
  *
  * Returns an array of validation error strings (empty = valid).
  */

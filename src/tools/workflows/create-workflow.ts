@@ -24,7 +24,12 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation.\n" +
         "- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. " +
         "Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n" +
-        "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.",
+        "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.\n" +
+        "- TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. " +
+        "Supported keywords: type, required, properties, enum, const, items (recursive into arrays). " +
+        "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.\n" +
+        "- WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. " +
+        "See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.",
       inputSchema: z.object({
         name: z.string().describe("Unique name for the workflow"),
         description: z.string().optional().describe("Description of what this workflow does"),
@@ -57,6 +62,14 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           .min(1)
           .optional()
           .describe("Default VCS repo for all agent-task nodes (e.g. org/repo)"),
+        triggerSchema: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe(
+            "Optional JSON-Schema object that validates incoming trigger payloads. " +
+              "Supported keywords: type, required, properties, enum, const, items. " +
+              "Other JSON-Schema keywords are silently ignored.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().optional(),
@@ -66,7 +79,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
       }),
     },
     async (
-      { name, description, definition, triggers, cooldown, input, dir, vcsRepo },
+      { name, description, definition, triggers, cooldown, input, dir, vcsRepo, triggerSchema },
       requestInfo,
     ) => {
       if (!requestInfo.agentId) {
@@ -102,6 +115,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           input,
           dir,
           vcsRepo,
+          triggerSchema,
           createdByAgentId: requestInfo.agentId,
         });
         return {

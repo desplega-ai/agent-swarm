@@ -16,19 +16,20 @@ import {
   CooldownConfigSchema,
   InputValueSchema,
   TriggerConfigSchema,
-  WorkflowDefinitionPatchSchema,
   WorkflowDefinitionSchema,
   WorkflowNodePatchSchema,
+  WorkflowPatchSchema,
   WorkflowRunStatusSchema,
 } from "../types";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { applyDefinitionPatch, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
+import { validateJsonSchema } from "../workflows/json-schema-validator";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotWorkflow } from "../workflows/version";
 import { route } from "./route-def";
-import { json, jsonError, parseBody } from "./utils";
+import { json, jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -112,7 +113,7 @@ const patchWorkflowRoute = route({
   summary: "Patch a workflow definition (create/update/delete nodes)",
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
-  body: WorkflowDefinitionPatchSchema,
+  body: WorkflowPatchSchema,
   responses: {
     200: { description: "Workflow patched (version snapshot created)" },
     400: { description: "Invalid patch or resulting definition" },
@@ -159,6 +160,20 @@ const triggerWorkflowRoute = route({
     201: { description: "Workflow run started (or skipped if cooldown active)" },
     400: { description: "Workflow is disabled" },
     401: { description: "Unauthorized" },
+    404: { description: "Workflow not found" },
+  },
+});
+
+const validateTriggerRoute = route({
+  method: "post",
+  path: "/api/workflows/{id}/trigger/validate",
+  pattern: ["api", "workflows", null, "trigger", "validate"],
+  summary: "Validate a payload against the workflow's triggerSchema (no run)",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Payload matches the workflow's triggerSchema (or workflow has none)" },
+    400: { description: "Payload failed validation; body matches the TriggerSchemaError contract" },
     404: { description: "Workflow not found" },
   },
 });
@@ -349,7 +364,7 @@ export async function handleWorkflows(
       json(res, result, 201);
     } catch (err) {
       if (err instanceof TriggerSchemaError) {
-        jsonError(res, err.message, 400);
+        triggerSchemaErrorResponse(res, err.message, err.validationErrors);
       } else if (err instanceof WebhookError) {
         jsonError(res, err.message, err.statusCode);
       } else {
@@ -510,7 +525,13 @@ export async function handleWorkflows(
       // Snapshot failure should not block the update
     }
 
-    const workflow = updateWorkflow(id, { definition: patchResult.definition });
+    const updateArgs: Parameters<typeof updateWorkflow>[1] = {
+      definition: patchResult.definition,
+    };
+    if (parsed.body.triggerSchema !== undefined) {
+      updateArgs.triggerSchema = parsed.body.triggerSchema;
+    }
+    const workflow = updateWorkflow(id, updateArgs);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -585,6 +606,34 @@ export async function handleWorkflows(
     return true;
   }
 
+  if (validateTriggerRoute.match(req.method, pathSegments)) {
+    const parsed = await validateTriggerRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const workflow = getWorkflow(parsed.params.id);
+    if (!workflow) {
+      res.writeHead(404);
+      res.end();
+      return true;
+    }
+    const body = await parseBody<Record<string, unknown>>(req);
+    const triggerData = (body?.triggerData ?? body) as unknown;
+    if (!workflow.triggerSchema) {
+      json(res, { valid: true, schema: null });
+      return true;
+    }
+    const errors = validateJsonSchema(workflow.triggerSchema, triggerData);
+    if (errors.length > 0) {
+      triggerSchemaErrorResponse(
+        res,
+        `Trigger schema validation failed: ${errors.join("; ")}`,
+        errors,
+      );
+      return true;
+    }
+    json(res, { valid: true });
+    return true;
+  }
+
   if (triggerWorkflowRoute.match(req.method, pathSegments)) {
     const parsed = await triggerWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -605,7 +654,7 @@ export async function handleWorkflows(
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry());
     } catch (err) {
       if (err instanceof TriggerSchemaError) {
-        jsonError(res, err.message, 400);
+        triggerSchemaErrorResponse(res, err.message, err.validationErrors);
         return true;
       }
       throw err;

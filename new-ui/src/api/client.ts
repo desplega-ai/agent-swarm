@@ -54,6 +54,58 @@ import type {
   WorkflowVersion,
 } from "./types";
 
+/**
+ * Thrown by `api.triggerWorkflow` when the server returns the frozen
+ * `{ error: "TriggerSchemaError", message, details }` 400 contract.
+ *
+ * `details` carries one human-readable validator message per failed field
+ * (e.g. `'pr: missing required property "number"'`). UI surfaces render it
+ * as a bulleted list — see `TriggersDetailPanel` payload tester.
+ */
+export class TriggerSchemaApiError extends Error {
+  readonly details: string[];
+  readonly validationMessage: string;
+  constructor(message: string, details: string[]) {
+    super(message);
+    this.name = "TriggerSchemaApiError";
+    this.details = details;
+    this.validationMessage = message;
+  }
+}
+
+/**
+ * Inspect a non-OK Response. If the body matches the frozen
+ * `{ error: "TriggerSchemaError", message, details }` contract, throw a
+ * `TriggerSchemaApiError`. Otherwise throw a generic Error using `genericLabel`.
+ *
+ * Always throws — never returns. Caller's `if (!res.ok)` guard should be the
+ * only branch invoking it.
+ */
+async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: string): Promise<never> {
+  try {
+    const body = (await res.json()) as unknown;
+    if (
+      body !== null &&
+      typeof body === "object" &&
+      (body as { error?: unknown }).error === "TriggerSchemaError"
+    ) {
+      const message =
+        typeof (body as { message?: unknown }).message === "string"
+          ? (body as { message: string }).message
+          : "Trigger schema validation failed";
+      const rawDetails = (body as { details?: unknown }).details;
+      const details = Array.isArray(rawDetails)
+        ? rawDetails.filter((d): d is string => typeof d === "string")
+        : [];
+      throw new TriggerSchemaApiError(message, details);
+    }
+  } catch (e) {
+    if (e instanceof TriggerSchemaApiError) throw e;
+    // fall through to the generic throw below
+  }
+  throw new Error(`${genericLabel}: ${res.status}`);
+}
+
 class ApiClient {
   private getHeaders(): HeadersInit {
     const config = getConfig();
@@ -651,7 +703,12 @@ class ApiClient {
 
   async updateWorkflow(
     id: string,
-    data: Partial<Pick<Workflow, "name" | "description" | "enabled">>,
+    data: Partial<
+      Pick<Workflow, "name" | "description" | "enabled"> & {
+        // null = clear, object = set/replace, undefined/omitted = unchanged.
+        triggerSchema: Record<string, unknown> | null;
+      }
+    >,
   ): Promise<Workflow> {
     const url = `${this.getBaseUrl()}/api/workflows/${id}`;
     const res = await fetch(url, {
@@ -677,10 +734,32 @@ class ApiClient {
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify({ triggerData }),
+      // Send the payload directly as the body. The engine treats the raw body
+      // as triggerData; wrapping in `{ triggerData }` would break schema
+      // validation against any non-trivial schema.
+      body: JSON.stringify(triggerData ?? {}),
     });
-    if (!res.ok) throw new Error(`Failed to trigger workflow: ${res.status}`);
+    if (!res.ok) {
+      await throwTriggerSchemaErrorIfMatch(res, "Failed to trigger workflow");
+    }
     return res.json();
+  }
+
+  /**
+   * Dry-run validation: validate `triggerData` against the workflow's
+   * `triggerSchema` without creating a run. Returns void on success, throws
+   * `TriggerSchemaApiError` on validation failure.
+   */
+  async validateTriggerData(id: string, triggerData: unknown): Promise<void> {
+    const url = `${this.getBaseUrl()}/api/workflows/${id}/trigger/validate`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(triggerData ?? {}),
+    });
+    if (!res.ok) {
+      await throwTriggerSchemaErrorIfMatch(res, "Failed to validate trigger payload");
+    }
   }
 
   async fetchWorkflowRuns(workflowId: string): Promise<WorkflowRun[]> {
