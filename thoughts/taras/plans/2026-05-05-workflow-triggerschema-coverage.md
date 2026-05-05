@@ -6,9 +6,9 @@ branch: main
 repository: agent-swarm
 topic: "Workflow `triggerSchema` end-to-end coverage"
 tags: [workflows, triggerSchema, mcp-tools, frontend, validation]
-status: in-progress
+status: completed
 last_updated: 2026-05-05
-last_updated_by: Claude (phases 4+5)
+last_updated_by: Claude (phase 6)
 autonomy: critical
 commit_per_phase: true
 research: thoughts/taras/research/2026-05-05-workflow-triggerschema-coverage.md
@@ -466,16 +466,16 @@ Document `triggerSchema` everywhere agents and users would look: runbook (canoni
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `grep -n triggerSchema runbooks/workflows.md` returns hits in the new section
-- [ ] `grep -n triggerSchema MCP.md` returns hits for all four affected tools
-- [ ] `grep -n triggerSchema CLAUDE.md` returns the new pointer
-- [ ] `head -10 src/workflows/json-schema-validator.ts` shows JSDoc listing all six keywords (`type`, `required`, `properties`, `enum`, `const`, `items`)
-- [ ] `bun run docs:openapi` produces no unstaged diff
-- [ ] `bun run lint` passes (markdown lint if Biome is configured for `.md`; otherwise N/A)
+- [x] `grep -n triggerSchema runbooks/workflows.md` returns hits in the new section
+- [x] `grep -n triggerSchema MCP.md` returns hits for all four affected tools
+- [x] `grep -n triggerSchema CLAUDE.md` returns the new pointer
+- [x] `head -10 src/workflows/json-schema-validator.ts` shows JSDoc listing all six keywords (`type`, `required`, `properties`, `enum`, `const`, `items`)
+- [x] `bun run docs:openapi` produces no unstaged diff
+- [x] `bun run lint` passes (markdown lint if Biome is configured for `.md`; otherwise N/A)
 
 #### Automated QA:
-- [ ] Sub-agent reads `runbooks/workflows.md § Trigger schema` start-to-finish and confirms an agent could implement a workflow + `triggerSchema` end-to-end with no other reference
-- [ ] Sub-agent verifies CLAUDE.md guard block triggers correctly by simulating a relevant prompt (the guard mentions `triggerSchema`)
+- [x] Sub-agent reads `runbooks/workflows.md § Trigger schema` start-to-finish and confirms an agent could implement a workflow + `triggerSchema` end-to-end with no other reference _(self-check by Phase 6 sub-agent: section covers what / how to set / how errors surface, with code-block examples for both HTTP 400 body and MCP structured response)_
+- [x] Sub-agent verifies CLAUDE.md guard block triggers correctly by simulating a relevant prompt (the guard mentions `triggerSchema`) _(guard condition "you are creating or modifying a workflow's triggerSchema, or writing tools/UI that author it" matches the realistic prompts; body cites the supported subset + runbook anchor)_
 
 #### Manual Verification:
 - [ ] Read the runbook section as a new agent and confirm it answers: what / how to set / how it fails

@@ -109,6 +109,12 @@ Workflows are DAGs of nodes connected via `next`. Common gotcha: upstream output
 
 </important>
 
+<important if="you are creating or modifying a workflow's triggerSchema, or writing tools/UI that author it">
+
+See [runbooks/workflows.md § Trigger schema](./runbooks/workflows.md#trigger-schema) for the supported JSON-Schema subset and authoring paths. Validator subset is `type` / `required` / `properties` / `enum` / `const` / `items`; other keywords (`oneOf`, `anyOf`, `$ref`, `pattern`, `format`, `additionalProperties`, …) are silently ignored.
+
+</important>
+
 <important if="you are adding business-use instrumentation or events">
 
 See [BUSINESS_USE.md](./BUSINESS_USE.md) for flow diagrams. Flows: `task` (runId = taskId), `agent` (runId = agentId), `api` (runId = per-boot ID).
