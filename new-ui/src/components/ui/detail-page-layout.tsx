@@ -59,10 +59,18 @@ export function DetailPageBody({ main, rail, className }: DetailPageBodyProps) {
   if (!rail) {
     return <div className={cn("flex flex-col gap-4", className)}>{main}</div>;
   }
+  // Phase 17 — `min-h-0 lg:min-h-0` on the inner main/aside containers so
+  // descendants with their own `flex-1 + overflow-auto` (Monaco editors,
+  // <pre> blocks, log viewers) can actually shrink + scroll when the parent
+  // page passes `className="flex-1 min-h-0"`. Without this, the lg:grid row
+  // had implicit `auto` height on each cell, forcing children to overflow
+  // the page and break scroll across detail pages adopting <DetailPageBody>.
   return (
     <div className={cn("flex flex-col lg:grid lg:grid-cols-[1fr_280px] gap-6 lg:gap-8", className)}>
-      <div className="min-w-0">{main}</div>
-      <aside className="lg:border-l lg:border-border lg:pl-6 min-w-0">{rail}</aside>
+      <div className="min-w-0 min-h-0 flex flex-col">{main}</div>
+      <aside className="lg:border-l lg:border-border lg:pl-6 min-w-0 min-h-0 flex flex-col">
+        {rail}
+      </aside>
     </div>
   );
 }

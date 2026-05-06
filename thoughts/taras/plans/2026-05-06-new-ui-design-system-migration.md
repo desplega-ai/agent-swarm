@@ -4,7 +4,7 @@ topic: "new-ui Design System Migration Plan"
 status: completed
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
-last_updated_by: Claude (phase 16)
+last_updated_by: Claude (phase 17)
 ---
 
 # new-ui Design System Migration Plan
@@ -1174,6 +1174,105 @@ The `new-ui/CLAUDE.md` "Detail-page layout convention" section currently says "D
 ### QA Spec (optional):
 
 n/a — UX cleanup of two narrow regressions. qa-use deferred to PR-time.
+
+---
+
+## Phase 17: tasks/[id] visual polish + scrollable Activity rail + scroll-bug fix
+
+### Overview
+
+After Phases 14–16 shipped, Taras ran the dev server and surfaced five items in review:
+
+1. **Padding on `tasks/[id]` "task details part on top of the logs" is too tight.** The hero block (badges + description + actions) and the body block (Failure / Output cards + SessionLogViewer) feel cramped. Brand-kit `preview/task-detail.html` uses `.header { padding: 14px 18px 12px }` and `.body { padding: 14px 18px }`; new-ui currently uses `pb-3 px-1` and `py-3 px-3 gap-2`.
+2. **Activity rail should be scrollable with sticky header.** When `task.logs` is long, the whole right rail scrolls and the "Activity (N)" heading scrolls away with it. The user wants the heading pinned while rows scroll under it.
+3. **Cost belongs on the left rail.** Phase 14 placed `<TaskCostSection>` in the right rail alongside Activity. The user wants Session Cost stats colocated with the other static meta on the left so they're always visible without scrolling the activity feed.
+4. **Right rail should be collapsible (?).** Tentative ask. Implement only if it's a clean ~30-line addition (chevron toggle + localStorage persistence + dynamic grid template).
+5. **Some detail pages content is not scrollable.** Bug. `<DetailPageBody>` does not propagate `min-h-0` to its inner main/aside containers, so descendants with `flex-1 overflow-auto` (Monaco, `<pre>`, log viewers) cannot shrink + scroll when the parent page passes `className="flex-1 min-h-0"`. Surfaces on `skills/[id]` (the `<pre>` of SKILL.md content) and `mcp-servers/[id]` (the Tabs body). Pages with outer `overflow-y-auto` (`repos/[id]`, `schedules/[id]`, `approval-requests/[id]`, `integrations/[id]`) avoided the bug accidentally.
+
+### Changes Required:
+
+#### 1. Padding on `tasks/[id]` center column (item 17.1)
+
+**File**: `new-ui/src/pages/tasks/[id]/page.tsx`
+
+- Hero block (`heroBlock`, ~line 772): `space-y-2 px-1 pb-3 shrink-0` → `space-y-3 px-4 pt-4 pb-5 shrink-0`. Adds top/bottom padding and opens the badge-row → description → action-row vertical rhythm.
+- Body block (Failure / Output / SessionLogViewer wrapper, ~line 941): `py-3 px-3 gap-2` → `py-4 px-4 gap-3`. Aligns with brand kit's `.body { padding: 14px 18px }`.
+
+#### 2. Sticky Activity heading + scrollable rows (item 17.2)
+
+**File**: `new-ui/src/pages/tasks/[id]/page.tsx` (`rightRailContent`)
+
+Inline approach (no primitive change). Replace the `<DetailPageSection title=...>` wrapping `<LogTimeline>` with a hand-rolled `<section>` whose `<h4>` carries `sticky top-0 z-10 bg-background -mx-3 -mt-3 px-3 pt-3 pb-2 pr-10 ... border-b border-border`. The `-mx-3 -mt-3` negative margins extend the bg into the rail's `px-3 py-3` padding so rows pass cleanly beneath. `pr-10` reserves space for the collapse chevron (item 17.4) so the title text doesn't overlap it.
+
+The rail's existing `<aside className="overflow-y-auto">` is the scroll container — sticky `top-0` resolves against it.
+
+A primitive-level `<DetailPageSection scrollable>` was considered but rejected: only one detail page (tasks) has a recurring-events feed where scroll-with-sticky-header matters. Extracting prematurely would force the other rails (which are short, static k/v lists) through an unnecessary indirection.
+
+#### 3. Move Session Cost to left rail (item 17.3)
+
+**File**: `new-ui/src/pages/tasks/[id]/page.tsx`
+
+Move `<TaskCostSection>` out of `rightRailContent` and append it to `leftRailContent` immediately after `<TaskContextSection>`. The left rail already renders inside an `<aside overflow-y-auto>` so cost stats scroll with the rest of the meta. Right rail then renders only the Activity timeline.
+
+Update the LEFT RAIL comment (~line 490): include Session Cost in the inventory line and note Phase 17's relocation.
+
+#### 4. Collapsible right rail (item 17.4)
+
+**File**: `new-ui/src/pages/tasks/[id]/page.tsx`
+
+Implement (~30 lines including state + chevron + grid template):
+
+- Add `useState` + `useEffect` to manage `railCollapsed` with localStorage persistence under key `agent-swarm-task-rail-collapsed`. SSR-safe via `typeof window === "undefined"` guard.
+- Update the desktop grid: `lg:grid-cols-[280px_1fr_280px]` → conditional `railCollapsed ? "lg:grid-cols-[280px_1fr_36px]" : "lg:grid-cols-[280px_1fr_280px]"` via `cn()`.
+- Render a chevron toggle absolutely positioned at the top-right of the rail (or center when collapsed). Use `lucide-react`'s `ChevronLeft` / `ChevronRight`. Button is `h-6 w-6` with `border border-border bg-background hover:bg-accent`.
+- When collapsed, conditionally suppress `rightRailContent` so only the chevron renders inside the 36px gutter.
+
+#### 5. Scroll-bug fix in `<DetailPageBody>` primitive (item 17.5)
+
+**File**: `new-ui/src/components/ui/detail-page-layout.tsx`
+
+In the `rail`-present branch, change the inner main/aside containers:
+
+```tsx
+// before
+<div className="min-w-0">{main}</div>
+<aside className="lg:border-l lg:border-border lg:pl-6 min-w-0">{rail}</aside>
+
+// after
+<div className="min-w-0 min-h-0 flex flex-col">{main}</div>
+<aside className="lg:border-l lg:border-border lg:pl-6 min-w-0 min-h-0 flex flex-col">{rail}</aside>
+```
+
+`min-h-0` lets descendants with `flex-1 overflow-auto` actually shrink to the available height. `flex flex-col` propagates the flex chain so the inner page-supplied `<div className="flex flex-col flex-1 min-h-0 gap-3">` (skills) or `<Tabs flex flex-col flex-1 min-h-0>` (mcp-servers) can stretch.
+
+This is a primitive-level fix — applies to all 8 detail pages adopting `<DetailPageBody>`. Pages with outer `overflow-y-auto` (repos, schedules, approval-requests, integrations) are unaffected because their content's natural height fits inside the page-level scroller; the new `min-h-0` doesn't constrain them. Pages with `overflow-hidden` outer + internal scroll (skills, mcp-servers) are now fixed.
+
+#### 6. Audit doc
+
+Append a Phase 17 section to `thoughts/taras/research/2026-05-06-design-system-audit.md` documenting each item, the implementation approach, and the scroll-bug root cause for future reference. Note that `<DetailPageSection>` was *not* extended with a `scrollable` prop — the inline approach is a deliberate scope choice and would be revisited if a second rail-scroll pattern emerges.
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] `cd new-ui && pnpm run check:tokens` — no new color literals introduced
+- [x] `cd new-ui && pnpm lint` — Biome passes
+- [x] `cd new-ui && pnpm exec tsc -b` — typecheck passes
+- [x] `cd new-ui && pnpm exec vite build` — build passes
+- [x] `cd new-ui && pnpm dev` boots clean and all 8 detail-page routes serve `200` (verified via curl)
+
+#### Automated QA:
+- [x] `qa-use` capture of `tasks/[id]` (padding, sticky header, cost-on-left, rail-collapse) and one previously-broken page (`skills/[id]` showing scroll restored) [skipped — qa-use deferred to PR-time]
+
+#### Manual Verification:
+- [ ] User confirms `tasks/[id]` hero + body padding feels visibly more spacious
+- [ ] User confirms Activity heading stays pinned at the top of the right rail when the timeline scrolls
+- [ ] User confirms Session Cost is now on the left rail (below Context budget) and no longer in the right rail
+- [ ] User confirms the right-rail chevron toggles the rail to a 36px gutter and the choice survives a page reload
+- [ ] User confirms `skills/[id]` SKILL.md `<pre>` scrolls inside the page (no page-overflow), and `mcp-servers/[id]` Configuration / Authentication tabs scroll inside the page
+
+### QA Spec (optional):
+
+n/a — visual polish + one primitive bug fix. qa-use deferred to PR-time.
 
 ---
 

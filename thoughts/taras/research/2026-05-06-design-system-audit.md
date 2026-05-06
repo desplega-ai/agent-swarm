@@ -751,3 +751,66 @@ The intent was alignment with the brand kit's `preview/detail-page-template.html
 - `pnpm lint` — green
 - `pnpm exec tsc -b` — green
 - `pnpm exec vite build` — green
+
+## Phase 17 — `tasks/[id]` polish + Activity scrollability + scroll-bug fix (2026-05-06)
+
+After Phases 14–16 shipped, Taras ran the dev server and surfaced five items.
+
+### Item 1 — `tasks/[id]` hero + body padding too tight
+
+The center column on `tasks/[id]` had `pb-3 px-1` on the hero block and `py-3 px-3 gap-2` on the Failure / Output / SessionLogViewer body. Brand kit `preview/task-detail.html` uses `.header { padding: 14px 18px 12px }` and `.body { padding: 14px 18px }`. Bumped to `space-y-3 px-4 pt-4 pb-5` (hero) and `py-4 px-4 gap-3` (body) — closer to the 14–18px brand-kit values, with explicit `space-y-3` opening up the badge-row → description → action-row vertical rhythm.
+
+### Item 2 — Activity heading should stay sticky while rows scroll
+
+The right rail used `<DetailPageSection title="Activity (N)">` whose heading scrolled with the rail's `overflow-y-auto`. Replaced with a hand-rolled `<section>` whose `<h4>` carries `sticky top-0 z-10 bg-background -mx-3 -mt-3 px-3 pt-3 pb-2 pr-10 ... border-b border-border`. The negative margins extend the heading bg into the rail's `px-3 py-3` padding so rows scroll cleanly under the pinned heading. `pr-10` reserves space for the collapse chevron (item 4) at top-right.
+
+A primitive-level `<DetailPageSection scrollable>` was considered but rejected: only the tasks Activity feed needs this pattern today; the other rails are short k/v lists. Premature primitive extraction would force the simpler rails through unnecessary indirection. Revisit if a second rail-scroll surface emerges.
+
+### Item 3 — Session Cost moved from right rail to left rail
+
+`<TaskCostSection>` was originally in the right rail alongside Activity (Phase 14). Phase 17 moved it to the left rail, immediately after `<TaskContextSection>`. Right rail now hosts only the Activity timeline. Cost stats are scroll-adjacent to other static meta (Agent, Created, SCM, Dependencies, Progress, Context budget) which the user always wants visible without scrolling the activity feed.
+
+### Item 4 — Collapsible right rail (implemented)
+
+Added a chevron toggle button at the top of the right rail. State persists in `localStorage` under key `agent-swarm-task-rail-collapsed`. Implementation:
+
+- `useState` initializer reads localStorage (SSR-safe via `typeof window === "undefined"` guard).
+- `useEffect` writes back on change.
+- Desktop grid template is conditional via `cn()`: collapsed → `lg:grid-cols-[280px_1fr_36px]`, expanded → `lg:grid-cols-[280px_1fr_280px]`. The 36px gutter holds only the chevron.
+- When collapsed, `rightRailContent` is suppressed; only the toggle chevron renders inside the gutter.
+
+~30 lines total. Met the "implement only if clean and small" bar from Taras's brief. No new primitive needed; localStorage hook would be a candidate for extraction if a second collapsible appears.
+
+### Item 5 — Scroll bug in `<DetailPageBody>` (primitive-level fix)
+
+**Root cause**: the `<DetailPageBody>` `rail`-present branch rendered:
+
+```tsx
+<div className="min-w-0">{main}</div>
+<aside className="lg:border-l lg:border-border lg:pl-6 min-w-0">{rail}</aside>
+```
+
+These intermediate containers had `min-w-0` but no `min-h-0` and were not flex containers themselves. When a page passed `className="flex-1 min-h-0"` to `<DetailPageBody>` and inside `main` used a `<pre>` or `<Tabs>` with `flex-1 overflow-auto`, the lg:grid sized each cell to `auto` height (its content's natural height) and the `flex-1 overflow-auto` descendant could not shrink → page overflow → no scroll.
+
+**Pages affected**: `skills/[id]` (the `<pre>` of SKILL.md content), `mcp-servers/[id]` (the Tabs body — Configuration / Authentication tabs each contain a long stack of cards). Both used outer `overflow-hidden` because they wanted internal scroll, not page-level scroll; that intent was broken by the missing `min-h-0` propagation.
+
+**Pages NOT affected**: `repos/[id]`, `schedules/[id]`, `approval-requests/[id]`, `integrations/[id]` — all use outer `overflow-y-auto` (page-level scroll), so the `<DetailPageBody>` cell-height didn't matter; their content overflowed naturally into the outer scroller. `tasks/[id]` doesn't use `<DetailPageBody>` (it has its own bespoke 3-column desktop layout). `agents/[id]` Profile tab uses `<TabsContent overflow-y-auto>` which scrolls the whole `<DetailPageBody>` from the outside.
+
+**Fix**: change the inner containers in `<DetailPageBody>` to:
+
+```tsx
+<div className="min-w-0 min-h-0 flex flex-col">{main}</div>
+<aside className="lg:border-l lg:border-border lg:pl-6 min-w-0 min-h-0 flex flex-col">{rail}</aside>
+```
+
+`min-h-0` lets descendants with `flex-1 overflow-auto` actually shrink to the available height. `flex flex-col` propagates the flex chain so a page-supplied `<div className="flex flex-col flex-1 min-h-0 gap-3">` (skills) or `<Tabs flex flex-col flex-1 min-h-0>` (mcp-servers) can stretch into the cell. Pages with outer `overflow-y-auto` are unaffected because their content's natural height still fits inside the page-level scroller — the new `min-h-0` doesn't constrain them.
+
+**Pre-existing or regression?**: pre-existing. The `<DetailPageBody>` primitive landed in Phase 15 (commit `bd1be1b9`), and skills/mcp-servers adopted it in Phase 15c (commit `637a8aa7`). Both were broken at adoption time but went undetected because the user's manual review didn't try long enough content to trigger overflow. So Phase 17 is a now-noticed bug, not a Phase 14–16 regression. Documented for future contributors: any new detail page that passes `flex-1 min-h-0` to `<DetailPageBody>` and expects internal scroll relies on this fix.
+
+### Verification
+
+- `pnpm run check:tokens` — green
+- `pnpm lint` — green
+- `pnpm exec tsc -b` — green
+- `pnpm exec vite build` — green
+- `pnpm dev` (Vite at `http://127.0.0.1:4017/`) — boot clean; `/`, `/tasks/x`, `/repos/x`, `/skills/x`, `/mcp-servers/x`, `/schedules/x`, `/approval-requests/x`, `/integrations/x`, `/agents/x` all serve 200 (SPA index.html → React Router). qa-use visual confirmation deferred to PR-time per Taras's brief.

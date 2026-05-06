@@ -6,6 +6,8 @@ import {
   Box,
   Calendar,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Cpu,
   DollarSign,
@@ -27,7 +29,7 @@ import {
   User,
   Zap,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
@@ -462,6 +464,17 @@ export default function TaskDetailPage() {
     return agents.find((a) => a.id === task.agentId)?.name ?? null;
   }, [task, agents]);
 
+  // Phase 17 — collapsible right rail (Activity feed). Persists to
+  // localStorage so the choice survives reloads and route changes.
+  const [railCollapsed, setRailCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("agent-swarm-task-rail-collapsed") === "1";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("agent-swarm-task-rail-collapsed", railCollapsed ? "1" : "0");
+  }, [railCollapsed]);
+
   if (isLoading) {
     return (
       <div className="flex-1 min-h-0 space-y-4 p-1">
@@ -487,9 +500,11 @@ export default function TaskDetailPage() {
   const hasOutput = !!task.output;
   const hasEvents = task.logs && task.logs.length > 0;
 
-  // LEFT RAIL — meta info + SCM card + Dependencies + Progress + Context budget.
-  // Mirrors brand-kit `preview/task-detail.html` left column (meta-row + .scm-card +
-  // .csec-deps + .csec-ctx). Activity timeline and Session Cost moved to right rail.
+  // LEFT RAIL — meta info + SCM card + Dependencies + Progress + Context budget +
+  // Session Cost. Mirrors brand-kit `preview/task-detail.html` left column
+  // (meta-row + .scm-card + .csec-deps + .csec-ctx). Phase 17 moved Session Cost
+  // here from the right rail so the user sees cost stats without scrolling the
+  // Activity feed; right rail now hosts only the Activity timeline.
   const leftRailContent = (
     <div className="space-y-1">
       {task.agentId && (
@@ -676,37 +691,43 @@ export default function TaskDetailPage() {
         providerMeta={task.providerMeta}
         costs={costs}
       />
-    </div>
-  );
 
-  // RIGHT RAIL — Activity timeline (top) + Session Cost (below). Wraps each
-  // block in <DetailPageSection> from the canonical <DetailPageRail> primitive
-  // so headings + spacing match brand-kit `preview/detail-page-template.html`
-  // (font-mono · 10px · 700 · uppercase · tracking 0.08em). The MetaRow-shaped
-  // Session Cost / Activity timeline content is preserved as-is — task pages
-  // have icon-prefixed rows that don't fit the QuickStat 2-col k/v shape used
-  // by simpler detail pages.
-  const rightRailContent = (
-    <DetailPageRail>
-      {hasEvents && (
-        <DetailPageSection
-          title={
-            <>
-              <Activity className="h-3 w-3 inline-block mr-1 -mt-0.5 text-muted-foreground" />
-              Activity ({task.logs!.length})
-            </>
-          }
-        >
-          <LogTimeline logs={task.logs!} />
-        </DetailPageSection>
-      )}
-
+      {/* Phase 17 — Session Cost moved from right rail to left rail. The right
+          rail now hosts only the Activity timeline (which gets a sticky header
+          + scrollable body), while cost stats live alongside the other static
+          meta rows on the left so the user sees them without scrolling the
+          activity feed. */}
       <TaskCostSection
         costs={costs}
         isLoading={costsLoading}
         provider={task.provider}
         providerMeta={task.providerMeta}
       />
+    </div>
+  );
+
+  // RIGHT RAIL — Activity timeline only (Phase 17 moved Session Cost to the
+  // left rail). The Activity heading is sticky at the top of the rail; rows
+  // scroll under it. The rail itself renders `overflow-y-auto` at the page
+  // level (see desktop layout below); the sticky heading uses `top-0` against
+  // that scroll container and a `bg-background` background so the rows pass
+  // beneath without showing through.
+  const rightRailContent = (
+    <DetailPageRail>
+      {hasEvents && (
+        <section className="first:mt-0 mt-0">
+          {/* Sticky header — stays pinned at the top of the rail's scroll
+              container so users always see "Activity (N)". `-mx-3 -mt-3 px-3
+              pt-3 pb-2 pr-10` extends the bg into the rail's px-3/py-3 padding
+              and reserves room for the absolutely-positioned collapse chevron
+              at top-2 right-2 (24×24 + spacing → ~40px). */}
+          <h4 className="sticky top-0 z-10 bg-background -mx-3 -mt-3 px-3 pt-3 pb-2 pr-10 font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground mb-2.5 border-b border-border">
+            <Activity className="h-3 w-3 inline-block mr-1 -mt-0.5 text-muted-foreground" />
+            Activity ({task.logs!.length})
+          </h4>
+          <LogTimeline logs={task.logs!} />
+        </section>
+      )}
     </DetailPageRail>
   );
 
@@ -770,7 +791,12 @@ export default function TaskDetailPage() {
   // on desktop (lg+) and above the Tabs on mobile/tablet (<lg). Same JSX in both
   // places — single-use; not extractable per the "appears in 2+ places" rule.
   const heroBlock = (
-    <div className="space-y-2 px-1 pb-3 shrink-0">
+    // Phase 17 — generous padding around the badges/description/actions block
+    // ("the task details part on top of the logs"). Brand kit's
+    // `preview/task-detail.html` `.header { padding: 14px 18px 12px }` informs
+    // the new px-4/py-4 values; the `space-y-3` opens up vertical breathing
+    // between badge row → description → action row.
+    <div className="space-y-3 px-4 pt-4 pb-5 shrink-0">
       <div className="flex items-center gap-2 flex-wrap">
         <StatusBadge status={task.status} size="md" />
         {task.taskType && (
@@ -927,9 +953,16 @@ export default function TaskDetailPage() {
           preview/detail-page-template.html. Both rails at 280px (canonical
           brand-kit width). The left meta-sidebar remains page-specific (no
           other detail page has dense meta data); the right rail comes from
-          the <DetailPageBody> contract. */}
-      <div className="hidden lg:grid lg:grid-cols-[280px_1fr_280px] flex-1 min-h-0 overflow-hidden">
-        {/* Left rail — meta info + SCM card + Dependencies + Progress + Context budget */}
+          the <DetailPageBody> contract. Phase 17 — the right rail collapses
+          to a 36px gutter (just the toggle button) so the center column can
+          take the freed width. State persists in localStorage. */}
+      <div
+        className={cn(
+          "hidden lg:grid flex-1 min-h-0 overflow-hidden",
+          railCollapsed ? "lg:grid-cols-[280px_1fr_36px]" : "lg:grid-cols-[280px_1fr_280px]",
+        )}
+      >
+        {/* Left rail — meta info + SCM card + Dependencies + Progress + Context budget + Session Cost */}
         <aside className="border-r border-border py-3 px-1 pr-3 overflow-y-auto min-h-0">
           {leftRailContent}
         </aside>
@@ -938,7 +971,10 @@ export default function TaskDetailPage() {
         <section className="flex flex-col min-h-0 overflow-hidden">
           {heroBlock}
           <Separator className="shrink-0" />
-          <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-3 px-3 gap-2">
+          {/* Phase 17 — bumped padding from py-3 px-3 gap-2 to py-4 px-4 gap-3
+              to match brand-kit `.body { padding: 14px 18px }` and give the
+              SessionLogViewer + Failure / Output cards more breathing room. */}
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-4 px-4 gap-3">
             {isFailed && task.failureReason && (
               <CollapsibleSection
                 variant="card"
@@ -984,9 +1020,30 @@ export default function TaskDetailPage() {
           </div>
         </section>
 
-        {/* Right rail — Activity timeline + Session Cost stats */}
-        <aside className="border-l border-border py-3 px-3 overflow-y-auto min-h-0">
-          {rightRailContent}
+        {/* Right rail — Activity timeline (sticky header). Collapsible: when
+            collapsed, only the toggle chevron shows; click to re-expand. */}
+        <aside
+          className={cn(
+            "border-l border-border min-h-0 relative",
+            railCollapsed ? "overflow-hidden" : "overflow-y-auto py-3 px-3",
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => setRailCollapsed((v) => !v)}
+            aria-label={railCollapsed ? "Expand activity rail" : "Collapse activity rail"}
+            className={cn(
+              "absolute z-20 top-2 h-6 w-6 inline-flex items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",
+              railCollapsed ? "left-1/2 -translate-x-1/2" : "right-2",
+            )}
+          >
+            {railCollapsed ? (
+              <ChevronLeft className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+          </button>
+          {!railCollapsed && rightRailContent}
         </aside>
       </div>
     </div>
