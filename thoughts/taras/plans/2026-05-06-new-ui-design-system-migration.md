@@ -4,7 +4,7 @@ topic: "new-ui Design System Migration Plan"
 status: completed
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
-last_updated_by: Claude (phase 12)
+last_updated_by: Claude (phase 13)
 ---
 
 # new-ui Design System Migration Plan
@@ -851,6 +851,57 @@ Tabular list of any "Code-change candidate" deltas with file, effort, recommende
 ### QA Spec (optional):
 
 n/a — research-only phase. No browser scenarios.
+
+---
+
+## Phase 13: LogTimeline vertical rail visual to match brand kit
+
+### Overview
+
+Phase 12 audit (commit `328218d1`) surfaced one surgical code-change candidate: `LogTimeline` rows on `pages/tasks/[id]/page.tsx` render flat. Brand kit `~/Downloads/swarm-design-system/preview/task-detail.html:170-191` shows a vertical 1px rail (`var(--border)` solid) connecting status-colored dots — visually richer "story" of task events.
+
+The current implementation already has the right structural skeleton (per-row `flex flex-col items-center` rail column with dot + `flex-1 w-px` line, content column on the right). The deltas vs. the brand kit are:
+
+1. Line uses `bg-border/40` — preview uses solid `var(--border)`
+2. Line has no top margin — preview has `margin-top: 2px` between dot and line
+3. Dot has `mt-1.5` (6px) — preview uses `margin-top: 5px`
+
+This phase is a CSS-only patch on the existing `LogTimeline` component. No new tokens needed (`bg-border` already exists). No structural changes to data flow.
+
+### Changes Required:
+
+#### 1. `LogTimeline` rail visual
+
+**File**: `new-ui/src/pages/tasks/[id]/page.tsx` (`LogTimeline`, around line 139)
+
+Tighten the rail visual to match `preview/task-detail.html`:
+
+- Dot: `mt-1.5` → `mt-[5px]` (preview uses 5px, current is 6px — minor pixel parity)
+- Line: `bg-border/40` → `bg-border` (preview uses full opacity)
+- Line: add `mt-[2px]` (preview has 2px gap between dot and line)
+- Keep conditional render on the line for the last row (preview's last `.tl-row` also omits `<span class="tl-line"></span>`)
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] `cd new-ui && pnpm run check:tokens` — no new color literals introduced
+- [x] `cd new-ui && pnpm lint` — Biome passes
+- [x] `cd new-ui && pnpm exec tsc -b` — typecheck passes
+- [x] `cd new-ui && pnpm exec vite build` — build passes
+- [x] `cd new-ui && pnpm dev` boots clean — sanity-check JSX compiles, no obvious layout breaks (kill after start)
+
+#### Automated QA:
+- [ ] `qa-use` capture of `tasks/[id]` page before/after for the rail visual [skipped — qa-use deferred to PR-time]
+
+#### Manual Verification:
+- [ ] User visually confirms rail visual on `tasks/[id]` matches `preview/task-detail.html` reasonably (light + dark)
+- [ ] User confirms the tighter rail is the desired regression-fix (vs. keeping the muted `/40` line)
+
+**Implementation Note**: Single commit `[phase 13] LogTimeline vertical rail visual to match brand kit`. Plan frontmatter flips back to `status: completed` after the commit.
+
+### QA Spec (optional):
+
+n/a — single-component CSS visual fix. qa-use deferred to PR-time per orchestrator policy.
 
 ---
 

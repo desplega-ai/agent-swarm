@@ -141,14 +141,15 @@ function LogTimeline({ logs }: { logs: AgentLog[] }) {
     <div className="space-y-0">
       {logs.map((log, i) => (
         <div key={log.id} className="flex gap-3 text-sm">
+          {/* Rail column — vertical 1px line connecting status-colored dots; mirrors brand-kit `.tl-rail` (preview/task-detail.html). */}
           <div className="flex flex-col items-center">
             <div
               className={cn(
-                "h-2 w-2 rounded-full mt-1.5 shrink-0",
+                "h-2 w-2 rounded-full mt-[5px] shrink-0",
                 logDotColor(log.eventType, log.newValue ?? undefined),
               )}
             />
-            {i < logs.length - 1 && <div className="flex-1 w-px bg-border/40" />}
+            {i < logs.length - 1 && <div className="flex-1 w-px bg-border mt-[2px]" />}
           </div>
           <div className="pb-3 min-w-0">
             {renderLogContent(log)}
