@@ -29,6 +29,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  DangerZone,
+  DetailPageBody,
+  DetailPageRail,
+  QuickStat,
+  QuickStats,
+} from "@/components/ui/detail-page-layout";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -36,7 +43,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -283,73 +289,82 @@ export default function RepoDetailPage() {
           </div>
         }
         action={
-          <>
-            <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-3.5 w-3.5" /> Edit
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button size="sm" variant="destructive-outline" className="gap-1">
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete Repository</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Are you sure you want to delete <strong>{repo.name}</strong>? This action cannot
-                    be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction variant="destructive" onClick={handleDelete}>
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </>
+          <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditOpen(true)}>
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </Button>
         }
       />
 
-      <Card>
-        <CardContent className="pt-6">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <InfoRow label="URL">
-              <a
-                href={repo.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-              >
-                {repo.url}
-                <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-              </a>
-            </InfoRow>
-            <InfoRow label="Clone Path">
-              <p className="text-sm font-mono">{repo.clonePath}</p>
-            </InfoRow>
-            <InfoRow label="Default Branch">
-              <p className="text-sm inline-flex items-center gap-1">
-                <GitBranch className="h-3 w-3" /> {repo.defaultBranch}
-              </p>
-            </InfoRow>
-            <InfoRow label="Created">{formatSmartTime(repo.createdAt)}</InfoRow>
-          </div>
-        </CardContent>
-      </Card>
+      <DetailPageBody
+        main={
+          repo.guidelines ? (
+            <GuidelinesSection guidelines={repo.guidelines} />
+          ) : (
+            <Card>
+              <CardContent className="py-8 flex flex-col items-center text-muted-foreground">
+                <X className="h-6 w-6 mb-2 opacity-40" />
+                <p className="text-sm">No guidelines configured for this repository.</p>
+              </CardContent>
+            </Card>
+          )
+        }
+        rail={
+          <DetailPageRail>
+            <QuickStats>
+              <QuickStat
+                label="URL"
+                value={
+                  <a
+                    href={repo.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                  >
+                    <span className="truncate">{repo.url}</span>
+                    <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
+                  </a>
+                }
+              />
+              <QuickStat label="Clone Path" value={repo.clonePath} mono />
+              <QuickStat
+                label="Default Branch"
+                value={
+                  <span className="inline-flex items-center gap-1">
+                    <GitBranch className="h-3 w-3" /> {repo.defaultBranch}
+                  </span>
+                }
+              />
+              <QuickStat label="Created" value={formatSmartTime(repo.createdAt)} />
+              <QuickStat label="Auto-clone" value={repo.autoClone ? "Enabled" : "Disabled"} />
+            </QuickStats>
 
-      {repo.guidelines ? (
-        <GuidelinesSection guidelines={repo.guidelines} />
-      ) : (
-        <Card>
-          <CardContent className="py-8 flex flex-col items-center text-muted-foreground">
-            <X className="h-6 w-6 mb-2 opacity-40" />
-            <p className="text-sm">No guidelines configured for this repository.</p>
-          </CardContent>
-        </Card>
-      )}
+            <DangerZone>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="destructive-outline" className="w-full gap-1">
+                    <Trash2 className="h-3.5 w-3.5" /> Delete repository
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete Repository</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to delete <strong>{repo.name}</strong>? This action
+                      cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction variant="destructive" onClick={handleDelete}>
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </DangerZone>
+          </DetailPageRail>
+        }
+      />
 
       <RepoEditDialog
         key={repo.id}

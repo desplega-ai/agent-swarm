@@ -16,10 +16,17 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DangerZone,
+  DetailPageBody,
+  DetailPageRail,
+  QuickStat,
+  QuickStats,
+  Relationship,
+  Relationships,
+} from "@/components/ui/detail-page-layout";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -106,146 +113,107 @@ export default function SkillDetailPage() {
           </div>
         }
         action={
-          <>
-            <Button variant="outline" size="sm" onClick={handleToggleEnabled}>
-              {skill.isEnabled ? "Disable" : "Enable"}
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive-outline" size="sm">
-                  <Trash2 className="h-4 w-4 mr-1" /> Delete
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete skill "{skill.name}"?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will permanently delete this skill and uninstall it from all agents.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </>
+          <Button variant="outline" size="sm" onClick={handleToggleEnabled}>
+            {skill.isEnabled ? "Disable" : "Enable"}
+          </Button>
         }
       />
 
       <p className="text-sm text-muted-foreground shrink-0">{skill.description}</p>
 
-      <Tabs defaultValue="content" className="flex flex-col flex-1 min-h-0">
-        <TabsList className="shrink-0">
-          <TabsTrigger value="content">Content</TabsTrigger>
-          <TabsTrigger value="metadata">Metadata</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="content" className="flex flex-col flex-1 min-h-0 mt-4 gap-3">
-          <div className="flex items-center justify-between shrink-0">
-            <span className="text-sm text-muted-foreground">SKILL.md content</span>
+      <DetailPageBody
+        className="flex-1 min-h-0"
+        main={
+          <div className="flex flex-col flex-1 min-h-0 gap-3">
+            <div className="flex items-center justify-between shrink-0">
+              <span className="text-sm text-muted-foreground">SKILL.md content</span>
+              {editContent !== null ? (
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setEditContent(null)}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleSaveContent} disabled={updateSkill.isPending}>
+                    Save
+                  </Button>
+                </div>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => setEditContent(skill.content)}>
+                  Edit
+                </Button>
+              )}
+            </div>
             {editContent !== null ? (
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setEditContent(null)}>
-                  Cancel
-                </Button>
-                <Button size="sm" onClick={handleSaveContent} disabled={updateSkill.isPending}>
-                  Save
-                </Button>
-              </div>
+              <Textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="flex-1 min-h-[300px] font-mono text-sm"
+              />
             ) : (
-              <Button variant="outline" size="sm" onClick={() => setEditContent(skill.content)}>
-                Edit
-              </Button>
+              <pre className="flex-1 overflow-auto bg-muted p-4 rounded-lg text-sm font-mono whitespace-pre-wrap">
+                {skill.content || "(empty)"}
+              </pre>
             )}
           </div>
-          {editContent !== null ? (
-            <Textarea
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              className="flex-1 min-h-[300px] font-mono text-sm"
-            />
-          ) : (
-            <pre className="flex-1 overflow-auto bg-muted p-4 rounded-lg text-sm font-mono whitespace-pre-wrap">
-              {skill.content || "(empty)"}
-            </pre>
-          )}
-        </TabsContent>
-
-        <TabsContent value="metadata" className="mt-4 overflow-y-auto">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Details</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">ID</span>
-                <p className="font-mono text-xs">{skill.id}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Version</span>
-                <p>{skill.version}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Created</span>
-                <p>{formatRelativeTime(skill.createdAt)}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Last Updated</span>
-                <p>{formatRelativeTime(skill.lastUpdatedAt)}</p>
-              </div>
+        }
+        rail={
+          <DetailPageRail>
+            <QuickStats>
+              <QuickStat label="ID" value={skill.id} mono />
+              <QuickStat label="Version" value={skill.version} />
+              <QuickStat label="Created" value={formatRelativeTime(skill.createdAt)} />
+              <QuickStat label="Last Updated" value={formatRelativeTime(skill.lastUpdatedAt)} />
               {skill.lastFetchedAt && (
-                <div>
-                  <span className="text-muted-foreground">Last Fetched</span>
-                  <p>{formatRelativeTime(skill.lastFetchedAt)}</p>
-                </div>
+                <QuickStat label="Last Fetched" value={formatRelativeTime(skill.lastFetchedAt)} />
               )}
-              {skill.ownerAgentId && (
-                <div>
-                  <span className="text-muted-foreground">Owner Agent</span>
-                  <p className="font-mono text-xs">{skill.ownerAgentId}</p>
-                </div>
-              )}
-              {skill.sourceRepo && (
-                <>
-                  <div>
-                    <span className="text-muted-foreground">Source Repo</span>
-                    <p>{skill.sourceRepo}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Source Path</span>
-                    <p>{skill.sourcePath || "/"}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Branch</span>
-                    <p>{skill.sourceBranch}</p>
-                  </div>
-                </>
-              )}
-              {skill.allowedTools && (
-                <div>
-                  <span className="text-muted-foreground">Allowed Tools</span>
-                  <p>{skill.allowedTools}</p>
-                </div>
-              )}
-              {skill.model && (
-                <div>
-                  <span className="text-muted-foreground">Model</span>
-                  <p>{skill.model}</p>
-                </div>
-              )}
-              <div>
-                <span className="text-muted-foreground">Complex</span>
-                <p>{skill.isComplex ? "Yes" : "No"}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">User Invocable</span>
-                <p>{skill.userInvocable ? "Yes" : "No"}</p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+              {skill.model && <QuickStat label="Model" value={skill.model} mono />}
+              {skill.allowedTools && <QuickStat label="Allowed Tools" value={skill.allowedTools} />}
+              <QuickStat label="Complex" value={skill.isComplex ? "Yes" : "No"} />
+              <QuickStat label="User Invocable" value={skill.userInvocable ? "Yes" : "No"} />
+            </QuickStats>
+
+            {(skill.ownerAgentId || skill.sourceRepo) && (
+              <Relationships>
+                {skill.ownerAgentId && (
+                  <Relationship label="Owner Agent" to={`/agents/${skill.ownerAgentId}`}>
+                    <span className="font-mono">{skill.ownerAgentId.slice(0, 8)}…</span>
+                  </Relationship>
+                )}
+                {skill.sourceRepo && (
+                  <Relationship label="Source">
+                    <span className="font-mono text-[11px] truncate">
+                      {skill.sourceRepo}
+                      {skill.sourcePath && skill.sourcePath !== "/" ? ` · ${skill.sourcePath}` : ""}
+                      {skill.sourceBranch ? ` @ ${skill.sourceBranch}` : ""}
+                    </span>
+                  </Relationship>
+                )}
+              </Relationships>
+            )}
+
+            <DangerZone>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive-outline" size="sm" className="w-full">
+                    <Trash2 className="h-4 w-4 mr-1" /> Delete skill
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete skill "{skill.name}"?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete this skill and uninstall it from all agents.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </DangerZone>
+          </DetailPageRail>
+        }
+      />
     </div>
   );
 }
