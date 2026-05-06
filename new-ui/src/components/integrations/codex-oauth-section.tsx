@@ -1,6 +1,7 @@
 import { AlertCircle, Check, Copy, Terminal, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useConfigs, useDeleteConfigsBatch } from "@/api/hooks/use-config-api";
+import { OAuthSection, OAuthStatusRow } from "@/components/shared/oauth-section";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -80,81 +81,69 @@ export function CodexOAuthSection() {
       </Alert>
 
       {/* Command snippet */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
-          CLI command
-        </h2>
-        <div className="flex items-start gap-2">
-          <code className="flex-1 font-mono text-xs bg-muted px-3 py-2 rounded border border-border break-all">
-            {snippet}
-          </code>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={handleCopy}
-            className="shrink-0"
-          >
-            {copied ? (
-              <Check className="h-3.5 w-3.5 text-status-success" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
-            {copied ? "Copied" : "Copy"}
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          The <code className="font-mono">--api-url</code> flag is auto-filled from your active
-          connection.
-        </p>
-      </section>
-
-      {/* Status */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
-          Status
-        </h2>
-        <div className="border border-border rounded-md bg-muted/10 p-4 flex items-start justify-between gap-4">
-          {isLoading ? (
-            <div className="text-sm text-muted-foreground">Loading status…</div>
-          ) : isConfigured ? (
-            <div className="flex items-start gap-3">
-              <div className="mt-1.5 h-2 w-2 rounded-full bg-status-success shrink-0" aria-hidden />
-              <div className="space-y-1">
-                <div className="text-sm font-medium">OAuth is configured</div>
-                <div className="text-xs text-muted-foreground">
-                  Codex workers will restore these credentials into{" "}
-                  <code className="font-mono">~/.codex/auth.json</code> on boot.
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-start gap-3">
-              <div className="mt-1.5 h-2 w-2 rounded-full bg-status-neutral shrink-0" aria-hidden />
-              <div className="space-y-1">
-                <div className="text-sm font-medium">Not configured</div>
-                <div className="text-xs text-muted-foreground">
-                  Run the command above from your laptop to store Codex OAuth credentials.
-                </div>
-              </div>
-            </div>
-          )}
-
-          {isConfigured && (
+      <OAuthSection title="CLI command">
+        <div className="p-4 space-y-2">
+          <div className="flex items-start gap-2">
+            <code className="flex-1 font-mono text-xs bg-muted px-3 py-2 rounded border border-border break-all">
+              {snippet}
+            </code>
             <Button
               type="button"
               size="sm"
-              variant="destructive-outline"
+              variant="outline"
+              onClick={handleCopy}
               className="shrink-0"
-              onClick={() => setConfirmClearOpen(true)}
-              disabled={deleteBatch.isPending}
             >
-              <Trash2 className="h-3.5 w-3.5" />
-              Clear stored OAuth
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-status-success" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+              {copied ? "Copied" : "Copy"}
             </Button>
-          )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The <code className="font-mono">--api-url</code> flag is auto-filled from your active
+            connection.
+          </p>
         </div>
-      </section>
+      </OAuthSection>
+
+      {/* Status */}
+      <OAuthSection title="Status">
+        {isLoading ? (
+          <div className="p-4 text-sm text-muted-foreground">Loading status…</div>
+        ) : (
+          <OAuthStatusRow
+            connected={isConfigured}
+            label={isConfigured ? "OAuth is configured" : "Not configured"}
+            description={
+              isConfigured ? (
+                <>
+                  Codex workers will restore these credentials into{" "}
+                  <code className="font-mono">~/.codex/auth.json</code> on boot.
+                </>
+              ) : (
+                "Run the command above from your laptop to store Codex OAuth credentials."
+              )
+            }
+            actions={
+              isConfigured ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive-outline"
+                  onClick={() => setConfirmClearOpen(true)}
+                  disabled={deleteBatch.isPending}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Clear stored OAuth
+                </Button>
+              ) : null
+            }
+          />
+        )}
+      </OAuthSection>
 
       {/* Non-ideal edge: if we can't list configs at all, warn. */}
       {!isLoading && !configs && (

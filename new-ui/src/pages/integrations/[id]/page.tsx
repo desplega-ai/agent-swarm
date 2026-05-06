@@ -55,6 +55,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   INTEGRATIONS,
   type IntegrationDef,
@@ -332,25 +333,29 @@ function IntegrationDetailInner({
         <Button asChild size="sm" variant="ghost" className="self-start text-muted-foreground">
           <Link to="/integrations">← All integrations</Link>
         </Button>
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted/50 shrink-0">
-              <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
+        <PageHeader
+          title={
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted/50 shrink-0">
+                <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-xl font-semibold">{def.name}</h1>
+                <p className="text-sm text-muted-foreground">{def.description}</p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h1 className="text-xl font-semibold">{def.name}</h1>
-              <p className="text-sm text-muted-foreground">{def.description}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <IntegrationStatusBadge status={status} />
-            <Button asChild size="sm" variant="outline" className="gap-1">
-              <a href={def.docsUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="h-3.5 w-3.5" /> Docs
-              </a>
-            </Button>
-          </div>
-        </div>
+          }
+          action={
+            <>
+              <IntegrationStatusBadge status={status} />
+              <Button asChild size="sm" variant="outline" className="gap-1">
+                <a href={def.docsUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-3.5 w-3.5" /> Docs
+                </a>
+              </Button>
+            </>
+          }
+        />
       </div>
 
       {/* Action bar — hidden for codex-cli (no catalog fields to save/reset via the generic flow). */}

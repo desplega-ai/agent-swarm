@@ -18,6 +18,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { InfoRow } from "@/components/ui/info-row";
+import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatRelativeTime } from "@/lib/utils";
@@ -117,57 +119,62 @@ export default function McpServerDetailPage() {
         <ArrowLeft className="h-4 w-4" /> Back to MCP Servers
       </button>
 
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold">{server.name}</h1>
-          <TransportBadge transport={server.transport} />
-          <ScopeBadge scope={server.scope} />
-          {server.authMethod === "oauth" && (
+      <PageHeader
+        className="shrink-0"
+        title={
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold">{server.name}</h1>
+            <TransportBadge transport={server.transport} />
+            <ScopeBadge scope={server.scope} />
+            {server.authMethod === "oauth" && (
+              <Badge
+                variant="outline"
+                size="tag"
+                className="border-action-delegate-to-agent/30 text-action-delegate-to-agent"
+              >
+                OAuth
+              </Badge>
+            )}
             <Badge
               variant="outline"
               size="tag"
-              className="border-action-delegate-to-agent/30 text-action-delegate-to-agent"
+              className={`${
+                server.isEnabled
+                  ? "border-status-success/30 text-status-success"
+                  : "border-status-error/30 text-status-error"
+              }`}
             >
-              OAuth
+              {server.isEnabled ? "Enabled" : "Disabled"}
             </Badge>
-          )}
-          <Badge
-            variant="outline"
-            size="tag"
-            className={`${
-              server.isEnabled
-                ? "border-status-success/30 text-status-success"
-                : "border-status-error/30 text-status-error"
-            }`}
-          >
-            {server.isEnabled ? "Enabled" : "Disabled"}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleToggleEnabled}>
-            {server.isEnabled ? "Disable" : "Enable"}
-          </Button>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive-outline" size="sm">
-                <Trash2 className="h-4 w-4 mr-1" /> Delete
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete MCP server "{server.name}"?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently delete this MCP server and uninstall it from all agents.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-      </div>
+          </div>
+        }
+        action={
+          <>
+            <Button variant="outline" size="sm" onClick={handleToggleEnabled}>
+              {server.isEnabled ? "Disable" : "Enable"}
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive-outline" size="sm">
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete MCP server "{server.name}"?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete this MCP server and uninstall it from all agents.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
+        }
+      />
 
       {server.description && (
         <p className="text-sm text-muted-foreground shrink-0">{server.description}</p>
@@ -187,37 +194,32 @@ export default function McpServerDetailPage() {
               <CardTitle className="text-sm">Transport Configuration</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">Transport</span>
+              <InfoRow label="Transport">
                 <p className="uppercase">{server.transport}</p>
-              </div>
+              </InfoRow>
               {server.transport === "stdio" && (
                 <>
-                  <div>
-                    <span className="text-muted-foreground">Command</span>
+                  <InfoRow label="Command">
                     <p className="font-mono text-xs">{server.command || "(not set)"}</p>
-                  </div>
+                  </InfoRow>
                   {server.args && (
-                    <div className="col-span-2">
-                      <span className="text-muted-foreground">Arguments</span>
+                    <InfoRow label="Arguments" className="col-span-2">
                       <p className="font-mono text-xs">{server.args}</p>
-                    </div>
+                    </InfoRow>
                   )}
                 </>
               )}
               {(server.transport === "http" || server.transport === "sse") && (
                 <>
-                  <div className="col-span-2">
-                    <span className="text-muted-foreground">URL</span>
+                  <InfoRow label="URL" className="col-span-2">
                     <p className="font-mono text-xs break-all">{server.url || "(not set)"}</p>
-                  </div>
+                  </InfoRow>
                   {server.headers && (
-                    <div className="col-span-2">
-                      <span className="text-muted-foreground">Headers</span>
+                    <InfoRow label="Headers" className="col-span-2">
                       <pre className="font-mono text-xs bg-muted p-2 rounded mt-1 whitespace-pre-wrap">
                         {server.headers}
                       </pre>
-                    </div>
+                    </InfoRow>
                   )}
                 </>
               )}
@@ -232,8 +234,7 @@ export default function McpServerDetailPage() {
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
                 {envKeys.length > 0 && (
-                  <div>
-                    <span className="text-muted-foreground">Environment Config Keys</span>
+                  <InfoRow label="Environment Config Keys">
                     <div className="flex flex-wrap gap-1 mt-1">
                       {envKeys.map((key) => (
                         <Badge
@@ -245,11 +246,10 @@ export default function McpServerDetailPage() {
                         </Badge>
                       ))}
                     </div>
-                  </div>
+                  </InfoRow>
                 )}
                 {headerKeys.length > 0 && (
-                  <div>
-                    <span className="text-muted-foreground">Header Config Keys</span>
+                  <InfoRow label="Header Config Keys">
                     <div className="flex flex-wrap gap-1 mt-1">
                       {headerKeys.map((key) => (
                         <Badge
@@ -261,7 +261,7 @@ export default function McpServerDetailPage() {
                         </Badge>
                       ))}
                     </div>
-                  </div>
+                  </InfoRow>
                 )}
               </CardContent>
             </Card>
@@ -278,32 +278,20 @@ export default function McpServerDetailPage() {
               <CardTitle className="text-sm">Details</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">ID</span>
+              <InfoRow label="ID">
                 <p className="font-mono text-xs">{server.id}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Version</span>
-                <p>{server.version}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Scope</span>
+              </InfoRow>
+              <InfoRow label="Version">{server.version}</InfoRow>
+              <InfoRow label="Scope">
                 <p className="capitalize">{server.scope}</p>
-              </div>
+              </InfoRow>
               {server.ownerAgentId && (
-                <div>
-                  <span className="text-muted-foreground">Owner Agent</span>
+                <InfoRow label="Owner Agent">
                   <p className="font-mono text-xs">{server.ownerAgentId}</p>
-                </div>
+                </InfoRow>
               )}
-              <div>
-                <span className="text-muted-foreground">Created</span>
-                <p>{formatRelativeTime(server.createdAt)}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Last Updated</span>
-                <p>{formatRelativeTime(server.lastUpdatedAt)}</p>
-              </div>
+              <InfoRow label="Created">{formatRelativeTime(server.createdAt)}</InfoRow>
+              <InfoRow label="Last Updated">{formatRelativeTime(server.lastUpdatedAt)}</InfoRow>
             </CardContent>
           </Card>
         </TabsContent>

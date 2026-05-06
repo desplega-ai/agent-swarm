@@ -7,6 +7,7 @@ import type { McpServer } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
   SelectContent,
@@ -158,9 +159,7 @@ export default function McpServersPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <div className="flex items-center justify-between shrink-0">
-        <h1 className="text-xl font-semibold">MCP Servers</h1>
-      </div>
+      <PageHeader title="MCP Servers" className="shrink-0" />
 
       <div className="flex items-center gap-3 shrink-0">
         <Input

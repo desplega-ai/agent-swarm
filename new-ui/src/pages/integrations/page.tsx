@@ -8,6 +8,7 @@ import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
 import { INTEGRATIONS, type IntegrationCategory } from "@/lib/integrations-catalog";
 import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-status";
 import { cn } from "@/lib/utils";
@@ -86,11 +87,15 @@ export default function IntegrationsPage() {
   return (
     <div className="flex-1 min-h-0 overflow-y-auto space-y-6 p-2">
       <div className="space-y-2">
-        <h1 className="text-xl font-semibold">Integrations</h1>
-        <p className="text-sm text-muted-foreground">
-          Configure third-party integrations (Slack, GitHub, LLM providers, and more) without
-          hand-editing <code className="font-mono text-xs">.env</code>.
-        </p>
+        <PageHeader
+          title="Integrations"
+          description={
+            <>
+              Configure third-party integrations (Slack, GitHub, LLM providers, and more) without
+              hand-editing <code className="font-mono text-xs">.env</code>.
+            </>
+          }
+        />
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none hover:text-foreground">
             Legend — what do the chips mean?

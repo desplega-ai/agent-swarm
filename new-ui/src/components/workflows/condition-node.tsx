@@ -1,6 +1,6 @@
-import { Handle, type NodeProps, Position } from "@xyflow/react";
-import { Code2, Filter, ShieldCheck, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
+import type { NodeProps } from "@xyflow/react";
+import { Code2, Filter, type LucideIcon, ShieldCheck, Sparkles } from "lucide-react";
+import { WorkflowNodeShell } from "@/components/shared/workflow-node-shell";
 import type { FlowNodeData } from "./graph-utils";
 import { statusBorderColor } from "./node-styles";
 
@@ -9,7 +9,7 @@ type NodeStyle = {
   bg: string;
   text: string;
   handle: string;
-  icon: React.ElementType;
+  icon: LucideIcon;
 };
 
 const nodeStyleMap: Record<string, NodeStyle> = {
@@ -56,47 +56,19 @@ const defaultStyle: NodeStyle = {
 export function ConditionNode({ data }: NodeProps) {
   const d = data as unknown as FlowNodeData;
   const style = nodeStyleMap[d.nodeType] ?? defaultStyle;
-  const Icon = style.icon;
-  const borderColor = d.stepStatus ? statusBorderColor[d.stepStatus] : style.border;
-  const ports = d.outputPorts.length > 0 ? d.outputPorts : ["default"];
+  const borderClass = d.stepStatus ? statusBorderColor[d.stepStatus] : style.border;
 
   return (
-    <div
-      className={cn(
-        "bg-card border-2 rounded-lg shadow-sm px-3 py-2 min-w-[240px] max-w-[280px]",
-        borderColor,
-        d.selected && "ring-2 ring-status-active ring-offset-1 ring-offset-background",
-      )}
-    >
-      <Handle type="target" position={Position.Top} id="input" className={style.handle} />
-      <div className="flex items-center gap-2">
-        <div className={cn("p-1 rounded", style.bg)}>
-          <Icon className={cn("h-4 w-4", style.text)} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-xs font-medium truncate">{d.label}</div>
-          <div className="text-[10px] text-muted-foreground uppercase">{d.nodeType}</div>
-        </div>
-      </div>
-      {ports.length > 1 ? (
-        <div className="flex justify-around mt-1">
-          {ports.map((port, i) => (
-            <div key={port} className="flex flex-col items-center">
-              <span className="text-[9px] text-muted-foreground">{port}</span>
-              <Handle
-                type="source"
-                position={Position.Bottom}
-                id={port}
-                className={style.handle}
-                // inline-style: react-flow port position computed per index
-                style={{ left: `${((i + 1) / (ports.length + 1)) * 100}%` }}
-              />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Handle type="source" position={Position.Bottom} id="default" className={style.handle} />
-      )}
-    </div>
+    <WorkflowNodeShell
+      icon={style.icon}
+      label={d.label}
+      nodeType={d.nodeType}
+      borderClass={borderClass}
+      iconBgClass={style.bg}
+      iconClass={style.text}
+      handleClass={style.handle}
+      selected={d.selected}
+      outputPorts={d.outputPorts}
+    />
   );
 }

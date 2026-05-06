@@ -26,6 +26,7 @@ import { useTasks } from "@/api/hooks/use-tasks";
 import type { AgentLog, AgentWithTasks } from "@/api/types";
 import { StatsBar } from "@/components/shared/stats-bar";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { statusTextClass } from "@/lib/status-tone";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 // --- Agent Tile (Command Center style) ---
@@ -154,25 +155,6 @@ const eventIcons: Record<string, { icon: LucideIcon; tone: EventTone }> = {
   service_registered: { icon: Server, tone: "service" },
 };
 
-function statusColor(status: string | null | undefined): string {
-  switch (status) {
-    case "completed":
-      return "text-status-success";
-    case "failed":
-    case "cancelled":
-      return "text-status-error";
-    case "in_progress":
-    case "busy":
-      return "text-status-active";
-    case "idle":
-      return "text-status-success";
-    case "offline":
-      return "text-status-neutral";
-    default:
-      return "text-primary";
-  }
-}
-
 function ActivityItem({ log, agentMap }: { log: AgentLog; agentMap: Map<string, string> }) {
   const config = eventIcons[log.eventType] ?? {
     icon: Activity,
@@ -208,7 +190,9 @@ function ActivityItem({ log, agentMap }: { log: AgentLog; agentMap: Map<string, 
         return (
           <>
             {agentLink} is now{" "}
-            <span className={cn("font-semibold", statusColor(log.newValue))}>{log.newValue}</span>
+            <span className={cn("font-semibold", statusTextClass(log.newValue))}>
+              {log.newValue}
+            </span>
           </>
         );
       case "task_created":
@@ -227,10 +211,14 @@ function ActivityItem({ log, agentMap }: { log: AgentLog; agentMap: Map<string, 
           <>
             Task {taskLink}{" "}
             {log.oldValue && (
-              <span className={cn("font-medium", statusColor(log.oldValue))}>{log.oldValue}</span>
+              <span className={cn("font-medium", statusTextClass(log.oldValue))}>
+                {log.oldValue}
+              </span>
             )}
             {log.oldValue && " → "}
-            <span className={cn("font-semibold", statusColor(log.newValue))}>{log.newValue}</span>
+            <span className={cn("font-semibold", statusTextClass(log.newValue))}>
+              {log.newValue}
+            </span>
           </>
         );
       case "task_progress":

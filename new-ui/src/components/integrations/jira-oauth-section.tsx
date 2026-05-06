@@ -5,6 +5,7 @@ import {
   useDisconnectJira,
   useJiraTrackerStatus,
 } from "@/api/hooks/use-jira-status";
+import { OAuthSection, OAuthSectionRow, OAuthStatusRow } from "@/components/shared/oauth-section";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -54,15 +55,12 @@ export function JiraOAuthSection() {
 
   if (isLoading) {
     return (
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
-          Connection
-        </h2>
-        <div className="border border-border rounded-md p-4 bg-muted/10 animate-pulse">
+      <OAuthSection title="Connection">
+        <div className="p-4 animate-pulse">
           <div className="h-5 w-32 bg-muted rounded mb-2" />
           <div className="h-4 w-48 bg-muted rounded" />
         </div>
-      </section>
+      </OAuthSection>
     );
   }
 
@@ -111,246 +109,223 @@ export function JiraOAuthSection() {
   const expiryLabel = formatTokenExpiry(data.tokenExpiresAt);
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
-        Connection
-      </h2>
-
-      <div className="border border-border rounded-md bg-muted/10">
-        {/* Status row */}
-        <div className="flex items-start justify-between gap-4 p-4">
-          <div className="flex items-start gap-3">
-            <div
-              className={
-                data.connected
-                  ? "mt-1.5 h-2 w-2 rounded-full bg-status-success shrink-0"
-                  : "mt-1.5 h-2 w-2 rounded-full bg-status-neutral shrink-0"
-              }
-              aria-hidden="true"
-            />
-            <div className="space-y-1">
-              <div className="text-sm font-medium">
-                {data.connected ? "Connected to Jira" : "Not connected"}
-              </div>
-              {data.connected ? (
-                <div className="text-xs text-muted-foreground space-y-0.5">
-                  {data.siteUrl && (
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span>Site:</span>
-                      <code className="font-mono bg-muted px-1.5 py-0.5 rounded">
-                        {data.siteUrl}
-                      </code>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-5 w-5"
-                        onClick={() => handleCopy("site", data.siteUrl ?? "")}
-                        aria-label="Copy site URL"
-                      >
-                        {copied === "site" ? (
-                          <Check className="h-3 w-3 text-status-success" />
-                        ) : (
-                          <Copy className="h-3 w-3" />
-                        )}
-                      </Button>
-                    </div>
-                  )}
-                  {data.cloudId && (
-                    <div>
-                      cloudId: <span className="font-mono">{data.cloudId}</span>
-                    </div>
-                  )}
-                  {data.scope && (
-                    <div>
-                      Scope: <span className="font-mono">{data.scope}</span>
-                    </div>
-                  )}
-                  {expiryLabel && <div>Token expires: {expiryLabel}</div>}
-                  <div>
-                    Registered webhooks: <span className="font-mono">{data.webhookIds.length}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-xs text-muted-foreground">
-                  Copy the Authorization URL below and open it in a browser to authorize a Jira
-                  Cloud workspace via OAuth 3LO.
+    <OAuthSection title="Connection">
+      <OAuthStatusRow
+        connected={data.connected}
+        label={data.connected ? "Connected to Jira" : "Not connected"}
+        description={
+          data.connected ? (
+            <div className="space-y-0.5">
+              {data.siteUrl && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span>Site:</span>
+                  <code className="font-mono bg-muted px-1.5 py-0.5 rounded">{data.siteUrl}</code>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-5 w-5"
+                    onClick={() => handleCopy("site", data.siteUrl ?? "")}
+                    aria-label="Copy site URL"
+                  >
+                    {copied === "site" ? (
+                      <Check className="h-3 w-3 text-status-success" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </Button>
                 </div>
               )}
+              {data.cloudId && (
+                <div>
+                  cloudId: <span className="font-mono">{data.cloudId}</span>
+                </div>
+              )}
+              {data.scope && (
+                <div>
+                  Scope: <span className="font-mono">{data.scope}</span>
+                </div>
+              )}
+              {expiryLabel && <div>Token expires: {expiryLabel}</div>}
+              <div>
+                Registered webhooks: <span className="font-mono">{data.webhookIds.length}</span>
+              </div>
             </div>
-          </div>
-        </div>
+          ) : (
+            "Copy the Authorization URL below and open it in a browser to authorize a Jira Cloud workspace via OAuth 3LO."
+          )
+        }
+      />
 
-        {/* Authorization URL row — copy instead of auto-redirect. */}
-        <div className="border-t border-border px-4 py-3 space-y-1.5">
+      {/* Authorization URL row — copy instead of auto-redirect. */}
+      <OAuthSectionRow>
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          {data.connected ? "Re-authentication URL" : "Authorization URL"}
+        </div>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 font-mono text-xs bg-muted px-2 py-1 rounded truncate">
+            {buildJiraAuthorizeUrl()}
+          </code>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => handleCopy("authorize", buildJiraAuthorizeUrl())}
+            className="shrink-0"
+          >
+            {copied === "authorize" ? (
+              <Check className="h-3.5 w-3.5 text-status-success" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
+            {copied === "authorize" ? "Copied" : "Copy"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => window.open(buildJiraAuthorizeUrl(), "_blank", "noopener,noreferrer")}
+            className="shrink-0"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Open
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Open this URL in a browser to {data.connected ? "re-authenticate" : "authorize"} the swarm
+          with Jira via OAuth 3LO.
+        </p>
+      </OAuthSectionRow>
+
+      {/* Redirect URI row */}
+      {data.redirectUri && (
+        <OAuthSectionRow>
           <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            {data.connected ? "Re-authentication URL" : "Authorization URL"}
+            Redirect URI
           </div>
           <div className="flex items-center gap-2">
             <code className="flex-1 font-mono text-xs bg-muted px-2 py-1 rounded truncate">
-              {buildJiraAuthorizeUrl()}
+              {data.redirectUri}
             </code>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => handleCopy("authorize", buildJiraAuthorizeUrl())}
+              onClick={() => handleCopy("redirect", data.redirectUri)}
               className="shrink-0"
             >
-              {copied === "authorize" ? (
+              {copied === "redirect" ? (
                 <Check className="h-3.5 w-3.5 text-status-success" />
               ) : (
                 <Copy className="h-3.5 w-3.5" />
               )}
-              {copied === "authorize" ? "Copied" : "Copy"}
+              {copied === "redirect" ? "Copied" : "Copy"}
             </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Paste this into your Atlassian app's Authorization callback URL — must match exactly.
+          </p>
+        </OAuthSectionRow>
+      )}
+
+      {/* Webhook URL row */}
+      {data.webhookUrl && (
+        <OAuthSectionRow>
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Webhook URL
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 font-mono text-xs bg-muted px-2 py-1 rounded truncate">
+              {data.webhookUrl}
+            </code>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => window.open(buildJiraAuthorizeUrl(), "_blank", "noopener,noreferrer")}
+              onClick={() => handleCopy("webhook", data.webhookUrl)}
               className="shrink-0"
             >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Open
+              {copied === "webhook" ? (
+                <Check className="h-3.5 w-3.5 text-status-success" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+              {copied === "webhook" ? "Copied" : "Copy"}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Open this URL in a browser to {data.connected ? "re-authenticate" : "authorize"} the
-            swarm with Jira via OAuth 3LO.
-          </p>
-        </div>
-
-        {/* Redirect URI row */}
-        {data.redirectUri && (
-          <div className="border-t border-border px-4 py-3 space-y-1.5">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Redirect URI
-            </div>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 font-mono text-xs bg-muted px-2 py-1 rounded truncate">
-                {data.redirectUri}
-              </code>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => handleCopy("redirect", data.redirectUri)}
-                className="shrink-0"
-              >
-                {copied === "redirect" ? (
-                  <Check className="h-3.5 w-3.5 text-status-success" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-                {copied === "redirect" ? "Copied" : "Copy"}
-              </Button>
-            </div>
+          {data.connected && !data.hasManageWebhookScope ? (
             <p className="text-xs text-muted-foreground">
-              Paste this into your Atlassian app's Authorization callback URL — must match exactly.
+              Your OAuth grant lacks the <CodeChip>manage:jira-webhook</CodeChip> scope. Register
+              this URL manually in Atlassian's webhook UI, or reconnect with the scope to enable
+              auto-registration.
             </p>
-          </div>
-        )}
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              The swarm auto-registers webhooks via <CodeChip>POST</CodeChip>{" "}
+              <CodeChip>/api/trackers/jira/webhook-register</CodeChip> with a JQL filter. Treat this
+              URL like a Slack incoming-webhook URL — keep it private.
+            </p>
+          )}
+        </OAuthSectionRow>
+      )}
 
-        {/* Webhook URL row */}
-        {data.webhookUrl && (
-          <div className="border-t border-border px-4 py-3 space-y-1.5">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Webhook URL
-            </div>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 font-mono text-xs bg-muted px-2 py-1 rounded truncate">
-                {data.webhookUrl}
-              </code>
+      {/* Footer / refresh + disconnect */}
+      <OAuthSectionRow className="flex items-center justify-between gap-3 space-y-0">
+        {data.connected ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
-                onClick={() => handleCopy("webhook", data.webhookUrl)}
-                className="shrink-0"
+                variant="destructive-outline"
+                disabled={disconnect.isPending}
               >
-                {copied === "webhook" ? (
-                  <Check className="h-3.5 w-3.5 text-status-success" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-                {copied === "webhook" ? "Copied" : "Copy"}
+                <Trash2 className="h-3.5 w-3.5" />
+                {disconnect.isPending ? "Disconnecting…" : "Disconnect"}
               </Button>
-            </div>
-            {data.connected && !data.hasManageWebhookScope ? (
-              <p className="text-xs text-muted-foreground">
-                Your OAuth grant lacks the <CodeChip>manage:jira-webhook</CodeChip> scope. Register
-                this URL manually in Atlassian's webhook UI, or reconnect with the scope to enable
-                auto-registration.
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                The swarm auto-registers webhooks via <CodeChip>POST</CodeChip>{" "}
-                <CodeChip>/api/trackers/jira/webhook-register</CodeChip> with a JQL filter. Treat
-                this URL like a Slack incoming-webhook URL — keep it private.
-              </p>
-            )}
-          </div>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Disconnect Jira?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will delete all {data.webhookIds.length} registered Atlassian webhook
+                  {data.webhookIds.length === 1 ? "" : "s"}, drop stored OAuth credentials, and
+                  clear cloudId / siteUrl metadata. You'll need to reconnect to use Jira again. To
+                  fully revoke the OAuth grant, also remove the app at{" "}
+                  <a
+                    href="https://id.atlassian.com/manage/connected-apps"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    id.atlassian.com → Connected apps
+                  </a>
+                  .
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => disconnect.mutate()}>
+                  Disconnect
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : (
+          <span className="text-xs text-muted-foreground italic">Not connected.</span>
         )}
-
-        {/* Footer / refresh + disconnect */}
-        <div className="border-t border-border px-4 py-3 flex items-center justify-between gap-3">
-          {data.connected ? (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive-outline"
-                  disabled={disconnect.isPending}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {disconnect.isPending ? "Disconnecting…" : "Disconnect"}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Disconnect Jira?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will delete all {data.webhookIds.length} registered Atlassian webhook
-                    {data.webhookIds.length === 1 ? "" : "s"}, drop stored OAuth credentials, and
-                    clear cloudId / siteUrl metadata. You'll need to reconnect to use Jira again. To
-                    fully revoke the OAuth grant, also remove the app at{" "}
-                    <a
-                      href="https://id.atlassian.com/manage/connected-apps"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline"
-                    >
-                      id.atlassian.com → Connected apps
-                    </a>
-                    .
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => disconnect.mutate()}>
-                    Disconnect
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          ) : (
-            <span className="text-xs text-muted-foreground italic">Not connected.</span>
-          )}
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw className={isFetching ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
-            Refresh
-          </Button>
-        </div>
-      </div>
-    </section>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => refetch()}
+          disabled={isFetching}
+        >
+          <RefreshCw className={isFetching ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+          Refresh
+        </Button>
+      </OAuthSectionRow>
+    </OAuthSection>
   );
 }
 

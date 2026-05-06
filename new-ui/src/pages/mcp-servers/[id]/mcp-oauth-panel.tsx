@@ -11,6 +11,7 @@ import {
   useStartMcpOAuthConnect,
 } from "@/api/hooks";
 import type { McpOAuthStatus, McpServer } from "@/api/types";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,8 +35,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { SettingsRow } from "@/components/ui/settings-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -131,17 +133,15 @@ function ManualClientDialog({ mcpServerId }: ManualClientDialogProps) {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-4">
-            <div className="space-y-1">
-              <Label htmlFor="oauth-client-id">Client ID *</Label>
+            <SettingsRow label="Client ID" htmlFor="oauth-client-id" required className="space-y-1">
               <Input
                 id="oauth-client-id"
                 value={clientId}
                 onChange={(e) => setClientId(e.target.value)}
                 required
               />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="oauth-client-secret">Client secret</Label>
+            </SettingsRow>
+            <SettingsRow label="Client secret" htmlFor="oauth-client-secret" className="space-y-1">
               <Input
                 id="oauth-client-secret"
                 type="password"
@@ -149,43 +149,43 @@ function ManualClientDialog({ mcpServerId }: ManualClientDialogProps) {
                 onChange={(e) => setClientSecret(e.target.value)}
                 placeholder="(optional for public clients)"
               />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="oauth-issuer">Authorization server issuer</Label>
+            </SettingsRow>
+            <SettingsRow
+              label="Authorization server issuer"
+              htmlFor="oauth-issuer"
+              className="space-y-1"
+            >
               <Input
                 id="oauth-issuer"
                 value={issuer}
                 onChange={(e) => setIssuer(e.target.value)}
                 placeholder="https://auth.example.com"
               />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="oauth-authorize-url">Authorize URL</Label>
+            </SettingsRow>
+            <SettingsRow label="Authorize URL" htmlFor="oauth-authorize-url" className="space-y-1">
               <Input
                 id="oauth-authorize-url"
                 value={authorizeUrl}
                 onChange={(e) => setAuthorizeUrl(e.target.value)}
                 placeholder="https://auth.example.com/oauth/authorize"
               />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="oauth-token-url">Token URL</Label>
+            </SettingsRow>
+            <SettingsRow label="Token URL" htmlFor="oauth-token-url" className="space-y-1">
               <Input
                 id="oauth-token-url"
                 value={tokenUrl}
                 onChange={(e) => setTokenUrl(e.target.value)}
                 placeholder="https://auth.example.com/oauth/token"
               />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="oauth-scopes">Scopes</Label>
+            </SettingsRow>
+            <SettingsRow label="Scopes" htmlFor="oauth-scopes" className="space-y-1">
               <Input
                 id="oauth-scopes"
                 value={scopes}
                 onChange={(e) => setScopes(e.target.value)}
                 placeholder="read write (space- or comma-separated)"
               />
-            </div>
+            </SettingsRow>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
@@ -276,14 +276,12 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
         {statusLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : statusError ? (
-          <div className="flex items-start gap-2 rounded-md border border-status-error/30 bg-status-error/5 p-3 text-status-error">
-            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-            <span>{(statusError as Error).message}</span>
-          </div>
+          <AlertCallout tone="error" icon={AlertCircle}>
+            {(statusError as Error).message}
+          </AlertCallout>
         ) : (
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <span className="text-muted-foreground">Status</span>
+            <InfoRow label="Status">
               <p className="flex items-center gap-2 mt-0.5">
                 {connected ? (
                   <>
@@ -302,54 +300,40 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
                   </>
                 )}
               </p>
-            </div>
+            </InfoRow>
             {token?.expiresAt && (
-              <div>
-                <span className="text-muted-foreground">Expires</span>
-                <p>{formatRelativeTime(token.expiresAt)}</p>
-              </div>
+              <InfoRow label="Expires">{formatRelativeTime(token.expiresAt)}</InfoRow>
             )}
             {token?.scope && (
-              <div className="col-span-2">
-                <span className="text-muted-foreground">Scopes</span>
+              <InfoRow label="Scopes" className="col-span-2">
                 <p className="font-mono text-xs break-all">{token.scope}</p>
-              </div>
+              </InfoRow>
             )}
             {token?.authorizationServerIssuer && (
-              <div className="col-span-2">
-                <span className="text-muted-foreground">Issuer</span>
+              <InfoRow label="Issuer" className="col-span-2">
                 <p className="font-mono text-xs break-all">{token.authorizationServerIssuer}</p>
-              </div>
+              </InfoRow>
             )}
             {token?.resourceUrl && (
-              <div className="col-span-2">
-                <span className="text-muted-foreground">Resource</span>
+              <InfoRow label="Resource" className="col-span-2">
                 <p className="font-mono text-xs break-all">{token.resourceUrl}</p>
-              </div>
+              </InfoRow>
             )}
             {token?.clientSource && (
-              <div>
-                <span className="text-muted-foreground">Client source</span>
+              <InfoRow label="Client source">
                 <p className="capitalize">{token.clientSource}</p>
-              </div>
+              </InfoRow>
             )}
             {token?.lastRefreshedAt && (
-              <div>
-                <span className="text-muted-foreground">Last refreshed</span>
-                <p>{formatRelativeTime(token.lastRefreshedAt)}</p>
-              </div>
+              <InfoRow label="Last refreshed">{formatRelativeTime(token.lastRefreshedAt)}</InfoRow>
             )}
           </div>
         )}
 
         {token?.lastErrorMessage && (
-          <div className="flex items-start gap-2 rounded-md border border-status-active/30 bg-status-active/5 p-3 text-status-active-strong">
-            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-medium">Last error</p>
-              <p className="text-xs mt-0.5">{token.lastErrorMessage}</p>
-            </div>
-          </div>
+          <AlertCallout tone="active" icon={AlertCircle} title="Last error">
+            {token.lastErrorMessage}
+          </AlertCallout>
         )}
 
         {metadataError && !token && (

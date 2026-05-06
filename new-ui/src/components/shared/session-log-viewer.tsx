@@ -17,6 +17,7 @@ import type { ContextSnapshot, SessionLog } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import { formatTokens } from "@/lib/format-tokens";
 import { cn, normalizeNewlines } from "@/lib/utils";
 
 // --- Parsed message types ---
@@ -760,12 +761,6 @@ function IterationDivider({ iteration }: { iteration: number }) {
       <div className="h-px flex-1 bg-border/50" />
     </div>
   );
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString();
 }
 
 function CompactionDivider({ snapshot }: { snapshot: ContextSnapshot }) {

@@ -2,6 +2,7 @@ import { Check, Copy, PlugZap, Terminal } from "lucide-react";
 import { useState } from "react";
 import { useTestClaudeManagedConnection } from "@/api/hooks/use-integrations-meta";
 import type { SwarmConfig } from "@/api/types";
+import { OAuthSection } from "@/components/shared/oauth-section";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -97,11 +98,8 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
       </Alert>
 
       {/* Command snippet */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
-          Setup CLI
-        </h2>
-        <div className="flex items-start gap-2">
+      <OAuthSection title="Setup CLI">
+        <div className="p-4 flex items-start gap-2">
           <code className="flex-1 font-mono text-xs bg-muted px-3 py-2 rounded border border-border break-all">
             {SETUP_SNIPPET}
           </code>
@@ -120,14 +118,11 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
             {copied ? "Copied" : "Copy"}
           </Button>
         </div>
-      </section>
+      </OAuthSection>
 
       {/* Status + Test connection */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
-          Connection
-        </h2>
-        <div className="border border-border rounded-md bg-muted/10 p-4 space-y-3">
+      <OAuthSection title="Connection">
+        <div className="p-4 space-y-3">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">Status:</span>
@@ -182,7 +177,7 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
             </div>
           )}
         </div>
-      </section>
+      </OAuthSection>
     </div>
   );
 }

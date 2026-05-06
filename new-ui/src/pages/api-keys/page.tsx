@@ -6,7 +6,6 @@ import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
   SelectContent,
@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StatPanel } from "@/components/ui/stat-panel";
 import { cn, formatSmartTime } from "@/lib/utils";
 
 const statusConfig: Record<ApiKeyStatusType, { label: string; dot: string; text: string }> = {
@@ -313,65 +314,27 @@ export default function ApiKeysPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <h1 className="text-xl font-semibold">API Keys</h1>
+      <PageHeader title="API Keys" />
 
       {/* Summary cards */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
-        <Card>
-          <CardContent className="p-3 flex items-center gap-3">
-            <div className="rounded-md bg-muted p-2">
-              <Key className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Total Keys</p>
-              <p className="text-lg font-semibold">{stats.total}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 flex items-center gap-3">
-            <div className="rounded-md bg-status-success/10 p-2">
-              <ShieldCheck className="h-4 w-4 text-status-success" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Available</p>
-              <p className="text-lg font-semibold text-status-success">{stats.available}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 flex items-center gap-3">
-            <div className="rounded-md bg-status-error/10 p-2">
-              <ShieldAlert className="h-4 w-4 text-status-error" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Rate Limited</p>
-              <p className="text-lg font-semibold text-status-error">{stats.rateLimited}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 flex items-center gap-3">
-            <div className="rounded-md bg-muted p-2">
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Total Usage</p>
-              <p className="text-lg font-semibold">{stats.totalUsage.toLocaleString()}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 flex items-center gap-3">
-            <div className="rounded-md bg-muted p-2">
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Total Cost</p>
-              <p className="text-lg font-semibold">${stats.totalCost.toFixed(2)}</p>
-            </div>
-          </CardContent>
-        </Card>
+        <StatPanel icon={Key} label="Total Keys" value={stats.total} />
+        <StatPanel
+          icon={ShieldCheck}
+          label="Available"
+          value={stats.available}
+          tone="success"
+          colorValue
+        />
+        <StatPanel
+          icon={ShieldAlert}
+          label="Rate Limited"
+          value={stats.rateLimited}
+          tone="error"
+          colorValue
+        />
+        <StatPanel icon={BarChart3} label="Total Usage" value={stats.totalUsage.toLocaleString()} />
+        <StatPanel icon={DollarSign} label="Total Cost" value={`$${stats.totalCost.toFixed(2)}`} />
       </div>
 
       {/* Filters */}

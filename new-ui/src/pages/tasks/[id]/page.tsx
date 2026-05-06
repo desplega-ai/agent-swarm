@@ -71,30 +71,11 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatDurationMs } from "@/lib/format-duration-ms";
+import { formatTokens } from "@/lib/format-tokens";
+import { progressBarTone } from "@/lib/percent-progress-tone";
+import { statusTextClass } from "@/lib/status-tone";
 import { cn, formatRelativeTime, formatSmartTime, normalizeNewlines } from "@/lib/utils";
-
-function logStatusColor(status: string | null | undefined): string {
-  switch (status) {
-    case "completed":
-      return "text-status-success";
-    case "failed":
-    case "cancelled":
-      return "text-status-error";
-    case "in_progress":
-    case "busy":
-      return "text-status-active";
-    case "idle":
-      return "text-status-success";
-    case "offline":
-      return "text-status-neutral";
-    case "pending":
-    case "offered":
-    case "unassigned":
-      return "text-status-pending";
-    default:
-      return "text-primary";
-  }
-}
 
 function logDotColor(eventType: string, newValue?: string): string {
   if (eventType === "task_status_change") {
@@ -123,10 +104,10 @@ function renderLogContent(log: AgentLog): React.ReactNode {
       return (
         <span className="text-xs">
           {log.oldValue && (
-            <span className={cn("font-medium", logStatusColor(log.oldValue))}>{log.oldValue}</span>
+            <span className={cn("font-medium", statusTextClass(log.oldValue))}>{log.oldValue}</span>
           )}
           {log.oldValue && <span className="text-muted-foreground"> → </span>}
-          <span className={cn("font-semibold", logStatusColor(log.newValue))}>{log.newValue}</span>
+          <span className={cn("font-semibold", statusTextClass(log.newValue))}>{log.newValue}</span>
         </span>
       );
     case "task_progress":
@@ -252,24 +233,6 @@ function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
   );
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return `${hours}h ${remainingMinutes}m`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString();
-}
-
 function TaskCostSection({
   costs,
   isLoading,
@@ -362,7 +325,7 @@ function TaskCostSection({
           </>
         )}
         <MetaRow icon={Timer} label="Duration">
-          <span className="text-xs">{formatDuration(stats.totalDurationMs)}</span>
+          <span className="text-xs">{formatDurationMs(stats.totalDurationMs)}</span>
         </MetaRow>
         {!isDevin && (
           <MetaRow icon={Hash} label="Turns">
@@ -378,12 +341,6 @@ function TaskCostSection({
       </div>
     </>
   );
-}
-
-function contextBarColor(percent: number): string {
-  if (percent > 80) return "[&_[data-slot=progress-indicator]]:bg-status-error";
-  if (percent > 50) return "[&_[data-slot=progress-indicator]]:bg-status-warning";
-  return "[&_[data-slot=progress-indicator]]:bg-status-success";
 }
 
 function TaskContextSection({
@@ -420,7 +377,7 @@ function TaskContextSection({
             ACU Budget
           </span>
           <div className="flex items-center gap-2 py-1">
-            <Progress value={percent} className={cn("h-1.5 flex-1", contextBarColor(percent))} />
+            <Progress value={percent} className={cn("h-1.5 flex-1", progressBarTone(percent))} />
             <span className="text-[10px] font-mono text-muted-foreground shrink-0">
               {percent.toFixed(0)}%
             </span>
@@ -471,7 +428,7 @@ function TaskContextSection({
         <div className="flex items-center gap-2 py-1">
           <Progress
             value={currentPercent}
-            className={cn("h-1.5 flex-1", contextBarColor(currentPercent))}
+            className={cn("h-1.5 flex-1", progressBarTone(currentPercent))}
           />
           <span className="text-[10px] font-mono text-muted-foreground shrink-0">
             {currentPercent.toFixed(0)}%
