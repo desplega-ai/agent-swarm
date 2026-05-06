@@ -26,21 +26,13 @@ const FEATURES: {
   {
     num: "03",
     tag: "integrations",
-    title: "Already working in your Slack and GitHub",
+    title: "Talks human, talks API",
     desc:
-      "Mention the bot, assign a Linear issue, send an email — that’s the task. Workers reply in-thread, open PRs, and close issues. No new dashboard to live in.",
+      "Mention the bot in Slack, assign a Linear issue, send an email — that’s the task. Built on Model Context Protocol with a full OpenAPI 3.1 spec at :3013, so anything that speaks HTTP — your CI, your monitoring, your custom dashboards — can drive the swarm or be driven by it.",
     diagram: "plug",
   },
   {
     num: "04",
-    tag: "mcp",
-    title: "Hooks into anything that speaks API",
-    desc:
-      "Built on Model Context Protocol with a full OpenAPI 3.1 spec at :3013. Anything that speaks HTTP — your CI, your monitoring, your custom dashboards — can drive the swarm or be driven by it.",
-    diagram: "mcp",
-  },
-  {
-    num: "05",
     tag: "lifecycle",
     title: "Wake up to work already done",
     desc:
@@ -196,7 +188,7 @@ export function Features() {
             <span className="italic gradient-text">already ships.</span>
           </h2>
         </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {FEATURES.map((f) => (
             <div
               key={f.title}
@@ -209,7 +201,7 @@ export function Features() {
                 <Diagram kind={f.diagram} />
               </div>
               <div className="flex items-center justify-between font-mono text-[10.5px] tracking-[0.1em] text-amber-700 mb-2">
-                <span>{f.num} / 05</span>
+                <span>{f.num} / 04</span>
                 <span className="text-zinc-400">{f.tag}</span>
               </div>
               <h3
