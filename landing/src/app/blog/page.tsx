@@ -75,6 +75,22 @@ const posts: BlogPost[] = [
     ],
   },
   {
+    slug: "deep-dive-memory-poisoning-decay-model",
+    title:
+      "The Decay Model: How We Defuse Memory Poisoning in an Agent Swarm",
+    description:
+      "Four decay primitives — time-based decay, provenance, failure-driven quarantine, outlier detection — that turn persistent agent memory from a liability into a learning system.",
+    date: "May 6, 2026",
+    readTime: "14 min read",
+    tags: [
+      "agent memory",
+      "memory decay",
+      "vector embeddings",
+      "semantic search",
+      "database schema",
+    ],
+  },
+  {
     slug: "deep-dive-mcp-tool-caching-core-deferred",
     title:
       "We Hid 75 of Our Agent's 90 MCP Tools — And It Got Smarter",
