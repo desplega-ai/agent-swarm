@@ -924,10 +924,11 @@ export default function TaskDetailPage() {
 
       {/* Desktop (lg+): 3-column meta-rail layout per
           ~/Downloads/swarm-design-system/preview/task-detail.html and
-          preview/detail-page-template.html. Right rail = 280px (canonical
-          brand-kit width); left rail keeps 240px (page-specific meta sidebar
-          unique to tasks — no other detail page has dense meta data). */}
-      <div className="hidden lg:grid lg:grid-cols-[240px_1fr_280px] flex-1 min-h-0 overflow-hidden">
+          preview/detail-page-template.html. Both rails at 280px (canonical
+          brand-kit width). The left meta-sidebar remains page-specific (no
+          other detail page has dense meta data); the right rail comes from
+          the <DetailPageBody> contract. */}
+      <div className="hidden lg:grid lg:grid-cols-[280px_1fr_280px] flex-1 min-h-0 overflow-hidden">
         {/* Left rail — meta info + SCM card + Dependencies + Progress + Context budget */}
         <aside className="border-r border-border py-3 px-1 pr-3 overflow-y-auto min-h-0">
           {leftRailContent}

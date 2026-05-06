@@ -19,7 +19,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  DangerZone,
   DetailPageBody,
   DetailPageRail,
   QuickStat,
@@ -158,9 +157,30 @@ export default function McpServerDetailPage() {
           </div>
         }
         action={
-          <Button variant="outline" size="sm" onClick={handleToggleEnabled}>
-            {server.isEnabled ? "Disable" : "Enable"}
-          </Button>
+          <>
+            <Button variant="outline" size="sm" onClick={handleToggleEnabled}>
+              {server.isEnabled ? "Disable" : "Enable"}
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive-outline" size="sm">
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete MCP server "{server.name}"?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete this MCP server and uninstall it from all agents.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
         }
       />
 
@@ -284,28 +304,6 @@ export default function McpServerDetailPage() {
                 </Relationship>
               </Relationships>
             )}
-
-            <DangerZone>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive-outline" size="sm" className="w-full">
-                    <Trash2 className="h-4 w-4 mr-1" /> Delete server
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete MCP server "{server.name}"?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will permanently delete this MCP server and uninstall it from all agents.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </DangerZone>
           </DetailPageRail>
         }
       />

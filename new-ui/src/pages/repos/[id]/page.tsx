@@ -29,7 +29,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  DangerZone,
   DetailPageBody,
   DetailPageRail,
   QuickStat,
@@ -289,9 +288,33 @@ export default function RepoDetailPage() {
           </div>
         }
         action={
-          <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditOpen(true)}>
-            <Pencil className="h-3.5 w-3.5" /> Edit
-          </Button>
+          <>
+            <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditOpen(true)}>
+              <Pencil className="h-3.5 w-3.5" /> Edit
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" variant="destructive-outline" className="gap-1">
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete Repository</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to delete <strong>{repo.name}</strong>? This action cannot
+                    be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction variant="destructive" onClick={handleDelete}>
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
         }
       />
 
@@ -337,31 +360,6 @@ export default function RepoDetailPage() {
               <QuickStat label="Created" value={formatSmartTime(repo.createdAt)} />
               <QuickStat label="Auto-clone" value={repo.autoClone ? "Enabled" : "Disabled"} />
             </QuickStats>
-
-            <DangerZone>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="sm" variant="destructive-outline" className="w-full gap-1">
-                    <Trash2 className="h-3.5 w-3.5" /> Delete repository
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete Repository</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Are you sure you want to delete <strong>{repo.name}</strong>? This action
-                      cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction variant="destructive" onClick={handleDelete}>
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </DangerZone>
           </DetailPageRail>
         }
       />

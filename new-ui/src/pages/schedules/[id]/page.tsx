@@ -27,7 +27,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  DangerZone,
   DetailPageBody,
   DetailPageRail,
   QuickStat,
@@ -228,6 +227,9 @@ export default function ScheduleDetailPage() {
           <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
             <Pencil className="h-3 w-3 mr-1" /> Edit
           </Button>
+          <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
+            <Trash2 className="h-3 w-3 mr-1" /> Delete
+          </Button>
         </div>
       </div>
 
@@ -420,17 +422,6 @@ export default function ScheduleDetailPage() {
                 </Relationship>
               </Relationships>
             )}
-
-            <DangerZone>
-              <Button
-                variant="destructive-outline"
-                size="sm"
-                className="w-full"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="h-3 w-3 mr-1" /> Delete schedule
-              </Button>
-            </DangerZone>
           </DetailPageRail>
         }
       />

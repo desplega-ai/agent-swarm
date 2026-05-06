@@ -707,3 +707,47 @@ Pages keep their existing `<PageHeader>` for the title row above the body; the p
 - `pnpm lint` — green
 - `pnpm exec tsc -b` — green
 - `pnpm exec vite build` — green
+
+## Phase 16 — UX cleanup: rail width parity + Delete-button rollback (2026-05-06)
+
+After Phase 15 review, two UX deltas were flagged that needed correction.
+
+### Delta 1 — `tasks/[id]` rail-width asymmetry
+
+**Phase 14** (commit `1779bbde`) introduced the 3-col tasks layout with `lg:grid-cols-[240px_1fr_240px]`.
+
+**Phase 15a** (commit `bd1be1b9`) refactored the right rail to use `<DetailPageBody>` (canonical 280px) but left the left rail at 240px, producing the asymmetric `lg:grid-cols-[240px_1fr_280px]`. Reasoning at the time: the left rail is "page-specific meta-sidebar", not promoted to the primitive — but visually the asymmetry was distracting on the actual rendered page.
+
+**Phase 16 fix**: bumped left rail to 280px → `lg:grid-cols-[280px_1fr_280px]`. The brand-kit `task-detail.html` mock uses `240px 1fr 240px`, but the canonical `detail-page-template.html` (the meta-template the design system promotes) is `1fr 280px`. Phase 15 chose 280px for the right rail; Phase 16 aligns the left to match. Both rails are now visually equal at the `lg` breakpoint.
+
+### Delta 2 — Delete-button discoverability regression
+
+**Phase 15b** (commit `41070a2b`) moved the Delete button from the page header into `<DangerZone>` at the bottom of the right rail on:
+- `repos/[id]`
+- `skills/[id]`
+- `mcp-servers/[id]`
+- `schedules/[id]`
+
+The intent was alignment with the brand kit's `preview/detail-page-template.html` "Right rail · stats, relationships, danger zone" pattern. In practice, Delete became hard to find — buried below QuickStats on long pages, scrolled out of the viewport on common laptop heights.
+
+**Phase 16 fix**: restored Delete to the page header on all four pages.
+
+| Page | Header form |
+|---|---|
+| `repos/[id]` | `<Button size="sm" variant="destructive-outline">Delete</Button>` in `<PageHeader action>` (alongside `Edit`) |
+| `skills/[id]` | `<Button variant="destructive-outline" size="sm">Delete</Button>` in `<PageHeader action>` (alongside `Disable`/`Enable`) |
+| `mcp-servers/[id]` | `<Button variant="destructive-outline" size="sm">Delete</Button>` in `<PageHeader action>` (alongside `Disable`/`Enable`) |
+| `schedules/[id]` | `<Button variant="destructive-outline" size="sm">Delete</Button>` in the inline action bar (alongside `Run Now` / `Edit`); page does not use `<PageHeader>` because its title row has a custom Switch toggle and tag layout |
+
+`<DangerZone>` was removed from the rail on all four pages because Delete was the only destructive action — the rail now ends after `<QuickStats>` (and `<Relationships>` where applicable). No empty `<DangerZone>` is rendered.
+
+### `<DangerZone>` retained in the primitive surface
+
+`<DangerZone>` stays exported from `components/ui/detail-page-layout.tsx`. It's still appropriate for pages with **multiple** destructive actions (e.g. a future settings page that pairs "Reset all OAuth tokens" + "Delete integration", or an account page with "Disable agent" + "Delete agent"). The CLAUDE.md guidance was updated: single-action Deletes belong in the page header; the DangerZone slot is for genuinely supplementary or grouped destructive actions.
+
+### Verification
+
+- `pnpm run check:tokens` — green (no new color literals; the restored Delete buttons use `variant="destructive-outline"`, never raw red palette literals — would otherwise fail the Phase 7 lint gate)
+- `pnpm lint` — green
+- `pnpm exec tsc -b` — green
+- `pnpm exec vite build` — green

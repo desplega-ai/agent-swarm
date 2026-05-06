@@ -4,7 +4,7 @@ topic: "new-ui Design System Migration Plan"
 status: completed
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
-last_updated_by: Claude (phase 15)
+last_updated_by: Claude (phase 16)
 ---
 
 # new-ui Design System Migration Plan
@@ -1101,6 +1101,79 @@ Append a Phase 15 section to `thoughts/taras/research/2026-05-06-design-system-a
 ### QA Spec (optional):
 
 n/a — primitive extraction + cross-page rollout. qa-use deferred to PR-time per orchestrator policy.
+
+---
+
+## Phase 16: UX cleanup — rail width parity + Delete-button rollback
+
+### Overview
+
+Two UX deltas surfaced after Phase 15 review (sub-commits `bd1be1b9` / `41070a2b` / `637a8aa7`):
+
+1. **Rail-width inconsistency on `tasks/[id]`**: Phase 14 used `lg:grid-cols-[240px_1fr_240px]`. Phase 15a refactored the right rail to use `<DetailPageBody>` (canonical 280px) but left the left rail at 240px, leaving the layout asymmetric — `lg:grid-cols-[240px_1fr_280px]`.
+2. **Delete-button discoverability regression**: Phase 15b moved Delete buttons from the page header to `<DangerZone>` (rail bottom) on `repos/[id]`, `skills/[id]`, `mcp-servers/[id]`, `schedules/[id]`. User wants Delete back in the header — it's a primary action that's now buried below the fold on long pages.
+
+This phase corrects both. `<DangerZone>` stays as a primitive — it's still useful when a detail page has multiple destructive actions (disable + delete + reset). On these four pages, however, Delete is the only destructive action and belongs in the header.
+
+### Changes Required:
+
+#### 1. Align both rails on `tasks/[id]` to canonical 280px
+
+**File**: `new-ui/src/pages/tasks/[id]/page.tsx` (line ~930)
+
+Change:
+```tsx
+<div className="hidden lg:grid lg:grid-cols-[240px_1fr_280px] flex-1 min-h-0 overflow-hidden">
+```
+to:
+```tsx
+<div className="hidden lg:grid lg:grid-cols-[280px_1fr_280px] flex-1 min-h-0 overflow-hidden">
+```
+
+Update the adjacent comment to reflect "Both rails at 280px (canonical brand-kit width). The 280px left meta-sidebar remains page-specific (no other detail page has dense meta data); the 280px right rail comes from the `<DetailPageBody>` contract."
+
+#### 2. Restore Delete to PageHeader on `repos/[id]`, `skills/[id]`, `mcp-servers/[id]`
+
+For each: Move the `<AlertDialog>...<Button variant="destructive-outline">Delete</Button>...</AlertDialog>` from inside `<DangerZone>` back into `<PageHeader>`'s `action` prop, alongside the existing action(s). Remove `<DangerZone>` from the rail. Keep handler unchanged.
+
+The pre-Phase-15 form was `<Button variant="destructive-outline" size="sm">` wrapped in an `AlertDialog` — restore that exact form.
+
+#### 3. Restore Delete to inline action bar on `schedules/[id]`
+
+`schedules/[id]` does not use `<PageHeader>` — it has a custom inline header with Run Now / Edit buttons in a `<div className="ml-auto flex items-center gap-1.5 shrink-0">`. Add the Delete button there. Keep the `setDeleteOpen(true)` handler. Remove `<DangerZone>` from the rail.
+
+#### 4. Verify `<DetailPageSection>` handles empty children gracefully
+
+The 4 pages above will still render `<QuickStats>` (and sometimes `<Relationships>`) inside their rails. `<DetailPageRail>` itself is just a flex container — it does not require any specific section. No primitive change needed unless verification shows otherwise.
+
+#### 5. Update audit doc
+
+Append a Phase 16 section to `thoughts/taras/research/2026-05-06-design-system-audit.md` documenting the two UX deltas, why we reverted each, and the fix applied. Note that `<DangerZone>` remains in the primitive surface for future destructive multi-action scenarios (it's not deprecated).
+
+#### 6. CLAUDE.md update
+
+The `new-ui/CLAUDE.md` "Detail-page layout convention" section currently says "Destructive actions (Delete / Disconnect / Reset) go to the rail's `<DangerZone />`, NOT the header." This is too prescriptive — Phase 16 establishes that single-action Deletes belong in the header. Update to: "Destructive actions go in the page header alongside other primary actions. Use `<DangerZone />` only when a page has multiple destructive actions or when the destructive action is genuinely supplementary (e.g. an irreversible reset paired with a primary save)."
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] `cd new-ui && pnpm run check:tokens` — no new color literals introduced
+- [x] `cd new-ui && pnpm lint` — Biome passes
+- [x] `cd new-ui && pnpm exec tsc -b` — typecheck passes
+- [x] `cd new-ui && pnpm exec vite build` — build passes
+
+#### Automated QA:
+- [x] `qa-use` capture of `tasks/[id]` (rail-width fix) and the 4 Delete-rollback pages [skipped — qa-use deferred to PR-time]
+
+#### Manual Verification:
+- [ ] User confirms `tasks/[id]` left + right rails are visually equal (both 280px) at lg breakpoint
+- [ ] User confirms Delete button is back in the page header on `repos/[id]`, `skills/[id]`, `mcp-servers/[id]`
+- [ ] User confirms Delete button is back in the inline action bar on `schedules/[id]` (alongside Run Now / Edit)
+- [ ] User confirms confirmation dialog still appears and delete still works on all 4 pages
+
+### QA Spec (optional):
+
+n/a — UX cleanup of two narrow regressions. qa-use deferred to PR-time.
 
 ---
 

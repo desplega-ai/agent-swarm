@@ -17,7 +17,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  DangerZone,
   DetailPageBody,
   DetailPageRail,
   QuickStat,
@@ -113,9 +112,30 @@ export default function SkillDetailPage() {
           </div>
         }
         action={
-          <Button variant="outline" size="sm" onClick={handleToggleEnabled}>
-            {skill.isEnabled ? "Disable" : "Enable"}
-          </Button>
+          <>
+            <Button variant="outline" size="sm" onClick={handleToggleEnabled}>
+              {skill.isEnabled ? "Disable" : "Enable"}
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive-outline" size="sm">
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete skill "{skill.name}"?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete this skill and uninstall it from all agents.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
         }
       />
 
@@ -189,28 +209,6 @@ export default function SkillDetailPage() {
                 )}
               </Relationships>
             )}
-
-            <DangerZone>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive-outline" size="sm" className="w-full">
-                    <Trash2 className="h-4 w-4 mr-1" /> Delete skill
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete skill "{skill.name}"?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will permanently delete this skill and uninstall it from all agents.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </DangerZone>
           </DetailPageRail>
         }
       />

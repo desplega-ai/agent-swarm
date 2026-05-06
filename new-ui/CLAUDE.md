@@ -252,9 +252,9 @@ If you find yourself writing `<div className="flex items-center gap-2">` or `<di
 ### Detail-page layout convention
 
 Detail pages (`pages/*/[id]/page.tsx`) follow the brand-kit's `preview/detail-page-template.html` contract:
-- Header: `<PageHeader />` (title, badges, primary actions). Destructive actions (Delete / Disconnect / Reset) go to the rail's `<DangerZone />`, NOT the header.
+- Header: `<PageHeader />` (title, badges, primary actions). Single destructive actions (Delete) go in the header alongside other primary actions — they are first-class operations, not buried below the fold.
 - Body: `<DetailPageBody main={...} rail={<DetailPageRail>…</DetailPageRail>} />`. Right rail is fixed 280px; below `lg` the rail stacks below main.
-- Rail sections, in order: `<QuickStats>` (k/v at-a-glance) → `<Relationships>` (linked entities, arrow link) → `<DangerZone>` (full-width destructive button).
+- Rail sections, in order: `<QuickStats>` (k/v at-a-glance) → `<Relationships>` (linked entities, arrow link) → `<DangerZone>` (full-width destructive button — use only when a page has multiple destructive actions or the action is genuinely supplementary, e.g. an irreversible reset paired with a primary save).
 
 A handful of detail pages are exempt because their identity is an editor or split-view (Monaco-dominated, react-flow graph): `templates/[id]`, `templates/[id]/history/[version]`, `workflow-runs/[id]`, `workflows/[id]`. Don't shoehorn the primitive in there. For tabs-driven pages where a single tab carries the primary content (agents `Profile`, mcp-servers `Configuration`), apply the primitive INSIDE that tab body so the rail rides alongside.
 
