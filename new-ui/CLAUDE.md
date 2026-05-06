@@ -110,17 +110,26 @@ Do not re-inline `border-red-500/30 text-red-400 hover:bg-red-500/10`. Pair with
 
 ### Semantic token reference
 
-Status tokens (cover the 18 statuses in `status-badge.tsx`'s `statusConfig` map plus a few extras used by integrations and workflow runs):
+Status tokens (cover the 18 statuses in `status-badge.tsx`'s `statusConfig` map plus a few extras used by integrations and workflow runs).
+
+`-strong` variants exist for text emphasis on neutral surfaces (one Tailwind stop darker in light mode for contrast). Use `bg-status-X` for fills, `text-status-X-strong` for emphasis text on cards/pages. In dark mode the `-strong` variant collapses to the same `*-400` stop as the canonical token — pixel parity preserved across the existing `bg-{color}-500 + text-{color}-600 dark:text-{color}-400` literal pattern.
 
 | Token | Usage | Light source | Dark source |
 |---|---|---|---|
-| `status-success` | idle, completed, healthy, approved | emerald-500 | emerald-400 |
-| `status-active` | busy, offered, in_progress, running | amber-500 | amber-400 |
-| `status-error` | failed, unhealthy, rejected | red-600 | red-400 |
-| `status-info` | (reserved for informational chips) | sky-500 | sky-400 |
-| `status-pending` | pending, waiting, starting | yellow-500 | yellow-400 |
-| `status-warning` | timeout, threshold-warning | orange-500 | orange-400 |
-| `status-paused` | paused, reviewing | blue-500 | blue-400 |
+| `status-success` | idle, completed, healthy, approved (fill) | emerald-500 | emerald-400 |
+| `status-success-strong` | success-state text emphasis | emerald-600 | emerald-400 |
+| `status-active` | busy, offered, in_progress, running (fill) | amber-500 | amber-400 |
+| `status-active-strong` | active-state text emphasis | amber-600 | amber-400 |
+| `status-error` | failed, unhealthy, rejected (fill) | red-500 | red-400 |
+| `status-error-strong` | error-state text emphasis | red-600 | red-400 |
+| `status-info` | informational chips (fill) | sky-500 | sky-400 |
+| `status-info-strong` | info-state text emphasis | sky-600 | sky-400 |
+| `status-pending` | pending, waiting, starting (fill) | yellow-500 | yellow-400 |
+| `status-pending-strong` | pending-state text emphasis | yellow-600 | yellow-400 |
+| `status-warning` | timeout, threshold-warning (fill) | orange-500 | orange-400 |
+| `status-warning-strong` | warning-state text emphasis | orange-600 | orange-400 |
+| `status-paused` | paused, reviewing (fill) | blue-500 | blue-400 |
+| `status-paused-strong` | paused-state text emphasis | blue-600 | blue-400 |
 | `status-neutral` | offline, backlog, unassigned, cancelled, stopped, skipped | zinc-500 | zinc-400 |
 
 Action-type tokens (workflow node types from `components/workflows/action-node.tsx` and `condition-node.tsx`):

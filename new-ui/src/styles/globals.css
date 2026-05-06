@@ -40,21 +40,32 @@
 
   /* Semantic status tokens — light mode
      Source: existing utility OKLCH literals being replaced (see audit doc).
-     Light values match the *-500/-600 stops the codebase uses for fills,
-     plus a paired *-foreground for legible text on those fills. */
+     Canonical token = fill stop (matches `bg-{color}-500` literals).
+     `-strong` variant = text-emphasis stop (one Tailwind stop darker for
+     contrast on neutral surfaces — matches `text-{color}-600` literals).
+     `-foreground` variant = legible text on the colored fill.
+     Pixel parity preserved: existing `bg-{color}-500 + text-{color}-600`
+     pairs migrate to `bg-status-X + text-status-X-strong`. */
   --color-status-success: oklch(0.696 0.17 162.48);          /* emerald-500 */
+  --color-status-success-strong: oklch(0.596 0.145 163.225); /* emerald-600 */
   --color-status-success-foreground: oklch(0.985 0 0);
   --color-status-active: oklch(0.769 0.188 70.08);           /* amber-500 */
+  --color-status-active-strong: oklch(0.666 0.179 58.318);   /* amber-600 */
   --color-status-active-foreground: oklch(0.141 0.005 285.823);
-  --color-status-error: oklch(0.577 0.245 27.325);           /* red-600 */
+  --color-status-error: oklch(0.637 0.237 25.331);           /* red-500 */
+  --color-status-error-strong: oklch(0.577 0.245 27.325);    /* red-600 */
   --color-status-error-foreground: oklch(0.985 0 0);
   --color-status-info: oklch(0.685 0.169 237.323);           /* sky-500 */
+  --color-status-info-strong: oklch(0.588 0.158 241.966);    /* sky-600 */
   --color-status-info-foreground: oklch(0.985 0 0);
   --color-status-pending: oklch(0.795 0.184 86.047);         /* yellow-500 */
+  --color-status-pending-strong: oklch(0.681 0.162 75.834);  /* yellow-600 */
   --color-status-pending-foreground: oklch(0.141 0.005 285.823);
   --color-status-warning: oklch(0.705 0.213 47.604);         /* orange-500 */
+  --color-status-warning-strong: oklch(0.646 0.222 41.116);  /* orange-600 */
   --color-status-warning-foreground: oklch(0.985 0 0);
   --color-status-paused: oklch(0.623 0.214 259.815);         /* blue-500 */
+  --color-status-paused-strong: oklch(0.546 0.245 262.881);  /* blue-600 */
   --color-status-paused-foreground: oklch(0.985 0 0);
   --color-status-neutral: oklch(0.552 0.016 285.938);        /* zinc-500 */
   --color-status-neutral-foreground: oklch(0.985 0 0);
@@ -127,20 +138,31 @@
 
   /* Semantic status tokens — dark mode
      Match the lighter *-400 palette stops the codebase already uses
-     for `dark:text-*-400` overrides in status-badge.tsx etc. */
+     for `dark:text-*-400` overrides in status-badge.tsx etc.
+     `-strong` variants mirror the canonical *-400 stops in dark mode —
+     existing pairs `bg-{color}-500 + dark:text-{color}-400` and
+     `text-{color}-600 + dark:text-{color}-400` both become
+     `bg-status-X + text-status-X-strong` with identical dark output. */
   --color-status-success: oklch(0.765 0.177 163.223);        /* emerald-400 */
+  --color-status-success-strong: oklch(0.765 0.177 163.223); /* emerald-400 */
   --color-status-success-foreground: oklch(0.21 0.006 285.885);
   --color-status-active: oklch(0.828 0.189 84.429);          /* amber-400 */
+  --color-status-active-strong: oklch(0.828 0.189 84.429);   /* amber-400 */
   --color-status-active-foreground: oklch(0.21 0.006 285.885);
   --color-status-error: oklch(0.704 0.191 22.216);           /* red-400 */
+  --color-status-error-strong: oklch(0.704 0.191 22.216);    /* red-400 */
   --color-status-error-foreground: oklch(0.21 0.006 285.885);
   --color-status-info: oklch(0.746 0.16 232.661);            /* sky-400 */
+  --color-status-info-strong: oklch(0.746 0.16 232.661);     /* sky-400 */
   --color-status-info-foreground: oklch(0.21 0.006 285.885);
   --color-status-pending: oklch(0.852 0.199 91.936);         /* yellow-400 */
+  --color-status-pending-strong: oklch(0.852 0.199 91.936);  /* yellow-400 */
   --color-status-pending-foreground: oklch(0.21 0.006 285.885);
   --color-status-warning: oklch(0.75 0.183 55.934);          /* orange-400 */
+  --color-status-warning-strong: oklch(0.75 0.183 55.934);   /* orange-400 */
   --color-status-warning-foreground: oklch(0.21 0.006 285.885);
   --color-status-paused: oklch(0.707 0.165 254.624);         /* blue-400 */
+  --color-status-paused-strong: oklch(0.707 0.165 254.624);  /* blue-400 */
   --color-status-paused-foreground: oklch(0.21 0.006 285.885);
   --color-status-neutral: oklch(0.705 0.015 286.067);        /* zinc-400 */
   --color-status-neutral-foreground: oklch(0.21 0.006 285.885);
