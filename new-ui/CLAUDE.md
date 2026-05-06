@@ -104,9 +104,42 @@ Do not re-inline `border-red-500/30 text-red-400 hover:bg-red-500/10`. Pair with
 
 - **Never hardcode dark-mode colors** (no `bg-zinc-950`, `text-zinc-400`, etc.). Use CSS variable classes: `bg-background`, `bg-muted`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-accent`.
 - **Amber** is brand `--primary` — use it for interactive / active states only.
-- **Status colors** (semantic): emerald (success), amber (active/busy), red (error), zinc (inactive).
+- **Status colors come from named semantic tokens** — `bg-status-success`, `text-status-error`, `bg-status-active`, etc. — defined in `src/styles/globals.css` (light + dark). Action-type colors (workflow nodes) come from `bg-action-*` tokens. **Do not** use raw Tailwind palette literals (`bg-emerald-500`, `text-amber-400`, `border-red-500/30`, etc.) in app code. Translucent fills use the standard Tailwind opacity syntax: `bg-status-success/10`, `border-action-script/50`. The lint gate (Phase 7 of the design-system migration) enforces this rule.
 - CSS variables defined in `src/styles/globals.css`; AG Grid themed via `src/styles/ag-grid.css`.
 - Use `cn()` from `@/lib/utils` for conditional class merging.
+
+### Semantic token reference
+
+Status tokens (cover the 18 statuses in `status-badge.tsx`'s `statusConfig` map plus a few extras used by integrations and workflow runs):
+
+| Token | Usage | Light source | Dark source |
+|---|---|---|---|
+| `status-success` | idle, completed, healthy, approved | emerald-500 | emerald-400 |
+| `status-active` | busy, offered, in_progress, running | amber-500 | amber-400 |
+| `status-error` | failed, unhealthy, rejected | red-600 | red-400 |
+| `status-info` | (reserved for informational chips) | sky-500 | sky-400 |
+| `status-pending` | pending, waiting, starting | yellow-500 | yellow-400 |
+| `status-warning` | timeout, threshold-warning | orange-500 | orange-400 |
+| `status-paused` | paused, reviewing | blue-500 | blue-400 |
+| `status-neutral` | offline, backlog, unassigned, cancelled, stopped, skipped | zinc-500 | zinc-400 |
+
+Action-type tokens (workflow node types from `components/workflows/action-node.tsx` and `condition-node.tsx`):
+
+| Token | Workflow node type | Light source | Dark source |
+|---|---|---|---|
+| `action-agent-task` | `agent-task` | violet-500 | violet-400 |
+| `action-script` | `script` | cyan-500 | cyan-400 |
+| `action-notify` | `notify` | teal-500 | teal-400 |
+| `action-human-in-the-loop` | `human-in-the-loop` | orange-500 | orange-400 |
+| `action-create-task` | `create-task` | indigo-500 | indigo-400 |
+| `action-send-message` | `send-message` | pink-500 | pink-400 |
+| `action-delegate-to-agent` | `delegate-to-agent` | purple-500 | purple-400 |
+| `action-default` | unknown action fallback | blue-500 | blue-400 |
+| `action-property-match` | `property-match` (condition) | amber-500 | amber-400 |
+| `action-code-match` | `code-match` (condition) | yellow-500 | yellow-400 |
+| `action-raw-llm` | `raw-llm` (condition) | sky-500 | sky-400 |
+
+Each status token has a paired `-foreground` for legible text on the colored fill (e.g. `text-status-success-foreground`). Action tokens do not — workflow nodes pair the colored token with `bg-action-X/10` (translucent fill) and `text-action-X` (text + border).
 
 </important>
 

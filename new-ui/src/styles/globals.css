@@ -38,6 +38,45 @@
   --color-sidebar-border: oklch(0.92 0.004 286.32);
   --color-sidebar-ring: oklch(0.555 0.163 48.998);
 
+  /* Semantic status tokens — light mode
+     Source: existing utility OKLCH literals being replaced (see audit doc).
+     Light values match the *-500/-600 stops the codebase uses for fills,
+     plus a paired *-foreground for legible text on those fills. */
+  --color-status-success: oklch(0.696 0.17 162.48);          /* emerald-500 */
+  --color-status-success-foreground: oklch(0.985 0 0);
+  --color-status-active: oklch(0.769 0.188 70.08);           /* amber-500 */
+  --color-status-active-foreground: oklch(0.141 0.005 285.823);
+  --color-status-error: oklch(0.577 0.245 27.325);           /* red-600 */
+  --color-status-error-foreground: oklch(0.985 0 0);
+  --color-status-info: oklch(0.685 0.169 237.323);           /* sky-500 */
+  --color-status-info-foreground: oklch(0.985 0 0);
+  --color-status-pending: oklch(0.795 0.184 86.047);         /* yellow-500 */
+  --color-status-pending-foreground: oklch(0.141 0.005 285.823);
+  --color-status-warning: oklch(0.705 0.213 47.604);         /* orange-500 */
+  --color-status-warning-foreground: oklch(0.985 0 0);
+  --color-status-paused: oklch(0.623 0.214 259.815);         /* blue-500 */
+  --color-status-paused-foreground: oklch(0.985 0 0);
+  --color-status-neutral: oklch(0.552 0.016 285.938);        /* zinc-500 */
+  --color-status-neutral-foreground: oklch(0.985 0 0);
+
+  /* Action-type tokens — light mode
+     Source: components/workflows/action-node.tsx L18-L72 and
+             components/workflows/condition-node.tsx L17-L50.
+     Light values match the *-500 stops used for borders/handles;
+     dark values match the *-400 stops used for text. The /10 alpha
+     fills used as backgrounds are emitted as Tailwind opacity utilities
+     (e.g. `bg-action-webhook/10`) — no separate -bg token needed. */
+  --color-action-agent-task: oklch(0.606 0.25 292.717);       /* violet-500 */
+  --color-action-script: oklch(0.715 0.143 215.221);          /* cyan-500 */
+  --color-action-notify: oklch(0.704 0.14 182.503);           /* teal-500 */
+  --color-action-human-in-the-loop: oklch(0.705 0.213 47.604); /* orange-500 */
+  --color-action-create-task: oklch(0.585 0.233 277.117);     /* indigo-500 */
+  --color-action-send-message: oklch(0.656 0.241 354.308);    /* pink-500 */
+  --color-action-delegate-to-agent: oklch(0.627 0.265 303.9); /* purple-500 */
+  --color-action-default: oklch(0.623 0.214 259.815);         /* blue-500 — fallback action */
+  --color-action-property-match: oklch(0.769 0.188 70.08);    /* amber-500 — condition */
+  --color-action-code-match: oklch(0.795 0.184 86.047);       /* yellow-500 — condition */
+  --color-action-raw-llm: oklch(0.685 0.169 237.323);         /* sky-500 — condition */
 
   /* Fonts */
   --font-sans: "Space Grotesk", sans-serif;
@@ -85,6 +124,39 @@
   --color-sidebar-accent-foreground: oklch(0.985 0 0);
   --color-sidebar-border: oklch(1 0 0 / 10%);
   --color-sidebar-ring: oklch(0.769 0.188 70.08);
+
+  /* Semantic status tokens — dark mode
+     Match the lighter *-400 palette stops the codebase already uses
+     for `dark:text-*-400` overrides in status-badge.tsx etc. */
+  --color-status-success: oklch(0.765 0.177 163.223);        /* emerald-400 */
+  --color-status-success-foreground: oklch(0.21 0.006 285.885);
+  --color-status-active: oklch(0.828 0.189 84.429);          /* amber-400 */
+  --color-status-active-foreground: oklch(0.21 0.006 285.885);
+  --color-status-error: oklch(0.704 0.191 22.216);           /* red-400 */
+  --color-status-error-foreground: oklch(0.21 0.006 285.885);
+  --color-status-info: oklch(0.746 0.16 232.661);            /* sky-400 */
+  --color-status-info-foreground: oklch(0.21 0.006 285.885);
+  --color-status-pending: oklch(0.852 0.199 91.936);         /* yellow-400 */
+  --color-status-pending-foreground: oklch(0.21 0.006 285.885);
+  --color-status-warning: oklch(0.75 0.183 55.934);          /* orange-400 */
+  --color-status-warning-foreground: oklch(0.21 0.006 285.885);
+  --color-status-paused: oklch(0.707 0.165 254.624);         /* blue-400 */
+  --color-status-paused-foreground: oklch(0.21 0.006 285.885);
+  --color-status-neutral: oklch(0.705 0.015 286.067);        /* zinc-400 */
+  --color-status-neutral-foreground: oklch(0.21 0.006 285.885);
+
+  /* Action-type tokens — dark mode (lighter *-400 stops for legibility) */
+  --color-action-agent-task: oklch(0.702 0.183 293.541);      /* violet-400 */
+  --color-action-script: oklch(0.789 0.154 211.53);           /* cyan-400 */
+  --color-action-notify: oklch(0.777 0.152 181.912);          /* teal-400 */
+  --color-action-human-in-the-loop: oklch(0.75 0.183 55.934); /* orange-400 */
+  --color-action-create-task: oklch(0.673 0.182 276.935);     /* indigo-400 */
+  --color-action-send-message: oklch(0.718 0.202 349.761);    /* pink-400 */
+  --color-action-delegate-to-agent: oklch(0.714 0.203 305.504); /* purple-400 */
+  --color-action-default: oklch(0.707 0.165 254.624);         /* blue-400 */
+  --color-action-property-match: oklch(0.828 0.189 84.429);   /* amber-400 */
+  --color-action-code-match: oklch(0.852 0.199 91.936);       /* yellow-400 */
+  --color-action-raw-llm: oklch(0.746 0.16 232.661);          /* sky-400 */
 }
 
 :root {
