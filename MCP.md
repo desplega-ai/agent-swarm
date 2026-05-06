@@ -99,7 +99,7 @@ Tool for an agent to join the swarm of agents with optional profile information.
 | `lead` | `boolean` | No | false | Whether this agent should be the lead. |
 | `name` | `string` | Yes | - | The name of the agent joining the swarm. |
 | `description` | `string` | No | - | Agent description. |
-| `role` | `string` | No | - | Agent role (free-form, e.g., 'frontend dev', 'code reviewer |
+| `role` | `string` | No | - | Agent role (free-form, e.g., 'frontend dev', 'code reviewer'). |
 | `capabilities` | `array` | No | - | List of capabilities (e.g., ['typescript', 'react', 'testing']). |
 
 ### poll-task
@@ -132,7 +132,7 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 | `unassigned` | `boolean` | No | - | Only return unassigned tasks in the pool. |
 | `offeredToMe` | `boolean` | No | - | Only return tasks offered to you (awaiting accept/reject). |
 | `readyOnly` | `boolean` | No | - | Only return tasks whose dependencies are met. |
-| `taskType` | `string` | No | - | Filter by task type (e.g., 'bug', 'feature |
+| `taskType` | `string` | No | - | Filter by task type (e.g., 'bug', 'feature'). |
 | `tags` | `array` | No | - | Filter by any matching tag. |
 | `search` | `string` | No | - | Search in task description. |
 | `scheduleId` | `string` | No | - | Filter by schedule ID to find tasks created by a specific schedule. |
@@ -150,17 +150,17 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `agentId` | `uuid` | No | - | The agent to assign/offer task to. Omit to create unassigned task for pool. |
 | `task` | `string` | Yes | - | The task description to send. |
 | `offerMode` | `boolean` | No | false | If true, offer the task instead of direct assign (agent must accept/reject). |
-| `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature', 'review |
+| `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature', 'review'). |
 | `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
 | `priority` | `number` | No | - | Priority 0-100 (default: 50). |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
-| `parentTaskId` | `uuid` | No | - | - |
-| `dir` | `string` | No | - | - |
-| `vcsRepo` | `string` | No | - | - |
-| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for this task ('haiku', 'sonnet', or 'opus |
-| `allowDuplicate` | `boolean` | No | false | - |
-| `slackChannelId` | `string` | No | - | - |
-| `slackThreadTs` | `string` | No | - | - |
+| `parentTaskId` | `uuid` | No | - | Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided. |
+| `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. If the directory doesn't exist, falls back to the default working directory. |
+| `vcsRepo` | `string` | No | - | VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context. |
+| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for this task ('haiku', 'sonnet', or 'opus'). If not set, uses agent/global config MODEL_OVERRIDE or defaults to 'opus'. |
+| `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. |
+| `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
+| `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
 | `slackUserId` | `string` | No | - | Slack user ID of the original requester. |
 
 ### get-task-details
@@ -233,7 +233,7 @@ Create, update, delete, or list user profiles in the user registry. Lead-only.
 | `userId` | `string` | No | - | User ID (required for update/delete/get) |
 | `name` | `string` | No | - | Display name (required for create) |
 | `email` | `string` | No | - | Primary email address |
-| `role` | `string` | No | - | Role (e.g., "founder", "engineer |
+| `role` | `string` | No | - | Role (e.g., "founder", "engineer") |
 | `notes` | `string` | No | - | Free-form notes |
 | `slackUserId` | `string` | No | - | Slack user ID |
 | `linearUserId` | `string` | No | - | Linear user UUID |
@@ -262,8 +262,8 @@ Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `scopeId` | `string` | No | - | - |
-| `key` | `string` | Yes | - | Configuration key (e.g., 'AGENTMAIL_WEBHOOK_SECRET |
+| `scopeId` | `string` | No | - | Agent ID or repo ID. Required for 'agent' and 'repo' scopes, omit for 'global'. |
+| `key` | `string` | Yes | - | Configuration key (e.g., 'AGENTMAIL_WEBHOOK_SECRET'). |
 | `value` | `string` | Yes | - | Configuration value. |
 | `isSecret` | `boolean` | No | - | If true, value is masked in API responses (default: false). |
 | `envPath` | `string` | No | - | Optional: file path to write the value as KEY=VALUE in a .env file. |
@@ -337,7 +337,7 @@ List prompt templates with optional filters. Returns all templates matching the 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `eventType` | `string` | No | - | Filter by event type (e.g. 'github.pull_request.opened |
+| `eventType` | `string` | No | - | Filter by event type (e.g. 'github.pull_request.opened'). |
 | `scopeId` | `string` | No | - | Filter by scope ID (agent ID or repo ID). |
 | `isDefault` | `boolean` | No | - | Filter by default status. |
 
@@ -359,8 +359,8 @@ Create or update a prompt template override. Upserts by (eventType, scope, scope
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `eventType` | `string` | Yes | - | Event type identifier (e.g. 'github.pull_request.opened |
-| `scopeId` | `string` | No | - | - |
+| `eventType` | `string` | Yes | - | Event type identifier (e.g. 'github.pull_request.opened'). |
+| `scopeId` | `string` | No | - | Agent ID or repo ID. Required for 'agent' and 'repo' scopes, omit for 'global'. |
 | `body` | `string` | Yes | - | The template body text with {{variable}} placeholders. |
 | `changeReason` | `string` | No | - | Reason for the change (recorded in history). |
 
@@ -423,7 +423,7 @@ Post a message to a Slack channel. By default creates a new top-level message; p
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
 | `message` | `string` | Yes | - | The message content to post. |
-| `threadTs` | `string` | No | - | - |
+| `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
 
 ### slack-start-thread
 
@@ -444,7 +444,7 @@ List Slack channels the bot is a member of. Use this to discover available chann
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `types` | `array` | No | - | - |
+| `types` | `array` | No | - | Filter by channel types. Options: public (public channels), private (private channels), dm (direct messages), mpim (group DMs). Default: all types. |
 | `limit` | `number` | No | 100 | Maximum number of channels to retrieve (default: 100, max: 200). |
 
 ### slack-upload-file
@@ -459,9 +459,9 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
 | `channelId` | `string` | No | - | Direct channel ID to upload to (requires lead privileges). |
 | `threadTs` | `string` | No | - | Thread timestamp to upload as a thread reply (used with channelId). |
-| `filePath` | `string` | No | - | Path to the file to upload. Either filePath OR content must be provided. Relative paths are resolved from /workspace (e.g., 'shared/file.png' -> '/workspace/shared/file.png'). Absolute paths work if they exist or if the file exists under /workspace with that path (e.g., '/tmp/file.png' checks '/tmp/file.png' then '/workspace/tmp/file.png |
-| `content` | `string` | No | - | - |
-| `filename` | `string` | No | - | - |
+| `filePath` | `string` | No | - | Path to the file to upload. Either filePath OR content must be provided. Relative paths are resolved from /workspace (e.g., 'shared/file.png' -> '/workspace/shared/file.png'). Absolute paths work if they exist or if the file exists under /workspace with that path (e.g., '/tmp/file.png' checks '/tmp/file.png' then '/workspace/tmp/file.png'). |
+| `content` | `string` | No | - | Base64-encoded file content. Use this when the file is not on the local filesystem. Either filePath OR content must be provided. |
+| `filename` | `string` | No | - | Name to give the file in Slack. Required when using content, defaults to original filename when using filePath. |
 | `initialComment` | `string` | No | - | Optional message to post with the file. |
 
 ### slack-download-file
@@ -472,9 +472,9 @@ Download a file from Slack by file ID or URL. Files are saved to the agent's dow
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `fileId` | `string` | No | - | The Slack file ID to download (e.g., 'F0RDC39U1 |
+| `fileId` | `string` | No | - | The Slack file ID to download (e.g., 'F0RDC39U1'). |
 | `url` | `string` | No | - | Direct URL to download (url_private_download from a file object). |
-| `savePath` | `string` | No | - | - |
+| `savePath` | `string` | No | - | Where to save the file. Can be a directory or full path. Defaults to /workspace/shared/downloads/{agentId}/slack/ |
 | `filename` | `string` | No | - | Filename to use when saving. Only used if savePath is a directory. |
 
 ### register-agentmail-inbox
@@ -486,7 +486,7 @@ Register an AgentMail inbox ID to route incoming emails to this agent. When emai
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `action` | `register \| unregister \| list` | Yes | - | Action to perform: register, unregister, or list inbox mappings. |
-| `inboxId` | `string` | No | - | The AgentMail inbox ID (e.g., 'inb_xxx |
+| `inboxId` | `string` | No | - | The AgentMail inbox ID (e.g., 'inb_xxx'). Required for register/unregister. |
 | `inboxEmail` | `string` | No | - | Optional email address for this inbox (for reference only). |
 
 ## Task Pool Tools
@@ -501,11 +501,11 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature |
+| `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature'). |
 | `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
 | `priority` | `number` | No | - | Priority 0-100, default 50. |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
-| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for the created task ('haiku', 'sonnet', or 'opus |
+| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for the created task ('haiku', 'sonnet', or 'opus'). Only used with 'create' action. |
 
 ## Messaging Tools
 
@@ -550,7 +550,7 @@ Posts a message to a channel for cross-agent communication.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `channel` | `string` | No | "general" | Channel name (default: 'general |
+| `channel` | `string` | No | "general" | Channel name (default: 'general'). |
 | `content` | `string` | Yes | - | Message content. |
 | `replyTo` | `uuid` | No | - | Message ID to reply to (for threading). |
 | `mentions` | `array` | No | - | Agent IDs to @mention (they'll see it in unread). |
@@ -582,17 +582,17 @@ Updates an agent's profile information (name, description, role, capabilities). 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `agentId` | `string` | No | - | - |
+| `agentId` | `string` | No | - | Target agent ID to update. If omitted, updates the calling agent. Only lead agents can update other agents' profiles. |
 | `name` | `string` | No | - | Agent name. |
 | `description` | `string` | No | - | Agent description. |
-| `role` | `string` | No | - | Agent role (free-form, e.g., 'frontend dev', 'code reviewer |
+| `role` | `string` | No | - | Agent role (free-form, e.g., 'frontend dev', 'code reviewer'). |
 | `capabilities` | `array` | No | - | List of capabilities (e.g., ['typescript', 'react', 'testing']). |
-| `claudeMd` | `string` | No | - | - |
-| `soulMd` | `string` | No | - | - |
-| `identityMd` | `string` | No | - | - |
-| `setupScript` | `string` | No | - | - |
-| `toolsMd` | `string` | No | - | - |
-| `heartbeatMd` | `string` | No | - | - |
+| `claudeMd` | `string` | No | - | Personal CLAUDE.md content. Loaded on session start and synced back on session end. Use for persistent notes and instructions. |
+| `soulMd` | `string` | No | - | Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md. Must be at least 200 characters to prevent accidental corruption. |
+| `identityMd` | `string` | No | - | Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md. Must be at least 200 characters to prevent accidental corruption. |
+| `setupScript` | `string` | No | - | Setup script content (bash). Runs at container start to install tools, configure environment. Persists across sessions. Also written to /workspace/start-up.sh. |
+| `toolsMd` | `string` | No | - | Environment-specific operational knowledge. Repos, services, SSH hosts, APIs, device names — anything specific to your setup. Synced to /workspace/TOOLS.md. |
+| `heartbeatMd` | `string` | No | - | Heartbeat checklist content (HEARTBEAT.md). Checked periodically — add standing orders for the lead to review. Synced to /workspace/HEARTBEAT.md. |
 
 ### context-history
 
@@ -633,7 +633,7 @@ Register a background service (e.g., PM2 process) for discovery by other agents.
 | `description` | `string` | No | - | What this service does. |
 | `healthCheckPath` | `string` | No | - | Health check endpoint path (default: /health). |
 | `cwd` | `string` | No | - | Working directory for the script. |
-| `interpreter` | `string` | No | - | Interpreter to use (e.g., 'node', 'bun |
+| `interpreter` | `string` | No | - | Interpreter to use (e.g., 'node', 'bun'). Auto-detected from extension if not set. |
 | `args` | `array` | No | - | Command line arguments for the script. |
 | `env` | `object` | No | - | Environment variables for the process. |
 | `metadata` | `object` | No | - | Additional metadata. |
@@ -697,21 +697,21 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `name` | `string` | Yes | - | Unique name for the schedule (e.g., 'daily-cleanup |
+| `name` | `string` | Yes | - | Unique name for the schedule (e.g., 'daily-cleanup') |
 | `taskTemplate` | `string` | Yes | - | The task description that will be created each time |
 | `scheduleType` | `recurring \| one_time` | No | "recurring" | Schedule type: 'recurring' (default) or 'one_time' |
-| `cronExpression` | `string` | No | - | Cron expression for recurring schedules (e.g., '0 9 * * * |
+| `cronExpression` | `string` | No | - | Cron expression for recurring schedules (e.g., '0 9 * * *') |
 | `intervalMs` | `number` | No | - | Interval in milliseconds for recurring schedules (e.g., 3600000 for hourly) |
 | `delayMs` | `number` | No | - | Delay in milliseconds for one-time schedules (e.g., 1800000 for 30 min) |
-| `runAt` | `string` | No | - | ISO datetime for one-time schedules (e.g., '2026-03-06T15:00:00Z |
+| `runAt` | `string` | No | - | ISO datetime for one-time schedules (e.g., '2026-03-06T15:00:00Z') |
 | `description` | `string` | No | - | Human-readable description of the schedule |
-| `taskType` | `string` | No | - | Task type (e.g., 'maintenance', 'report |
+| `taskType` | `string` | No | - | Task type (e.g., 'maintenance', 'report') |
 | `tags` | `array` | No | - | Tags to apply to created tasks |
 | `priority` | `number` | No | 50 | Task priority 0-100 (default: 50) |
 | `targetAgentId` | `string` | No | - | Agent to assign tasks to (omit for task pool) |
 | `timezone` | `string` | No | "UTC" | Timezone for cron schedules |
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
-| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for tasks created by this schedule ('haiku', 'sonnet', or 'opus |
+| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for tasks created by this schedule ('haiku', 'sonnet', or 'opus'). If not set, uses agent/global config or defaults to 'opus'. |
 
 ### update-schedule
 
@@ -771,7 +771,7 @@ Search your accumulated memories using natural language. Returns summaries with 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | `string` | Yes | - | Natural language search query. |
-| `scope` | `all \| agent \| swarm` | No | "all" | - |
+| `scope` | `all \| agent \| swarm` | No | "all" | Search scope: 'all' (own + swarm), 'agent' (own only), 'swarm' (shared only). |
 | `limit` | `number` | No | 10 | Max results to return. |
 
 ### memory-get
@@ -826,17 +826,17 @@ Allows the lead agent to push learnings into a worker's memory. The learning wil
 
 **Create Workflow**
 
-Create a new automation workflow. Key concepts:\n- Nodes are linked via 'next' (string or port-based record).\n- CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation.\n- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.\n- TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.\n- WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
+Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (string or port-based record). - CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation. - STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different. - Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. - TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. - WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `string` | Yes | - | Unique name for the workflow |
 | `description` | `string` | No | - | Description of what this workflow does |
 | `triggers` | `array` | No | - | Optional trigger configurations (webhook, schedule) |
-| `input` | `object` | No | - | - |
-| `dir` | `string` | No | - | - |
+| `input` | `object` | No | - | Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals) |
+| `dir` | `string` | No | - | Default working directory for all agent-task nodes (absolute path, e.g. /tmp/workspace) |
 | `vcsRepo` | `string` | No | - | Default VCS repo for all agent-task nodes (e.g. org/repo) |
-| `triggerSchema` | `object` | No | - | - |
+| `triggerSchema` | `object` | No | - | Optional JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items. Other JSON-Schema keywords are silently ignored. |
 
 ### list-workflows
 
@@ -874,7 +874,7 @@ Update an existing workflow's name, description, definition, triggers, cooldown,
 | `dir` | `string` | No | - | Default working directory for all agent-task nodes (null to remove) |
 | `vcsRepo` | `string` | No | - | Default VCS repo for all agent-task nodes (null to remove) |
 | `enabled` | `boolean` | No | - | Enable or disable the workflow |
-| `triggerSchema` | `object` | No | - | - |
+| `triggerSchema` | `object` | No | - | New trigger payload JSON-Schema (null to clear). Supported keywords: type, required, properties, enum, const, items. Other JSON-Schema keywords are silently ignored. |
 
 ### patch-workflow
 
@@ -889,7 +889,7 @@ Partially update a workflow by creating, updating, or deleting individual nodes,
 | `delete` | `array` | No | - | Node IDs to delete |
 | `create` | `array` | No | - | New nodes to add |
 | `onNodeFailure` | `fail \| continue` | No | - | Update onNodeFailure behavior |
-| `triggerSchema` | `object` | No | - | - |
+| `triggerSchema` | `object` | No | - | Optional JSON-Schema describing the expected trigger payload. Pass an object to set/replace; pass null to clear; omit to leave unchanged. Validator subset: type, required, properties, enum, const, items. |
 
 ### patch-workflow-node
 
@@ -1083,7 +1083,7 @@ Map a swarm agent to an external tracker user (for assignment sync).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira |
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira') |
 | `agentId` | `string` | Yes | - | The swarm agent ID |
 | `externalUserId` | `string` | Yes | - | The external user ID in the tracker |
 | `agentName` | `string` | Yes | - | Display name for the agent mapping |
@@ -1096,10 +1096,10 @@ Link a swarm task to an external tracker issue.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira |
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira') |
 | `swarmTaskId` | `string` | Yes | - | The swarm task ID to link |
 | `externalId` | `string` | Yes | - | The external issue ID in the tracker |
-| `externalIdentifier` | `string` | No | - | Human-readable identifier (e.g. 'ENG-42 |
+| `externalIdentifier` | `string` | No | - | Human-readable identifier (e.g. 'ENG-42') |
 | `externalUrl` | `string` | No | - | URL to the external issue |
 
 ### tracker-sync-status
@@ -1110,7 +1110,7 @@ Show all tracker sync mappings with their state.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | No | - | Filter by provider (e.g. 'linear', 'jira |
+| `provider` | `string` | No | - | Filter by provider (e.g. 'linear', 'jira') |
 | `entityType` | `task` | No | - | Filter by entity type |
 
 ### tracker-status
@@ -1139,8 +1139,8 @@ Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md via 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `sourceRepo` | `string` | Yes | - | GitHub repo (e.g. "vercel-labs/skills |
-| `sourcePath` | `string` | No | - | Path within repo (e.g. "skills/nextjs |
+| `sourceRepo` | `string` | Yes | - | GitHub repo (e.g. "vercel-labs/skills") |
+| `sourcePath` | `string` | No | - | Path within repo (e.g. "skills/nextjs") |
 | `scope` | `global \| swarm` | No | "global" | Scope for the installed skill |
 | `isComplex` | `boolean` | No | false | If true, registers for npx install (metadata only) |
 

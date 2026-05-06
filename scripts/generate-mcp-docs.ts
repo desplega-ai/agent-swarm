@@ -110,41 +110,96 @@ async function discoverToolFiles(): Promise<string[]> {
 }
 
 /**
- * Strip the surrounding quotes and JS string-concatenation operators from a
- * captured string literal (or chain of literals). Handles all three quote
- * styles and any whitespace/newlines between concat fragments.
+ * Walk `source` starting at `startIdx` and parse a chain of one or more JS
+ * string literals joined by `+`. Returns the concatenated decoded value plus
+ * the index at which parsing stopped, or `null` if the cursor isn't pointing
+ * at a string literal.
  *
- * Examples:
- *   `"abc " + "def"`       → "abc def"
- *   `"a"\n  + "b"`         → "ab"
- *   `'foo'`                → "foo"
- *   `"already-clean text"` → "already-clean text"
+ * Handles all three quote styles (`"`, `'`, `` ` ``) — the closing quote
+ * must match the opening quote of THAT literal, so descriptions containing
+ * inner quotes of a different style (`"Model ('haiku', 'sonnet')..."`) are
+ * captured in full instead of being truncated at the first inner quote.
+ *
+ * Backslash escapes are decoded for common cases (`\n`, `\t`, `\r`, `\\`,
+ * matching the opening quote) — anything else passes through as-is. Template
+ * literals are treated as plain strings (no `${}` interpolation handling)
+ * because no MCP tool description uses interpolation today.
  */
-function stripStringLiteral(raw: string): string {
-  return raw
-    .replace(/^\s*["'`]/, "")
-    .replace(/["'`]\s*$/, "")
-    .replace(/["'`]\s*\+\s*["'`]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+function parseStringLiteralChain(
+  source: string,
+  startIdx: number,
+): { value: string; endIdx: number } | null {
+  let i = startIdx;
+  while (i < source.length && /\s/.test(source[i]!)) i++;
+
+  let result = "";
+  let parsedAtLeastOne = false;
+
+  while (i < source.length) {
+    const quote = source[i];
+    if (quote !== '"' && quote !== "'" && quote !== "`") break;
+    i++;
+
+    while (i < source.length) {
+      const c = source[i]!;
+      if (c === "\\" && i + 1 < source.length) {
+        const next = source[i + 1]!;
+        if (next === "n") result += "\n";
+        else if (next === "t") result += "\t";
+        else if (next === "r") result += "\r";
+        else if (next === "\\") result += "\\";
+        else if (next === '"' || next === "'" || next === "`") result += next;
+        else result += next;
+        i += 2;
+        continue;
+      }
+      if (c === quote) {
+        i++;
+        break;
+      }
+      result += c;
+      i++;
+    }
+    parsedAtLeastOne = true;
+
+    // Skip whitespace; if we see a `+`, look for another literal — otherwise
+    // we're done.
+    let j = i;
+    while (j < source.length && /\s/.test(source[j]!)) j++;
+    if (source[j] === "+") {
+      i = j + 1;
+      while (i < source.length && /\s/.test(source[i]!)) i++;
+      // continue outer loop to read next literal
+    } else {
+      break;
+    }
+  }
+
+  if (!parsedAtLeastOne) return null;
+  return { value: result, endIdx: i };
+}
+
+/**
+ * Convenience: parse a literal chain at `startIdx` and return the cleaned-up
+ * single-line description, or empty string when no literal is found.
+ */
+function readDescriptionAt(source: string, startIdx: number): string {
+  const parsed = parseStringLiteralChain(source, startIdx);
+  if (!parsed) return "";
+  return parsed.value.replace(/\s+/g, " ").trim();
 }
 
 /**
  * Look up the value of a top-level `const NAME = "..." (+ "...")*;` declaration
- * inside `content`. Returns the resolved string with concat fragments stripped,
- * or empty string when the constant isn't a string literal.
+ * inside `content`. Returns the resolved string, or empty string when the
+ * constant's RHS isn't a string-literal chain.
  */
 function resolveStringConstant(constName: string, content: string): string {
-  const re = new RegExp(
-    `(?:const|let|var)\\s+${constName}(?:\\s*:\\s*[^=;]+)?\\s*=\\s*([\\s\\S]*?);`,
-  );
-  const match = content.match(re);
-  if (!match) return "";
-  const raw = match[1].trim();
-  // Only resolve when the right-hand side is a string-literal chain — bail on
-  // function calls, ternaries, etc. so we don't ship garbage.
-  if (!/^["'`]/.test(raw)) return "";
-  return stripStringLiteral(raw);
+  const re = new RegExp(`(?:const|let|var)\\s+${constName}(?:\\s*:\\s*[^=;]+)?\\s*=\\s*`);
+  const match = re.exec(content);
+  if (!match || match.index === undefined) return "";
+  const startIdx = match.index + match[0].length;
+  return readDescriptionAt(content, startIdx);
 }
 
 /**
@@ -164,28 +219,26 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo | null> {
   const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
   const title = titleMatch ? titleMatch[1] : formatTitle(name);
 
-  // Extract description - handle multiline and various quote types
+  // Extract description — find `description:` immediately followed by a
+  // string-literal opener and walk the chain. The lookahead `(?=["'\`])`
+  // skips over `description: z.string()...` lines that some tools have on
+  // nested zod field schemas (e.g. request-human-input's `QuestionSchema`),
+  // so we land on the tool-level config description, not a nested-field one.
+  //
+  // The walker is quote-delimiter-aware: a `"`-delimited literal is closed
+  // only by another `"`, so descriptions like
+  //   `"Model to use ('haiku', 'sonnet', or 'opus')..."`
+  // are captured in full. (Pre-fix regex used `["'\`]...["'\`]` which let
+  // ANY quote close the literal, truncating at the first inner `'`.)
   let description = "";
-  // Try to find description that ends before inputSchema, outputSchema, or annotations
-  const descPatterns = [
-    /description:\s*["'`]([\s\S]*?)["'`]\s*,\s*(?:inputSchema|outputSchema|annotations|_meta)/,
-    /description:\s*["']([^"']+)["']/,
-    /description:\s*`([^`]+)`/,
-  ];
-
-  for (const pattern of descPatterns) {
-    const match = content.match(pattern);
-    if (match) {
-      // The pattern's outer quotes are NOT captured; the captured text may
-      // still contain inner `" + "` concat operators when the source uses
-      // multi-line string concatenation. Strip them so the rendered doc
-      // matches the runtime string the SDK actually serves.
-      description = match[1]
-        .replace(/["'`]\s*\+\s*["'`]/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-      break;
-    }
+  const descKeyRegex = /description\s*:\s*(?=["'`])/g;
+  let descKeyMatch: RegExpExecArray | null;
+  while ((descKeyMatch = descKeyRegex.exec(content)) !== null) {
+    const startIdx = descKeyMatch.index + descKeyMatch[0].length;
+    const parsed = parseStringLiteralChain(content, startIdx);
+    if (!parsed) continue;
+    description = parsed.value.replace(/\s+/g, " ").trim();
+    break;
   }
 
   // Parse schema fields
@@ -316,20 +369,28 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
   //      is defined elsewhere in the same file as a string literal (or
   //      string-literal chain).
   //
-  // Without #2, fields like memory-rate.ts's `referencesSource` (which uses
-  // a hoisted `REFERENCES_SOURCE_DESCRIPTION` constant) render with a blank
-  // description — even though the runtime SDK serves the full text. The
-  // shipped doc would silently drift from the actual schema.
+  // The walker is quote-delimiter-aware: a `"`-delimited literal is closed
+  // only by another `"`, so descriptions like
+  //   `"Model to use ('haiku', 'sonnet', or 'opus')..."`
+  // are captured in full. (Pre-fix regex used `["'\`]...["'\`]` which let
+  // ANY quote close the literal, truncating at the first inner `'`.)
   let description = "";
-  const inlineDescMatch = typeChain.match(
-    /\.describe\(\s*((?:["'`][\s\S]*?["'`]\s*\+\s*)*["'`][\s\S]*?["'`])\s*\)/,
-  );
-  if (inlineDescMatch) {
-    description = stripStringLiteral(inlineDescMatch[1]);
-  } else {
-    const constRefMatch = typeChain.match(/\.describe\(\s*([A-Z_][A-Z0-9_]*)\s*\)/);
-    if (constRefMatch) {
-      description = resolveStringConstant(constRefMatch[1], fullContent);
+  const describeOpen = typeChain.search(/\.describe\s*\(\s*/);
+  if (describeOpen !== -1) {
+    const openMatch = /\.describe\s*\(\s*/.exec(typeChain.slice(describeOpen))!;
+    const argStart = describeOpen + openMatch[0].length;
+    if (typeChain[argStart] === '"' || typeChain[argStart] === "'" || typeChain[argStart] === "`") {
+      description = readDescriptionAt(typeChain, argStart);
+    } else {
+      // `.describe(CONSTANT)` — resolve UPPER_SNAKE identifiers from the
+      // full file. Lower-case identifiers are deliberately ignored: they're
+      // typically variables / computed values and resolving them would be
+      // unsafe. Stick with the convention and bail otherwise.
+      const tail = typeChain.slice(argStart);
+      const constRefMatch = /^([A-Z_][A-Z0-9_]*)\s*\)/.exec(tail);
+      if (constRefMatch) {
+        description = resolveStringConstant(constRefMatch[1]!, fullContent);
+      }
     }
   }
 
