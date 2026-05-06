@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
+  title: "Agent Swarm — Intelligence that compounds. Your agent company OS.",
   description:
-    "Run a team of AI coding agents that coordinate autonomously. Start your 7-day free trial on Agent Swarm Cloud, or self-host for free. Open source, MCP-powered.",
+    "Intelligence that compounds. The multi-agent coordination layer for AI coding agents. Your agent company OS — free & open source.",
   keywords: [
     "agent swarm",
     "agent swarm cloud",
@@ -26,19 +26,19 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
+    title: "Agent Swarm — Intelligence that compounds. Your agent company OS.",
     description:
-      "Run a team of AI coding agents that coordinate autonomously. Start your 7-day free trial on Agent Swarm Cloud, or self-host for free. Open source, MCP-powered.",
+      "Intelligence that compounds. The multi-agent coordination layer for AI coding agents. Your agent company OS — free & open source.",
     url: "https://agent-swarm.dev",
     siteName: "Agent Swarm",
     type: "website",
     locale: "en_US",
     images: [
       {
-        url: "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Multi-Agent+Orchestration+for+AI+Coding+Assistants&subtitle=Run+a+team+of+AI+coding+agents+that+coordinate+autonomously.+Open+source%2C+MCP-powered.",
+        url: "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Intelligence+that+compounds.+Your+agent+company+OS.&subtitle=The+multi-agent+coordination+layer+for+AI+coding+agents.+Your+agent+company+OS+%E2%80%94+free+%26+open+source.",
         width: 1200,
         height: 630,
-        alt: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
+        alt: "Agent Swarm — Intelligence that compounds. Your agent company OS.",
       },
     ],
   },
@@ -46,11 +46,11 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     site: "@desplegalabs",
     creator: "@desplegalabs",
-    title: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
+    title: "Agent Swarm — Intelligence that compounds. Your agent company OS.",
     description:
-      "Run a team of AI coding agents that coordinate autonomously. Start your 7-day free trial on Agent Swarm Cloud, or self-host for free. Open source, MCP-powered.",
+      "Intelligence that compounds. The multi-agent coordination layer for AI coding agents. Your agent company OS — free & open source.",
     images: [
-      "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Multi-Agent+Orchestration+for+AI+Coding+Assistants&subtitle=Run+a+team+of+AI+coding+agents+that+coordinate+autonomously.+Open+source%2C+MCP-powered.",
+      "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Intelligence+that+compounds.+Your+agent+company+OS.&subtitle=The+multi-agent+coordination+layer+for+AI+coding+agents.+Your+agent+company+OS+%E2%80%94+free+%26+open+source.",
     ],
   },
   metadataBase: new URL("https://agent-swarm.dev"),

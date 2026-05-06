@@ -54,9 +54,8 @@ export async function Hero() {
           className="mt-8 text-[18.5px] text-zinc-400 leading-[1.55] max-w-[52ch] mx-auto"
           style={{ textWrap: "pretty" }}
         >
-          A lead delegates. Workers ship in Docker.{" "}
-          <span className="text-white">Memory persists across every task</span> so tomorrow&apos;s
-          swarm is sharper than today&apos;s.
+          A lead delegates. Workers ship in Docker. Memory persists.{" "}
+          <span className="text-white">The agentic OS your company needs.</span>
         </p>
 
         <div className="mt-11 flex flex-row gap-2.5 sm:gap-3 justify-center">
