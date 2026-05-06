@@ -37,16 +37,6 @@ jobs:
       - name: Helm lint
         run: helm lint ${{ env.CHART_PATH }}
 
-      - name: Verify Chart.yaml.appVersion matches package.json.version
-        run: |
-          PKG_VERSION=$(jq -r '.version' package.json)
-          CHART_APP_VERSION=$(grep -E '^appVersion:' ${{ env.CHART_PATH }}/Chart.yaml | awk '{print $2}' | tr -d '"')
-          if [ "$PKG_VERSION" != "$CHART_APP_VERSION" ]; then
-            echo "::error::Chart.yaml appVersion ($CHART_APP_VERSION) is out of sync with package.json version ($PKG_VERSION). Update Chart.yaml.appVersion to match."
-            exit 1
-          fi
-          echo "appVersion in sync: $PKG_VERSION"
-
       - name: Render + validate — defaults
         run: |
           helm template release ${{ env.CHART_PATH }} \
@@ -91,16 +81,6 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: v3.14.0
-
-      - name: Verify Chart.yaml.appVersion matches package.json.version
-        run: |
-          PKG_VERSION=$(jq -r '.version' package.json)
-          CHART_APP_VERSION=$(grep -E '^appVersion:' ${{ env.CHART_PATH }}/Chart.yaml | awk '{print $2}' | tr -d '"')
-          if [ "$PKG_VERSION" != "$CHART_APP_VERSION" ]; then
-            echo "::error::Chart.yaml appVersion ($CHART_APP_VERSION) is out of sync with package.json version ($PKG_VERSION). Refusing to publish."
-            exit 1
-          fi
-          echo "appVersion in sync: $PKG_VERSION"
 
       - name: Detect chart version change
         id: detect

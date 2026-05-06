@@ -7,8 +7,11 @@ type: application
 kubeVersion: ">=1.25.0-0"
 # Chart version — bumped when the chart itself changes. Independent of appVersion.
 version: 0.1.0
-# Application version — must match package.json.version. Bump it by hand
-# whenever you bump package.json; CI rejects PRs where the two values drift.
+# Application version — default image tag the chart deploys. Set to any
+# published agent-swarm version (see ghcr.io/desplega-ai/agent-swarm).
+# Users override at install time with --set image.tag=...; this is just
+# the default. Doesn't need to track package.json — bump it when the chart
+# is intentionally re-baselined onto a newer app version.
 appVersion: "1.74.4"
 home: https://github.com/desplega-ai/agent-swarm
 sources:
