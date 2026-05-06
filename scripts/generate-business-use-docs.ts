@@ -55,6 +55,8 @@ flowchart TD
     cancelled_in_progress([cancelled_in_progress])
     paused([paused])
     resumed([resumed])
+    memory_retrieved([memory_retrieved])
+    memory_rated([memory_rated])
     completed([completed])
     failed([failed])
     worker_received([worker_received])
@@ -64,11 +66,17 @@ flowchart TD
     created --> started
     created --> cancelled_pending
 
+    started --> memory_retrieved
+    started --> memory_rated
     started --> completed
     started --> failed
     started --> cancelled_in_progress
     started --> paused
     started --> worker_received
+
+    memory_retrieved --> memory_rated
+    memory_retrieved --> completed
+    memory_rated --> completed
 
     paused --> resumed
 
@@ -83,7 +91,7 @@ flowchart TD
     classDef assert fill:#34d399,stroke:#059669,color:#fff
     classDef worker fill:#f59e0b,stroke:#d97706,color:#fff
 
-    class created act
+    class created,memory_retrieved,memory_rated act
     class started,cancelled_pending,cancelled_in_progress,completed,failed,paused,resumed assert
     class worker_received,worker_process_spawned act
     class worker_process_finished assert
@@ -122,18 +130,24 @@ flowchart TD
 \`\`\``;
 }
 
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 3)}...` : s;
+}
+
 function generateNodeTable(nodes: Node[]): string {
   const rows = nodes
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((n) => {
       const deps = n.dep_ids?.join(", ") || "—";
-      const validatorScript = n.validator?.script?.trim().replace(/\n/g, " ") || "—";
-      const validator = validatorScript.length > 60 ? `${validatorScript.slice(0, 57)}...` : validatorScript;
-      return `| \`${n.id}\` | ${n.type} | ${deps} | ${validator} |`;
+      const filterScript = n.filter?.script?.trim().replace(/\n/g, " ") || "";
+      const filter = filterScript ? truncate(filterScript, 60) : "—";
+      const validatorScript = n.validator?.script?.trim().replace(/\n/g, " ") || "";
+      const validator = validatorScript ? truncate(validatorScript, 60) : "—";
+      return `| \`${n.id}\` | ${n.type} | ${deps} | ${filter} | ${validator} |`;
     });
 
-  return `| Node | Type | Dependencies | Validator |
-|------|------|-------------|-----------|
+  return `| Node | Type | Dependencies | Filter | Validator |
+|------|------|-------------|--------|-----------|
 ${rows.join("\n")}`;
 }
 
@@ -229,6 +243,8 @@ uvx business-use-core@latest flow graph task
 | \`src/http/poll.ts\` | API | started |
 | \`src/http/agents.ts\` | API | registered, reconnected |
 | \`src/tools/store-progress.ts\` | API | completed, failed (MCP path) |
+| \`src/be/memory/raters/store.ts\` | API | memory_rated |
+| \`src/be/memory/raters/retrieval.ts\` | API | memory_retrieved |
 | \`src/http/index.ts\` | API | listen |
 | \`src/scheduler/scheduler.ts\` | API | scheduler_started |
 | \`src/commands/runner.ts\` | Worker | worker_received, worker_process_spawned, worker_process_finished |

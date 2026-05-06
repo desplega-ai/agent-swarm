@@ -216,8 +216,10 @@ function parseSchemaFields(content: string): FieldInfo[] {
  * Parse a single field definition
  */
 function parseField(fieldStr: string): FieldInfo | null {
-  // Match field name and type chain
-  const fieldMatch = fieldStr.match(/^\s*(\w+):\s*z\.([\s\S]+)/);
+  // Match field name and type chain. Allow whitespace/newlines between `z` and
+  // the first `.method(...)` so multi-line zod chains (e.g. `z\n  .string()`)
+  // are parsed too.
+  const fieldMatch = fieldStr.match(/^\s*(\w+):\s*z\s*\.([\s\S]+)/);
   if (!fieldMatch) return null;
 
   const [, name, typeChain] = fieldMatch;
@@ -363,16 +365,32 @@ async function generateDocs() {
 
 `;
 
+  // TOC entries use the canonical tool name from the source registration
+  // (kebab or snake) so the anchor matches the section heading the generator
+  // emits below.
+  const canonicalName = (toolName: string): string =>
+    toolInfoMap.get(toolName)?.name ??
+    toolInfoMap.get(toolName.replace(/-/g, "_"))?.name ??
+    toolName;
+
   // Generate TOC
   for (const category of categories) {
     const anchor = category.title.toLowerCase().replace(/\s+/g, "-");
     markdown += `- [${category.title}](#${anchor})\n`;
     for (const toolName of category.tools) {
-      markdown += `  - [${toolName}](#${toolName})\n`;
+      const name = canonicalName(toolName);
+      markdown += `  - [${name}](#${name})\n`;
     }
   }
 
   markdown += "\n---\n\n";
+
+  // Tool names registered in source can use either kebab-case ("memory-search")
+  // or snake_case ("memory_rate"); register-fn names always derive to kebab via
+  // camelToKebab. Look up both variants so either casing finds its info.
+  const lookupTool = (toolName: string): ToolInfo | undefined => {
+    return toolInfoMap.get(toolName) ?? toolInfoMap.get(toolName.replace(/-/g, "_"));
+  };
 
   // Generate tool documentation by category
   for (const category of categories) {
@@ -380,7 +398,7 @@ async function generateDocs() {
     markdown += `*${category.description}*\n\n`;
 
     for (const toolName of category.tools) {
-      const tool = toolInfoMap.get(toolName);
+      const tool = lookupTool(toolName);
       if (tool) {
         markdown += generateToolMarkdown(tool);
       } else {
@@ -391,7 +409,9 @@ async function generateDocs() {
   }
 
   // Check for uncategorized tools
-  const categorizedTools = new Set(categories.flatMap((c) => c.tools));
+  const categorizedTools = new Set(
+    categories.flatMap((c) => c.tools.flatMap((t) => [t, t.replace(/-/g, "_")])),
+  );
   const uncategorized = [...toolInfoMap.keys()].filter((name) => !categorizedTools.has(name));
 
   if (uncategorized.length > 0) {

@@ -1,3 +1,4 @@
+import { ensure } from "@desplega.ai/business-use";
 import { getDb } from "@/be/db";
 import { type RatingEvent, REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "./types";
 
@@ -115,9 +116,12 @@ export function applyRating(
        beta  = beta  + excluded.beta  - 1.0`,
   );
 
+  type AppliedEntry = { event: RatingEvent; sanitizedReferencesSource: string | null };
+
   const applyTx = db.transaction(() => {
     let applied = 0;
     const lateRejects: ApplyRatingResult["rejected"] = [];
+    const appliedEvents: AppliedEntry[] = [];
     for (const { event, sanitizedReferencesSource } of accepted) {
       const exists = checkExists.get(event.memoryId);
       if (!exists) {
@@ -158,12 +162,46 @@ export function applyRating(
           new Date().toISOString(),
         );
       }
+      appliedEvents.push({ event, sanitizedReferencesSource });
       applied += 1;
     }
-    return { applied, lateRejects };
+    return { applied, lateRejects, appliedEvents };
   });
 
-  const { applied, lateRejects } = applyTx();
+  const { applied, lateRejects, appliedEvents } = applyTx();
+
+  // Business-use instrumentation — emit ONE `memory_rated` event in the `task`
+  // flow per applied rating. Placed OUTSIDE the transaction (per CLAUDE.md BU
+  // block), validator self-contained (references only `data`). Skipped when
+  // `ctx.taskId` is absent because the `task` flow is keyed on taskId.
+  if (ctx.taskId && appliedEvents.length > 0) {
+    for (const { event, sanitizedReferencesSource } of appliedEvents) {
+      ensure({
+        id: "memory_rated",
+        flow: "task",
+        runId: ctx.taskId,
+        data: {
+          memoryId: event.memoryId,
+          source: event.source,
+          signal: event.signal,
+          weight: event.weight,
+          hasReferencesSource: sanitizedReferencesSource !== null,
+        },
+        validator: (data) =>
+          typeof data.memoryId === "string" &&
+          data.memoryId.length > 0 &&
+          typeof data.source === "string" &&
+          data.source.length > 0 &&
+          typeof data.signal === "number" &&
+          data.signal >= -1 &&
+          data.signal <= 1 &&
+          typeof data.weight === "number" &&
+          data.weight >= 0 &&
+          data.weight <= 1,
+      });
+    }
+  }
+
   return { applied, rejected: [...rejected, ...lateRejects] };
 }
 
