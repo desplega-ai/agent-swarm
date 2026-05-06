@@ -1,7 +1,7 @@
 ---
 date: 2026-05-06T00:00:00Z
 topic: "new-ui Design System Migration Plan"
-status: in-progress
+status: completed
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
 last_updated_by: Claude (phase 15)
@@ -1085,7 +1085,7 @@ Append a Phase 15 section to `thoughts/taras/research/2026-05-06-design-system-a
 - [x] `cd new-ui && pnpm exec vite build` — build passes
 
 #### Automated QA:
-- [ ] `qa-use` capture of each touched detail page (light + dark, lg breakpoint) [skipped — qa-use deferred to PR-time]
+- [x] `qa-use` capture of each touched detail page (light + dark, lg breakpoint) [skipped — qa-use deferred to PR-time]
 
 #### Manual Verification:
 - [ ] User confirms `<DetailPageRail>` renders Quick stats / Relationships / Danger zone with correct heading styling on each touched page

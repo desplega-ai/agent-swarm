@@ -635,3 +635,75 @@ Data-shape edge cases to spot-check:
 - **Devin provider** — `TaskContextSection` switches to ACU budget; `TaskCostSection` shows `ACUs` not tokens
 - Task with **no session_logs** — center column renders the empty-state placeholder
 - Task with **0 `task.logs`** — `hasEvents` is false, right rail's Activity section omits entirely (but Cost still renders)
+
+
+---
+
+## Phase 15 — `<DetailPageLayout>` primitive + cross-page rollout (2026-05-06)
+
+### Source of truth
+
+Brand kit `~/Downloads/swarm-design-system/preview/detail-page-template.html` declares the canonical detail-page meta-spec:
+
+- Body: 2-col grid `1fr 280px`, rail collapses below 980px (we use `lg:` ≈ 1024px).
+- Right rail sections, in order: **Quick stats → Relationships → Danger zone**.
+- Section heading: `font-mono · 10px · 700 · uppercase · letter-spacing 0.08em · color fg-4`.
+- Stat row: 2-col grid `1fr auto`, key in muted, value right-aligned, mono variant for numeric/id values.
+- Relationship row: stat-row format, value is a `→` link to the linked resource.
+- Danger zone: full-width destructive button (oklch red).
+
+Phase 14 hand-rolled this for `tasks/[id]` (with a 240px right rail). Phase 15 extracts the primitive, bumps `tasks/[id]` to the canonical 280px width, and rolls out across the remaining detail pages where the data shape fits.
+
+### Primitive surface
+
+`new-ui/src/components/ui/detail-page-layout.tsx` exports:
+
+| Component | Role |
+|---|---|
+| `DetailPageBody` | 2-col grid wrapper; `main` + optional `rail` props. Below `lg`, stacks vertically. |
+| `DetailPageRail` | Flex-col container for sections. |
+| `DetailPageSection` | Section h4 heading + content. Used internally by the named sections; pages can use directly for bespoke sections (e.g. tasks/[id]'s Activity timeline). |
+| `QuickStats` | "Quick stats" section heading + container for `QuickStat` rows. |
+| `QuickStat` | k/v row, 2-col grid `1fr auto`, optional `mono` variant. |
+| `Relationships` | "Relationships" section heading + container for `Relationship` rows. |
+| `Relationship` | `label` + `→`/value, internal Link or external `<a>`. |
+| `DangerZone` | "Danger zone" section heading + content slot (full-width button typically). |
+
+Pages keep their existing `<PageHeader>` for the title row above the body; the primitive is purely about the body / rail.
+
+### Per-page mapping
+
+| Page | Approach | Quick stats | Relationships | Danger zone |
+|---|---|---|---|---|
+| `tasks/[id]` | Refactored to use `DetailPageRail` + `DetailPageSection`. Right rail width 240px → 280px. Activity timeline + Session Cost wrapped in primitive sections. | Cost / Tokens / Duration / Turns / Model (existing icon-prefixed `MetaRow` rows preserved — different visual style, consistent with task-page convention). | n/a (parent / workflow / dir live in left rail) | n/a (Cancel lives in hero per existing UX) |
+| `repos/[id]` | Single-pane primitive use. Card+InfoRows replaced by rail QuickStats. Guidelines = main. | URL / Clone Path / Default Branch / Created / Auto-clone | n/a | Delete repository |
+| `skills/[id]` | Tabs collapsed (Content + Metadata → just Content + rail). | id / version / created / updated / lastFetched / model / allowedTools / complex / userInvocable | Owner Agent / Source repo | Delete skill |
+| `mcp-servers/[id]` | Tabs preserved (Configuration / Authentication; Metadata folded into rail). DetailPageBody wraps Tabs + rail. | id / version / transport / scope / created / updated | Owner Agent | Delete server |
+| `schedules/[id]` | Tabs preserved (Schedule / Tasks); rail provides at-a-glance summary alongside. Rich schedule cards stay in main. | type / enabled / priority / nextRun / lastRun / created | Target Agent | Delete schedule |
+| `approval-requests/[id]` | Single-pane primitive use. Meta strip replaced by rail QuickStats. Questions = main. | status / created / resolved / resolvedBy / timeout / questions count | Workflow Run / Source Task | n/a (no destructive action exists) |
+| `integrations/[id]` | Settings page; rail provides field counts + docs link. Action bar (save / disable / reset) stays at top of main. | status / total fields / required / advanced / disabled | Docs link | n/a (Reset stays in action bar — existing flow) |
+| `agents/[id]` | Tabs preserved (Profile + 4 others). Primitive applied INSIDE Profile tab body only. | status / role / capacity / joined / updated | n/a | n/a (no delete-agent action exists) |
+
+### Skipped pages (primitive does not fit)
+
+| Page | Reason |
+|---|---|
+| `templates/[id]` | Monaco editor dominates the body — fills full width, no natural rail spot. Header badges already convey scope/state/version. |
+| `templates/[id]/history/[version]` | Read-only Monaco editor — same reason. |
+| `workflow-runs/[id]` | Body is a 2-col split (workflow graph left + steps panel right). Adding a third "rail" column would compete with the steps panel. |
+| `workflows/[id]` | Massive 1869-line tab-driven editor (Definition Monaco + Runs / Triggers / Settings). Out of scope for this phase — would need a dedicated phase to reshape. |
+
+### Deliberate API choices
+
+- **Width 280px (not 240px)**: matches brand kit canonical. `tasks/[id]` left rail stays 240px (page-specific meta-sidebar; left rail is not part of the canonical primitive's contract — only `1fr | 280px` is).
+- **Title accepts `ReactNode`**: lets `tasks/[id]` pass `<><Activity icon /> Activity (N)</>` as a section heading.
+- **Below-`lg` stack**: rail goes BELOW main rather than hidden — preserves all content on tablet/mobile.
+- **No left rail support**: brand-kit template only specifies right rail. Tasks's 3-col is page-specific (its meta sidebar is denser than any other detail page) and stays inline.
+- **Pages keep their `<PageHeader>`**: no `header` slot on `DetailPageBody`. Avoids re-implementing `PageHeader` and lets pages compose freely.
+
+### Verification
+
+- `pnpm run check:tokens` — green (no new color literals)
+- `pnpm lint` — green
+- `pnpm exec tsc -b` — green
+- `pnpm exec vite build` — green

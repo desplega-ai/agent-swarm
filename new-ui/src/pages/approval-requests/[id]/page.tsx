@@ -8,6 +8,14 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DetailPageBody,
+  DetailPageRail,
+  QuickStat,
+  QuickStats,
+  Relationship,
+  Relationships,
+} from "@/components/ui/detail-page-layout";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Separator } from "@/components/ui/separator";
@@ -199,84 +207,107 @@ export default function ApprovalRequestDetailPage() {
         }
       />
 
-      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        <span>Created {formatSmartTime(request.createdAt)}</span>
-        {request.resolvedAt && <span>Resolved {formatSmartTime(request.resolvedAt)}</span>}
-        {request.resolvedBy && <span>by {request.resolvedBy}</span>}
-        {request.timeoutSeconds && (
-          <span className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {request.timeoutSeconds}s timeout
-          </span>
-        )}
-        {request.workflowRunId && (
-          <Link
-            to={`/workflow-runs/${request.workflowRunId}`}
-            className="text-primary hover:underline"
-          >
-            View Workflow Run
-          </Link>
-        )}
-        {request.sourceTaskId && (
-          <Link to={`/tasks/${request.sourceTaskId}`} className="text-primary hover:underline">
-            View Task
-          </Link>
-        )}
-      </div>
-
       <Separator />
 
-      <div className="space-y-4">
-        {request.questions.map((question, idx) => (
-          <Card key={question.id}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-start gap-2">
-                <span className="text-muted-foreground shrink-0">{idx + 1}.</span>
-                <span className="flex-1 min-w-0">
-                  <Streamdown>{normalizeNewlines(question.label)}</Streamdown>
-                </span>
-                {question.required && <span className="text-status-error text-xs shrink-0">*</span>}
-                <Badge variant="outline" size="tag" className="ml-auto shrink-0">
-                  {question.type}
-                </Badge>
-              </CardTitle>
-              {question.description && (
-                <div className="text-muted-foreground prose-chat">
-                  <Streamdown>{normalizeNewlines(question.description)}</Streamdown>
-                </div>
-              )}
-            </CardHeader>
-            <CardContent>
-              {isPending ? (
-                <QuestionField
-                  question={question}
-                  value={responses[question.id]}
-                  onChange={(val) => setResponses((prev) => ({ ...prev, [question.id]: val }))}
-                  disabled={respondMutation.isPending}
-                />
-              ) : (
-                <div className="text-sm">
-                  <span className="text-muted-foreground">Response: </span>
-                  <span className="font-mono">
-                    {request.responses?.[question.id] != null
-                      ? JSON.stringify(request.responses[question.id])
-                      : "—"}
-                  </span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <DetailPageBody
+        main={
+          <div className="space-y-4">
+            <div className="space-y-4">
+              {request.questions.map((question, idx) => (
+                <Card key={question.id}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-start gap-2">
+                      <span className="text-muted-foreground shrink-0">{idx + 1}.</span>
+                      <span className="flex-1 min-w-0">
+                        <Streamdown>{normalizeNewlines(question.label)}</Streamdown>
+                      </span>
+                      {question.required && (
+                        <span className="text-status-error text-xs shrink-0">*</span>
+                      )}
+                      <Badge variant="outline" size="tag" className="ml-auto shrink-0">
+                        {question.type}
+                      </Badge>
+                    </CardTitle>
+                    {question.description && (
+                      <div className="text-muted-foreground prose-chat">
+                        <Streamdown>{normalizeNewlines(question.description)}</Streamdown>
+                      </div>
+                    )}
+                  </CardHeader>
+                  <CardContent>
+                    {isPending ? (
+                      <QuestionField
+                        question={question}
+                        value={responses[question.id]}
+                        onChange={(val) =>
+                          setResponses((prev) => ({ ...prev, [question.id]: val }))
+                        }
+                        disabled={respondMutation.isPending}
+                      />
+                    ) : (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Response: </span>
+                        <span className="font-mono">
+                          {request.responses?.[question.id] != null
+                            ? JSON.stringify(request.responses[question.id])
+                            : "—"}
+                        </span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
 
-      {isPending && (
-        <div className="space-y-2">
-          {error && <p className="text-sm text-status-error">{error}</p>}
-          <Button onClick={handleSubmit} disabled={respondMutation.isPending}>
-            {respondMutation.isPending ? "Submitting..." : "Submit Response"}
-          </Button>
-        </div>
-      )}
+            {isPending && (
+              <div className="space-y-2">
+                {error && <p className="text-sm text-status-error">{error}</p>}
+                <Button onClick={handleSubmit} disabled={respondMutation.isPending}>
+                  {respondMutation.isPending ? "Submitting..." : "Submit Response"}
+                </Button>
+              </div>
+            )}
+          </div>
+        }
+        rail={
+          <DetailPageRail>
+            <QuickStats>
+              <QuickStat label="Status" value={request.status} />
+              <QuickStat label="Created" value={formatSmartTime(request.createdAt)} />
+              {request.resolvedAt && (
+                <QuickStat label="Resolved" value={formatSmartTime(request.resolvedAt)} />
+              )}
+              {request.resolvedBy && <QuickStat label="Resolved by" value={request.resolvedBy} />}
+              {request.timeoutSeconds && (
+                <QuickStat
+                  label="Timeout"
+                  value={
+                    <span className="inline-flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {request.timeoutSeconds}s
+                    </span>
+                  }
+                />
+              )}
+              <QuickStat label="Questions" value={request.questions.length} />
+            </QuickStats>
+
+            {(request.workflowRunId || request.sourceTaskId) && (
+              <Relationships>
+                {request.workflowRunId && (
+                  <Relationship
+                    label="Workflow Run"
+                    to={`/workflow-runs/${request.workflowRunId}`}
+                  />
+                )}
+                {request.sourceTaskId && (
+                  <Relationship label="Source Task" to={`/tasks/${request.sourceTaskId}`} />
+                )}
+              </Relationships>
+            )}
+          </DetailPageRail>
+        }
+      />
     </div>
   );
 }

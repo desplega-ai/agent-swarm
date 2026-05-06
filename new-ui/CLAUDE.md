@@ -202,6 +202,7 @@ Pages and composed components are built from primitives. Raw `<div>` layouts tha
 | `Button` | actions (variants: default, outline, ghost, destructive, destructive-outline, secondary, link) | `<Button size="sm" variant="outline">Save</Button>` |
 | `Card`, `CardHeader`, `CardTitle`, `CardAction`, `CardContent`, `CardFooter` | bordered section container | `<Card><CardHeader><CardTitle>...</CardTitle></CardHeader><CardContent>...</CardContent></Card>` |
 | `Command`, `CommandInput`, `CommandList`, `CommandItem` | command palette / fuzzy-search list | `<Command><CommandInput /><CommandList>...</CommandList></Command>` |
+| `DetailPageBody`, `DetailPageRail`, `DetailPageSection`, `QuickStats`, `QuickStat`, `Relationships`, `Relationship`, `DangerZone` | canonical detail-page body layout (1fr / 280px rail) per brand-kit `preview/detail-page-template.html`. Compose pages with `<PageHeader />` above + `<DetailPageBody main={...} rail={<DetailPageRail>…</DetailPageRail>} />`. Pages dominated by editors / split-views / Monaco (templates, workflow-runs, workflows) are exempt. | `<DetailPageBody main={<Form />} rail={<DetailPageRail><QuickStats><QuickStat label="Created" value="…" /></QuickStats><Relationships><Relationship label="Owner" to="/agents/abc" /></Relationships><DangerZone><Button variant="destructive-outline" className="w-full">Delete</Button></DangerZone></DetailPageRail>} />` |
 | `Dialog`, `DialogTrigger`, `DialogContent`, `DialogHeader`, `DialogTitle`, `DialogFooter` | modal dialog | `<Dialog open={open}><DialogContent>...</DialogContent></Dialog>` |
 | `DropdownMenu`, `DropdownMenuTrigger`, `DropdownMenuContent`, `DropdownMenuItem` | dropdown actions menu | `<DropdownMenu><DropdownMenuTrigger>...</DropdownMenuTrigger><DropdownMenuContent>...` |
 | `InfoRow`, `DefinitionList` | uppercase-label + value pair, used in detail pages | `<DefinitionList><InfoRow label="Role">Engineer</InfoRow></DefinitionList>` |
@@ -247,6 +248,15 @@ Pages and composed components are built from primitives. Raw `<div>` layouts tha
 | `WorkflowNodeShell` | shared shell for action / condition / trigger nodes (react-flow) | `<WorkflowNodeShell icon={Bot} label={name} nodeType="agent-task" borderClass="..." iconBgClass="..." iconClass="..." handleClass="..." />` |
 
 If you find yourself writing `<div className="flex items-center gap-2">` or `<div className="space-y-2"><h1>...</h1>...</div>` to recreate one of the patterns above, stop and use the primitive. If the pattern doesn't fit any primitive yet but appears 2+ times, add a new primitive to `src/components/{ui,shared}/` rather than copying the JSX a third time.
+
+### Detail-page layout convention
+
+Detail pages (`pages/*/[id]/page.tsx`) follow the brand-kit's `preview/detail-page-template.html` contract:
+- Header: `<PageHeader />` (title, badges, primary actions). Destructive actions (Delete / Disconnect / Reset) go to the rail's `<DangerZone />`, NOT the header.
+- Body: `<DetailPageBody main={...} rail={<DetailPageRail>…</DetailPageRail>} />`. Right rail is fixed 280px; below `lg` the rail stacks below main.
+- Rail sections, in order: `<QuickStats>` (k/v at-a-glance) → `<Relationships>` (linked entities, arrow link) → `<DangerZone>` (full-width destructive button).
+
+A handful of detail pages are exempt because their identity is an editor or split-view (Monaco-dominated, react-flow graph): `templates/[id]`, `templates/[id]/history/[version]`, `workflow-runs/[id]`, `workflows/[id]`. Don't shoehorn the primitive in there. For tabs-driven pages where a single tab carries the primary content (agents `Profile`, mcp-servers `Configuration`), apply the primitive INSIDE that tab body so the rail rides alongside.
 
 </important>
 
