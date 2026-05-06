@@ -46,7 +46,7 @@ export function SocialProof({ stars }: { stars: number }) {
               <span className="text-amber-700 italic text-[28px] leading-none ml-0.5">”</span>
             </blockquote>
             <figcaption className="mt-5 text-[13px] text-zinc-500 leading-tight">
-              — Tech Lead
+              — Engineer Manager
             </figcaption>
           </figure>
 
