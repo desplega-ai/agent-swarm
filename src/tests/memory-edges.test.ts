@@ -162,6 +162,12 @@ beforeAll(async () => {
 
   testTemplateGlobals.__savedEdgesTemplate = testTemplateGlobals.__testMigrationTemplate;
   testTemplateGlobals.__testMigrationTemplate = undefined;
+  // Close any leftover in-memory DB from a prior test in the same Bun worker.
+  // initDb is a no-op when `db` is already set, so without this the test
+  // process keeps writing to the previous template-restored DB while the
+  // spawned server reads from TEST_DB_PATH — cross-process WAL visibility
+  // breaks and `applied=0` / 400 / empty edge lists ensue.
+  closeDb();
   initDb(TEST_DB_PATH);
   createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
   createAgent({ id: agentB, name: "Agent B", isLead: false, status: "idle" });
