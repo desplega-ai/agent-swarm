@@ -4,6 +4,7 @@ import pkg from "../../package.json";
 import {
   buildRatingsFromLlm,
   buildSummaryWithRatingsPrompt,
+  extractSummaryFromClaudeStdout,
   fetchRetrievalsForTask,
   isLlmRaterEnabled,
   parseSummaryWithRatings,
@@ -1146,12 +1147,11 @@ ${transcript}`;
             if (parsedRatings) {
               summary = parsedRatings.summary;
             } else {
-              try {
-                const summaryOutput = JSON.parse(result.stdout);
-                summary = summaryOutput.result ?? result.stdout;
-              } catch {
-                summary = result.stdout;
-              }
+              // Fallback: never index raw JSON. extractSummaryFromClaudeStdout
+              // pulls the `summary` field out of a structured-output payload
+              // whose ratings failed schema validation; otherwise behaves
+              // like the previous unstructured envelope.result extraction.
+              summary = extractSummaryFromClaudeStdout(result.stdout);
             }
 
             // Skip indexing if the session had no significant learnings

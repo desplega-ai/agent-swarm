@@ -22,6 +22,7 @@ import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import {
   buildRatingsFromLlm,
   buildSummaryWithRatingsPrompt,
+  extractSummaryFromClaudeStdout,
   fetchRetrievalsForTask,
   isLlmRaterEnabled,
   LLM_RATER_WEIGHT,
@@ -248,6 +249,69 @@ describe("parseSummaryWithRatings", () => {
     });
     const envelope = JSON.stringify({ result: inner });
     expect(parseSummaryWithRatings(envelope)).toBeNull();
+  });
+});
+
+describe("extractSummaryFromClaudeStdout (hook fallback path)", () => {
+  // Regression: PR #429 review feedback. When the structured-output piggyback
+  // returns a valid envelope but the inner ratings fail SummaryWithRatingsSchema,
+  // the hook MUST index the human-readable `summary` text — not the raw inner
+  // JSON blob. See src/hooks/hook.ts ~L1148.
+  test("structured envelope with invalid ratings → extracts inner summary string", () => {
+    const summaryText = "Found a couple of helpful patterns; one was misleading.";
+    const inner = JSON.stringify({
+      summary: summaryText,
+      // Out-of-range score makes SummaryWithRatingsSchema.safeParse fail.
+      ratings: [{ id: "mem-A", score: 5, reasoning: "bogus" }],
+    });
+    const envelope = JSON.stringify({ result: inner });
+    expect(parseSummaryWithRatings(envelope)).toBeNull();
+    const out = extractSummaryFromClaudeStdout(envelope);
+    expect(out).toBe(summaryText);
+    // Hard guarantee for the indexer: must NOT be raw JSON.
+    expect(out.startsWith("{")).toBe(false);
+    expect(out.includes('"ratings"')).toBe(false);
+  });
+
+  test("structured envelope missing the `ratings` field entirely → extracts summary", () => {
+    const summaryText = "No retrievals this session.";
+    const inner = JSON.stringify({ summary: summaryText });
+    const envelope = JSON.stringify({ result: inner });
+    const out = extractSummaryFromClaudeStdout(envelope);
+    expect(out).toBe(summaryText);
+  });
+
+  test("structured envelope with non-string summary field → falls through to inner string", () => {
+    // Defensive: if `summary` itself is malformed, we still don't crash; the
+    // best-effort fallback is to return the inner JSON as a string. The
+    // length/keyword heuristics in the hook will likely skip indexing.
+    const inner = JSON.stringify({ summary: 42, ratings: [] });
+    const envelope = JSON.stringify({ result: inner });
+    const out = extractSummaryFromClaudeStdout(envelope);
+    expect(out).toBe(inner);
+  });
+
+  test("unstructured envelope with plain text result → returns the text unchanged", () => {
+    const text = "- Discovered that the API requires Bearer prefix.\n- No other learnings.";
+    const envelope = JSON.stringify({ result: text });
+    expect(extractSummaryFromClaudeStdout(envelope)).toBe(text);
+  });
+
+  test("envelope.result is an object with a string summary field → extracts it", () => {
+    const envelope = JSON.stringify({
+      result: { summary: "object form", ratings: [] },
+    });
+    expect(extractSummaryFromClaudeStdout(envelope)).toBe("object form");
+  });
+
+  test("envelope is not JSON → returns the raw stdout", () => {
+    const stdout = "totally not json";
+    expect(extractSummaryFromClaudeStdout(stdout)).toBe(stdout);
+  });
+
+  test("envelope is JSON but lacks `result` field → returns the raw stdout", () => {
+    const stdout = JSON.stringify({ other: "field" });
+    expect(extractSummaryFromClaudeStdout(stdout)).toBe(stdout);
   });
 });
 

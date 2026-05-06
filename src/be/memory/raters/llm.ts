@@ -220,6 +220,49 @@ export function parseSummaryWithRatings(claudeStdout: string): SummaryWithRating
 }
 
 /**
+ * Fallback summary-text extractor for the hook's `claude -p` envelope. Used
+ * when {@link parseSummaryWithRatings} returns null — i.e., when the LLM
+ * returned a valid envelope but the inner payload either wasn't structured
+ * JSON (unstructured prompt path) OR was structured JSON whose ratings failed
+ * `SummaryWithRatingsSchema` validation (e.g., out-of-range scores).
+ *
+ * In the latter case `envelope.result` is the full inner JSON STRING such as
+ * `{"summary":"...","ratings":[...]}`; indexing that verbatim into agent
+ * memory would violate the step-4 contract that ratings are best-effort and
+ * the existing summary-indexing behavior remains unchanged. We extract the
+ * inner `summary` field if present, else return the inner string (treating
+ * it as plain summary text). NEVER throws.
+ */
+export function extractSummaryFromClaudeStdout(claudeStdout: string): string {
+  let envelope: { result?: unknown };
+  try {
+    envelope = JSON.parse(claudeStdout) as { result?: unknown };
+  } catch {
+    return claudeStdout;
+  }
+  const inner = envelope.result;
+  if (typeof inner === "string") {
+    try {
+      const innerParsed = JSON.parse(inner.trim()) as { summary?: unknown };
+      if (innerParsed && typeof innerParsed.summary === "string") {
+        return innerParsed.summary;
+      }
+    } catch {
+      // inner wasn't JSON — treat it as plain summary text
+    }
+    return inner;
+  }
+  if (
+    inner &&
+    typeof inner === "object" &&
+    typeof (inner as { summary?: unknown }).summary === "string"
+  ) {
+    return (inner as { summary: string }).summary;
+  }
+  return claudeStdout;
+}
+
+/**
  * `MEMORY_RATERS=...` includes `llm`? Used by the hook to gate the piggyback
  * path — strict opt-in so existing deployments are byte-identical when unset.
  */
