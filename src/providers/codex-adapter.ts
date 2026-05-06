@@ -45,6 +45,7 @@
  * `Turn`, events, or items — the SDK already exports them as a tagged union.
  */
 
+import { existsSync as nodeExistsSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import {
@@ -73,6 +74,8 @@ import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
 import type {
   CostData,
+  CredCheckOptions,
+  CredStatus,
   ProviderAdapter,
   ProviderEvent,
   ProviderResult,
@@ -82,6 +85,45 @@ import type {
 
 /** Alias for the SDK's (unexported) `CodexConfigObject` type. */
 type CodexConfig = NonNullable<CodexOptions["config"]>;
+
+/**
+ * Codex satisfies its credential requirement by ANY of:
+ *   1. `~/.codex/auth.json` already exists on disk (the canonical state once
+ *      `codex login` has run).
+ *   2. `OPENAI_API_KEY` is set — the entrypoint will run
+ *      `codex login --with-api-key` to materialise auth.json on the next boot.
+ *   3. `CODEX_OAUTH` is set in the env (typically pulled from swarm_config) —
+ *      the entrypoint restores it to disk.
+ *
+ * Cases 2/3 return `satisfiedBy: 'side-effect-pending'` because the worker
+ * process can't proceed until the entrypoint side-effect has materialised the
+ * file. The boot loop treats this as ready (the side-effect is the
+ * entrypoint's job, and re-running it is idempotent).
+ */
+export function checkCodexCredentials(
+  env: Record<string, string | undefined>,
+  opts: CredCheckOptions = {},
+): CredStatus {
+  const homeDir = opts.homeDir ?? env.HOME ?? "/root";
+  const existsSync = opts.fs?.existsSync ?? nodeExistsSync;
+  const authFile = `${homeDir}/.codex/auth.json`;
+  if (existsSync(authFile)) {
+    return { ready: true, missing: [], satisfiedBy: "file" };
+  }
+  if (env.OPENAI_API_KEY || env.CODEX_OAUTH) {
+    return {
+      ready: true,
+      missing: [],
+      satisfiedBy: "side-effect-pending",
+      hint: "Credential present in env; entrypoint will materialise ~/.codex/auth.json on next boot.",
+    };
+  }
+  return {
+    ready: false,
+    missing: ["OPENAI_API_KEY", "CODEX_OAUTH", authFile],
+    hint: "Set OPENAI_API_KEY (entrypoint runs `codex login --with-api-key`), or store CODEX_OAUTH in swarm_config, or place a pre-authenticated `~/.codex/auth.json` in the worker home.",
+  };
+}
 
 /**
  * Shape returned by `GET /api/agents/:id/mcp-servers?resolveSecrets=true`.

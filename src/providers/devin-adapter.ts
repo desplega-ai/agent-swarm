@@ -24,6 +24,7 @@ import { getOrCreatePlaybook } from "./devin-playbooks";
 import { resolveDevinPrompt } from "./devin-skill-resolver";
 import type {
   CostData,
+  CredStatus,
   ProviderAdapter,
   ProviderEvent,
   ProviderResult,
@@ -31,6 +32,23 @@ import type {
   ProviderSessionConfig,
   ProviderTraits,
 } from "./types";
+
+/**
+ * Devin requires both an API key and an org id — there is no file-based
+ * fallback like the local-CLI providers offer.
+ */
+export function checkDevinCredentials(env: Record<string, string | undefined>): CredStatus {
+  const required = ["DEVIN_API_KEY", "DEVIN_ORG_ID"] as const;
+  const missing = required.filter((key) => !env[key]);
+  if (missing.length === 0) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  return {
+    ready: false,
+    missing,
+    hint: "Set DEVIN_API_KEY and DEVIN_ORG_ID. Both come from app.devin.ai → Settings → API.",
+  };
+}
 
 /** Default polling interval in milliseconds. */
 const DEFAULT_POLL_INTERVAL_MS = 15_000;

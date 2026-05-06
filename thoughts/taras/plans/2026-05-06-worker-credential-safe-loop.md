@@ -5,7 +5,7 @@ branch: main
 repository: agent-swarm
 topic: "Worker Credential Safe-Loop (TS-level wait, no entrypoint crash)"
 tags: [plan, worker, harness, credentials, docker-entrypoint, providers]
-status: draft
+status: in-progress
 autonomy: critical
 last_updated: 2026-05-06
 last_updated_by: Claude (orchestrator)
@@ -166,17 +166,17 @@ Reuse `resolveModel` from pi-mono-adapter.ts:69 for the mapping (extract a small
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Linting passes: `bun run lint`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] New test file passes: `bun test src/tests/credential-check.test.ts`
-- [ ] All existing tests pass: `bun test`
+- [x] Linting passes: `bun run lint`
+- [x] Type check passes: `bun run tsc:check`
+- [x] New test file passes: `bun test src/tests/credential-check.test.ts`
+- [x] All existing tests pass: `bun test`
 
 #### Automated QA:
-- [ ] Snapshot test: for each provider, given a "fully unset env", `checkCredentials({})` returns `ready: false` with a non-empty `missing` array and a `hint` string.
-- [ ] Snapshot test: for each provider, given a "minimum sufficient env", `checkCredentials(...)` returns `ready: true`.
+- [x] Snapshot test: for each provider, given a "fully unset env", `checkCredentials({})` returns `ready: false` with a non-empty `missing` array and a `hint` string.
+- [x] Snapshot test: for each provider, given a "minimum sufficient env", `checkCredentials(...)` returns `ready: true`.
 
 #### Manual Verification:
-- [ ] None — pure-function phase.
+- [x] None — pure-function phase.
 
 **Implementation Note**: After this phase, pause for manual confirmation. If commit-per-phase was requested, create commit after verification passes.
 

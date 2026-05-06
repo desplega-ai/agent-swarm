@@ -1,0 +1,336 @@
+import { describe, expect, test } from "bun:test";
+import { checkClaudeCredentials } from "../providers/claude-adapter";
+import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
+import { checkCodexCredentials } from "../providers/codex-adapter";
+import { checkProviderCredentials, REQUIRED_CRED_VARS_BY_PROVIDER } from "../providers/credentials";
+import { checkDevinCredentials } from "../providers/devin-adapter";
+import { checkOpencodeCredentials } from "../providers/opencode-adapter";
+import { checkPiMonoCredentials } from "../providers/pi-mono-adapter";
+
+/** Build a stub `fs` whose `existsSync` returns true only for paths in the set. */
+function fsWith(present: Set<string>): { existsSync(p: string): boolean } {
+  return { existsSync: (p: string) => present.has(p) };
+}
+
+const noFiles = fsWith(new Set());
+
+// ─── claude ──────────────────────────────────────────────────────────────────
+
+describe("checkClaudeCredentials", () => {
+  test("ready when CLAUDE_CODE_OAUTH_TOKEN is set", () => {
+    const status = checkClaudeCredentials({ CLAUDE_CODE_OAUTH_TOKEN: "tok" });
+    expect(status.ready).toBe(true);
+    expect(status.missing).toEqual([]);
+    expect(status.satisfiedBy).toBe("env");
+  });
+
+  test("ready when only ANTHROPIC_API_KEY is set", () => {
+    const status = checkClaudeCredentials({ ANTHROPIC_API_KEY: "sk-ant" });
+    expect(status.ready).toBe(true);
+  });
+
+  test("not ready when both unset, lists both as missing with hint", () => {
+    const status = checkClaudeCredentials({});
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]);
+    expect(status.hint).toBeTruthy();
+  });
+});
+
+// ─── claude-managed ──────────────────────────────────────────────────────────
+
+describe("checkClaudeManagedCredentials", () => {
+  const full = {
+    ANTHROPIC_API_KEY: "sk-ant",
+    MANAGED_AGENT_ID: "ag_123",
+    MANAGED_ENVIRONMENT_ID: "env_123",
+    MCP_BASE_URL: "https://swarm.example",
+  };
+
+  test("ready when all four are set", () => {
+    const status = checkClaudeManagedCredentials(full);
+    expect(status.ready).toBe(true);
+    expect(status.missing).toEqual([]);
+  });
+
+  test("not ready when any one is missing", () => {
+    for (const drop of Object.keys(full) as Array<keyof typeof full>) {
+      const env: Record<string, string | undefined> = { ...full };
+      delete env[drop];
+      const status = checkClaudeManagedCredentials(env);
+      expect(status.ready).toBe(false);
+      expect(status.missing).toContain(drop);
+    }
+  });
+
+  test("not ready when env is empty, lists all four as missing", () => {
+    const status = checkClaudeManagedCredentials({});
+    expect(status.ready).toBe(false);
+    expect(status.missing.sort()).toEqual(
+      ["ANTHROPIC_API_KEY", "MANAGED_AGENT_ID", "MANAGED_ENVIRONMENT_ID", "MCP_BASE_URL"].sort(),
+    );
+    expect(status.hint).toContain("claude-managed-setup");
+  });
+});
+
+// ─── devin ───────────────────────────────────────────────────────────────────
+
+describe("checkDevinCredentials", () => {
+  test("ready when both keys are set", () => {
+    expect(checkDevinCredentials({ DEVIN_API_KEY: "k", DEVIN_ORG_ID: "o" }).ready).toBe(true);
+  });
+
+  test("not ready when org id is missing", () => {
+    const status = checkDevinCredentials({ DEVIN_API_KEY: "k" });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["DEVIN_ORG_ID"]);
+  });
+
+  test("not ready when both are missing", () => {
+    const status = checkDevinCredentials({});
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["DEVIN_API_KEY", "DEVIN_ORG_ID"]);
+  });
+});
+
+// ─── codex ───────────────────────────────────────────────────────────────────
+
+describe("checkCodexCredentials", () => {
+  const HOME = "/home/worker";
+  const AUTH = `${HOME}/.codex/auth.json`;
+
+  test("ready (file) when ~/.codex/auth.json exists", () => {
+    const status = checkCodexCredentials({}, { homeDir: HOME, fs: fsWith(new Set([AUTH])) });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("file");
+  });
+
+  test("ready (side-effect-pending) when OPENAI_API_KEY is set but auth.json absent", () => {
+    const status = checkCodexCredentials(
+      { OPENAI_API_KEY: "sk-proj" },
+      { homeDir: HOME, fs: noFiles },
+    );
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("side-effect-pending");
+  });
+
+  test("ready (side-effect-pending) when CODEX_OAUTH is set", () => {
+    const status = checkCodexCredentials({ CODEX_OAUTH: "{}" }, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("side-effect-pending");
+  });
+
+  test("not ready when nothing is present, missing list includes both env keys + the file", () => {
+    const status = checkCodexCredentials({}, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toContain("OPENAI_API_KEY");
+    expect(status.missing).toContain("CODEX_OAUTH");
+    expect(status.missing).toContain(AUTH);
+  });
+});
+
+// ─── pi-mono ─────────────────────────────────────────────────────────────────
+
+describe("checkPiMonoCredentials", () => {
+  const HOME = "/home/worker";
+  const AUTH = `${HOME}/.pi/agent/auth.json`;
+
+  test("ready (file) when ~/.pi/agent/auth.json exists", () => {
+    const status = checkPiMonoCredentials({}, { homeDir: HOME, fs: fsWith(new Set([AUTH])) });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("file");
+  });
+
+  test("permissive: ready when MODEL_OVERRIDE unset and any one supported key is present", () => {
+    expect(
+      checkPiMonoCredentials({ ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles }).ready,
+    ).toBe(true);
+    expect(
+      checkPiMonoCredentials({ OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles }).ready,
+    ).toBe(true);
+    expect(
+      checkPiMonoCredentials({ OPENAI_API_KEY: "x" }, { homeDir: HOME, fs: noFiles }).ready,
+    ).toBe(true);
+  });
+
+  test("permissive: not ready when MODEL_OVERRIDE unset and no keys are set", () => {
+    const status = checkPiMonoCredentials({}, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toContain("ANTHROPIC_API_KEY");
+    expect(status.missing).toContain("OPENROUTER_API_KEY");
+    expect(status.missing).toContain("OPENAI_API_KEY");
+  });
+
+  test("strict: MODEL_OVERRIDE=anthropic/... requires ANTHROPIC_API_KEY", () => {
+    const env = { MODEL_OVERRIDE: "anthropic/claude-sonnet-4" };
+    expect(checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles }).ready).toBe(false);
+    expect(
+      checkPiMonoCredentials({ ...env, ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(true);
+    // OPENROUTER_API_KEY does NOT satisfy an anthropic-prefixed model
+    expect(
+      checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(false);
+  });
+
+  test("strict: MODEL_OVERRIDE=openrouter/... requires OPENROUTER_API_KEY", () => {
+    const env = { MODEL_OVERRIDE: "openrouter/google/gemini-2.5-flash-lite" };
+    expect(
+      checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(true);
+    expect(
+      checkPiMonoCredentials({ ...env, ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(false);
+  });
+
+  test("strict: shortname `sonnet` resolves to anthropic", () => {
+    const env = { MODEL_OVERRIDE: "sonnet" };
+    expect(
+      checkPiMonoCredentials({ ...env, ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(true);
+    expect(
+      checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(false);
+  });
+});
+
+// ─── opencode ────────────────────────────────────────────────────────────────
+
+describe("checkOpencodeCredentials", () => {
+  const HOME = "/home/worker";
+  const AUTH = `${HOME}/.local/share/opencode/auth.json`;
+
+  test("ready (file) when ~/.local/share/opencode/auth.json exists", () => {
+    const status = checkOpencodeCredentials({}, { homeDir: HOME, fs: fsWith(new Set([AUTH])) });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("file");
+  });
+
+  test("permissive: ready with any one supported key", () => {
+    expect(
+      checkOpencodeCredentials({ OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles }).ready,
+    ).toBe(true);
+  });
+
+  test("strict: MODEL_OVERRIDE=openai/... requires OPENAI_API_KEY", () => {
+    const env = { MODEL_OVERRIDE: "openai/gpt-4o" };
+    expect(checkOpencodeCredentials(env, { homeDir: HOME, fs: noFiles }).ready).toBe(false);
+    expect(
+      checkOpencodeCredentials({ ...env, OPENAI_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(true);
+  });
+
+  test("not ready when nothing is set", () => {
+    const status = checkOpencodeCredentials({}, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toContain("OPENROUTER_API_KEY");
+    expect(status.missing).toContain("ANTHROPIC_API_KEY");
+    expect(status.missing).toContain("OPENAI_API_KEY");
+    expect(status.missing).toContain(AUTH);
+  });
+});
+
+// ─── dispatcher ──────────────────────────────────────────────────────────────
+
+describe("checkProviderCredentials dispatcher", () => {
+  const HOME = "/home/worker";
+
+  test("dispatches to the right adapter for every supported provider", () => {
+    expect(checkProviderCredentials("claude", { CLAUDE_CODE_OAUTH_TOKEN: "x" }).ready).toBe(true);
+    expect(checkProviderCredentials("claude", {}).ready).toBe(false);
+
+    expect(
+      checkProviderCredentials(
+        "claude-managed",
+        {
+          ANTHROPIC_API_KEY: "x",
+          MANAGED_AGENT_ID: "a",
+          MANAGED_ENVIRONMENT_ID: "e",
+          MCP_BASE_URL: "https://x",
+        },
+        { homeDir: HOME, fs: noFiles },
+      ).ready,
+    ).toBe(true);
+
+    expect(checkProviderCredentials("devin", { DEVIN_API_KEY: "x", DEVIN_ORG_ID: "y" }).ready).toBe(
+      true,
+    );
+
+    expect(
+      checkProviderCredentials("codex", { OPENAI_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(true);
+
+    expect(
+      checkProviderCredentials("pi", { ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(true);
+
+    expect(
+      checkProviderCredentials(
+        "opencode",
+        { OPENROUTER_API_KEY: "x" },
+        { homeDir: HOME, fs: noFiles },
+      ).ready,
+    ).toBe(true);
+  });
+
+  test("throws on unknown provider", () => {
+    expect(() => checkProviderCredentials("nope", {})).toThrow(/unknown provider/i);
+  });
+});
+
+// ─── snapshot tests required by the plan ────────────────────────────────────
+
+describe("snapshot: every provider", () => {
+  const HOME = "/home/worker";
+  const providers = ["claude", "claude-managed", "codex", "devin", "opencode", "pi"] as const;
+
+  test("fully unset env → ready=false with non-empty missing[] and hint", () => {
+    for (const p of providers) {
+      const status = checkProviderCredentials(p, {}, { homeDir: HOME, fs: noFiles });
+      expect(status.ready).toBe(false);
+      expect(status.missing.length).toBeGreaterThan(0);
+      expect(status.hint).toBeTruthy();
+    }
+  });
+
+  test("minimum sufficient env → ready=true", () => {
+    const minimums: Record<string, Record<string, string>> = {
+      claude: { CLAUDE_CODE_OAUTH_TOKEN: "x" },
+      "claude-managed": {
+        ANTHROPIC_API_KEY: "x",
+        MANAGED_AGENT_ID: "a",
+        MANAGED_ENVIRONMENT_ID: "e",
+        MCP_BASE_URL: "https://x",
+      },
+      codex: { OPENAI_API_KEY: "x" },
+      devin: { DEVIN_API_KEY: "x", DEVIN_ORG_ID: "y" },
+      opencode: { OPENROUTER_API_KEY: "x" },
+      pi: { ANTHROPIC_API_KEY: "x" },
+    };
+    for (const p of providers) {
+      const status = checkProviderCredentials(p, minimums[p]!, { homeDir: HOME, fs: noFiles });
+      expect(status.ready).toBe(true);
+    }
+  });
+});
+
+// ─── REQUIRED_CRED_VARS_BY_PROVIDER documentation map ────────────────────────
+
+describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
+  test("covers every supported provider", () => {
+    const providers = ["claude", "claude-managed", "codex", "devin", "opencode", "pi"] as const;
+    for (const p of providers) {
+      expect(REQUIRED_CRED_VARS_BY_PROVIDER[p]).toBeDefined();
+      expect(REQUIRED_CRED_VARS_BY_PROVIDER[p].length).toBeGreaterThan(0);
+    }
+  });
+});
