@@ -1,4 +1,4 @@
-type DiagramKind = "network" | "identity" | "docker" | "plug" | "mcp" | "schedule";
+type DiagramKind = "network" | "docker" | "plug" | "mcp" | "schedule";
 
 const FEATURES: {
   num: string;
@@ -7,55 +7,47 @@ const FEATURES: {
   desc: string;
   diagram: DiagramKind;
 }[] = [
-    {
-      num: "01",
-      tag: "orchestration",
-      title: "Lead → worker delegation",
-      desc:
-        "A lead agent receives the task, breaks it down, and assigns subtasks to workers — sent directly, offered for acceptance, or pooled to claim.",
-      diagram: "network",
-    },
-    {
-      num: "02",
-      tag: "memory",
-      title: "SOUL.md, IDENTITY.md, vectors, ...",
-      desc:
-        "Each agent carries evolving identity files. Past sessions are summarized, embedded, and recalled before each new task.",
-      diagram: "identity",
-    },
-    {
-      num: "03",
-      tag: "isolation",
-      title: "Isolated workers",
-      desc:
-        "Every worker runs in its own container with a full dev environment and a persisted /workspace/personal directory.",
-      diagram: "docker",
-    },
-    {
-      num: "04",
-      tag: "integrations",
-      title: "Slack, GitHub, GitLab, Linear, email, ...",
-      desc:
-        "Mention the bot, assign an issue, send an email — that’s the task. Workers reply in-thread; they meet you where you already work.",
-      diagram: "plug",
-    },
-    {
-      num: "05",
-      tag: "mcp",
-      title: "MCP server, OpenAPI 3.1",
-      desc:
-        "Built on the Model Context Protocol. The API automatically runs at :3013 with interactive docs and a full OpenAPI spec for any client.",
-      diagram: "mcp",
-    },
-    {
-      num: "06",
-      tag: "lifecycle",
-      title: "Tasks, schedules, workflows, swarms",
-      desc:
-        "Cron-scheduled recurring work, Workflows, Skills, MCPs. Templates for Coder, Researcher, PM, and more. Real-time monitoring at app.agent-swarm.dev.",
-      diagram: "schedule",
-    },
-  ];
+  {
+    num: "01",
+    tag: "orchestration",
+    title: "A lead that decides what to ship next",
+    desc:
+      "The lead reads the task, breaks it down, and routes work to workers — directly assigned, offered for acceptance, or pulled from a pool. You hand off the goal; the lead owns the plan.",
+    diagram: "network",
+  },
+  {
+    num: "02",
+    tag: "isolation",
+    title: "Every worker free to do its own job",
+    desc:
+      "Each worker runs in its own Docker container with a persistent /workspace. They install what they need, branch off main, and ship without stepping on each other or your repo.",
+    diagram: "docker",
+  },
+  {
+    num: "03",
+    tag: "integrations",
+    title: "Already working in your Slack and GitHub",
+    desc:
+      "Mention the bot, assign a Linear issue, send an email — that’s the task. Workers reply in-thread, open PRs, and close issues. No new dashboard to live in.",
+    diagram: "plug",
+  },
+  {
+    num: "04",
+    tag: "mcp",
+    title: "Hooks into anything that speaks API",
+    desc:
+      "Built on Model Context Protocol with a full OpenAPI 3.1 spec at :3013. Anything that speaks HTTP — your CI, your monitoring, your custom dashboards — can drive the swarm or be driven by it.",
+    diagram: "mcp",
+  },
+  {
+    num: "05",
+    tag: "lifecycle",
+    title: "Wake up to work already done",
+    desc:
+      "Cron-scheduled recurring jobs, multi-step workflows, role templates for Coder / Researcher / PM. Hand the night-shift work to scheduled tasks, find the results in your Slack the next morning.",
+    diagram: "schedule",
+  },
+];
 
 function Diagram({ kind }: { kind: DiagramKind }) {
   const amber = "oklch(0.555 0.163 48.998)";
@@ -82,25 +74,6 @@ function Diagram({ kind }: { kind: DiagramKind }) {
           [160, 62],
         ].map(([x, y]) => (
           <circle key={`${x}-${y}`} cx={x} cy={y} r="6" fill="#fff" stroke={zinc} />
-        ))}
-      </svg>
-    );
-  }
-
-  if (kind === "identity") {
-    return (
-      <svg viewBox="0 0 200 84" className="w-full h-full" aria-hidden="true">
-        {["SOUL.md", "IDENTITY.md", "TOOLS.md"].map((label, i) => (
-          <g key={label} transform={`translate(${30 + i * 50}, 18)`}>
-            <rect width="44" height="48" rx="3" fill="#fff" stroke={zinc} strokeWidth="1" />
-            <line x1="6" y1="10" x2="38" y2="10" stroke={zinc} strokeWidth="0.8" />
-            <line x1="6" y1="16" x2="34" y2="16" stroke={zinc} strokeWidth="0.8" />
-            <line x1="6" y1="22" x2="38" y2="22" stroke={zinc} strokeWidth="0.8" />
-            <line x1="6" y1="28" x2="30" y2="28" stroke={zinc} strokeWidth="0.8" />
-            <text x="22" y="44" textAnchor="middle" fontFamily="Space Mono" fontSize="6.5" fill={amber}>
-              {label}
-            </text>
-          </g>
         ))}
       </svg>
     );
@@ -214,10 +187,13 @@ export function Features() {
           <div className="font-mono text-[11px] tracking-[0.14em] uppercase text-amber-700 mb-4">
             / what&apos;s in the box
           </div>
-          <h2 className="text-[40px] sm:text-[52px] leading-[1.02] font-semibold tracking-[-0.025em] text-zinc-950">
-            The mechanics behind
+          <h2
+            className="text-[40px] sm:text-[52px] leading-[1.02] font-semibold tracking-[-0.025em] text-zinc-950"
+            style={{ textWrap: "balance" }}
+          >
+            Day one: a team that
             <br />
-            <span className="text-zinc-400">the swarm.</span>
+            <span className="italic gradient-text">already ships.</span>
           </h2>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -233,7 +209,7 @@ export function Features() {
                 <Diagram kind={f.diagram} />
               </div>
               <div className="flex items-center justify-between font-mono text-[10.5px] tracking-[0.1em] text-amber-700 mb-2">
-                <span>{f.num} / 06</span>
+                <span>{f.num} / 05</span>
                 <span className="text-zinc-400">{f.tag}</span>
               </div>
               <h3
