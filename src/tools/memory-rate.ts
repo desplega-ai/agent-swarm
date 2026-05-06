@@ -1,9 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "@/be/memory/raters/types";
 import { createToolRegistrar } from "@/tools/utils";
 
 /**
  * Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-5.md §1
+ *       thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-6.md §5
  *
  * Worker-facing MCP tool. Posts a single explicit-self `RatingEvent` to the
  * existing `POST /api/memory/rate` endpoint shipped in step-3 and surfaces
@@ -11,12 +13,21 @@ import { createToolRegistrar } from "@/tools/utils";
  * throwing — so an agent that mis-uses the tool gets a clear, recoverable
  * answer rather than a tool-call exception.
  *
- * The brainstorm-canonical input is `(id, useful, note?)`. Step-6 will extend
- * the input with an optional `referencesSource` field; do NOT add it here.
+ * Step-6 added the optional `referencesSource` field — Q2 free-form contract:
+ * ≤512 chars, control-char strip, NUL byte rejection. Convention-only shape
+ * `<source>:<identifier>` is documentation, NOT enforcement.
  */
 
 const DUPLICATE_MESSAGE =
   "Memory already rated for this task. Use a follow-up memory_rerate tool (coming soon) to override.";
+
+const REFERENCES_SOURCE_DESCRIPTION =
+  "Optional external source ID this memory references. Free-form string, " +
+  'convention "<source>:<identifier>" (e.g. "github:owner/repo#N", ' +
+  '"linear:KEY-N", "customer:<slug>", "slack:<channel>:<ts>", ' +
+  '"agentmail:<thread-id>"). Pick any prefix that fits — no closed enum. ' +
+  "When present, an edge from this memory to the external source is " +
+  "created/updated.";
 
 export const registerMemoryRateTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -38,13 +49,19 @@ export const registerMemoryRateTool = (server: McpServer) => {
           .max(280)
           .optional()
           .describe("Short reason. Captured for telemetry; not surfaced to other agents."),
+        referencesSource: z
+          .string()
+          .min(1)
+          .max(REFERENCES_SOURCE_MAX_LENGTH)
+          .optional()
+          .describe(REFERENCES_SOURCE_DESCRIPTION),
       }),
       outputSchema: z.object({
         success: z.boolean(),
         message: z.string(),
       }),
     },
-    async ({ id, useful, note }, requestInfo, _meta) => {
+    async ({ id, useful, note, referencesSource }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         const msg = "Agent ID required. Are you registered in the swarm?";
         return {
@@ -60,6 +77,20 @@ export const registerMemoryRateTool = (server: McpServer) => {
         };
       }
 
+      let cleanedReferencesSource: string | undefined;
+      if (referencesSource !== undefined) {
+        const cleaned = sanitizeReferencesSource(referencesSource);
+        if (cleaned === null) {
+          const msg =
+            "referencesSource must not contain NUL bytes or strip to empty after control-char removal.";
+          return {
+            content: [{ type: "text", text: msg }],
+            structuredContent: { success: false, message: msg },
+          };
+        }
+        cleanedReferencesSource = cleaned;
+      }
+
       const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
       const apiKey = process.env.API_KEY || "";
 
@@ -70,6 +101,9 @@ export const registerMemoryRateTool = (server: McpServer) => {
         source: "explicit-self" as const,
         reasoning: note ?? "",
         taskId: requestInfo.sourceTaskId,
+        ...(cleanedReferencesSource !== undefined
+          ? { referencesSource: cleanedReferencesSource }
+          : {}),
       };
 
       try {

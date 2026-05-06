@@ -1,3 +1,4 @@
+import { ensure } from "@desplega.ai/business-use";
 import { getDb } from "@/be/db";
 
 /**
@@ -54,6 +55,26 @@ export function recordRetrievals(
       );
     }
   })();
+
+  // Business-use instrumentation — one `memory_retrieved` event per call,
+  // OUTSIDE the transaction. Validator self-contained.
+  ensure({
+    id: "memory_retrieved",
+    flow: "task",
+    runId: taskId,
+    data: {
+      count: results.length,
+      taskId,
+      agentId,
+    },
+    validator: (data) =>
+      typeof data.count === "number" &&
+      data.count > 0 &&
+      typeof data.taskId === "string" &&
+      data.taskId.length > 0 &&
+      typeof data.agentId === "string" &&
+      data.agentId.length > 0,
+  });
 }
 
 export function getRetrievalsForTask(

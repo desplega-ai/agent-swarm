@@ -3081,6 +3081,12 @@
                         "taskId": {
                           "type": "string",
                           "format": "uuid"
+                        },
+                        "referencesSource": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "description": "Optional external source ID this memory references. Free-form string, convention \"<source>:<identifier>\" (e.g. \"github:owner/repo#N\", \"linear:KEY-N\", \"customer:<slug>\", \"slack:<channel>:<ts>\", \"agentmail:<thread-id>\"). Pick any prefix that fits — no closed enum. When present, an edge from this memory to the external source is created/updated."
                         }
                       },
                       "required": [
@@ -3150,6 +3156,38 @@
           },
           "400": {
             "description": "Missing taskId/sessionId or X-Agent-ID"
+          }
+        }
+      }
+    },
+    "/api/memory/edges": {
+      "get": {
+        "summary": "List references-source edges for a memory",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "memoryId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Edges with computed usefulness scores"
+          },
+          "400": {
+            "description": "Missing memoryId or X-Agent-ID"
           }
         }
       }

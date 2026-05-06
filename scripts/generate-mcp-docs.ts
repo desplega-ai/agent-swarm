@@ -110,6 +110,99 @@ async function discoverToolFiles(): Promise<string[]> {
 }
 
 /**
+ * Walk `source` starting at `startIdx` and parse a chain of one or more JS
+ * string literals joined by `+`. Returns the concatenated decoded value plus
+ * the index at which parsing stopped, or `null` if the cursor isn't pointing
+ * at a string literal.
+ *
+ * Handles all three quote styles (`"`, `'`, `` ` ``) — the closing quote
+ * must match the opening quote of THAT literal, so descriptions containing
+ * inner quotes of a different style (`"Model ('haiku', 'sonnet')..."`) are
+ * captured in full instead of being truncated at the first inner quote.
+ *
+ * Backslash escapes are decoded for common cases (`\n`, `\t`, `\r`, `\\`,
+ * matching the opening quote) — anything else passes through as-is. Template
+ * literals are treated as plain strings (no `${}` interpolation handling)
+ * because no MCP tool description uses interpolation today.
+ */
+function parseStringLiteralChain(
+  source: string,
+  startIdx: number,
+): { value: string; endIdx: number } | null {
+  let i = startIdx;
+  while (i < source.length && /\s/.test(source[i]!)) i++;
+
+  let result = "";
+  let parsedAtLeastOne = false;
+
+  while (i < source.length) {
+    const quote = source[i];
+    if (quote !== '"' && quote !== "'" && quote !== "`") break;
+    i++;
+
+    while (i < source.length) {
+      const c = source[i]!;
+      if (c === "\\" && i + 1 < source.length) {
+        const next = source[i + 1]!;
+        if (next === "n") result += "\n";
+        else if (next === "t") result += "\t";
+        else if (next === "r") result += "\r";
+        else if (next === "\\") result += "\\";
+        else if (next === '"' || next === "'" || next === "`") result += next;
+        else result += next;
+        i += 2;
+        continue;
+      }
+      if (c === quote) {
+        i++;
+        break;
+      }
+      result += c;
+      i++;
+    }
+    parsedAtLeastOne = true;
+
+    // Skip whitespace; if we see a `+`, look for another literal — otherwise
+    // we're done.
+    let j = i;
+    while (j < source.length && /\s/.test(source[j]!)) j++;
+    if (source[j] === "+") {
+      i = j + 1;
+      while (i < source.length && /\s/.test(source[i]!)) i++;
+      // continue outer loop to read next literal
+    } else {
+      break;
+    }
+  }
+
+  if (!parsedAtLeastOne) return null;
+  return { value: result, endIdx: i };
+}
+
+/**
+ * Convenience: parse a literal chain at `startIdx` and return the cleaned-up
+ * single-line description, or empty string when no literal is found.
+ */
+function readDescriptionAt(source: string, startIdx: number): string {
+  const parsed = parseStringLiteralChain(source, startIdx);
+  if (!parsed) return "";
+  return parsed.value.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Look up the value of a top-level `const NAME = "..." (+ "...")*;` declaration
+ * inside `content`. Returns the resolved string, or empty string when the
+ * constant's RHS isn't a string-literal chain.
+ */
+function resolveStringConstant(constName: string, content: string): string {
+  const re = new RegExp(`(?:const|let|var)\\s+${constName}(?:\\s*:\\s*[^=;]+)?\\s*=\\s*`);
+  const match = re.exec(content);
+  if (!match || match.index === undefined) return "";
+  const startIdx = match.index + match[0].length;
+  return readDescriptionAt(content, startIdx);
+}
+
+/**
  * Parse a tool file to extract metadata
  */
 async function parseToolFile(toolFileName: string): Promise<ToolInfo | null> {
@@ -126,21 +219,26 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo | null> {
   const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
   const title = titleMatch ? titleMatch[1] : formatTitle(name);
 
-  // Extract description - handle multiline and various quote types
+  // Extract description — find `description:` immediately followed by a
+  // string-literal opener and walk the chain. The lookahead `(?=["'\`])`
+  // skips over `description: z.string()...` lines that some tools have on
+  // nested zod field schemas (e.g. request-human-input's `QuestionSchema`),
+  // so we land on the tool-level config description, not a nested-field one.
+  //
+  // The walker is quote-delimiter-aware: a `"`-delimited literal is closed
+  // only by another `"`, so descriptions like
+  //   `"Model to use ('haiku', 'sonnet', or 'opus')..."`
+  // are captured in full. (Pre-fix regex used `["'\`]...["'\`]` which let
+  // ANY quote close the literal, truncating at the first inner `'`.)
   let description = "";
-  // Try to find description that ends before inputSchema, outputSchema, or annotations
-  const descPatterns = [
-    /description:\s*["'`]([\s\S]*?)["'`]\s*,\s*(?:inputSchema|outputSchema|annotations|_meta)/,
-    /description:\s*["']([^"']+)["']/,
-    /description:\s*`([^`]+)`/,
-  ];
-
-  for (const pattern of descPatterns) {
-    const match = content.match(pattern);
-    if (match) {
-      description = match[1].replace(/\s+/g, " ").trim();
-      break;
-    }
+  const descKeyRegex = /description\s*:\s*(?=["'`])/g;
+  let descKeyMatch: RegExpExecArray | null;
+  while ((descKeyMatch = descKeyRegex.exec(content)) !== null) {
+    const startIdx = descKeyMatch.index + descKeyMatch[0].length;
+    const parsed = parseStringLiteralChain(content, startIdx);
+    if (!parsed) continue;
+    description = parsed.value.replace(/\s+/g, " ").trim();
+    break;
   }
 
   // Parse schema fields
@@ -150,7 +248,9 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo | null> {
 }
 
 /**
- * Parse input schema fields from file content
+ * Parse input schema fields from file content. The full `content` is
+ * threaded through so `parseField` can resolve `.describe(CONST_NAME)`
+ * references back to their string-literal definitions.
  */
 function parseSchemaFields(content: string): FieldInfo[] {
   const fields: FieldInfo[] = [];
@@ -203,7 +303,7 @@ function parseSchemaFields(content: string): FieldInfo[] {
     const isEndOfField = (char === "," && depth === 0) || j === objectContent.length - 1;
 
     if (isEndOfField && currentField.trim()) {
-      const field = parseField(currentField);
+      const field = parseField(currentField, content);
       if (field) fields.push(field);
       currentField = "";
     }
@@ -213,11 +313,15 @@ function parseSchemaFields(content: string): FieldInfo[] {
 }
 
 /**
- * Parse a single field definition
+ * Parse a single field definition. `fullContent` is the entire tool-file
+ * source; it's used to resolve `.describe(CONST_NAME)` references back to the
+ * string literal the constant holds.
  */
-function parseField(fieldStr: string): FieldInfo | null {
-  // Match field name and type chain
-  const fieldMatch = fieldStr.match(/^\s*(\w+):\s*z\.([\s\S]+)/);
+function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
+  // Match field name and type chain. Allow whitespace/newlines between `z` and
+  // the first `.method(...)` so multi-line zod chains (e.g. `z\n  .string()`)
+  // are parsed too.
+  const fieldMatch = fieldStr.match(/^\s*(\w+):\s*z\s*\.([\s\S]+)/);
   if (!fieldMatch) return null;
 
   const [, name, typeChain] = fieldMatch;
@@ -256,11 +360,38 @@ function parseField(fieldStr: string): FieldInfo | null {
     }
   }
 
-  // Extract description
+  // Extract description.
+  //
+  // Two shapes to handle:
+  //   1) Inline string literal — possibly a chain of concatenated literals
+  //      across multiple lines: `.describe("foo " + "bar")`.
+  //   2) Constant reference: `.describe(SOME_CONSTANT)` where the constant
+  //      is defined elsewhere in the same file as a string literal (or
+  //      string-literal chain).
+  //
+  // The walker is quote-delimiter-aware: a `"`-delimited literal is closed
+  // only by another `"`, so descriptions like
+  //   `"Model to use ('haiku', 'sonnet', or 'opus')..."`
+  // are captured in full. (Pre-fix regex used `["'\`]...["'\`]` which let
+  // ANY quote close the literal, truncating at the first inner `'`.)
   let description = "";
-  const descMatch = typeChain.match(/\.describe\(["'`]([\s\S]*?)["'`]\)/);
-  if (descMatch) {
-    description = descMatch[1].replace(/\s+/g, " ").trim();
+  const describeOpen = typeChain.search(/\.describe\s*\(\s*/);
+  if (describeOpen !== -1) {
+    const openMatch = /\.describe\s*\(\s*/.exec(typeChain.slice(describeOpen))!;
+    const argStart = describeOpen + openMatch[0].length;
+    if (typeChain[argStart] === '"' || typeChain[argStart] === "'" || typeChain[argStart] === "`") {
+      description = readDescriptionAt(typeChain, argStart);
+    } else {
+      // `.describe(CONSTANT)` — resolve UPPER_SNAKE identifiers from the
+      // full file. Lower-case identifiers are deliberately ignored: they're
+      // typically variables / computed values and resolving them would be
+      // unsafe. Stick with the convention and bail otherwise.
+      const tail = typeChain.slice(argStart);
+      const constRefMatch = /^([A-Z_][A-Z0-9_]*)\s*\)/.exec(tail);
+      if (constRefMatch) {
+        description = resolveStringConstant(constRefMatch[1]!, fullContent);
+      }
+    }
   }
 
   return { name, type, required, default: defaultValue, description };
@@ -363,16 +494,32 @@ async function generateDocs() {
 
 `;
 
+  // TOC entries use the canonical tool name from the source registration
+  // (kebab or snake) so the anchor matches the section heading the generator
+  // emits below.
+  const canonicalName = (toolName: string): string =>
+    toolInfoMap.get(toolName)?.name ??
+    toolInfoMap.get(toolName.replace(/-/g, "_"))?.name ??
+    toolName;
+
   // Generate TOC
   for (const category of categories) {
     const anchor = category.title.toLowerCase().replace(/\s+/g, "-");
     markdown += `- [${category.title}](#${anchor})\n`;
     for (const toolName of category.tools) {
-      markdown += `  - [${toolName}](#${toolName})\n`;
+      const name = canonicalName(toolName);
+      markdown += `  - [${name}](#${name})\n`;
     }
   }
 
   markdown += "\n---\n\n";
+
+  // Tool names registered in source can use either kebab-case ("memory-search")
+  // or snake_case ("memory_rate"); register-fn names always derive to kebab via
+  // camelToKebab. Look up both variants so either casing finds its info.
+  const lookupTool = (toolName: string): ToolInfo | undefined => {
+    return toolInfoMap.get(toolName) ?? toolInfoMap.get(toolName.replace(/-/g, "_"));
+  };
 
   // Generate tool documentation by category
   for (const category of categories) {
@@ -380,7 +527,7 @@ async function generateDocs() {
     markdown += `*${category.description}*\n\n`;
 
     for (const toolName of category.tools) {
-      const tool = toolInfoMap.get(toolName);
+      const tool = lookupTool(toolName);
       if (tool) {
         markdown += generateToolMarkdown(tool);
       } else {
@@ -391,7 +538,9 @@ async function generateDocs() {
   }
 
   // Check for uncategorized tools
-  const categorizedTools = new Set(categories.flatMap((c) => c.tools));
+  const categorizedTools = new Set(
+    categories.flatMap((c) => c.tools.flatMap((t) => [t, t.replace(/-/g, "_")])),
+  );
   const uncategorized = [...toolInfoMap.keys()].filter((name) => !categorizedTools.has(name));
 
   if (uncategorized.length > 0) {
