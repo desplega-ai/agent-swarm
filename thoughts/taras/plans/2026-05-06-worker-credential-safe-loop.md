@@ -5,7 +5,7 @@ branch: main
 repository: agent-swarm
 topic: "Worker Credential Safe-Loop (TS-level wait, no entrypoint crash)"
 tags: [plan, worker, harness, credentials, docker-entrypoint, providers]
-status: in-progress
+status: completed
 autonomy: critical
 last_updated: 2026-05-06
 last_updated_by: Claude (orchestrator)
