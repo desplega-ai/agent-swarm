@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -107,13 +108,11 @@ export default function SoulMdIdentityStackPost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/deep-dive-soul-md-identity-stack.png"
-          alt="4-File Identity Stack Architecture showing SOUL.md, IDENTITY.md, TOOLS.md, and CLAUDE.md"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/deep-dive-soul-md-identity-stack.png"
+        alt="4-File Identity Stack Architecture showing SOUL.md, IDENTITY.md, TOOLS.md, and CLAUDE.md"
+        caption="Four markdown files holding back agent identity collapse. Paperback edition pending."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

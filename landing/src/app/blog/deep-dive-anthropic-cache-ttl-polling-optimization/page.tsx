@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -115,13 +116,11 @@ export default function AnthropicCacheTtlPollingOptimizationPost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/anthropic-cache-cliff-polling-optimization.png"
-          alt="Cost curve showing dramatic spike at 5 minute sleep intervals due to Anthropic cache TTL cliff"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/anthropic-cache-cliff-polling-optimization.png"
+        alt="Cost curve showing dramatic spike at 5 minute sleep intervals due to Anthropic cache TTL cliff"
+        caption="30 seconds is the difference between thrifty and broke. Anthropic does not negotiate."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

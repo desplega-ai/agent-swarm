@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -115,13 +116,11 @@ export default function AgentIdentitySoulMdPost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/deep-dive-agent-identity-soul-md.png"
-          alt="Agent identity architecture diagram showing SOUL.md and IDENTITY.md files"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/deep-dive-agent-identity-soul-md.png"
+        alt="Agent identity architecture diagram showing SOUL.md and IDENTITY.md files"
+        caption="The job description we forgot to write for our agents. They read it; we never recovered."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

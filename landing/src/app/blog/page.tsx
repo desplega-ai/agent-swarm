@@ -247,52 +247,72 @@ export default function BlogIndex() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      <header className="mb-16">
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-zinc-900">Blog</h1>
-        <p className="mt-4 text-lg text-zinc-500 max-w-xl">
-          Updates, technical deep dives, and stories from the Agent Swarm team.
+      <header className="mb-16 grid lg:grid-cols-[1.1fr_1fr] gap-10 items-end">
+        <div>
+          <div className="font-mono text-[11px] tracking-[0.14em] uppercase text-amber-700 mb-4">
+            / writing
+          </div>
+          <h1
+            className="text-[40px] sm:text-[56px] leading-[1.0] font-semibold tracking-[-0.03em] text-zinc-950"
+            style={{ textWrap: "balance" }}
+          >
+            Notes from inside
+            <br />
+            <span className="italic gradient-text">the swarm.</span>
+          </h1>
+        </div>
+        <p className="text-[16px] text-zinc-500 leading-[1.6] max-w-md">
+          Technical deep dives, post-mortems, and architecture notes from the team building Agent
+          Swarm — written by humans and{" "}
+          <span className="text-zinc-800">occasionally by the agents themselves.</span>
         </p>
       </header>
 
-      <div className="space-y-0 divide-y divide-zinc-100">
+      <div className="divide-y divide-zinc-100 border-t border-zinc-100">
         {posts.map((post) => (
-          <article key={post.slug} className="group py-8 first:pt-0">
-            <Link href={`/blog/${post.slug}`} className="block">
-              <div className="flex items-center gap-3 mb-3">
-                <span className="flex items-center gap-1.5 text-[13px] text-zinc-400">
-                  <Calendar className="w-3.5 h-3.5" />
+          <article key={post.slug} className="group">
+            <Link
+              href={`/blog/${post.slug}`}
+              className="block py-8 lg:py-10 grid lg:grid-cols-[auto_1fr_auto] gap-x-8 gap-y-3 items-start hover:bg-amber-50/30 transition-colors -mx-3 px-3 rounded-xl"
+            >
+              <div className="flex lg:flex-col items-center lg:items-start gap-3 lg:gap-1.5 min-w-[140px] font-mono text-[11px] tracking-[0.06em] text-zinc-400">
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="w-3 h-3" />
                   {post.date}
                 </span>
-                <span className="text-zinc-300">&middot;</span>
-                <span className="flex items-center gap-1.5 text-[13px] text-zinc-400">
-                  <Clock className="w-3.5 h-3.5" />
+                <span className="text-zinc-200 lg:hidden">·</span>
+                <span className="flex items-center gap-1.5">
+                  <Clock className="w-3 h-3" />
                   {post.readTime}
                 </span>
               </div>
 
-              <h2 className="text-xl sm:text-2xl font-semibold text-zinc-900 group-hover:text-amber-700 transition-colors mb-2">
-                {post.title}
-              </h2>
-
-              <p className="text-[15px] text-zinc-500 leading-relaxed mb-4">{post.description}</p>
-
-              <div className="flex items-center justify-between">
-                <div className="flex gap-2 flex-wrap">
+              <div>
+                <h2
+                  className="text-[20px] sm:text-[24px] font-semibold text-zinc-950 group-hover:text-amber-700 transition-colors mb-2 tracking-[-0.015em] leading-[1.25]"
+                  style={{ textWrap: "balance" }}
+                >
+                  {post.title}
+                </h2>
+                <p className="text-[14.5px] text-zinc-500 leading-[1.6] mb-3" style={{ textWrap: "pretty" }}>
+                  {post.description}
+                </p>
+                <div className="flex gap-1.5 flex-wrap">
                   {post.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-500"
+                      className="font-mono text-[10.5px] tracking-[0.02em] text-zinc-500 bg-zinc-50 border border-zinc-100 rounded-md px-2 py-0.5"
                     >
                       {tag}
                     </span>
                   ))}
                 </div>
-
-                <span className="flex items-center gap-1.5 text-sm font-medium text-amber-700 opacity-0 group-hover:opacity-100 transition-opacity">
-                  Read
-                  <ArrowRight className="w-4 h-4" />
-                </span>
               </div>
+
+              <span className="hidden lg:flex items-center gap-1.5 text-[13px] font-semibold text-amber-700 opacity-0 group-hover:opacity-100 transition-opacity self-center">
+                Read
+                <ArrowRight className="w-4 h-4" />
+              </span>
             </Link>
           </article>
         ))}

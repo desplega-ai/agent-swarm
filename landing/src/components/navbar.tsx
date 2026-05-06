@@ -3,94 +3,132 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Github, BookOpen, Menu, X, Blocks, ArrowRight, DollarSign } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { usePathname } from "next/navigation";
+import { Github, Menu, X, ArrowRight } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 
-export function Navbar({ animate = true }: { animate?: boolean }) {
+type Props = {
+  /** When true, the navbar starts dark over a full-bleed dark hero and inverts to light past the fold. */
+  darkAboveFold?: boolean;
+};
+
+export function Navbar({ darkAboveFold = false }: Props) {
   const [scrolled, setScrolled] = useState(false);
+  const [pastHero, setPastHero] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", onScroll);
+    const onScroll = () => {
+      const y = window.scrollY;
+      setScrolled(y > 12);
+      setPastHero(y > window.innerHeight - 80);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  const dark = darkAboveFold && !pastHero;
+  const pathname = usePathname() ?? "/";
+
+  const isActive = (href: string) => {
+    if (href === "/") return pathname === "/";
+    if (href.startsWith("http")) return false;
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
+
+  const activeCls = dark
+    ? "text-amber-300 font-semibold"
+    : "text-amber-700 font-semibold";
+
+  const baseBar = dark
+    ? scrolled
+      ? "bg-zinc-950/80 backdrop-blur-xl border-b border-white/[0.06]"
+      : "bg-transparent"
+    : scrolled
+      ? "bg-white/85 backdrop-blur-xl border-b border-zinc-100"
+      : "bg-transparent";
+
+  const linkCls = dark ? "text-zinc-300 hover:text-white" : "text-zinc-600 hover:text-zinc-950";
+  const ghCls = dark
+    ? "text-zinc-200 hover:text-white hover:bg-white/[0.06]"
+    : "text-zinc-700 hover:text-zinc-950 hover:bg-zinc-50";
+  const wordCls = dark ? "text-white" : "text-zinc-950";
+
   return (
-    <motion.nav
-      initial={animate ? { y: -100 } : false}
-      animate={animate ? { y: 0 } : undefined}
-      transition={animate ? { duration: 0.6, ease: "easeOut" } : undefined}
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        scrolled
-          ? "bg-white/80 backdrop-blur-xl border-b border-zinc-200/60 shadow-sm"
-          : "bg-transparent"
-      }`}
-    >
-      <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-3 group">
+    <nav className={`fixed top-0 inset-x-0 z-50 transition-colors duration-300 ${baseBar}`}>
+      <div className="mx-auto max-w-[1180px] px-6 sm:px-7 h-[68px] flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2.5">
           <Image
             src="/logo.png"
             alt="Agent Swarm"
-            width={32}
-            height={32}
-            className="rounded-lg shadow-lg shadow-amber-500/20 group-hover:shadow-amber-500/40 transition-shadow"
+            width={28}
+            height={28}
+            className="rounded-md"
+            style={{ boxShadow: "0 4px 14px -2px oklch(0.769 0.188 70.08 / 0.35)" }}
             priority
           />
-          <span className="text-lg font-bold tracking-tight text-zinc-900">Agent Swarm</span>
+          <span className={`font-semibold tracking-[-0.01em] transition-colors ${wordCls}`}>
+            Agent Swarm
+          </span>
         </Link>
 
-        <div className="hidden md:flex items-center gap-6">
-          <a
-            href="https://docs.agent-swarm.dev"
-            className="flex items-center gap-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
-          >
-            <BookOpen className="w-4 h-4" />
-            Docs
+        <div
+          className={`hidden md:flex items-center gap-9 text-[14px] transition-colors ${
+            dark ? "text-zinc-300" : "text-zinc-600"
+          }`}
+        >
+          <a href="/#features" className={`transition-colors ${linkCls}`}>
+            Features
+          </a>
+          <a href="/#how" className={`transition-colors ${linkCls}`}>
+            How it works
           </a>
           <Link
             href="/pricing"
-            className="flex items-center gap-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
+            className={`transition-colors ${isActive("/pricing") ? activeCls : linkCls}`}
           >
-            <DollarSign className="w-4 h-4" />
             Pricing
           </Link>
           <Link
             href="/blog"
-            className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
+            className={`transition-colors ${isActive("/blog") ? activeCls : linkCls}`}
           >
             Blog
           </Link>
-          <a
-            href="https://templates.agent-swarm.dev"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
-          >
-            <Blocks className="w-4 h-4" />
-            Templates
-          </a>
-          <a
-            href="https://github.com/desplega-ai/agent-swarm"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-zinc-600 hover:text-zinc-900 transition-colors"
-            aria-label="GitHub"
-          >
-            <Github className="w-5 h-5" />
-          </a>
-          <a
-            href="https://cloud.agent-swarm.dev"
-            className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500 transition-colors shadow-lg shadow-amber-600/20"
-          >
-            Start Free Trial
-            <ArrowRight className="w-4 h-4" />
+          <a href="https://docs.agent-swarm.dev" className={`transition-colors ${linkCls}`}>
+            Docs
           </a>
         </div>
 
-        <button onClick={() => setMobileOpen(!mobileOpen)} className="md:hidden p-2 text-zinc-600">
-          {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <a
+            className={`hidden sm:inline-flex items-center gap-1.5 text-[13.5px] font-medium px-3 h-9 rounded-md transition-colors ${ghCls}`}
+            href="https://github.com/desplega-ai/agent-swarm"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Github className="w-[15px] h-[15px]" /> GitHub
+          </a>
+          <a
+            className="hidden sm:inline-flex items-center gap-1.5 text-[13.5px] font-semibold text-white bg-amber-700 hover:bg-amber-600 px-4 h-9 rounded-md transition-colors"
+            style={{
+              boxShadow:
+                "0 1px 0 0 oklch(0.473 0.137 46.201) inset, 0 8px 20px -8px oklch(0.555 0.163 48.998 / 0.55)",
+            }}
+            href="https://cloud.agent-swarm.dev"
+          >
+            Start free trial
+          </a>
+          <button
+            type="button"
+            onClick={() => setMobileOpen((s) => !s)}
+            className={`md:hidden p-2 transition-colors ${dark ? "text-zinc-200" : "text-zinc-700"}`}
+            aria-label="Toggle menu"
+          >
+            {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </div>
 
       <AnimatePresence>
@@ -99,61 +137,69 @@ export function Navbar({ animate = true }: { animate?: boolean }) {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="md:hidden overflow-hidden bg-white/95 backdrop-blur-xl border-b border-zinc-200"
+            className={`md:hidden overflow-hidden border-b ${
+              dark
+                ? "bg-zinc-950/95 border-white/[0.06]"
+                : "bg-white/95 backdrop-blur-xl border-zinc-100"
+            }`}
           >
             <div className="px-6 py-4 flex flex-col gap-3">
               <a
-                href="https://docs.agent-swarm.dev"
+                href="/#features"
                 onClick={() => setMobileOpen(false)}
-                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
+                className={`text-sm font-medium py-2 ${linkCls}`}
               >
-                <BookOpen className="w-4 h-4" /> Docs
+                Features
+              </a>
+              <a
+                href="/#how"
+                onClick={() => setMobileOpen(false)}
+                className={`text-sm font-medium py-2 ${linkCls}`}
+              >
+                How it works
               </a>
               <Link
                 href="/pricing"
                 onClick={() => setMobileOpen(false)}
-                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
+                className={`text-sm font-medium py-2 ${isActive("/pricing") ? activeCls : linkCls}`}
               >
-                <DollarSign className="w-4 h-4" /> Pricing
+                Pricing
               </Link>
               <Link
                 href="/blog"
                 onClick={() => setMobileOpen(false)}
-                className="text-sm font-medium text-zinc-600 py-2"
+                className={`text-sm font-medium py-2 ${isActive("/blog") ? activeCls : linkCls}`}
               >
                 Blog
               </Link>
               <a
-                href="https://templates.agent-swarm.dev"
-                target="_blank"
-                rel="noopener noreferrer"
+                href="https://docs.agent-swarm.dev"
                 onClick={() => setMobileOpen(false)}
-                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
+                className={`text-sm font-medium py-2 ${linkCls}`}
               >
-                <Blocks className="w-4 h-4" /> Templates
+                Docs
               </a>
               <a
                 href="https://github.com/desplega-ai/agent-swarm"
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => setMobileOpen(false)}
-                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
+                className={`flex items-center gap-2 text-sm font-medium py-2 ${linkCls}`}
               >
                 <Github className="w-4 h-4" /> GitHub
               </a>
-              <div className="h-px bg-zinc-200" />
+              <div className="h-px bg-zinc-200/40" />
               <a
                 href="https://cloud.agent-swarm.dev"
                 onClick={() => setMobileOpen(false)}
-                className="flex items-center gap-2 justify-center rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white"
+                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-700 px-4 h-10 text-sm font-semibold text-white"
               >
-                Start Free Trial
-                <ArrowRight className="w-4 h-4" />
+                Start free trial <ArrowRight className="w-4 h-4" />
               </a>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.nav>
+    </nav>
   );
 }

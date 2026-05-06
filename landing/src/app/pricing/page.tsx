@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import { Navbar } from "@/components/navbar";
-import { PricingSection } from "@/components/pricing-section";
+import { PricingTiers } from "@/components/pricing-tiers";
+import { PricingFAQ } from "@/components/pricing-faq";
+import { CTA } from "@/components/cta";
 import { Footer } from "@/components/footer";
 
 export const metadata: Metadata = {
   title: "Pricing — Agent Swarm Cloud",
   description:
-    "Simple, predictable pricing for Agent Swarm Cloud. Platform base at \u20AC9/mo plus \u20AC29/mo per worker. 7-day free trial included.",
+    "Simple, predictable pricing for Agent Swarm Cloud. Platform base at €9/mo plus €29/mo per worker. 7-day free trial included. Self-host for free under MIT.",
   keywords: [
     "agent swarm pricing",
     "AI agent cloud pricing",
@@ -20,7 +22,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Pricing — Agent Swarm Cloud",
     description:
-      "Simple, predictable pricing for Agent Swarm Cloud. Platform base at \u20AC9/mo plus \u20AC29/mo per worker. 7-day free trial included.",
+      "Simple, predictable pricing for Agent Swarm Cloud. Platform base at €9/mo plus €29/mo per worker. 7-day free trial included.",
     url: "https://agent-swarm.dev/pricing",
     siteName: "Agent Swarm",
     type: "website",
@@ -37,7 +39,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Pricing — Agent Swarm Cloud",
     description:
-      "Simple, predictable pricing for Agent Swarm Cloud. Platform base at \u20AC9/mo plus \u20AC29/mo per worker. 7-day free trial included.",
+      "Simple, predictable pricing for Agent Swarm Cloud. Platform base at €9/mo plus €29/mo per worker. 7-day free trial included.",
     images: [
       "https://agent-swarm.dev/api/og?title=Pricing+%E2%80%94+Agent+Swarm+Cloud&subtitle=%E2%82%AC9%2Fmo+platform+%2B+%E2%82%AC29%2Fmo+per+worker.+7-day+free+trial.+Self-host+for+free.",
     ],
@@ -51,10 +53,11 @@ export default function PricingPage() {
   return (
     <main>
       <Navbar />
-      {/* Spacer for fixed navbar */}
       <div className="h-20" />
       <h1 className="sr-only">Pricing — Agent Swarm Cloud</h1>
-      <PricingSection />
+      <PricingTiers />
+      <PricingFAQ />
+      <CTA />
       <Footer />
 
       <script
@@ -75,7 +78,16 @@ export default function PricingPage() {
             offers: [
               {
                 "@type": "Offer",
-                name: "Platform",
+                name: "Self-hosted",
+                description: "Open-source, self-hosted under MIT license.",
+                price: "0.00",
+                priceCurrency: "EUR",
+                availability: "https://schema.org/InStock",
+                url: "https://github.com/desplega-ai/agent-swarm",
+              },
+              {
+                "@type": "Offer",
+                name: "Cloud — Platform",
                 description: "Base infrastructure: dashboard, orchestration, integrations, memory",
                 price: "9.00",
                 priceCurrency: "EUR",
@@ -85,9 +97,8 @@ export default function PricingPage() {
               },
               {
                 "@type": "Offer",
-                name: "Worker Compute",
-                description:
-                  "Docker-isolated agent worker with managed infrastructure, per worker",
+                name: "Cloud — Worker Compute",
+                description: "Docker-isolated agent worker with managed infrastructure, per worker",
                 price: "29.00",
                 priceCurrency: "EUR",
                 priceValidUntil: "2027-12-31",
@@ -118,7 +129,7 @@ export default function PricingPage() {
                 name: "How do workers scale?",
                 acceptedAnswer: {
                   "@type": "Answer",
-                  text: "Each worker runs in its own Docker container with full workspace isolation. Add workers on demand -- each one costs a flat \u20AC29/mo. Workers can use any LLM provider with your own API keys, so you control both capacity and cost.",
+                  text: "Each worker runs in its own Docker container with full workspace isolation. Add workers on demand — each one costs a flat €29 / mo. Workers can use any LLM provider with your own API keys, so you control both capacity and cost.",
                 },
               },
               {
@@ -134,7 +145,7 @@ export default function PricingPage() {
                 name: "What happens after the trial?",
                 acceptedAnswer: {
                   "@type": "Answer",
-                  text: "After your trial ends, you can subscribe to continue. If you don't, your swarm pauses -- no data is deleted. You can reactivate at any time and pick up right where you left off.",
+                  text: "After your trial ends, you can subscribe to continue. If you don't, your swarm pauses — no data is deleted. You can reactivate at any time and pick up right where you left off.",
                 },
               },
               {
@@ -142,7 +153,7 @@ export default function PricingPage() {
                 name: "Can I self-host instead?",
                 acceptedAnswer: {
                   "@type": "Answer",
-                  text: "Absolutely. Agent Swarm is fully open source under the MIT license. You can self-host on any infrastructure -- your own servers, air-gapped environments, or any cloud provider. Cloud is for teams that want managed infrastructure without the ops overhead.",
+                  text: "Absolutely. Agent Swarm is fully open source under the MIT license. You can self-host on any infrastructure — your own servers, air-gapped environments, or any cloud provider. Cloud is for teams that want managed infrastructure without the ops overhead.",
                 },
               },
               {
@@ -150,7 +161,7 @@ export default function PricingPage() {
                 name: "What LLMs are supported?",
                 acceptedAnswer: {
                   "@type": "Answer",
-                  text: "Agent Swarm is LLM-agnostic. Workers support Claude (via Anthropic or AWS Bedrock), OpenAI, Gemini, and any OpenRouter-compatible model. Bring your own API keys -- there's no vendor lock-in.",
+                  text: "Agent Swarm is LLM-agnostic. Workers support Claude (via Anthropic or AWS Bedrock), OpenAI, Gemini, and any OpenRouter-compatible model. Bring your own API keys — there's no vendor lock-in.",
                 },
               },
             ],

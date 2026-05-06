@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -117,13 +118,11 @@ export default function PromptCacheSchedulingDeadZonePost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/deep-dive-prompt-cache-scheduling-dead-zone.png"
-          alt="Agent scheduling intervals showing the forbidden dead zone between 270 and 1200 seconds"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/deep-dive-prompt-cache-scheduling-dead-zone.png"
+        alt="Agent scheduling intervals showing the forbidden dead zone between 270 and 1200 seconds"
+        caption="The Bermuda Triangle of agent polling: cache TTL goes here to die."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -113,13 +114,11 @@ export default function McpToolCachingCoreDeferredPost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/deep-dive-mcp-tool-caching-core-deferred.png"
-          alt="Core versus deferred tool architecture diagram"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/deep-dive-mcp-tool-caching-core-deferred.png"
+        alt="Core versus deferred tool architecture diagram"
+        caption="We packed 90 tools into a context window and called it a feature. We have since changed our minds."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

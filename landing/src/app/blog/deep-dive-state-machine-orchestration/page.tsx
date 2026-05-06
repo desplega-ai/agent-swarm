@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -116,13 +117,11 @@ export default function StateMachineOrchestrationPost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/deep-dive-state-machine-orchestration.png"
-          alt="State machine diagram showing explicit transitions between agent states"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/deep-dive-state-machine-orchestration.png"
+        alt="State machine diagram showing explicit transitions between agent states"
+        caption="We drew a DAG, hit production, drew a state machine. The arrows are happier now."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

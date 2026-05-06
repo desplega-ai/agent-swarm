@@ -1,111 +1,108 @@
 import Image from "next/image";
 import Link from "next/link";
-import {
-  Github,
-  BookOpen,
-  ExternalLink,
-  Cloud,
-  DollarSign,
-  PenLine,
-  Blocks,
-} from "lucide-react";
+
+type FooterLink = { label: string; href: string; external?: boolean };
+
+const COLUMNS: { title: string; links: FooterLink[] }[] = [
+  {
+    title: "Product",
+    links: [
+      { label: "Features", href: "/#features" },
+      { label: "Pricing", href: "/pricing" },
+      { label: "Cloud", href: "https://cloud.agent-swarm.dev", external: true },
+      { label: "Templates", href: "https://templates.agent-swarm.dev", external: true },
+      { label: "Changelog", href: "https://github.com/desplega-ai/agent-swarm/releases", external: true },
+    ],
+  },
+  {
+    title: "Resources",
+    links: [
+      { label: "Docs", href: "https://docs.agent-swarm.dev", external: true },
+      { label: "GitHub", href: "https://github.com/desplega-ai/agent-swarm", external: true },
+      { label: "Blog", href: "/blog" },
+      { label: "MCP servers", href: "https://docs.agent-swarm.dev/docs/mcp", external: true },
+    ],
+  },
+  {
+    title: "Company",
+    links: [
+      { label: "desplega.sh", href: "https://desplega.sh", external: true },
+      { label: "Privacy", href: "/privacy" },
+      { label: "Terms", href: "/terms" },
+      { label: "Contact", href: "mailto:hello@desplega.sh" },
+    ],
+  },
+];
+
+function FooterCol({ title, links }: { title: string; links: FooterLink[] }) {
+  return (
+    <div>
+      <div className="text-[11px] font-semibold text-zinc-950 uppercase tracking-[0.12em] mb-4">
+        {title}
+      </div>
+      <ul className="space-y-2.5">
+        {links.map((l) => (
+          <li key={l.label}>
+            {l.external || l.href.startsWith("mailto:") ? (
+              <a
+                href={l.href}
+                target={l.external ? "_blank" : undefined}
+                rel={l.external ? "noopener noreferrer" : undefined}
+                className="text-[13.5px] text-zinc-500 hover:text-zinc-950 transition-colors"
+              >
+                {l.label}
+              </a>
+            ) : (
+              <Link
+                href={l.href}
+                className="text-[13.5px] text-zinc-500 hover:text-zinc-950 transition-colors"
+              >
+                {l.label}
+              </Link>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function Footer() {
   return (
-    <footer className="border-t border-zinc-100 bg-white">
-      <div className="mx-auto max-w-6xl px-6 py-12">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
+    <footer className="border-t border-zinc-100 py-14 bg-white">
+      <div className="max-w-[1180px] mx-auto px-6 sm:px-7 grid md:grid-cols-[1.6fr_1fr_1fr_1fr] gap-10">
+        <div>
+          <div className="flex items-center gap-2.5">
             <Image
               src="/logo.png"
               alt="Agent Swarm"
               width={28}
               height={28}
-              className="rounded-lg"
+              className="rounded-md"
+              style={{ boxShadow: "0 4px 14px -2px oklch(0.769 0.188 70.08 / 0.35)" }}
             />
-            <div>
-              <div className="text-sm font-semibold text-zinc-900">Agent Swarm</div>
-              <div className="text-xs text-zinc-400">
-                Built by{" "}
-                <a
-                  href="https://desplega.sh"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-amber-600 hover:text-amber-700 transition-colors inline-flex items-center gap-0.5"
-                >
-                  desplega.sh
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-            </div>
+            <span className="font-semibold text-zinc-950 tracking-[-0.01em]">Agent Swarm</span>
           </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
-            <a
-              href="https://github.com/desplega-ai/agent-swarm"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
-            >
-              <Github className="w-4 h-4" />
-              GitHub
-            </a>
-            <a
-              href="https://docs.agent-swarm.dev"
-              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
-            >
-              <BookOpen className="w-4 h-4" />
-              Docs
-            </a>
-            <Link
-              href="/pricing"
-              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
-            >
-              <DollarSign className="w-4 h-4" />
-              Pricing
-            </Link>
-            <Link
-              href="/blog"
-              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
-            >
-              <PenLine className="w-4 h-4" />
-              Blog
-            </Link>
-            <a
-              href="https://templates.agent-swarm.dev"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
-            >
-              <Blocks className="w-4 h-4" />
-              Templates
-            </a>
-            <a
-              href="https://cloud.agent-swarm.dev"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
-            >
-              <Cloud className="w-4 h-4" />
-              Cloud
-            </a>
+          <p className="mt-4 text-[14px] text-zinc-500 leading-[1.6] max-w-xs">
+            Intelligence that compounds. Your agent company OS — open source, MCP-powered.
+          </p>
+          <p className="mt-5 text-[12px] text-zinc-400 font-mono tracking-[0.04em]">
+            Built by{" "}
             <a
               href="https://desplega.sh"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
+              className="text-amber-700 hover:text-amber-600 transition-colors"
             >
-              <ExternalLink className="w-4 h-4" />
               desplega.sh
             </a>
-          </div>
-        </div>
-
-        <div className="mt-8 pt-6 border-t border-zinc-100 text-center">
-          <p className="text-xs text-zinc-400">
-            MIT License &middot; Open source multi-agent orchestration for Claude Code
+            <br />
+            by builders, for builders.
           </p>
         </div>
+        {COLUMNS.map((c) => (
+          <FooterCol key={c.title} title={c.title} links={c.links} />
+        ))}
       </div>
     </footer>
   );

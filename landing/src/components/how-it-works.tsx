@@ -1,178 +1,139 @@
-"use client";
+type CodeLine = { p: string; t: string; ok?: boolean };
 
-import { motion } from "framer-motion";
+type Step = {
+  n: string;
+  eyebrow: string;
+  title: string;
+  desc: string;
+  code?: CodeLine[];
+  chips?: string[];
+};
 
-const steps = [
+const STEPS: Step[] = [
   {
-    number: "01",
-    title: "Deploy the Swarm",
-    description:
-      "Clone the repo, configure your environment, and run docker compose up. The API server, lead agent, and workers start in isolated containers — each with their own identity, capabilities, and workspace.",
-    badge: "Docker-isolated \u00b7 Runs anywhere \u00b7 Self-hosted or cloud",
-    visual: (
-      <div className="font-mono text-xs leading-relaxed text-zinc-600">
-        <div className="text-zinc-400"># Clone and configure</div>
-        <div>
-          <span className="text-amber-600">$</span> git clone github.com/desplega-ai/agent-swarm
-        </div>
-        <div>
-          <span className="text-amber-600">$</span> cp .env.docker.example .env
-        </div>
-        <div className="mt-2 text-zinc-400"># Start the swarm</div>
-        <div>
-          <span className="text-amber-600">$</span> docker compose up -d
-        </div>
-        <div className="mt-2 text-emerald-600">✓ API server running on :3013</div>
-        <div className="text-emerald-600">✓ Lead agent online</div>
-        <div className="text-emerald-600">✓ 2 workers connected</div>
-      </div>
-    ),
+    n: "01",
+    eyebrow: "install",
+    title: "docker compose up",
+    desc:
+      "Clone, set CLAUDE_CODE_OAUTH_TOKEN in .env, bring it up. The API server, lead, and workers come online in their own containers — no DAG, no agent definition language.",
+    code: [
+      { p: "$", t: "git clone github.com/desplega-ai/agent-swarm" },
+      { p: "$", t: "cp .env.docker.example .env" },
+      { p: "$", t: "docker compose up -d" },
+      { p: "✓", t: "API on :3013   ✓ Lead online   ✓ 2 workers ready", ok: true },
+    ],
   },
   {
-    number: "02",
-    title: "Delegate Tasks",
-    description:
-      "The lead agent breaks down work and assigns tasks to specialized workers. Tasks can be sent directly, offered for acceptance, or pooled for anyone to claim.",
-    badge: "Any LLM \u00b7 No vendor lock-in",
-    visual: (
-      <div className="space-y-2">
-        {[
-          {
-            task: "Implement auth flow",
-            agent: "Picateclas",
-            status: "in_progress",
-            color: "bg-blue-100 text-blue-700",
-          },
-          {
-            task: "Write API tests",
-            agent: "Codebot",
-            status: "pending",
-            color: "bg-amber-100 text-amber-700",
-          },
-          {
-            task: "Update docs",
-            agent: "Pool",
-            status: "unassigned",
-            color: "bg-zinc-100 text-zinc-600",
-          },
-        ].map((t) => (
-          <div
-            key={t.task}
-            className="flex items-center justify-between rounded-lg border border-zinc-100 bg-white px-3 py-2"
-          >
-            <div>
-              <div className="text-xs font-medium text-zinc-800">{t.task}</div>
-              <div className="text-xs text-zinc-400">{t.agent}</div>
-            </div>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${t.color}`}>
-              {t.status}
-            </span>
-          </div>
-        ))}
-      </div>
-    ),
+    n: "02",
+    eyebrow: "connect",
+    title: "Wire it into where you work",
+    desc:
+      "Install the GitHub App, drop the bot in Slack, OAuth Linear, point AgentMail at an inbox. From now on, mentions and assignments become tasks the lead routes.",
+    chips: ["Slack", "GitHub", "GitLab", "Linear", "AgentMail", "Sentry", "DataDog", "..."],
   },
   {
-    number: "03",
-    title: "Knowledge Compounds",
-    description:
-      "Every completed task generates memories. Every session enriches the agent's identity. The swarm doesn't just work — it learns. Each session builds on all that came before.",
-    badge: "Open source \u00b7 Your agents are your IP",
-    visual: (
-      <div className="space-y-3">
-        <div className="flex items-start gap-2">
-          <div className="mt-1 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-          <div className="text-xs text-zinc-600">
-            <span className="font-medium text-zinc-800">Memory saved:</span> &ldquo;The API requires
-            Bearer prefix on all auth headers&rdquo;
-          </div>
-        </div>
-        <div className="flex items-start gap-2">
-          <div className="mt-1 w-1.5 h-1.5 rounded-full bg-violet-500 shrink-0" />
-          <div className="text-xs text-zinc-600">
-            <span className="font-medium text-zinc-800">Identity evolved:</span> Added &ldquo;auth
-            specialist&rdquo; to capabilities
-          </div>
-        </div>
-        <div className="flex items-start gap-2">
-          <div className="mt-1 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-          <div className="text-xs text-zinc-600">
-            <span className="font-medium text-zinc-800">Pattern learned:</span> Session continuity
-            via parentTaskId
-          </div>
-        </div>
-        <div className="mt-3 rounded-lg bg-gradient-to-r from-amber-50 to-amber-100/50 border border-amber-200/50 px-3 py-2">
-          <div className="text-xs font-medium text-amber-800">
-            Session 47 — 3x faster than session 1
-          </div>
-          <div className="mt-1 w-full bg-amber-200/50 rounded-full h-1.5">
-            <div
-              className="bg-gradient-to-r from-amber-500 to-amber-600 h-1.5 rounded-full"
-              style={{ width: "78%" }}
-            />
-          </div>
-        </div>
-      </div>
-    ),
+    n: "03",
+    eyebrow: "compound",
+    title: "It gets sharper while you sleep",
+    desc:
+      "Workers ship. Each task summary is embedded into shared memory. SOUL.md and IDENTITY.md evolve. Tomorrow’s swarm reads what last week’s shipped before it touches a keystroke.",
+    chips: ["SOUL.md", "IDENTITY.md", "TOOLS.md", "embeddings", "..."],
   },
 ];
 
+function StepCard({ step, i }: { step: Step; i: number }) {
+  return (
+    <div className="relative bg-white rounded-2xl border border-zinc-100 p-7 hover:border-zinc-200 hover:shadow-xl hover:shadow-zinc-200/40 transition-all flex flex-col">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-8 h-8 rounded-full border border-amber-700 bg-white flex items-center justify-center font-mono text-[11px] font-bold text-amber-700 relative z-10">
+          {step.n}
+        </div>
+        <div className="font-mono text-[10.5px] tracking-[0.14em] text-zinc-400 uppercase">
+          step {i + 1} · {step.eyebrow}
+        </div>
+      </div>
+      <h3
+        className="text-[20px] font-semibold text-zinc-950 mb-2.5 tracking-[-0.01em]"
+        style={{ textWrap: "balance" }}
+      >
+        {step.title}
+      </h3>
+      <p
+        className="text-[14.5px] text-zinc-500 leading-[1.6] mb-5"
+        style={{ textWrap: "pretty" }}
+      >
+        {step.desc}
+      </p>
+
+      {step.code && (
+        <div className="mt-auto rounded-lg bg-zinc-950 text-zinc-300 font-mono text-[11.5px] leading-[1.7] p-4 overflow-hidden">
+          {step.code.map((line, j) => (
+            <div key={j} className="whitespace-nowrap overflow-hidden text-ellipsis">
+              <span className={line.ok ? "text-emerald-400" : "text-zinc-500"}>{line.p}</span>{" "}
+              <span className={line.ok ? "text-zinc-300" : "text-zinc-100"}>{line.t}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {step.chips && (
+        <div className="mt-auto flex flex-wrap gap-1.5">
+          {step.chips.map((c) => (
+            <span
+              key={c}
+              className="font-mono text-[11px] tracking-[0.02em] text-zinc-700 bg-zinc-50 border border-zinc-100 rounded-md px-2 py-1"
+            >
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="relative py-32">
-      <div className="mx-auto max-w-6xl px-6">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-100px" }}
-          transition={{ duration: 0.6 }}
-          className="text-center mb-20"
-        >
-          <span className="inline-block text-sm font-semibold text-amber-700 tracking-wider uppercase mb-4">
-            How It Works
-          </span>
-          <h2 className="text-4xl sm:text-5xl font-bold tracking-tight mb-6">
-            From setup to compounding
-          </h2>
-          <p className="text-lg text-zinc-500 max-w-2xl mx-auto">
-            Three steps to a swarm that gets smarter every day.
-          </p>
-        </motion.div>
-
-        <div className="space-y-24">
-          {steps.map((step, i) => (
-            <motion.div
-              key={step.number}
-              initial={{ opacity: 0, y: 40 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-80px" }}
-              transition={{ duration: 0.6 }}
-              className={`grid lg:grid-cols-2 gap-12 items-center ${
-                i % 2 === 1 ? "lg:direction-rtl" : ""
-              }`}
+    <section
+      id="how"
+      className="relative py-32"
+      style={{
+        background:
+          "linear-gradient(180deg, #fff, oklch(0.987 0.022 95.277 / 0.5) 50%, #fff)",
+      }}
+    >
+      <div className="max-w-[1180px] mx-auto px-6 sm:px-7">
+        <div className="mb-16 grid lg:grid-cols-[1fr_auto] gap-6 items-end">
+          <div>
+            <div className="font-mono text-[11px] tracking-[0.14em] uppercase text-amber-700 mb-4">
+              / how it works
+            </div>
+            <h2
+              className="text-[40px] sm:text-[52px] leading-[1.02] font-semibold tracking-[-0.025em] text-zinc-950 max-w-2xl"
+              style={{ textWrap: "balance" }}
             >
-              <div className={i % 2 === 1 ? "lg:order-2" : ""}>
-                <div className="flex items-center gap-4 mb-4">
-                  <span className="text-5xl font-bold text-amber-200/80 font-mono">
-                    {step.number}
-                  </span>
-                  <div className="h-px flex-1 bg-gradient-to-r from-amber-200 to-transparent" />
-                </div>
-                <h3 className="text-2xl sm:text-3xl font-bold text-zinc-900 mb-4">{step.title}</h3>
-                <p className="text-base text-zinc-500 leading-relaxed">{step.description}</p>
-                {step.badge && (
-                  <span className="inline-block mt-4 text-xs font-medium text-amber-600 bg-amber-50 rounded-full px-3 py-1">
-                    {step.badge}
-                  </span>
-                )}
-              </div>
-
-              <div className={`${i % 2 === 1 ? "lg:order-1" : ""}`}>
-                <div className="rounded-2xl bg-zinc-50 border border-zinc-100 p-6">
-                  {step.visual}
-                </div>
-              </div>
-            </motion.div>
+              From zero to compounding
+              <br />
+              <span className="italic gradient-text">in an afternoon.</span>
+            </h2>
+          </div>
+          <p className="text-[15px] text-zinc-500 max-w-xs leading-[1.6]">
+            No DAGs. No definition language.{" "}
+            <br />
+            Run <span className="font-mono text-zinc-800">docker compose up</span>, then talk to it
+            where you already work.
+          </p>
+        </div>
+        <div className="grid md:grid-cols-3 gap-5 lg:gap-6 relative">
+          <div
+            className="hidden md:block absolute top-[55px] left-[8%] right-[8%] h-px pointer-events-none"
+            style={{
+              background:
+                "linear-gradient(90deg, transparent, oklch(0.879 0.169 91.605 / 0.5), oklch(0.879 0.169 91.605 / 0.5), transparent)",
+            }}
+          />
+          {STEPS.map((s, i) => (
+            <StepCard key={s.n} step={s} i={i} />
           ))}
         </div>
       </div>

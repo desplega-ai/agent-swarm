@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -118,13 +119,11 @@ export default function StatelessWorkersDbBanPost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/deep-dive-stateless-workers-db-ban.png"
-          alt="Stateless worker architecture diagram showing API boundary between workers and database"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/deep-dive-stateless-workers-db-ban.png"
+        alt="Stateless worker architecture diagram showing API boundary between workers and database"
+        caption="30 lines of bash standing between us and a database in every container. Worth every line."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

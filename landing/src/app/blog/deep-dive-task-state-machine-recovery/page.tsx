@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -116,13 +117,11 @@ export default function TaskStateMachineRecoveryPost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/deep-dive-task-state-machine-recovery.png"
-          alt="7-State Task Lifecycle Diagram showing transitions between unassigned, offered, pending, in_progress, and terminal states"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/deep-dive-task-state-machine-recovery.png"
+        alt="7-State Task Lifecycle Diagram showing transitions between unassigned, offered, pending, in_progress, and terminal states"
+        caption="Seven states between &lsquo;I have an idea&rsquo; and &lsquo;a worker actually shipped it&rsquo;. Bureaucracy works, sometimes."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

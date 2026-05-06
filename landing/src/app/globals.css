@@ -61,6 +61,7 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
@@ -70,6 +71,7 @@ body {
   font-family: var(--font-sans);
   min-height: 100vh;
   overflow-x: hidden;
+  max-width: 100vw;
 }
 
 ::selection {
@@ -140,4 +142,120 @@ body {
   -webkit-text-fill-color: transparent;
   background-clip: text;
   animation: gradient-shift 4s linear infinite;
+}
+
+/* ==========================================================
+   Blog code-block polish — applies inside .prose-custom only
+   ========================================================== */
+
+.prose-custom {
+  font-feature-settings: "ss01", "cv02";
+}
+
+/* Light-theme code blocks. !important overrides the dark Tailwind
+   utilities baked into per-post <pre> elements. */
+.prose-custom pre {
+  position: relative;
+  background: oklch(0.985 0 0) !important;
+  color: oklch(0.21 0.006 285.885) !important;
+  border: 1px solid oklch(0.92 0.004 286.32) !important;
+  border-radius: 0.75rem !important;
+}
+
+.prose-custom pre code {
+  color: oklch(0.21 0.006 285.885);
+  background: transparent !important;
+  font-feature-settings: "calt" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- highlight.js token colors — light theme tuned to amber/zinc palette ---- */
+.prose-custom .hljs { background: transparent !important; color: oklch(0.21 0.006 285.885); }
+.prose-custom .hljs-comment,
+.prose-custom .hljs-quote { color: oklch(0.705 0.015 286.067); font-style: italic; }
+.prose-custom .hljs-keyword,
+.prose-custom .hljs-selector-tag,
+.prose-custom .hljs-literal,
+.prose-custom .hljs-section,
+.prose-custom .hljs-link { color: oklch(0.473 0.137 46.201); font-weight: 600; }
+.prose-custom .hljs-built_in,
+.prose-custom .hljs-class .hljs-title,
+.prose-custom .hljs-title.class_,
+.prose-custom .hljs-type { color: oklch(0.473 0.137 46.201); }
+.prose-custom .hljs-string,
+.prose-custom .hljs-attr,
+.prose-custom .hljs-symbol,
+.prose-custom .hljs-bullet,
+.prose-custom .hljs-meta-string { color: oklch(0.46 0.13 145); }
+.prose-custom .hljs-number,
+.prose-custom .hljs-meta { color: oklch(0.5 0.16 230); }
+.prose-custom .hljs-variable,
+.prose-custom .hljs-template-variable,
+.prose-custom .hljs-attribute { color: oklch(0.42 0.15 280); }
+.prose-custom .hljs-title,
+.prose-custom .hljs-title.function_,
+.prose-custom .hljs-name,
+.prose-custom .hljs-selector-id,
+.prose-custom .hljs-selector-class { color: oklch(0.45 0.18 250); }
+.prose-custom .hljs-deletion { color: oklch(0.577 0.245 27.325); }
+.prose-custom .hljs-addition { color: oklch(0.46 0.13 145); }
+.prose-custom .hljs-emphasis { font-style: italic; }
+.prose-custom .hljs-strong { font-weight: 700; }
+
+/* Inline code chips — amber tinted, distinct from blocks */
+.prose-custom :not(pre) > code {
+  background: oklch(0.987 0.022 95.277);
+  border: 1px solid oklch(0.962 0.059 95.617);
+  color: oklch(0.473 0.137 46.201);
+  border-radius: 0.375rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.875em;
+  font-feature-settings: "calt" 1;
+}
+
+/* Copy button — injected at runtime by <ProseEnhancer> */
+.prose-copy-btn {
+  position: absolute;
+  top: 0.625rem;
+  right: 0.625rem;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: oklch(0.555 0.163 48.998);
+  background: oklch(0.987 0.022 95.277);
+  border: 1px solid oklch(0.962 0.059 95.617);
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  user-select: none;
+}
+
+.prose-custom pre:hover .prose-copy-btn,
+.prose-copy-btn:focus-visible {
+  opacity: 1;
+}
+
+.prose-copy-btn:hover {
+  color: oklch(0.473 0.137 46.201);
+  background: oklch(0.962 0.059 95.617);
+}
+
+.prose-copy-btn[data-copied="1"] {
+  color: oklch(0.696 0.17 162.48);
+  background: oklch(0.962 0.059 95.617);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

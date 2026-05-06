@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -117,13 +118,11 @@ export default function ContextCompactionDesignPost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/context-compaction-agent-design.png"
-          alt="Context compaction architecture diagram showing PreCompact hook injection"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/context-compaction-agent-design.png"
+        alt="Context compaction architecture diagram showing PreCompact hook injection"
+        caption="What your agent's brain looks like at 200k tokens. Tasteful, isn't it."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

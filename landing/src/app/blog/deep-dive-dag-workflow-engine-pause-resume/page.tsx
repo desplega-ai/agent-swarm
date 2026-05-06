@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { Figure } from "@/components/figure";
 
 export const metadata: Metadata = {
   title:
@@ -118,13 +119,11 @@ export default function DagWorkflowEnginePost() {
       jsonLd={jsonLd}
     >
       {/* Hero Image */}
-      <div className="mb-10 rounded-xl overflow-hidden border border-zinc-200">
-        <img
-          src="/images/deep-dive-dag-workflow-engine-pause-resume.png"
-          alt="DAG workflow engine architecture diagram showing fan-out, convergence gates, and async pause-resume patterns"
-          className="w-full"
-        />
-      </div>
+      <Figure
+        src="/images/deep-dive-dag-workflow-engine-pause-resume.png"
+        alt="DAG workflow engine architecture diagram showing fan-out, convergence gates, and async pause-resume patterns"
+        caption="A DAG that knows how to nap. Resumes exactly where it dozed off."
+      />
 
       {/* Intro */}
       <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">

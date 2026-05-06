@@ -1,229 +1,105 @@
-"use client";
+import { ArrowRight, Github } from "lucide-react";
+import { HiveScroll } from "@/components/hive-scroll";
+import { StarCount } from "@/components/star-count";
+import { getLatestRelease, getStarCount } from "@/lib/stars";
 
-import { motion } from "framer-motion";
-import { ArrowRight, Github, Sparkles } from "lucide-react";
-
-function SwarmVisualization() {
-  const nodes = [
-    { x: 50, y: 50, label: "Lead", size: 18, delay: 0 },
-    { x: 20, y: 25, label: "W1", size: 12, delay: 0.2 },
-    { x: 80, y: 20, label: "W2", size: 12, delay: 0.4 },
-    { x: 15, y: 70, label: "W3", size: 12, delay: 0.6 },
-    { x: 85, y: 75, label: "W4", size: 12, delay: 0.8 },
-    { x: 50, y: 85, label: "W5", size: 12, delay: 1.0 },
-  ];
-
-  const connections = [
-    [0, 1],
-    [0, 2],
-    [0, 3],
-    [0, 4],
-    [0, 5],
-    [1, 2],
-    [3, 4],
-    [4, 5],
-  ];
+export async function Hero() {
+  const [stars, version] = await Promise.all([getStarCount(), getLatestRelease()]);
 
   return (
-    <div className="relative w-full aspect-square max-w-lg mx-auto">
-      <div className="absolute inset-0 rounded-full bg-gradient-to-br from-amber-100/50 to-amber-50/20 blur-3xl" />
-
-      <svg viewBox="0 0 100 100" className="relative w-full h-full" role="img" aria-label="Agent Swarm network visualization showing interconnected AI agents">
-        {connections.map(([from, to], i) => (
-          <motion.line
-            key={i}
-            x1={nodes[from].x}
-            y1={nodes[from].y}
-            x2={nodes[to].x}
-            y2={nodes[to].y}
-            stroke="url(#lineGrad)"
-            strokeWidth="0.3"
-            initial={{ pathLength: 0, opacity: 0 }}
-            animate={{ pathLength: 1, opacity: 0.4 }}
-            transition={{ duration: 1.5, delay: 0.5 + i * 0.1, ease: "easeOut" }}
-          />
-        ))}
-
-        {/* Animated data particles along connections */}
-        {connections.slice(0, 5).map(([from, to], i) => (
-          <motion.circle
-            key={`particle-${i}`}
-            r="0.8"
-            fill="oklch(0.769 0.188 70.08)"
-            initial={{ opacity: 0 }}
-            animate={{
-              cx: [nodes[from].x, nodes[to].x],
-              cy: [nodes[from].y, nodes[to].y],
-              opacity: [0, 1, 1, 0],
-            }}
-            transition={{
-              duration: 2,
-              delay: 1.5 + i * 0.6,
-              repeat: Infinity,
-              repeatDelay: 2,
-              ease: "easeInOut",
-            }}
-          />
-        ))}
-
-        {nodes.map((node, i) => (
-          <motion.g
-            key={i}
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.5, delay: node.delay, type: "spring", stiffness: 200 }}
-          >
-            <motion.circle
-              cx={node.x}
-              cy={node.y}
-              r={node.size * 0.8}
-              fill="none"
-              stroke="oklch(0.555 0.163 48.998)"
-              strokeWidth="0.15"
-              animate={{ r: [node.size * 0.8, node.size * 1.2, node.size * 0.8] }}
-              transition={{ duration: 3, repeat: Infinity, delay: node.delay }}
-              opacity={0.2}
-            />
-            <circle
-              cx={node.x}
-              cy={node.y}
-              r={node.size * 0.5}
-              fill={i === 0 ? "oklch(0.555 0.163 48.998)" : "oklch(0.967 0.001 286.375)"}
-              stroke={i === 0 ? "oklch(0.473 0.137 46.201)" : "oklch(0.92 0.004 286.32)"}
-              strokeWidth="0.5"
-            />
-            <text
-              x={node.x}
-              y={node.y + 1.2}
-              textAnchor="middle"
-              fontSize="3"
-              fontWeight={i === 0 ? "700" : "500"}
-              fill={i === 0 ? "white" : "oklch(0.552 0.016 285.938)"}
-              fontFamily="Space Grotesk, sans-serif"
-            >
-              {node.label}
-            </text>
-          </motion.g>
-        ))}
-
-        <defs>
-          <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="oklch(0.555 0.163 48.998)" />
-            <stop offset="100%" stopColor="oklch(0.769 0.188 70.08)" />
-          </linearGradient>
-        </defs>
-      </svg>
-    </div>
-  );
-}
-
-export function Hero() {
-  return (
-    <section className="relative min-h-screen flex items-center overflow-hidden">
-      {/* Background grid */}
-      <div className="absolute inset-0 grid-bg opacity-40" />
-
-      {/* Gradient orbs */}
-      <div className="absolute top-20 -left-40 w-96 h-96 rounded-full bg-amber-200/20 blur-[100px] animate-pulse-glow" />
+    <section
+      className="relative min-h-screen flex items-center overflow-hidden bg-zinc-950 text-white"
+      style={{ clipPath: "inset(0)" }}
+    >
       <div
-        className="absolute bottom-20 -right-40 w-96 h-96 rounded-full bg-amber-300/15 blur-[100px] animate-pulse-glow"
-        style={{ animationDelay: "1.5s" }}
+        className="absolute inset-0 opacity-[0.06] pointer-events-none"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px)",
+          backgroundSize: "60px 60px",
+        }}
+      />
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: [
+            "radial-gradient(ellipse 60% 45% at 50% 0%, oklch(0.555 0.163 48.998 / 0.28), transparent 65%)",
+            "radial-gradient(ellipse 38% 28% at 50% 50%, oklch(0.141 0.005 285.823 / 0.78), transparent 75%)",
+            "linear-gradient(180deg, transparent 65%, oklch(0.141 0.005 285.823) 100%)",
+          ].join(", "),
+        }}
       />
 
-      <div className="relative mx-auto max-w-6xl px-6 pt-32 pb-20 w-full">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
-          <div>
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-              className="inline-flex items-center gap-2 rounded-full bg-amber-50 border border-amber-200/60 px-4 py-1.5 mb-8"
-            >
-              <Sparkles className="w-4 h-4 text-amber-600" />
-              <span className="text-sm font-medium text-amber-800">
-                Open Source &middot; MCP-Powered
-              </span>
-            </motion.div>
+      <HiveScroll />
 
-            <motion.h1
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.05] mb-6"
-            >
-              Intelligence that <span className="gradient-text">compounds</span>
-            </motion.h1>
+      <div className="relative w-full max-w-[980px] mx-auto px-7 text-center py-24">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.12] text-zinc-400 text-[12px] mb-9 backdrop-blur-sm">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          <span className="font-mono tracking-[0.04em] text-[11px]">
+            <span className="text-amber-300">{version}</span> · MIT · <StarCount count={stars} /> stars
+          </span>
+        </div>
 
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              className="text-lg sm:text-xl text-zinc-500 leading-relaxed mb-10 max-w-xl"
-            >
-              Orchestrate autonomous AI agents that learn, remember, and get smarter with every
-              session. A lead coordinates workers. Memory persists. Knowledge compounds.{" "}
-              <strong className="text-zinc-700">Deploy in minutes with Agent Swarm Cloud, or self-host for free.</strong>
-            </motion.p>
+        <h1
+          className="text-[clamp(48px,7vw,104px)] font-semibold tracking-[-0.04em] leading-[0.96] max-w-[18ch] mx-auto"
+          style={{ textWrap: "balance" }}
+        >
+          <span className="text-white">Intelligence that compounds.</span>
+          <br />
+          <span className="italic text-white">Every single day</span>
+          <span className="text-white">.</span>
+        </h1>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-              className="flex flex-wrap gap-4"
-            >
-              <a
-                href="https://cloud.agent-swarm.dev"
-                className="group inline-flex items-center gap-2 rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white hover:bg-amber-500 transition-all shadow-xl shadow-amber-600/20 hover:shadow-amber-600/30"
-              >
-                Start Free Trial
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-              </a>
-              <a
-                href="https://github.com/desplega-ai/agent-swarm"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-zinc-700 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 transition-all shadow-sm"
-              >
-                <Github className="w-4 h-4" />
-                GitHub
-              </a>
-            </motion.div>
+        <p
+          className="mt-8 text-[18.5px] text-zinc-400 leading-[1.55] max-w-[52ch] mx-auto"
+          style={{ textWrap: "pretty" }}
+        >
+          A lead delegates. Workers ship in Docker.{" "}
+          <span className="text-white">Memory persists across every task</span> so tomorrow&apos;s
+          swarm is sharper than today&apos;s.
+        </p>
 
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.6, delay: 0.5 }}
-              className="mt-10 flex items-center gap-6 text-sm text-zinc-400"
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                TypeScript
-              </div>
-              <div className="flex items-center gap-2">
-                <div
-                  className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
-                  style={{ animationDelay: "0.5s" }}
-                />
-                MCP Protocol
-              </div>
-              <div className="flex items-center gap-2">
-                <div
-                  className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"
-                  style={{ animationDelay: "1s" }}
-                />
-                Claude Code
-              </div>
-            </motion.div>
-          </div>
-
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.8, delay: 0.3 }}
-            className="hidden lg:block"
+        <div className="mt-11 flex flex-row gap-2.5 sm:gap-3 justify-center">
+          <a
+            href="https://cloud.agent-swarm.dev"
+            className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-[13px] sm:text-[14px] font-semibold px-4 sm:px-5 h-11 rounded-xl transition whitespace-nowrap"
+            style={{ boxShadow: "0 14px 40px -8px oklch(0.769 0.188 70.08 / 0.55)" }}
           >
-            <SwarmVisualization />
-          </motion.div>
+            Start free trial <ArrowRight className="w-[15px] h-[15px]" />
+          </a>
+          <a
+            href="https://github.com/desplega-ai/agent-swarm"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-2 bg-white/[0.06] hover:bg-white/[0.1] backdrop-blur-sm text-white text-[13px] sm:text-[14px] font-semibold px-4 sm:px-5 h-11 rounded-xl border border-white/[0.12] transition whitespace-nowrap"
+          >
+            <Github className="w-[15px] h-[15px]" />
+            <StarCount count={stars} format="star" />
+            <span className="hidden sm:inline"> · Star on GitHub</span>
+          </a>
+        </div>
+
+        <div className="mt-14 flex flex-col items-center gap-3">
+          <div className="flex flex-wrap items-baseline justify-center gap-x-3">
+            <span className="font-mono text-[10.5px] tracking-[0.18em] text-zinc-500 uppercase">
+              Models
+            </span>
+            <span className="font-mono text-[12px] tracking-[0.04em] text-zinc-300">
+              <span className="text-white">Claude Code</span> · Codex · Devin
+              <span className="hidden sm:inline"> · OpenCode</span> ·{" "}
+              <span className="text-zinc-500">+ more</span>
+            </span>
+          </div>
+          <div className="flex flex-wrap items-baseline justify-center gap-x-3">
+            <span className="font-mono text-[10.5px] tracking-[0.18em] text-zinc-500 uppercase">
+              Lives in
+            </span>
+            <span className="font-mono text-[12px] tracking-[0.04em] text-zinc-300">
+              Slack · GitHub · GitLab
+              <span className="hidden sm:inline"> · Linear · Jira · Email · API</span> ·{" "}
+              <span className="text-zinc-500">+ more</span>
+            </span>
+          </div>
         </div>
       </div>
     </section>
