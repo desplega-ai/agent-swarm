@@ -8,6 +8,7 @@ type Company = {
 
 const COMPANIES: Company[] = [
   { name: "Reveri", href: "https://www.reveri.com/", src: "/logos/reveri.png" },
+  { name: "Lodgify", href: "https://www.lodgify.com/", src: "/logos/lodgify.svg" },
   { name: "Capchase", href: "https://capchase.com/", src: "/logos/capchase.svg" },
   { name: "Evalion", href: "https://evalion.ai/", src: "/logos/evalion.svg" },
 ];
@@ -53,7 +54,7 @@ export function SocialProof({ stars }: { stars: number }) {
             <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-zinc-400 mb-7">
               Trusted by
             </div>
-            <div className="grid grid-cols-3 gap-4 sm:gap-6 items-center">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6 items-center">
               {COMPANIES.map((c) => (
                 <CompanyLogo key={c.name} company={c} />
               ))}
