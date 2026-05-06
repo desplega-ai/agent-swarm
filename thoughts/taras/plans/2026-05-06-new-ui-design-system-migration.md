@@ -4,7 +4,7 @@ topic: "new-ui Design System Migration Plan"
 status: in-progress
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
-last_updated_by: Claude (phase 1)
+last_updated_by: Claude (phase 2)
 ---
 
 # new-ui Design System Migration Plan
@@ -263,18 +263,20 @@ Rewrite `src/components/shared/status-badge.tsx`'s `statusConfig` map (`L28-L99`
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `rg -n '(bg|text|border)-(emerald|amber|red|sky|orange|yellow|green|rose|blue|zinc|slate|gray|stone|neutral)-\d' new-ui/src/components/shared/status-badge.tsx` → 0 results
-- [ ] `cd new-ui && pnpm lint && pnpm exec tsc -b`
-- [ ] `cd new-ui && pnpm dev` boots clean
+- [x] `rg -n '(bg|text|border)-(emerald|amber|red|sky|orange|yellow|green|rose|blue|zinc|slate|gray|stone|neutral)-\d' new-ui/src/components/shared/status-badge.tsx` → 0 results
+- [x] `cd new-ui && pnpm lint && pnpm exec tsc -b`
+- [x] `cd new-ui && pnpm dev` boots clean *(verified via `pnpm exec vite build` succeeding — same Vite pipeline)*
 
 #### Automated QA:
-- [ ] `qa-use` light + dark capture of `/`, `/agents`, `/tasks`, `/workflow-runs/<id>`, `/approval-requests`, `/schedules`, `/services`, `/integrations` into `thoughts/taras/qa/2026-05-06-design-system-audit/phase-2/`.
-- [ ] Visual diff against Phase 1 post-baseline: target = pixel parity per status. Any delta logged in QA report and resolved before phase complete.
+- [ ] `qa-use` light + dark capture of `/`, `/agents`, `/tasks`, `/workflow-runs/<id>`, `/approval-requests`, `/schedules`, `/services`, `/integrations` into `thoughts/taras/qa/2026-05-06-design-system-audit/phase-2/`. *(skipped — qa-use deferred to PR-time per orchestrator instruction)*
+- [ ] Visual diff against Phase 1 post-baseline: target = pixel parity per status. Any delta logged in QA report and resolved before phase complete. *(skipped — qa-use deferred to PR-time)*
 
 #### Manual Verification:
 - [ ] Live spot-check three statuses (`pending`, `running`/`active`, `failed`/`error`) in both modes — confirms 18-status palette renders brand-correct.
 
 **Implementation Note**: Pause for manual confirmation. Commit: `[phase 2] migrate status-badge to semantic status tokens`.
+
+**Phase 2 amendment (2026-05-06)**: Token-shape divergence surfaced during the first migration attempt. User chose the "add `-strong` text-emphasis tokens — pixel parity preserved" option. Phase 2 now ships as **two commits**: (1) token foundation correction (add `-strong` variants, revert `--color-status-error` from red-600 → red-500); (2) the original status-badge.tsx migration. See decision #6 in `thoughts/taras/research/2026-05-06-design-system-audit.md`.
 
 ---
 

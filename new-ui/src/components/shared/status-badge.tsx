@@ -27,75 +27,75 @@ interface StatusConfig {
 
 const statusConfig: Record<string, StatusConfig> = {
   // Agent statuses
-  idle: { label: "IDLE", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+  idle: { label: "IDLE", dot: "bg-status-success", text: "text-status-success-strong" },
   busy: {
     label: "BUSY",
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
+    dot: "bg-status-active",
+    text: "text-status-active-strong",
     spinner: true,
   },
-  offline: { label: "OFFLINE", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+  offline: { label: "OFFLINE", dot: "bg-status-neutral", text: "text-status-neutral" },
 
   // Task statuses
-  backlog: { label: "BACKLOG", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
-  unassigned: { label: "UNASSIGNED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+  backlog: { label: "BACKLOG", dot: "bg-status-neutral", text: "text-status-neutral" },
+  unassigned: { label: "UNASSIGNED", dot: "bg-status-neutral", text: "text-status-neutral" },
   offered: {
     label: "OFFERED",
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
+    dot: "bg-status-active",
+    text: "text-status-active-strong",
     spinner: true,
   },
-  reviewing: { label: "REVIEWING", dot: "bg-blue-500", text: "text-blue-600 dark:text-blue-400" },
-  pending: { label: "PENDING", dot: "bg-yellow-500", text: "text-yellow-600 dark:text-yellow-400" },
+  reviewing: { label: "REVIEWING", dot: "bg-status-paused", text: "text-status-paused-strong" },
+  pending: { label: "PENDING", dot: "bg-status-pending", text: "text-status-pending-strong" },
   in_progress: {
     label: "IN PROGRESS",
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
+    dot: "bg-status-active",
+    text: "text-status-active-strong",
     spinner: true,
   },
-  paused: { label: "PAUSED", dot: "bg-blue-500", text: "text-blue-600 dark:text-blue-400" },
+  paused: { label: "PAUSED", dot: "bg-status-paused", text: "text-status-paused-strong" },
   completed: {
     label: "COMPLETED",
-    dot: "bg-emerald-500",
-    text: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-status-success",
+    text: "text-status-success-strong",
   },
-  failed: { label: "FAILED", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
-  cancelled: { label: "CANCELLED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+  failed: { label: "FAILED", dot: "bg-status-error", text: "text-status-error-strong" },
+  cancelled: { label: "CANCELLED", dot: "bg-status-neutral", text: "text-status-neutral" },
 
   // Service statuses
   starting: {
     label: "STARTING",
-    dot: "bg-yellow-500",
-    text: "text-yellow-600 dark:text-yellow-400",
+    dot: "bg-status-pending",
+    text: "text-status-pending-strong",
   },
   healthy: {
     label: "HEALTHY",
-    dot: "bg-emerald-500",
-    text: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-status-success",
+    text: "text-status-success-strong",
   },
-  unhealthy: { label: "UNHEALTHY", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
-  stopped: { label: "STOPPED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+  unhealthy: { label: "UNHEALTHY", dot: "bg-status-error", text: "text-status-error-strong" },
+  stopped: { label: "STOPPED", dot: "bg-status-neutral", text: "text-status-neutral" },
 
   // Workflow run statuses
   running: {
     label: "RUNNING",
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
+    dot: "bg-status-active",
+    text: "text-status-active-strong",
     spinner: true,
   },
-  waiting: { label: "WAITING", dot: "bg-yellow-500", text: "text-yellow-600 dark:text-yellow-400" },
+  waiting: { label: "WAITING", dot: "bg-status-pending", text: "text-status-pending-strong" },
 
   // Workflow step statuses
-  skipped: { label: "SKIPPED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+  skipped: { label: "SKIPPED", dot: "bg-status-neutral", text: "text-status-neutral" },
 
   // Approval request statuses
   approved: {
     label: "APPROVED",
-    dot: "bg-emerald-500",
-    text: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-status-success",
+    text: "text-status-success-strong",
   },
-  rejected: { label: "REJECTED", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
-  timeout: { label: "TIMEOUT", dot: "bg-orange-500", text: "text-orange-600 dark:text-orange-400" },
+  rejected: { label: "REJECTED", dot: "bg-status-error", text: "text-status-error-strong" },
+  timeout: { label: "TIMEOUT", dot: "bg-status-warning", text: "text-status-warning-strong" },
 } satisfies Record<string, StatusConfig>;
 
 interface StatusBadgeProps {
@@ -107,8 +107,8 @@ interface StatusBadgeProps {
 export function StatusBadge({ status, size = "sm", className }: StatusBadgeProps) {
   const config = statusConfig[status] ?? {
     label: status,
-    dot: "bg-zinc-400",
-    text: "text-zinc-500 dark:text-zinc-400",
+    dot: "bg-status-neutral",
+    text: "text-status-neutral",
   };
 
   return (
