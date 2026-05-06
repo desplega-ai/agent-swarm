@@ -192,7 +192,7 @@ export default function DebugPage() {
         {/* Right panel: editor + results */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
           {/* Monaco editor */}
-          <div className="border-b border-border" style={{ height: 200 }}>
+          <div className="border-b border-border h-[200px]">
             <Editor
               language="sql"
               theme={theme === "dark" ? "vs-dark" : "vs"}

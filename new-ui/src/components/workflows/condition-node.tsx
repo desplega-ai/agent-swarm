@@ -88,6 +88,7 @@ export function ConditionNode({ data }: NodeProps) {
                 position={Position.Bottom}
                 id={port}
                 className={style.handle}
+                // inline-style: react-flow port position computed per index
                 style={{ left: `${((i + 1) / (ports.length + 1)) * 100}%` }}
               />
             </div>

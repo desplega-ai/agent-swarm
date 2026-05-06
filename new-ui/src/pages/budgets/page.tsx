@@ -107,6 +107,7 @@ function SpendBar({ spend, budget }: { spend: number; budget: number | null }) {
       <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
         <div
           className={cn("h-full transition-all", spendBarColor(ratio))}
+          // inline-style: dynamic computed width %
           style={{ width: `${pct}%` }}
         />
       </div>

@@ -69,6 +69,7 @@ import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { useTheme } from "@/hooks/use-theme";
 import { getConfig } from "@/lib/config";
+import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 export default function WorkflowDetailPage() {
@@ -617,58 +618,6 @@ function AgentTaskConfig({ config }: { config: Record<string, unknown> }) {
   );
 }
 
-const GITHUB_LIGHT_THEME = {
-  base: "vs" as const,
-  inherit: true,
-  rules: [
-    { token: "comment", foreground: "6a737d", fontStyle: "italic" },
-    { token: "string", foreground: "032f62" },
-    { token: "keyword", foreground: "d73a49" },
-    { token: "number", foreground: "005cc5" },
-    { token: "type", foreground: "d73a49" },
-    { token: "function", foreground: "6f42c1" },
-    { token: "variable", foreground: "e36209" },
-    { token: "constant", foreground: "005cc5" },
-    { token: "operator", foreground: "d73a49" },
-  ],
-  colors: {
-    "editor.background": "#ffffff",
-    "editor.foreground": "#24292f",
-    "editor.lineHighlightBackground": "#f6f8fa",
-    "editorLineNumber.foreground": "#6e7781",
-    "editorLineNumber.activeForeground": "#24292f",
-    "editor.selectionBackground": "#0366d625",
-    "editorCursor.foreground": "#24292f",
-    "editor.inactiveSelectionBackground": "#0366d610",
-  },
-};
-
-const GITHUB_DARK_THEME = {
-  base: "vs-dark" as const,
-  inherit: true,
-  rules: [
-    { token: "comment", foreground: "8b949e", fontStyle: "italic" },
-    { token: "string", foreground: "a5d6ff" },
-    { token: "keyword", foreground: "ff7b72" },
-    { token: "number", foreground: "79c0ff" },
-    { token: "type", foreground: "ffa657" },
-    { token: "function", foreground: "d2a8ff" },
-    { token: "variable", foreground: "ffa657" },
-    { token: "constant", foreground: "79c0ff" },
-    { token: "operator", foreground: "ff7b72" },
-  ],
-  colors: {
-    "editor.background": "#0d1117",
-    "editor.foreground": "#c9d1d9",
-    "editor.lineHighlightBackground": "#161b22",
-    "editorLineNumber.foreground": "#6e7681",
-    "editorLineNumber.activeForeground": "#c9d1d9",
-    "editor.selectionBackground": "#388bfd44",
-    "editorCursor.foreground": "#c9d1d9",
-    "editor.inactiveSelectionBackground": "#388bfd22",
-  },
-};
-
 function ScriptConfig({ config }: { config: Record<string, unknown> }) {
   const { theme } = useTheme();
   // Schema uses `script` (the code) + `runtime` ("bash" | "ts" | "python").
@@ -691,12 +640,7 @@ function ScriptConfig({ config }: { config: Record<string, unknown> }) {
     <InspectorSection label="Configuration">
       <div className="space-y-2">
         {code && (
-          <div
-            className={cn(
-              "rounded-md border overflow-hidden",
-              theme === "dark" ? "bg-[#0d1117]" : "bg-white",
-            )}
-          >
+          <div className="rounded-md border overflow-hidden bg-card">
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-muted text-muted-foreground">
               <span className="text-[10px] font-mono uppercase tracking-wide">
                 {runtime ?? language}
@@ -714,8 +658,8 @@ function ScriptConfig({ config }: { config: Record<string, unknown> }) {
               value={code}
               height={`${editorHeight}px`}
               beforeMount={(monaco) => {
-                monaco.editor.defineTheme("github-light", GITHUB_LIGHT_THEME);
-                monaco.editor.defineTheme("github-dark", GITHUB_DARK_THEME);
+                monaco.editor.defineTheme("github-light", monacoLightTheme);
+                monaco.editor.defineTheme("github-dark", monacoDarkTheme);
               }}
               options={{
                 readOnly: true,
@@ -1236,8 +1180,8 @@ function JsonMonacoEditor({
         height={`${height}px`}
         onChange={(v) => onChange(v ?? "")}
         beforeMount={(monaco) => {
-          monaco.editor.defineTheme("github-light", GITHUB_LIGHT_THEME);
-          monaco.editor.defineTheme("github-dark", GITHUB_DARK_THEME);
+          monaco.editor.defineTheme("github-light", monacoLightTheme);
+          monaco.editor.defineTheme("github-dark", monacoDarkTheme);
         }}
         options={{
           readOnly,

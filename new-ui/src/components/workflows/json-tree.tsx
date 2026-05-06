@@ -23,6 +23,7 @@ export function JsonTree({
         "rounded-md bg-muted p-3 overflow-auto font-mono text-xs leading-relaxed",
         className,
       )}
+      // inline-style: dynamic max-height driven by prop
       style={{ maxHeight }}
     >
       <JsonValue value={data} depth={0} defaultExpandDepth={defaultExpandDepth} />
@@ -105,6 +106,7 @@ function JsonObject({ obj, depth, defaultExpandDepth }: JsonObjectProps) {
       {expanded && (
         <>
           {entries.map(([key, val], i) => (
+            // inline-style: depth-driven indent
             <div key={key} style={{ paddingLeft: `${(depth + 1) * 16}px` }}>
               <span className="text-muted-foreground">{key}</span>
               <span className="text-muted-foreground">: </span>
@@ -112,6 +114,7 @@ function JsonObject({ obj, depth, defaultExpandDepth }: JsonObjectProps) {
               {i < entries.length - 1 && <span className="text-muted-foreground">,</span>}
             </div>
           ))}
+          {/* inline-style: depth-driven indent */}
           <div style={{ paddingLeft: `${depth * 16}px` }}>
             <span className="text-muted-foreground">{"}"}</span>
           </div>
@@ -150,11 +153,13 @@ function JsonArray({ items, depth, defaultExpandDepth }: JsonArrayProps) {
       {expanded && (
         <>
           {items.map((item, i) => (
+            // inline-style: depth-driven indent
             <div key={i} style={{ paddingLeft: `${(depth + 1) * 16}px` }}>
               <JsonValue value={item} depth={depth + 1} defaultExpandDepth={defaultExpandDepth} />
               {i < items.length - 1 && <span className="text-muted-foreground">,</span>}
             </div>
           ))}
+          {/* inline-style: depth-driven indent */}
           <div style={{ paddingLeft: `${depth * 16}px` }}>
             <span className="text-muted-foreground">{"]"}</span>
           </div>

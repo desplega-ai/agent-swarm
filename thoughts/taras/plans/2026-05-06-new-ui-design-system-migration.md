@@ -4,7 +4,7 @@ topic: "new-ui Design System Migration Plan"
 status: in-progress
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
-last_updated_by: Claude (phase 5)
+last_updated_by: Claude (phase 6)
 ---
 
 # new-ui Design System Migration Plan
@@ -519,16 +519,16 @@ export const monacoDarkTheme = { /* ...the L657-L676 object... */ };
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `rg -n '#[0-9a-fA-F]{6}' new-ui/src/ -g '*.{ts,tsx}' -g '!**/monaco-themes.ts'` → 0 results
-- [ ] `rg -n '\b(bg|text|border|fill|stroke|ring|from|via|to|shadow)-\[#[0-9a-fA-F]+\]' new-ui/src/` → 0 results
-- [ ] `rg -n 'next-themes' new-ui/` → 0 results (excluding lockfile pre-`pnpm install`; after re-install, lockfile is also clean)
-- [ ] `rg -n 'style={{' new-ui/src/` returns only the 9 documented occurrences, each with a `// inline-style:` comment on the preceding line
-- [ ] `cd new-ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b`
+- [x] `rg -n '#[0-9a-fA-F]{6}' new-ui/src/ -g '*.{ts,tsx}' -g '!**/monaco-themes.ts'` → 0 results
+- [x] `rg -n '\b(bg|text|border|fill|stroke|ring|from|via|to|shadow)-\[#[0-9a-fA-F]+\]' new-ui/src/` → 0 results
+- [x] `rg -n 'next-themes' new-ui/` → 0 results (excluding lockfile pre-`pnpm install`; after re-install, lockfile is also clean)
+- [x] `rg -n 'style={{' new-ui/src/` returns only the 9 documented occurrences, each with a `// inline-style:` comment on the preceding line
+- [x] `cd new-ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b`
 
 #### Automated QA:
-- [ ] `qa-use` capture of `/workflows/<id>` in light + dark — Monaco editor renders identically (it's now sourced from a separate theme file).
-- [ ] `qa-use` capture of `/debug` — the 200px-height region renders at the same dimensions.
-- [ ] Theme toggle works without any provider regression (validates that `next-themes` removal is invisible).
+- [ ] `qa-use` capture of `/workflows/<id>` in light + dark — Monaco editor renders identically (it's now sourced from a separate theme file). [skipped — qa-use deferred to PR-time]
+- [ ] `qa-use` capture of `/debug` — the 200px-height region renders at the same dimensions. [skipped — qa-use deferred to PR-time]
+- [ ] Theme toggle works without any provider regression (validates that `next-themes` removal is invisible). [skipped — qa-use deferred to PR-time]
 
 #### Manual Verification:
 - [ ] Toggle theme on `/workflows/<id>` — Monaco editor switches between the two new theme objects.
