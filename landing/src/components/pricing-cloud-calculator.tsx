@@ -52,8 +52,10 @@ export function PricingCloudCalculator() {
       </div>
 
       <div className="mt-3 font-mono text-[11.5px] tracking-[0.02em] text-amber-300">
-        {tier.workers} workers · billed monthly
+        Up to {tier.workers} workers · billed monthly
       </div>
+
+      <div className="mt-5 h-px bg-white/[0.08]" />
 
       <div className="mt-5">
         <div
@@ -93,8 +95,6 @@ export function PricingCloudCalculator() {
           </span>
         </div>
       </div>
-
-      <div className="mt-5 h-px bg-white/[0.08]" />
 
       <ul className="mt-5 space-y-2.5 text-[14px] text-zinc-300 flex-1">
         {FEATURES.map((f) => (

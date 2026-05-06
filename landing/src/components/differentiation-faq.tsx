@@ -105,7 +105,7 @@ export function DifferentiationFAQ() {
           </h2>
         </div>
 
-        <div className="max-w-[840px] rounded-2xl border border-zinc-100 px-6">
+        <div className="rounded-2xl border border-zinc-100 px-6">
           {FAQS.map((f) => (
             <FAQItem key={f.question} faq={f} />
           ))}

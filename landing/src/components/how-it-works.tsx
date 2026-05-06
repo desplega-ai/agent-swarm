@@ -43,7 +43,7 @@ const STEPS: Step[] = [
 
 function StepCard({ step, i }: { step: Step; i: number }) {
   return (
-    <div className="relative bg-white rounded-2xl border border-zinc-100 p-7 hover:border-zinc-200 hover:shadow-xl hover:shadow-zinc-200/40 transition-all flex flex-col">
+    <div className="relative bg-white rounded-2xl border border-zinc-100 p-7 hover:border-zinc-200 hover:shadow-xl hover:shadow-zinc-200/40 transition-all flex flex-col min-w-0">
       <div className="flex items-center gap-3 mb-5">
         <div className="w-8 h-8 rounded-full border border-amber-700 bg-white flex items-center justify-center font-mono text-[11px] font-bold text-amber-700 relative z-10">
           {step.n}
@@ -66,7 +66,7 @@ function StepCard({ step, i }: { step: Step; i: number }) {
       </p>
 
       {step.code && (
-        <div className="mt-auto rounded-lg bg-zinc-950 text-zinc-300 font-mono text-[11.5px] leading-[1.7] p-4 overflow-hidden">
+        <div className="mt-auto rounded-lg bg-zinc-950 text-zinc-300 font-mono text-[11.5px] leading-[1.7] p-4 overflow-hidden min-w-0 w-full">
           {step.code.map((line, j) => (
             <div key={j} className="whitespace-nowrap overflow-hidden text-ellipsis">
               <span className={line.ok ? "text-emerald-400" : "text-zinc-500"}>{line.p}</span>{" "}

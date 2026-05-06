@@ -2,7 +2,7 @@ import { ArrowRight, Github } from "lucide-react";
 
 export function CTA() {
   return (
-    <section className="relative py-28 overflow-hidden bg-zinc-950">
+    <section className="relative py-44 overflow-hidden bg-zinc-950">
       <div
         className="absolute inset-1/2 w-[680px] h-[680px] -translate-x-1/2 -translate-y-1/2 rounded-full pointer-events-none"
         style={{

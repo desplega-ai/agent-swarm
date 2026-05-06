@@ -71,8 +71,8 @@ function FAQItem({ faq }: { faq: Faq }) {
 export function PricingFAQ() {
   return (
     <section className="py-24 bg-white border-t border-zinc-100">
-      <div className="max-w-[760px] mx-auto px-6 sm:px-7">
-        <div className="mb-10 text-center">
+      <div className="max-w-[1180px] mx-auto px-6 sm:px-7">
+        <div className="mb-10">
           <div className="font-mono text-[11px] tracking-[0.14em] uppercase text-amber-700 mb-4">
             / faq
           </div>
