@@ -18,7 +18,13 @@
  */
 import { z } from "zod";
 import { ClaudeCliLlmRaterClient, type LlmRaterClient, type LlmRaterResult } from "./llm-client";
-import type { MemoryRater, RatingContext, RatingEvent } from "./types";
+import {
+  type MemoryRater,
+  type RatingContext,
+  type RatingEvent,
+  REFERENCES_SOURCE_MAX_LENGTH,
+  sanitizeReferencesSource,
+} from "./types";
 
 /**
  * Per-rating weight, fixed at 0.8 per the research-doc convention
@@ -31,6 +37,11 @@ const RatingSchema = z.object({
   id: z.string().min(1),
   score: z.number().min(0).max(1),
   reasoning: z.string().min(1).max(500),
+  // Step-6 §6 — optional free-form external source ID. Q2 contract: ≤512
+  // chars, no closed enum, no prefix parser. Sanitization (control-char
+  // strip + NUL rejection) happens in `buildRatingsFromLlm` so a single
+  // bad rating drops the field rather than failing the whole batch.
+  referencesSource: z.string().min(1).max(REFERENCES_SOURCE_MAX_LENGTH).optional(),
 });
 
 /**
@@ -129,12 +140,25 @@ export function buildRatingsFromLlm(
   const events: RatingEvent[] = [];
   for (const r of ratings) {
     if (!allowed.has(r.id)) continue;
+    // Step-6 §6 — sanitize before propagation. If the LLM emits a NUL byte
+    // or an all-control-chars string, drop the edge but keep the rating
+    // (best-effort: the memory's own posterior still gets the signal).
+    let cleanedReferencesSource: string | undefined;
+    if (r.referencesSource !== undefined) {
+      const cleaned = sanitizeReferencesSource(r.referencesSource);
+      if (cleaned !== null) {
+        cleanedReferencesSource = cleaned;
+      }
+    }
     events.push({
       memoryId: r.id,
       signal: 2 * r.score - 1,
       weight: LLM_RATER_WEIGHT,
       source: "llm",
       reasoning: r.reasoning,
+      ...(cleanedReferencesSource !== undefined
+        ? { referencesSource: cleanedReferencesSource }
+        : {}),
     });
   }
   return events;
@@ -176,12 +200,15 @@ CRITICAL: Return JSON conforming to this schema (no prose outside the JSON, no m
     {
       "id": string,                         // memory id, copied from the list below
       "score": number,                      // 0 = misleading/unhelpful, 1 = highly useful
-      "reasoning": string                   // 1..500 chars, why
+      "reasoning": string,                  // 1..500 chars, why
+      "referencesSource": string            // OPTIONAL — see note below
     }
   ]
 }
 
 Score ONLY memories present in the list below. Use the exact ids. Omit any you cannot evaluate.
+
+Optionally for each rating, if the memory clearly references a specific external source (a GitHub PR/issue, a Linear issue, a customer, a Slack thread, an AgentMail thread, etc.), include a \`referencesSource\` string using the convention "<source>:<identifier>" (e.g. "github:owner/repo#N", "linear:KEY-N", "customer:<slug>"). Any prefix is fine — pick what matches the source. Omit the field if no clear external source.
 
 Memories retrieved during this session:
 
@@ -340,6 +367,7 @@ export async function postRatings(opts: {
     weight: e.weight,
     source: e.source,
     ...(e.reasoning !== undefined ? { reasoning: e.reasoning } : {}),
+    ...(e.referencesSource !== undefined ? { referencesSource: e.referencesSource } : {}),
     ...(opts.taskId ? { taskId: opts.taskId } : {}),
   }));
   try {

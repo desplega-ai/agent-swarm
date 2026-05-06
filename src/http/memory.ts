@@ -3,9 +3,14 @@ import { z } from "zod";
 import { chunkContent } from "../be/chunking";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
+import { listEdgesForAgent } from "../be/memory/edges-store";
 import { recordRetrievals } from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
-import type { RatingEvent } from "../be/memory/raters/types";
+import {
+  type RatingEvent,
+  REFERENCES_SOURCE_MAX_LENGTH,
+  sanitizeReferencesSource,
+} from "../be/memory/raters/types";
 import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
@@ -125,6 +130,31 @@ const deleteMemoryById = route({
 // `source` is restricted to `llm` and `explicit-self` at the HTTP boundary —
 // `implicit-citation` runs in-process server-side via applyRating directly
 // and must never arrive over HTTP (defence against worker spoofing).
+// `referencesSource` (step-6 §4) — Q2 free-form contract: ≤512 chars,
+// control-char strip, NUL byte rejection. Convention `<source>:<identifier>`
+// (e.g. github:owner/repo#N, linear:KEY-N, customer:<slug>) is documented
+// only in the OpenAPI description — server does NOT validate prefixes and
+// does NOT enforce a closed enum. The transform throws via `z.NEVER` when
+// sanitization rejects the input so the request fails with a clear 400.
+const ReferencesSourceSchema = z
+  .string()
+  .min(1)
+  .max(REFERENCES_SOURCE_MAX_LENGTH)
+  .transform((value, ctx) => {
+    const cleaned = sanitizeReferencesSource(value);
+    if (cleaned === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "referencesSource must not contain NUL bytes or strip to empty",
+      });
+      return z.NEVER;
+    }
+    return cleaned;
+  })
+  .describe(
+    'Optional external source ID this memory references. Free-form string, convention "<source>:<identifier>" (e.g. "github:owner/repo#N", "linear:KEY-N", "customer:<slug>", "slack:<channel>:<ts>", "agentmail:<thread-id>"). Pick any prefix that fits — no closed enum. When present, an edge from this memory to the external source is created/updated.',
+  );
+
 const RateEventSchema = z.object({
   memoryId: z.string().min(1),
   signal: z.number().min(-1).max(1),
@@ -132,6 +162,7 @@ const RateEventSchema = z.object({
   source: z.enum(["llm", "explicit-self"]),
   reasoning: z.string().max(500).optional(),
   taskId: z.string().uuid().optional(),
+  referencesSource: ReferencesSourceSchema.optional(),
 });
 
 const rateMemory = route({
@@ -169,6 +200,26 @@ const getRetrievals = route({
   responses: {
     200: { description: "Retrieval rows joined with agent_memory" },
     400: { description: "Missing taskId/sessionId or X-Agent-ID" },
+  },
+});
+
+// Memory rater v1.5 step-6 — the edges-list endpoint that powers the
+// homepage demo ("this memory references PR #377"). Auth by X-Agent-ID +
+// Bearer with defence-in-depth: the joined `agent_memory` row must either
+// be swarm-scope or owned by the requesting agent. Plan §7.
+const getMemoryEdges = route({
+  method: "get",
+  path: "/api/memory/edges",
+  pattern: ["api", "memory", "edges"],
+  summary: "List references-source edges for a memory",
+  tags: ["Memory"],
+  auth: { apiKey: true, agentId: true },
+  query: z.object({
+    memoryId: z.string().min(1),
+  }),
+  responses: {
+    200: { description: "Edges with computed usefulness scores" },
+    400: { description: "Missing memoryId or X-Agent-ID" },
   },
 });
 
@@ -515,6 +566,7 @@ export async function handleMemory(
           weight: e.weight,
           source: e.source,
           reasoning: e.reasoning,
+          ...(e.referencesSource !== undefined ? { referencesSource: e.referencesSource } : {}),
         }));
         const result = applyRating(ratingEvents, { taskId });
         applied += result.applied;
@@ -547,6 +599,22 @@ export async function handleMemory(
     const { taskId, sessionId } = parsed.query;
     const rows = getRetrievalsForAgent(myAgentId, { taskId, sessionId });
     json(res, { results: rows });
+    return true;
+  }
+
+  if (getMemoryEdges.match(req.method, pathSegments)) {
+    if (!myAgentId) {
+      jsonError(res, "Missing X-Agent-ID header", 400);
+      return true;
+    }
+
+    const queryParams = parseQueryParams(req.url || "");
+    const parsed = await getMemoryEdges.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { memoryId } = parsed.query;
+    const edges = listEdgesForAgent(myAgentId, memoryId);
+    json(res, { edges });
     return true;
   }
 
