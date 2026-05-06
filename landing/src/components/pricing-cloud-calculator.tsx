@@ -44,7 +44,30 @@ export function PricingCloudCalculator() {
       <div className="text-[13px] font-semibold tracking-tight text-amber-400">Cloud</div>
       <div className="mt-1 text-[12.5px] text-zinc-400">Hosted swarm, pick your size</div>
 
-      <div className="mt-6">
+      <div className="mt-5 flex items-baseline gap-1.5">
+        <span className="text-[44px] font-bold tracking-[-0.03em] leading-none text-white">
+          {period === "monthly" ? formatEuro(monthlyTotal) : formatEuro(Math.round(annualTotal))}
+        </span>
+        <span className="text-[13px] text-zinc-400">{period === "monthly" ? "/ mo" : "/ yr"}</span>
+      </div>
+      {period === "annual" && (
+        <div className="mt-1 font-mono text-[11.5px] tracking-[0.02em] text-zinc-500">
+          ≈ {formatEuro(Math.round(annualEffectiveMonthly))} / mo paid annually
+        </div>
+      )}
+
+      <div className="mt-3 font-mono text-[11.5px] tracking-[0.02em] text-amber-300">
+        {formatEuro(PLATFORM_FEE_EUR)} platform + {workers} × {formatEuro(WORKER_FEE_EUR)} worker ={" "}
+        {formatEuro(monthlyTotal)} / mo
+      </div>
+
+      {period === "annual" && (
+        <div className="mt-1.5 font-mono text-[11px] tracking-[0.02em] text-zinc-500">
+          Saves {formatEuro(Math.round(annualSavings))}/yr vs monthly billing
+        </div>
+      )}
+
+      <div className="mt-5">
         <div
           id={stepperLabelId}
           className="font-mono text-[10.5px] tracking-[0.14em] uppercase text-zinc-400 mb-2"
@@ -91,7 +114,7 @@ export function PricingCloudCalculator() {
       </div>
 
       <div
-        className="mt-5 inline-flex items-center self-start rounded-lg bg-white/[0.04] border border-white/[0.12] p-0.5"
+        className="mt-4 inline-flex items-center self-start rounded-lg bg-white/[0.04] border border-white/[0.12] p-0.5"
         role="group"
         aria-label="Billing period"
       >
@@ -121,29 +144,6 @@ export function PricingCloudCalculator() {
           <span className="font-mono text-[10px] tracking-[0.04em] text-amber-300">save 25%</span>
         </button>
       </div>
-
-      <div className="mt-6 flex items-baseline gap-1.5">
-        <span className="text-[44px] font-bold tracking-[-0.03em] leading-none text-white">
-          {period === "monthly" ? formatEuro(monthlyTotal) : formatEuro(Math.round(annualTotal))}
-        </span>
-        <span className="text-[13px] text-zinc-400">{period === "monthly" ? "/ mo" : "/ yr"}</span>
-      </div>
-      {period === "annual" && (
-        <div className="mt-1 font-mono text-[11.5px] tracking-[0.02em] text-zinc-500">
-          ≈ {formatEuro(Math.round(annualEffectiveMonthly))} / mo paid annually
-        </div>
-      )}
-
-      <div className="mt-2 font-mono text-[11.5px] tracking-[0.02em] text-amber-300">
-        {formatEuro(PLATFORM_FEE_EUR)} platform + {workers} × {formatEuro(WORKER_FEE_EUR)} worker ={" "}
-        {formatEuro(monthlyTotal)} / mo
-      </div>
-
-      {period === "annual" && (
-        <div className="mt-1.5 font-mono text-[11px] tracking-[0.02em] text-zinc-500">
-          Saves {formatEuro(Math.round(annualSavings))}/yr vs monthly billing
-        </div>
-      )}
 
       <div className="mt-5 h-px bg-white/[0.08]" />
 
