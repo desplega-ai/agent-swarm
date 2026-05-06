@@ -157,7 +157,8 @@ Volume mounts shared by every pool pod.
 {{/*
 Init container that waits for the API to become healthy before starting
 the pool pod. Avoids bootstrap thrash when a fresh install rolls all pods
-in parallel.
+in parallel. Capped at 60 retries × 5s = 5 min so a misconfigured install
+doesn't pin pool pods in Init forever.
 */}}
 {{- define "agent-swarm.waitForApi" -}}
 - name: wait-for-api
@@ -165,5 +166,17 @@ in parallel.
   command:
     - sh
     - -c
-    - 'until wget -qO- http://{{ include "agent-swarm.fullname" . }}-api:{{ .Values.api.port }}{{ .Values.api.healthCheck.path }}; do echo "Waiting for API..."; sleep 5; done'
+    - |
+      i=0
+      while [ $i -lt 60 ]; do
+        if wget -qO- http://{{ include "agent-swarm.fullname" . }}-api:{{ .Values.api.port }}{{ .Values.api.healthCheck.path }} >/dev/null 2>&1; then
+          echo "API is up"
+          exit 0
+        fi
+        i=$((i + 1))
+        echo "Waiting for API (attempt $i/60)..."
+        sleep 5
+      done
+      echo "API never came up after 5 minutes; check the API pod"
+      exit 1
 {{- end }}

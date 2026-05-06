@@ -29,9 +29,3 @@ Note: litestream WAL replication is disabled. Back up
 {{ include "agent-swarm.fullname" . }}-api-0:/app/data/agent-swarm-db.sqlite
 out-of-band, or enable litestream for continuous replication to S3.
 {{- end }}
-
-{{- if and (not .Values.auth.existingSecret) (not .Values.auth.apiKey) }}
-
-WARNING: No API_KEY configured. Set auth.apiKey or auth.existingSecret
-before exposing the API anywhere reachable.
-{{- end }}

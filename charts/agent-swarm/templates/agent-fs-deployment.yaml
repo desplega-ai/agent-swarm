@@ -9,6 +9,8 @@ metadata:
     app.kubernetes.io/component: agent-fs
 spec:
   replicas: 1
+  # ReadWriteOnce PVC + replicas: 1 → Recreate avoids the rolling-update
+  # deadlock where the new pod can't claim the PVC the old pod still holds.
   strategy:
     type: Recreate
   selector:

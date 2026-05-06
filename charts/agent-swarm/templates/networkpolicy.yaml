@@ -20,14 +20,31 @@ spec:
             matchLabels:
               {{- include "agent-swarm.selectorLabels" . | nindent 14 }}
   egress:
-    # Permit DNS, intra-release traffic, and outbound to the wider cluster
-    # network. Operators can restrict further by overriding this template.
+    # DNS to kube-system. Required for any service-name resolution.
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
       ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
           port: 53
-    - {}
+    # Intra-release traffic (pool ↔ api ↔ agent-fs).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agent-swarm.selectorLabels" . | nindent 14 }}
+    # Operator-supplied egress rules. Add provider endpoints, registries,
+    # external trackers, etc. — the chart ships zero outbound allowance
+    # because the right list depends on which providers and integrations
+    # the swarm uses. Example:
+    #   networkPolicy:
+    #     extraEgress:
+    #       - to: [{ ipBlock: { cidr: 0.0.0.0/0 } }]
+    #         ports:
+    #           - { protocol: TCP, port: 443 }
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 {{- end }}

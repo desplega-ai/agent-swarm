@@ -2,6 +2,9 @@ apiVersion: v2
 name: agent-swarm
 description: Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants
 type: application
+# Required Kubernetes version. networking.k8s.io/v1 Ingress and modern
+# StatefulSet semantics assume 1.25+.
+kubeVersion: ">=1.25.0-0"
 # Chart version — bumped when the chart itself changes. Independent of appVersion.
 version: 0.1.0
 # Application version — must match package.json.version. Bump it by hand

@@ -8,6 +8,9 @@ metadata:
     {{- include "agent-swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: agent-fs
   annotations:
+    # Keep the PVC across helm uninstall — agent-fs holds searchable shared
+    # state that operators usually want to preserve. Delete it manually
+    # alongside uninstall if you want a clean tear-down.
     helm.sh/resource-policy: keep
 spec:
   accessModes: ["ReadWriteOnce"]

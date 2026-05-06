@@ -286,6 +286,10 @@ litestream:
 # explicit NetworkPolicy or you need the chart to manage RBAC.
 networkPolicy:
   enabled: false
+  # -- Additional egress rules. The chart ships only DNS + intra-release
+  # traffic; whatever your providers/integrations need (Anthropic, OpenAI,
+  # GitHub, Slack, etc.) goes here. Standard NetworkPolicy egress shape.
+  extraEgress: []
 
 rbac:
   create: false
