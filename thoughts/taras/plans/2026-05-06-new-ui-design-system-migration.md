@@ -4,7 +4,7 @@ topic: "new-ui Design System Migration Plan"
 status: completed
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
-last_updated_by: Claude (phase 13)
+last_updated_by: Claude (phase 14)
 ---
 
 # new-ui Design System Migration Plan
@@ -902,6 +902,99 @@ Tighten the rail visual to match `preview/task-detail.html`:
 ### QA Spec (optional):
 
 n/a — single-component CSS visual fix. qa-use deferred to PR-time per orchestrator policy.
+
+---
+
+## Phase 14: tasks/[id] 3-column meta-rail layout per brand kit
+
+### Overview
+
+Phase 12 audit (commit `328218d1`) flagged that `pages/tasks/[id]/page.tsx` lacks the brand kit's **3-column meta-rail layout** shown in `~/Downloads/swarm-design-system/preview/task-detail.html`. Phase 13 already landed the timeline-rail visual; this phase restructures the page shell into the canonical 3-column grid:
+
+- **Left rail** (240px): meta info (Agent / Created / Dir / Session / API Key / Workflow / Parent / Swarm version) + SCM/PR card + Dependencies list + Progress text + ACU/Context budget bar
+- **Center** (1fr): hero (status + tag/priority/provider/model badges + description + action buttons) → optional Failure / Output cards → Session Logs viewer
+- **Right rail** (240px): Activity timeline (LogTimeline) + Session-Cost stat block
+
+The existing flat Tabs structure (Details / Outcome / Session Logs) is **preserved on mobile only** (`md:hidden`) and **dissolved on desktop** in favor of the 3-column rail layout. No data fetching, action handlers, or WebSocket subscriptions change — this is a purely presentational restructure.
+
+### Design Decisions
+
+**Left rail content** (was: `detailsContent` minus Activity / SessionCost blocks):
+- Agent / Created by / Created / Finished / Swarm version / Parent / Dir / Session / API Key / Workflow (existing `MetaRow` rows)
+- Source Control card (existing block — preserved as-is)
+- Dependencies list (existing block — preserved as-is)
+- Progress text (existing block — preserved as-is)
+- ACU / Context budget — `TaskContextSection` (existing component)
+
+**Center content** (was: top header + desktop right column):
+- Hero (status badge + tag/priority/source/provider/model badges + collapsible description + action buttons) — preserved as-is from existing top-header block
+- Failure-reason card (existing `CollapsibleSection` — preserved as-is, conditional)
+- Output card (existing `CollapsibleSection` — preserved as-is, conditional)
+- Session-log viewer (existing `SessionLogViewer` — preserved as-is, fills remaining height)
+
+**Right rail content** (NEW — was scattered across `detailsContent`'s tail):
+- Activity timeline (existing `LogTimeline` from Phase 13) — moves out of left rail into right rail at top, matching `preview/task-detail.html` lines 459–520
+- Session-Cost block — `TaskCostSection` (existing component) — moves out of left rail into right rail below the timeline (it's stat-shaped data; right rail is the stats column)
+
+**Tabs disposition**: preserved on mobile (`md:hidden` Tabs branch unchanged). On desktop the 3-column grid replaces the previous 2-column (left meta sidebar + right output/logs) layout. No new tabs added.
+
+**No new primitives proposed.** The 3-column shell is plain Tailwind grid; `MetaRow` is already local to this file; SCM card / Dependencies / Progress are inline blocks specific to this page (single-use; not extractable per the "appears in 2+ places" Phase 9 rule).
+
+**Grid widths**: preview HTML uses `grid-template-columns: 240px 1fr 240px`. Mirror exactly with `lg:grid-cols-[240px_1fr_240px]`. Below `lg` (≥1024px): fall back to existing single-column stacked layout via the existing mobile Tabs branch. Between `md` and `lg`: the previous 2-column desktop layout no longer applies — collapse to mobile Tabs (acceptable since the 3-column rail layout fundamentally needs `lg+` width).
+
+### Changes Required:
+
+#### 1. Restructure desktop layout in `pages/tasks/[id]/page.tsx`
+
+**File**: `new-ui/src/pages/tasks/[id]/page.tsx`
+
+- Split `detailsContent` (existing variable holding all left-rail content) into `leftRailContent` (meta + SCM + deps + progress + context budget) and `rightRailContent` (Activity timeline + Session Cost).
+- Replace the desktop branch (`<div className="hidden md:flex flex-1 ...">`) with a 3-column grid (`hidden lg:grid lg:grid-cols-[240px_1fr_240px]`):
+  - Left column: `leftRailContent` in a scrollable container (`overflow-y-auto`, `border-r border-border`).
+  - Center column: existing hero (status / badges / description / actions) + Failure / Output cards + SessionLogViewer.
+  - Right column: `rightRailContent` (Activity timeline at top, Session Cost below) in a scrollable container (`overflow-y-auto`, `border-l border-border`).
+- Adjust mobile/tablet branch (`md:hidden` → `lg:hidden`) so the Tabs layout covers everything below the lg breakpoint. Add the right-rail content (Activity + Session Cost) into the existing "Details" tab (or merge into the same tab body) so no content is lost on tablet.
+
+#### 2. Move hero out of fixed top into center column
+
+The existing breadcrumb + hero header is rendered as a fixed shrink-0 block above the layout switch. Keep the breadcrumb fixed at top (it's page-level chrome) but move the hero (badges + description + action buttons) into the center column so the 3-column layout can include it as part of the center scroll context per the preview's `.center > .header` block.
+
+Caveat: on mobile the hero must stay above the Tabs (it's the page's primary identity). To avoid duplication, render the hero in a single shared block above the layout switch on mobile, and inside the center column on desktop.
+
+Cleanest approach: extract the hero into a local `HeroBlock` JSX expression (not a new component — single-use), render it once in mobile (above Tabs) and once in desktop (top of center column). This is a controlled duplication of JSX instances of the same expression — not a new abstraction.
+
+#### 3. Preserve all existing behavior
+
+No changes to:
+- Data fetching (`useTask`, `useTaskSessionLogs`, `useAgents`, `useSessionCosts`, `useTaskContext`)
+- Action handlers (`useCancelTask`, `usePauseTask`, `useResumeTask`)
+- AlertDialog confirmation flow for cancel
+- Streamdown / SessionLogViewer / CollapsibleSection / CollapsibleDescription rendering
+- LogTimeline rendering (already finalized in Phase 13)
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] `cd new-ui && pnpm run check:tokens` — no new color literals introduced
+- [x] `cd new-ui && pnpm lint` — Biome passes
+- [x] `cd new-ui && pnpm exec tsc -b` — typecheck passes
+- [x] `cd new-ui && pnpm exec vite build` — build passes
+- [x] `cd new-ui && pnpm dev` boots clean — sanity-check JSX compiles, no obvious layout breaks (kill after start)
+
+#### Automated QA:
+- [ ] `qa-use` capture of `tasks/[id]` page 3-column layout (light + dark, lg breakpoint) [skipped — qa-use deferred to PR-time]
+
+#### Manual Verification:
+- [ ] User visually confirms 3-column layout on `tasks/[id]` matches `preview/task-detail.html` (lg+ breakpoint, light + dark)
+- [ ] User confirms mobile/tablet (<lg) Tabs branch still renders full task data
+- [ ] User confirms all action buttons (Pause / Resume / Cancel) still work across task states (pending / in_progress / paused / completed / failed / cancelled)
+- [ ] User spot-checks tasks with: vcs metadata; dependencies; failure reason + output; long progress text; Devin provider (ACU budget); long session log
+
+**Implementation Note**: Single commit `[phase 14] tasks/[id] 3-column meta-rail layout per brand kit`. Plan frontmatter flips back to `status: completed` after the commit.
+
+### QA Spec (optional):
+
+n/a — single-page presentational restructure. qa-use deferred to PR-time per orchestrator policy.
 
 ---
 

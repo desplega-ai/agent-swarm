@@ -496,7 +496,10 @@ export default function TaskDetailPage() {
   const hasOutput = !!task.output;
   const hasEvents = task.logs && task.logs.length > 0;
 
-  const detailsContent = (
+  // LEFT RAIL — meta info + SCM card + Dependencies + Progress + Context budget.
+  // Mirrors brand-kit `preview/task-detail.html` left column (meta-row + .scm-card +
+  // .csec-deps + .csec-ctx). Activity timeline and Session Cost moved to right rail.
+  const leftRailContent = (
     <div className="space-y-1">
       {task.agentId && (
         <MetaRow icon={User} label="Agent">
@@ -682,6 +685,26 @@ export default function TaskDetailPage() {
         providerMeta={task.providerMeta}
         costs={costs}
       />
+    </div>
+  );
+
+  // RIGHT RAIL — Activity timeline (top) + Session Cost (below). Mirrors
+  // brand-kit `preview/task-detail.html` right column (`.right > .section-label
+  // Activity` + `.tl-row` rows). Session Cost is stat-shaped data; this column
+  // is the canonical "stats" rail.
+  const rightRailContent = (
+    <div className="space-y-1">
+      {hasEvents && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5">
+            <Activity className="h-3 w-3 text-muted-foreground" />
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Activity ({task.logs!.length})
+            </span>
+          </div>
+          <LogTimeline logs={task.logs!} />
+        </div>
+      )}
 
       <TaskCostSection
         costs={costs}
@@ -689,15 +712,6 @@ export default function TaskDetailPage() {
         provider={task.provider}
         providerMeta={task.providerMeta}
       />
-
-      {hasEvents && (
-        <>
-          <Separator className="my-2" />
-          <CollapsibleSection title={`Activity (${task.logs!.length})`} icon={Activity}>
-            <LogTimeline logs={task.logs!} />
-          </CollapsibleSection>
-        </>
-      )}
     </div>
   );
 
@@ -756,9 +770,126 @@ export default function TaskDetailPage() {
     </div>
   );
 
+  // HERO — status badge + tags / priority / source / provider / model badges +
+  // collapsible description + action buttons. Rendered inside the center column
+  // on desktop (lg+) and above the Tabs on mobile/tablet (<lg). Same JSX in both
+  // places — single-use; not extractable per the "appears in 2+ places" rule.
+  const heroBlock = (
+    <div className="space-y-2 px-1 pb-3 shrink-0">
+      <div className="flex items-center gap-2 flex-wrap">
+        <StatusBadge status={task.status} size="md" />
+        {task.taskType && (
+          <Badge variant="outline" size="tag">
+            {task.taskType}
+          </Badge>
+        )}
+        {task.priority !== undefined && (
+          <Badge
+            variant="outline"
+            className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
+          >
+            P{task.priority}
+          </Badge>
+        )}
+        {task.tags?.map((tag) => (
+          <Badge key={tag} variant="outline" size="tag">
+            {tag}
+          </Badge>
+        ))}
+        {task.source && (
+          <Badge variant="outline" size="tag">
+            {task.source}
+          </Badge>
+        )}
+        {task.provider && (
+          <Badge
+            variant="outline"
+            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+          >
+            {task.provider}
+          </Badge>
+        )}
+        {(() => {
+          // Prefer the model recorded on the task row (set at task creation
+          // when explicitly requested), but fall back to whatever the
+          // session_costs entries report — codex tasks don't carry a
+          // task-level model today, so the cost record is the source of
+          // truth for what was actually used.
+          const displayModel = task.model ?? costs?.[0]?.model;
+          return displayModel ? (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
+            >
+              {displayModel}
+            </Badge>
+          ) : null;
+        })()}
+      </div>
+      <CollapsibleDescription text={task.task} />
+      <div className="flex items-center gap-2">
+        {(canCancel || canPause || canResume) && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            {canPause && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => pauseTask.mutate(task.id)}
+                disabled={pauseTask.isPending}
+              >
+                <Pause className="h-3 w-3 mr-1" />
+                Pause
+              </Button>
+            )}
+            {canResume && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => resumeTask.mutate(task.id)}
+                disabled={resumeTask.isPending}
+              >
+                <Play className="h-3 w-3 mr-1" />
+                Resume
+              </Button>
+            )}
+            {canCancel && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive-outline" size="sm">
+                    <Ban className="h-3 w-3 mr-1" />
+                    Cancel
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Cancel Task</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to cancel this task? This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Keep Task</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      onClick={() =>
+                        cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
+                      }
+                    >
+                      Cancel Task
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      {/* Breadcrumb — fixed */}
+      {/* Breadcrumb — fixed at top across all breakpoints */}
       <div className="px-1 pb-2 shrink-0">
         <button
           type="button"
@@ -769,130 +900,23 @@ export default function TaskDetailPage() {
         </button>
       </div>
 
-      {/* Header — fixed */}
-      <div className="space-y-2 px-1 pb-3 shrink-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <StatusBadge status={task.status} size="md" />
-          {task.taskType && (
-            <Badge variant="outline" size="tag">
-              {task.taskType}
-            </Badge>
-          )}
-          {task.priority !== undefined && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
-            >
-              P{task.priority}
-            </Badge>
-          )}
-          {task.tags?.map((tag) => (
-            <Badge key={tag} variant="outline" size="tag">
-              {tag}
-            </Badge>
-          ))}
-          {task.source && (
-            <Badge variant="outline" size="tag">
-              {task.source}
-            </Badge>
-          )}
-          {task.provider && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
-              {task.provider}
-            </Badge>
-          )}
-          {(() => {
-            // Prefer the model recorded on the task row (set at task creation
-            // when explicitly requested), but fall back to whatever the
-            // session_costs entries report — codex tasks don't carry a
-            // task-level model today, so the cost record is the source of
-            // truth for what was actually used.
-            const displayModel = task.model ?? costs?.[0]?.model;
-            return displayModel ? (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
-              >
-                {displayModel}
-              </Badge>
-            ) : null;
-          })()}
-        </div>
-        <CollapsibleDescription text={task.task} />
-        <div className="flex items-center gap-2">
-          {(canCancel || canPause || canResume) && (
-            <div className="flex items-center gap-1.5 shrink-0">
-              {canPause && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => pauseTask.mutate(task.id)}
-                  disabled={pauseTask.isPending}
-                >
-                  <Pause className="h-3 w-3 mr-1" />
-                  Pause
-                </Button>
-              )}
-              {canResume && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => resumeTask.mutate(task.id)}
-                  disabled={resumeTask.isPending}
-                >
-                  <Play className="h-3 w-3 mr-1" />
-                  Resume
-                </Button>
-              )}
-              {canCancel && (
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="destructive-outline" size="sm">
-                      <Ban className="h-3 w-3 mr-1" />
-                      Cancel
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Cancel Task</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Are you sure you want to cancel this task? This action cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Keep Task</AlertDialogCancel>
-                      <AlertDialogAction
-                        variant="destructive"
-                        onClick={() =>
-                          cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
-                        }
-                      >
-                        Cancel Task
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <Separator className="shrink-0" />
-
-      {/* Mobile: tabbed layout */}
-      <div className="md:hidden flex flex-col flex-1 min-h-0">
+      {/* Mobile / tablet (<lg): hero above tabs. Tabs hold left-rail meta in
+          Details (with right-rail Activity + Cost merged in so nothing is lost),
+          Outcome card, and Session Logs. Below lg the 3-column grid does not
+          fit; we fall back to the previous tabbed layout, extended to include
+          the right-rail content. */}
+      <div className="lg:hidden flex flex-col flex-1 min-h-0">
+        {heroBlock}
+        <Separator className="shrink-0" />
         <Tabs defaultValue="details" className="flex flex-col flex-1 min-h-0">
           <TabsList className="shrink-0 mx-1 mt-2">
             <TabsTrigger value="details">Details</TabsTrigger>
             <TabsTrigger value="outcome">Outcome</TabsTrigger>
             <TabsTrigger value="logs">Session Logs</TabsTrigger>
           </TabsList>
-          <TabsContent value="details" className="flex-1 overflow-y-auto px-1 py-3">
-            {detailsContent}
+          <TabsContent value="details" className="flex-1 overflow-y-auto px-1 py-3 space-y-4">
+            {leftRailContent}
+            {rightRailContent}
           </TabsContent>
           <TabsContent value="outcome" className="flex-1 overflow-y-auto px-1 py-3">
             {outcomeContent}
@@ -903,58 +927,69 @@ export default function TaskDetailPage() {
         </Tabs>
       </div>
 
-      {/* Desktop: two-column layout */}
-      <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">
-        {/* Left sidebar: metadata */}
-        <div className="w-52 lg:w-60 shrink-0 border-r border-border py-3 px-1 pr-3 space-y-1 overflow-y-auto min-h-0">
-          {detailsContent}
-        </div>
+      {/* Desktop (lg+): 3-column meta-rail layout per
+          ~/Downloads/swarm-design-system/preview/task-detail.html. Grid widths
+          mirror the brand kit's `grid-template-columns: 240px 1fr 240px`. */}
+      <div className="hidden lg:grid lg:grid-cols-[240px_1fr_240px] flex-1 min-h-0 overflow-hidden">
+        {/* Left rail — meta info + SCM card + Dependencies + Progress + Context budget */}
+        <aside className="border-r border-border py-3 px-1 pr-3 overflow-y-auto min-h-0">
+          {leftRailContent}
+        </aside>
 
-        {/* Right content: output/error (collapsible) + session logs (fills remaining) */}
-        <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-3 pl-3 px-1 gap-2">
-          {isFailed && task.failureReason && (
-            <CollapsibleSection
-              variant="card"
-              title="Failure Reason"
-              icon={AlertTriangle}
-              iconColor="text-status-error"
-              borderColor="border-status-error/30"
-              bgColor="bg-status-error/5"
-            >
-              <div className="text-sm text-status-error/80 leading-relaxed max-h-48 overflow-auto">
-                <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
+        {/* Center — hero (badges + description + actions) + Failure / Output cards + SessionLogViewer */}
+        <section className="flex flex-col min-h-0 overflow-hidden">
+          {heroBlock}
+          <Separator className="shrink-0" />
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-3 px-3 gap-2">
+            {isFailed && task.failureReason && (
+              <CollapsibleSection
+                variant="card"
+                title="Failure Reason"
+                icon={AlertTriangle}
+                iconColor="text-status-error"
+                borderColor="border-status-error/30"
+                bgColor="bg-status-error/5"
+              >
+                <div className="text-sm text-status-error/80 leading-relaxed max-h-48 overflow-auto">
+                  <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
+                </div>
+              </CollapsibleSection>
+            )}
+
+            {hasOutput && (
+              <CollapsibleSection
+                variant="card"
+                title="Output"
+                icon={isCompleted ? CheckCircle2 : Terminal}
+                iconColor={isCompleted ? "text-status-success" : "text-muted-foreground"}
+                borderColor={isCompleted ? "border-status-success/30" : "border-border"}
+                bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
+              >
+                <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-48" />
+              </CollapsibleSection>
+            )}
+
+            {hasSessionLogs ? (
+              <SessionLogViewer
+                logs={sessionLogs}
+                compactionSnapshots={contextData?.snapshots}
+                className="flex-1 min-h-0"
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center min-h-0">
+                <div className="text-center text-muted-foreground">
+                  <Terminal className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-xs">No session data available</p>
+                </div>
               </div>
-            </CollapsibleSection>
-          )}
+            )}
+          </div>
+        </section>
 
-          {hasOutput && (
-            <CollapsibleSection
-              variant="card"
-              title="Output"
-              icon={isCompleted ? CheckCircle2 : Terminal}
-              iconColor={isCompleted ? "text-status-success" : "text-muted-foreground"}
-              borderColor={isCompleted ? "border-status-success/30" : "border-border"}
-              bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
-            >
-              <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-48" />
-            </CollapsibleSection>
-          )}
-
-          {hasSessionLogs ? (
-            <SessionLogViewer
-              logs={sessionLogs}
-              compactionSnapshots={contextData?.snapshots}
-              className="flex-1 min-h-0"
-            />
-          ) : (
-            <div className="flex-1 flex items-center justify-center min-h-0">
-              <div className="text-center text-muted-foreground">
-                <Terminal className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                <p className="text-xs">No session data available</p>
-              </div>
-            </div>
-          )}
-        </div>
+        {/* Right rail — Activity timeline + Session Cost stats */}
+        <aside className="border-l border-border py-3 px-3 overflow-y-auto min-h-0">
+          {rightRailContent}
+        </aside>
       </div>
     </div>
   );

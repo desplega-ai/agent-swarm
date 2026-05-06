@@ -560,3 +560,78 @@ The audit surfaces these new candidates not covered by Phase 11's existing 15-it
 1. **Detail-page-template.html is a meta-spec.** Every detail page in the dashboard is supposed to have a right rail with Quick stats / Relationships / Danger zone. **None do.** This is the largest architectural divergence the original 11-phase plan missed. (Severity: follow-up plan.)
 2. **Task-detail.html shows a 3-column meta-rail layout** (left: SCM-PR + progress bars; center: hero + timeline rail; right: stats) — `tasks/[id]/page.tsx` uses flat Tabs. The timeline-rail visual (a 1px line connecting dots vertically) is the only piece small enough to fix surgically.
 3. **Zero net-new tokens in the backlog from the preview scan.** All brand-kit-only tokens (`--fg-{1..4}`, `--space-*`, `--shadow-amber-glow`, `--t-*`, `--lh-*`, `--radius-2xl`, etc.) are already on the Phase 11 backlog. The preview HTMLs **confirm** the existing scope; they don't add new token-level work. The new backlog items (13) are **structural / primitive-level** patterns, not token-level.
+
+---
+
+## Phase 14 — `tasks/[id]` 3-column meta-rail layout
+
+Phase 12 audit (commit `328218d1`) flagged the second-highest-leverage finding: `pages/tasks/[id]/page.tsx` lacks the brand kit's 3-column meta-rail layout (`~/Downloads/swarm-design-system/preview/task-detail.html`). The layout was originally classified as a "Follow-up plan candidate" (effort ~1 day). The user re-scoped it into this branch as Phase 14.
+
+### Layout decisions
+
+Brand-kit grid is `grid-template-columns: 240px 1fr 240px` (`preview/task-detail.html:22`). new-ui mirrors this exactly via `lg:grid-cols-[240px_1fr_240px]`. Below the `lg` breakpoint (1024px) the previous tabbed mobile layout takes over — the 3-column rail does not fit in narrower viewports.
+
+| Column | Width | Content placement | Source |
+|---|---|---|---|
+| Left rail | 240px | Meta info (Agent / Created by / Created / Finished / Swarm version / Parent / Dir / Session / API Key / Workflow) + Source Control card + Dependencies + Progress text + Context / ACU budget | Lifted from previous `detailsContent` minus Activity + Cost. |
+| Center | 1fr | Hero (status + tag/priority/source/provider/model badges + collapsible description + action buttons), Failure-reason card, Output card, SessionLogViewer (fills remaining height). | Hero moved out of fixed top into center column; rest preserved from previous desktop right column. |
+| Right rail | 240px | Activity timeline (LogTimeline w/ Phase 13 rail visual) at top + Session Cost stat block below. | New rail. Activity moved out of left rail (was at the bottom of `detailsContent`) into the canonical "stats" rail; Cost moved alongside it. |
+
+### Tabs disposition
+
+**Preserved on mobile/tablet (`<lg`)**, **dissolved on desktop (`lg+`)**. The mobile branch (now `lg:hidden`, was `md:hidden`) keeps the existing `Details / Outcome / Session Logs` tabs. The new right-rail content (Activity + Session Cost) is merged into the Details tab so no data is lost on tablet — the alternative (a 4th tab) would have been a regression for narrow-viewport readability.
+
+This means the previous **2-column desktop layout (`md:flex` w/ `w-52 lg:w-60` left sidebar)** is gone — between `md` and `lg` (768–1023px) the page now falls back to mobile Tabs. This is acceptable because the 3-column rail layout fundamentally needs `lg+` width to render legibly. Users with narrow desktop windows see Tabs, not a half-broken 2-column grid.
+
+### Hero handling
+
+Hero (status badges + description + action buttons) was previously rendered as a fixed `shrink-0` block above the layout switch. To match the brand kit's `.center > .header` block (where the hero lives **inside** the center column), the hero is now extracted into a local `heroBlock` JSX expression and rendered twice:
+- **Mobile** (`<lg`): above the Tabs (preserves the previous mobile UX — hero is the page's primary identity and must stay above the tab strip).
+- **Desktop** (`lg+`): inside the top of the center column, matching the preview.
+
+This is **controlled JSX duplication**, not a new abstraction — the hero is single-use, page-specific, and not extractable per the Phase 9 "appears in 2+ places" rule (it appears in 2 places, but both are the same single component instance rendered conditionally; no other page reuses it).
+
+### Deviations from preview HTML
+
+| Deviation | Why |
+|---|---|
+| Mobile/tablet uses Tabs, not stacked rails. | Preview is desktop-only; mobile/tablet branch preserves existing behavior to avoid regressions. |
+| Activity timeline header in right rail is a flex row with `Activity` icon + `(N)` count, not a `.section-label` (font-mono uppercase) like the preview. | Reuses existing dashboard typography (`text-[10px] font-semibold text-muted-foreground uppercase tracking-wider`) for consistency with other section labels in the file. The brand kit's `.section-label` uses `Space Mono` — that's a backlog item from Phase 11 / Phase 12 (font-family adoption is not in scope of this phase). |
+| No `.csec` collapsible sections in left rail. | Existing rail content uses `Separator + section-label + content` pattern (see Source Control / Dependencies / Progress / Context blocks); collapsibility is not a Phase 14 deliverable. The preview's `.csec` toggles are a follow-up enhancement (backlog candidate). |
+| No `.btn.danger` styling on Cancel button. | new-ui's `Button variant="destructive-outline"` is the canonical destructive-outline (Phase 4) — visually equivalent but uses status tokens, not raw `oklch(0.66 0.22 27 / 0.4)` literals. This is a deliberate Phase 1–4 decision documented in `new-ui/CLAUDE.md`. |
+
+### Visual deltas worth flagging
+
+- **Header borders** — preview has `border-bottom: 1px solid var(--border)` on `.header` separating hero from output. We use the existing `<Separator />` (which renders `border-t`/`bg-border`). Pixel parity should be close.
+- **Right rail border** — preview has `border-left: 1px solid var(--border)`. We use `border-l border-border` — exact match.
+- **Right rail padding** — preview is `padding: 14px`. We use `py-3 px-3` (12px). Acceptable parity (one Tailwind step off).
+- **Center scroll behavior** — preview's `.body` is `flex: 1; overflow-y: auto`; new-ui's center column wraps Failure / Output / SessionLogViewer in `flex flex-col flex-1 min-h-0 overflow-hidden` with the SessionLogViewer claiming `flex-1`. Equivalent semantics.
+
+### Implementation summary
+
+| Artifact | Status |
+|---|---|
+| `pages/tasks/[id]/page.tsx` restructure | done — `leftRailContent` / `rightRailContent` / `heroBlock` extracted; 3-column desktop grid added; mobile Tabs branch updated to `lg:hidden` and merges right-rail content into Details tab |
+| Token compliance | `pnpm run check:tokens` green — no raw palette literals introduced |
+| Lint / typecheck / build | `pnpm lint` / `pnpm exec tsc -b` / `pnpm exec vite build` green |
+| qa-use captures | **skipped** — qa-use deferred to PR-time per orchestrator instruction |
+
+### Risk callouts
+
+The restructure is purely presentational (no data-fetching, mutation, or subscription changes). States most worth spot-checking visually:
+
+- **`pending`** — no `canPause` / `canResume` / `canCancel` actions; hero will lack the action-buttons row
+- **`in_progress`** — Pause + Cancel buttons; `LogTimeline` shows live activity
+- **`paused`** — Resume + Cancel buttons
+- **`completed`** — no actions; Output card with `text-status-success` accent
+- **`failed`** — no actions; Failure-reason card + Output card
+- **`cancelled`** — no actions; potentially no Output
+
+Data-shape edge cases to spot-check:
+
+- Task with **no `vcsProvider`** — left rail's Source Control block is conditionally rendered (`{(task.vcsProvider || ...) && ...}`); should not produce an empty separator
+- Task with **`dependsOn`** populated — left rail Dependencies block renders below SCM
+- Task with **long `progress` text** — left rail Progress block has `max-h-32 overflow-auto`
+- **Devin provider** — `TaskContextSection` switches to ACU budget; `TaskCostSection` shows `ACUs` not tokens
+- Task with **no session_logs** — center column renders the empty-state placeholder
+- Task with **0 `task.logs`** — `hasEvents` is false, right rail's Activity section omits entirely (but Cost still renders)
