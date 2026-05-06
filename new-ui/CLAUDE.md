@@ -98,6 +98,16 @@ Do not re-inline `border-red-500/30 text-red-400 hover:bg-red-500/10`. Pair with
 
 </important>
 
+<important if="you are copying a primitive from ~/Downloads/swarm-design-system or comparing new-ui's components/ui to the brand kit">
+
+## Primitive parity with brand kit
+
+new-ui's primitives in `src/components/ui/` are the **canonical implementation**. The brand kit at `~/Downloads/swarm-design-system/new-ui/src/components/ui/` is a snapshot of an earlier version of new-ui — it is a brand reference, not a build artifact.
+
+Brand-kit divergences are tracked in [`thoughts/taras/research/2026-05-06-design-system-audit.md`](../thoughts/taras/research/2026-05-06-design-system-audit.md) (see "Phase 8 — Primitive parity") and reconciled deliberately. **Do not blindly copy from `~/Downloads/swarm-design-system`** — consult the audit first, especially for the `Button` `destructive-outline` variant where new-ui's status-token form (Phase 4) is canonical and adopting the brand kit's raw `red-*` literals would break the Phase 7 `check:tokens` lint gate.
+
+</important>
+
 <important if="you are writing Tailwind classes, picking colors, or styling components in new-ui">
 
 ## Theming

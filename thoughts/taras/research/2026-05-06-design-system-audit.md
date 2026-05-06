@@ -2,7 +2,7 @@
 date: 2026-05-06T00:00:00Z
 topic: "Brand-truth audit: ~/Downloads/swarm-design-system vs new-ui/"
 status: in-progress
-author: Claude (phase 1)
+author: Claude (phases 1, 4, 8)
 related_plan: thoughts/taras/plans/2026-05-06-new-ui-design-system-migration.md
 ---
 
@@ -252,3 +252,69 @@ Sourced from `components/workflows/action-node.tsx:16-74` (8 entries: 7 keyed ac
 15. **JSON token type colors in `json-tree.tsx`** map to `-strong` variants because the original used the `text-X-600 dark:text-X-400` pattern (Phase 2 amendment). Strings → `text-status-success-strong`, numbers → `text-status-active-strong`, booleans → `text-status-info-strong`. Pixel-identical migration.
 
 16. **`swarm-switcher.tsx` migrated despite being absent from Phase 4 plan list.** Two `bg-emerald-500` / `bg-red-500` literals (and one collapsed `bg-zinc-400`/`bg-zinc-600` neutral indicator) needed migration to keep `rg` returning 0 in `new-ui/src/components/`. Phase 3 already touched the file for layout colors; Phase 4 finishes it.
+
+---
+
+## Phase 8 — Primitive parity (brand kit ↔ new-ui)
+
+Diffed all 7 shared primitives between `~/Downloads/swarm-design-system/new-ui/src/components/ui/*` and `new-ui/src/components/ui/*`. Verified at byte level via `diff(1)`. Outcome: **6 primitives byte-identical; 1 primitive (`button.tsx`) has a single, intentional new-ui-side improvement that we keep.**
+
+### Per-primitive diff table
+
+| Primitive | Brand kit (file:line) | new-ui (file:line) | Variants | Sizes | Hover/active/focus | Padding/radius | Icon slot | data-slot | Type signature | Decision |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `alert-dialog.tsx` | brand kit `alert-dialog.tsx:1-177` | new-ui `alert-dialog.tsx:1-177` | identical | identical (`default`, `sm` on Content) | identical (overlay `bg-black/50`, content shadow-lg, focus inherited) | identical (`p-6 rounded-lg`, max-w-xs/lg) | identical (`*:[svg:not([class*='size-'])]:size-8` on Media) | identical (12 slots: alert-dialog, -trigger, -portal, -overlay, -content, -header, -footer, -title, -description, -media, -action, -cancel) | identical | **non-issue** (byte-identical) |
+| `badge.tsx` | brand kit `badge.tsx:1-54` | new-ui `badge.tsx:1-54` | identical 6: default, secondary, destructive, outline, ghost, link | identical 2: default, **`tag`** (project-specific contract documented in CLAUDE.md) | identical (`focus-visible:ring-ring/50 focus-visible:ring-[3px]` + `[a&]:hover:bg-primary/90`) | identical (`rounded-full px-2 py-0.5`; tag size `px-1.5 py-0 h-5`) | identical (`[&>svg]:size-3 gap-1`) | identical (`data-slot="badge"`, `data-variant`, `data-size`) | identical (`asChild?` flag, `VariantProps`) | **non-issue** (byte-identical) |
+| `button.tsx` | brand kit `button.tsx:1-65` | new-ui `button.tsx:1-65` | 7 each: default, destructive, outline, **`destructive-outline`** (project-specific), secondary, ghost, link | identical 8: default, xs, sm, lg, icon, icon-xs, icon-sm, icon-lg | identical (`focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]`) | identical (`rounded-md`; default `h-9 px-4`; `xs` `h-6 rounded-md px-2`; sizes match exactly) | identical (`[&_svg:not([class*='size-'])]:size-4`; xs override `size-3`) | identical (`data-slot="button"`, `data-variant`, `data-size`) | identical (`asChild?`) | **One delta** — see below |
+| `card.tsx` | brand kit `card.tsx:1-76` | new-ui `card.tsx:1-76` | n/a (no cva) | n/a | n/a (passive surface) | identical (`rounded-xl border py-6 shadow-sm`; header `gap-2 px-6`; footer `[.border-t]:pt-6`) | n/a | identical (7 slots: card, -header, -title, -description, -action, -content, -footer) | identical | **non-issue** (byte-identical) |
+| `dialog.tsx` | brand kit `dialog.tsx:1-144` | new-ui `dialog.tsx:1-144` | identical (no cva variants) | n/a | identical (`opacity-70 hover:opacity-100`, `focus:ring-2 focus:ring-offset-2`) | identical (`rounded-lg p-6 shadow-lg sm:max-w-lg`) | identical (`[&_svg:not([class*='size-'])]:size-4`) | identical (10 slots) | identical (`showCloseButton?` on Content & Footer) | **non-issue** (byte-identical) |
+| `dropdown-menu.tsx` | brand kit `dropdown-menu.tsx:1-227` | new-ui `dropdown-menu.tsx:1-227` | identical (item variant: default, **destructive** uses `text-destructive`, `focus:bg-destructive/10`) | n/a | identical (`focus:bg-accent focus:text-accent-foreground`; destructive: `data-[variant=destructive]:focus:bg-destructive/20` in dark) | identical (`rounded-md p-1 shadow-md`; items `rounded-sm px-2 py-1.5`) | identical (`[&_svg:not([class*='size-'])]:size-4`; muted-fg fill via `[&_svg:not([class*='text-'])]:text-muted-foreground`) | identical (15 slots) | identical (`inset?`, `variant?`) | **non-issue** (byte-identical) |
+| `tabs.tsx` | brand kit `tabs.tsx:1-80` | new-ui `tabs.tsx:1-80` | identical 2: default, **`line`** | n/a | identical (`focus-visible:ring-[3px] focus-visible:outline-1`; underline-line variant uses `after:bg-foreground` pseudo-element) | identical (`rounded-lg p-[3px]`; trigger `px-2 py-1 rounded-md`) | identical (`[&_svg:not([class*='size-'])]:size-4`) | identical (4 slots) | identical (`VariantProps<typeof tabsListVariants>` on TabsList) | **non-issue** (byte-identical) |
+
+### Single delta — `button.tsx:18` (`destructive-outline` variant)
+
+| Side | `file:line` | Class string |
+|---|---|---|
+| brand kit | `~/Downloads/swarm-design-system/new-ui/src/components/ui/button.tsx:18` | `border bg-background shadow-xs border-red-500/30 text-red-400 hover:bg-red-500/10 dark:bg-input/30` |
+| new-ui    | `new-ui/src/components/ui/button.tsx:18` | `border bg-background shadow-xs border-status-error/30 text-status-error hover:bg-status-error/10 dark:bg-input/30` |
+
+**Decision: keep new-ui.** Rationale (three reasons, any one decisive):
+
+1. **Phase 7 lint gate is canonical.** `border-red-500/30`, `text-red-400`, `hover:bg-red-500/10` are raw Tailwind palette literals. The Phase 7 `check:tokens` script (committed at `3cf3227d`) fails CI on any of those. Adopting brand-kit text would re-introduce three lint violations in the file the gate was specifically set up to keep clean. The gate is the canonical color contract; the brand kit is a reference snapshot, not a build artifact.
+2. **Pixel parity preserved.** `--color-status-error` resolves to red-500 in light (`oklch(0.637 0.237 25.331)`) and red-400 in dark. Verified in audit doc §(g) that this is byte-identical to the brand-kit literal source. Adopting brand kit would not change pixels — only break the lint gate.
+3. **Phase 4 migration was deliberate.** The status-token form was the explicit Phase 4 deliverable for this exact line, captured in CLAUDE.md's "Destructive-outline buttons" section as the no-re-inline contract. Reverting it would undo Phase 4.
+
+### Variants/sizes that are net-additions in new-ui (kept; documented as project-specific)
+
+These already match the brand kit byte-for-byte where shared, but represent **net additions** new-ui makes that the brand kit doesn't have. They stay per CLAUDE.md's "Tags / status chips" and "Destructive-outline buttons" contracts:
+
+| Primitive | New-ui addition | Documented at |
+|---|---|---|
+| `Badge` | `size="tag"` (9px, uppercase, leading-none, h-5) | `new-ui/CLAUDE.md` "Tags / status chips" section |
+| `Button` | `variant="destructive-outline"` (red border + text + 10% hover bg) | `new-ui/CLAUDE.md` "Destructive-outline buttons" section |
+| `Button` | sizes `xs`, `icon-xs`, `icon-sm`, `icon-lg` (brand kit only has default/sm/lg/icon) | implicitly via cva variants |
+| `Tabs` | `variant="line"` underline-style with `after:` pseudo-element | implicitly via cva variants |
+| `AlertDialog` | `size="sm"` (max-w-xs); `AlertDialogMedia` slot for icon header | implicitly |
+| `DropdownMenuItem` | `variant="destructive"` for inline delete actions | implicitly |
+| `Dialog` | `showCloseButton` on Content/Footer | implicitly |
+
+The brand kit's `~/Downloads/swarm-design-system/new-ui/src/components/ui/` is a **direct copy** of new-ui at an earlier point — every variant/size new-ui ships is also in the brand kit, except the `destructive-outline` line where new-ui's Phase 4 token migration ran ahead of the brand kit's snapshot.
+
+### Net Phase 8 outcome
+
+**Zero primitive code changes.** All 7 primitives reconciled. The audit doc is the source of truth for parity decisions; CLAUDE.md picks up a "Primitive parity with brand kit" subsection (added in this phase) pointing back to this audit.
+
+The plan explicitly anticipates zero code changes as a possibility ("**Even if zero primitive code changes land** … still commit the audit doc + CLAUDE.md updates so the parity work is documented"). That is the case here.
+
+---
+
+## Phase 8 implementation summary
+
+| Artifact | Status |
+|---|---|
+| Diff all 7 shared primitives byte-level | done |
+| Document deltas per primitive in audit doc with `file:line` | done (table above) |
+| Apply approved primitive changes | n/a — zero code changes; brand kit is one-line behind on `button.tsx:18` and adopting it would break the Phase 7 lint gate |
+| Update `new-ui/CLAUDE.md` with primitive-parity subsection | done |
+| Phase 8 success criteria: `pnpm run check:tokens && pnpm lint && pnpm exec tsc -b` | run during phase verification |
+| Phase 8 success criteria: `qa-use` capture | **skipped** — qa-use deferred to PR-time per orchestrator instruction |

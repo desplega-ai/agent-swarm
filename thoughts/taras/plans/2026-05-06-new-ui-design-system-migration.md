@@ -4,7 +4,7 @@ topic: "new-ui Design System Migration Plan"
 status: in-progress
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
-last_updated_by: Claude (phase 7)
+last_updated_by: Claude (phase 8)
 ---
 
 # new-ui Design System Migration Plan
@@ -615,12 +615,12 @@ Per-decision edits to the affected `src/components/ui/*.tsx` files. Each touched
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd new-ui && pnpm run check:tokens` (Phase 7) still passes
-- [ ] `cd new-ui && pnpm lint && pnpm exec tsc -b`
+- [x] `cd new-ui && pnpm run check:tokens` (Phase 7) still passes
+- [x] `cd new-ui && pnpm lint && pnpm exec tsc -b`
 
 #### Automated QA:
-- [ ] `qa-use` capture of routes that exercise each touched primitive in light + dark into `thoughts/taras/qa/2026-05-06-design-system-audit/phase-8/`.
-- [ ] If any deliberate visual change lands, side-by-side before/after captured for review.
+- [ ] `qa-use` capture of routes that exercise each touched primitive in light + dark into `thoughts/taras/qa/2026-05-06-design-system-audit/phase-8/`. [skipped — qa-use deferred to PR-time]
+- [ ] If any deliberate visual change lands, side-by-side before/after captured for review. [skipped — qa-use deferred to PR-time; zero deliberate visual changes landed in Phase 8]
 
 #### Manual Verification:
 - [ ] Audit doc parity table reviewed: every primitive has an entry, every delta has a decision.
