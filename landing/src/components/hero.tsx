@@ -55,7 +55,7 @@ export async function Hero() {
           style={{ textWrap: "pretty" }}
         >
           A lead delegates. Workers ship in Docker. Memory persists.{" "}
-          <span className="text-white">The agentic OS your company needs.</span>
+          <span className="text-white">The agentic company OS your company needs.</span>
         </p>
 
         <div className="mt-11 flex flex-row gap-2.5 sm:gap-3 justify-center">

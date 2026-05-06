@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Agent Swarm — Intelligence that compounds. Your agent company OS.",
+  title: "Agent Swarm — Intelligence that compounds. Your agentic company OS.",
   description:
-    "Intelligence that compounds. The multi-agent coordination layer for AI coding agents. Your agent company OS — free & open source.",
+    "Intelligence that compounds. The multi-agent coordination layer for AI coding agents. Your agentic company OS — free & open source.",
   keywords: [
     "agent swarm",
     "agent swarm cloud",
@@ -26,19 +26,19 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "Agent Swarm — Intelligence that compounds. Your agent company OS.",
+    title: "Agent Swarm — Intelligence that compounds. Your agentic company OS.",
     description:
-      "Intelligence that compounds. The multi-agent coordination layer for AI coding agents. Your agent company OS — free & open source.",
+      "Intelligence that compounds. The multi-agent coordination layer for AI coding agents. Your agentic company OS — free & open source.",
     url: "https://agent-swarm.dev",
     siteName: "Agent Swarm",
     type: "website",
     locale: "en_US",
     images: [
       {
-        url: "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Intelligence+that+compounds.+Your+agent+company+OS.&subtitle=The+multi-agent+coordination+layer+for+AI+coding+agents.+Your+agent+company+OS+%E2%80%94+free+%26+open+source.",
+        url: "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Intelligence+that+compounds.+Your+agentic+company+OS.&subtitle=The+multi-agent+coordination+layer+for+AI+coding+agents.+Your+agentic+company+OS+%E2%80%94+free+%26+open+source.",
         width: 1200,
         height: 630,
-        alt: "Agent Swarm — Intelligence that compounds. Your agent company OS.",
+        alt: "Agent Swarm — Intelligence that compounds. Your agentic company OS.",
       },
     ],
   },
@@ -46,11 +46,11 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     site: "@desplegalabs",
     creator: "@desplegalabs",
-    title: "Agent Swarm — Intelligence that compounds. Your agent company OS.",
+    title: "Agent Swarm — Intelligence that compounds. Your agentic company OS.",
     description:
-      "Intelligence that compounds. The multi-agent coordination layer for AI coding agents. Your agent company OS — free & open source.",
+      "Intelligence that compounds. The multi-agent coordination layer for AI coding agents. Your agentic company OS — free & open source.",
     images: [
-      "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Intelligence+that+compounds.+Your+agent+company+OS.&subtitle=The+multi-agent+coordination+layer+for+AI+coding+agents.+Your+agent+company+OS+%E2%80%94+free+%26+open+source.",
+      "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Intelligence+that+compounds.+Your+agentic+company+OS.&subtitle=The+multi-agent+coordination+layer+for+AI+coding+agents.+Your+agentic+company+OS+%E2%80%94+free+%26+open+source.",
     ],
   },
   metadataBase: new URL("https://agent-swarm.dev"),
