@@ -112,7 +112,7 @@ export function PricingTiers() {
           <p className="text-[16px] text-zinc-500 leading-[1.6] max-w-md">
             Self-host the whole thing for free, forever. Or skip the ops and run it on Cloud —{" "}
             <span className="text-zinc-800">
-              pick how many workers you need, see the total. 25% off if paid annually.
+              pick how many workers you need, see the total.
             </span>
           </p>
         </div>
