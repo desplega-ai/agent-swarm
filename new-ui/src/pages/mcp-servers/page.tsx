@@ -16,11 +16,23 @@ import {
 } from "@/components/ui/select";
 import { formatRelativeTime } from "@/lib/utils";
 
+/**
+ * Transport / auth-method / scope chips. Each protocol type has no semantic
+ * status meaning — they're visual differentiators. Mapped by closest hue match
+ * to existing action / status tokens (pixel parity preserved):
+ * - stdio (blue) → `action-default`
+ * - http (purple) → `action-delegate-to-agent`
+ * - sse (cyan) → `action-script`
+ * - oauth (purple) → `action-delegate-to-agent`
+ * - auto (sky) → `action-raw-llm`
+ * - global (emerald) → `status-success`
+ * - swarm (amber) → `status-active`
+ */
 function TransportBadge({ transport }: { transport: string }) {
   const colors: Record<string, string> = {
-    stdio: "border-blue-500/30 text-blue-400",
-    http: "border-purple-500/30 text-purple-400",
-    sse: "border-cyan-500/30 text-cyan-400",
+    stdio: "border-action-default/30 text-action-default",
+    http: "border-action-delegate-to-agent/30 text-action-delegate-to-agent",
+    sse: "border-action-script/30 text-action-script",
   };
   return (
     <Badge variant="outline" size="tag" className={`${colors[transport] || ""}`}>
@@ -32,8 +44,8 @@ function TransportBadge({ transport }: { transport: string }) {
 function AuthMethodBadge({ method }: { method: string }) {
   const colors: Record<string, string> = {
     static: "border-status-neutral/30 text-status-neutral",
-    oauth: "border-purple-500/30 text-purple-400",
-    auto: "border-sky-500/30 text-sky-400",
+    oauth: "border-action-delegate-to-agent/30 text-action-delegate-to-agent",
+    auto: "border-action-raw-llm/30 text-action-raw-llm",
   };
   return (
     <Badge variant="outline" size="tag" className={`${colors[method] || ""}`}>
@@ -44,8 +56,8 @@ function AuthMethodBadge({ method }: { method: string }) {
 
 function ScopeBadge({ scope }: { scope: string }) {
   const colors: Record<string, string> = {
-    global: "border-emerald-500/30 text-emerald-400",
-    swarm: "border-amber-500/30 text-amber-400",
+    global: "border-status-success/30 text-status-success",
+    swarm: "border-status-active/30 text-status-active",
     agent: "border-status-neutral/30 text-status-neutral",
   };
   return (
@@ -119,8 +131,8 @@ export default function McpServersPage() {
             size="tag"
             className={`${
               params.value
-                ? "border-emerald-500/30 text-emerald-400"
-                : "border-red-500/30 text-red-400"
+                ? "border-status-success/30 text-status-success"
+                : "border-status-error/30 text-status-error"
             }`}
           >
             {params.value ? "Enabled" : "Disabled"}

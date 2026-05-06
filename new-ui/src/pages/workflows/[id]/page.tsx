@@ -128,7 +128,7 @@ export default function WorkflowDetailPage() {
         flex: 1,
         cellRenderer: (params: { value?: string }) =>
           params.value ? (
-            <span className="text-red-500 truncate text-xs">{params.value}</span>
+            <span className="text-status-error truncate text-xs">{params.value}</span>
           ) : null,
       },
     ],
@@ -351,7 +351,7 @@ export default function WorkflowDetailPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700"
+              variant="destructive"
               onClick={() => {
                 deleteWorkflow.mutate(workflow.id, {
                   onSuccess: () => navigate("/workflows"),
@@ -409,7 +409,7 @@ function NodeInspector({ node, allNodes }: { node: WorkflowNode; allNodes: Workf
               {node.type}
             </Badge>
             {executorInfo && (
-              <Badge variant="outline" size="tag" className="text-sky-400">
+              <Badge variant="outline" size="tag" className="text-status-info">
                 {executorInfo.mode}
               </Badge>
             )}
@@ -425,7 +425,7 @@ function NodeInspector({ node, allNodes }: { node: WorkflowNode; allNodes: Workf
                 <div key={key} className="flex items-center gap-2 text-xs font-mono">
                   <span className="text-foreground">{key}</span>
                   <span className="text-muted-foreground">&rarr;</span>
-                  <span className="text-amber-500">{value}</span>
+                  <span className="text-status-active">{value}</span>
                 </div>
               ))}
             </div>
@@ -516,7 +516,7 @@ function HighlightedTemplate({ text }: { text: string }) {
     <div className="bg-muted rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
       {parts.map((part, i) =>
         /^{{[^}]*}}$/.test(part) ? (
-          <span key={i} className="text-amber-500">
+          <span key={i} className="text-status-active">
             {part}
           </span>
         ) : (
@@ -882,7 +882,7 @@ function NotifyNodeConfig({ config }: { config: Record<string, unknown> }) {
 
         {(channel || target) && (
           <div className="flex items-center gap-2 text-xs flex-wrap">
-            {ChannelIcon && <ChannelIcon className="h-3.5 w-3.5 text-teal-400 shrink-0" />}
+            {ChannelIcon && <ChannelIcon className="h-3.5 w-3.5 text-action-notify shrink-0" />}
             {channel && (
               <>
                 <span className="text-muted-foreground">Channel:</span>
@@ -935,7 +935,7 @@ function PropertyMatchConfig({ config }: { config: Record<string, unknown> }) {
                 className="rounded-md bg-muted px-3 py-2 font-mono text-xs flex items-center gap-2 flex-wrap"
               >
                 <span className="text-foreground">{cond.field ?? "?"}</span>
-                <span className="text-amber-500">{cond.op ?? "?"}</span>
+                <span className="text-status-active">{cond.op ?? "?"}</span>
                 {cond.value !== undefined && (
                   <span className="text-muted-foreground">{JSON.stringify(cond.value)}</span>
                 )}
@@ -1557,7 +1557,7 @@ function TriggerSchemaSection({
             </Button>
           </div>
           <div
-            className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-900 dark:text-amber-200"
+            className="rounded-md border border-status-active/40 bg-status-active/10 px-2 py-1.5 text-xs text-status-active-strong"
             data-testid="trigger-schema-real-run-warning"
           >
             <strong className="font-semibold">Heads up:</strong> clicking <em>Send trigger</em>{" "}
@@ -1593,7 +1593,7 @@ function TriggerSchemaSection({
           )}
           {liveStatus === "valid" && (
             <p
-              className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1"
+              className="text-xs text-status-success-strong flex items-center gap-1"
               data-testid="trigger-schema-live-valid"
             >
               <Check className="h-3 w-3" /> Payload matches the schema. Safe to send.
@@ -1662,12 +1662,12 @@ function TriggerSchemaSection({
           )}
           {testSuccessRunId && (
             <div
-              className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2 text-xs"
+              className="rounded-md border border-status-success/30 bg-status-success/5 p-2 text-xs"
               data-testid="trigger-schema-test-success"
             >
               <span className="text-muted-foreground">Run started: </span>
               <a
-                className="font-mono text-emerald-600 dark:text-emerald-400 hover:underline"
+                className="font-mono text-status-success-strong hover:underline"
                 href={`/workflow-runs/${testSuccessRunId}`}
               >
                 {testSuccessRunId}
@@ -1706,7 +1706,7 @@ function TriggerCard({ workflowId, trigger }: { workflowId: string; trigger: Tri
     return (
       <div className="rounded-lg border bg-card p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <Webhook className="h-4 w-4 text-emerald-500" />
+          <Webhook className="h-4 w-4 text-status-success" />
           <Badge variant="outline" size="tag" className="font-mono">
             webhook
           </Badge>

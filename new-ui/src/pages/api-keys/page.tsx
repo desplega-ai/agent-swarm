@@ -27,13 +27,13 @@ import { cn, formatSmartTime } from "@/lib/utils";
 const statusConfig: Record<ApiKeyStatusType, { label: string; dot: string; text: string }> = {
   available: {
     label: "AVAILABLE",
-    dot: "bg-emerald-500",
-    text: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-status-success",
+    text: "text-status-success-strong",
   },
   rate_limited: {
     label: "RATE LIMITED",
-    dot: "bg-red-500",
-    text: "text-red-600 dark:text-red-400",
+    dot: "bg-status-error",
+    text: "text-status-error-strong",
   },
 };
 
@@ -73,10 +73,18 @@ function formatProvider(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;
 }
 
+/**
+ * Provider tone hints. Mapped to existing semantic tokens by closest hue:
+ * - claude (amber) → `status-active-strong` (exact light/dark match)
+ * - pi (violet) → `action-agent-task` (light shifts amber-600 → -500; dark
+ *   stays violet-400 — single-stop light shift accepted per Phase 4 audit
+ *   decision §7 "no `-strong` action tokens")
+ * - codex (emerald) → `status-success-strong` (exact light/dark match)
+ */
 const PROVIDER_BADGE_TONE: Record<string, string> = {
-  claude: "text-amber-600 dark:text-amber-400",
-  pi: "text-violet-600 dark:text-violet-400",
-  codex: "text-emerald-600 dark:text-emerald-400",
+  claude: "text-status-active-strong",
+  pi: "text-action-agent-task",
+  codex: "text-status-success-strong",
 };
 
 function formatExpiry(until: string | null): string {
@@ -250,7 +258,9 @@ export default function ApiKeysPage() {
           if (params.data?.status !== "rate_limited")
             return <span className="text-muted-foreground">-</span>;
           return (
-            <span className="text-xs font-mono text-red-400">{formatExpiry(params.value)}</span>
+            <span className="text-xs font-mono text-status-error">
+              {formatExpiry(params.value)}
+            </span>
           );
         },
       },
@@ -267,7 +277,7 @@ export default function ApiKeysPage() {
         headerName: "Rate Limits",
         width: 110,
         cellRenderer: (params: { value: number }) => (
-          <span className={cn("font-mono text-xs", params.value > 0 && "text-red-400")}>
+          <span className={cn("font-mono text-xs", params.value > 0 && "text-status-error")}>
             {params.value}
           </span>
         ),
@@ -320,23 +330,23 @@ export default function ApiKeysPage() {
         </Card>
         <Card>
           <CardContent className="p-3 flex items-center gap-3">
-            <div className="rounded-md bg-emerald-500/10 p-2">
-              <ShieldCheck className="h-4 w-4 text-emerald-500" />
+            <div className="rounded-md bg-status-success/10 p-2">
+              <ShieldCheck className="h-4 w-4 text-status-success" />
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Available</p>
-              <p className="text-lg font-semibold text-emerald-500">{stats.available}</p>
+              <p className="text-lg font-semibold text-status-success">{stats.available}</p>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-3 flex items-center gap-3">
-            <div className="rounded-md bg-red-500/10 p-2">
-              <ShieldAlert className="h-4 w-4 text-red-500" />
+            <div className="rounded-md bg-status-error/10 p-2">
+              <ShieldAlert className="h-4 w-4 text-status-error" />
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Rate Limited</p>
-              <p className="text-lg font-semibold text-red-500">{stats.rateLimited}</p>
+              <p className="text-lg font-semibold text-status-error">{stats.rateLimited}</p>
             </div>
           </CardContent>
         </Card>

@@ -159,7 +159,7 @@ export default function WorkflowsPage() {
         flex: 1,
         cellRenderer: (params: { value?: string }) =>
           params.value ? (
-            <span className="text-red-500 truncate text-xs">{params.value}</span>
+            <span className="text-status-error truncate text-xs">{params.value}</span>
           ) : null,
       },
     ],

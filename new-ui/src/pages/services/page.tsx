@@ -10,9 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatSmartTime } from "@/lib/utils";
 
 const statusColors: Record<ServiceStatus, string> = {
-  healthy: "bg-emerald-500",
-  unhealthy: "bg-red-500",
-  starting: "bg-yellow-500",
+  healthy: "bg-status-success",
+  unhealthy: "bg-status-error",
+  starting: "bg-status-pending",
   stopped: "bg-status-neutral",
 };
 

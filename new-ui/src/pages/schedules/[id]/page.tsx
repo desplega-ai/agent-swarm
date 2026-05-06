@@ -213,8 +213,8 @@ export default function ScheduleDetailPage() {
           size="tag"
           className={`${
             schedule.scheduleType === "one_time"
-              ? "border-amber-500/30 text-amber-400"
-              : "border-emerald-500/30 text-emerald-400"
+              ? "border-status-active/30 text-status-active"
+              : "border-status-success/30 text-status-success"
           }`}
         >
           {schedule.scheduleType === "one_time" ? "One-time" : "Recurring"}
@@ -454,7 +454,7 @@ export default function ScheduleDetailPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700"
+              variant="destructive"
               onClick={() => {
                 deleteSchedule.mutate(schedule.id, { onSuccess: () => navigate("/schedules") });
               }}

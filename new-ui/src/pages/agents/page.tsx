@@ -65,7 +65,7 @@ export default function AgentsPage() {
         cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => {
           const agent = params.data;
           const atCapacity = agent?.capacity && agent.capacity.available === 0;
-          return <span className={atCapacity ? "text-red-400" : ""}>{params.value}</span>;
+          return <span className={atCapacity ? "text-status-error" : ""}>{params.value}</span>;
         },
       },
       {

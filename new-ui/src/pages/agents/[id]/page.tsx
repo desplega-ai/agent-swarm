@@ -365,7 +365,7 @@ export default function AgentDetailPage() {
                   </span>
                   <p className="text-sm">
                     {agent.capacity ? (
-                      <span className={agent.capacity.available === 0 ? "text-red-400" : ""}>
+                      <span className={agent.capacity.available === 0 ? "text-status-error" : ""}>
                         {agent.capacity.current} / {agent.capacity.max} tasks{" "}
                         <span className="text-muted-foreground">
                           ({agent.capacity.available} available)
@@ -539,7 +539,7 @@ export default function AgentDetailPage() {
                         size="tag"
                         className={`${
                           skill.isActive
-                            ? "border-emerald-500/30 text-emerald-400"
+                            ? "border-status-success/30 text-status-success"
                             : "border-status-neutral/30 text-status-neutral"
                         }`}
                       >
@@ -582,10 +582,10 @@ export default function AgentDetailPage() {
                         size="tag"
                         className={`${
                           server.transport === "stdio"
-                            ? "border-blue-500/30 text-blue-400"
+                            ? "border-action-default/30 text-action-default"
                             : server.transport === "http"
-                              ? "border-purple-500/30 text-purple-400"
-                              : "border-cyan-500/30 text-cyan-400"
+                              ? "border-action-delegate-to-agent/30 text-action-delegate-to-agent"
+                              : "border-action-script/30 text-action-script"
                         }`}
                       >
                         {server.transport}
@@ -595,7 +595,7 @@ export default function AgentDetailPage() {
                         size="tag"
                         className={`${
                           server.isActive
-                            ? "border-emerald-500/30 text-emerald-400"
+                            ? "border-status-success/30 text-status-success"
                             : "border-status-neutral/30 text-status-neutral"
                         }`}
                       >

@@ -76,21 +76,21 @@ import { cn, formatRelativeTime, formatSmartTime, normalizeNewlines } from "@/li
 function logStatusColor(status: string | null | undefined): string {
   switch (status) {
     case "completed":
-      return "text-emerald-400";
+      return "text-status-success";
     case "failed":
     case "cancelled":
-      return "text-red-400";
+      return "text-status-error";
     case "in_progress":
     case "busy":
-      return "text-amber-400";
+      return "text-status-active";
     case "idle":
-      return "text-emerald-400";
+      return "text-status-success";
     case "offline":
       return "text-status-neutral";
     case "pending":
     case "offered":
     case "unassigned":
-      return "text-yellow-400";
+      return "text-status-pending";
     default:
       return "text-primary";
   }
@@ -100,17 +100,17 @@ function logDotColor(eventType: string, newValue?: string): string {
   if (eventType === "task_status_change") {
     switch (newValue) {
       case "completed":
-        return "bg-emerald-500";
+        return "bg-status-success";
       case "failed":
       case "cancelled":
-        return "bg-red-500";
+        return "bg-status-error";
       case "in_progress":
-        return "bg-amber-500";
+        return "bg-status-active";
       default:
         return "bg-primary/60";
     }
   }
-  if (eventType === "task_created") return "bg-blue-400";
+  if (eventType === "task_created") return "bg-status-paused";
   if (eventType === "task_progress") return "bg-muted-foreground/40";
   return "bg-primary/60";
 }
@@ -138,11 +138,11 @@ function renderLogContent(log: AgentLog): React.ReactNode {
     case "task_offered":
       return <span className="text-xs font-medium">Offered to agent</span>;
     case "task_accepted":
-      return <span className="text-xs font-medium text-emerald-400">Accepted</span>;
+      return <span className="text-xs font-medium text-status-success">Accepted</span>;
     case "task_rejected":
-      return <span className="text-xs font-medium text-red-400">Rejected</span>;
+      return <span className="text-xs font-medium text-status-error">Rejected</span>;
     case "task_claimed":
-      return <span className="text-xs font-medium text-emerald-400">Claimed</span>;
+      return <span className="text-xs font-medium text-status-success">Claimed</span>;
     case "task_released":
       return <span className="text-xs font-medium">Released</span>;
     default:
@@ -381,9 +381,9 @@ function TaskCostSection({
 }
 
 function contextBarColor(percent: number): string {
-  if (percent > 80) return "[&_[data-slot=progress-indicator]]:bg-red-500";
-  if (percent > 50) return "[&_[data-slot=progress-indicator]]:bg-amber-500";
-  return "[&_[data-slot=progress-indicator]]:bg-emerald-500";
+  if (percent > 80) return "[&_[data-slot=progress-indicator]]:bg-status-error";
+  if (percent > 50) return "[&_[data-slot=progress-indicator]]:bg-status-warning";
+  return "[&_[data-slot=progress-indicator]]:bg-status-success";
 }
 
 function TaskContextSection({
@@ -750,12 +750,12 @@ export default function TaskDetailPage() {
           variant="card"
           title="Failure Reason"
           icon={AlertTriangle}
-          iconColor="text-red-400"
-          borderColor="border-red-500/30"
-          bgColor="bg-red-500/5"
+          iconColor="text-status-error"
+          borderColor="border-status-error/30"
+          bgColor="bg-status-error/5"
           defaultOpen
         >
-          <div className="text-sm text-red-300/80 leading-relaxed max-h-64 overflow-auto">
+          <div className="text-sm text-status-error/80 leading-relaxed max-h-64 overflow-auto">
             <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
           </div>
         </CollapsibleSection>
@@ -766,9 +766,9 @@ export default function TaskDetailPage() {
           variant="card"
           title="Output"
           icon={isCompleted ? CheckCircle2 : Terminal}
-          iconColor={isCompleted ? "text-emerald-400" : "text-muted-foreground"}
-          borderColor={isCompleted ? "border-emerald-500/30" : "border-border"}
-          bgColor={isCompleted ? "bg-emerald-500/5" : "bg-muted/20"}
+          iconColor={isCompleted ? "text-status-success" : "text-muted-foreground"}
+          borderColor={isCompleted ? "border-status-success/30" : "border-border"}
+          bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
           defaultOpen
         >
           <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-[60vh]" />
@@ -907,10 +907,10 @@ export default function TaskDetailPage() {
                     <AlertDialogFooter>
                       <AlertDialogCancel>Keep Task</AlertDialogCancel>
                       <AlertDialogAction
+                        variant="destructive"
                         onClick={() =>
                           cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
                         }
-                        className="bg-red-600 hover:bg-red-700"
                       >
                         Cancel Task
                       </AlertDialogAction>
@@ -959,11 +959,11 @@ export default function TaskDetailPage() {
               variant="card"
               title="Failure Reason"
               icon={AlertTriangle}
-              iconColor="text-red-400"
-              borderColor="border-red-500/30"
-              bgColor="bg-red-500/5"
+              iconColor="text-status-error"
+              borderColor="border-status-error/30"
+              bgColor="bg-status-error/5"
             >
-              <div className="text-sm text-red-300/80 leading-relaxed max-h-48 overflow-auto">
+              <div className="text-sm text-status-error/80 leading-relaxed max-h-48 overflow-auto">
                 <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
               </div>
             </CollapsibleSection>
@@ -974,9 +974,9 @@ export default function TaskDetailPage() {
               variant="card"
               title="Output"
               icon={isCompleted ? CheckCircle2 : Terminal}
-              iconColor={isCompleted ? "text-emerald-400" : "text-muted-foreground"}
-              borderColor={isCompleted ? "border-emerald-500/30" : "border-border"}
-              bgColor={isCompleted ? "bg-emerald-500/5" : "bg-muted/20"}
+              iconColor={isCompleted ? "text-status-success" : "text-muted-foreground"}
+              borderColor={isCompleted ? "border-status-success/30" : "border-border"}
+              bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
             >
               <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-48" />
             </CollapsibleSection>

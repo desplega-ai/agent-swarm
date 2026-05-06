@@ -34,7 +34,7 @@ function QuestionField({
             variant={(value as { approved?: boolean })?.approved === true ? "default" : "outline"}
             className={
               (value as { approved?: boolean })?.approved === true
-                ? "bg-emerald-600 hover:bg-emerald-700"
+                ? "bg-status-success hover:bg-status-success-strong text-status-success-foreground"
                 : ""
             }
             onClick={() => onChange({ approved: true })}
@@ -230,7 +230,7 @@ export default function ApprovalRequestDetailPage() {
                 <span className="flex-1 min-w-0">
                   <Streamdown>{normalizeNewlines(question.label)}</Streamdown>
                 </span>
-                {question.required && <span className="text-red-400 text-xs shrink-0">*</span>}
+                {question.required && <span className="text-status-error text-xs shrink-0">*</span>}
                 <Badge variant="outline" size="tag" className="ml-auto shrink-0">
                   {question.type}
                 </Badge>
@@ -266,7 +266,7 @@ export default function ApprovalRequestDetailPage() {
 
       {isPending && (
         <div className="space-y-2">
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error && <p className="text-sm text-status-error">{error}</p>}
           <Button onClick={handleSubmit} disabled={respondMutation.isPending}>
             {respondMutation.isPending ? "Submitting..." : "Submit Response"}
           </Button>

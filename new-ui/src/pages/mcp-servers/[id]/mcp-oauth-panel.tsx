@@ -42,8 +42,8 @@ import { formatRelativeTime } from "@/lib/utils";
 function AuthMethodBadge({ method }: { method: McpServer["authMethod"] }) {
   const colors: Record<string, string> = {
     static: "border-status-neutral/30 text-status-neutral",
-    oauth: "border-purple-500/30 text-purple-400",
-    auto: "border-sky-500/30 text-sky-400",
+    oauth: "border-action-delegate-to-agent/30 text-action-delegate-to-agent",
+    auto: "border-action-raw-llm/30 text-action-raw-llm",
   };
   return (
     <Badge variant="outline" size="tag" className={`${colors[method] || ""}`}>
@@ -54,10 +54,10 @@ function AuthMethodBadge({ method }: { method: McpServer["authMethod"] }) {
 
 function OAuthStatusBadge({ status }: { status: McpOAuthStatus }) {
   const colors: Record<McpOAuthStatus, string> = {
-    connected: "border-emerald-500/30 text-emerald-400",
-    expired: "border-amber-500/30 text-amber-400",
+    connected: "border-status-success/30 text-status-success",
+    expired: "border-status-active/30 text-status-active",
     revoked: "border-status-neutral/30 text-status-neutral",
-    error: "border-red-500/30 text-red-400",
+    error: "border-status-error/30 text-status-error",
   };
   return (
     <Badge variant="outline" size="tag" className={`${colors[status] || ""}`}>
@@ -276,7 +276,7 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
         {statusLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : statusError ? (
-          <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-red-400">
+          <div className="flex items-start gap-2 rounded-md border border-status-error/30 bg-status-error/5 p-3 text-status-error">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <span>{(statusError as Error).message}</span>
           </div>
@@ -287,12 +287,12 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
               <p className="flex items-center gap-2 mt-0.5">
                 {connected ? (
                   <>
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                    <CheckCircle2 className="h-3.5 w-3.5 text-status-success" />
                     Connected
                   </>
                 ) : token ? (
                   <>
-                    <AlertCircle className="h-3.5 w-3.5 text-amber-400" />
+                    <AlertCircle className="h-3.5 w-3.5 text-status-active" />
                     {token.status}
                   </>
                 ) : (
@@ -343,7 +343,7 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
         )}
 
         {token?.lastErrorMessage && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-amber-300">
+          <div className="flex items-start gap-2 rounded-md border border-status-active/30 bg-status-active/5 p-3 text-status-active-strong">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <div>
               <p className="font-medium">Last error</p>

@@ -150,17 +150,17 @@ function GuidelinesSection({ guidelines }: { guidelines: RepoGuidelines }) {
     {
       title: "PR Checks",
       items: guidelines.prChecks,
-      icon: <ShieldCheck className="h-4 w-4 text-amber-500" />,
+      icon: <ShieldCheck className="h-4 w-4 text-status-active" />,
     },
     {
       title: "Merge Checks",
       items: guidelines.mergeChecks,
-      icon: <GitBranch className="h-4 w-4 text-emerald-500" />,
+      icon: <GitBranch className="h-4 w-4 text-status-success" />,
     },
     {
       title: "Review Guidelines",
       items: guidelines.review,
-      icon: <Check className="h-4 w-4 text-blue-500" />,
+      icon: <Check className="h-4 w-4 text-status-paused" />,
     },
   ];
 
@@ -173,8 +173,8 @@ function GuidelinesSection({ guidelines }: { guidelines: RepoGuidelines }) {
           size="tag"
           className={
             guidelines.allowMerge
-              ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
-              : "bg-red-500/15 text-red-400 border-red-500/30"
+              ? "bg-status-success/15 text-status-success border-status-success/30"
+              : "bg-status-error/15 text-status-error border-status-error/30"
           }
         >
           {guidelines.allowMerge ? "Merge allowed" : "Merge not allowed"}
@@ -269,7 +269,9 @@ export default function RepoDetailPage() {
             variant="outline"
             size="tag"
             className={
-              repo.autoClone ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30" : ""
+              repo.autoClone
+                ? "bg-status-success/15 text-status-success border-status-success/30"
+                : ""
             }
           >
             {repo.autoClone ? "Auto-clone ON" : "Auto-clone OFF"}
@@ -281,7 +283,7 @@ export default function RepoDetailPage() {
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button size="sm" variant="destructive-outline" className="gap-1 hover:text-red-300">
+              <Button size="sm" variant="destructive-outline" className="gap-1">
                 <Trash2 className="h-3.5 w-3.5" /> Delete
               </Button>
             </AlertDialogTrigger>

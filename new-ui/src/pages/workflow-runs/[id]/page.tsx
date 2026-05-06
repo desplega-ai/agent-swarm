@@ -162,10 +162,10 @@ export default function WorkflowRunDetailPage() {
               <span
                 className={cn(
                   "inline-block h-2 w-2 rounded-full",
-                  status === "completed" && "bg-emerald-500",
-                  status === "running" && "bg-amber-500",
-                  status === "waiting" && "bg-yellow-500",
-                  status === "failed" && "bg-red-500",
+                  status === "completed" && "bg-status-success",
+                  status === "running" && "bg-status-active",
+                  status === "waiting" && "bg-status-pending",
+                  status === "failed" && "bg-status-error",
                   status === "pending" && "bg-status-neutral",
                   status === "skipped" && "bg-status-neutral/40",
                 )}

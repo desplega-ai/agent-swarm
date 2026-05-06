@@ -81,9 +81,9 @@ export default function SkillDetailPage() {
             size="tag"
             className={`${
               skill.scope === "global"
-                ? "border-emerald-500/30 text-emerald-400"
+                ? "border-status-success/30 text-status-success"
                 : skill.scope === "swarm"
-                  ? "border-amber-500/30 text-amber-400"
+                  ? "border-status-active/30 text-status-active"
                   : ""
             }`}
           >
@@ -94,8 +94,8 @@ export default function SkillDetailPage() {
             size="tag"
             className={`${
               skill.isEnabled
-                ? "border-emerald-500/30 text-emerald-400"
-                : "border-red-500/30 text-red-400"
+                ? "border-status-success/30 text-status-success"
+                : "border-status-error/30 text-status-error"
             }`}
           >
             {skill.isEnabled ? "Enabled" : "Disabled"}

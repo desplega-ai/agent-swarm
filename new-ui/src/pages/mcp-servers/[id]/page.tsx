@@ -23,11 +23,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatRelativeTime } from "@/lib/utils";
 import { McpOAuthPanel } from "./mcp-oauth-panel";
 
+/**
+ * See `mcp-servers/page.tsx` for token-mapping rationale (transport/scope
+ * have no semantic status meaning — mapped by closest hue).
+ */
 function TransportBadge({ transport }: { transport: string }) {
   const colors: Record<string, string> = {
-    stdio: "border-blue-500/30 text-blue-400",
-    http: "border-purple-500/30 text-purple-400",
-    sse: "border-cyan-500/30 text-cyan-400",
+    stdio: "border-action-default/30 text-action-default",
+    http: "border-action-delegate-to-agent/30 text-action-delegate-to-agent",
+    sse: "border-action-script/30 text-action-script",
   };
   return (
     <Badge variant="outline" size="tag" className={`${colors[transport] || ""}`}>
@@ -38,8 +42,8 @@ function TransportBadge({ transport }: { transport: string }) {
 
 function ScopeBadge({ scope }: { scope: string }) {
   const colors: Record<string, string> = {
-    global: "border-emerald-500/30 text-emerald-400",
-    swarm: "border-amber-500/30 text-amber-400",
+    global: "border-status-success/30 text-status-success",
+    swarm: "border-status-active/30 text-status-active",
     agent: "border-status-neutral/30 text-status-neutral",
   };
   return (
@@ -119,7 +123,11 @@ export default function McpServerDetailPage() {
           <TransportBadge transport={server.transport} />
           <ScopeBadge scope={server.scope} />
           {server.authMethod === "oauth" && (
-            <Badge variant="outline" size="tag" className="border-purple-500/30 text-purple-400">
+            <Badge
+              variant="outline"
+              size="tag"
+              className="border-action-delegate-to-agent/30 text-action-delegate-to-agent"
+            >
               OAuth
             </Badge>
           )}
@@ -128,8 +136,8 @@ export default function McpServerDetailPage() {
             size="tag"
             className={`${
               server.isEnabled
-                ? "border-emerald-500/30 text-emerald-400"
-                : "border-red-500/30 text-red-400"
+                ? "border-status-success/30 text-status-success"
+                : "border-status-error/30 text-status-error"
             }`}
           >
             {server.isEnabled ? "Enabled" : "Disabled"}

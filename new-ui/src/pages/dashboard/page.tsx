@@ -38,12 +38,12 @@ function AgentRow({ agent, currentTaskText }: { agent: AgentWithTasks; currentTa
     >
       <div className="shrink-0">
         {agent.status === "busy" ? (
-          <Loader2 className="h-3 w-3 animate-spin text-amber-500" />
+          <Loader2 className="h-3 w-3 animate-spin text-status-active" />
         ) : (
           <div
             className={cn(
               "h-2.5 w-2.5 rounded-full",
-              agent.status === "idle" && "bg-emerald-500",
+              agent.status === "idle" && "bg-status-success",
               agent.status === "offline" && "bg-status-neutral",
             )}
           />
@@ -85,12 +85,12 @@ function ActiveTaskRow({
       className="flex items-center gap-3 px-3 py-2.5 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
     >
       {task.status === "in_progress" || task.status === "offered" ? (
-        <Loader2 className="h-3 w-3 animate-spin text-amber-500 shrink-0" />
+        <Loader2 className="h-3 w-3 animate-spin text-status-active shrink-0" />
       ) : (
         <div
           className={cn(
             "h-2 w-2 rounded-full shrink-0",
-            task.status === "pending" && "bg-yellow-500",
+            task.status === "pending" && "bg-status-pending",
           )}
         />
       )}
@@ -109,34 +109,63 @@ function ActiveTaskRow({
 
 // --- Activity Feed (Linear-style with icons) ---
 
-const eventIcons: Record<string, { icon: LucideIcon; color: string }> = {
-  agent_joined: { icon: UserPlus, color: "text-emerald-400 bg-emerald-400/10" },
-  agent_left: { icon: UserMinus, color: "text-status-neutral bg-status-neutral/10" },
-  agent_status_change: { icon: Radio, color: "text-yellow-400 bg-yellow-400/10" },
-  task_created: { icon: ClipboardPlus, color: "text-blue-400 bg-blue-400/10" },
-  task_status_change: { icon: ArrowRightLeft, color: "text-primary bg-primary/10" },
-  task_progress: { icon: Timer, color: "text-amber-400 bg-amber-400/10" },
-  task_offered: { icon: ArrowRightLeft, color: "text-amber-400 bg-amber-400/10" },
-  task_accepted: { icon: CircleCheck, color: "text-emerald-400 bg-emerald-400/10" },
-  task_rejected: { icon: CircleX, color: "text-red-400 bg-red-400/10" },
-  task_claimed: { icon: CircleCheck, color: "text-emerald-400 bg-emerald-400/10" },
-  task_released: { icon: Ban, color: "text-status-neutral bg-status-neutral/10" },
-  channel_message: { icon: MessageSquare, color: "text-blue-300 bg-blue-300/10" },
-  service_registered: { icon: Server, color: "text-purple-400 bg-purple-400/10" },
+/**
+ * Map of event-type → { icon, status }. The `status` keys into the semantic
+ * status-token classes table below — keeps this map focused on the semantic
+ * meaning of each event ("success", "active", "info", ...) instead of inlining
+ * Tailwind palette literals per row. `service_registered` reuses
+ * `action-delegate-to-agent` (purple hue) since "service joined" doesn't map
+ * to any status; visually identical to the previous purple literal.
+ */
+type EventTone =
+  | "success"
+  | "active"
+  | "info"
+  | "error"
+  | "neutral"
+  | "primary"
+  | "pending"
+  | "service";
+
+const eventToneClasses: Record<EventTone, string> = {
+  success: "text-status-success bg-status-success/10",
+  active: "text-status-active bg-status-active/10",
+  info: "text-status-paused bg-status-paused/10",
+  error: "text-status-error bg-status-error/10",
+  neutral: "text-status-neutral bg-status-neutral/10",
+  primary: "text-primary bg-primary/10",
+  pending: "text-status-pending bg-status-pending/10",
+  service: "text-action-delegate-to-agent bg-action-delegate-to-agent/10",
+};
+
+const eventIcons: Record<string, { icon: LucideIcon; tone: EventTone }> = {
+  agent_joined: { icon: UserPlus, tone: "success" },
+  agent_left: { icon: UserMinus, tone: "neutral" },
+  agent_status_change: { icon: Radio, tone: "pending" },
+  task_created: { icon: ClipboardPlus, tone: "info" },
+  task_status_change: { icon: ArrowRightLeft, tone: "primary" },
+  task_progress: { icon: Timer, tone: "active" },
+  task_offered: { icon: ArrowRightLeft, tone: "active" },
+  task_accepted: { icon: CircleCheck, tone: "success" },
+  task_rejected: { icon: CircleX, tone: "error" },
+  task_claimed: { icon: CircleCheck, tone: "success" },
+  task_released: { icon: Ban, tone: "neutral" },
+  channel_message: { icon: MessageSquare, tone: "info" },
+  service_registered: { icon: Server, tone: "service" },
 };
 
 function statusColor(status: string | null | undefined): string {
   switch (status) {
     case "completed":
-      return "text-emerald-400";
+      return "text-status-success";
     case "failed":
     case "cancelled":
-      return "text-red-400";
+      return "text-status-error";
     case "in_progress":
     case "busy":
-      return "text-amber-400";
+      return "text-status-active";
     case "idle":
-      return "text-emerald-400";
+      return "text-status-success";
     case "offline":
       return "text-status-neutral";
     default:
@@ -147,9 +176,10 @@ function statusColor(status: string | null | undefined): string {
 function ActivityItem({ log, agentMap }: { log: AgentLog; agentMap: Map<string, string> }) {
   const config = eventIcons[log.eventType] ?? {
     icon: Activity,
-    color: "text-status-neutral bg-status-neutral/10",
+    tone: "neutral" as EventTone,
   };
   const Icon = config.icon;
+  const toneClass = eventToneClasses[config.tone];
 
   const agentName = log.agentId ? (agentMap.get(log.agentId) ?? log.agentId.slice(0, 8)) : null;
 
@@ -259,12 +289,12 @@ function ActivityItem({ log, agentMap }: { log: AgentLog; agentMap: Map<string, 
             {channelId ? (
               <Link
                 to={`/chat?channel=${channelId}`}
-                className="font-semibold text-blue-400 hover:underline"
+                className="font-semibold text-status-paused hover:underline"
               >
                 #chat
               </Link>
             ) : (
-              <span className="font-semibold text-blue-400">#chat</span>
+              <span className="font-semibold text-status-paused">#chat</span>
             )}
           </>
         );
@@ -279,7 +309,7 @@ function ActivityItem({ log, agentMap }: { log: AgentLog; agentMap: Map<string, 
       <div
         className={cn(
           "flex h-7 w-7 shrink-0 items-center justify-center rounded-full mt-0.5",
-          config.color,
+          toneClass,
         )}
       >
         <Icon className="h-3.5 w-3.5" />

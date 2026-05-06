@@ -353,8 +353,8 @@ export default function SchedulesPage() {
             size="tag"
             className={`${
               params.value === "one_time"
-                ? "border-amber-500/30 text-amber-400"
-                : "border-emerald-500/30 text-emerald-400"
+                ? "border-status-active/30 text-status-active"
+                : "border-status-success/30 text-status-success"
             }`}
           >
             {params.value === "one_time" ? "One-time" : "Recurring"}

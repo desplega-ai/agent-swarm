@@ -176,7 +176,7 @@ function CreateTaskDialog({
                       <Badge
                         key={depId}
                         variant="outline"
-                        className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center gap-1 cursor-pointer hover:bg-red-500/10 hover:border-red-500/30"
+                        className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center gap-1 cursor-pointer hover:bg-status-error/10 hover:border-status-error/30"
                         onClick={() =>
                           setForm({ ...form, dependsOn: form.dependsOn.filter((d) => d !== depId) })
                         }
@@ -378,7 +378,7 @@ export default function TasksPage() {
           const v = params.value;
           if (!v) return null;
           const color =
-            v >= 80 ? "text-amber-500" : v >= 60 ? "text-foreground" : "text-muted-foreground";
+            v >= 80 ? "text-status-active" : v >= 60 ? "text-foreground" : "text-muted-foreground";
           return <span className={`text-xs font-medium ${color}`}>{v}</span>;
         },
       },

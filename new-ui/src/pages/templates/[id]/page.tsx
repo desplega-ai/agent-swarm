@@ -488,7 +488,7 @@ export default function TemplateDetailPage() {
                           key={v}
                           variant="outline"
                           size="tag"
-                          className="border-amber-500/30 text-amber-400"
+                          className="border-status-active/30 text-status-active"
                         >
                           {v}
                         </Badge>
@@ -563,7 +563,7 @@ export default function TemplateDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={handleDelete}>
+            <AlertDialogAction variant="destructive" onClick={handleDelete}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

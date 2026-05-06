@@ -4,7 +4,7 @@ topic: "new-ui Design System Migration Plan"
 status: in-progress
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
-last_updated_by: Claude (phase 4)
+last_updated_by: Claude (phase 5)
 ---
 
 # new-ui Design System Migration Plan
@@ -464,14 +464,14 @@ Exact target list from enumeration (status-color literals only — layout colors
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `rg -n '(bg|text|border)-(emerald|amber|red|sky|orange|yellow|green|rose|blue|indigo|violet|purple|pink|fuchsia|teal|cyan|lime)-\d' new-ui/src/pages/` → 0 results
-- [ ] `rg -n 'dark:(bg|text|border)-(emerald|amber|red|sky|orange|yellow|green|rose|blue|indigo|violet|purple|pink|fuchsia|teal|cyan|lime)-\d' new-ui/src/pages/` → 0 results
-- [ ] Combined: `rg -n '(bg|text|border)-(emerald|amber|red|sky|orange|yellow|green|rose|blue|indigo|violet|purple|pink|fuchsia|teal|cyan|lime)-\d' new-ui/src/` → 0 results
-- [ ] `cd new-ui && pnpm lint && pnpm exec tsc -b`
+- [x] `rg -n '(bg|text|border)-(emerald|amber|red|sky|orange|yellow|green|rose|blue|indigo|violet|purple|pink|fuchsia|teal|cyan|lime)-\d' new-ui/src/pages/` → 0 results
+- [x] `rg -n 'dark:(bg|text|border)-(emerald|amber|red|sky|orange|yellow|green|rose|blue|indigo|violet|purple|pink|fuchsia|teal|cyan|lime)-\d' new-ui/src/pages/` → 0 results
+- [x] Combined: `rg -n '(bg|text|border)-(emerald|amber|red|sky|orange|yellow|green|rose|blue|indigo|violet|purple|pink|fuchsia|teal|cyan|lime)-\d' new-ui/src/` → 0 results
+- [x] `cd new-ui && pnpm lint && pnpm exec tsc -b`
 
 #### Automated QA:
-- [ ] `qa-use` sweep of all 30 touched pages in light + dark into `thoughts/taras/qa/2026-05-06-design-system-audit/phase-5/`.
-- [ ] Visual diff vs. Phase 4 post-baseline. Special attention to `tasks/[id]`, `dashboard`, `api-keys`, `budgets` (dense pages).
+- [ ] `qa-use` sweep of all 30 touched pages in light + dark into `thoughts/taras/qa/2026-05-06-design-system-audit/phase-5/`. [skipped — qa-use deferred to PR-time]
+- [ ] Visual diff vs. Phase 4 post-baseline. Special attention to `tasks/[id]`, `dashboard`, `api-keys`, `budgets` (dense pages). [skipped — qa-use deferred to PR-time]
 
 #### Manual Verification:
 - [ ] Walk through `/tasks/<id>` for a task in each terminal state (completed, failed, active).
