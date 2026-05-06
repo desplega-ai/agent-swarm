@@ -59,6 +59,22 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-memory-poisoning-decay",
+    title:
+      "Memory Poisoning: Why Persistent Agent Memory Is a Time Bomb",
+    description:
+      "Persistent memory without decay, provenance, and quarantine is not a learning system. It is shared mutable global state dressed in vector embeddings.",
+    date: "May 6, 2026",
+    readTime: "13 min read",
+    tags: [
+      "agent memory",
+      "memory poisoning",
+      "vector search",
+      "AI orchestration",
+      "temporal decay",
+    ],
+  },
+  {
     slug: "deep-dive-mcp-tool-caching-core-deferred",
     title:
       "We Hid 75 of Our Agent's 90 MCP Tools — And It Got Smarter",
