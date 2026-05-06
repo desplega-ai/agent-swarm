@@ -110,6 +110,44 @@ async function discoverToolFiles(): Promise<string[]> {
 }
 
 /**
+ * Strip the surrounding quotes and JS string-concatenation operators from a
+ * captured string literal (or chain of literals). Handles all three quote
+ * styles and any whitespace/newlines between concat fragments.
+ *
+ * Examples:
+ *   `"abc " + "def"`       → "abc def"
+ *   `"a"\n  + "b"`         → "ab"
+ *   `'foo'`                → "foo"
+ *   `"already-clean text"` → "already-clean text"
+ */
+function stripStringLiteral(raw: string): string {
+  return raw
+    .replace(/^\s*["'`]/, "")
+    .replace(/["'`]\s*$/, "")
+    .replace(/["'`]\s*\+\s*["'`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Look up the value of a top-level `const NAME = "..." (+ "...")*;` declaration
+ * inside `content`. Returns the resolved string with concat fragments stripped,
+ * or empty string when the constant isn't a string literal.
+ */
+function resolveStringConstant(constName: string, content: string): string {
+  const re = new RegExp(
+    `(?:const|let|var)\\s+${constName}(?:\\s*:\\s*[^=;]+)?\\s*=\\s*([\\s\\S]*?);`,
+  );
+  const match = content.match(re);
+  if (!match) return "";
+  const raw = match[1].trim();
+  // Only resolve when the right-hand side is a string-literal chain — bail on
+  // function calls, ternaries, etc. so we don't ship garbage.
+  if (!/^["'`]/.test(raw)) return "";
+  return stripStringLiteral(raw);
+}
+
+/**
  * Parse a tool file to extract metadata
  */
 async function parseToolFile(toolFileName: string): Promise<ToolInfo | null> {
@@ -138,7 +176,14 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo | null> {
   for (const pattern of descPatterns) {
     const match = content.match(pattern);
     if (match) {
-      description = match[1].replace(/\s+/g, " ").trim();
+      // The pattern's outer quotes are NOT captured; the captured text may
+      // still contain inner `" + "` concat operators when the source uses
+      // multi-line string concatenation. Strip them so the rendered doc
+      // matches the runtime string the SDK actually serves.
+      description = match[1]
+        .replace(/["'`]\s*\+\s*["'`]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
       break;
     }
   }
@@ -150,7 +195,9 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo | null> {
 }
 
 /**
- * Parse input schema fields from file content
+ * Parse input schema fields from file content. The full `content` is
+ * threaded through so `parseField` can resolve `.describe(CONST_NAME)`
+ * references back to their string-literal definitions.
  */
 function parseSchemaFields(content: string): FieldInfo[] {
   const fields: FieldInfo[] = [];
@@ -203,7 +250,7 @@ function parseSchemaFields(content: string): FieldInfo[] {
     const isEndOfField = (char === "," && depth === 0) || j === objectContent.length - 1;
 
     if (isEndOfField && currentField.trim()) {
-      const field = parseField(currentField);
+      const field = parseField(currentField, content);
       if (field) fields.push(field);
       currentField = "";
     }
@@ -213,9 +260,11 @@ function parseSchemaFields(content: string): FieldInfo[] {
 }
 
 /**
- * Parse a single field definition
+ * Parse a single field definition. `fullContent` is the entire tool-file
+ * source; it's used to resolve `.describe(CONST_NAME)` references back to the
+ * string literal the constant holds.
  */
-function parseField(fieldStr: string): FieldInfo | null {
+function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
   // Match field name and type chain. Allow whitespace/newlines between `z` and
   // the first `.method(...)` so multi-line zod chains (e.g. `z\n  .string()`)
   // are parsed too.
@@ -258,11 +307,30 @@ function parseField(fieldStr: string): FieldInfo | null {
     }
   }
 
-  // Extract description
+  // Extract description.
+  //
+  // Two shapes to handle:
+  //   1) Inline string literal — possibly a chain of concatenated literals
+  //      across multiple lines: `.describe("foo " + "bar")`.
+  //   2) Constant reference: `.describe(SOME_CONSTANT)` where the constant
+  //      is defined elsewhere in the same file as a string literal (or
+  //      string-literal chain).
+  //
+  // Without #2, fields like memory-rate.ts's `referencesSource` (which uses
+  // a hoisted `REFERENCES_SOURCE_DESCRIPTION` constant) render with a blank
+  // description — even though the runtime SDK serves the full text. The
+  // shipped doc would silently drift from the actual schema.
   let description = "";
-  const descMatch = typeChain.match(/\.describe\(["'`]([\s\S]*?)["'`]\)/);
-  if (descMatch) {
-    description = descMatch[1].replace(/\s+/g, " ").trim();
+  const inlineDescMatch = typeChain.match(
+    /\.describe\(\s*((?:["'`][\s\S]*?["'`]\s*\+\s*)*["'`][\s\S]*?["'`])\s*\)/,
+  );
+  if (inlineDescMatch) {
+    description = stripStringLiteral(inlineDescMatch[1]);
+  } else {
+    const constRefMatch = typeChain.match(/\.describe\(\s*([A-Z_][A-Z0-9_]*)\s*\)/);
+    if (constRefMatch) {
+      description = resolveStringConstant(constRefMatch[1], fullContent);
+    }
   }
 
   return { name, type, required, default: defaultValue, description };

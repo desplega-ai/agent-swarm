@@ -29,9 +29,22 @@ and bad ones get demoted.
 | `LlmRater` | worker | Piggybacks the existing `claude -p` summary call in `src/hooks/hook.ts` — the prompt now asks for a `ratings[]` array (`{id, score, reasoning, referencesSource?}`) which is POSTed to `/api/memory/rate`. | `llm` |
 | `ExplicitSelfRatingRater` | worker | The `memory_rate` MCP tool — agents flag a retrieved memory as useful or misleading mid-task. Spam-guarded by a partial unique index on `(taskId, memoryId) WHERE source='explicit-self'`. | `explicit-self` |
 
-Source strings are stamped by the framework, never by the rater itself —
-events that pre-populate `source` are rejected by `applyRating` so a rater
-cannot spoof another rater's signal.
+Source strings travel with each `RatingEvent` and are required by
+`applyRating` (events with an empty `event.source` are rejected — see
+`src/be/memory/raters/store.ts`'s `validate()`). Where the value comes
+from depends on which path the event takes:
+
+- **Server-side raters** (`ImplicitCitationRater`) typically leave
+  `event.source = ""` and let `runServerRaters` stamp
+  `event.source = rater.name` before calling `applyRating` — that's
+  the "framework standardizes the source string" guarantee.
+- **Worker-side raters** (`LlmRater`, `ExplicitSelfRatingRater`) set
+  `event.source` explicitly before POSTing to `/api/memory/rate` —
+  `"llm"` or `"explicit-self"` respectively.
+
+The HTTP boundary additionally restricts incoming `source` to
+`{"llm", "explicit-self"}`, so a worker cannot impersonate the
+server-side `implicit-citation` source.
 
 ### Env vars
 

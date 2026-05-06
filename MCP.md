@@ -157,7 +157,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `parentTaskId` | `uuid` | No | - | - |
 | `dir` | `string` | No | - | - |
 | `vcsRepo` | `string` | No | - | - |
-| `model` | `haiku \| sonnet \| opus` | No | - | - |
+| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for this task ('haiku', 'sonnet', or 'opus |
 | `allowDuplicate` | `boolean` | No | false | - |
 | `slackChannelId` | `string` | No | - | - |
 | `slackThreadTs` | `string` | No | - | - |
@@ -459,7 +459,7 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
 | `channelId` | `string` | No | - | Direct channel ID to upload to (requires lead privileges). |
 | `threadTs` | `string` | No | - | Thread timestamp to upload as a thread reply (used with channelId). |
-| `filePath` | `string` | No | - | - |
+| `filePath` | `string` | No | - | Path to the file to upload. Either filePath OR content must be provided. Relative paths are resolved from /workspace (e.g., 'shared/file.png' -> '/workspace/shared/file.png'). Absolute paths work if they exist or if the file exists under /workspace with that path (e.g., '/tmp/file.png' checks '/tmp/file.png' then '/workspace/tmp/file.png |
 | `content` | `string` | No | - | - |
 | `filename` | `string` | No | - | - |
 | `initialComment` | `string` | No | - | Optional message to post with the file. |
@@ -505,7 +505,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
 | `priority` | `number` | No | - | Priority 0-100, default 50. |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
-| `model` | `haiku \| sonnet \| opus` | No | - | - |
+| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for the created task ('haiku', 'sonnet', or 'opus |
 
 ## Messaging Tools
 
@@ -633,7 +633,7 @@ Register a background service (e.g., PM2 process) for discovery by other agents.
 | `description` | `string` | No | - | What this service does. |
 | `healthCheckPath` | `string` | No | - | Health check endpoint path (default: /health). |
 | `cwd` | `string` | No | - | Working directory for the script. |
-| `interpreter` | `string` | No | - | - |
+| `interpreter` | `string` | No | - | Interpreter to use (e.g., 'node', 'bun |
 | `args` | `array` | No | - | Command line arguments for the script. |
 | `env` | `object` | No | - | Environment variables for the process. |
 | `metadata` | `object` | No | - | Additional metadata. |
@@ -711,7 +711,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 | `targetAgentId` | `string` | No | - | Agent to assign tasks to (omit for task pool) |
 | `timezone` | `string` | No | "UTC" | Timezone for cron schedules |
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
-| `model` | `haiku \| sonnet \| opus` | No | - | - |
+| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for tasks created by this schedule ('haiku', 'sonnet', or 'opus |
 
 ### update-schedule
 
@@ -798,14 +798,14 @@ Delete a specific memory by its ID. Agents can delete their own memories; lead a
 
 **Rate a memory**
 
-Rate a memory you used in the current task. Call this when a " + "retrieved memory was clearly useful (or actively misleading) so " + "the swarm learns to surface better memories next time.
+Rate a memory you used in the current task. Call this when a retrieved memory was clearly useful (or actively misleading) so the swarm learns to surface better memories next time.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | Memory ID returned by memory_search. |
 | `useful` | `boolean` | Yes | - | true = this memory helped solve the task; false = misled or wasted time. |
 | `note` | `string` | No | - | Short reason. Captured for telemetry; not surfaced to other agents. |
-| `referencesSource` | `string` | No | - | - |
+| `referencesSource` | `string` | No | - | Optional external source ID this memory references. Free-form string, convention "<source>:<identifier>" (e.g. "github:owner/repo#N", "linear:KEY-N", "customer:<slug>", "slack:<channel>:<ts>", "agentmail:<thread-id>"). Pick any prefix that fits — no closed enum. When present, an edge from this memory to the external source is created/updated. |
 
 ### inject-learning
 
@@ -826,7 +826,7 @@ Allows the lead agent to push learnings into a worker's memory. The learning wil
 
 **Create Workflow**
 
-Create a new automation workflow. Key concepts:\n" + "- Nodes are linked via 'next' (string or port-based record).\n" + "- CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. " + 'Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. ' + "Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation.\n" + "- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. " + "Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n" + "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.\n" + "- TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. " + "Supported keywords: type, required, properties, enum, const, items (recursive into arrays). " + "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.\n" + "- WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. " + "See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
+Create a new automation workflow. Key concepts:\n- Nodes are linked via 'next' (string or port-based record).\n- CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation.\n- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.\n- TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.\n- WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -862,7 +862,7 @@ Get a workflow by ID, including its definition, triggers, cooldown, input, and a
 
 **Update Workflow**
 
-Update an existing workflow's name, description, definition, triggers, cooldown, input, triggerSchema, or enabled state. " + "Creates a version snapshot before applying changes. " + "TRIGGER SCHEMA: pass 'triggerSchema' as a JSON-Schema object to set/replace, or 'null' to clear. " + "Supported JSON-Schema keywords: type, required, properties, enum, const, items (recursive into arrays). " + "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.
+Update an existing workflow's name, description, definition, triggers, cooldown, input, triggerSchema, or enabled state. Creates a version snapshot before applying changes. TRIGGER SCHEMA: pass 'triggerSchema' as a JSON-Schema object to set/replace, or 'null' to clear. Supported JSON-Schema keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -880,7 +880,7 @@ Update an existing workflow's name, description, definition, triggers, cooldown,
 
 **Patch Workflow Definition**
 
-Partially update a workflow by creating, updating, or deleting individual nodes, " + "and/or by setting/clearing the trigger payload schema. " + "DAG operations are applied in order: delete → create → update. " + "`triggerSchema` is independent of DAG ops: pass an object to set/replace, " + "pass null to clear, or omit to leave unchanged. " + "Validator subset for `triggerSchema`: type, required, properties, enum, const, items. " + "Other JSON-Schema keywords are silently ignored. " + "Creates a version snapshot before applying changes.
+Partially update a workflow by creating, updating, or deleting individual nodes, and/or by setting/clearing the trigger payload schema. DAG operations are applied in order: delete → create → update. `triggerSchema` is independent of DAG ops: pass an object to set/replace, pass null to clear, or omit to leave unchanged. Validator subset for `triggerSchema`: type, required, properties, enum, const, items. Other JSON-Schema keywords are silently ignored. Creates a version snapshot before applying changes.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -895,7 +895,7 @@ Partially update a workflow by creating, updating, or deleting individual nodes,
 
 **Patch Workflow Node**
 
-Partially update a single node in a workflow definition. " + "Merges the provided fields into the existing node. " + "Creates a version snapshot before applying changes.
+Partially update a single node in a workflow definition. Merges the provided fields into the existing node. Creates a version snapshot before applying changes.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -916,7 +916,7 @@ Delete a workflow by ID. This also removes all associated runs and steps.
 
 **Trigger Workflow**
 
-Manually trigger a workflow execution, optionally passing trigger data as context. Respects cooldown configuration. " + "If the workflow has a triggerSchema, the payload is validated first; on failure, the response includes structured validationErrors plus the workflow's triggerSchema for self-correction.
+Manually trigger a workflow execution, optionally passing trigger data as context. Respects cooldown configuration. If the workflow has a triggerSchema, the payload is validated first; on failure, the response includes structured validationErrors plus the workflow's triggerSchema for self-correction.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -968,7 +968,7 @@ Cancel a running or waiting workflow run. Cancels all non-terminal steps and the
 
 **Request human input**
 
-Create an approval request that pauses until a human responds. " + "Supports multiple question types: approval (yes/no), text, single-select, " + "multi-select, and boolean. Returns the request ID and URL for the human to respond.
+Create an approval request that pauses until a human responds. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
