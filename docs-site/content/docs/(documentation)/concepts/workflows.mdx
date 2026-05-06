@@ -17,7 +17,7 @@ A workflow consists of:
 
 ### Executor Types
 
-The engine includes 9 built-in executor types:
+The engine includes 10 built-in executor types:
 
 | Executor | Description |
 |----------|-------------|
@@ -30,6 +30,7 @@ The engine includes 9 built-in executor types:
 | `notify` | Send a notification (Slack, email, or internal message) |
 | `validate` | Validate step output; can halt or trigger retry |
 | `human-in-the-loop` | Pause workflow for human approval or input via the dashboard |
+| `wait` | Pause for a fixed duration (`mode: "time"`) or until a workflow event matching an optional filter (`mode: "event"`); event mode supports `run` / `global` scope and an optional `timeoutMs` that routes to the `timeout` port |
 
 Each executor has typed config and output schemas available via `GET /api/executor-types` (returns JSON Schemas via Zod v4 `z.toJSONSchema()`).
 
@@ -95,6 +96,16 @@ Workflows support a cooldown period to prevent rapid re-triggering:
 ```
 
 A second trigger within the cooldown window results in a run with `skipped` status.
+
+### Trigger payload validation (`triggerSchema`)
+
+Workflows can attach an optional JSON Schema to validate the `triggerData` payload across every trigger path — manual `/trigger`, webhooks, schedules, and the `trigger-workflow` MCP tool. When set, mismatched payloads are rejected with HTTP 400 (or an MCP error) **before** the workflow starts: no run is created, no nodes execute. When unset, any payload is accepted (current default).
+
+Set or update via `create-workflow` / `update-workflow` / `patch-workflow` (MCP) or `POST` / `PUT` / `PATCH /api/workflows/{id}` (HTTP). The `PUT` / `PATCH` paths accept `null` to clear an existing schema.
+
+The validator supports a deliberate JSON-Schema subset: `type`, `required`, `properties`, `enum`, `const`, `items`. Other keywords (`oneOf`, `anyOf`, `$ref`, `pattern`, `format`, `additionalProperties`, …) are silently ignored. On validation failure, the response echoes the workflow's current `triggerSchema` so callers can self-correct without a follow-up `get-workflow`.
+
+See [runbooks/workflows.md § Trigger schema](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/workflows.md#trigger-schema) for the full reference and authoring examples.
 
 ## Execution Model
 
