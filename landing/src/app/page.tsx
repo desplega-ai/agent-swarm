@@ -5,6 +5,7 @@ import { Pillars } from "@/components/pillars";
 import { SocialProof } from "@/components/social-proof";
 import { Features } from "@/components/features";
 import { HowItWorks } from "@/components/how-it-works";
+import { DifferentiationFAQ } from "@/components/differentiation-faq";
 import { PricingTiers } from "@/components/pricing-tiers";
 import { CTA } from "@/components/cta";
 import { Footer } from "@/components/footer";
@@ -41,6 +42,7 @@ export default async function Home() {
       <SocialProof stars={stars} />
       <Features />
       <HowItWorks />
+      <DifferentiationFAQ />
       <PricingTiers />
       <CTA />
       <Footer />
