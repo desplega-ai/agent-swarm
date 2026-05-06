@@ -814,3 +814,78 @@ These intermediate containers had `min-w-0` but no `min-h-0` and were not flex c
 - `pnpm exec tsc -b` — green
 - `pnpm exec vite build` — green
 - `pnpm dev` (Vite at `http://127.0.0.1:4017/`) — boot clean; `/`, `/tasks/x`, `/repos/x`, `/skills/x`, `/mcp-servers/x`, `/schedules/x`, `/approval-requests/x`, `/integrations/x`, `/agents/x` all serve 200 (SPA index.html → React Router). qa-use visual confirmation deferred to PR-time per Taras's brief.
+
+## Phase 18 — sticky Activity heading coverage (regression fix)
+
+After Phase 17 shipped, the user spotted a coverage bug on `tasks/[id]`: when scrolling the right-rail Activity timeline, rows visibly appeared **above** the sticky `<h4>` "ACTIVITY (N)" heading. The heading wasn't fully covering scrolled-past content as a sticky header should.
+
+### Root cause
+
+The Phase 17 markup was:
+
+```tsx
+<DetailPageRail>                        {/* flex flex-col */}
+  <section className="first:mt-0 mt-0">
+    <h4 className="sticky top-0 z-10 bg-background -mx-3 -mt-3 px-3 pt-3 pb-2 pr-10 ... mb-2.5 border-b">
+      ACTIVITY (N)
+    </h4>
+    <LogTimeline />
+  </section>
+</DetailPageRail>
+```
+
+inside an `<aside className="overflow-y-auto py-3 px-3 relative">` that also held the chevron toggle as `position: absolute z-20 top-2 right-2`.
+
+Two interacting flaws produced the visual bug:
+
+1. **Sticky inside `flex flex-col` ambiguity**. `<DetailPageRail>` is a flex column. Its child `<section>` and the sticky `<h4>` resolved their containing block through a flex item with no constrained height. While modern browsers generally handle this, the negative-margin trick (`-mt-3`) compounded the ambiguity: the h4's normal-flow position was *above* the section's content-box origin, which interacts with sticky pin calculations in non-obvious ways.
+2. **Transparent gap below the heading**. `mb-2.5` (10px) sat between the h4's `border-b` and the first timeline row. As the user scrolled, content scrolling up was briefly visible *through* that 10px strip — looking, in screenshot terms, exactly like "a row showing above the heading" because the strip was directly under the heading's bottom border with nothing covering it.
+
+The token swap hypothesis (`bg-background` vs `bg-card`) was wrong: the rail surface IS `bg-background`. The aside has no `bg-*` of its own, so it inherits from `<body>`'s `bg-background`. Token coverage was correct; the structural pattern was the leak.
+
+### Fix
+
+```tsx
+const rightRailContent = hasEvents ? (
+  <div>
+    <h4 className="sticky top-0 z-30 bg-background -mx-3 px-3 pt-3 pb-3 pr-10 ... border-b border-border">
+      <Activity ... /> Activity (N)
+    </h4>
+    <div className="pt-3"><LogTimeline ... /></div>
+  </div>
+) : null;
+```
+
+And on the desktop aside:
+
+```tsx
+- railCollapsed ? "overflow-hidden" : "overflow-y-auto py-3 px-3"
++ railCollapsed ? "overflow-hidden" : "overflow-y-auto pb-3 px-3"
+```
+
+Three structural changes:
+
+1. **Dropped `<DetailPageRail>` and `<section>` wrappers**. The h4 is now a direct child of a bare `<div>` inside the aside. The sticky containing block resolves cleanly to the aside's content-box (the scroll container). No flex-col ambiguity.
+2. **Moved aside top-padding onto the heading**. The aside's `py-3` becomes `pb-3` (no top padding); the h4 owns the top zone via its own `pt-3`. The `-mx-3` extends the heading's `bg-background` to both aside edges. The h4's natural normal-flow position is now `y=0` of the aside's content-box, so sticky `top-0` pins it cleanly with no negative-margin tricks.
+3. **Eliminated the `mb-2.5` transparent gap**. The h4's `pb-3` extends its `bg-background` all the way to its `border-b`. The `pt-3` on the body div below provides the visual breathing room *below* the border, but it's part of the scrolling content — when rows scroll up, they pass *behind* the heading (which now has unbroken `bg-background` coverage from `top: 0` down to its `border-b`). No strip, no leak.
+
+Z-index bumped from `z-10` to `z-30` so the heading paints above the chevron toggle (`z-20`) too — defense-in-depth, in case the chevron's region overlaps the heading text on narrow rails.
+
+### Why this generalizes
+
+Anywhere we want a sticky header inside a padded scrollable container, this pattern is the safe one:
+
+- Drop top padding from the scroll container.
+- Put the padding inside the sticky element (so its `bg-*` covers from `top: 0` of the viewport down to its content's bottom edge).
+- Use negative horizontal margin (`-mx-3`) only — no negative top margin.
+- Keep the sticky element as a direct child of a bare `<div>` (or the scroll container itself), not a `flex` parent.
+
+This is documented here so future contributors hitting the same shape (long-list rail, sticky title) don't repeat the negative-margin-on-flex-parent pattern.
+
+### Verification
+
+- `pnpm run check:tokens` — green
+- `pnpm lint` — green
+- `pnpm exec tsc -b` — green
+- `pnpm exec vite build` — green
+- `pnpm dev` (portless `https://ui.swarm.localhost`) — boots; `/tasks/<id>` serves 200; HMR picked up the change (verified via curl of `/src/pages/tasks/[id]/page.tsx` returning the new `z-30` source). Visual confirmation of the scroll behavior deferred to user qa-use at PR-time per the brief.

@@ -69,7 +69,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DetailPageRail, DetailPageSection } from "@/components/ui/detail-page-layout";
+import { DetailPageSection } from "@/components/ui/detail-page-layout";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -707,29 +707,41 @@ export default function TaskDetailPage() {
   );
 
   // RIGHT RAIL — Activity timeline only (Phase 17 moved Session Cost to the
-  // left rail). The Activity heading is sticky at the top of the rail; rows
-  // scroll under it. The rail itself renders `overflow-y-auto` at the page
-  // level (see desktop layout below); the sticky heading uses `top-0` against
-  // that scroll container and a `bg-background` background so the rows pass
-  // beneath without showing through.
-  const rightRailContent = (
-    <DetailPageRail>
-      {hasEvents && (
-        <section className="first:mt-0 mt-0">
-          {/* Sticky header — stays pinned at the top of the rail's scroll
-              container so users always see "Activity (N)". `-mx-3 -mt-3 px-3
-              pt-3 pb-2 pr-10` extends the bg into the rail's px-3/py-3 padding
-              and reserves room for the absolutely-positioned collapse chevron
-              at top-2 right-2 (24×24 + spacing → ~40px). */}
-          <h4 className="sticky top-0 z-10 bg-background -mx-3 -mt-3 px-3 pt-3 pb-2 pr-10 font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground mb-2.5 border-b border-border">
-            <Activity className="h-3 w-3 inline-block mr-1 -mt-0.5 text-muted-foreground" />
-            Activity ({task.logs!.length})
-          </h4>
-          <LogTimeline logs={task.logs!} />
-        </section>
-      )}
-    </DetailPageRail>
-  );
+  // left rail). Phase 18 — restructured the sticky-heading pattern:
+  //
+  // The aside is the scroll container (overflow-y-auto). The Activity heading
+  // is a `position: sticky top-0` direct child of a bare wrapper div (no
+  // <DetailPageRail>/<section> in between). Two changes from Phase 17 fix the
+  // coverage bug where timeline rows showed above the pinned heading:
+  //
+  //   1. Removed the `<DetailPageRail>` (`flex flex-col`) and `<section>`
+  //      wrappers around the sticky h4. Sticky inside `flex` items can mis-
+  //      pin in some scroll-with-padding configurations; the bare div gives
+  //      the h4 an unambiguous block-flow containing block whose bounds match
+  //      the aside content area exactly.
+  //   2. The aside's vertical padding (`py-3`) was moved off the top — the
+  //      h4 owns its own `pt-3 pb-3` padding instead, with `-mx-3` extending
+  //      its bg-background to the aside edges. This removes the transparent
+  //      `mb-2.5` gap between heading and timeline that previously let rows
+  //      scroll into view immediately under the heading. `pr-10` reserves
+  //      room for the collapse chevron.
+  //
+  // bg-background is the rail's actual surface (no `bg-card` on the aside —
+  // it inherits from the page <body>'s background, which is bg-background).
+  // z-30 keeps the heading above both the timeline rows (no z) and the
+  // chevron toggle (z-20), so the heading visually covers everything that
+  // scrolls past it.
+  const rightRailContent = hasEvents ? (
+    <div>
+      <h4 className="sticky top-0 z-30 bg-background -mx-3 px-3 pt-3 pb-3 pr-10 font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground border-b border-border">
+        <Activity className="h-3 w-3 inline-block mr-1 -mt-0.5 text-muted-foreground" />
+        Activity ({task.logs!.length})
+      </h4>
+      <div className="pt-3">
+        <LogTimeline logs={task.logs!} />
+      </div>
+    </div>
+  ) : null;
 
   const outcomeContent = (
     <div className="space-y-2">
@@ -1021,11 +1033,14 @@ export default function TaskDetailPage() {
         </section>
 
         {/* Right rail — Activity timeline (sticky header). Collapsible: when
-            collapsed, only the toggle chevron shows; click to re-expand. */}
+            collapsed, only the toggle chevron shows; click to re-expand.
+            Phase 18 — moved `py-3` off the aside (the sticky h4 now owns the
+            top zone via its own `pt-3 -mx-3 px-3 bg-background`); kept `pb-3`
+            so the timeline still gets bottom breathing room. */}
         <aside
           className={cn(
             "border-l border-border min-h-0 relative",
-            railCollapsed ? "overflow-hidden" : "overflow-y-auto py-3 px-3",
+            railCollapsed ? "overflow-hidden" : "overflow-y-auto pb-3 px-3",
           )}
         >
           <button

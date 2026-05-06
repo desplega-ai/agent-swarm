@@ -4,7 +4,7 @@ topic: "new-ui Design System Migration Plan"
 status: completed
 author: Claude (planning)
 last_updated: 2026-05-06T00:00:00Z
-last_updated_by: Claude (phase 17)
+last_updated_by: Claude (phase 18)
 ---
 
 # new-ui Design System Migration Plan
@@ -1273,6 +1273,74 @@ Append a Phase 17 section to `thoughts/taras/research/2026-05-06-design-system-a
 ### QA Spec (optional):
 
 n/a — visual polish + one primitive bug fix. qa-use deferred to PR-time.
+
+---
+
+## Phase 18: fix sticky Activity heading coverage on `tasks/[id]`
+
+### Overview
+
+Phase 17 introduced a sticky `<h4>` heading on the right-rail Activity timeline (`tasks/[id]`). The user reported a visual regression: when scrolling the rail, timeline rows ("Check CI final status" was the example) showed **above** the pinned heading instead of being cleanly hidden behind it. The pinned heading wasn't fully covering the scrolled-past content.
+
+**Root cause** (hypothesis 3 from the brief, with hypothesis 4 contributing): the Phase 17 markup wrapped the sticky `<h4>` in `<DetailPageRail>` (`flex flex-col`) and a `<section>`, then used negative margins (`-mx-3 -mt-3`) to extend the `bg-background` into the aside's `py-3 px-3` padding. Two interacting flaws:
+
+1. Sticky elements inside flex-column wrappers can mis-pin in some layouts (the containing-block resolution becomes ambiguous when the flex item itself has no constrained height).
+2. The h4's `mb-2.5` left a transparent 10px strip between the heading's `border-b` and the first timeline row. As the user scrolled, content scrolling up briefly visible *through* that strip was indistinguishable from "showing above the heading".
+
+The page-level surface (`bg-background`) was correct for the rail (no `bg-card` is applied to the aside; it inherits from `<body>`), so the token swap hypothesis was a red herring.
+
+### Changes Required:
+
+#### 1. Restructure the Activity rail content (`new-ui/src/pages/tasks/[id]/page.tsx`)
+
+Replace the Phase 17 `<DetailPageRail><section><h4 sticky -mx-3 -mt-3 ... mb-2.5 border-b>` pattern with a bare `<div>` wrapper. The h4 is a direct child of the bare wrapper, with its own `pt-3 pb-3` padding (replacing the previous `-mt-3 pt-3 ... mb-2.5`). The body div carries `pt-3` so the timeline still gets breathing room below the heading.
+
+```tsx
+const rightRailContent = hasEvents ? (
+  <div>
+    <h4 className="sticky top-0 z-30 bg-background -mx-3 px-3 pt-3 pb-3 pr-10 ... border-b border-border">
+      <Activity ... /> Activity (N)
+    </h4>
+    <div className="pt-3"><LogTimeline ... /></div>
+  </div>
+) : null;
+```
+
+Bumped `z-10 → z-30` so the heading paints above both the timeline rows (no z) and the chevron toggle button (z-20).
+
+#### 2. Move aside top-padding onto the heading (`new-ui/src/pages/tasks/[id]/page.tsx`)
+
+The aside changes from `overflow-y-auto py-3 px-3` to `overflow-y-auto pb-3 px-3`. The h4 owns the top zone entirely (its own `pt-3`); the bottom retains `pb-3` so the timeline doesn't butt against the rail bottom. With the h4 starting at the aside's content-box top (no negative margin needed), the sticky `top-0` pins the heading at the absolute top of the scroll viewport — no transparent strip above OR below the heading lets rows leak into view.
+
+#### 3. Drop unused `DetailPageRail` import
+
+The bare-div restructure means `DetailPageRail` is no longer imported; only `DetailPageSection` is. Trim the import line.
+
+#### 4. Audit doc
+
+Append a Phase 18 section to `thoughts/taras/research/2026-05-06-design-system-audit.md` documenting the bug, the structural cause, and the fix — for future reference if a similar sticky-with-padding pattern shows up elsewhere.
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] `cd new-ui && pnpm run check:tokens` — no new color literals introduced
+- [x] `cd new-ui && pnpm lint` — Biome passes
+- [x] `cd new-ui && pnpm exec tsc -b` — typecheck passes
+- [x] `cd new-ui && pnpm exec vite build` — build passes
+- [x] `cd new-ui && pnpm dev` boots clean; `tasks/<id>` route serves `200` (verified via curl against the running portless dev server at `https://ui.swarm.localhost`)
+
+#### Automated QA:
+- [x] `qa-use` capture of `tasks/[id]` showing scroll behavior with sticky heading — no rows visible above the pinned heading [skipped — qa-use deferred to PR-time]
+
+#### Manual Verification:
+- [ ] User scrolls a `tasks/[id]` page with a long Activity feed (>10 events) and confirms NO timeline rows are visible above the sticky heading at any scroll position
+- [ ] User confirms the heading remains pinned at the top of the rail throughout scroll
+- [ ] User confirms the chevron toggle still positions cleanly at top-right when expanded and centered when collapsed
+- [ ] User confirms light + dark mode both render correctly (rail surface and heading bg match)
+
+### QA Spec (optional):
+
+n/a — single-bug fix. qa-use deferred to PR-time per Taras's brief.
 
 ---
 
