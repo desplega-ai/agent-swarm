@@ -350,6 +350,33 @@ export default function AgentDetailPage() {
           <DetailPageBody
             main={
               <div className="space-y-4">
+                {agent.status === "waiting_for_credentials" &&
+                  agent.credentialMissing &&
+                  agent.credentialMissing.length > 0 && (
+                    <Card className="border-status-warning/30">
+                      <CardContent className="p-4 space-y-2">
+                        <InfoRow label="Waiting for credentials">
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {agent.credentialMissing.map((key) => (
+                              <Badge
+                                key={key}
+                                variant="outline"
+                                size="tag"
+                                className="border-status-warning/30 text-status-warning-strong"
+                              >
+                                {key}
+                              </Badge>
+                            ))}
+                          </div>
+                        </InfoRow>
+                        <p className="text-xs text-muted-foreground">
+                          Worker is registered but parked. Set the missing key(s) via{" "}
+                          <code className="text-[10px]">PUT /api/config</code> (scope=agent) and the
+                          worker will resume polling within 30s.
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )}
                 <Card>
                   <CardContent className="p-4 space-y-3">
                     {agent.role && <InfoRow label="Role">{agent.role}</InfoRow>}

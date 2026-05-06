@@ -1,5 +1,5 @@
 // Backend types (mirrored from agent-swarm backend)
-export type AgentStatus = "idle" | "busy" | "offline";
+export type AgentStatus = "idle" | "busy" | "offline" | "waiting_for_credentials";
 export type AgentTaskStatus =
   | "backlog"
   | "unassigned"
@@ -34,6 +34,9 @@ export interface Agent {
     max: number;
     available: number;
   };
+  /** Env-var names the worker is blocked on when status is `waiting_for_credentials`. */
+  credentialMissing?: string[] | null;
+  provider?: string;
   createdAt: string;
   lastUpdatedAt: string;
 }

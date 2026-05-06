@@ -5,6 +5,7 @@
     "secrets-encryption",
     "harness-configuration",
     "harness-providers",
+    "worker-credential-recovery",
     "provider-auth",
     "slack-integration",
     "github-integration",

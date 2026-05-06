@@ -28,12 +28,83 @@ import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient } from "./pi-mono-mcp-client";
 import type {
   CostData,
+  CredCheckOptions,
+  CredStatus,
   ProviderAdapter,
   ProviderEvent,
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
 } from "./types";
+
+/**
+ * Map a `MODEL_OVERRIDE` string to the env var that satisfies it. Mirrors
+ * `resolveModel` above (shortname → anthropic, `provider/model-id` → that
+ * provider). Returns `null` when the override is empty (boot-loop should
+ * treat it as the permissive case) or the provider can't be inferred.
+ */
+function modelToCredKey(modelStr: string | undefined): string | null {
+  if (!modelStr) return null;
+  const lower = modelStr.toLowerCase();
+  // Hard-coded shortnames map straight to anthropic.
+  if (lower === "opus" || lower === "sonnet" || lower === "haiku") {
+    return "ANTHROPIC_API_KEY";
+  }
+  if (modelStr.includes("/")) {
+    const provider = modelStr.slice(0, modelStr.indexOf("/")).toLowerCase();
+    if (provider === "anthropic") return "ANTHROPIC_API_KEY";
+    if (provider === "openrouter") return "OPENROUTER_API_KEY";
+    if (provider === "openai") return "OPENAI_API_KEY";
+    if (provider === "google") return "GOOGLE_API_KEY";
+  }
+  // Bare model name with no provider prefix — adapter falls through to a
+  // best-effort resolution against multiple providers, so the boot loop
+  // accepts any one of them.
+  return null;
+}
+
+/**
+ * Pi-mono is satisfied by ANY of:
+ *   1. `~/.pi/agent/auth.json` exists.
+ *   2. `MODEL_OVERRIDE` is set to a provider-prefixed model — only the
+ *      matching provider's key is required.
+ *   3. `MODEL_OVERRIDE` is empty / unprefixed — any one of the supported
+ *      keys (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY) is
+ *      enough.
+ */
+export function checkPiMonoCredentials(
+  env: Record<string, string | undefined>,
+  opts: CredCheckOptions = {},
+): CredStatus {
+  const homeDir = opts.homeDir ?? env.HOME ?? "/root";
+  const probe = opts.fs?.existsSync ?? existsSync;
+  const authFile = `${homeDir}/.pi/agent/auth.json`;
+  if (probe(authFile)) {
+    return { ready: true, missing: [], satisfiedBy: "file" };
+  }
+
+  const requiredKey = modelToCredKey(env.MODEL_OVERRIDE);
+  if (requiredKey) {
+    if (env[requiredKey]) {
+      return { ready: true, missing: [], satisfiedBy: "env" };
+    }
+    return {
+      ready: false,
+      missing: [requiredKey, authFile],
+      hint: `MODEL_OVERRIDE=${env.MODEL_OVERRIDE} requires ${requiredKey}; or run \`pi auth login\` to create ${authFile}.`,
+    };
+  }
+
+  // Permissive case: any one supported key works.
+  if (env.ANTHROPIC_API_KEY || env.OPENROUTER_API_KEY || env.OPENAI_API_KEY) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  return {
+    ready: false,
+    missing: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", authFile],
+    hint: "Set one of ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY (any one suffices), or run `pi auth login` to create ~/.pi/agent/auth.json.",
+  };
+}
 
 /** Convert a JSON Schema object to a TypeBox TSchema using Type.Unsafe */
 function jsonSchemaToTypeBox(schema: Record<string, unknown>): TSchema {

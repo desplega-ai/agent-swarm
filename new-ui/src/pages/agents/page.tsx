@@ -130,6 +130,7 @@ export default function AgentsPage() {
             <SelectItem value="idle">Idle</SelectItem>
             <SelectItem value="busy">Busy</SelectItem>
             <SelectItem value="offline">Offline</SelectItem>
+            <SelectItem value="waiting_for_credentials">Waiting for credentials</SelectItem>
           </SelectContent>
         </Select>
       </div>

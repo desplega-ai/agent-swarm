@@ -555,6 +555,8 @@ type AgentRow = {
   provider: string | null;
   createdAt: string;
   lastUpdatedAt: string;
+  /** JSON array of env-var names; populated only when status is `waiting_for_credentials`. */
+  credentialMissing: string | null;
 };
 
 function rowToAgent(row: AgentRow): Agent {
@@ -578,6 +580,9 @@ function rowToAgent(row: AgentRow): Agent {
     provider: (row.provider as ProviderName | null) ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
+    credentialMissing: row.credentialMissing
+      ? (JSON.parse(row.credentialMissing) as string[])
+      : null,
   };
 }
 
@@ -596,8 +601,35 @@ export const agentQueries = {
       "UPDATE agents SET status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
     ),
 
+  updateCredentialState: () =>
+    getDb().prepare<AgentRow, [AgentStatus, string | null, string]>(
+      "UPDATE agents SET status = ?, credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+    ),
+
   delete: () => getDb().prepare<null, [string]>("DELETE FROM agents WHERE id = ?"),
 };
+
+/**
+ * Phase 3 of the worker credential safe-loop plan.
+ *
+ * `ready=true` clears the waiting state — the agent transitions to `idle`
+ * and the dispatcher will start handing it tasks again.
+ *
+ * `ready=false` parks the agent on `waiting_for_credentials` with the env-var
+ * names it's blocked on. The capacity dispatch query already filters
+ * `status === 'idle'` so the new value is implicitly excluded with no other
+ * code change.
+ */
+export function updateAgentCredentialState(
+  agentId: string,
+  ready: boolean,
+  missing: string[] | null,
+): Agent | null {
+  const status: AgentStatus = ready ? "idle" : "waiting_for_credentials";
+  const missingJson = ready ? null : missing && missing.length > 0 ? JSON.stringify(missing) : null;
+  const row = agentQueries.updateCredentialState().get(status, missingJson, agentId);
+  return row ? rowToAgent(row) : null;
+}
 
 export function createAgent(
   agent: Omit<Agent, "id" | "createdAt" | "lastUpdatedAt"> & { id?: string },
@@ -774,6 +806,10 @@ export function getRemainingCapacity(agentId: string): number {
 export function updateAgentStatusFromCapacity(agentId: string): void {
   const agent = getAgentById(agentId);
   if (!agent || agent.status === "offline") return;
+  // `waiting_for_credentials` is owned by the worker's credential-wait
+  // tick — task-completion shouldn't accidentally promote a blocked agent
+  // back to idle.
+  if (agent.status === "waiting_for_credentials") return;
 
   const activeCount = getActiveTaskCount(agentId);
   const newStatus = activeCount > 0 ? "busy" : "idle";

@@ -18,6 +18,8 @@ import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type {
   CostData,
+  CredCheckOptions,
+  CredStatus,
   ProviderAdapter,
   ProviderEvent,
   ProviderResult,
@@ -25,6 +27,64 @@ import type {
   ProviderSessionConfig,
   ProviderTraits,
 } from "./types";
+
+/**
+ * Map opencode model strings to the env var that satisfies them. Opencode
+ * uses the same `provider/model-id` shape as pi-mono — the prefix tells us
+ * which key the user must supply.
+ */
+function opencodeModelToCredKey(modelStr: string | undefined): string | null {
+  if (!modelStr) return null;
+  if (modelStr.includes("/")) {
+    const provider = modelStr.slice(0, modelStr.indexOf("/")).toLowerCase();
+    if (provider === "anthropic") return "ANTHROPIC_API_KEY";
+    if (provider === "openrouter") return "OPENROUTER_API_KEY";
+    if (provider === "openai") return "OPENAI_API_KEY";
+  }
+  return null;
+}
+
+/**
+ * Opencode is satisfied by ANY of:
+ *   1. `~/.local/share/opencode/auth.json` exists (the file `opencode auth login`
+ *      writes).
+ *   2. `MODEL_OVERRIDE` resolves to a provider-prefixed model — only that
+ *      provider's key is required.
+ *   3. Otherwise any one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY /
+ *      OPENAI_API_KEY suffices.
+ */
+export function checkOpencodeCredentials(
+  env: Record<string, string | undefined>,
+  opts: CredCheckOptions = {},
+): CredStatus {
+  const homeDir = opts.homeDir ?? env.HOME ?? "/root";
+  const probe = opts.fs?.existsSync ?? existsSync;
+  const authFile = `${homeDir}/.local/share/opencode/auth.json`;
+  if (probe(authFile)) {
+    return { ready: true, missing: [], satisfiedBy: "file" };
+  }
+
+  const requiredKey = opencodeModelToCredKey(env.MODEL_OVERRIDE);
+  if (requiredKey) {
+    if (env[requiredKey]) {
+      return { ready: true, missing: [], satisfiedBy: "env" };
+    }
+    return {
+      ready: false,
+      missing: [requiredKey, authFile],
+      hint: `MODEL_OVERRIDE=${env.MODEL_OVERRIDE} requires ${requiredKey}; or run \`opencode auth login\` to create ${authFile}.`,
+    };
+  }
+
+  if (env.OPENROUTER_API_KEY || env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  return {
+    ready: false,
+    missing: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", authFile],
+    hint: "Set one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY (any one suffices), or run `opencode auth login` to create ~/.local/share/opencode/auth.json.",
+  };
+}
 
 function isAssistantMessage(msg: unknown): msg is AssistantMessage {
   return (

@@ -1,5 +1,12 @@
+export {
+  checkProviderCredentials,
+  REQUIRED_CRED_VARS_BY_PROVIDER,
+  type SupportedProvider,
+} from "./credentials";
 export type {
   CostData,
+  CredCheckOptions,
+  CredStatus,
   ProviderAdapter,
   ProviderEvent,
   ProviderResult,

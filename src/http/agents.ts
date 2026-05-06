@@ -11,6 +11,7 @@ import {
   getSwarmConfigs,
   resetEmptyPollCount,
   updateAgentActivity,
+  updateAgentCredentialState,
   updateAgentMaxTasks,
   updateAgentName,
   updateAgentProfile,
@@ -140,6 +141,55 @@ const getAgent = route({
   responses: {
     200: { description: "Agent with capacity info" },
     404: { description: "Agent not found" },
+  },
+});
+
+// ─── Credential-status (Phase 3 + 4 of the credential safe-loop plan) ───────
+
+const credentialStatusBody = z.object({
+  ready: z.boolean(),
+  /** Env-var names (or absolute file paths) the worker is blocked on. Empty/null when ready. */
+  missing: z.array(z.string()).optional().nullable(),
+});
+
+const updateAgentCredentialStatusRoute = route({
+  method: "put",
+  path: "/api/agents/{id}/credential-status",
+  pattern: ["api", "agents", null, "credential-status"],
+  summary: "Worker self-report of credential readiness (Phase 3 boot loop)",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  body: credentialStatusBody,
+  responses: {
+    200: { description: "State updated; returns the agent row." },
+    404: { description: "Agent not found" },
+  },
+});
+
+const getAgentCredentialStatusRoute = route({
+  method: "get",
+  path: "/api/agents/{id}/credential-status",
+  pattern: ["api", "agents", null, "credential-status"],
+  summary: "Single-agent credential-status snapshot for the dashboard",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Credential status payload" },
+    404: { description: "Agent not found" },
+  },
+});
+
+const listCredentialStatusRoute = route({
+  method: "get",
+  path: "/api/agents/credential-status",
+  pattern: ["api", "agents", "credential-status"],
+  summary: "Bulk credential-status across all agents (powers the dashboard)",
+  tags: ["Agents"],
+  query: z.object({
+    status: z.enum(["idle", "busy", "offline", "waiting_for_credentials"]).optional(),
+  }),
+  responses: {
+    200: { description: "List of {agentId, status, missing[], lastCheckedAt}" },
   },
 });
 
@@ -346,6 +396,66 @@ export async function handleAgentsRest(
     updateAgentActivity(parsed.params.id);
     res.writeHead(204);
     res.end();
+    return true;
+  }
+
+  // Bulk credential-status MUST be matched BEFORE single-agent routes — the
+  // path "api/agents/credential-status" otherwise looks like an agent id.
+  if (listCredentialStatusRoute.match(req.method, pathSegments)) {
+    const parsed = await listCredentialStatusRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const filter = parsed.query.status;
+    const agents = getAllAgents()
+      .filter((a) => (filter ? a.status === filter : true))
+      .map((a) => ({
+        agentId: a.id,
+        name: a.name,
+        status: a.status,
+        missing: a.credentialMissing ?? [],
+        provider: a.provider ?? null,
+        lastCheckedAt: a.lastUpdatedAt,
+      }));
+    json(res, { agents });
+    return true;
+  }
+
+  if (updateAgentCredentialStatusRoute.match(req.method, pathSegments)) {
+    const parsed = await updateAgentCredentialStatusRoute.parse(
+      req,
+      res,
+      pathSegments,
+      queryParams,
+    );
+    if (!parsed) return true;
+    const agent = updateAgentCredentialState(
+      parsed.params.id,
+      parsed.body.ready,
+      parsed.body.missing ?? null,
+    );
+    if (!agent) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+    json(res, agentWithCapacity(agent));
+    return true;
+  }
+
+  if (getAgentCredentialStatusRoute.match(req.method, pathSegments)) {
+    const parsed = await getAgentCredentialStatusRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const agent = getAgentById(parsed.params.id);
+    if (!agent) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+    json(res, {
+      agentId: agent.id,
+      name: agent.name,
+      status: agent.status,
+      missing: agent.credentialMissing ?? [],
+      provider: agent.provider ?? null,
+      lastCheckedAt: agent.lastUpdatedAt,
+    });
     return true;
   }
 

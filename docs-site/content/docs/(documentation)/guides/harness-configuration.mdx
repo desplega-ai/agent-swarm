@@ -368,17 +368,13 @@ OPENROUTER_API_KEY=sk-or-...
 
 ## Troubleshooting
 
-### Claude Code: "No Claude credentials found"
+### Worker is parked in `waiting_for_credentials`
 
-The adapter checks for `CLAUDE_CODE_OAUTH_TOKEN` first, then `ANTHROPIC_API_KEY`. Ensure at least one is set in your `.env.docker` file.
+The container booted but no harness credentials are present. This is expected — the worker waits at runtime instead of crash-looping. Set the missing key via `PUT /api/config` (scope=agent or scope=global) and the worker picks it up within ≤30s. See [Worker Credential Recovery](/docs/guides/worker-credential-recovery) for the full lifecycle, the `credentialMissing` payload, and the configuration knobs (`BOOT_INITIAL_BACKOFF_MS`, `BOOT_MAX_BACKOFF_MS`, `BOOT_MAX_WAIT_SECONDS`).
 
 ### Claude Code: "Claude CLI not found"
 
 The `claude` binary must be in `$PATH` inside the Docker container. The worker Docker image includes it by default. If using a custom image, set `CLAUDE_BINARY=/path/to/claude`.
-
-### pi-mono: credential validation error
-
-The Docker entrypoint requires at least one pi-mono credential (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `~/.pi/agent/auth.json`). Set the appropriate key in your `.env.docker` file.
 
 ### Wrong provider selected
 

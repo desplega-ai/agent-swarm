@@ -233,7 +233,7 @@ export const UserSchema = z.object({
 
 export type User = z.infer<typeof UserSchema>;
 
-export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
+export const AgentStatusSchema = z.enum(["idle", "busy", "offline", "waiting_for_credentials"]);
 
 export const AgentSchema = z.object({
   id: z.uuid(),
@@ -271,6 +271,10 @@ export const AgentSchema = z.object({
 
   // Harness provider this agent runs (claude, opencode, codex, ...)
   provider: ProviderNameSchema.optional(),
+
+  // Env-var names the worker is blocked on when status is
+  // `waiting_for_credentials`. Null otherwise.
+  credentialMissing: z.array(z.string()).nullable().optional(),
 
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),

@@ -35,6 +35,11 @@ const statusConfig: Record<string, StatusConfig> = {
     spinner: true,
   },
   offline: { label: "OFFLINE", dot: "bg-status-neutral", text: "text-status-neutral" },
+  waiting_for_credentials: {
+    label: "WAITING FOR CREDS",
+    dot: "bg-status-warning",
+    text: "text-status-warning-strong",
+  },
 
   // Task statuses
   backlog: { label: "BACKLOG", dot: "bg-status-neutral", text: "text-status-neutral" },

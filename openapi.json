@@ -621,6 +621,126 @@
         }
       }
     },
+    "/api/agents/{id}/credential-status": {
+      "put": {
+        "summary": "Worker self-report of credential readiness (Phase 3 boot loop)",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ready": {
+                    "type": "boolean"
+                  },
+                  "missing": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "ready"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "State updated; returns the agent row."
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        }
+      },
+      "get": {
+        "summary": "Single-agent credential-status snapshot for the dashboard",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential status payload"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        }
+      }
+    },
+    "/api/agents/credential-status": {
+      "get": {
+        "summary": "Bulk credential-status across all agents (powers the dashboard)",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "idle",
+                "busy",
+                "offline",
+                "waiting_for_credentials"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of {agentId, status, missing[], lastCheckedAt}"
+          }
+        }
+      }
+    },
     "/api/approval-requests": {
       "post": {
         "summary": "Create a new approval request",

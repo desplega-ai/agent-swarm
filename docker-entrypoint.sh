@@ -1,21 +1,34 @@
 #!/bin/bash
 set -e
 
+# ─── Boot model ──────────────────────────────────────────────────────────────
+# Harness-credential validation is intentionally NON-FATAL here. The worker
+# process runs a TS-level wait loop (`src/commands/credential-wait.ts`) that
+# parks the worker after `join-swarm` if creds are missing, polling
+# `swarm_config` until they appear. This script does best-effort prep
+# (codex login, codex_oauth restore, claude-managed pre-fetch) and emits
+# warnings when a provider's expected env vars / files are absent.
+#
+# The ONLY hard-exit on missing config is `API_KEY` — it's the bootstrap
+# requirement for the worker to talk to the API at all, and there's no
+# recovery path without it.
+#
+# See thoughts/taras/plans/2026-05-06-worker-credential-safe-loop.md.
+# ────────────────────────────────────────────────────────────────────────────
+
 # Validate required environment variables based on provider
 HARNESS_PROVIDER="${HARNESS_PROVIDER:-claude}"
 
 if [ "$HARNESS_PROVIDER" = "pi" ]; then
     # Pi-mono auth: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or auth.json must exist
     if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
-        echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
-        exit 1
+        echo "Warning: pi provider has no credentials yet (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / ~/.pi/agent/auth.json). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or auth.json must exist
     OPENCODE_AUTH_FILE="${HOME}/.local/share/opencode/auth.json"
     if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ ! -f "$OPENCODE_AUTH_FILE" ]; then
-        echo "Error: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or ~/.local/share/opencode/auth.json required for opencode provider"
-        exit 1
+        echo "Warning: opencode provider has no credentials yet (OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / ${OPENCODE_AUTH_FILE}). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     # Claude Managed Agents — sessions run in Anthropic's cloud sandbox.
@@ -50,30 +63,26 @@ elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
         done
     fi
 
-    # Validate the four required env vars are present.
+    # Soft-validate the four required env vars (TS-level loop will block until ready).
     MISSING=""
     [ -z "$ANTHROPIC_API_KEY" ] && MISSING="$MISSING ANTHROPIC_API_KEY"
     [ -z "$MANAGED_AGENT_ID" ] && MISSING="$MISSING MANAGED_AGENT_ID"
     [ -z "$MANAGED_ENVIRONMENT_ID" ] && MISSING="$MISSING MANAGED_ENVIRONMENT_ID"
     [ -z "$MCP_BASE_URL" ] && MISSING="$MISSING MCP_BASE_URL"
     if [ -n "$MISSING" ]; then
-        echo "Error: claude-managed provider requires:$MISSING"
-        echo "Run \`bun run src/cli.tsx claude-managed-setup\` from your laptop to create"
-        echo "the Anthropic-side agent + environment and persist their IDs to swarm_config."
-        echo "MCP_BASE_URL must be a public HTTPS URL (ngrok / Cloudflare Tunnel in dev)."
-        exit 1
+        echo "Warning: claude-managed provider missing:$MISSING"
+        echo "  Run \`bun run src/cli.tsx claude-managed-setup\` from your laptop to create"
+        echo "  the Anthropic-side agent + environment and persist their IDs to swarm_config."
+        echo "  MCP_BASE_URL must be a public HTTPS URL (ngrok / Cloudflare Tunnel in dev)."
+        echo "  Worker will park in credential-wait until they appear."
     fi
 elif [ "$HARNESS_PROVIDER" = "devin" ]; then
-    # Devin auth: DEVIN_API_KEY and DEVIN_ORG_ID must exist
-    if [ -z "$DEVIN_API_KEY" ]; then
-        echo "Error: DEVIN_API_KEY is required for Devin provider"
-        exit 1
+    # Devin auth: DEVIN_API_KEY and DEVIN_ORG_ID must exist (soft check; TS loop blocks).
+    if [ -z "$DEVIN_API_KEY" ] || [ -z "$DEVIN_ORG_ID" ]; then
+        echo "Warning: devin provider missing DEVIN_API_KEY / DEVIN_ORG_ID. Worker will park in credential-wait until they appear in swarm_config."
+    else
+        echo "Devin API: configured (org: ${DEVIN_ORG_ID})"
     fi
-    if [ -z "$DEVIN_ORG_ID" ]; then
-        echo "Error: DEVIN_ORG_ID is required for Devin provider"
-        exit 1
-    fi
-    echo "Devin API: configured (org: ${DEVIN_ORG_ID})"
 elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     WORKER_CODEX_HOME="/home/worker/.codex"
 
@@ -141,17 +150,14 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
         fi
     fi
 
-    # Fail if still no auth
+    # Soft-check; TS-level loop will block until auth.json materialises.
     if [ ! -f "$WORKER_CODEX_HOME/auth.json" ]; then
-        echo "Error: codex provider requires OPENAI_API_KEY, ~/.codex/auth.json, or codex_oauth in config store"
-        exit 1
+        echo "Warning: codex provider has no auth.json yet (no OPENAI_API_KEY, no codex_oauth in config store, no pre-existing ~/.codex/auth.json). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 else
-    # Claude auth (default)
-    # Allow both Oauth and ANTHROPIC_API_KEY for flexibility, but require at least one
+    # Claude auth (default) — soft check; TS-level loop blocks if missing.
     if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-        echo "Error: Claude provider requires either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY environment variable"
-        exit 1
+        echo "Warning: claude provider has no credentials yet (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 fi
 

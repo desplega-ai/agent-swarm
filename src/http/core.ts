@@ -272,6 +272,11 @@ export async function handleCore(
 
       if (agent.status === "busy") {
         status = "busy";
+      } else if (agent.status === "waiting_for_credentials") {
+        // Preserve the waiting state — only the worker's own credential-wait
+        // tick (POST /api/agents/:id/credential-status) clears it once creds
+        // resolve. The pinger must not stomp it back to idle.
+        status = "waiting_for_credentials";
       }
 
       updateAgentStatus(agent.id, status);

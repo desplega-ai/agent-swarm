@@ -11,12 +11,29 @@ import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type {
   CostData,
+  CredStatus,
   ProviderAdapter,
   ProviderEvent,
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
 } from "./types";
+
+/**
+ * Predicate used by the worker boot loop and the credential-status endpoint.
+ * The claude harness needs EITHER `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or
+ * `ANTHROPIC_API_KEY` — both are listed as missing when neither is present.
+ */
+export function checkClaudeCredentials(env: Record<string, string | undefined>): CredStatus {
+  if (env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  return {
+    ready: false,
+    missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+    hint: "Set either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (one is enough).",
+  };
+}
 
 /** Task file data written to /tmp for hook to read */
 interface TaskFileData {

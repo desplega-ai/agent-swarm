@@ -344,13 +344,18 @@ export default function DashboardPage() {
     return m;
   }, [tasksData]);
 
-  // Sort agents: lead first, then busy, then idle, then offline
+  // Sort agents: lead first, then busy, then idle, then waiting_for_credentials, then offline
   const sortedAgents = useMemo(() => {
     if (!agents) return [];
     return [...agents].sort((a, b) => {
-      const statusOrder = { busy: 0, idle: 1, offline: 2 };
+      const statusOrder: Record<string, number> = {
+        busy: 0,
+        idle: 1,
+        waiting_for_credentials: 2,
+        offline: 3,
+      };
       if (a.isLead !== b.isLead) return b.isLead ? 1 : -1;
-      return (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
+      return (statusOrder[a.status] ?? 4) - (statusOrder[b.status] ?? 4);
     });
   }, [agents]);
 

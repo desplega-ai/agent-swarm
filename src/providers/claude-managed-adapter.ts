@@ -64,12 +64,36 @@ import { computeClaudeManagedCostUsd } from "./claude-managed-models";
 import { createClaudeManagedSwarmEventHandler } from "./claude-managed-swarm-events";
 import type {
   CostData,
+  CredStatus,
   ProviderAdapter,
   ProviderEvent,
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
 } from "./types";
+
+/**
+ * Managed-agents needs all four bootstrap values. Unlike vanilla claude there
+ * is no oauth fallback — the SDK requires the API key, agent id, environment
+ * id, and a public MCP base URL the cloud sandbox can reach.
+ */
+export function checkClaudeManagedCredentials(env: Record<string, string | undefined>): CredStatus {
+  const required = [
+    "ANTHROPIC_API_KEY",
+    "MANAGED_AGENT_ID",
+    "MANAGED_ENVIRONMENT_ID",
+    "MCP_BASE_URL",
+  ] as const;
+  const missing = required.filter((key) => !env[key]);
+  if (missing.length === 0) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  return {
+    ready: false,
+    missing,
+    hint: "Run `bun run src/cli.tsx claude-managed-setup` once to provision MANAGED_AGENT_ID and MANAGED_ENVIRONMENT_ID, then set ANTHROPIC_API_KEY and MCP_BASE_URL (must be HTTPS-public).",
+  };
+}
 
 // Re-export the type aliases at module level so adjacent files / tests can use
 // the short names without re-discovering the long Beta-prefixed ones. Kept on
