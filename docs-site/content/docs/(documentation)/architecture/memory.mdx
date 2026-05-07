@@ -83,6 +83,7 @@ Agents can search and manage memories using MCP tools:
 - **`memory-search`** — Search with natural language queries. Returns reranked results.
 - **`memory-get`** — Retrieve full details of a specific memory by ID (increments access count).
 - **`memory-delete`** — Delete a memory. Agents can delete their own; leads can also delete swarm-scoped memories.
+- **`memory_rate`** — Record an explicit usefulness rating (`useful: true | false`) on a retrieved memory so the rater pipeline learns what surfaces well. Optional `referencesSource` (free-form `<source>:<identifier>`, e.g. `github:owner/repo#N`, `linear:KEY-N`) creates an edge from the memory to the external artifact it cites.
 
 ## Writing Memories
 

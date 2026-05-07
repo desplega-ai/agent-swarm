@@ -65,7 +65,7 @@ Fires when the session ends. This hook handles cleanup:
 - **Artifact cleanup** — Stops any active artifact tunnels (PM2 processes prefixed with `artifact-`)
 - **PM2 state** — Saves the current PM2 process list for auto-restart
 - **Identity sync** — Final sync of all identity files to the database
-- **Session summary** — Runs a lightweight model (Haiku) to extract key learnings from the session transcript
+- **Session summary + LLM memory rating** — Runs a lightweight model (Haiku) to extract key learnings from the session transcript. When `MEMORY_LLM_RATER_ENABLED=true`, the same Haiku call also produces structured `useful: true | false` ratings for the memories that were retrieved into the task's prompt — piggybacking on the summary call so there's no extra LLM round-trip. Ratings are POSTed to `/api/memory/rate` with `source: "llm"` and feed the memory rater pipeline.
 - **Agent status** — Marks the agent as offline in the database
 
 ## Related
