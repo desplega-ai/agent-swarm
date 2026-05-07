@@ -35,6 +35,7 @@ import "../src/http/tasks";
 import "../src/http/task-templates";
 import "../src/http/trackers/jira";
 import "../src/http/trackers/linear";
+import "../src/http/trackers/notion";
 import "../src/http/users";
 import "../src/http/webhooks";
 import "../src/http/workflow-events";

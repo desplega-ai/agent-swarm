@@ -13,11 +13,16 @@ import { ensureTokenOrThrow } from "./ensure-token";
 // token alive" goal — Atlassian expires inactive refresh tokens after 90 days,
 // and Linear's behavior is similar; refreshing every 50 min trivially keeps
 // both providers active.
+//
+// Notion (added Phase 1 of the Notion integration): public-OAuth integrations
+// rotate refresh tokens on every refresh and access tokens have an
+// empirically-observed ~1h TTL despite Notion's response not including
+// `expires_in`. Same cadence works.
 const KEEPALIVE_INTERVAL_MS = 50 * 60 * 1000;
 const KEEPALIVE_BUFFER_MS = 65 * 60 * 1000;
 const SLACK_ALERTS_CHANNEL = process.env.SLACK_ALERTS_CHANNEL || "C08JCRURPBV";
 
-const KEEPALIVE_PROVIDERS = ["linear", "jira"] as const;
+const KEEPALIVE_PROVIDERS = ["linear", "jira", "notion"] as const;
 
 let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 

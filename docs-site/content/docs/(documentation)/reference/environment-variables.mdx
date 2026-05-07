@@ -242,6 +242,25 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 
 With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/trackers/linear/callback`
 
+## Notion Integration
+
+| Variable | Description |
+|----------|-------------|
+| `NOTION_DISABLE` | Set to `true` to disable Notion integration |
+| `NOTION_CLIENT_ID` | OAuth client ID (create at https://www.notion.so/my-integrations as a Public integration) |
+| `NOTION_CLIENT_SECRET` | OAuth client secret. **Required** when `NOTION_CLIENT_ID` is set — the server refuses to boot with an empty secret to prevent silent refresh/revoke breakage. |
+| `NOTION_REDIRECT_URI` | OAuth callback URL. Default: `<MCP_BASE_URL>/api/trackers/notion/callback`. |
+
+### Setup Steps
+
+1. Create a Public integration at https://www.notion.so/my-integrations.
+2. Set capabilities to at minimum **Read content**. (Recommended: also enable Update content + Insert content now to avoid a re-consent round-trip when the writes phase ships.)
+3. Set the Redirect URI to `<MCP_BASE_URL>/api/trackers/notion/callback`.
+4. Copy the OAuth client ID and secret into your `.env`.
+5. Start the server, then visit `<MCP_BASE_URL>/api/trackers/notion/authorize` and pick which pages/databases to share.
+
+See [Notion integration](/docs/integrations/notion) for the full integration page.
+
 ## Portless (Local Development)
 
 [Portless](https://port1355.dev/) replaces port-based URLs with friendly domain names for local development.

@@ -19,6 +19,7 @@ This section is the canonical home for each integration's setup, behavior, and o
 
 - [**Linear**](/docs/integrations/linear) — inbound webhook → swarm tasks. Workflow-state gate plus `swarm-ready` label override. Outbound updates via the `linear-interaction` skill.
 - [**Jira Cloud**](/docs/guides/jira-integration) — OAuth 3LO + dynamic webhooks. Assignee or @-mention triggers a task; lifecycle events post back as Jira comments.
+- [**Notion**](/docs/integrations/notion) — read-only KB. OAuth public integration → 4 MCP tools (`notion-search`, `notion-get-page`, `notion-query-database`, `notion-list-databases`). Phase 1 — writes and tracker support are roadmapped.
 - [**GitHub**](/docs/guides/github-integration) — App + webhooks. Issues, PRs, and review threads create or update swarm tasks; the agent comments back inline.
 - [**GitLab**](/docs/guides/gitlab-integration) — token-based webhooks. Merge requests and issues map to swarm tasks the same way GitHub does.
 

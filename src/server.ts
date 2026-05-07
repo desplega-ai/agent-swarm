@@ -41,6 +41,13 @@ import { registerMemoryGetTool } from "./tools/memory-get";
 import { registerMemoryRateTool } from "./tools/memory-rate";
 import { registerMemorySearchTool } from "./tools/memory-search";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
+// Notion read-only KB tools
+import {
+  registerNotionGetPageTool,
+  registerNotionListDatabasesTool,
+  registerNotionQueryDatabaseTool,
+  registerNotionSearchTool,
+} from "./tools/notion";
 import { registerPollTaskTool } from "./tools/poll-task";
 import { registerPostMessageTool } from "./tools/post-message";
 // Prompt template tools
@@ -263,6 +270,14 @@ export function createServer() {
   registerTrackerUnlinkTool(server);
   registerTrackerSyncStatusTool(server);
   registerTrackerMapAgentTool(server);
+
+  // Notion KB tools (read-only). Always registered; "not connected" surfaces
+  // as a structured error so deployments without Notion get a clear message
+  // instead of a missing tool.
+  registerNotionSearchTool(server);
+  registerNotionGetPageTool(server);
+  registerNotionQueryDatabaseTool(server);
+  registerNotionListDatabasesTool(server);
 
   // Workflows capability - DAG-based automation workflows
   if (hasCapability("workflows")) {

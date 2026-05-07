@@ -129,6 +129,158 @@ describe("exchangeCode", () => {
   });
 });
 
+describe("Notion-shape options (additive — defaults preserve Linear/Jira)", () => {
+  const notionConfig: OAuthProviderConfig = {
+    provider: "notion-test",
+    clientId: "notion-client",
+    clientSecret: "notion-secret",
+    authorizeUrl: "https://api.notion.com/v1/oauth/authorize",
+    tokenUrl: "https://api.notion.com/v1/oauth/token",
+    redirectUri: "http://localhost:3013/cb",
+    scopes: [],
+    extraParams: { owner: "user" },
+    tokenAuthMode: "basic",
+    tokenContentType: "json",
+    extraTokenHeaders: { "Notion-Version": "2026-03-11" },
+    usePkce: false,
+    defaultTokenLifetimeMs: 60 * 60 * 1000,
+  };
+
+  beforeAll(() => {
+    upsertOAuthApp("notion-test", {
+      clientId: notionConfig.clientId,
+      clientSecret: notionConfig.clientSecret,
+      authorizeUrl: notionConfig.authorizeUrl,
+      tokenUrl: notionConfig.tokenUrl,
+      redirectUri: notionConfig.redirectUri,
+      scopes: "",
+    });
+  });
+
+  test("usePkce: false omits code_challenge from authorize URL", async () => {
+    const result = await buildAuthorizationUrl(notionConfig);
+    const url = new URL(result.url);
+    expect(url.searchParams.get("code_challenge")).toBeNull();
+    expect(url.searchParams.get("code_challenge_method")).toBeNull();
+  });
+
+  test("empty scopes array omits scope param entirely", async () => {
+    const result = await buildAuthorizationUrl(notionConfig);
+    const url = new URL(result.url);
+    expect(url.searchParams.has("scope")).toBe(false);
+  });
+
+  test("extraParams (owner=user) are appended to authorize URL", async () => {
+    const result = await buildAuthorizationUrl(notionConfig);
+    const url = new URL(result.url);
+    expect(url.searchParams.get("owner")).toBe("user");
+  });
+
+  test("tokenAuthMode=basic + tokenContentType=json + extraTokenHeaders shape token request", async () => {
+    const buildResult = await buildAuthorizationUrl(notionConfig);
+
+    let capturedUrl: string | undefined;
+    let capturedInit: RequestInit | undefined;
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+      // biome-ignore lint/suspicious/noExplicitAny: fetch typing for spy
+      async (url: any, init?: any) => {
+        capturedUrl = String(url);
+        capturedInit = init;
+        return new Response(
+          JSON.stringify({
+            access_token: "at_1",
+            token_type: "bearer",
+            refresh_token: "rt_1",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+
+    try {
+      await exchangeCode(notionConfig, "auth-code", buildResult.state);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+
+    expect(capturedUrl).toBe(notionConfig.tokenUrl);
+    const headers = capturedInit!.headers as Record<string, string>;
+    expect(headers.Authorization).toMatch(/^Basic /);
+    const decoded = Buffer.from(headers.Authorization.split(" ")[1] ?? "", "base64").toString();
+    expect(decoded).toBe(`${notionConfig.clientId}:${notionConfig.clientSecret}`);
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["Notion-Version"]).toBe("2026-03-11");
+
+    const body = JSON.parse(capturedInit!.body as string) as Record<string, unknown>;
+    expect(body.grant_type).toBe("authorization_code");
+    expect(body.code).toBe("auth-code");
+    expect(body.redirect_uri).toBe(notionConfig.redirectUri);
+    // No client creds in body when basic auth is used
+    expect(body.client_id).toBeUndefined();
+    expect(body.client_secret).toBeUndefined();
+    // No PKCE verifier when usePkce=false
+    expect(body.code_verifier).toBeUndefined();
+  });
+
+  test("defaultTokenLifetimeMs governs expiresAt when expires_in is missing", async () => {
+    const buildResult = await buildAuthorizationUrl(notionConfig);
+
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ access_token: "at_2", token_type: "bearer", refresh_token: "rt_2" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    try {
+      const before = Date.now();
+      await exchangeCode(notionConfig, "code-x", buildResult.state);
+      const after = Date.now();
+
+      const tokens = (await import("../be/db-queries/oauth")).getOAuthTokens("notion-test");
+      expect(tokens).toBeTruthy();
+      const expiresAtMs = new Date(tokens!.expiresAt).getTime();
+      // Should fall in [before + 1h, after + 1h] (defaultTokenLifetimeMs)
+      expect(expiresAtMs).toBeGreaterThanOrEqual(before + 60 * 60 * 1000 - 1000);
+      expect(expiresAtMs).toBeLessThanOrEqual(after + 60 * 60 * 1000 + 1000);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("refreshAccessToken honors basic auth + json + extraTokenHeaders", async () => {
+    let capturedInit: RequestInit | undefined;
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+      // biome-ignore lint/suspicious/noExplicitAny: fetch typing for spy
+      async (_url: any, init?: any) => {
+        capturedInit = init;
+        return new Response(
+          JSON.stringify({ access_token: "at_3", token_type: "bearer", refresh_token: "rt_3" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+
+    try {
+      const { refreshAccessToken } = await import("../oauth/wrapper");
+      await refreshAccessToken(notionConfig, "old-rt");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+
+    const headers = capturedInit!.headers as Record<string, string>;
+    expect(headers.Authorization).toMatch(/^Basic /);
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["Notion-Version"]).toBe("2026-03-11");
+
+    const body = JSON.parse(capturedInit!.body as string) as Record<string, unknown>;
+    expect(body.grant_type).toBe("refresh_token");
+    expect(body.refresh_token).toBe("old-rt");
+    expect(body.client_id).toBeUndefined();
+    expect(body.client_secret).toBeUndefined();
+  });
+});
+
 describe("state TTL cleanup", () => {
   test("expired states are cleaned up on next buildAuthorizationUrl call", async () => {
     // Manually insert an "expired" entry by backdating createdAt

@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleJiraTracker } from "./jira";
 import { handleLinearTracker } from "./linear";
+import { handleNotionTracker } from "./notion";
 
 export async function handleTrackers(
   req: IncomingMessage,
@@ -15,6 +16,9 @@ export async function handleTrackers(
     }
     if (pathSegments[2] === "linear") {
       return await handleLinearTracker(req, res, pathSegments);
+    }
+    if (pathSegments[2] === "notion") {
+      return await handleNotionTracker(req, res, pathSegments);
     }
   }
   // Fallback: try Linear (preserves existing behavior for any path that

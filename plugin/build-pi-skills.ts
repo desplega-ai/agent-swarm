@@ -33,6 +33,7 @@ const SKILLS_TO_CONVERT = [
   "review-pr",
   "todos",
   "user-management",
+  "notion-interaction",
 ];
 
 function convertToPiSkill(name: string, content: string): string {

@@ -23,6 +23,43 @@ export interface OAuthProviderConfig {
    * pre-existing consumer of this wrapper.
    */
   scopeSeparator?: string;
+  /**
+   * How client credentials are sent to the token endpoint.
+   *
+   * - `"body"` (default — Linear/Jira): client_id + client_secret in the
+   *   form-encoded request body alongside `code` / `refresh_token`.
+   * - `"basic"` (Notion): credentials as HTTP Basic auth header
+   *   (`Authorization: Basic base64(id:secret)`); body carries only the grant.
+   */
+  tokenAuthMode?: "body" | "basic";
+  /**
+   * Wire format for the token-endpoint request body.
+   *
+   * - `"form"` (default — RFC 6749): `application/x-www-form-urlencoded`.
+   * - `"json"` (Notion): `application/json`.
+   */
+  tokenContentType?: "form" | "json";
+  /**
+   * Extra headers to attach to every token-endpoint request (code exchange
+   * AND refresh). Notion needs `Notion-Version` here; passing it via
+   * extraParams would put it in the body, which Notion ignores.
+   */
+  extraTokenHeaders?: Record<string, string>;
+  /**
+   * Whether to include PKCE (S256) parameters in the authorize URL and the
+   * code-exchange request body. Default `true` (Linear/Jira). Notion's public
+   * OAuth doesn't support PKCE — set `false` to suppress `code_challenge`,
+   * `code_challenge_method`, and `code_verifier` plumbing.
+   */
+  usePkce?: boolean;
+  /**
+   * Fallback access-token lifetime (ms) when the provider's response omits
+   * `expires_in`. Default 24h. Notion responses don't include `expires_in`
+   * but actual access-token TTL is ~1h with refresh-token rotation; setting
+   * this to ~1h ensures `isTokenExpiringSoon` triggers under the standard
+   * 65-min keepalive buffer.
+   */
+  defaultTokenLifetimeMs?: number;
 }
 
 interface PendingState {
@@ -34,6 +71,8 @@ interface PendingState {
 // ─── In-memory pending state (PKCE code verifiers keyed by state) ────────────
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const DEFAULT_TOKEN_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24h
+
 const pendingStates = new Map<string, PendingState>();
 
 /** Remove expired entries from the pending state map */
@@ -46,20 +85,57 @@ function cleanupExpiredStates(): void {
   }
 }
 
+function buildBasicAuthHeader(clientId: string, clientSecret: string): string {
+  return `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`;
+}
+
+function buildTokenRequestInit(
+  config: OAuthProviderConfig,
+  bodyFields: Record<string, string>,
+): RequestInit {
+  const tokenAuthMode = config.tokenAuthMode ?? "body";
+  const tokenContentType = config.tokenContentType ?? "form";
+
+  const headers: Record<string, string> = { ...(config.extraTokenHeaders ?? {}) };
+
+  if (tokenAuthMode === "basic") {
+    headers.Authorization = buildBasicAuthHeader(config.clientId, config.clientSecret);
+  } else {
+    bodyFields.client_id = config.clientId;
+    bodyFields.client_secret = config.clientSecret;
+  }
+
+  let body: string;
+  if (tokenContentType === "json") {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(bodyFields);
+  } else {
+    headers["Content-Type"] = "application/x-www-form-urlencoded";
+    body = new URLSearchParams(bodyFields).toString();
+  }
+
+  return { method: "POST", headers, body };
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Build an OAuth 2.0 authorization URL with PKCE (S256).
- * Stores the pending state + code verifier in-memory for later exchange.
+ * Build an OAuth 2.0 authorization URL.
+ *
+ * PKCE (S256) is on by default; opt out per provider via `usePkce: false`.
+ * Stores the pending state + (when PKCE-enabled) code verifier in-memory for
+ * later exchange.
  */
 export async function buildAuthorizationUrl(
   config: OAuthProviderConfig,
 ): Promise<{ url: string; state: string; codeVerifier: string }> {
   cleanupExpiredStates();
 
+  const usePkce = config.usePkce ?? true;
   const state = oauth.generateRandomState();
+  // Always generate a verifier so the in-memory state has a stable shape and
+  // tests can assert it; we just don't put it on the wire when usePkce=false.
   const codeVerifier = oauth.generateRandomCodeVerifier();
-  const codeChallenge = await oauth.calculatePKCECodeChallenge(codeVerifier);
 
   pendingStates.set(state, {
     codeVerifier,
@@ -71,12 +147,20 @@ export async function buildAuthorizationUrl(
   url.searchParams.set("client_id", config.clientId);
   url.searchParams.set("redirect_uri", config.redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", config.scopes.join(config.scopeSeparator ?? ","));
+  // Notion has no scopes; emitting `scope=` is harmless for most providers but
+  // some validators reject empty values, so omit when no scopes are configured.
+  if (config.scopes.length > 0) {
+    url.searchParams.set("scope", config.scopes.join(config.scopeSeparator ?? ","));
+  }
   url.searchParams.set("state", state);
-  url.searchParams.set("code_challenge", codeChallenge);
-  url.searchParams.set("code_challenge_method", "S256");
+  if (usePkce) {
+    const codeChallenge = await oauth.calculatePKCECodeChallenge(codeVerifier);
+    url.searchParams.set("code_challenge", codeChallenge);
+    url.searchParams.set("code_challenge_method", "S256");
+  }
 
-  // Append provider-specific extra params (e.g. actor=app for Linear)
+  // Append provider-specific extra params (e.g. actor=app for Linear,
+  // owner=user for Notion).
   if (config.extraParams) {
     for (const [key, value] of Object.entries(config.extraParams)) {
       url.searchParams.set(key, value);
@@ -103,22 +187,16 @@ export async function exchangeCode(
   pendingStates.delete(state);
 
   const { codeVerifier } = pending;
+  const usePkce = config.usePkce ?? true;
 
-  // Build token request manually — Linear doesn't use standard OAuth discovery
-  const body = new URLSearchParams({
+  const bodyFields: Record<string, string> = {
     grant_type: "authorization_code",
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
     redirect_uri: config.redirectUri,
     code,
-    code_verifier: codeVerifier,
-  });
+  };
+  if (usePkce) bodyFields.code_verifier = codeVerifier;
 
-  const response = await fetch(config.tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+  const response = await fetch(config.tokenUrl, buildTokenRequestInit(config, bodyFields));
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -134,9 +212,10 @@ export async function exchangeCode(
   };
 
   // Persist tokens
+  const fallbackLifetimeMs = config.defaultTokenLifetimeMs ?? DEFAULT_TOKEN_LIFETIME_MS;
   const expiresAt = data.expires_in
     ? new Date(Date.now() + data.expires_in * 1000).toISOString()
-    : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // default 24h
+    : new Date(Date.now() + fallbackLifetimeMs).toISOString();
 
   storeOAuthTokens(config.provider, {
     accessToken: data.access_token,
@@ -161,18 +240,12 @@ export async function refreshAccessToken(
   config: OAuthProviderConfig,
   refreshToken: string,
 ): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number }> {
-  const body = new URLSearchParams({
+  const bodyFields: Record<string, string> = {
     grant_type: "refresh_token",
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
     refresh_token: refreshToken,
-  });
+  };
 
-  const response = await fetch(config.tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+  const response = await fetch(config.tokenUrl, buildTokenRequestInit(config, bodyFields));
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -186,9 +259,10 @@ export async function refreshAccessToken(
     refresh_token?: string;
   };
 
+  const fallbackLifetimeMs = config.defaultTokenLifetimeMs ?? DEFAULT_TOKEN_LIFETIME_MS;
   const expiresAt = data.expires_in
     ? new Date(Date.now() + data.expires_in * 1000).toISOString()
-    : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    : new Date(Date.now() + fallbackLifetimeMs).toISOString();
 
   storeOAuthTokens(config.provider, {
     accessToken: data.access_token,

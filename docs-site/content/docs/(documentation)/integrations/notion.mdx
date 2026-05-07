@@ -1,0 +1,141 @@
+---
+title: Notion
+description: Read-only Notion KB integration. OAuth-backed search, page fetch, database query, and database discovery via 4 MCP tools.
+---
+
+Agent Swarm integrates with [Notion](https://www.notion.so/) as a read-only knowledge-base provider. Connect a Notion workspace once via OAuth, then agents can search pages, fetch page content, and query databases through 4 MCP tools.
+
+<Callout type="info">
+**Phase 1 is read-only.** Writes (page creation, block append, property updates) and "Notion DB as tracker" support are scheduled for later phases. The `notion-interaction` skill explicitly tells agents not to attempt writes.
+</Callout>
+
+## What it does
+
+- **OAuth public-integration flow.** Per-org connection. Tokens stored in `oauth_tokens` (provider=`notion`).
+- **Refresh-token rotation.** Notion access tokens expire ~1h and refresh tokens rotate on every refresh. The standard OAuth keepalive (50min cadence, 65min buffer) keeps the row fresh.
+- **4 MCP tools** for read-only KB access.
+- **`notion-interaction` skill** with procedural guidance for agents.
+
+## Setup
+
+### 1. Create a Notion public integration
+
+1. Go to **https://www.notion.so/my-integrations** and create a new integration.
+2. Choose **Public integration**.
+3. **Capabilities**: enable at minimum **Read content**. (Recommendation: also enable Update content + Insert content now even though Phase 1 doesn't use them — this avoids a re-consent round-trip when Phase 2 ships.)
+4. **Redirect URIs**: add `<MCP_BASE_URL>/api/trackers/notion/callback`. With portless dev mode (`bun run dev:http`), use `https://api.swarm.localhost:1355/api/trackers/notion/callback`.
+5. Copy the **OAuth client ID** and **OAuth client secret**.
+
+### 2. Configure environment
+
+Add to your `.env`:
+
+```bash
+# Required
+NOTION_CLIENT_ID=your-oauth-client-id
+NOTION_CLIENT_SECRET=your-oauth-client-secret
+
+# Optional — defaults to <MCP_BASE_URL>/api/trackers/notion/callback
+NOTION_REDIRECT_URI=http://localhost:3013/api/trackers/notion/callback
+
+# Optional — disable the integration entirely
+# NOTION_DISABLE=true
+```
+
+<Callout type="warn">
+**`NOTION_CLIENT_SECRET` is required if `NOTION_CLIENT_ID` is set.** The server refuses to boot when the client ID is set but the secret is missing or empty — writing an empty secret to `oauth_apps` would silently break refresh + revoke later. Same hardening applies to Linear/Jira post-fix.
+</Callout>
+
+### 3. Complete OAuth
+
+Start the server and visit `<MCP_BASE_URL>/api/trackers/notion/authorize` in a browser. Notion will:
+
+1. Show a consent screen.
+2. Prompt the user to pick which pages and databases the integration can access.
+3. Redirect back to `/api/trackers/notion/callback` with an authorization code.
+
+The swarm exchanges the code for an access token + refresh token, fetches `/v1/users/me` to capture bot identity (`bot_id`, workspace name, icon), and persists everything.
+
+Verify with:
+
+```bash
+curl <MCP_BASE_URL>/api/trackers/notion/status
+# → { "provider": "notion", "connected": true, "workspaceName": "...", ... }
+```
+
+## How it works
+
+### OAuth flow specifics
+
+Notion's public OAuth diverges from RFC 6749 / Linear / Jira:
+
+- **Token endpoint** uses HTTP Basic auth (not `client_id`/`client_secret` in the body).
+- **Token request body** is JSON (not URL-encoded form).
+- **Every token request** must carry `Notion-Version` (pinned in `src/notion/constants.ts`).
+- **No PKCE** support — the authorize URL omits `code_challenge`.
+- **No OAuth scopes** — capabilities are configured at integration creation time.
+- **Authorize URL** must include `owner=user`.
+- **Token responses omit `expires_in`** — the integration uses a 1h fallback that matches the empirically-observed access-token TTL.
+
+These are encoded as additive fields on `OAuthProviderConfig` in `src/oauth/wrapper.ts` (`tokenAuthMode`, `tokenContentType`, `extraTokenHeaders`, `usePkce`, `defaultTokenLifetimeMs`). Linear and Jira use the defaults — no changes to their config.
+
+### Token refresh
+
+Notion participates in the standard OAuth keepalive worker (`src/oauth/keepalive.ts`) at a 50-min cadence with a 65-min "expiring soon" buffer. Each refresh rotates the refresh token; the wrapper persists both new tokens atomically.
+
+### Rate limiting
+
+Notion enforces ~3 req/sec average per integration with bursts. 429 responses include a `Retry-After` header. The Notion client (`src/notion/client.ts`) surfaces 429 as a structured `NotionRateLimitedError` — Phase 1 does not auto-retry; the agent decides.
+
+## MCP tools
+
+| Tool | Description |
+|---|---|
+| `notion-search` | Free-text search across pages and databases. Filter by object type. |
+| `notion-get-page` | Fetch a page by ID. Optionally walks the block tree and returns plaintext content (capped via `maxBlocks`). |
+| `notion-query-database` | Query a database. `filter` and `sorts` shapes match the [Notion API](https://developers.notion.com/reference/post-database-query) verbatim. |
+| `notion-list-databases` | Discover all databases the integration has access to, with property-name → property-type schema preview. |
+| `tracker-status` | Includes Notion alongside Linear/Jira: `connected`, `tokenExpiresAt`, `redirectUri`. |
+
+All tools surface a structured `not_connected` error when no OAuth token exists, pointing at `/api/trackers/notion/authorize`.
+
+## HTTP endpoints
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/trackers/notion/authorize` | GET | 302 → Notion OAuth consent |
+| `/api/trackers/notion/callback` | GET | Handles OAuth code exchange |
+| `/api/trackers/notion/status` | GET | Connection + workspace info |
+| `/api/trackers/notion/refresh` | POST | Force-refresh the access token (recovery path) |
+| `/api/trackers/notion/disconnect` | DELETE | Revoke + drop tokens + clear metadata |
+
+## Architecture
+
+- `src/oauth/wrapper.ts` — extended generically with `tokenAuthMode`, `tokenContentType`, `extraTokenHeaders`, `usePkce`, `defaultTokenLifetimeMs`. Linear/Jira use defaults.
+- `src/notion/` — Notion-specific:
+  - `app.ts` — env detection, boot-time secret-empty guard, `oauth_apps` row seeding.
+  - `oauth.ts` — `OAuthProviderConfig` builder, callback handler, revoke helper.
+  - `client.ts` — `notionFetch` with auto-refresh on 401, structured errors on 429/4xx/5xx.
+  - `metadata.ts` — typed read/write of `oauth_apps.metadata` (botId, workspaceId, etc.).
+  - `constants.ts` — `Notion-Version` and lifetime defaults pinned here.
+- `src/http/trackers/notion.ts` — 5 HTTP routes mirroring Linear's shape (minus webhook).
+- `src/tools/notion/` — 4 read-only MCP tools + shared response-shaping helpers.
+
+## Related skills & references
+
+- **`notion-interaction` skill** — canonical procedural guide for agents using the MCP tools. Invoke with the `Skill` tool.
+- **[Notion API reference](https://developers.notion.com/reference/intro)**
+- **[Notion OAuth guide](https://developers.notion.com/docs/authorization)**
+
+## Roadmap
+
+- **Phase 2 (writes):** `notion-create-page`, `notion-append-blocks`, `notion-update-page`. Capability scopes (`Update content`, `Insert content`) need to be granted in the integration consent flow.
+- **Phase 3 (tracker):** `notion_db_tracker_mappings` table with per-org field map (Notion DB column → swarm task field). Treats a chosen Notion database as an inbound tracker similar to Linear.
+- **Phase 4 (telemetry):** Cross-integration usage telemetry (Notion + Linear + Jira + GitHub + GitLab).
+- **Phase 5 (webhooks):** Notion announced webhook subscriptions in late 2024 for change events; integrate when stable enough.
+
+## Related docs
+
+- [Linear Integration](/docs/integrations/linear)
+- [Environment Variables](/docs/reference/environment-variables)
+- [Architecture Overview](/docs/architecture/overview)

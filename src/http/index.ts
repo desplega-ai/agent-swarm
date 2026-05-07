@@ -14,6 +14,7 @@ import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
 import { initJira } from "../jira";
 import { initLinear } from "../linear";
+import { initNotion } from "../notion";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
 import { initWorkflows } from "../workflows";
@@ -303,6 +304,9 @@ httpServer
 
     // Initialize Jira tracker integration (if configured)
     initJira();
+
+    // Initialize Notion KB integration (if configured)
+    initNotion();
 
     // Initialize workflow engine (trigger subscriptions + resume listener)
     initWorkflows();

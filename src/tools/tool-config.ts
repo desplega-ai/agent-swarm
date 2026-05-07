@@ -105,6 +105,12 @@ export const DEFERRED_TOOLS = new Set([
   "tracker-sync-status",
   "tracker-map-agent",
 
+  // Notion KB (read-only) (4)
+  "notion-search",
+  "notion-get-page",
+  "notion-query-database",
+  "notion-list-databases",
+
   // Prompt Templates (5)
   "list-prompt-templates",
   "get-prompt-template",

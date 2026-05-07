@@ -27,7 +27,7 @@ export const registerTrackerStatusTool = (server: McpServer) => {
       }),
     },
     async (_requestInfo, _meta) => {
-      const providers = ["linear", "jira"] as const;
+      const providers = ["linear", "jira", "notion"] as const;
       // Refresh near-expiry tokens before reading so agents that subsequently
       // read oauth_tokens directly (e.g. via the read-only db-query MCP) see a
       // not-yet-expired access token. ensureToken is no-op when no refresh

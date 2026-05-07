@@ -13,6 +13,7 @@ import {
 import { initGitHub, resetGitHub } from "../github";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
+import { initNotion, resetNotion } from "../notion";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
@@ -72,6 +73,9 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
 
   resetJira();
   if (initJira()) integrations.push("jira");
+
+  resetNotion();
+  if (initNotion()) integrations.push("notion");
 
   await stopSlackApp();
   await startSlackApp();
