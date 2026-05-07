@@ -1198,13 +1198,20 @@ ${transcript}`;
             }
 
             // Best-effort: post LLM ratings. Never blocks summary indexing.
-            console.error("[memory-rater:llm] piggyback gate=", {
-              llmRaterEnabled,
-              hasTaskId: !!taskId,
-              retrievalsLen: retrievals.length,
-              parseSuccess: parsedRatings != null,
-              ratingsLen: parsedRatings?.ratings?.length ?? 0,
-            });
+            // Failure-path log only — keeps regressions visible without
+            // spamming the runner stderr on every successful Stop hook.
+            if (
+              llmRaterEnabled &&
+              taskId &&
+              retrievals.length > 0 &&
+              (parsedRatings == null || parsedRatings.ratings.length === 0)
+            ) {
+              console.error("[memory-rater:llm] piggyback produced no ratings", {
+                retrievalsLen: retrievals.length,
+                parseSuccess: parsedRatings != null,
+                ratingsLen: parsedRatings?.ratings?.length ?? 0,
+              });
+            }
             if (parsedRatings && parsedRatings.ratings.length > 0) {
               try {
                 const events = buildRatingsFromLlm(parsedRatings.ratings, retrievals);

@@ -193,7 +193,9 @@ export function buildSummaryWithRatingsPrompt(
 
   return `${basePrompt}
 
-CRITICAL: Return JSON conforming to this schema (no prose outside the JSON, no markdown fences):
+CRITICAL: Your entire response MUST be a single JSON object that conforms to the schema below. Do NOT wrap it in triple-backtick fences (no \`\`\`json or \`\`\`), do NOT add a prose preamble, do NOT add trailing commentary. Just the JSON object, nothing else.
+
+Schema:
 {
   "summary": string,                        // your existing summary text
   "ratings": [                              // one entry per memory you can score
@@ -216,11 +218,54 @@ ${memoryBlock}`;
 }
 
 /**
+ * Best-effort parse of an inner JSON string that may be wrapped in markdown
+ * fences (```json … ``` or plain ``` … ```), have a prose preamble, or both.
+ * Returns the parsed value or `null`. NEVER throws.
+ *
+ * Strategy: try strict parse first. On failure, strip a leading ```json /
+ * ```<lang> / ``` fence + matching trailing ```; on second failure, slice
+ * from the first `{` to the last `}` and retry.
+ */
+export function tryParseLooseJson(raw: string): unknown {
+  const trimmed = raw.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // fall through to fence-stripping
+  }
+  // Strip a leading ``` or ```json (or any language tag) and the trailing ```.
+  const fenced = trimmed.match(/^```[a-zA-Z0-9_-]*\s*\n?([\s\S]*?)\n?```\s*$/);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {
+      // fall through
+    }
+  }
+  // Last resort: slice from first { to last } (handles prose preamble or
+  // trailing chatter outside the object).
+  const first = trimmed.indexOf("{");
+  const last = trimmed.lastIndexOf("}");
+  if (first !== -1 && last > first) {
+    try {
+      return JSON.parse(trimmed.slice(first, last + 1));
+    } catch {
+      // fall through
+    }
+  }
+  return null;
+}
+
+/**
  * Best-effort parse of the structured `SummaryWithRatingsSchema` JSON out of
  * the `claude -p --output-format json` envelope (`{ result: "<inner json>" }`).
  *
  * Returns `null` on any parse failure — the caller falls back to the existing
  * summary-only path. NEVER throws.
+ *
+ * Tolerant of fenced or preambled inner payloads: Haiku occasionally wraps
+ * its structured output in ```json … ``` fences or adds a short prose lead-in
+ * ("Here is the JSON: { … }"). See {@link tryParseLooseJson}.
  */
 export function parseSummaryWithRatings(claudeStdout: string): SummaryWithRatings | null {
   let envelope: { result?: unknown };
@@ -232,11 +277,7 @@ export function parseSummaryWithRatings(claudeStdout: string): SummaryWithRating
   const inner = envelope.result;
   let candidate: unknown;
   if (typeof inner === "string") {
-    try {
-      candidate = JSON.parse(inner.trim());
-    } catch {
-      return null;
-    }
+    candidate = tryParseLooseJson(inner);
   } else if (inner && typeof inner === "object") {
     candidate = inner;
   } else {
@@ -269,13 +310,9 @@ export function extractSummaryFromClaudeStdout(claudeStdout: string): string {
   }
   const inner = envelope.result;
   if (typeof inner === "string") {
-    try {
-      const innerParsed = JSON.parse(inner.trim()) as { summary?: unknown };
-      if (innerParsed && typeof innerParsed.summary === "string") {
-        return innerParsed.summary;
-      }
-    } catch {
-      // inner wasn't JSON — treat it as plain summary text
+    const innerParsed = tryParseLooseJson(inner) as { summary?: unknown } | null;
+    if (innerParsed && typeof innerParsed.summary === "string") {
+      return innerParsed.summary;
     }
     return inner;
   }

@@ -30,6 +30,7 @@ import {
   parseSummaryWithRatings,
   postRatings,
   SummaryWithRatingsSchema,
+  tryParseLooseJson,
 } from "../be/memory/raters/llm";
 import { getRegisteredRaters, SERVER_RATERS } from "../be/memory/raters/registry";
 import type { RatingEvent } from "../be/memory/raters/types";
@@ -250,6 +251,107 @@ describe("parseSummaryWithRatings", () => {
     const envelope = JSON.stringify({ result: inner });
     expect(parseSummaryWithRatings(envelope)).toBeNull();
   });
+
+  // Tolerant-parser regression: Haiku occasionally wraps its structured
+  // output in ```json fences or adds a prose preamble. Pre-fix, the strict
+  // JSON.parse choked and the rater never fired. See PR fixing 0 LLM ratings.
+  test("parses inner payload wrapped in ```json fences", () => {
+    const innerRaw = JSON.stringify({
+      summary: "S",
+      ratings: [{ id: "m", score: 0.7, reasoning: "useful" }],
+    });
+    const envelope = JSON.stringify({ result: `\`\`\`json\n${innerRaw}\n\`\`\`` });
+    const out = parseSummaryWithRatings(envelope);
+    expect(out).not.toBeNull();
+    if (!out) return;
+    expect(out.summary).toBe("S");
+    expect(out.ratings[0]!.score).toBe(0.7);
+  });
+
+  test("parses inner payload wrapped in plain ``` fences (no language tag)", () => {
+    const innerRaw = JSON.stringify({
+      summary: "T",
+      ratings: [{ id: "m", score: 0.3, reasoning: "meh" }],
+    });
+    const envelope = JSON.stringify({ result: `\`\`\`\n${innerRaw}\n\`\`\`` });
+    const out = parseSummaryWithRatings(envelope);
+    expect(out).not.toBeNull();
+    expect(out?.summary).toBe("T");
+  });
+
+  test("parses inner payload with leading prose preamble", () => {
+    const innerRaw = JSON.stringify({
+      summary: "U",
+      ratings: [{ id: "m", score: 1, reasoning: "spot on" }],
+    });
+    const envelope = JSON.stringify({
+      result: `Here is the JSON:\n\n${innerRaw}`,
+    });
+    const out = parseSummaryWithRatings(envelope);
+    expect(out).not.toBeNull();
+    expect(out?.summary).toBe("U");
+  });
+
+  test("parses inner payload with both prose preamble AND trailing chatter", () => {
+    const innerRaw = JSON.stringify({
+      summary: "V",
+      ratings: [{ id: "m", score: 0.5, reasoning: "ok" }],
+    });
+    const envelope = JSON.stringify({
+      result: `Sure, here you go:\n${innerRaw}\n\nLet me know if you need anything else.`,
+    });
+    const out = parseSummaryWithRatings(envelope);
+    expect(out).not.toBeNull();
+    expect(out?.summary).toBe("V");
+  });
+
+  test("genuinely garbage inner payload still returns null", () => {
+    const envelope = JSON.stringify({ result: "this is just prose with no JSON object at all" });
+    expect(parseSummaryWithRatings(envelope)).toBeNull();
+  });
+
+  test("inner with malformed JSON inside fences still returns null", () => {
+    const envelope = JSON.stringify({
+      result: "```json\n{not actually valid: json,}\n```",
+    });
+    expect(parseSummaryWithRatings(envelope)).toBeNull();
+  });
+});
+
+describe("tryParseLooseJson", () => {
+  test("strict JSON parses unchanged", () => {
+    expect(tryParseLooseJson('{"a":1}')).toEqual({ a: 1 });
+  });
+
+  test("strips ```json fences", () => {
+    expect(tryParseLooseJson('```json\n{"a":1}\n```')).toEqual({ a: 1 });
+  });
+
+  test("strips plain ``` fences", () => {
+    expect(tryParseLooseJson('```\n{"a":1}\n```')).toEqual({ a: 1 });
+  });
+
+  test("recovers from prose preamble via brace-slice", () => {
+    expect(tryParseLooseJson('Here you go: {"a":1}')).toEqual({ a: 1 });
+  });
+
+  test("recovers from prose preamble + trailing chatter via brace-slice", () => {
+    expect(tryParseLooseJson('preamble\n{"a":1}\nthanks')).toEqual({ a: 1 });
+  });
+
+  test("returns null on genuine garbage", () => {
+    expect(tryParseLooseJson("not json at all")).toBeNull();
+  });
+
+  test("returns null on broken JSON inside fences", () => {
+    expect(tryParseLooseJson("```json\n{broken,}\n```")).toBeNull();
+  });
+
+  test("never throws — even on adversarial input", () => {
+    expect(() => tryParseLooseJson("{[}}}}")).not.toThrow();
+    expect(() => tryParseLooseJson("```")).not.toThrow();
+    expect(() => tryParseLooseJson("")).not.toThrow();
+  });
 });
 
 describe("extractSummaryFromClaudeStdout (hook fallback path)", () => {
@@ -312,6 +414,42 @@ describe("extractSummaryFromClaudeStdout (hook fallback path)", () => {
   test("envelope is JSON but lacks `result` field → returns the raw stdout", () => {
     const stdout = JSON.stringify({ other: "field" });
     expect(extractSummaryFromClaudeStdout(stdout)).toBe(stdout);
+  });
+
+  // Tolerant-parser regression: matches parseSummaryWithRatings — when the
+  // structured payload is fenced or preambled but otherwise valid, the
+  // summary fallback path must still recover the human-readable summary.
+  test("inner payload wrapped in ```json fences → extracts summary", () => {
+    const summaryText = "Found a few useful things.";
+    const innerRaw = JSON.stringify({
+      summary: summaryText,
+      ratings: [{ id: "mem-A", score: 5, reasoning: "out of range — schema fails" }],
+    });
+    const envelope = JSON.stringify({ result: `\`\`\`json\n${innerRaw}\n\`\`\`` });
+    expect(parseSummaryWithRatings(envelope)).toBeNull();
+    expect(extractSummaryFromClaudeStdout(envelope)).toBe(summaryText);
+  });
+
+  test("inner payload wrapped in plain ``` fences → extracts summary", () => {
+    const summaryText = "Plain fence summary.";
+    const innerRaw = JSON.stringify({ summary: summaryText, ratings: [] });
+    const envelope = JSON.stringify({ result: `\`\`\`\n${innerRaw}\n\`\`\`` });
+    expect(extractSummaryFromClaudeStdout(envelope)).toBe(summaryText);
+  });
+
+  test("inner payload with leading prose preamble → extracts summary", () => {
+    const summaryText = "Preamble-wrapped summary.";
+    const innerRaw = JSON.stringify({ summary: summaryText, ratings: [] });
+    const envelope = JSON.stringify({
+      result: `Sure! Here is the JSON:\n\n${innerRaw}`,
+    });
+    expect(extractSummaryFromClaudeStdout(envelope)).toBe(summaryText);
+  });
+
+  test("genuinely garbage inner (no JSON object) → returns inner text unchanged", () => {
+    const text = "Just a sentence with no braces or structure.";
+    const envelope = JSON.stringify({ result: text });
+    expect(extractSummaryFromClaudeStdout(envelope)).toBe(text);
   });
 });
 
