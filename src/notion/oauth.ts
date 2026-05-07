@@ -43,13 +43,32 @@ export function getNotionOAuthConfig(): OAuthProviderConfig | null {
   };
 }
 
-// Register the Notion-specific config builder so the refresh path in
-// `ensure-token.ts` reuses the same Basic-auth + Notion-Version + JSON body
-// shape as the initial code exchange. Without this, the first refresh after
-// a successful exchange would be sent as default form-encoded body auth
-// without the required version header — breaking keepalive, tracker-status,
-// /api/trackers/notion/refresh, and the 401 retry path in `notionFetch`.
-registerOAuthProviderConfig("notion", getNotionOAuthConfig);
+/**
+ * Register the Notion-specific OAuth config builder so the refresh path in
+ * `ensure-token.ts` reuses the same Basic-auth + JSON body + `Notion-Version`
+ * header shape as the initial code exchange. Without this, the first refresh
+ * after a successful exchange is sent as default form-encoded body auth
+ * without the required version header — breaking keepalive, tracker-status,
+ * /api/trackers/notion/refresh, and the 401 retry path in `notionFetch`.
+ *
+ * Idempotent — `registerOAuthProviderConfig` is `Map.set` under the hood, so
+ * calling this twice is a no-op. Safe to invoke from every MCP server boot
+ * (`createServer()` in `src/server.ts`) and from the HTTP tracker route flow
+ * which transitively imports this module via `src/notion/index.ts`.
+ *
+ * Why an exported function instead of just a top-level side-effect: in
+ * MCP-only mode (`src/stdio.ts`, `src/http/mcp.ts`), nothing in the import
+ * graph reaches `notion/oauth.ts` — only `notion/client.ts` and the tool
+ * files. Calling this explicitly from `createServer()` guarantees the
+ * registry is populated regardless of which import paths run.
+ */
+export function registerNotionOAuthConfig(): void {
+  registerOAuthProviderConfig("notion", getNotionOAuthConfig);
+}
+
+// Run on module load too, so legacy import paths (HTTP tracker route,
+// `import "../notion"` barrel) still register without an explicit call.
+registerNotionOAuthConfig();
 
 export async function getNotionAuthorizationUrl(): Promise<string | null> {
   const config = getNotionOAuthConfig();

@@ -1,6 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
 import { initDb } from "./be/db";
+// Notion OAuth provider config registration. Imported here (not just from the
+// HTTP tracker route at `src/http/trackers/notion.ts`) so MCP-only entrypoints
+// — `src/stdio.ts` and `src/http/mcp.ts` — still populate the OAuth provider
+// registry. Without this, the refresh path in `src/oauth/ensure-token.ts`
+// falls back to the legacy DB-only reconstruction and drops Notion's
+// Basic-auth + JSON body + Notion-Version header settings.
+import { registerNotionOAuthConfig } from "./notion/oauth";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
@@ -274,6 +281,13 @@ export function createServer() {
   // Notion KB tools (read-only). Always registered; "not connected" surfaces
   // as a structured error so deployments without Notion get a clear message
   // instead of a missing tool.
+  //
+  // Also explicitly populate the OAuth provider-config registry for Notion so
+  // the refresh path (`tracker-status` → `ensureToken("notion")`,
+  // `notionFetch` 401 retry, `keepalive`) sends Basic auth + JSON body +
+  // `Notion-Version` header. Idempotent. Required because MCP-only
+  // entrypoints don't otherwise import `notion/oauth.ts`.
+  registerNotionOAuthConfig();
   registerNotionSearchTool(server);
   registerNotionGetPageTool(server);
   registerNotionQueryDatabaseTool(server);

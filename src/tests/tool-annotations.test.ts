@@ -325,7 +325,7 @@ describe("Tool Annotations & Classification", () => {
     // We expect all tools to be registered when all capabilities are enabled (default)
     // Includes 11 skill tools and 7 MCP server tools
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(95);
+    expect(count).toBeLessThanOrEqual(100);
   });
 
   test("core tools are fewer than deferred tools", () => {

@@ -93,9 +93,13 @@ Notion enforces ~3 req/sec average per integration with bursts. 429 responses in
 |---|---|
 | `notion-search` | Free-text search across pages and databases. Filter by object type. |
 | `notion-get-page` | Fetch a page by ID. Optionally walks the block tree and returns plaintext content (capped via `maxBlocks`). |
-| `notion-query-database` | Query a database. `filter` and `sorts` shapes match the [Notion API](https://developers.notion.com/reference/post-database-query) verbatim. |
-| `notion-list-databases` | Discover all databases the integration has access to, with property-name → property-type schema preview. |
+| `notion-query-database` | Query a Notion data source (`POST /v1/data_sources/{id}/query`). `filter` and `sorts` shapes match the [Notion data-source query API](https://developers.notion.com/reference/query-a-data-source) verbatim. Pass `dataSourceId` (preferred — get it from `notion-list-databases`'s `dataSources[*].id`); `databaseId` works as a compat fallback for single-source databases (auto-resolves via `GET /v1/databases/{id}`). |
+| `notion-list-databases` | Discover all databases the integration has access to. Returns property-name → property-type schema preview AND a `dataSources: [{ id, name }]` array per database — feed `dataSources[*].id` into `notion-query-database`. |
 | `tracker-status` | Includes Notion alongside Linear/Jira: `connected`, `tokenExpiresAt`, `redirectUri`. |
+
+<Callout type="warn">
+**Notion's `databases/{id}/query` endpoint is deprecated as of `Notion-Version: 2025-09-03`.** The swarm pins `2025-09-03` (see `src/notion/constants.ts`), so all queries go through the new `data_sources/{id}/query` endpoint. The `data_source_id` is a different UUID from the `database_id` — they are NOT interchangeable. See Notion's [`2025-09-03` upgrade guide](https://developers.notion.com/docs/upgrade-guide-2025-09-03) for the full data-source model.
+</Callout>
 
 All tools surface a structured `not_connected` error when no OAuth token exists, pointing at `/api/trackers/notion/authorize`.
 
@@ -126,6 +130,9 @@ All tools surface a structured `not_connected` error when no OAuth token exists,
 - **`notion-interaction` skill** — canonical procedural guide for agents using the MCP tools. Invoke with the `Skill` tool.
 - **[Notion API reference](https://developers.notion.com/reference/intro)**
 - **[Notion OAuth guide](https://developers.notion.com/docs/authorization)**
+- **[Query a data source](https://developers.notion.com/reference/query-a-data-source)** — canonical query endpoint reference under pinned `Notion-Version: 2025-09-03`.
+- **[Notion API versioning](https://developers.notion.com/reference/versioning)** — latest is `2026-03-11`; we pin `2025-09-03`.
+- **[`2025-09-03` upgrade guide](https://developers.notion.com/docs/upgrade-guide-2025-09-03)** — `database` → `data_source` migration details.
 
 ## Roadmap
 
