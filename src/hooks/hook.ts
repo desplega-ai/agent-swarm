@@ -206,6 +206,32 @@ async function restoreClaudeMdBackup(): Promise<void> {
 }
 
 /**
+ * Resolve task context for the Stop-hook session-summary / memory-rater
+ * piggyback. Prefers the AGENT_SWARM_TASK_ID env var (set by the harness in
+ * `claude-adapter.ts`) so the rater still works when the on-disk TASK_FILE
+ * was already cleaned up — the silent-drop bug PR #444 traced.
+ */
+export async function resolveStopHookTaskContext(
+  env: Record<string, string | undefined> = process.env,
+): Promise<{ taskContext: string; taskId: string | undefined }> {
+  let taskContext = "";
+  let taskId: string | undefined = env.AGENT_SWARM_TASK_ID || undefined;
+  const taskFile = env.TASK_FILE;
+  if (taskFile) {
+    try {
+      const taskData = JSON.parse(await Bun.file(taskFile).text());
+      taskContext = `Task: ${taskData.task || "Unknown"}`;
+      if (!taskId) taskId = taskData.id;
+    } catch (err) {
+      // Don't blackhole the read failure — log it once so future regressions
+      // are visible. Same one-line debug pattern as PR #444's gate trace.
+      console.error("[memory-rater:llm] TASK_FILE read failed:", (err as Error).message);
+    }
+  }
+  return { taskContext, taskId };
+}
+
+/**
  * Main hook handler - processes Claude Code hook events
  */
 export async function handleHook(): Promise<void> {
@@ -1067,19 +1093,10 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
           }
 
           if (transcript.length > 100) {
-            // Read task context if available
-            let taskContext = "";
-            let taskId: string | undefined;
-            const taskFile = process.env.TASK_FILE;
-            if (taskFile) {
-              try {
-                const taskData = JSON.parse(await Bun.file(taskFile).text());
-                taskContext = `Task: ${taskData.task || "Unknown"}`;
-                taskId = taskData.id;
-              } catch {
-                /* no task file */
-              }
-            }
+            // Prefer AGENT_SWARM_TASK_ID env var; fall back to TASK_FILE on
+            // disk. PR #444 gate-trace showed the file disappears mid-session
+            // and the silent catch dropped every LLM rater piggyback.
+            const { taskContext, taskId } = await resolveStopHookTaskContext();
 
             const apiUrl =
               process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;

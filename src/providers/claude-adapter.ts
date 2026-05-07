@@ -194,6 +194,11 @@ class ClaudeSession implements ProviderSession {
         ENABLE_PROMPT_CACHING_1H: "1",
         ...(config.env || process.env),
         TASK_FILE: taskFilePath,
+        // Belt-and-braces: TASK_FILE on disk can disappear mid-session (race
+        // with task lifecycle), which silently drops the Stop-hook memory
+        // rater. The hook prefers these env vars when present. See PR #444.
+        AGENT_SWARM_TASK_ID: config.taskId,
+        AGENT_SWARM_AGENT_ID: config.agentId,
       } as Record<string, string>,
       stdout: "pipe",
       stderr: "pipe",
