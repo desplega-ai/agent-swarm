@@ -1,10 +1,21 @@
 import { getOAuthApp, getOAuthTokens, isTokenExpiringSoon } from "../be/db-queries/oauth";
+import { getRegisteredOAuthProviderConfig } from "./provider-config-registry";
 import { type OAuthProviderConfig, refreshAccessToken } from "./wrapper";
 
 /**
- * Build an OAuthProviderConfig from the oauth_apps table for any provider.
+ * Build an OAuthProviderConfig for the refresh path.
+ *
+ * Providers with non-default token-endpoint settings (Notion's Basic auth +
+ * `Notion-Version` header + JSON body) register a config builder via
+ * {@link registerOAuthProviderConfig} so the same {@link OAuthProviderConfig}
+ * used for the initial code exchange is reused at refresh time. Providers
+ * without registered builders fall through to a DB-only reconstruction
+ * sufficient for the standard RFC 6749 form-encoded refresh (Linear, Jira).
  */
 function getOAuthConfig(provider: string): OAuthProviderConfig | null {
+  const registered = getRegisteredOAuthProviderConfig(provider);
+  if (registered) return registered;
+
   const app = getOAuthApp(provider);
   if (!app) return null;
 

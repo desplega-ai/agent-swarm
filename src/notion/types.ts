@@ -31,6 +31,13 @@ export interface NotionPageSummary {
   parent: { type: string; id?: string } | null;
 }
 
+export interface NotionDataSourceRef {
+  /** Data source UUID — feed this to `notion-query-database`. NOT the database id. */
+  id: string;
+  /** Human-readable data source name. Same value Notion shows in the database header. */
+  name: string;
+}
+
 export interface NotionDatabaseSummary {
   id: string;
   title: string;
@@ -39,6 +46,17 @@ export interface NotionDatabaseSummary {
   lastEditedTime: string | null;
   /** Map of property name → property type. Schema preview, not full definitions. */
   properties: Record<string, string>;
+  /**
+   * Data sources contained by this database. Under Notion API version
+   * 2025-09-03+, querying happens at the data-source level — the database id
+   * is no longer queryable directly. Single-source databases still expose
+   * exactly one entry here, but its `id` is a different UUID from the
+   * database's own id.
+   *
+   * Empty array when Notion's response omits `data_sources` (older version
+   * or response shape drift).
+   */
+  dataSources: NotionDataSourceRef[];
 }
 
 export interface NotionPageDetail extends NotionPageSummary {

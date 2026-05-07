@@ -1,8 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, initDb } from "../be/db";
 import { deleteOAuthTokens, storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
 import { NotionApiError, NotionRateLimitedError } from "../notion/client";
+import { registerNotionListDatabasesTool } from "../tools/notion/notion-list-databases";
+import { registerNotionQueryDatabaseTool } from "../tools/notion/notion-query-database";
 import {
   hasNotionToken,
   notConnectedResult,
@@ -152,7 +155,7 @@ describe("shapePageSummary", () => {
 // ─── shapeDatabaseSummary ────────────────────────────────────────────────────
 
 describe("shapeDatabaseSummary", () => {
-  test("extracts title, description, and property→type map", () => {
+  test("extracts title, description, property→type map, and data sources", () => {
     const obj = {
       id: "db-1",
       object: "database",
@@ -165,14 +168,16 @@ describe("shapeDatabaseSummary", () => {
         Email: { type: "email" },
         Status: { type: "select" },
       },
+      data_sources: [{ id: "ds-1", name: "Customers data source" }],
     };
     const result = shapeDatabaseSummary(obj);
     expect(result.title).toBe("Customers");
     expect(result.description).toBe("All customers");
     expect(result.properties).toEqual({ Name: "title", Email: "email", Status: "select" });
+    expect(result.dataSources).toEqual([{ id: "ds-1", name: "Customers data source" }]);
   });
 
-  test("null description when empty", () => {
+  test("null description when empty, empty dataSources when missing", () => {
     const result = shapeDatabaseSummary({
       id: "x",
       object: "database",
@@ -181,6 +186,24 @@ describe("shapeDatabaseSummary", () => {
     });
     expect(result.description).toBeNull();
     expect(result.title).toBe("(untitled)");
+    expect(result.dataSources).toEqual([]);
+  });
+
+  test("filters out malformed data_sources entries (missing id)", () => {
+    const result = shapeDatabaseSummary({
+      id: "db-2",
+      object: "database",
+      data_sources: [
+        { id: "ds-keep", name: "Good" },
+        { name: "Missing id" },
+        { id: "" },
+        { id: "ds-also-keep", name: null },
+      ],
+    });
+    expect(result.dataSources).toEqual([
+      { id: "ds-keep", name: "Good" },
+      { id: "ds-also-keep", name: "" },
+    ]);
   });
 });
 
@@ -279,5 +302,186 @@ describe("shapePageProperties", () => {
     });
     expect(result.Name).toEqual({ type: "title", preview: "Foo" });
     expect(result.Done).toEqual({ type: "checkbox", preview: "false" });
+  });
+});
+
+// ─── notion-query-database tool — data_sources endpoint ─────────────────────
+
+type RegisteredTool = {
+  handler: (args: unknown, extra: unknown) => Promise<unknown>;
+};
+
+function registerQueryTool(): RegisteredTool {
+  const server = new McpServer({ name: "notion-tools-test", version: "1.0.0" });
+  registerNotionQueryDatabaseTool(server);
+  const registered = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
+    ._registeredTools;
+  const tool = registered["notion-query-database"];
+  if (!tool) throw new Error("notion-query-database tool not registered");
+  return tool;
+}
+
+function registerListTool(): RegisteredTool {
+  const server = new McpServer({ name: "notion-tools-test", version: "1.0.0" });
+  registerNotionListDatabasesTool(server);
+  const registered = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
+    ._registeredTools;
+  const tool = registered["notion-list-databases"];
+  if (!tool) throw new Error("notion-list-databases tool not registered");
+  return tool;
+}
+
+describe("notion-query-database — endpoint shape", () => {
+  test("with `dataSourceId`, POSTs to /v1/data_sources/{id}/query", async () => {
+    const tool = registerQueryTool();
+    const calls: string[] = [];
+    globalThis.fetch = mock(
+      // biome-ignore lint/suspicious/noExplicitAny: fetch typing
+      async (url: any) => {
+        calls.push(String(url));
+        return new Response(
+          JSON.stringify({ object: "list", results: [], has_more: false, next_cursor: null }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: typeof globalThis.fetch
+    ) as any;
+
+    const result = (await tool.handler(
+      { dataSourceId: "ds-uuid-1", filter: { property: "Status", status: { equals: "Done" } } },
+      {},
+    )) as { structuredContent?: { success: boolean; dataSourceId?: string } };
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toBe("https://api.notion.com/v1/data_sources/ds-uuid-1/query");
+    expect(result.structuredContent?.success).toBe(true);
+    expect(result.structuredContent?.dataSourceId).toBe("ds-uuid-1");
+  });
+
+  test("with only `databaseId`, resolves via GET /v1/databases/{id} then queries the data source", async () => {
+    const tool = registerQueryTool();
+    const calls: { url: string; method?: string }[] = [];
+    globalThis.fetch = mock(
+      // biome-ignore lint/suspicious/noExplicitAny: fetch typing
+      async (url: any, init?: any) => {
+        const u = String(url);
+        calls.push({ url: u, method: init?.method });
+        if (u === "https://api.notion.com/v1/databases/db-uuid-1") {
+          return new Response(
+            JSON.stringify({
+              object: "database",
+              id: "db-uuid-1",
+              data_sources: [{ id: "ds-resolved", name: "Primary" }],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (u === "https://api.notion.com/v1/data_sources/ds-resolved/query") {
+          return new Response(
+            JSON.stringify({ object: "list", results: [], has_more: false, next_cursor: null }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("unexpected", { status: 500 });
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: typeof globalThis.fetch
+    ) as any;
+
+    const result = (await tool.handler({ databaseId: "db-uuid-1" }, {})) as {
+      structuredContent?: { success: boolean; dataSourceId?: string };
+    };
+
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://api.notion.com/v1/databases/db-uuid-1",
+      "https://api.notion.com/v1/data_sources/ds-resolved/query",
+    ]);
+    expect(calls[1]?.method).toBe("POST");
+    expect(result.structuredContent?.success).toBe(true);
+    expect(result.structuredContent?.dataSourceId).toBe("ds-resolved");
+  });
+
+  test("with `databaseId` resolving to multiple data sources, returns api_error reason", async () => {
+    const tool = registerQueryTool();
+    globalThis.fetch = mock(
+      async () =>
+        new Response(
+          JSON.stringify({
+            object: "database",
+            id: "db-uuid-multi",
+            data_sources: [
+              { id: "ds-a", name: "A" },
+              { id: "ds-b", name: "B" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      // biome-ignore lint/suspicious/noExplicitAny: typeof globalThis.fetch
+    ) as any;
+
+    const result = (await tool.handler({ databaseId: "db-uuid-multi" }, {})) as {
+      isError?: boolean;
+      structuredContent?: { reason?: string; message?: string };
+    };
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent?.reason).toBe("unknown_error");
+    expect(result.structuredContent?.message).toMatch(/multiple data sources/i);
+  });
+
+  test("with neither id, returns invalid_args reason", async () => {
+    const tool = registerQueryTool();
+    let fetchCalled = false;
+    globalThis.fetch = mock(
+      async () => {
+        fetchCalled = true;
+        return new Response("nope", { status: 500 });
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: typeof globalThis.fetch
+    ) as any;
+
+    const result = (await tool.handler({}, {})) as {
+      isError?: boolean;
+      structuredContent?: { reason?: string };
+    };
+    expect(fetchCalled).toBe(false);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent?.reason).toBe("invalid_args");
+  });
+});
+
+describe("notion-list-databases — exposes dataSources from /search", () => {
+  test("propagates data_sources from each database object", async () => {
+    const tool = registerListTool();
+    globalThis.fetch = mock(
+      async () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            has_more: false,
+            next_cursor: null,
+            results: [
+              {
+                object: "database",
+                id: "db-1",
+                title: [{ plain_text: "Customers" }],
+                properties: { Name: { type: "title" } },
+                data_sources: [{ id: "ds-1", name: "Customers data source" }],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      // biome-ignore lint/suspicious/noExplicitAny: typeof globalThis.fetch
+    ) as any;
+
+    const result = (await tool.handler({}, {})) as {
+      structuredContent?: {
+        success: boolean;
+        databases?: Array<{ id: string; dataSources: Array<{ id: string; name: string }> }>;
+      };
+    };
+    expect(result.structuredContent?.success).toBe(true);
+    expect(result.structuredContent?.databases?.[0]?.dataSources).toEqual([
+      { id: "ds-1", name: "Customers data source" },
+    ]);
   });
 });

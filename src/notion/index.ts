@@ -20,6 +20,7 @@ export {
 export type {
   NotionApiError as NotionApiErrorShape,
   NotionDatabaseSummary,
+  NotionDataSourceRef,
   NotionOAuthAppMetadata,
   NotionPageDetail,
   NotionPageSummary,

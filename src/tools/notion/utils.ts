@@ -130,6 +130,8 @@ interface NotionDatabaseObject {
   title?: NotionRichTextSegment[];
   description?: NotionRichTextSegment[];
   properties?: Record<string, { type?: string } & Record<string, unknown>>;
+  /** Present on database objects under Notion API version 2025-09-03+. */
+  data_sources?: Array<{ id?: string; name?: string | null }>;
 }
 
 function joinRichText(segments?: NotionRichTextSegment[]): string {
@@ -183,6 +185,11 @@ export function shapeDatabaseSummary(obj: unknown): NotionDatabaseSummary {
       if (typeof propType === "string") propertiesSummary[name] = propType;
     }
   }
+  const dataSources = Array.isArray(db.data_sources)
+    ? db.data_sources
+        .map((ds) => ({ id: ds.id ?? "", name: ds.name ?? "" }))
+        .filter((ds) => ds.id.length > 0)
+    : [];
   return {
     id: db.id,
     title: joinRichText(db.title) || "(untitled)",
@@ -190,6 +197,7 @@ export function shapeDatabaseSummary(obj: unknown): NotionDatabaseSummary {
     url: db.url ?? null,
     lastEditedTime: db.last_edited_time ?? null,
     properties: propertiesSummary,
+    dataSources,
   };
 }
 

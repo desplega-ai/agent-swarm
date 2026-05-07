@@ -1,4 +1,5 @@
 import { getOAuthApp } from "../be/db-queries/oauth";
+import { registerOAuthProviderConfig } from "../oauth/provider-config-registry";
 import { buildAuthorizationUrl, exchangeCode, type OAuthProviderConfig } from "../oauth/wrapper";
 import { NOTION_DEFAULT_TOKEN_LIFETIME_MS, NOTION_REVOKE_URL, NOTION_VERSION } from "./constants";
 import { updateNotionMetadata } from "./metadata";
@@ -41,6 +42,14 @@ export function getNotionOAuthConfig(): OAuthProviderConfig | null {
     defaultTokenLifetimeMs: NOTION_DEFAULT_TOKEN_LIFETIME_MS,
   };
 }
+
+// Register the Notion-specific config builder so the refresh path in
+// `ensure-token.ts` reuses the same Basic-auth + Notion-Version + JSON body
+// shape as the initial code exchange. Without this, the first refresh after
+// a successful exchange would be sent as default form-encoded body auth
+// without the required version header — breaking keepalive, tracker-status,
+// /api/trackers/notion/refresh, and the 401 retry path in `notionFetch`.
+registerOAuthProviderConfig("notion", getNotionOAuthConfig);
 
 export async function getNotionAuthorizationUrl(): Promise<string | null> {
   const config = getNotionOAuthConfig();

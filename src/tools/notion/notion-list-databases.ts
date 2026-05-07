@@ -9,6 +9,11 @@ import {
   shapeDatabaseSummary,
 } from "./utils";
 
+const DataSourceRefSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
 const DatabaseSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -16,6 +21,7 @@ const DatabaseSummarySchema = z.object({
   url: z.string().nullable(),
   lastEditedTime: z.string().nullable(),
   properties: z.record(z.string(), z.string()),
+  dataSources: z.array(DataSourceRefSchema),
 });
 
 interface NotionSearchResponse {
@@ -31,7 +37,7 @@ export const registerNotionListDatabasesTool = (server: McpServer) => {
     {
       title: "Notion List Databases",
       description:
-        "Discover all Notion databases the integration has access to. Returns id, title, description, and a property-name → property-type schema preview. Read-only.",
+        "Discover all Notion databases the integration has access to. Returns id, title, description, a property-name → property-type schema preview, and `dataSources` (an array of `{ id, name }` entries). Pass `dataSources[*].id` — NOT the database id — to `notion-query-database`. Read-only.",
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({

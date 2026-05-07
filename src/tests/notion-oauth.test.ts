@@ -11,8 +11,9 @@ import {
 } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
-import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { getOAuthTokens, storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
 import { getNotionMetadata } from "../notion/metadata";
+import { ensureTokenOrThrow } from "../oauth/ensure-token";
 import * as wrapperModule from "../oauth/wrapper";
 
 const TEST_DB_PATH = "./test-notion-oauth.sqlite";
@@ -222,5 +223,98 @@ describe("initNotion (clientSecret-empty-bug guard)", () => {
     resetNotion();
     expect(initNotion()).toBe(true);
     expect(isNotionEnabled()).toBe(true);
+  });
+});
+
+describe("ensureTokenOrThrow('notion') — refresh wire shape", () => {
+  // Real refresh path test (no ensureToken-wrapper mock). Asserts the
+  // outgoing request to Notion's token endpoint carries Basic auth + JSON
+  // body + Notion-Version header — the additive fields from the
+  // provider-config registry. Regression guard for "first refresh after
+  // initial code exchange fails because legacy reconstruction in
+  // ensure-token.ts dropped the Notion-specific token settings".
+  test("uses Basic auth, JSON body, and Notion-Version header on refresh", async () => {
+    // Re-assert the credentials directly — earlier `initNotion()` tests in
+    // this file may have rewritten the row from env vars.
+    upsertOAuthApp("notion", {
+      clientId: "notion-client",
+      clientSecret: "notion-secret",
+      authorizeUrl: "https://api.notion.com/v1/oauth/authorize",
+      tokenUrl: "https://api.notion.com/v1/oauth/token",
+      redirectUri: "http://localhost:3013/api/trackers/notion/callback",
+      scopes: "",
+    });
+    storeOAuthTokens("notion", {
+      accessToken: "at_old",
+      refreshToken: "rt_for_refresh",
+      // Within the default 5-min "expiring soon" buffer.
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      scope: null,
+    });
+
+    let capturedUrl: string | undefined;
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = mock(
+      // biome-ignore lint/suspicious/noExplicitAny: fetch typing
+      async (url: any, init?: any) => {
+        capturedUrl = String(url);
+        capturedInit = init as RequestInit;
+        return new Response(
+          JSON.stringify({
+            access_token: "at_refreshed",
+            refresh_token: "rt_refreshed",
+            token_type: "bearer",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: typeof globalThis.fetch
+    ) as any;
+
+    await ensureTokenOrThrow("notion");
+
+    expect(capturedUrl).toBe("https://api.notion.com/v1/oauth/token");
+
+    const headers = capturedInit!.headers as Record<string, string>;
+    // Basic auth (clientId:clientSecret base64-encoded), NOT form-encoded
+    // client credentials in the body.
+    expect(headers.Authorization).toBe(
+      `Basic ${Buffer.from("notion-client:notion-secret").toString("base64")}`,
+    );
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["Notion-Version"]).toBeTruthy();
+
+    // JSON body — with grant_type/refresh_token, NOT client_id/client_secret.
+    const body = JSON.parse(capturedInit!.body as string) as Record<string, string>;
+    expect(body.grant_type).toBe("refresh_token");
+    expect(body.refresh_token).toBe("rt_for_refresh");
+    expect(body.client_id).toBeUndefined();
+    expect(body.client_secret).toBeUndefined();
+
+    // Refreshed access token + rotated refresh token persisted.
+    const tokens = getOAuthTokens("notion");
+    expect(tokens?.accessToken).toBe("at_refreshed");
+    expect(tokens?.refreshToken).toBe("rt_refreshed");
+  });
+
+  test("does nothing when token is not expiring", async () => {
+    storeOAuthTokens("notion", {
+      accessToken: "at_fresh",
+      refreshToken: "rt_fresh",
+      expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      scope: null,
+    });
+
+    let fetchCalled = false;
+    globalThis.fetch = mock(
+      async () => {
+        fetchCalled = true;
+        return new Response("nope", { status: 500 });
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: typeof globalThis.fetch
+    ) as any;
+
+    await ensureTokenOrThrow("notion");
+    expect(fetchCalled).toBe(false);
   });
 });
