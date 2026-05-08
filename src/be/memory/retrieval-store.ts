@@ -28,6 +28,20 @@ export type RetrievalListRow = {
   /** Up to RETRIEVAL_CONTENT_SNIPPET_CHARS chars of `agent_memory.content`. */
   content: string;
   scope: string;
+  /**
+   * `agent_memory.source` — `'task_completion' | 'session_summary' | 'manual'
+   * | 'file_index'`. Surfaced so the worker rater can scope dedup to the
+   * memory class that exhibits scheduled-task self-similarity.
+   */
+  source: string;
+  /**
+   * `agent_tasks.scheduleId` for the source task that wrote this memory, or
+   * `null` if the memory has no source task or the task wasn't a scheduled
+   * run. Worker raters use this as a precise cron-clone discriminator —
+   * memories sharing a non-null `scheduleId` are by definition from the same
+   * scheduled job and safe to dedupe.
+   */
+  scheduleId: string | null;
   similarity: number | null;
   retrievedAt: string;
 };
@@ -61,15 +75,22 @@ export function getRetrievalsForAgent(
     params.push(filter.sessionId);
   }
 
+  // LEFT JOIN agent_tasks so we can surface `scheduleId` to worker raters —
+  // a non-null `scheduleId` is the precise cron-clone discriminator that
+  // `dedupeRetrievalsForRater` keys on. The LEFT keeps memories with no
+  // source task (manual / file_index) in the result set.
   const sql = `
     SELECT am.id        AS id,
            am.name      AS name,
            substr(am.content, 1, ?) AS content,
            am.scope     AS scope,
+           am.source    AS source,
+           at.scheduleId AS scheduleId,
            mr.similarity AS similarity,
            mr.retrievedAt AS retrievedAt
       FROM memory_retrieval mr
       INNER JOIN agent_memory am ON am.id = mr.memoryId
+      LEFT JOIN  agent_tasks at  ON at.id = am.sourceTaskId
      WHERE ${conditions.join(" AND ")}
      ORDER BY mr.retrievedAt DESC
      LIMIT ?
