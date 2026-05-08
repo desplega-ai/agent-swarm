@@ -1,0 +1,24 @@
+{
+  "name": "bug-intake",
+  "displayName": "Bug Intake",
+  "description": "Jira starter — triage incoming bug reports, classify severity, request reproduction steps, and assign them to the right component owner.",
+  "version": "0.1.0",
+  "category": "official",
+  "icon": "bug",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
+  "createdAt": "2026-05-08",
+  "lastUpdatedAt": "2026-05-08",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["jira", "triage", "classification"],
+    "maxTasks": 5
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": null,
+    "identityMd": null,
+    "toolsMd": null,
+    "setupScript": null,
+    "heartbeatMd": null
+  }
+}

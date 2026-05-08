@@ -19,7 +19,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
-import { useStatus } from "@/api/hooks";
+import { useStatusContext } from "@/app/status-context";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import {
   Sidebar,
@@ -84,7 +84,7 @@ const navGroups = [
 
 export function AppSidebar() {
   const location = useLocation();
-  const { data: status } = useStatus();
+  const { data: status } = useStatusContext();
   // 404 from /status (older API) → hide the Home nav item.
   const homeAvailable = status !== null;
   const identityName = status?.identity.name ?? "Agent Swarm";

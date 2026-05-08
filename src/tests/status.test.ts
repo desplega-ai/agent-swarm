@@ -24,7 +24,12 @@ import {
   updateAgentActivity,
 } from "../be/db";
 import { storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
-import { _resetTestConnectionCache, buildStatusPayload } from "../http/status";
+import {
+  _resetTestConnectionCache,
+  buildStatusPayload,
+  computeHealth,
+  type SetupMilestone,
+} from "../http/status";
 import { validateProviderCredentials } from "../providers/credentials";
 
 const TEST_DB_PATH = "./test-status.sqlite";
@@ -562,6 +567,104 @@ describe("validateProviderCredentials — error scrubbing", () => {
     const result = await validateProviderCredentials("unknown-provider");
     expect(result.ok).toBe(false);
     expect(result.error).toContain("Unknown provider");
+  });
+});
+
+// ─── Phase 2: aggregate health rollup ────────────────────────────────────────
+
+describe("computeHealth (Phase 2)", () => {
+  test("`broken` on a clean swarm — harness + workers both unverified", () => {
+    const payload = buildStatusPayload();
+    expect(payload.health).toBe("broken");
+  });
+
+  test("`broken` when harness has creds but no workers ever joined", () => {
+    process.env.HARNESS_PROVIDER = "claude";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-1234567890";
+    const payload = buildStatusPayload();
+    // Harness flips to `configured`, workers still `unverified` → broken.
+    expect(payload.health).toBe("broken");
+  });
+
+  test("`degraded` when harness is `configured` (creds present, untested) and workers verified", () => {
+    process.env.HARNESS_PROVIDER = "claude";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-1234567890";
+
+    const lead = createAgent({ name: "lead-h", isLead: true, status: "idle", capabilities: [] });
+    const worker = createAgent({
+      name: "worker-h",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    updateAgentActivity(lead.id);
+    updateAgentActivity(worker.id);
+
+    const payload = buildStatusPayload();
+    expect(getMilestone(payload, "workers").state).toBe("verified");
+    expect(getMilestone(payload, "harness").state).toBe("configured");
+    expect(payload.health).toBe("degraded");
+  });
+
+  test("`degraded` when workers are `configured` (agents exist, no recent heartbeat)", () => {
+    process.env.HARNESS_PROVIDER = "claude";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-1234567890";
+
+    const lead = createAgent({ name: "lead-d", isLead: true, status: "idle", capabilities: [] });
+    // No updateAgentActivity → workers row stays `configured`, not `verified`.
+
+    // Seed test-connection cache via direct call: simulate a verified harness.
+    // We can't reach the cache from here cleanly, but we can leverage that
+    // workers === configured alone is enough to push health to degraded
+    // (assuming harness is configured too — same scenario).
+    const _ = lead; // keep TS happy, used implicitly via DB
+    const payload = buildStatusPayload();
+    expect(getMilestone(payload, "workers").state).toBe("configured");
+    expect(payload.health).toBe("degraded");
+  });
+
+  test("`ok` when harness verified and workers verified (no other integration is `configured`)", () => {
+    // We can't reach the in-memory cache from here, so simulate by directly
+    // checking the helper: build a synthetic milestone array.
+    // (computeHealth is exported.)
+    const synthetic: SetupMilestone[] = [
+      { id: "harness", label: "Harness", state: "verified" },
+      { id: "slack", label: "Slack", state: "unverified" },
+      { id: "github", label: "GitHub", state: "unverified" },
+      { id: "linear", label: "Linear", state: "unverified" },
+      { id: "jira", label: "Jira", state: "unverified" },
+      { id: "workers", label: "Workers", state: "verified" },
+      { id: "first_task", label: "First task", state: "verified" },
+    ];
+    expect(computeHealth(synthetic)).toBe("ok");
+  });
+
+  test("`degraded` when an integration is `configured`", () => {
+    const synthetic: SetupMilestone[] = [
+      { id: "harness", label: "Harness", state: "verified" },
+      { id: "slack", label: "Slack", state: "configured" },
+      { id: "github", label: "GitHub", state: "unverified" },
+      { id: "linear", label: "Linear", state: "unverified" },
+      { id: "jira", label: "Jira", state: "unverified" },
+      { id: "workers", label: "Workers", state: "verified" },
+      { id: "first_task", label: "First task", state: "verified" },
+    ];
+    expect(computeHealth(synthetic)).toBe("degraded");
+  });
+
+  test("integrations in `unverified` alone do NOT degrade health", () => {
+    // No integrations are connected — that's the common shape, not a
+    // problem. Health should be `ok` as long as harness + workers verified.
+    const synthetic: SetupMilestone[] = [
+      { id: "harness", label: "Harness", state: "verified" },
+      { id: "slack", label: "Slack", state: "unverified" },
+      { id: "github", label: "GitHub", state: "unverified" },
+      { id: "linear", label: "Linear", state: "unverified" },
+      { id: "jira", label: "Jira", state: "unverified" },
+      { id: "workers", label: "Workers", state: "verified" },
+      { id: "first_task", label: "First task", state: "unverified" },
+    ];
+    expect(computeHealth(synthetic)).toBe("ok");
   });
 });
 

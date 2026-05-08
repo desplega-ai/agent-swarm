@@ -4,7 +4,7 @@ topic: "Cloud Personalization & Onboarding — Phases 1–4"
 author: taras
 status: in-progress
 last_updated: 2026-05-08T00:00:00Z
-last_updated_by: claude (phase 1.5 — harness provider scoping)
+last_updated_by: claude (phase 4 — per-user UX persistence via localStorage)
 related:
   - thoughts/taras/brainstorms/2026-05-07-cloud-deployment-personalization.md
   - thoughts/taras/research/2026-05-07-cloud-personalization-research.md
@@ -517,12 +517,12 @@ Make `/status` health visible everywhere via a persistent header badge that poll
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] All tests pass: `bun test`
-- [ ] OpenAPI regenerated (additive `health` field) and committed: `bun run docs:openapi`
-- [ ] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
-- [ ] `/status` returns `health` ∈ {ok, degraded, broken} validated by unit tests covering all three states.
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] All tests pass: `bun test` (3566 / 3566 — +7 health rollup tests)
+- [x] OpenAPI regenerated (additive `health` field) and committed: `bun run docs:openapi`
+- [x] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
+- [x] `/status` returns `health` ∈ {ok, degraded, broken} validated by unit tests covering all three states.
 
 #### Automated QA:
 - [ ] qa-use session: header health badge — green when all milestones verified, yellow when ≥1 unverified non-critical, red when harness or workers are missing; click navigates to `/#setup`.
@@ -613,12 +613,12 @@ export function recommendTemplates(detected: Set<DetectedIntegration>): Recommen
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] All tests pass: `bun test`
-- [ ] OpenAPI regenerated **only if** an endpoint was added: `bun run docs:openapi`
-- [ ] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
-- [ ] Unit tests assert: `{slack+github}` → "pr-triage", `{linear+github}` → "issue-to-pr", `{jira}` → "bug-intake", `{}` → "hello-world", and that every `TemplateId` resolves to an existing template record.
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] All tests pass: `bun test` (3586 / 3586 — +20 template-recommendation tests vs Phase 2)
+- [x] OpenAPI regenerated **only if** an endpoint was added: `bun run docs:openapi` _(Phase 3 added no endpoint; regen still ran clean — picked up a Phase 2 drift to `health` field, committed alongside.)_
+- [x] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
+- [x] Unit tests assert: `{slack+github}` → "pr-triage", `{linear+github}` → "issue-to-pr", `{jira}` → "bug-intake", `{}` → "hello-world", and that every `TemplateId` resolves to an existing template record.
 
 #### Automated QA:
 - [ ] qa-use session: with no integrations connected, `/templates`, `/tasks`, `/workflows` empty states show the "hello-world" recommendation.
@@ -629,7 +629,10 @@ export function recommendTemplates(detected: Set<DetectedIntegration>): Recommen
 #### Manual Verification:
 - [ ] Recommendation copy reads naturally for at least 2 integration combinations — not robotic, not pushy.
 
-**Implementation Note**: After this phase, pause for manual confirmation.
+**Implementation Notes**:
+- Recommendation card click navigates to `/templates` (the prompt-templates list page), NOT `/templates/<id>` — the UI's `/templates/:id` route is for prompt templates, not the agent-template registry. Deep-linking would 404 today. Captured `data-template-id` on the action button so a future agent-template detail route can light up without a card refactor.
+- Template stubs created in `templates/official/{pr-triage,issue-to-pr,bug-intake,hello-world}/` (config.json + CLAUDE.md only). They are agent-role templates; future iterations can flesh them out with real soulMd/identityMd/setup-script bodies.
+- After this phase, pause for manual confirmation.
 
 ---
 
@@ -708,9 +711,9 @@ export function useDismissibleCard(cardKey: string) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
-- [ ] Unit tests for `useDismissibleCard` cover: namespace key derivation, dismiss/restore round-trip, namespace isolation across two `apiUrl` values, cross-tab sync via `storage` event, graceful failure when `localStorage` throws.
+- [x] Type check passes: `bun run tsc:check`
+- [x] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
+- [x] Unit tests for `useDismissibleCard` cover: namespace key derivation, dismiss/restore round-trip, namespace isolation across two `apiUrl` values, cross-tab sync via `storage` event, graceful failure when `localStorage` throws. _(Pure-logic tests at `src/tests/use-dismissible-card.test.ts` — `ui/` has no test runner. Cross-tab `storage` event handler tested in qa-use sessions instead — pure-logic can't meaningfully exercise `addEventListener("storage", …)`.)_
 
 #### Automated QA:
 - [ ] qa-use session: dismiss welcome card → reload → stays dismissed.

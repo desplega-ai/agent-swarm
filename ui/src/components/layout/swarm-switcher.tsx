@@ -1,6 +1,15 @@
-import { Check, ChevronsUpDown, Settings } from "lucide-react";
+import {
+  BookOpen,
+  Check,
+  ChevronsUpDown,
+  CreditCard,
+  ExternalLink,
+  LifeBuoy,
+  Settings,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useHealth } from "@/api/hooks/use-stats";
+import { useStatusContext } from "@/app/status-context";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,10 +21,18 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui
 import { useConfig } from "@/hooks/use-config";
 import { cn } from "@/lib/utils";
 
+// Phase 2: cloud-mode menu link defaults. These are placeholders configurable
+// via marketing — the brainstorm calls them out as "Docs / Support / Billing".
+const CLOUD_DOCS_URL = "https://docs.agent-swarm.dev";
+const CLOUD_SUPPORT_URL = "mailto:contact@desplega.sh";
+const CLOUD_BILLING_URL = "https://cloud.agent-swarm.dev/billing";
+
 export function SwarmSwitcher() {
   const { connections, activeConnection, switchConnection } = useConfig();
   const { data: health, isError } = useHealth();
+  const { data: status } = useStatusContext();
   const navigate = useNavigate();
+  const isCloud = status?.identity.is_cloud === true;
 
   const isHealthy = !!health && !isError;
   const displayName = activeConnection?.name ?? "No connection";
@@ -77,6 +94,47 @@ export function SwarmSwitcher() {
               <Settings className="size-3.5 shrink-0" />
               <span>Manage connections</span>
             </DropdownMenuItem>
+            {isCloud ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <a
+                    href={CLOUD_DOCS_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs"
+                  >
+                    <BookOpen className="size-3.5 shrink-0" />
+                    <span>Documentation</span>
+                    <ExternalLink className="ml-auto size-3 shrink-0 opacity-60" />
+                  </a>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <a
+                    href={CLOUD_SUPPORT_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs"
+                  >
+                    <LifeBuoy className="size-3.5 shrink-0" />
+                    <span>Support</span>
+                    <ExternalLink className="ml-auto size-3 shrink-0 opacity-60" />
+                  </a>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <a
+                    href={CLOUD_BILLING_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs"
+                  >
+                    <CreditCard className="size-3.5 shrink-0" />
+                    <span>Billing</span>
+                    <ExternalLink className="ml-auto size-3 shrink-0 opacity-60" />
+                  </a>
+                </DropdownMenuItem>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

@@ -82,11 +82,26 @@ export const StatusAgentFsSchema = z.object({
 });
 export type StatusAgentFs = z.infer<typeof StatusAgentFsSchema>;
 
+/**
+ * Phase 2: Aggregate health derived from setup milestones.
+ *
+ * - `broken`  — harness or workers blocking (creds missing, no live workers ever).
+ * - `degraded` — at least one optional integration `unverified`/`configured`
+ *                 while another is configured, OR harness creds present but
+ *                 never tested (`configured`).
+ * - `ok`       — harness + workers `verified`; no integration left in
+ *                 `configured` state.
+ */
+export const StatusHealthSchema = z.enum(["ok", "degraded", "broken"]);
+export type StatusHealth = z.infer<typeof StatusHealthSchema>;
+
 export const StatusResponseSchema = z.object({
   identity: StatusIdentitySchema,
   setup: z.array(SetupMilestoneSchema),
   activity: StatusActivitySchema,
   agent_fs: StatusAgentFsSchema,
+  /** Phase 2: rolled-up health for the always-on header badge. */
+  health: StatusHealthSchema,
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
@@ -384,17 +399,57 @@ function buildSetup(): SetupMilestone[] {
   ];
 }
 
+// ─── Health aggregate (Phase 2) ──────────────────────────────────────────────
+
+/**
+ * Roll the 7-milestone setup state into a single tri-state health value.
+ *
+ * Decision matrix:
+ * - Harness `unverified` (no creds at all) → `broken` — the swarm cannot run a task.
+ * - Workers `unverified` (no agents ever) → `broken` — same reason.
+ * - Harness `configured` (creds present, never live-tested) → `degraded`.
+ * - Workers `configured` (agents exist but no recent heartbeat) → `degraded`.
+ * - Any of {slack, github, linear, jira} `configured` (i.e. half-set-up) → `degraded`.
+ * - Otherwise → `ok`.
+ *
+ * Note: integrations in `unverified` are NOT degrading on their own — most
+ * deployments don't connect every integration. They only nudge the rollup if
+ * paired with another integration in `configured` (the brainstorm contract).
+ */
+export function computeHealth(setup: SetupMilestone[]): StatusHealth {
+  const byId = new Map(setup.map((m) => [m.id, m] as const));
+  const harness = byId.get("harness");
+  const workers = byId.get("workers");
+
+  // `broken` rules — critical blockers.
+  if (!harness || harness.state === "unverified") return "broken";
+  if (!workers || workers.state === "unverified") return "broken";
+
+  // `degraded` rules.
+  if (harness.state === "configured") return "degraded";
+  if (workers.state === "configured") return "degraded";
+
+  for (const id of ["slack", "github", "linear", "jira"] as const) {
+    const m = byId.get(id);
+    if (m?.state === "configured") return "degraded";
+  }
+
+  return "ok";
+}
+
 // ─── Public payload builder (also exported for tests) ────────────────────────
 
 export function buildStatusPayload(): StatusResponse {
+  const setup = buildSetup();
   return {
     identity: buildIdentity(),
-    setup: buildSetup(),
+    setup,
     activity: getInstanceActivity(),
     agent_fs: {
       configured: !!process.env.AGENT_FS_API_URL,
       base_url: process.env.AGENT_FS_API_URL ?? null,
     },
+    health: computeHealth(setup),
   };
 }
 

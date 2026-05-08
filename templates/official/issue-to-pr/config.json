@@ -1,0 +1,24 @@
+{
+  "name": "issue-to-pr",
+  "displayName": "Issue → PR",
+  "description": "Linear + GitHub starter — pick up Linear issues, implement them on a feature branch, and open a pull request with a concise summary.",
+  "version": "0.1.0",
+  "category": "official",
+  "icon": "git-merge",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
+  "createdAt": "2026-05-08",
+  "lastUpdatedAt": "2026-05-08",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["linear", "github", "implementation"],
+    "maxTasks": 2
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": null,
+    "identityMd": null,
+    "toolsMd": null,
+    "setupScript": null,
+    "heartbeatMd": null
+  }
+}

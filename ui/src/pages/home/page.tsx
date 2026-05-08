@@ -1,15 +1,12 @@
 /**
- * Home page (Phase 1) — `/`.
+ * Home page (Phase 1, with Phase 3/4 layers) — `/`.
  *
  * Driven by `GET /status`. Layout (top → bottom):
- *   1. Activity strip (3 stat tiles)
- *   2. Setup checklist:
- *        - Harness row
- *        - Integrations sub-section (Slack + GitHub) with "All integrations →"
- *          and "Docs ↗" links
- *        - Workers row
- *        - First task row
- *   3. First Steps + Storage placeholders (2-col on md+)
+ *   1. Welcome card (Phase 4 — dismissible, per-deployment localStorage)
+ *   2. Activity strip (3 stat tiles)
+ *   3. Setup checklist (extracted to `setup-checklist.tsx` in Phase 4 for
+ *      per-row + tour-completion collapse)
+ *   4. First Steps + Storage (2-col on md+)
  *
  * Identity (org name + logo) lives in the sidebar header — not on this page.
  *
@@ -22,159 +19,75 @@
 
 import {
   ArrowRight,
-  CheckCircle2,
-  Circle,
-  CircleDashed,
   Crown,
   ExternalLink,
   ListTodo,
   Loader2,
+  Sparkles,
   Users,
+  X,
 } from "lucide-react";
 import { Suspense } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
-import { useStatus, useTestConnection } from "@/api/hooks";
-import type { ProviderName, SetupMilestone, SetupMilestoneState } from "@/api/types";
+import type { ProviderName, SetupMilestone, StatusResponse } from "@/api/types";
+import { useStatusContext } from "@/app/status-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatPanel } from "@/components/ui/stat-panel";
-import { cn } from "@/lib/utils";
+import { useDismissibleCard } from "@/hooks/use-dismissible-card";
+import {
+  detectedFromStatus,
+  type TemplateId,
+  topRecommendation,
+} from "@/lib/template-recommendations";
+import { SetupChecklist } from "./setup-checklist";
 
-const DOCS_URL = "https://docs.agent-swarm.dev/docs";
 const AGENT_FS_URL = "https://agent-fs.dev";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-const STATE_LABEL: Record<SetupMilestoneState, string> = {
-  unverified: "Not set up",
-  configured: "Set up",
-  verified: "Verified",
-};
-
-const STATE_TONE_CLASS: Record<SetupMilestoneState, string> = {
-  unverified: "border-status-neutral/40 text-status-neutral-strong",
-  configured: "border-status-pending/40 text-status-pending-strong",
-  verified: "border-status-success/40 text-status-success-strong",
-};
-
-function StateIcon({ state }: { state: SetupMilestoneState }) {
-  if (state === "verified") {
-    return <CheckCircle2 className="h-4 w-4 text-status-success" aria-hidden="true" />;
-  }
-  if (state === "configured") {
-    return <CircleDashed className="h-4 w-4 text-status-pending" aria-hidden="true" />;
-  }
-  return <Circle className="h-4 w-4 text-status-neutral" aria-hidden="true" />;
-}
+// ─── Welcome card (Phase 4) ──────────────────────────────────────────────────
 
 /**
- * Per-milestone CTA copy. Generic "Set up" was misaligned with the actual
- * action on most rows.
+ * Org-aware intro card shown once per deployment. Dismissible via
+ * `useDismissibleCard("home-welcome")` — choice persists across reloads
+ * and tabs of the same `apiUrl`.
  */
-function ctaLabel(milestone: SetupMilestone): string {
-  if (milestone.state === "verified") return "View";
-  switch (milestone.id) {
-    case "slack":
-    case "github":
-    case "linear":
-    case "jira":
-      return "Connect";
-    case "workers":
-      return "Read docs";
-    case "first_task":
-      return "Create task";
-    default:
-      return "Set up";
-  }
-}
-
-// ─── Setup row ───────────────────────────────────────────────────────────────
-
-function SetupRow({
-  milestone,
-  harnessProvider,
-}: {
-  milestone: SetupMilestone;
-  harnessProvider: ProviderName | null;
-}) {
-  const navigate = useNavigate();
-  const testMutation = useTestConnection();
-  const isHarnessConfigured = milestone.id === "harness" && milestone.state === "configured";
-
-  const handleAction = () => {
-    if (!milestone.action_url) return;
-    navigate(milestone.action_url);
-  };
-
-  const handleTestConnection = () => {
-    if (!harnessProvider) return;
-    testMutation.mutate(harnessProvider, {
-      onSuccess: (result) => {
-        if (result.ok) {
-          toast.success(`Verified harness — ${result.latency_ms} ms.`);
-        } else {
-          toast.error(`Test failed: ${result.error ?? "unknown error"}`, {
-            description: `Provider: ${harnessProvider} • ${result.latency_ms} ms`,
-          });
-        }
-      },
-      onError: (err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to test connection.");
-      },
-    });
-  };
-
+function WelcomeCard({ status }: { status: StatusResponse }) {
+  const { dismissed, dismiss } = useDismissibleCard("home-welcome");
+  if (dismissed) return null;
+  const orgName = status.identity.name || "Swarm";
   return (
-    <div className="flex items-start justify-between gap-4 px-4 py-3 border-b border-border last:border-b-0">
-      <div className="flex items-start gap-3 min-w-0">
-        <div className="mt-0.5 shrink-0">
-          <StateIcon state={milestone.state} />
-        </div>
+    <Card>
+      <CardContent className="p-4 flex items-start justify-between gap-4">
         <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium">{milestone.label}</span>
-            <Badge variant="outline" size="tag" className={cn(STATE_TONE_CLASS[milestone.state])}>
-              {STATE_LABEL[milestone.state]}
-            </Badge>
-          </div>
-          {milestone.hint ? (
-            <p className="text-xs text-muted-foreground">{milestone.hint}</p>
-          ) : null}
+          <p className="text-sm font-medium">Welcome to {orgName}!</p>
+          <p className="text-xs text-muted-foreground">
+            This is your swarm home. Track setup, kick off your first task, and watch live activity.
+            Each card below maps to a setup milestone — finish them to graduate.
+          </p>
         </div>
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {isHarnessConfigured && harnessProvider ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleTestConnection}
-            disabled={testMutation.isPending}
-          >
-            {testMutation.isPending ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              "Test connection"
-            )}
-          </Button>
-        ) : null}
-        {milestone.action_url ? (
-          <Button size="sm" variant="ghost" onClick={handleAction}>
-            {ctaLabel(milestone)}
-            {milestone.state !== "verified" ? <ArrowRight className="ml-1 h-3 w-3" /> : null}
-          </Button>
-        ) : null}
-      </div>
-    </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={dismiss}
+          aria-label="Dismiss welcome card"
+          className="shrink-0"
+        >
+          <X className="h-3 w-3" aria-hidden="true" />
+          <span className="ml-1 text-xs">Got it</span>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 function HomePageContent() {
-  const navigate = useNavigate();
-  const { data: status, isLoading, error } = useStatus();
+  // Phase 2: read from the shared StatusProvider so polling is centralized
+  // (the AppHeader badge, AppFooter, sidebar identity, and home all share
+  // the same /status snapshot).
+  const { data: status, isLoading, error } = useStatusContext();
 
   if (isLoading) {
     return (
@@ -196,15 +109,14 @@ function HomePageContent() {
   // Phase 1.5: read the harness provider from the typed milestone field.
   const harnessRow = setup.find((m) => m.id === "harness");
   const provider: ProviderName | null = harnessRow?.provider ?? null;
-
-  const slackRow = setup.find((m) => m.id === "slack");
-  const githubRow = setup.find((m) => m.id === "github");
-  const workersRow = setup.find((m) => m.id === "workers");
   const firstTaskRow = setup.find((m) => m.id === "first_task");
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full pb-8">
+        {/* Welcome card (Phase 4) */}
+        <WelcomeCard status={status} />
+
         {/* Activity */}
         <section className="space-y-2">
           <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
@@ -232,47 +144,8 @@ function HomePageContent() {
           </div>
         </section>
 
-        {/* Setup checklist */}
-        <section id="setup" className="space-y-2">
-          <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
-            Setup checklist
-          </h2>
-          <Card>
-            <CardContent className="p-0">
-              {harnessRow ? <SetupRow milestone={harnessRow} harnessProvider={provider} /> : null}
-
-              {/* Integrations sub-group */}
-              <div className="px-4 py-2 bg-muted/30 border-b border-border">
-                <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
-                  Integrations
-                </p>
-              </div>
-              {slackRow ? <SetupRow milestone={slackRow} harnessProvider={null} /> : null}
-              {githubRow ? <SetupRow milestone={githubRow} harnessProvider={null} /> : null}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/10">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => navigate("/integrations")}
-                  className="text-xs"
-                >
-                  All integrations <ArrowRight className="ml-1 h-3 w-3" />
-                </Button>
-                <a
-                  href={`${DOCS_URL}/integrations`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-                >
-                  Docs <ExternalLink className="h-3 w-3" />
-                </a>
-              </div>
-
-              {workersRow ? <SetupRow milestone={workersRow} harnessProvider={null} /> : null}
-              {firstTaskRow ? <SetupRow milestone={firstTaskRow} harnessProvider={null} /> : null}
-            </CardContent>
-          </Card>
-        </section>
+        {/* Setup checklist (Phase 4: extracted, dismissible) */}
+        <SetupChecklist setup={setup} harnessProvider={provider} />
 
         {/* First Steps + Storage — two columns on md+ */}
         <section className="grid gap-4 grid-cols-1 md:grid-cols-2">
@@ -280,12 +153,7 @@ function HomePageContent() {
             <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
               First steps
             </h2>
-            <Card>
-              <CardContent className="p-4 text-sm text-muted-foreground">
-                Recommended starter templates will appear here once you connect an integration. For
-                now, head to the templates page to browse what's available.
-              </CardContent>
-            </Card>
+            <FirstStepsCard status={status} firstTaskRow={firstTaskRow} />
           </div>
 
           <div className="space-y-2">
@@ -323,6 +191,96 @@ function HomePageContent() {
         </section>
       </div>
     </div>
+  );
+}
+
+// ─── First-steps recommendation card ─────────────────────────────────────────
+
+const TEMPLATE_LABELS: Record<TemplateId, string> = {
+  "pr-triage": "PR triage",
+  "issue-to-pr": "Issue → PR",
+  "bug-intake": "Bug intake",
+  "hello-world": "Hello world",
+};
+
+/**
+ * Phase 3: home "First steps" section. Shows the top template recommendation
+ * derived from `/status`'s detected integrations.
+ *
+ * - When `first_task.state === "verified"`: collapse to a small link to
+ *   `/templates`. The user has already finished their first task — no need
+ *   to keep nagging.
+ * - Otherwise: full CTA card with the template recommendation. Primary
+ *   action wires through `first_task.action_url` (defaults to
+ *   `/tasks?new=true` server-side) so clicking opens the create-task
+ *   dialog. Secondary action goes to `/templates` to browse alternatives.
+ */
+function FirstStepsCard({
+  status,
+  firstTaskRow,
+}: {
+  status: StatusResponse;
+  firstTaskRow: SetupMilestone | undefined;
+}) {
+  const navigate = useNavigate();
+  const rec = topRecommendation(status);
+  const detectedCount = detectedFromStatus(status).size;
+  const templateLabel = TEMPLATE_LABELS[rec.templateId];
+
+  if (firstTaskRow?.state === "verified") {
+    return (
+      <Card>
+        <CardContent className="p-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">First task done — nice.</p>
+            <p className="text-xs text-muted-foreground">
+              Browse more templates to expand what your swarm can do.
+            </p>
+          </div>
+          <Button asChild size="sm" variant="ghost">
+            <a href="/templates">
+              Recommended templates <ArrowRight className="ml-1 h-3 w-3" aria-hidden="true" />
+            </a>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const primaryHref = firstTaskRow?.action_url ?? "/tasks?new=true";
+  return (
+    <Card>
+      <CardContent className="p-4 flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-3.5 w-3.5 text-status-active" aria-hidden="true" />
+          <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
+            Recommended template
+          </span>
+          {detectedCount === 0 ? (
+            <Badge variant="outline" size="tag" className="ml-auto">
+              No integrations
+            </Badge>
+          ) : null}
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Start with {templateLabel}</p>
+          <p className="text-xs text-muted-foreground">{rec.reason}</p>
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <Button size="sm" variant="ghost" onClick={() => navigate("/templates")}>
+            Browse all
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            data-template-id={rec.templateId}
+            onClick={() => navigate(primaryHref)}
+          >
+            Create task <ArrowRight className="ml-1 h-3 w-3" aria-hidden="true" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

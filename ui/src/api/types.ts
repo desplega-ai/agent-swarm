@@ -999,11 +999,19 @@ export interface StatusAgentFs {
   base_url: string | null;
 }
 
+/**
+ * Phase 2: Aggregate health rolled up server-side from the setup milestones.
+ * Drives the always-on header badge color.
+ */
+export type StatusHealth = "ok" | "degraded" | "broken";
+
 export interface StatusResponse {
   identity: StatusIdentity;
   setup: SetupMilestone[];
   activity: StatusActivity;
   agent_fs: StatusAgentFs;
+  /** Phase 2: rolled-up health for the always-on header badge. */
+  health: StatusHealth;
 }
 
 export interface TestConnectionResponse {

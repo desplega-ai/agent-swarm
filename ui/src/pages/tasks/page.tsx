@@ -8,6 +8,7 @@ import { useCreateTask, useTasks } from "@/api/hooks/use-tasks";
 import type { AgentTask, AgentTaskStatus } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TemplateRecommendationCard } from "@/components/shared/template-recommendation-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -588,6 +589,18 @@ export default function TasksPage() {
           </Button>
         )}
       </div>
+
+      {/* Phase 3: smart empty state — when the swarm has zero tasks total
+          (not just zero matching the current filter), promote the
+          recommended starter template based on detected integrations. */}
+      {!isLoading && total === 0 && !hasActiveFilters ? (
+        <div className="py-4">
+          <TemplateRecommendationCard
+            eyebrow="Try this to get going"
+            actionLabel="Browse templates"
+          />
+        </div>
+      ) : null}
 
       <DataGrid
         rowData={tasksData?.tasks ?? []}

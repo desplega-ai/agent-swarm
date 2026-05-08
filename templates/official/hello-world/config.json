@@ -1,0 +1,24 @@
+{
+  "name": "hello-world",
+  "displayName": "Hello World",
+  "description": "No-integration starter — a friendly worker agent you can task with anything to verify your swarm is wired up end-to-end.",
+  "version": "0.1.0",
+  "category": "official",
+  "icon": "sparkles",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
+  "createdAt": "2026-05-08",
+  "lastUpdatedAt": "2026-05-08",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["general"],
+    "maxTasks": 3
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": null,
+    "identityMd": null,
+    "toolsMd": null,
+    "setupScript": null,
+    "heartbeatMd": null
+  }
+}

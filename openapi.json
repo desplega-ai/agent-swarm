@@ -7161,13 +7161,22 @@
                         "configured",
                         "base_url"
                       ]
+                    },
+                    "health": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "degraded",
+                        "broken"
+                      ]
                     }
                   },
                   "required": [
                     "identity",
                     "setup",
                     "activity",
-                    "agent_fs"
+                    "agent_fs",
+                    "health"
                   ]
                 }
               }
