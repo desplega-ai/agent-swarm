@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Memory rater Stop-hook regression chain** (#444, #445, #447) — the LLM piggyback rater introduced in #429 had been silent in production since deploy. Three follow-ups landed the fix:
+  - **#444** — gate-trace logging in the Stop hook to expose which precondition was failing
+  - **#445** — pass `taskId` via `AGENT_SWARM_TASK_ID` (and `AGENT_SWARM_AGENT_ID`) env vars instead of relying on the on-disk `TASK_FILE`. The file disappeared mid-session in production, so `Bun.file().text()` threw ENOENT; the catch swallowed it and `taskId` stayed undefined, which short-circuited `fetchRetrievalsForTask`
+  - **#447** — tolerant JSON parser (`tryParseLooseJson`) for Haiku output that occasionally wrapped the inner `result` in ` ```json ` fences or prefixed it with a short prose preamble. Strict `JSON.parse` rejected those shapes; the new helper strips fences and falls back to first-`{` / last-`}` slicing. The summarizer prompt also got an explicit no-fences / no-preamble directive as defense-in-depth. Includes regression tests for both `parseSummaryWithRatings` and `extractSummaryFromClaudeStdout`
+
+### Changed
+- **`Dockerfile.worker`** — bumped `CODEX_VERSION` from 0.125.0 to 0.128.0; matching `@openai/codex-sdk` bump from `^0.125.0` to `^0.128.0` in `package.json` (#442)
+- **`Dockerfile.worker`** — `@desplega.ai/qa-use` bumped to 2.17.0 to dodge a `workspace:*` resolution failure in 2.15.3 that broke uncached Docker Build CI; pinned `@huggingface/hub` to 2.11.0 via npm overrides to work around `@huggingface/xetchunk-wasm@0.0.4` shipping unpublished `workspace:*` siblings. Switched the global-tool install pattern from `npm install -g` to staging-dir install + symlink-to-`/usr/local/bin` so the override applies (#447)
+
 ## [1.75.0] - 2026-05-06
 
 ### Added
