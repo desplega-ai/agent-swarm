@@ -24,6 +24,7 @@ import "../src/http/skills";
 import "../src/http/mcp-oauth";
 import "../src/http/mcp-servers";
 import "../src/http/stats";
+import "../src/http/status";
 import "../src/http/tasks";
 import "../src/http/trackers/jira";
 import "../src/http/trackers/linear";

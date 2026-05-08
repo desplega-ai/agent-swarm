@@ -42,6 +42,7 @@ import { handleSchedules } from "./schedules";
 import { handleSessionData } from "./session-data";
 import { handleSkills } from "./skills";
 import { handleStats } from "./stats";
+import { handleStatus } from "./status";
 import { handleTasks } from "./tasks";
 import { handleTrackers } from "./trackers";
 import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
@@ -126,6 +127,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleContext(req, res, pathSegments, queryParams, myAgentId),
     () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
     () => handleStats(req, res, pathSegments, queryParams),
+    () => handleStatus(req, res, pathSegments, queryParams),
     () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
     () => handlePricing(req, res, pathSegments, queryParams, myAgentId),
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),

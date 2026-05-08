@@ -557,6 +557,8 @@ type AgentRow = {
   lastUpdatedAt: string;
   /** JSON array of env-var names; populated only when status is `waiting_for_credentials`. */
   credentialMissing: string | null;
+  /** Phase 1.5: per-agent harness provider pushed on worker registration. */
+  harness_provider: string | null;
 };
 
 function rowToAgent(row: AgentRow): Agent {
@@ -578,6 +580,7 @@ function rowToAgent(row: AgentRow): Agent {
     heartbeatMd: row.heartbeatMd ?? undefined,
     lastActivityAt: row.lastActivityAt ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
+    harnessProvider: (row.harness_provider as ProviderName | null) ?? null,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     credentialMissing: row.credentialMissing
@@ -588,8 +591,11 @@ function rowToAgent(row: AgentRow): Agent {
 
 export const agentQueries = {
   insert: () =>
-    getDb().prepare<AgentRow, [string, string, number, AgentStatus, number, string | null]>(
-      "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
+    getDb().prepare<
+      AgentRow,
+      [string, string, number, AgentStatus, number, string | null, string | null]
+    >(
+      "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, harness_provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
     ),
 
   getById: () => getDb().prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?"),
@@ -638,7 +644,15 @@ export function createAgent(
   const maxTasks = agent.maxTasks ?? 1;
   const row = agentQueries
     .insert()
-    .get(id, agent.name, agent.isLead ? 1 : 0, agent.status, maxTasks, agent.provider ?? null);
+    .get(
+      id,
+      agent.name,
+      agent.isLead ? 1 : 0,
+      agent.status,
+      maxTasks,
+      agent.provider ?? null,
+      agent.harnessProvider ?? null,
+    );
   if (!row) throw new Error("Failed to create agent");
   try {
     createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
@@ -694,6 +708,44 @@ export function updateAgentProvider(id: string, provider: ProviderName): Agent |
     )
     .get(provider, id);
   return row ? rowToAgent(row) : null;
+}
+
+/**
+ * Phase 1.5 (cloud-personalization): set the per-agent `harness_provider`
+ * column. Pass `null` to clear. Validation against the canonical provider
+ * list happens at the API layer via `ProviderNameSchema`.
+ *
+ * Returns the updated row, or null if the agent does not exist.
+ */
+export function setAgentHarnessProvider(id: string, provider: ProviderName | null): Agent | null {
+  const row = getDb()
+    .prepare<AgentRow, [string | null, string]>(
+      `UPDATE agents SET harness_provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    )
+    .get(provider, id);
+  return row ? rowToAgent(row) : null;
+}
+
+/**
+ * Phase 1.5 (cloud-personalization): aggregate count of registered agents
+ * by `harness_provider`. NULL rows (agents that registered before the
+ * migration or never pushed a value) are excluded — they show up in the
+ * total agent count but not here.
+ *
+ * Used by future fleet displays. Not consumed in this phase.
+ */
+export function getAgentHarnessProviders(): Array<{ provider: string; count: number }> {
+  const rows = getDb()
+    .prepare<{ provider: string; count: number }, []>(
+      `SELECT harness_provider AS provider, COUNT(*) AS count
+       FROM agents
+       WHERE harness_provider IS NOT NULL
+       GROUP BY harness_provider
+       ORDER BY harness_provider`,
+    )
+    .all();
+  return rows.map((r) => ({ provider: r.provider, count: r.count }));
 }
 
 export function updateAgentActivity(id: string): void {
@@ -8910,4 +8962,79 @@ export function setBudgetRefusalFollowUpTaskId(
       "UPDATE budget_refusal_notifications SET follow_up_task_id = ? WHERE task_id = ? AND date = ?",
     )
     .run(followUpTaskId, taskId, date);
+}
+
+// ============================================================================
+// /status helpers — instance activity + first-task milestone
+// ============================================================================
+
+/**
+ * Count agents that have heartbeated within the last `minutes` minutes,
+ * grouped by lead/worker. Used by the `workers` setup milestone on
+ * `GET /status` to flip from `configured` → `verified` only when both a lead
+ * and at least one worker are alive.
+ *
+ * "Recent" defaults to 5 minutes — a multiple of `ACTIVITY_THROTTLE_MS = 5_000`
+ * (`src/providers/swarm-events-shared.ts:48-49`) plus margin for missed
+ * heartbeats. Agents with `status = 'offline'` are excluded.
+ */
+export function getLiveAgentCounts(minutes: number = 5): {
+  leads_alive: number;
+  workers_alive: number;
+} {
+  const row = getDb()
+    .prepare<{ leads_alive: number | null; workers_alive: number | null }, [number]>(
+      `SELECT
+         SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads_alive,
+         SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers_alive
+       FROM agents
+       WHERE lastActivityAt IS NOT NULL
+         AND lastActivityAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?1 || ' minutes')
+         AND status != 'offline'`,
+    )
+    .get(minutes);
+  return {
+    leads_alive: row?.leads_alive ?? 0,
+    workers_alive: row?.workers_alive ?? 0,
+  };
+}
+
+/**
+ * Aggregate activity numbers for `GET /status`'s `activity` block.
+ * - `agents_online` / `leads_online`: heartbeated within the last 5 minutes.
+ * - `recent_tasks_count`: agent_tasks rows created in the last 24 hours.
+ *
+ * `agents_online` reports total alive agents (leads + workers) so the home
+ * page can show a single "online" stat without summing on the client.
+ */
+export function getInstanceActivity(): {
+  agents_online: number;
+  leads_online: number;
+  recent_tasks_count: number;
+} {
+  const { leads_alive, workers_alive } = getLiveAgentCounts(5);
+  const tasksRow = getDb()
+    .prepare<{ count: number }, []>(
+      `SELECT COUNT(*) AS count FROM agent_tasks
+       WHERE createdAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')`,
+    )
+    .get();
+  return {
+    agents_online: leads_alive + workers_alive,
+    leads_online: leads_alive,
+    recent_tasks_count: tasksRow?.count ?? 0,
+  };
+}
+
+/**
+ * `first_task` milestone: true once any task has reached `status = 'completed'`.
+ * Cheap LIMIT 1 probe; the row's contents don't matter, only existence.
+ */
+export function hasFirstCompletedTask(): boolean {
+  const row = getDb()
+    .prepare<{ one: number }, []>(
+      `SELECT 1 AS one FROM agent_tasks WHERE status = 'completed' LIMIT 1`,
+    )
+    .get();
+  return row !== null;
 }

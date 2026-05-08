@@ -10,6 +10,7 @@ import {
   getDb,
   getSwarmConfigs,
   resetEmptyPollCount,
+  setAgentHarnessProvider,
   updateAgentActivity,
   updateAgentCredentialState,
   updateAgentMaxTasks,
@@ -38,11 +39,36 @@ const registerAgent = route({
     capabilities: z.array(z.string()).optional(),
     maxTasks: z.number().int().optional(),
     provider: ProviderNameSchema.optional(),
+    /**
+     * Phase 1.5 (cloud-personalization): worker-pushed canonical harness
+     * provider. Persists to `agents.harness_provider`. Validated against
+     * the canonical list — unknown values reject the request with 400.
+     */
+    harness_provider: ProviderNameSchema.optional(),
   }),
   responses: {
     200: { description: "Agent re-registered (already existed)" },
     201: { description: "Agent created" },
     400: { description: "Validation error" },
+  },
+});
+
+const setAgentHarnessProviderRoute = route({
+  method: "patch",
+  path: "/api/agents/{id}/harness-provider",
+  pattern: ["api", "agents", null, "harness-provider"],
+  summary: "Re-assign an agent's harness_provider (planning/forecast — not live)",
+  description:
+    "Updates the `agents.harness_provider` column. Worker does NOT react in real time — the new value is picked up on the next worker restart, where the env-driven HARNESS_PROVIDER still wins on register. Live per-agent re-assignment is tracked in DES-359.",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    harness_provider: ProviderNameSchema,
+  }),
+  responses: {
+    200: { description: "Updated agent row" },
+    400: { description: "Validation error (unknown provider)" },
+    404: { description: "Agent not found" },
   },
 });
 
@@ -219,6 +245,17 @@ export async function handleAgentRegister(
         if (parsed.body.provider && parsed.body.provider !== existingAgent.provider) {
           updateAgentProvider(existingAgent.id, parsed.body.provider);
         }
+        // Phase 1.5: worker-pushed harness_provider always wins on
+        // re-registration. Env-driven, by design (per-agent live override
+        // belongs to DES-359). NULL => leave existing column untouched
+        // so PATCH /harness-provider doesn't get clobbered by re-register
+        // payloads from older workers.
+        if (
+          parsed.body.harness_provider &&
+          parsed.body.harness_provider !== existingAgent.harnessProvider
+        ) {
+          setAgentHarnessProvider(existingAgent.id, parsed.body.harness_provider);
+        }
         resetEmptyPollCount(existingAgent.id);
         return { agent: getAgentById(agentId), created: false };
       }
@@ -233,6 +270,7 @@ export async function handleAgentRegister(
         capabilities: parsed.body.capabilities ?? [],
         maxTasks: parsed.body.maxTasks ?? 1,
         provider: parsed.body.provider,
+        harnessProvider: parsed.body.harness_provider ?? null,
       });
 
       return { agent, created: true };
@@ -396,6 +434,18 @@ export async function handleAgentsRest(
     updateAgentActivity(parsed.params.id);
     res.writeHead(204);
     res.end();
+    return true;
+  }
+
+  if (setAgentHarnessProviderRoute.match(req.method, pathSegments)) {
+    const parsed = await setAgentHarnessProviderRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const agent = setAgentHarnessProvider(parsed.params.id, parsed.body.harness_provider);
+    if (!agent) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+    json(res, agentWithCapacity(agent));
     return true;
   }
 

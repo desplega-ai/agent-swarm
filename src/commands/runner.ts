@@ -1348,6 +1348,15 @@ async function registerAgent(opts: {
 
   const provider = (process.env.HARNESS_PROVIDER || "claude") as ProviderName;
 
+  // Phase 1.5 (cloud-personalization): also push the canonical
+  // `harness_provider` field so the API can persist it in its own column
+  // (`agents.harness_provider`) without depending on the `provider` field
+  // (which historically tracked the runtime adapter selection). Send only
+  // when HARNESS_PROVIDER is explicitly set — server validates against
+  // ProviderNameSchema and rejects unknown values.
+  const harnessProviderEnv = process.env.HARNESS_PROVIDER?.trim();
+  const harnessProvider = harnessProviderEnv ? (harnessProviderEnv as ProviderName) : undefined;
+
   const response = await fetch(`${opts.apiUrl}/api/agents`, {
     method: "POST",
     headers,
@@ -1358,6 +1367,7 @@ async function registerAgent(opts: {
       capabilities: opts.capabilities,
       maxTasks: opts.maxTasks,
       provider,
+      ...(harnessProvider ? { harness_provider: harnessProvider } : {}),
     }),
   });
 

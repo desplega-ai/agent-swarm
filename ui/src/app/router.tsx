@@ -3,6 +3,7 @@ import { createBrowserRouter } from "react-router-dom";
 import { RootLayout } from "@/components/layout/root-layout";
 
 const DashboardPage = lazy(() => import("@/pages/dashboard/page"));
+const HomePage = lazy(() => import("@/pages/home/page"));
 const AgentsPage = lazy(() => import("@/pages/agents/page"));
 const AgentDetailPage = lazy(() => import("@/pages/agents/[id]/page"));
 const TasksPage = lazy(() => import("@/pages/tasks/page"));
@@ -42,7 +43,8 @@ export const router = createBrowserRouter([
     path: "/",
     element: <RootLayout />,
     children: [
-      { index: true, element: <DashboardPage /> },
+      { index: true, element: <HomePage /> },
+      { path: "dashboard", element: <DashboardPage /> },
       { path: "agents", element: <AgentsPage /> },
       { path: "agents/:id", element: <AgentDetailPage /> },
       { path: "tasks", element: <TasksPage /> },

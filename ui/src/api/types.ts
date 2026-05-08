@@ -37,6 +37,11 @@ export interface Agent {
   /** Env-var names the worker is blocked on when status is `waiting_for_credentials`. */
   credentialMissing?: string[] | null;
   provider?: string;
+  /**
+   * Phase 1.5: canonical harness provider the worker reported at registration
+   * time (or `null`/missing for legacy rows from before migration 054).
+   */
+  harnessProvider?: ProviderName | null;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -85,7 +90,7 @@ export interface AgentTask {
   providerMeta?: DevinProviderMeta | Record<string, never>;
 }
 
-export type ProviderName = "claude" | "codex" | "pi" | "devin";
+export type ProviderName = "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
 export type DevinProviderMeta = {
   sessionUrl: string;
   maxAcuLimit?: number;
@@ -945,4 +950,64 @@ export interface MemoryListResponse {
   results: MemoryEntry[];
   total: number;
   mode: "semantic" | "list";
+}
+
+// ─── /status (Phase 1: cloud personalization) ──────────────────────────────
+
+export type SetupMilestoneState = "unverified" | "configured" | "verified";
+
+export type MilestoneId =
+  | "harness"
+  | "slack"
+  | "github"
+  | "linear"
+  | "jira"
+  | "workers"
+  | "first_task";
+
+export interface SetupMilestone {
+  id: MilestoneId;
+  label: string;
+  state: SetupMilestoneState;
+  hint?: string;
+  action_url?: string;
+  /**
+   * Phase 1.5: only the `harness` milestone populates this. The UI uses
+   * it directly (no hint-string regex). Undefined when HARNESS_PROVIDER
+   * is unset or unknown.
+   */
+  provider?: ProviderName;
+}
+
+export interface StatusIdentity {
+  name: string;
+  logo_url: string | null;
+  brand_color: string | null;
+  is_cloud: boolean;
+  marketing_url: string | null;
+  hide_cloud_promo: boolean;
+}
+
+export interface StatusActivity {
+  agents_online: number;
+  leads_online: number;
+  recent_tasks_count: number;
+}
+
+export interface StatusAgentFs {
+  configured: boolean;
+  base_url: string | null;
+}
+
+export interface StatusResponse {
+  identity: StatusIdentity;
+  setup: SetupMilestone[];
+  activity: StatusActivity;
+  agent_fs: StatusAgentFs;
+}
+
+export interface TestConnectionResponse {
+  ok: boolean;
+  error?: string;
+  latency_ms: number;
 }

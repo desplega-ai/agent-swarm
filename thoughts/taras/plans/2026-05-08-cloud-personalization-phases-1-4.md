@@ -2,7 +2,9 @@
 date: 2026-05-08T00:00:00Z
 topic: "Cloud Personalization & Onboarding — Phases 1–4"
 author: taras
-status: draft
+status: in-progress
+last_updated: 2026-05-08T00:00:00Z
+last_updated_by: claude (phase 1.5 — harness provider scoping)
 related:
   - thoughts/taras/brainstorms/2026-05-07-cloud-deployment-personalization.md
   - thoughts/taras/research/2026-05-07-cloud-personalization-research.md
@@ -247,14 +249,15 @@ WHERE lastActivityAt IS NOT NULL
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] All tests pass: `bun test`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] OpenAPI regenerated and committed cleanly: `bun run docs:openapi` (no `git diff` after running)
-- [ ] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
-- [ ] New `/status` test file passes: `bun test src/tests/status.test.ts`
-- [ ] Existing `/health` is byte-identical: `curl -s http://localhost:3013/health` returns `{"status":"ok","version":"<pkg-version>"}` (regression).
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] All tests pass: `bun test`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] OpenAPI regenerated and committed cleanly: `bun run docs:openapi` (no `git diff` after running)
+- [x] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
+- [x] New `/status` test file passes: `bun test src/tests/status.test.ts`
+- [x] Existing `/health` is byte-identical: `curl -s http://localhost:3013/health` returns `{"status":"ok","version":"<pkg-version>"}` (regression). _(Verified by static inspection: `src/http/core.ts:100-113` is unchanged.)_
+- [x] Vite dev proxy: `ui/vite.config.ts` proxies `/status` to the API. _(Caught during manual QA — root-level routes need explicit proxy entries; fixed by adding alongside the existing `/health` proxy.)_
 
 #### Automated QA:
 - [ ] qa-use session: open `/` on a fresh-DB swarm with no envs set; screenshot the empty-state checklist; click each "Set up X" deep-link; confirm router lands on `/integrations`, `/agents`, `/tasks`, `/templates` respectively (and `/integrations#<id>` anchors hit the right section).
@@ -265,6 +268,192 @@ WHERE lastActivityAt IS NOT NULL
 #### Manual Verification:
 - [ ] On a real Linear-connected swarm, the Linear milestone shows `verified` after a successful keepalive cycle; the documented caveat hint is visible.
 - [ ] Test-connection latency shown in the toast feels reasonable (<5s typical) for the user's harness provider.
+
+**Implementation Note**: After this phase, pause for manual confirmation.
+
+---
+
+## Phase 1.5: Harness provider scoping (added mid-implementation)
+
+### Overview
+
+Two follow-ups to Phase 1, scoped during the Phase 1 review with Taras:
+
+- **A — Typed provider field on the harness milestone.** The Phase 1 implementation worked around the missing `provider` field by encoding `HARNESS_PROVIDER=<name>` into the milestone's `hint` string and parsing it in the UI with a regex. This is brittle; replace it with an explicit optional schema field.
+- **B — Per-agent harness provider as a first-class column.** Add `agents.harness_provider TEXT NULL`, have workers push their provider on registration, and expose a `PATCH /agents/:id/harness-provider` endpoint so an operator can re-assign without restarting. Worker boot path is **not** rewritten in this phase — that's the bigger Linear ticket [DES-359](https://linear.app/desplega-labs/issue/DES-359/) (full per-agent harness with dynamic adapter loading + swarm_config-driven creds).
+
+### Changes Required:
+
+#### 1. `provider?` field on `SetupMilestoneSchema`
+**File**: `src/http/status.ts`
+**Changes**:
+- Add `provider: ProviderNameSchema.optional()` to `SetupMilestoneSchema` (only the harness milestone populates it).
+- In `harnessMilestone()`, set `provider` on the returned object whenever `process.env.HARNESS_PROVIDER` is a known canonical provider; leave undefined when missing/unknown.
+- Strip the `HARNESS_PROVIDER=<name>` and `provider=<name>` substrings from milestone hints — hints become purely human copy.
+
+#### 2. UI: drop the regex, read the field
+**File**: `ui/src/api/hooks/use-status.ts`, `ui/src/pages/home/page.tsx`
+**Changes**: Replace the regex extraction with `setup.find(m => m.id === "harness")?.provider`. Pass it to the test-connection mutation directly.
+
+#### 3. Migration `054_agent_harness_provider.sql`
+**File**: `src/be/migrations/054_agent_harness_provider.sql` (new)
+**Changes**:
+```sql
+ALTER TABLE agents ADD COLUMN harness_provider TEXT NULL;
+```
+- Forward-only. NULL default = backward-compat for already-registered agents.
+
+#### 4. Worker registration pushes `harness_provider`
+**File**: `src/cli.tsx` worker register path (or wherever worker registration happens — likely `src/commands/agent-register.ts` or similar; locate during implementation), and the matching API handler (`src/http/agents.ts` or wherever the existing register/upsert endpoint lives).
+**Changes**:
+- Worker reads `process.env.HARNESS_PROVIDER` and includes it in the registration payload.
+- API handler accepts the new optional field, validates against the canonical provider list (`src/types.ts:77-85`), and writes to the new column.
+- Existing agents (no column value) stay valid.
+
+#### 5. `PATCH /agents/:id/harness-provider` endpoint
+**File**: `src/http/agents.ts` (or new `src/http/agent-harness.ts` if cleaner)
+**Changes**: New `route()` registration; body `{ harness_provider: ProviderName }`; updates the column. **Worker does not react in real-time** — picked up on next worker restart. Document this limitation in the route summary.
+
+#### 6. DB helpers
+**File**: `src/be/db.ts`
+**Changes**: Add `setAgentHarnessProvider(agentId: string, provider: ProviderName | null)` and `getAgentHarnessProviders(): { provider: string; count: number }[]` (used by future fleet displays; not consumed in this phase).
+
+#### 7. OpenAPI registration
+**File**: `scripts/generate-openapi.ts`
+**Changes**: Ensure the new route module is imported (alphabetical position); run `bun run docs:openapi` and commit regenerated `openapi.json` + `docs-site/content/docs/api-reference/**`.
+
+#### 8. Tests
+**File**: `src/tests/status.test.ts`
+**Changes**:
+- Assert `harness.provider === "claude"` when `HARNESS_PROVIDER=claude` set; undefined when unset.
+- Assert hints no longer contain `HARNESS_PROVIDER=` or `provider=` substrings.
+
+**File**: `src/tests/agents-harness-provider.test.ts` (new)
+**Changes**:
+- Migration applies cleanly to a fresh + existing DB.
+- Worker registration with `harness_provider` writes the column.
+- `PATCH /agents/:id/harness-provider` updates the column.
+- Invalid provider names rejected with 400.
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] All tests pass: `bun test`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] OpenAPI regenerated cleanly: `bun run docs:openapi`
+- [x] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
+- [x] Migration applies on a fresh DB and on an existing DB (`rm agent-swarm-db.sqlite && bun run start:http`; then with the previously-running DB).
+
+#### Automated QA (deferred):
+- [ ] Phase 1 qa-use sessions still pass after the regex removal.
+
+#### Manual Verification:
+- [ ] Restart a worker with `HARNESS_PROVIDER=claude` → confirm DB row gets the column populated.
+- [ ] `curl -X PATCH /agents/<id>/harness-provider -d '{"harness_provider":"codex"}'` → row updates; restart worker → next boot writes back to `claude` (env wins on register, by design — the PATCH is a planning/forecast mechanism today, not a live override; that's DES-359).
+
+**Implementation Note**: After this phase, pause for manual confirmation.
+
+---
+
+## Phase 1.6: Iteration & polish (added during manual QA)
+
+### Overview
+
+Bugs caught + UX requests landed during the Phase 1 walk-through with Taras. None of these were anticipated by the plan; they're recorded here so a future reader can trace the actual shipped behavior.
+
+### Changes Required:
+
+#### 1. Vite dev proxy
+**File**: `ui/vite.config.ts`
+**Changes**: `/status` was missing from the dev proxy (only `/api` and `/health` were proxied), so `useStatus()` hit Vite's SPA fallback and got HTML back. Added `/status` alongside `/health`.
+
+#### 2. Home page redesign
+**File**: `ui/src/pages/home/page.tsx`
+**Changes**:
+- Identity (logo + name) **moved to sidebar header** (`ui/src/components/layout/app-sidebar.tsx`) — frees vertical space and makes branding persistent across routes.
+- Layout reorder: **Activity** (top) → **Setup checklist** → **First Steps + Storage** (2-col grid on `md+`).
+- Made the page scrollable (`overflow-y-auto` on outer container) — was clipped before.
+- Setup checklist restructured into **groups**: Harness row, "Integrations" sub-section (Slack + GitHub) with "All integrations →" + "Docs ↗" links, Workers row, First task row. Linear/Jira are no longer on home — discoverable via the All-integrations link.
+- Per-state CTA copy: `Connect` (Slack/GitHub/Linear/Jira `unverified`), `Read docs` (workers `unverified`), `Create task` (first_task `unverified`), `View` (`verified`), `Set up` (harness `unverified`).
+- agent-fs unconfigured CTA links to `https://agent-fs.dev`.
+- Docs URL: `https://docs.agent-swarm.dev/docs`.
+
+#### 3. Sidebar identity + 404 fallback
+**File**: `ui/src/components/layout/app-sidebar.tsx`
+**Changes**:
+- Sidebar header reads `identity.name` / `identity.logo_url` / `identity.brand_color` from `/status`. Falls back to `"Agent Swarm"` + bundled `/logo.png` when status is unavailable.
+- Added `onError` handler on the logo `<img>` — if the configured URL fails to load, reverts to `/logo.png`.
+- When `/status` returns 404 (older API), the sidebar **hides the "Home" nav item** and the header NavLink points to `/dashboard` instead.
+
+#### 4. Graceful 404 / error fallback
+**File**: `ui/src/api/client.ts`, `ui/src/pages/home/page.tsx`
+**Changes**:
+- `fetchStatus()` returns `null` on HTTP 404 (older API server) instead of throwing. Other errors still throw.
+- `HomePage` redirects to `/dashboard` via `<Navigate replace>` when `status === null` OR when the query errors. Older deployments degrade gracefully.
+
+#### 5. Integration `action_url` paths
+**File**: `src/http/status.ts`
+**Changes**: Anchor-based URLs (`/integrations#slack`, etc.) didn't match the actual UI routes. Replaced with sub-routes (`/integrations/slack`, `/integrations/github`, `/integrations/linear`, `/integrations/jira`) — the routes that the IntegrationDetailPage at `/integrations/:id` actually serves. The harness milestone now points to `/integrations` (list page) since no single integration corresponds to a harness.
+
+#### 6. Server hint copy
+**File**: `src/http/status.ts`
+**Changes**:
+- Workers: "Run a worker container via Docker compose. See docs for setup." (was "Start a worker via PM2 (`bun run pm2-start`) or Docker compose.").
+- First task: "Send your first task to confirm the swarm runs end-to-end." (was "Issue your first task on the Tasks page, or kick off a workflow run.").
+- First-task `action_url` → `/tasks?new=true` so home links auto-open the create dialog.
+
+#### 7. Tasks page auto-open dialog
+**File**: `ui/src/pages/tasks/page.tsx`
+**Changes**: Added a `useEffect` that reads `?new=true` from the URL on mount, opens the create-task dialog, and strips the param so refresh doesn't re-trigger.
+
+#### 8. Credential validation rewrite — OAuth-aware, harness-consistent
+**File**: `src/providers/credentials.ts`
+**Changes**: The Phase 1 `validateProviderCredentials` only accepted API keys per harness, even though the runtime adapters accept OAuth tokens too (Claude Pro/Max via `claude` CLI login → `CLAUDE_CODE_OAUTH_TOKEN`; Codex ChatGPT OAuth → `CODEX_OAUTH`). Rewritten to mirror each adapter's actual credential resolution:
+
+| Harness | Accepted credentials (resolution order) | Validation |
+|---|---|---|
+| `claude` | `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` | OAuth: presence check. API key: live `GET /v1/models` (`x-api-key`). |
+| `claude-managed` | `ANTHROPIC_API_KEY` only | Live `GET /v1/models`. |
+| `codex` | `CODEX_OAUTH` (parseable JSON with `.access`) → `OPENAI_API_KEY` | OAuth: presence check. API key: live `GET /v1/models` (Bearer). |
+| `pi` | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` | Live call to matching `/v1/models`. |
+| `opencode` | same as `pi` | Live call to matching `/v1/models`. |
+| `devin` | `DEVIN_API_KEY` (+ optional `DEVIN_API_BASE_URL`) | Live `GET ${baseUrl}/v1/sessions?limit=1` (Bearer). |
+
+OAuth tokens get a presence check rather than a real upstream call — OAuth flows have their own refresh logic (handled at adapter boot) and the OAuth-bearer-with-`/v1/models` contract isn't a stable public surface.
+
+**File**: `src/tests/status.test.ts`
+**Changes**: Added `CODEX_OAUTH` to the env-reset list, updated the existing "missing creds" test to assert both env names are mentioned, and added 5 new tests covering: claude OAuth presence check, claude OAuth wins over API key, codex valid OAuth presence check, codex malformed OAuth falls back to API key, opencode resolves OPENROUTER first.
+
+#### 9. Harness column on `/agents`
+**File**: `ui/src/pages/agents/page.tsx`, `ui/src/api/types.ts`
+**Changes**: Added `harnessProvider?: ProviderName | null` to the UI `Agent` type. New "Harness" column on the agents grid between Role and Status — renders the provider as an outline badge when present, em-dash placeholder when null/missing (legacy rows from before migration 054).
+
+#### 10. Docs page
+**File**: `docs-site/content/docs/(documentation)/guides/personalization.mdx` (new), `docs-site/content/docs/(documentation)/guides/meta.json` (added to sidebar)
+**Changes**: New guide documenting all `SWARM_*` envs, the `/status` schema, the test-connection credential matrix, and the per-agent `harness_provider` mechanic (with DES-359 link). Also describes the `/status` 404 fallback behavior so operators understand graceful degradation.
+
+#### 11. Demo seed script
+**File**: `scripts/seed-demo-agents.ts` (new)
+**Changes**: Creates 5 dummy agents covering all 4 statuses (`idle`, `busy`, `offline`, `waiting_for_credentials`) plus lead/worker mix and varied `harness_provider`. Uses the API for registration + credential-status; uses `bun:sqlite` directly to set non-default `status` and `lastActivityAt` (admin-only seed, not runtime code — DB-boundary rule unchanged).
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] All tests pass: `bun test` (3559 / 3559 — +5 OAuth-path tests vs Phase 1.5)
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] OpenAPI regenerated: `bun run docs:openapi`
+- [x] UI lint + typecheck: `cd ui && pnpm lint && pnpm exec tsc -b`
+
+#### Manual Verification:
+- [x] Vite proxy fix verified by reload (was returning HTML doctype, now JSON).
+- [x] Edge-case identity envs tested live: long org name truncates in sidebar; remote logo URL loads; brand color tints the name.
+- [x] Seed script tested: `/status` reports `workers=verified`, `leads_online=1`, `agents_online=4`.
+- [ ] OAuth-only test-connection (no `ANTHROPIC_API_KEY`, only `CLAUDE_CODE_OAUTH_TOKEN`) — flips harness milestone to verified without an upstream call.
+- [ ] Phase 1 qa-use sessions still pass after the home redesign.
 
 **Implementation Note**: After this phase, pause for manual confirmation.
 

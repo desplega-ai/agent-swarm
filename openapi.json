@@ -326,6 +326,17 @@
                       "claude-managed",
                       "opencode"
                     ]
+                  },
+                  "harness_provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode"
+                    ]
                   }
                 },
                 "required": [
@@ -373,6 +384,66 @@
         "responses": {
           "200": {
             "description": "Agent list with capacity info"
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/harness-provider": {
+      "patch": {
+        "summary": "Re-assign an agent's harness_provider (planning/forecast — not live)",
+        "description": "Updates the `agents.harness_provider` column. Worker does NOT react in real time — the new value is picked up on the next worker restart, where the env-driven HARNESS_PROVIDER still wins on register. Live per-agent re-assignment is tracked in DES-359.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "harness_provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode"
+                    ]
+                  }
+                },
+                "required": [
+                  "harness_provider"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated agent row"
+          },
+          "400": {
+            "description": "Validation error (unknown provider)"
+          },
+          "404": {
+            "description": "Agent not found"
           }
         }
       }
@@ -6934,6 +7005,249 @@
         "responses": {
           "200": {
             "description": "Concurrent context data"
+          }
+        }
+      }
+    },
+    "/status": {
+      "get": {
+        "summary": "Identity + setup readiness + live activity for the swarm dashboard",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 7 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+        "tags": [
+          "Status"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "identity": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "logo_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "brand_color": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "is_cloud": {
+                          "type": "boolean"
+                        },
+                        "marketing_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "hide_cloud_promo": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "logo_url",
+                        "brand_color",
+                        "is_cloud",
+                        "marketing_url",
+                        "hide_cloud_promo"
+                      ]
+                    },
+                    "setup": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "enum": [
+                              "harness",
+                              "slack",
+                              "github",
+                              "linear",
+                              "jira",
+                              "workers",
+                              "first_task"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "unverified",
+                              "configured",
+                              "verified"
+                            ]
+                          },
+                          "hint": {
+                            "type": "string"
+                          },
+                          "action_url": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "pi",
+                              "devin",
+                              "claude-managed",
+                              "opencode"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "state"
+                        ]
+                      }
+                    },
+                    "activity": {
+                      "type": "object",
+                      "properties": {
+                        "agents_online": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "leads_online": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "recent_tasks_count": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "agents_online",
+                        "leads_online",
+                        "recent_tasks_count"
+                      ]
+                    },
+                    "agent_fs": {
+                      "type": "object",
+                      "properties": {
+                        "configured": {
+                          "type": "boolean"
+                        },
+                        "base_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "configured",
+                        "base_url"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "identity",
+                    "setup",
+                    "activity",
+                    "agent_fs"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/status/test-connection": {
+      "post": {
+        "summary": "Live-test the harness provider's credentials",
+        "description": "Issues a real upstream call (Anthropic /v1/models, OpenAI /v1/models, etc.) for the given provider. Updates an in-memory cache so the next GET /status reports `harness.state = 'verified'` for SWARM_VERIFY_TTL_MS (default 1h).",
+        "tags": [
+          "Status"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode"
+                    ]
+                  }
+                },
+                "required": [
+                  "provider"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Live-test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "latency_ms": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "latency_ms"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         }
       }

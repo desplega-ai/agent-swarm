@@ -92,6 +92,7 @@ export {
   useUpdateSkill,
 } from "./use-skills";
 export { useHealth, useLogs, useStats } from "./use-stats";
+export { useStatus, useTestConnection } from "./use-status";
 export type { TaskFilters } from "./use-tasks";
 export {
   useCancelTask,

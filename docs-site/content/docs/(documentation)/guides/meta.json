@@ -2,6 +2,7 @@
   "title": "Guides",
   "pages": [
     "deployment",
+    "personalization",
     "secrets-encryption",
     "harness-configuration",
     "harness-providers",

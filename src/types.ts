@@ -272,6 +272,16 @@ export const AgentSchema = z.object({
   // Harness provider this agent runs (claude, opencode, codex, ...)
   provider: ProviderNameSchema.optional(),
 
+  // Phase 1.5 (cloud-personalization): harness provider pushed by the worker
+  // on registration. Mirrors `provider` but lives in its own column so the
+  // server can answer "what harnesses are deployed?" without joining
+  // anywhere else, and so an operator can re-assign via
+  // PATCH /api/agents/:id/harness-provider without restarting the worker.
+  // Worker boot path is NOT yet rewritten (DES-359 tracks that) — the
+  // PATCH is a planning/forecast mechanism today; on next worker restart,
+  // the env-driven value wins.
+  harnessProvider: ProviderNameSchema.nullable().optional(),
+
   // Env-var names the worker is blocked on when status is
   // `waiting_for_credentials`. Null otherwise.
   credentialMissing: z.array(z.string()).nullable().optional(),

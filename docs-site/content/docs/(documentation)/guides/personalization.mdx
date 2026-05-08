@@ -1,0 +1,152 @@
+---
+title: Personalization & Status
+description: Brand the swarm with org name + logo + brand color, surface setup readiness via /status, and build cloud-aware UX with the SWARM_* identity envs.
+---
+
+The home page (`/`) and sidebar adapt to your deployment via two layers: **identity envs** (cosmetic — name, logo, brand color, cloud flag) and the **`/status` endpoint** (live setup readiness + activity).
+
+## Identity envs
+
+All identity envs are read on every `/status` request. Set them in your `.env`, Docker compose, or via `swarm_config` (then `POST /internal/reload-config`). Unset envs fall back to neutral defaults.
+
+| Env | Default | Where it shows |
+|---|---|---|
+| `SWARM_ORG_NAME` | `"Swarm"` | Sidebar header (next to logo) |
+| `SWARM_ORG_LOGO_URL` | bundled `/logo.png` | Sidebar header logo. Any HTTPS URL. If the URL fails to load, the sidebar reverts to the bundled logo. |
+| `SWARM_BRAND_COLOR` | none | Tints the org name in the sidebar header. Any CSS color (`#a855f7`, `rebeccapurple`, etc.). |
+| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Gates the user-menu Docs/Support/Billing items (Phase 2) and suppresses the self-host marketing link. |
+| `SWARM_MARKETING_URL` | none | Footer marketing link target on self-hosted deployments (Phase 2). Suppressed when `SWARM_CLOUD=true` or `SWARM_HIDE_CLOUD_PROMO=true`. |
+| `SWARM_HIDE_CLOUD_PROMO` | `false` | Force-hide the marketing footer regardless of `SWARM_CLOUD`. Useful for self-hosted swarms that don't want promotional UI. |
+| `SWARM_VERIFY_TTL_MS` | `3_600_000` (1h) | How long a successful "Test connection" click keeps the harness milestone in `verified` state before re-asking. In-memory; lost on API restart. |
+| `AGENT_FS_API_URL` | none | If set, the home "Storage" card shows the agent-fs base URL with an "Open" button. If unset, the card prompts setup with a link to [agent-fs.dev](https://agent-fs.dev). |
+
+### Examples
+
+```bash
+# Custom-branded self-hosted swarm
+SWARM_ORG_NAME="Acme Engineering"
+SWARM_ORG_LOGO_URL="https://acme.example.com/logo.png"
+SWARM_BRAND_COLOR="#ff5500"
+SWARM_MARKETING_URL="https://swarm.acme.example.com"
+
+# Cloud deployment
+SWARM_CLOUD=true
+SWARM_ORG_NAME="Acme on swarm.example.com"
+SWARM_ORG_LOGO_URL="https://swarm.example.com/logo.png"
+
+# Vanilla self-hosted, no marketing
+# (all identity envs unset — defaults apply)
+```
+
+## `GET /status`
+
+The single source of truth the UI leans on for "what does this swarm look like, what's set up, what's missing." Cheap (env reads + one SQL aggregate), zero side effects, no upstream calls.
+
+### Response shape
+
+```jsonc
+{
+  "identity": {
+    "name": "Acme Engineering",
+    "logo_url": "https://acme.example.com/logo.png",
+    "brand_color": "#ff5500",
+    "is_cloud": false,
+    "marketing_url": "https://swarm.acme.example.com",
+    "hide_cloud_promo": false
+  },
+  "setup": [
+    {
+      "id": "harness",
+      "label": "Harness configured",
+      "state": "verified",
+      "hint": "Live test passed within the last hour.",
+      "action_url": "/integrations",
+      "provider": "claude"
+    },
+    // … 6 more milestones
+  ],
+  "activity": {
+    "agents_online": 3,
+    "leads_online": 1,
+    "recent_tasks_count": 42
+  },
+  "agent_fs": {
+    "configured": true,
+    "base_url": "http://agent-fs:7777"
+  }
+}
+```
+
+The full schema (Zod-validated) is in `src/http/status.ts`. See the auto-generated [API reference](/docs/api-reference/status) for the wire contract.
+
+### Setup milestones
+
+Seven milestones in fixed order. Each carries a `state`: `unverified` (not even configured), `configured` (env present but never live-tested), or `verified` (live-tested OR DB-backed proof).
+
+| Milestone | `configured` rule | `verified` rule |
+|---|---|---|
+| `harness` | `HARNESS_PROVIDER` set + matching cred env present | A successful `POST /status/test-connection` within `SWARM_VERIFY_TTL_MS` |
+| `slack` | `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` + `!SLACK_DISABLE` | Same (Socket Mode connection state not exposed today) |
+| `github` | `GITHUB_WEBHOOK_SECRET` + `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` | Same (App installations validated JIT) |
+| `linear` | Row in `oauth_tokens(provider='linear')` | Same. Hint mentions the keepalive caveat — refresh-failure tracking is a future migration; check `#swarm-alerts` for keepalive errors. |
+| `jira` | Row in `oauth_tokens(provider='jira')` AND `oauth_apps.metadata.cloudId` set | Same as `linear` |
+| `workers` | ≥1 row in `agents` | ≥1 lead AND ≥1 worker with heartbeat in the last 5 min |
+| `first_task` | (never `configured`) | ≥1 row in `agent_tasks` with `status='completed'` |
+
+The `harness` milestone also carries a typed `provider?: ProviderName` field so the UI knows which provider name to send to `/status/test-connection`.
+
+### Test-connection
+
+`POST /status/test-connection` issues a real upstream call for the configured provider. Credential acceptance mirrors what each adapter accepts at runtime — OAuth users (Claude Pro/Max via `claude` CLI login, Codex ChatGPT OAuth) work without any API-key envs set.
+
+| Harness | Accepted credentials (in resolution order) | Validation |
+|---|---|---|
+| `claude` | `CLAUDE_CODE_OAUTH_TOKEN` (Pro/Max OAuth) → `ANTHROPIC_API_KEY` | OAuth: presence check.<br/>API key: live `GET /v1/models` (`x-api-key`). |
+| `claude-managed` | `ANTHROPIC_API_KEY` (managed-agents path is API-key only) | Live `GET /v1/models` (`x-api-key`). |
+| `codex` | `CODEX_OAUTH` (ChatGPT OAuth JSON blob; `.access` non-empty) → `OPENAI_API_KEY` | OAuth: presence check.<br/>API key: live `GET /v1/models` (`Authorization: Bearer`). |
+| `pi` | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` | Live call to matching provider's `/v1/models`. |
+| `opencode` | same as `pi` | Live call to matching provider's `/v1/models`. |
+| `devin` | `DEVIN_API_KEY` (+ optional `DEVIN_API_BASE_URL`) | Live `GET ${baseUrl}/v1/sessions?limit=1` (`Authorization: Bearer`). |
+
+OAuth tokens get a **presence check** rather than a real upstream call. The OAuth-bearer-with-`/v1/models` contract isn't a stable public surface, and OAuth flows have their own refresh logic (handled at adapter boot, not here) — a "real" check that fails on a stale-but-refreshable token would be a worse UX than an optimistic presence check. The runtime adapter remains the source of truth for whether a token actually works.
+
+5-second timeout via `AbortController`. Errors run through `scrubSecrets` before return. On success, the result is cached in-memory keyed by provider, and `/status` reports `harness.state === "verified"` until `SWARM_VERIFY_TTL_MS` elapses or the API restarts.
+
+```bash
+curl -s http://localhost:3013/status -H "Authorization: Bearer $API_KEY"
+
+curl -s -X POST http://localhost:3013/status/test-connection \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"claude"}'
+```
+
+## Per-agent `harness_provider`
+
+Workers report their `HARNESS_PROVIDER` env on registration into the `agents.harness_provider` column (migration 054). Operators can re-assign without restarting via:
+
+```bash
+curl -X PATCH http://localhost:3013/api/agents/<agent-id>/harness-provider \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"harness_provider":"codex"}'
+```
+
+The current behavior is **forecast-only** — the worker keeps using its env-set provider until it restarts, at which point the env wins on re-register. Full dynamic harness switching (worker boots without `HARNESS_PROVIDER`, picks up provider + creds from the API on demand) is tracked in [DES-359](https://linear.app/desplega-labs/issue/DES-359).
+
+## Home page
+
+The home page (`/`) consumes `/status` and renders:
+
+1. **Activity** — leads online, agents online, tasks in last 24h.
+2. **Setup checklist** — harness, integrations group (Slack + GitHub with "All integrations →" and "Docs ↗" links), workers, first task.
+3. **First steps + Storage** — Phase 3 fills "First steps" with a recommended starter template based on detected integrations; Storage shows the agent-fs card.
+
+If `/status` returns 404 (older API server), the home page redirects to `/dashboard` and the sidebar's "Home" item is hidden — older deployments degrade gracefully.
+
+## Related
+
+- [API reference: `/status`](/docs/api-reference/status)
+- [Harness configuration](./harness-configuration)
+- [Harness providers](./harness-providers)
+- [Deployment](./deployment)

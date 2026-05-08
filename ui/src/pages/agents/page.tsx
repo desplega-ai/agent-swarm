@@ -48,6 +48,19 @@ export default function AgentsPage() {
       },
       { field: "role", headerName: "Role", width: 150 },
       {
+        field: "harnessProvider",
+        headerName: "Harness",
+        width: 120,
+        cellRenderer: (params: { value: string | null | undefined }) =>
+          params.value ? (
+            <Badge variant="outline" size="tag" className="shrink-0">
+              {params.value}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
+      },
+      {
         field: "status",
         headerName: "Status",
         width: 120,

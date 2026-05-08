@@ -317,6 +317,32 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchStatus(): Promise<import("./types").StatusResponse | null> {
+    const url = `${this.getBaseUrl()}/status`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    // 404 = older API server without /status. Return null so consumers can
+    // hide the home page + sidebar entry instead of erroring.
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Failed to fetch status: ${res.status}`);
+    return res.json();
+  }
+
+  async testConnection(
+    provider: import("./types").ProviderName,
+  ): Promise<import("./types").TestConnectionResponse> {
+    const url = `${this.getBaseUrl()}/status/test-connection`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ provider }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to test connection" }));
+      throw new Error(err.error || `Failed to test connection: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async createChannel(data: {
     name: string;
     description?: string;

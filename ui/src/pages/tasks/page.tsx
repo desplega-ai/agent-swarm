@@ -1,6 +1,6 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ChevronLeft, ChevronRight, Clock, GitBranch, Plus, Search, X } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useScheduledTasks } from "@/api/hooks/use-schedules";
@@ -313,6 +313,23 @@ export default function TasksPage() {
   const { data: tasksData, isLoading } = useTasks(filters);
   const createTask = useCreateTask();
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  // Auto-open the create-task dialog when navigated with `?new=true`
+  // (used by the home page's "First task" CTA). Strips the param after firing
+  // so refresh / back doesn't re-open.
+  useEffect(() => {
+    if (searchParams.get("new") === "true") {
+      setDialogOpen(true);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("new");
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [searchParams, setSearchParams]);
 
   function handleCreateSubmit(data: TaskFormData) {
     const tags = data.tags
