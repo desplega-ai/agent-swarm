@@ -178,4 +178,46 @@ describe("Phase 4 — credential-status HTTP endpoints", () => {
     });
     expect(resp.status).toBe(404);
   });
+
+  // Migration 055 — round-trip the new `cred_status` field.
+  test("PUT /credential-status round-trips a cred_status snapshot", async () => {
+    const snapshot = {
+      ready: true,
+      missing: [],
+      satisfiedBy: "env" as const,
+      hint: null,
+      liveTest: { ok: true, error: null, latency_ms: 91, testedAt: Date.now() },
+      reportedAt: Date.now(),
+      reportKind: "boot" as const,
+    };
+    const put = await fetch(`${baseUrl}/api/agents/${readyAgentId}/credential-status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ready: true, missing: [], cred_status: snapshot }),
+    });
+    expect(put.status).toBe(200);
+
+    const get = await fetch(`${baseUrl}/api/agents/${readyAgentId}/credential-status`);
+    const body = (await get.json()) as {
+      credStatus: typeof snapshot | null;
+    };
+    expect(body.credStatus).toMatchObject({
+      ready: true,
+      satisfiedBy: "env",
+      reportKind: "boot",
+      liveTest: { ok: true, latency_ms: 91 },
+    });
+  });
+
+  test("PUT rejects a malformed cred_status payload (Zod validation)", async () => {
+    const resp = await fetch(`${baseUrl}/api/agents/${readyAgentId}/credential-status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ready: true,
+        cred_status: { ready: "not-a-boolean", reportedAt: Date.now() }, // bad shape
+      }),
+    });
+    expect(resp.status).toBe(400);
+  });
 });

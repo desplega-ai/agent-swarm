@@ -21,16 +21,41 @@ import {
   getLiveAgentCounts,
   hasFirstCompletedTask,
   initDb,
+  setAgentHarnessProvider,
   updateAgentActivity,
+  updateAgentCredStatus,
 } from "../be/db";
 import { storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
+import { validateProviderCredentials } from "../commands/provider-credentials";
 import {
   _resetTestConnectionCache,
   buildStatusPayload,
   computeHealth,
   type SetupMilestone,
 } from "../http/status";
-import { validateProviderCredentials } from "../providers/credentials";
+import type { AgentCredStatus } from "../types";
+
+// Helper for tests: stamp an agent row with a cred_status snapshot so the
+// `/status` endpoint sees it. Mirrors what the worker boot loop does via
+// `PUT /api/agents/:id/credential-status` after migration 055.
+function seedCredStatus(
+  agentId: string,
+  harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode",
+  partial: Partial<AgentCredStatus> = {},
+): void {
+  setAgentHarnessProvider(agentId, harnessProvider);
+  const now = Date.now();
+  updateAgentCredStatus(agentId, {
+    ready: true,
+    missing: [],
+    satisfiedBy: "env",
+    hint: null,
+    liveTest: null,
+    reportedAt: now,
+    reportKind: "boot",
+    ...partial,
+  });
+}
 
 const TEST_DB_PATH = "./test-status.sqlite";
 
@@ -179,17 +204,47 @@ describe("setup milestones", () => {
     }
   });
 
-  test("harness becomes `configured` when HARNESS_PROVIDER + creds set", () => {
+  test("harness becomes `configured` when a worker reports ready creds (no live test yet)", () => {
     process.env.HARNESS_PROVIDER = "claude";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test-1234567890abcdef";
+    const a = createAgent({ name: "w-cfg", isLead: false, status: "idle", capabilities: [] });
+    seedCredStatus(a.id, "claude", { ready: true, satisfiedBy: "env", liveTest: null });
+
     const payload = buildStatusPayload();
     expect(getMilestone(payload, "harness").state).toBe("configured");
   });
 
-  test("harness stays `unverified` when provider set but creds missing", () => {
+  test("harness flips to `verified` when a worker's recent live test passed", () => {
+    process.env.HARNESS_PROVIDER = "claude";
+    const a = createAgent({ name: "w-vfd", isLead: false, status: "idle", capabilities: [] });
+    seedCredStatus(a.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: true, error: null, latency_ms: 42, testedAt: Date.now() },
+    });
+
+    const payload = buildStatusPayload();
+    expect(getMilestone(payload, "harness").state).toBe("verified");
+  });
+
+  test("harness stays `unverified` when provider set but no worker registered", () => {
     process.env.HARNESS_PROVIDER = "claude";
     const payload = buildStatusPayload();
     expect(getMilestone(payload, "harness").state).toBe("unverified");
+  });
+
+  test("harness stays `unverified` when worker reports missing credentials", () => {
+    process.env.HARNESS_PROVIDER = "claude";
+    const a = createAgent({ name: "w-miss", isLead: false, status: "idle", capabilities: [] });
+    seedCredStatus(a.id, "claude", {
+      ready: false,
+      missing: ["ANTHROPIC_API_KEY"],
+      satisfiedBy: null,
+    });
+
+    const payload = buildStatusPayload();
+    const m = getMilestone(payload, "harness");
+    expect(m.state).toBe("unverified");
+    expect(m.hint).toContain("ANTHROPIC_API_KEY");
   });
 
   // ─── Phase 1.5: typed provider field on harness milestone ────────────────
@@ -586,9 +641,8 @@ describe("computeHealth (Phase 2)", () => {
     expect(payload.health).toBe("broken");
   });
 
-  test("`degraded` when harness is `configured` (creds present, untested) and workers verified", () => {
+  test("`degraded` when harness is `configured` (worker reported ready, no live test) and workers verified", () => {
     process.env.HARNESS_PROVIDER = "claude";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test-1234567890";
 
     const lead = createAgent({ name: "lead-h", isLead: true, status: "idle", capabilities: [] });
     const worker = createAgent({
@@ -599,6 +653,8 @@ describe("computeHealth (Phase 2)", () => {
     });
     updateAgentActivity(lead.id);
     updateAgentActivity(worker.id);
+    // Worker reports presence-ok but no live test → harness is `configured`.
+    seedCredStatus(worker.id, "claude", { ready: true, satisfiedBy: "env", liveTest: null });
 
     const payload = buildStatusPayload();
     expect(getMilestone(payload, "workers").state).toBe("verified");
@@ -608,16 +664,17 @@ describe("computeHealth (Phase 2)", () => {
 
   test("`degraded` when workers are `configured` (agents exist, no recent heartbeat)", () => {
     process.env.HARNESS_PROVIDER = "claude";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test-1234567890";
 
     const lead = createAgent({ name: "lead-d", isLead: true, status: "idle", capabilities: [] });
     // No updateAgentActivity → workers row stays `configured`, not `verified`.
-
-    // Seed test-connection cache via direct call: simulate a verified harness.
-    // We can't reach the cache from here cleanly, but we can leverage that
-    // workers === configured alone is enough to push health to degraded
-    // (assuming harness is configured too — same scenario).
-    const _ = lead; // keep TS happy, used implicitly via DB
+    // Seed lead's cred_status as `verified` (live test passed) so harness
+    // doesn't break the rollup. Then workers === configured alone pushes
+    // health to degraded.
+    seedCredStatus(lead.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: true, error: null, latency_ms: 12, testedAt: Date.now() },
+    });
     const payload = buildStatusPayload();
     expect(getMilestone(payload, "workers").state).toBe("configured");
     expect(payload.health).toBe("degraded");
@@ -668,34 +725,52 @@ describe("computeHealth (Phase 2)", () => {
   });
 });
 
-// ─── Test-connection cache → harness.state === 'verified' ────────────────────
+// ─── Worker-reported live test drives harness.state ──────────────────────────
+//
+// The pre-refactor in-memory cache is gone — `harness.state` now derives from
+// `agents.cred_status.liveTest` (migration 055) read across all agents whose
+// `harness_provider` matches. These tests cover the new rollup paths.
 
-describe("test-connection cache flips harness milestone to verified", () => {
-  const realFetch = globalThis.fetch;
-  afterEach(() => {
-    globalThis.fetch = realFetch;
+describe("worker-reported live test drives harness.state", () => {
+  test("a passing recent live test flips harness to `verified`", () => {
+    process.env.HARNESS_PROVIDER = "claude";
+    const a = createAgent({ name: "w-lt", isLead: false, status: "idle", capabilities: [] });
+    seedCredStatus(a.id, "claude", {
+      ready: true,
+      liveTest: { ok: true, error: null, latency_ms: 80, testedAt: Date.now() },
+    });
+    expect(getMilestone(buildStatusPayload(), "harness").state).toBe("verified");
   });
 
-  test("after a successful validateProviderCredentials, status emits verified", async () => {
+  test("a stale live test (older than SWARM_VERIFY_TTL_MS) drops to `configured`", () => {
     process.env.HARNESS_PROVIDER = "claude";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test-1234567890";
-
-    // Without a cache hit we should be `configured`.
+    process.env.SWARM_VERIFY_TTL_MS = "1000"; // 1s — anything older is stale
+    const a = createAgent({ name: "w-stl", isLead: false, status: "idle", capabilities: [] });
+    seedCredStatus(a.id, "claude", {
+      ready: true,
+      liveTest: {
+        ok: true,
+        error: null,
+        latency_ms: 80,
+        testedAt: Date.now() - 60_000, // 60s ago, well beyond TTL
+      },
+    });
     expect(getMilestone(buildStatusPayload(), "harness").state).toBe("configured");
+  });
 
-    // Mock a successful upstream call.
-    globalThis.fetch = (async () => new Response("{}", { status: 200 })) as typeof fetch;
-
-    // Note: the cache is a module-private map. Drive it through the public
-    // route by calling validateProviderCredentials and then manually marking
-    // the cache via the route handler. Here we just exercise the validator
-    // and import the cache reset to ensure isolation.
-    const result = await validateProviderCredentials("claude");
-    expect(result.ok).toBe(true);
-
-    // The cache lives inside `src/http/status.ts` and is updated by the
-    // POST handler. Until we exercise the HTTP layer end-to-end (covered by
-    // the route smoke test below), we simulate the same flip by calling the
-    // public payload AFTER seeding the cache through a fake HTTP request.
+  test("a failed live test still leaves harness `configured` if presence is ready", () => {
+    process.env.HARNESS_PROVIDER = "claude";
+    const a = createAgent({ name: "w-fail", isLead: false, status: "idle", capabilities: [] });
+    seedCredStatus(a.id, "claude", {
+      ready: true,
+      liveTest: {
+        ok: false,
+        error: "HTTP 401: invalid_api_key",
+        latency_ms: 30,
+        testedAt: Date.now(),
+      },
+    });
+    // Presence is OK; live test failed → not verified, but still configured.
+    expect(getMilestone(buildStatusPayload(), "harness").state).toBe("configured");
   });
 });

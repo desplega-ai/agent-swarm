@@ -30,6 +30,11 @@ import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { interpolate } from "../workflows/template.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
+import {
+  buildCredStatusReport,
+  isCredCheckDisabled,
+  reportCredStatus,
+} from "./provider-credentials.ts";
 // Side-effect import: registers runner trigger/resumption templates
 import "./templates.ts";
 
@@ -2524,6 +2529,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // Track tasks already signaled for cancellation to avoid repeated SIGTERM
     const cancelledSignaled = new Set<string>();
 
+    // Migration 055 — cache the harness_provider value used when we last
+    // built a `cred_status` snapshot. Re-runs the post-task check only when
+    // it changed (today this is degenerate since process.env.HARNESS_PROVIDER
+    // doesn't change at runtime; meaningful once DES-359 lands and operators
+    // can re-assign harness via PATCH /api/agents/:id/harness-provider).
+    // TODO(DES-359): read from agent row at post-task time instead.
+    let cachedCredHarnessProvider: string | null = null;
+
     // Create API config for ping/close
     const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
 
@@ -2556,37 +2569,59 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // the old bash-level fail-fast in `docker-entrypoint.sh` — the worker is
     // already registered (visible to the dashboard) and self-heals once
     // creds appear in `swarm_config`. See plans/2026-05-06-worker-credential-safe-loop.md.
+    //
+    // CRED_CHECK_DISABLE=1 opts out entirely: the worker trusts the operator
+    // and starts polling immediately, with a NULL `cred_status` row that the
+    // dashboard surfaces as "unreported."
     const harnessProvider = process.env.HARNESS_PROVIDER || "claude";
-    try {
-      await awaitCredentials({
-        provider: harnessProvider,
-        refreshEnv: async () => {
-          const { env } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
-          return env;
-        },
-        onTick: (status) => {
-          // Best-effort status report — the dispatcher uses it to route
-          // around blocked agents. Failures are non-fatal (the wait loop
-          // already swallows onTick exceptions).
-          fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "X-Agent-ID": agentId,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ ready: status.ready, missing: status.missing }),
-          }).catch(() => {
-            // Swallowed — Phase 2 wait loop logs every tick anyway.
-          });
-        },
-      });
-    } catch (err) {
-      if (err instanceof BootMaxWaitExceededError) {
-        console.error(`[${role}] ${err.message}`);
-        process.exit(EX_CONFIG);
+    cachedCredHarnessProvider = harnessProvider;
+    if (isCredCheckDisabled(process.env)) {
+      console.log(`[${role}] CRED_CHECK_DISABLE=1, skipping credential checks`);
+    } else {
+      try {
+        await awaitCredentials({
+          provider: harnessProvider,
+          refreshEnv: async () => {
+            const { env } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
+            return env;
+          },
+          onTick: (status) => {
+            // Best-effort status report — the dispatcher uses it to route
+            // around blocked agents. Failures are non-fatal (the wait loop
+            // already swallows onTick exceptions). We do NOT include
+            // `cred_status` here — the live test runs once the worker is
+            // ready (below), and intermediate ticks are presence-only.
+            fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
+              method: "PUT",
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "X-Agent-ID": agentId,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ ready: status.ready, missing: status.missing }),
+            }).catch(() => {
+              // Swallowed — Phase 2 wait loop logs every tick anyway.
+            });
+          },
+        });
+      } catch (err) {
+        if (err instanceof BootMaxWaitExceededError) {
+          console.error(`[${role}] ${err.message}`);
+          process.exit(EX_CONFIG);
+        }
+        throw err;
       }
-      throw err;
+
+      // Migration 055: build the full snapshot (presence + live test) once
+      // creds are ready and POST it to the agent row. Status endpoint reads
+      // this instead of running predicates server-side.
+      try {
+        const snapshot = await buildCredStatusReport(harnessProvider, process.env, {}, "boot");
+        await reportCredStatus(apiUrl, apiKey, agentId, snapshot);
+      } catch (err) {
+        // Non-fatal — worker proceeds even if reporting fails.
+        console.warn(`[${role}] cred_status boot report failed (non-fatal): ${err}`);
+      }
     }
 
     // Clean up any stale active sessions from previous runs (crash recovery)
@@ -3068,6 +3103,25 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
       // Check for completed processes first and ensure tasks are marked as finished
       await checkCompletedProcesses(state, role, apiConfig);
+
+      // Migration 055 — post-task credential refresh, cache-keyed on
+      // `harness_provider`. Today this is degenerate (the env var doesn't
+      // change at runtime), so the inner branch effectively never fires —
+      // but the wiring is here for DES-359 (dynamic per-agent harness).
+      // TODO(DES-359): read harness_provider from the agent row instead
+      // of process.env so an operator's PATCH /api/agents/:id/harness-provider
+      // takes effect without a worker restart.
+      if (!isCredCheckDisabled(process.env)) {
+        const currentHarness = process.env.HARNESS_PROVIDER || "claude";
+        if (currentHarness !== cachedCredHarnessProvider) {
+          cachedCredHarnessProvider = currentHarness;
+          buildCredStatusReport(currentHarness, process.env, {}, "post_task")
+            .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
+            .catch((err) =>
+              console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
+            );
+        }
+      }
 
       // Periodic VCS detection for running tasks (fire-and-forget, throttled per task)
       const now = Date.now();

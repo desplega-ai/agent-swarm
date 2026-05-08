@@ -13,13 +13,14 @@ import {
   setAgentHarnessProvider,
   updateAgentActivity,
   updateAgentCredentialState,
+  updateAgentCredStatus,
   updateAgentMaxTasks,
   updateAgentName,
   updateAgentProfile,
   updateAgentProvider,
   updateAgentStatus,
 } from "../be/db";
-import { ProviderNameSchema } from "../types";
+import { AgentCredStatusSchema, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
 
@@ -176,6 +177,13 @@ const credentialStatusBody = z.object({
   ready: z.boolean(),
   /** Env-var names (or absolute file paths) the worker is blocked on. Empty/null when ready. */
   missing: z.array(z.string()).optional().nullable(),
+  /**
+   * Migration 055: full credential snapshot (presence + live test). Optional
+   * for backward compat — older workers may only POST `{ready, missing}`.
+   * When present, written to `agents.cred_status` as JSON; the dashboard
+   * reads the row instead of running its own check.
+   */
+  cred_status: AgentCredStatusSchema.optional().nullable(),
 });
 
 const updateAgentCredentialStatusRoute = route({
@@ -463,6 +471,8 @@ export async function handleAgentsRest(
         status: a.status,
         missing: a.credentialMissing ?? [],
         provider: a.provider ?? null,
+        harnessProvider: a.harnessProvider ?? null,
+        credStatus: a.credStatus ?? null,
         lastCheckedAt: a.lastUpdatedAt,
       }));
     json(res, { agents });
@@ -486,7 +496,14 @@ export async function handleAgentsRest(
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    json(res, agentWithCapacity(agent));
+    // Phase 055: persist the richer worker-reported snapshot when sent.
+    // We accept `null` to explicitly clear (e.g. on harness change), and
+    // `undefined` to leave the existing row value untouched.
+    const finalAgent =
+      parsed.body.cred_status !== undefined
+        ? (updateAgentCredStatus(parsed.params.id, parsed.body.cred_status ?? null) ?? agent)
+        : agent;
+    json(res, agentWithCapacity(finalAgent));
     return true;
   }
 
@@ -504,6 +521,8 @@ export async function handleAgentsRest(
       status: agent.status,
       missing: agent.credentialMissing ?? [],
       provider: agent.provider ?? null,
+      harnessProvider: agent.harnessProvider ?? null,
+      credStatus: agent.credStatus ?? null,
       lastCheckedAt: agent.lastUpdatedAt,
     });
     return true;

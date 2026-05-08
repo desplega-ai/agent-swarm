@@ -1,25 +1,32 @@
 /**
- * Provider-agnostic credential check dispatcher.
+ * Provider-agnostic credential check dispatcher (WORKER-ONLY).
+ *
+ * Lives in `src/commands/` because the predicates value-import worker-harness
+ * SDKs (e.g. `@mariozechner/pi-coding-agent` via `pi-mono-adapter.ts`) that
+ * have module-load side effects. Importing this file from any module
+ * reachable from `src/http.ts` would drag those SDKs into the bun-compiled
+ * API binary — which is exactly the bug PR #452 hit at `/usr/local/bin/`.
  *
  * Used by:
  * - The worker boot loop (`src/commands/credential-wait.ts`) to decide
  *   whether the worker can claim tasks yet.
- * - The dashboard credential-status endpoint, which surfaces the per-provider
- *   `missing[]` list as a "blocked on …" hint.
+ * - The worker post-task hook (`src/commands/runner.ts`) to refresh on
+ *   harness_provider changes.
  *
- * The predicate functions live alongside their adapters so they evolve
- * together; this module is a thin switch with documentation/UI hints
- * exported as a static map for the credential-status API.
+ * Reports flow worker → API as JSON via the existing PATCH /agents/:id
+ * endpoint (see `AgentCredStatusSchema` in `src/types.ts`). The API never
+ * runs the predicate itself — it just reads the agent row.
  */
 
+import { checkClaudeCredentials } from "../providers/claude-adapter";
+import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
+import { checkCodexCredentials } from "../providers/codex-adapter";
+import { checkDevinCredentials } from "../providers/devin-adapter";
+import { checkOpencodeCredentials } from "../providers/opencode-adapter";
+import { checkPiMonoCredentials } from "../providers/pi-mono-adapter";
+import type { CredCheckOptions, CredStatus } from "../providers/types";
+import type { AgentCredStatus } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { checkClaudeCredentials } from "./claude-adapter";
-import { checkClaudeManagedCredentials } from "./claude-managed-adapter";
-import { checkCodexCredentials } from "./codex-adapter";
-import { checkDevinCredentials } from "./devin-adapter";
-import { checkOpencodeCredentials } from "./opencode-adapter";
-import { checkPiMonoCredentials } from "./pi-mono-adapter";
-import type { CredCheckOptions, CredStatus } from "./types";
 
 export type SupportedProvider = "claude" | "claude-managed" | "codex" | "devin" | "opencode" | "pi";
 
@@ -310,5 +317,93 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
     }
   } catch (err) {
     return asLiveError(err, Date.now() - startedAt);
+  }
+}
+
+// ─── Worker-side report composition ──────────────────────────────────────────
+// Composes the JSON the worker POSTs to `PATCH /agents/:id` so the API can
+// expose per-worker credential status without running any provider-specific
+// code itself. See `AgentCredStatusSchema` in `src/types.ts` for the contract.
+
+/**
+ * Single switch for the opt-out env var. Both `credential-wait.ts` (boot) and
+ * `runner.ts` (post-task) honor this; when set, the worker performs no
+ * checks and POSTs nothing — the agent row's `cred_status` stays NULL and
+ * the dashboard surfaces "unreported".
+ */
+export function isCredCheckDisabled(env: NodeJS.ProcessEnv): boolean {
+  return env.CRED_CHECK_DISABLE === "1";
+}
+
+/**
+ * Run the presence check + (when ready) live test, and shape the result into
+ * the JSON contract the API stores. `kind` records the trigger — useful for
+ * ops debugging and for the dashboard to surface "last verified Xs ago."
+ *
+ * Both "boot" and "post_task" run the live test today. The cache-hit
+ * post-task path skips this function entirely (caller decides), so when this
+ * function is called we always do the full check.
+ */
+export async function buildCredStatusReport(
+  provider: string,
+  env: Record<string, string | undefined>,
+  opts: CredCheckOptions = {},
+  kind: AgentCredStatus["reportKind"],
+): Promise<AgentCredStatus> {
+  const presence = checkProviderCredentials(provider, env, opts);
+  let liveTest: AgentCredStatus["liveTest"] = null;
+  if (presence.ready) {
+    const live = await validateProviderCredentials(provider);
+    liveTest = {
+      ok: live.ok,
+      error: live.error ?? null,
+      latency_ms: live.latency_ms,
+      testedAt: Date.now(),
+    };
+  }
+  return {
+    ready: presence.ready,
+    missing: presence.missing ?? [],
+    satisfiedBy: presence.satisfiedBy ?? null,
+    hint: presence.hint ?? null,
+    liveTest,
+    reportedAt: Date.now(),
+    reportKind: kind,
+  };
+}
+
+/**
+ * Fire-and-forget POST of a `cred_status` snapshot to the API. Used by the
+ * worker boot path (`runner.ts` after `awaitCredentials`) and the post-task
+ * cache-miss path (also in `runner.ts`). Failures are logged, not thrown —
+ * a stale dashboard is acceptable; blocking the worker is not.
+ *
+ * Posts to the existing `PUT /api/agents/:id/credential-status` endpoint
+ * which (per migration 055) now accepts an optional `cred_status` field.
+ * `ready` and `missing` are also included so legacy `agents.credentialMissing`
+ * and `agents.status='waiting_for_credentials'` keep tracking.
+ */
+export async function reportCredStatus(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  credStatus: AgentCredStatus,
+): Promise<void> {
+  try {
+    await fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Agent-ID": agentId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ready: credStatus.ready,
+        missing: credStatus.missing,
+        cred_status: credStatus,
+      }),
+    });
+  } catch (err) {
+    console.warn(`[cred-status] POST failed (non-fatal): ${err}`);
   }
 }

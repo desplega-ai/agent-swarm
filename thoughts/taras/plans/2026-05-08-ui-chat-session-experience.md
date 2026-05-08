@@ -15,8 +15,8 @@ related:
 Bundled v1 launch in `ui/`: a **Sessions** experience (`/sessions`, `/sessions/:id`) that renders a task chain as a chat-style timeline with composer, and a **Dashboard revamp** (`/`) replacing today's page with a static `@xyflow/react` org-chart canvas (lead → workers, sized by 24h activity) plus a four-bucket action-items inbox (Blocking / Broken / To read / To start). Backend changes are minimal and additive: Zod becomes the single source of truth for `agent_tasks.source`, `requestedByUserId` is plumbed end-to-end, a new chain-fetch endpoint, two new tables (`inbox_item_state`, `task_templates`), HTTP routes for users (DB functions already exist), and a minor version bump (`1.75.0 → 1.76.0`) so the UI can soft-degrade against older self-hosted API servers.
 
 - **Motivation**: replace the current task-table dashboard and Slack-only thread experience with a first-class in-product session/chat surface; align v1 with what's already plumbed (`parentTaskId`, `SessionLogViewer`, polling) so we ship in predictable, independently-reviewable phases.
-- **Self-hosted version-gate**: bump `package.json` to `1.76.0`. The UI checks `GET /health` (already returns `version` — `src/http/core.ts:100-113`) and soft-degrades new surfaces when the API is older. No hard block; users on a stale API still see the legacy dashboard and a banner pointing at upgrade docs. `/health` is also extended to return a stable `swarmId` so UI state can be namespaced per deployment.
-- **Identity**: a "who are you?" modal lists rows from a new `GET /api/users` endpoint (DB functions already exist at `src/be/db.ts:8285-8475`), persists the picked id in `localStorage` under `agent-swarm-current-user:<swarmId>`, and feeds `requestedByUserId` to every task create from the UI (existing CreateTaskDialog included). The modal **auto-pops** whenever no entry exists for the current swarm — so existing users on an upgraded API are prompted exactly once, and a single browser pointed at multiple swarms keeps separate identities.
+- **Self-hosted version-gate**: bump `package.json` to `1.76.0`. The UI checks `GET /health` (already returns `version` — `src/http/core.ts:100-113`) and soft-degrades new surfaces when the API is older. No hard block; users on a stale API still see the legacy dashboard and a banner pointing at upgrade docs. `/health` shape is **unchanged** — the original plan's `swarmId` addition is dropped (resolved errata Critical-C3): the UI namespaces all per-deployment localStorage by `apiUrl` from `useConfig()` to match `useDismissibleCard`'s shipped pattern (`swarm:v1:${apiUrl}:${cardKey}`).
+- **Identity**: a "who are you?" modal lists rows from a new `GET /api/users` endpoint (DB functions already exist at `src/be/db.ts:8285-8475`), persists the picked id in `localStorage` under the same `swarm:v1:${apiUrl}:current-user` namespace as `useDismissibleCard`, and feeds `requestedByUserId` to every task create from the UI (existing CreateTaskDialog included). The modal **auto-pops** whenever no entry exists for the current `apiUrl` — so existing users on an upgraded API are prompted exactly once, and a single browser pointed at multiple swarm URLs keeps separate identities.
 - **Related**:
   - `thoughts/taras/brainstorms/2026-05-08-ui-chat-session-experience.md` (PRD)
   - `thoughts/taras/research/2026-05-08-ui-chat-session-experience-research.md` (research)
@@ -65,7 +65,7 @@ Bundled v1 launch in `ui/`: a **Sessions** experience (`/sessions`, `/sessions/:
 - No identity context / user picker / current-user provider; no `useApiVersion` hook; no version-gate.
 - `ui/src/api/client.ts:215-234` `createTask` does NOT pass `parentTaskId`, `source`, `requestedByUserId`, `offeredTo`, `dir`, `outputSchema`, or `contextKey` (server accepts all of these).
 - `TaskFormData` (`ui/src/pages/tasks/page.tsx:35-42`) lacks `parentTaskId`, `source`, `requestedByUserId`.
-- Current `DashboardPage` (`ui/src/pages/dashboard/page.tsx:315-477`) is StatsBar + Agent Status Grid + Active Tasks Panel + Activity Feed — to be replaced.
+- **Stale post-PR #452**: `/` is now `HomePage` (`ui/src/pages/home/page.tsx`); the legacy 4-section dashboard moved to `/dashboard` (`ui/src/pages/dashboard/page.tsx`). Sidebar already lists both "Home" and "Dashboard" entries (`ui/src/components/layout/app-sidebar.tsx:42-47`). `<StatusProvider>` (`ui/src/app/status-context.tsx`) centralizes polling of `GET /status` at 30s for AppHeader badge / AppFooter / sidebar identity / home. `useDismissibleCard("home-welcome")` already implements per-deployment localStorage namespace + cross-tab sync via `storage` event. See errata Critical-C1 / Critical-C2 — Phase 5 and Phase 6 must be re-scoped against this baseline.
 
 ## Desired End State
 
@@ -95,7 +95,7 @@ v1 explicitly excludes:
 ## Implementation Approach
 
 - **Backend changes are additive** — new migrations, new routes, new schemas. The only mutation to existing surface is dropping the `agent_tasks.source` SQL CHECK and tightening the Zod to take its place, plus adding `requestedByUserId` to the `POST /api/tasks` body.
-- **Identity is the keystone** — Phase 1 establishes the identity contract; Phase 3 wires the boot UI; everything after assumes a `userId` is available client-side.
+- **Identity is the keystone** — Phase 1 establishes the audit-field contract (`requestedByUserId` accepted on `POST /api/tasks`); Phase 3 wires the boot UI and namespaces the picked id by `apiUrl` (matching `useDismissibleCard`); everything after assumes a `userId` is available client-side.
 - **Reuse the workflow-viewer pattern** for the agent canvas (`workflow-graph.tsx` + `graph-utils.ts` + `WorkflowNodeShell`) — no greenfield xyflow integration.
 - **Reuse SessionLogViewer + transcript hooks** verbatim inside a `Sheet` — no new transcript component.
 - **Polling, not streaming** — every UI surface is TanStack Query at 5s; no new transport layer.
@@ -120,11 +120,11 @@ UI (`ui/`):
 
 ---
 
-## Phase 1: Source-enum cleanup, audit field, swarmId, version bump
+## Phase 1: Source-enum cleanup, audit field, version bump
 
 ### Overview
 
-Drop the SQL CHECK on `agent_tasks.source`, tighten the Zod schema to `AgentTaskSourceSchema.optional()`, add `requestedByUserId` to the `POST /api/tasks` body, add a stable `swarmId` to `/health` (so the UI can namespace per-deployment localStorage), bump `package.json` to `1.76.0`, and regenerate `openapi.json`. Pure backend, no UI touch. Ships independently — no v1 UI feature depends on the version bump landing in this phase, but downstream phases gate against it.
+Drop the SQL CHECK on `agent_tasks.source`, tighten the Zod schema to `AgentTaskSourceSchema.optional()`, add `requestedByUserId` to the `POST /api/tasks` body, bump `package.json` to `1.76.0`, and regenerate `openapi.json`. Pure backend, no UI touch. Ships independently — no v1 UI feature depends on the version bump landing in this phase, but downstream phases gate against it. **Note (errata Critical-C3 resolved)**: the original plan included a `swarmId` extension to `/health` + a `swarm_metadata` migration. Dropped — the UI namespaces by `apiUrl` from `useConfig()` instead, matching `useDismissibleCard`. `/health` shape stays `{ status, version }`.
 
 **Independent shippability note**: this phase ships `1.76.0` to production with no UI consumer until Phase 3+. Stale-API users hitting an in-between deploy see a `1.76.0` API but the same UI as before. No regression — just no new features yet. Acceptable.
 
@@ -142,30 +142,11 @@ Drop the SQL CHECK on `agent_tasks.source`, tighten the Zod schema to `AgentTask
 **File**: `src/http/tasks.ts` (~lines 55-68 + handler at 271)
 **Changes**: Append `requestedByUserId: z.string().optional()` to the body schema; forward to `createTaskWithSiblingAwareness` alongside `parentTaskId`. DB layer already accepts (`src/be/db.ts:2085`).
 
-#### 4. `swarmId` exposed on `/health`
-**File**: `src/be/migrations/058_swarm_metadata.sql` *(new)*
-**Changes**:
-```sql
-CREATE TABLE IF NOT EXISTS swarm_metadata (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  swarmId TEXT NOT NULL DEFAULT (lower(hex(randomblob(8)))),
-  createdAt TEXT NOT NULL DEFAULT (datetime('now'))
-);
-INSERT OR IGNORE INTO swarm_metadata (id) VALUES (1);
-```
-Single-row table; auto-seeded with a 16-char hex id on first migration apply. Stable across restarts.
-
-**File**: `src/be/db.ts`
-**Changes**: Add `getSwarmId(): string` cached at boot — single SELECT. **Precedence rule**: `process.env.SWARM_ID` always wins if set, otherwise read the row. State explicitly: env override is the operator's contract — across replicas, all replicas pointing at the same DB MUST set the same `SWARM_ID` (or none). Changing `SWARM_ID` mid-deployment is supported but invalidates all per-swarm `localStorage` identities (acceptable; users re-pick once). The cache lives until process restart; no runtime invalidation.
-
-**File**: `src/http/core.ts:100-113`
-**Changes**: Extend the `/health` JSON to include `swarmId`. Final shape: `{ status: "ok", version: "1.76.0", swarmId: "<hex>" }`.
-
-#### 5. Version bump
+#### 4. Version bump
 **File**: `package.json`
 **Changes**: `"version": "1.75.0"` → `"version": "1.76.0"`. Update `runbooks/ci.md` if it references a specific version (it doesn't today — drift check only).
 
-#### 6. Regenerate OpenAPI
+#### 5. Regenerate OpenAPI
 **Files**: `openapi.json`, `docs-site/content/docs/api-reference/**`
 **Changes**: Run `bun run docs:openapi`. Commit regenerated outputs.
 
@@ -186,14 +167,12 @@ Single-row table; auto-seeded with a 16-char hex id on first migration apply. St
 - [ ] `curl -X POST` to `POST /api/tasks` with `source: "mcp"` succeeds (200 + task row)
 - [ ] `curl -X POST` to `POST /api/tasks` with `source: "garbage"` returns 400 (Zod rejects, not the SQL CHECK)
 - [ ] `curl -X POST` to `POST /api/tasks` with a valid `requestedByUserId` writes the column (verify via `sqlite3 agent-swarm-db.sqlite "SELECT id, requestedByUserId FROM agent_tasks ORDER BY createdAt DESC LIMIT 1"`)
-- [ ] `curl http://localhost:3013/health` returns `{ status: "ok", version: "1.76.0", swarmId: "<16-char hex>" }`
-- [ ] `swarmId` is stable across restarts: capture once, restart server, capture again, verify identical
-- [ ] `SWARM_ID=prod-us-east bun run start:http` honors the env override on `/health`
+- [ ] `curl http://localhost:3013/health` returns `{ status: "ok", version: "1.76.0" }` (shape unchanged from current)
 
 #### Manual Verification:
 - [ ] Diff `openapi.json` review: only the `source` enum tightening + new `requestedByUserId` field + version bump appear
 
-**Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 1] source enum cleanup + requestedByUserId + swarmId on /health + bump 1.76.0`.
+**Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 1] source enum cleanup + requestedByUserId + bump 1.76.0`.
 
 ---
 
@@ -326,13 +305,13 @@ INSERT INTO task_templates (title, description, prompt, category, tags) VALUES
 
 ### Overview
 
-Add a "who are you?" identity modal in `ui/` that lists / creates rows in the `users` table. Storage key is **namespaced per swarm**: `agent-swarm-current-user:<swarmId>` where `swarmId` comes from the extended `/health` response (Phase 1). The modal **auto-pops** the moment `useHealth()` resolves with no entry for the current swarm — so first-time visitors and existing users on a freshly-upgraded API both get prompted exactly once, and a single browser pointed at multiple swarms (e.g. `localhost` + `prod`) keeps separate identities. Add `useApiVersion()` and `useFeatureGate(minVersion)` hooks. Plumb `parentTaskId`, `source`, `requestedByUserId` through `ui/src/api/client.ts`, `useCreateTask`, and the existing `CreateTaskDialog`. Display `requestedByUserId` (read-only) in `TaskDetailPage`.
+Add a "who are you?" identity modal in `ui/` that lists / creates rows in the `users` table. Storage key is namespaced per deployment via `useDismissibleCard`'s pattern: `swarm:v1:${apiUrl}:current-user`, where `apiUrl` comes from `useConfig()`. The modal **auto-pops** the moment `useHealth()` + `useUsers()` resolve with no entry for the current `apiUrl` — so first-time visitors and existing users on a freshly-upgraded API both get prompted exactly once, and a single browser pointed at multiple swarm URLs keeps separate identities. Add `useApiVersion()` and `useFeatureGate(minVersion)` hooks. Plumb `parentTaskId`, `source`, `requestedByUserId` through `ui/src/api/client.ts`, `useCreateTask`, and the existing `CreateTaskDialog`. Display `requestedByUserId` (read-only) in `TaskDetailPage`.
 
 ### Changes Required:
 
-#### 1. Health, version, swarmId, and feature-gate hooks (extend existing `useHealth`)
+#### 1. Version + feature-gate hooks (extend existing `useHealth`)
 **File**: `ui/src/api/hooks/use-stats.ts` (extend — `useHealth` already exists at line 11)
-**Changes**: Extend `useHealth()` to surface the new `swarmId` field on the typed response. Add convenience selectors: `useApiVersion()` and `useSwarmId()` (both wrap `useHealth().data?.<field>`). Set `staleTime: 30_000` (NOT `Infinity` — covers the swarmId-switch-mid-session case where a user re-points the UI at a different deployment URL; 30s is fast enough to react, slow enough to avoid hot polling). Reuse the existing query key.
+**Changes**: Add a `useApiVersion()` selector wrapping `useHealth().data?.version`. Set `staleTime: 30_000` (NOT `Infinity` — covers the version-bump-mid-session case where the API server is upgraded under a long-lived UI tab; 30s is fast enough to react, slow enough to avoid hot polling). Reuse the existing query key. **No `useSwarmId()` hook** — Critical-C3 resolved to namespace by `apiUrl` from `useConfig()` instead.
 
 **File**: `ui/src/lib/semver.ts` *(new)*
 **Changes**: Tiny `compareSemver(a, b): -1 | 0 | 1` helper. No new dep.
@@ -348,20 +327,22 @@ Add a "who are you?" identity modal in `ui/` that lists / creates rows in the `u
 **Changes**: Add `listUsers(): Promise<User[]>`, `createUser(data): Promise<User>`. Reuse `getHeaders()`.
 
 **File**: `ui/src/contexts/current-user-context.tsx` *(new)*
-**Changes**: `<CurrentUserProvider>` with `localStorage` persistence of `userId`. Storage key is **namespaced per swarm**: `agent-swarm-current-user:${swarmId}` where `swarmId` is read from `useHealth()`. State machine — `state: "pending" | "needs-pick" | "ready"`:
-- `pending` while `useHealth()` is loading or `useUsers()` is loading.
-- `needs-pick` when no `userId` in localStorage for the current swarmId, OR when the stored `userId` doesn't match any row in `useUsers()` (covers the deleted-user case — provider re-derives `state` from the join).
+**Changes**: `<CurrentUserProvider>` with `localStorage` persistence of `userId`. Storage key follows the merged `useDismissibleCard` pattern: `deriveStorageKey(apiUrl, "current-user")` → `swarm:v1:${apiUrl}:current-user`, where `apiUrl` comes from `useConfig()` (`ui/src/api/client.ts:121-127`). State machine — `state: "pending" | "needs-pick" | "ready"`:
+- `pending` while `useUsers()` is loading.
+- `needs-pick` when no `userId` in localStorage for the current `apiUrl`, OR when the stored `userId` doesn't match any row in `useUsers()` (covers the deleted-user case — provider re-derives `state` from the join).
 - `ready` when both resolved and userId matches.
 
-**Multi-tab semantics**: provider attaches a `window.addEventListener("storage", ...)` listener to react to `localStorage` writes from other tabs. When another tab calls `setUserId` or `clearUser`, this tab updates state without a reload. When `swarmId` changes (different `useHealth()` response, e.g. user pointed at a new deployment URL), provider recomputes the storage key and may re-enter `needs-pick`.
+**Multi-tab semantics**: provider attaches a `window.addEventListener("storage", ...)` listener to react to `localStorage` writes from other tabs (mirroring `useDismissibleCard`'s implementation at `ui/src/hooks/use-dismissible-card.ts:75-83`). When another tab calls `setUserId` or `clearUser`, this tab updates state without a reload. When `apiUrl` changes (user re-pointed the UI at a different deployment URL), provider recomputes the storage key via the `useEffect` that watches `storageKey`, mirroring `use-dismissible-card.ts:50-52`, and may re-enter `needs-pick`.
 
 Exposes `useCurrentUser(): { state, userId: string | null, user: User | null, setUserId: (id: string) => void, clearUser: () => void }`.
 
 **File**: `ui/src/components/identity/identity-modal.tsx` *(new)*
 **Changes**: shadcn `Dialog` (not `Sheet`) listing `useUsers()` rows with select + inline "Create new" form (`name`, optional `email`). On submit → `setUserId` then close. Cannot dismiss without a selection (no `X` close, no escape-key dismiss).
 
+**Coordination note (Important-I4)**: HomePage (`ui/src/pages/home/page.tsx`) already shows a `<WelcomeCard>` on first load (dismissible via `useDismissibleCard("home-welcome")`). A first-time visitor would see: loading → identity modal → HomePage with WelcomeCard → user dismisses both. Decide one of: (a) modal first, then welcome (current spec — two prompts), (b) welcome card defers / is hidden until identity is set, (c) merge identity-pick into the welcome card itself for first-load. Recommend (b): WelcomeCard reads `useCurrentUser().state` and renders only when `state === "ready"`.
+
 **File**: `ui/src/app/providers.tsx`
-**Changes**: Mount `<CurrentUserProvider>` inside the QueryClient provider. Render `<IdentityModal />` automatically whenever `useCurrentUser().state === "needs-pick"` AND `useFeatureGate("1.76.0").supported` is true. This means: first-time visitors see it on first load; existing users keep their selection across reloads; users on a freshly-upgraded API hit `needs-pick` exactly once; users pointed at a different swarm (different `swarmId`) get prompted again for that swarm.
+**Changes**: Mount `<CurrentUserProvider>` inside the QueryClient provider. Render `<IdentityModal />` automatically whenever `useCurrentUser().state === "needs-pick"` AND `useFeatureGate("1.76.0").supported` is true. This means: first-time visitors see it on first load; existing users keep their selection across reloads; users on a freshly-upgraded API hit `needs-pick` exactly once; users pointed at a different deployment (different `apiUrl`) get prompted again for that deployment.
 
 #### 3. Plumb fields through createTask
 **File**: `ui/src/api/client.ts:215-234`
@@ -387,8 +368,8 @@ Exposes `useCurrentUser(): { state, userId: string | null, user: User | null, se
 
 #### Automated QA:
 - [ ] qa-use scenario A: with `localStorage.clear()`, load `http://localhost:5274/`, identity modal appears, list shows seeded users, creating a new user closes the modal, reload preserves selection.
-- [ ] qa-use scenario A2 (per-swarm namespacing): with a chosen identity for swarmId `A`, restart server with `SWARM_ID=swarm-b bun run start:http`, reload UI; modal **must** re-prompt (different swarmId → different localStorage key). Pick a different user, then point UI back at swarm A; original identity is still intact.
-- [ ] qa-use scenario A3 (auto-show on upgrade): pre-seed `localStorage["agent-swarm-current-user:<swarmId>"]` to a non-existent userId, reload — `<IdentityModal />` re-pops because `useUsers()` returns no match (defensive: `state` recomputes to `needs-pick`).
+- [ ] qa-use scenario A2 (per-deployment namespacing): with a chosen identity against `apiUrl=http://localhost:3013`, point the UI at a second deployment via `?apiUrl=http://localhost:3014`; modal **must** re-prompt (different `apiUrl` → different localStorage key per `useDismissibleCard`'s `swarm:v1:${apiUrl}:current-user` scheme). Pick a different user, then return to the first URL; original identity is still intact.
+- [ ] qa-use scenario A3 (auto-show on stale userId): pre-seed `localStorage.setItem('swarm:v1:${apiUrl}:current-user', 'non-existent-user-id')`, reload — `<IdentityModal />` re-pops because `useUsers()` returns no match (defensive: `state` recomputes to `needs-pick`).
 - [ ] qa-use scenario B: from `/tasks`, click "New Task", submit; verify `agent_tasks.requestedByUserId` matches the picked user (`sqlite3 ... "SELECT requestedByUserId FROM agent_tasks ORDER BY createdAt DESC LIMIT 1"`).
 - [ ] qa-use scenario C: open a task detail page where `requestedByUserId` is set; QuickStat shows the user's name.
 
@@ -507,11 +488,13 @@ Card collapsed-by-default body: status pill, agent name, started-at, latest tool
 
 ---
 
-## Phase 5: Dashboard react-flow agent canvas at `/`
+## Phase 5: Dashboard react-flow agent canvas at `/dashboard`
 
 ### Overview
 
-Replace `ui/src/pages/dashboard/page.tsx` with a new dashboard whose top region is a static `@xyflow/react` org-chart canvas (lead → workers, sized by 24h activity) and whose bottom region is reserved for the action-items inbox added in Phase 6. Reuse `workflow-graph.tsx` + `graph-utils.ts` + `WorkflowNodeShell`. Tabular fallback always available. Click-through to `/agents/:id`. Soft-degrade to today's dashboard when `useFeatureGate("1.76.0").supported === false`.
+**Resolved post-#452**: target route is **`/dashboard`** (not `/`). PR #452 made `/` the new `HomePage`; this phase is untouched by that — `HomePage` keeps its welcome card + activity strip + setup checklist + first-steps + storage. The work below replaces the **legacy 4-section dashboard at `/dashboard`** (StatsBar + Agent Status Grid + Active Tasks Panel + Activity Feed) with the new canvas + table + inbox. Sub-step 5.1 ("extract legacy") is no-op — legacy is already isolated at `/dashboard`. Soft-degrade still holds: when `useFeatureGate("1.76.0").supported === false`, `/dashboard` renders the existing legacy content unchanged (no canvas, no inbox).
+
+Replace `ui/src/pages/dashboard/page.tsx` body with a new dashboard whose top region is a static `@xyflow/react` org-chart canvas (lead → workers, sized by 24h activity) and whose bottom region is reserved for the action-items inbox added in Phase 6. Reuse `workflow-graph.tsx` + `graph-utils.ts` + `WorkflowNodeShell`. Tabular fallback always available. Click-through to `/agents/:id`. Soft-degrade to legacy content when `useFeatureGate("1.76.0").supported === false`.
 
 ### Changes Required:
 
@@ -538,6 +521,8 @@ Replace `ui/src/pages/dashboard/page.tsx` with a new dashboard whose top region 
 - `useAgents()` for the agent roster.
 - `useTasks({ createdAfter: <ISO 24h ago>, limit: 1000 })` — bounded fetch (≤ 1000 task rows/day is more than enough; if exceeded, surface a warning). Server-side `createdAfter` filter ships in Phase 2.
 - `useDashboardCosts()` (`ui/src/api/hooks/use-costs.ts:117`) — already aggregates server-side. Provides per-agent `cost24h`. Token usage is *not* a separate dimension in v1 — cost is a strict super-signal of token usage and the canvas is visually saturated by two dimensions; drop tokens from the score.
+
+**Pre-implementation verification (Important-I3)**: confirm the `useDashboardCosts()` return shape includes a per-agent `cost24h` (or equivalent) breakdown. The plan asserts this; if the hook only returns swarm-wide aggregates, either extend the underlying `/api/costs/dashboard` route to surface per-agent OR derive `cost24h` from session-cost rows joined to agents. Run `grep -n "useDashboardCosts\|/api/costs" ui/src/api/` first; do not hand-roll a parallel agent-cost path if one exists.
 
 **Activity score formula** (starting heuristic, label as such, tune in v1.1):
 `score(agent) = 0.6 * normalize(taskCount24h) + 0.4 * normalize(cost24h)`
@@ -575,7 +560,12 @@ If both dimensions are zero across the swarm, fall back to constant `MIN_SIZE` (
 
 ### Overview
 
-Add the four-bucket inbox below the agent canvas on `/`: Blocking (pending approvals + agents `waiting_for_credentials`), Broken (failed/cancelled tasks via `?status=failed,cancelled` — the multi-status CSV from Phase 2), To read (recently completed root sessions), To start (rows from `task_templates` — click pre-fills `CreateTaskDialog`). Each item supports dismiss / snooze / done via `PATCH /api/inbox-state`. State scoped by `userId` from identity context. Polling at the global 5s default.
+**Resolved post-#452**: keep the server-side `inbox_item_state` table + endpoints — dismiss/snooze/done state must follow a user across devices/browsers (a Slack notification dismissed on phone shouldn't re-pop on the desktop). `useDismissibleCard` is browser-local; not a substitute. Open follow-ups (handled below as inline notes, not blocking implementation):
+>
+> - **I1 — `task_templates` vs `templates/official/` registry**: still recommend resolving before implementing. The "To start" bucket can either source from a new `task_templates` SQL table OR from the existing template registry filtered by a `quickStart: true` config flag. Picking option (b) avoids fragmenting the template story; pick (a) only if there's a clear reason starter prompts must be data-driven and admin-editable in v1 (probably not).
+> - **I2 — Polling budget**: `<StatusProvider>` already polls `/status` at 30s. Counts that don't need sub-10s freshness (Blocking-bucket pending-approvals count, "broken" workers count) should ride that poll via aggregate fields on `/status.activity` instead of dedicated 5s polls. Tighten the 5s poll to surfaces that actually need it (active session timeline, composer-spawned-task feedback).
+
+Add the four-bucket inbox below the agent canvas on `/dashboard`: Blocking (pending approvals + agents `waiting_for_credentials`), Broken (failed/cancelled tasks via `?status=failed,cancelled` — the multi-status CSV from Phase 2), To read (recently completed root sessions), To start (rows from `task_templates` — click pre-fills `CreateTaskDialog`). Each item supports dismiss / snooze / done via `PATCH /api/inbox-state`. State scoped by `userId` from identity context. Polling at the global 5s default (revisit per I2 above).
 
 **Polling-rate budget** (per dashboard tick, every 5s):
 - `useApprovalRequests({ status: "pending" })` — 1 request
@@ -702,7 +692,7 @@ cd ui && pnpm dev   # port 5274
 
 # 3. Verify version contract
 curl -s http://localhost:3013/health
-# expect: {"status":"ok","version":"1.76.0"}
+# expect: {"status":"ok","version":"1.76.0"} (shape unchanged from current; swarmId NOT added per Critical-C3)
 
 # 4. Open http://localhost:5274/ in browser
 #    - Identity modal appears (no localStorage entry)
@@ -757,9 +747,10 @@ sqlite3 agent-swarm-db.sqlite "SELECT itemType, itemId, status, snoozeUntil FROM
 #       reload, the root session should appear in the "To read" bucket.
 #  10d. To-start: click any template card → CreateTaskDialog opens with `task` pre-filled from `template.prompt`.
 
-# 10e. Per-swarm namespacing — start a second API on a different port + SWARM_ID
-SWARM_ID=swarm-b PORT=3014 bun run start:http &
-#       Visit http://localhost:5274/?apiUrl=http://localhost:3014; identity modal re-pops.
+# 10e. Per-deployment namespacing — start a second API on a different port
+PORT=3014 bun run start:http &
+#       Visit http://localhost:5274/?apiUrl=http://localhost:3014; identity modal re-pops
+#       (different `apiUrl` → different localStorage key under `swarm:v1:${apiUrl}:current-user`).
 #       Pick a different user. Switch back to the default URL — original identity intact.
 
 # 10f. Canvas/table toggle persistence
@@ -842,3 +833,41 @@ _Reviewed: 2026-05-08 by `desplega:reviewing` (Auto-apply mode)_
 
 ### Remaining
 _(none — all Critical and Important auto-applied with user authorization)_
+
+---
+
+## Review Errata (2026-05-08 — second pass, post-PR #452)
+
+_Reviewed: 2026-05-08 by `desplega:reviewing` (Auto-apply mode). Cross-referenced against the latest merged PR — `6a2685a7 feat: cloud personalization & adaptive home (phases 1-4) (#452)` — which shipped a new `HomePage`, `<StatusProvider>`, `useDismissibleCard`, and `template-recommendations.ts`. The plan was authored before #452 merged; several assumptions are now stale._
+
+### Applied (Important)
+- [x] **I1 — `task_templates` vs `templates/official/` registry duplication**: noted in the Phase 6 § Overview review block. Decision required before implementing.
+- [x] **I2 — Phase 6 polling budget**: noted in the Phase 6 § Overview review block. Recommend reusing `<StatusProvider>`'s 30s poll for blocking-bucket counts.
+- [x] **I3 — `useDashboardCosts` per-agent shape**: pre-implementation verification step added under Phase 5 § "Activity-score data".
+- [x] **I4 — Identity modal vs HomePage WelcomeCard**: coordination note added under Phase 3 § "Identity context + boot modal", recommending WelcomeCard waits for `useCurrentUser().state === "ready"`.
+- [x] **I5 — HomePage `FirstStepsCard` "Create task" CTA route choice**: surfaced below as Remaining-Important (no clean place in the plan body; needs Sessions/Tasks scope decision).
+
+### Applied (Minor)
+- [x] **M1 — Migration numbering**: confirmed `054_agent_harness_provider.sql` is the latest existing migration; plan's 055 / 056 / 057 / 058 numbering is correct.
+- [x] **M2 — QA doc**: `thoughts/taras/qa/2026-05-08-ui-chat-session-experience-v1.md` is committed (alongside #452); scaffold matches the plan's scenarios A–Q.
+- [x] **M3 — Per-swarm-localstorage learning vs shipped pattern**: surfaced — `thoughts/taras/learnings/2026-05-08-per-swarm-localstorage-namespacing.md` advocates `swarmId` from `/health` while the merged PR's `useDismissibleCard` namespaces by `apiUrl`. Update or split the learning after Critical-C3 is resolved.
+- [x] **M4 — Stale "Current State" reference**: line about `ui/src/pages/dashboard/page.tsx:315-477` updated to acknowledge `/` is now `HomePage`, legacy lives at `/dashboard`, and to point at the relevant merged primitives (`useStatusContext`, `useDismissibleCard`).
+
+### Remaining (Critical — pending user decision)
+- [ ] **C1 — Phase 5 architecture is stale**: `/` is no longer the legacy dashboard. PR #452 made `/` `HomePage` and moved the legacy 4-section dashboard to `/dashboard`. Phase 5 must pick one of: (a) compose the agent canvas + table toggle into `HomePage` as a new section, (b) put the canvas + inbox on `/dashboard` and leave `HomePage` alone, (c) replace `HomePage` (throws out shipped cloud-personalization work — discouraged). Sub-step 5.1 ("extract legacy") is no-op post-#452. Phase 5 § Overview now carries an inline review block describing the three options.
+- [ ] **C2 — Phase 6 dismiss/snooze/done duplicates `useDismissibleCard`**: PR #452 shipped `useDismissibleCard(cardKey)` with per-deployment localStorage namespace, cross-tab `storage` event sync, and try/catch storage access (tested). The plan's `inbox_item_state` SQLite table + `PATCH /api/inbox-state` endpoint + optimistic-mutation glue are heavyweight unless dismiss state must follow the user across devices. Decide: (a) keep the table + endpoint (cross-device), (b) drop the table and use `useDismissibleCard` with `cardKey: 'inbox:${itemType}:${itemId}'` (browser-scoped). The latter cuts a migration, two routes, four hooks, and the optimistic-mutation glue.
+- [ ] **C3 — `swarmId` introduces a third namespacing pattern**: the plan adds `swarmId` to `/health` and namespaces identity localStorage as `agent-swarm-current-user:${swarmId}`. But `useDismissibleCard` uses `apiUrl` and `/status` already exposes a richer `identity` payload. Decide: (a) add `swarmId` to `/status.identity` (consistent surface) and have `useDismissibleCard` read swarmId via `useStatusContext()` instead of `apiUrl`, (b) drop the `/health` swarmId addition entirely and use `apiUrl` for current-user namespacing too (consistent with merged code), (c) keep both — only if a clear contract distinction exists. Whichever you pick, update the `per-swarm-localstorage-namespacing.md` learning to match.
+
+### Remaining (Important — needs micro-decision)
+- [ ] **I5 — HomePage `FirstStepsCard` "Create task" CTA**: the merged HomePage has a primary "Create task" button that today routes to `/tasks?new=true`. Plan v1 ships `/sessions` as a peer surface. Decide whether the CTA should route to `/sessions` (kicks off a session-style flow) or stay on `/tasks` (existing CreateTaskDialog). Likely keep `/tasks?new=true` for v1, route to `/sessions` in v2 once the session experience matures — but state the call.
+
+### Critical decisions — resolved (2026-05-08, by Taras)
+
+- [x] **C1 → "Put canvas on /dashboard"**: Phase 5 retargets `/dashboard` (replacing the legacy 4-section body), not `/`. `HomePage` at `/` is untouched. Sub-step 5.1 ("extract legacy") becomes no-op — legacy already lives at `/dashboard`. Soft-degrade: when feature-gate fails, `/dashboard` renders existing legacy content unchanged. Phase 5 § Overview rewritten.
+- [x] **C2 → "Keep server table"**: dismiss/snooze/done state must follow users across devices — `inbox_item_state` table + `PATCH /api/inbox-state` stay. `useDismissibleCard` is browser-local and not a substitute. Phase 6 § Overview rewritten; I1 (`task_templates` vs registry) and I2 (polling-budget reuse of `<StatusProvider>`) remain as inline notes for future tightening but are no longer blockers.
+- [x] **C3 → "Use apiUrl, drop swarmId"**: Phase 1 § 4 (swarmId on /health + `058_swarm_metadata.sql` + `getSwarmId()`) deleted. `/health` shape stays `{ status, version }`. Phase 3 namespaces identity localStorage as `swarm:v1:${apiUrl}:current-user` (matching `useDismissibleCard`'s `deriveStorageKey`). Phase 3 `<CurrentUserProvider>`, useApiVersion (no useSwarmId), QA scenarios A2 / A3, and Manual E2E §10e all updated. The `per-swarm-localstorage-namespacing.md` learning needs an update (or splitting) to reflect the chosen pattern; tracked as a follow-up below.
+
+### Follow-ups
+- Update `thoughts/taras/learnings/2026-05-08-per-swarm-localstorage-namespacing.md` to advocate the `apiUrl` namespacing pattern that actually shipped with PR #452, not the `swarmId`-from-`/health` pattern that was originally proposed and then dropped.
+- After implementation, retitle Phase 1 commit message stub to drop the `swarmId` mention: `[phase 1] source enum cleanup + requestedByUserId + bump 1.76.0`.
+- Confirm `useDashboardCosts()` per-agent shape during Phase 5 implementation (Important-I3 verification step).

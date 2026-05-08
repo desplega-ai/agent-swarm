@@ -286,9 +286,49 @@ export const AgentSchema = z.object({
   // `waiting_for_credentials`. Null otherwise.
   credentialMissing: z.array(z.string()).nullable().optional(),
 
+  // Worker-self-reported credential snapshot for this agent's harness.
+  // Pairs with `harnessProvider`. Null = unreported (worker hasn't booted
+  // yet, or CRED_CHECK_DISABLE=1 was set). Migration 055 adds the column.
+  credStatus: z
+    .lazy(() => AgentCredStatusSchema)
+    .nullable()
+    .optional(),
+
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
 });
+
+// ---------------------------------------------------------------------------
+// Worker-reported credential snapshot
+// ---------------------------------------------------------------------------
+// `provider` is intentionally absent from the JSON — already on the agent row
+// as `harnessProvider`; the status endpoint joins them at read time.
+//
+// `reportKind` records the trigger that produced the report:
+//   - "boot": worker startup, full check (presence + live test).
+//   - "post_task": worker finished a task and `harness_provider` differed
+//     from its cached value, so it re-ran a full check (presence + live test).
+//
+// The cache-hit post-task path does NOT produce a new report; the row's
+// `reportedAt` deliberately stays at the last actual check.
+export const AgentCredStatusLiveTestSchema = z.object({
+  ok: z.boolean(),
+  error: z.string().nullable().default(null),
+  latency_ms: z.number(),
+  testedAt: z.number(), // unix ms
+});
+export type AgentCredStatusLiveTest = z.infer<typeof AgentCredStatusLiveTestSchema>;
+
+export const AgentCredStatusSchema = z.object({
+  ready: z.boolean(),
+  missing: z.array(z.string()).default([]),
+  satisfiedBy: z.enum(["env", "file", "side-effect-pending"]).nullable().default(null),
+  hint: z.string().nullable().default(null),
+  liveTest: AgentCredStatusLiveTestSchema.nullable().default(null),
+  reportedAt: z.number(), // unix ms
+  reportKind: z.enum(["boot", "post_task"]).default("boot"),
+});
+export type AgentCredStatus = z.infer<typeof AgentCredStatusSchema>;
 
 export const AgentWithTasksSchema = AgentSchema.extend({
   tasks: z.array(AgentTaskSchema).default([]),

@@ -23,8 +23,8 @@
  * entrypoint hard-exits before the process can refresh.
  */
 
-import { checkProviderCredentials } from "../providers/credentials";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
+import { checkProviderCredentials } from "./provider-credentials";
 
 /** Exit code distinct from generic failures so monitoring can distinguish
  * "config never arrived" from worker process crashes. Matches sysexits(3)'s

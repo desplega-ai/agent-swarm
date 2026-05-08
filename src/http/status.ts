@@ -2,29 +2,30 @@
  * `/status` — identity + setup readiness + activity + agent_fs aggregate
  * for the home page.
  *
- * Phase 1 of the cloud-personalization plan. The route is the single source
- * of truth for "what does this swarm look like / what's set up / what's
- * missing" so the UI's `HomePage` (and later phases' header badge / smart
- * empty states) can lean on one contract.
- *
- * Design notes:
- * - Setup checks are env- and DB-only (zero network, zero side effects).
- *   Live upstream calls happen only via `POST /status/test-connection`,
- *   which then caches a `verifiedAt` timestamp per provider in-memory.
- * - The cache is intentionally in-memory: it's a UX nicety, not durable
- *   state. Lost on restart by design — operators re-click the button to
- *   reverify. Future iteration can persist `last_verified_at` per provider
- *   in `swarm_config` if this proves annoying (no migration needed).
- * - Provider env reads come from `process.env` directly so the route
- *   reflects whatever `loadGlobalConfigsAndIntegrations` last injected.
+ * Architecture (post worker-self-report refactor):
+ * - Credential checks are NEVER run server-side. Workers run them in their
+ *   boot loop / post-task hook (`src/commands/credential-wait.ts` and
+ *   `src/commands/runner.ts`) and POST results to the agent row's
+ *   `cred_status` column. This file only reads those rows.
+ * - This is critical for the bun-compiled API binary: importing any
+ *   provider-adapter code at module level drags worker-harness SDKs (e.g.
+ *   `@mariozechner/pi-coding-agent`) into the bundle, which crashes at
+ *   `/usr/local/bin/` on boot. Keep this file adapter-free.
+ * - Setup checks beyond credentials are still env- and DB-only (zero
+ *   network, zero side effects).
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getDb, getInstanceActivity, getLiveAgentCounts, hasFirstCompletedTask } from "../be/db";
+import {
+  getDb,
+  getInstanceActivity,
+  getLiveAgentCounts,
+  hasFirstCompletedTask,
+  listAgentsWithCredStatusByProvider,
+} from "../be/db";
 import { getOAuthApp, getOAuthTokens } from "../be/db-queries/oauth";
-import { checkProviderCredentials, validateProviderCredentials } from "../providers/credentials";
-import { ProviderNameSchema } from "../types";
+import { type AgentCredStatus, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -115,34 +116,96 @@ export const TestConnectionResponseSchema = z.object({
   latency_ms: z.number().int().nonnegative(),
 });
 
-// ─── Test-connection cache (in-memory) ───────────────────────────────────────
+// ─── Worker-reported credential rollup ───────────────────────────────────────
 
-interface TestCacheEntry {
-  ok: boolean;
-  verifiedAt: number;
+/**
+ * Read all worker reports for a given harness provider and reduce them to a
+ * single milestone-grade rollup. Reports are joined from `agents.cred_status`
+ * (migration 055) — no provider-adapter code runs here.
+ *
+ * `verified` ⇐ at least one worker has `liveTest.ok === true` and the test
+ *   is fresher than `getCredVerifyTtlMs()`.
+ * `configured` ⇐ at least one worker has `ready: true` (presence check
+ *   passed) but no fresh passing live test.
+ * `unverified` ⇐ no worker reported, or all reporting workers have
+ *   `ready: false`.
+ */
+type CredRollupState = "verified" | "configured" | "unverified";
+
+interface CredRollup {
+  state: CredRollupState;
+  workers: number;
+  reports: number;
+  latestLiveTest: AgentCredStatus["liveTest"];
+  latestMissing: string[];
+  oldestReportAgeMs: number | null;
 }
 
-const testConnectionCache = new Map<string, TestCacheEntry>();
-
-function getVerifyTtlMs(): number {
+function getCredVerifyTtlMs(): number {
   const raw = process.env.SWARM_VERIFY_TTL_MS;
-  if (!raw) return 3_600_000; // 1h default
+  if (!raw) return 3_600_000; // 1h default — matches pre-refactor behavior.
   const parsed = Number.parseInt(raw, 10);
   if (Number.isNaN(parsed) || parsed <= 0) return 3_600_000;
   return parsed;
 }
 
-function isCachedVerified(provider: string): boolean {
-  const entry = testConnectionCache.get(provider);
-  if (!entry) return false;
-  if (!entry.ok) return false;
-  const ttl = getVerifyTtlMs();
-  return entry.verifiedAt + ttl > Date.now();
+/**
+ * Compatibility stub. The pre-refactor in-memory test-connection cache is
+ * gone — credential state now lives on agent rows. Tests still call this
+ * in `beforeEach` for backward compat; it's a no-op today.
+ */
+export function _resetTestConnectionCache(): void {
+  // intentionally empty
 }
 
-/** Exported for tests. */
-export function _resetTestConnectionCache(): void {
-  testConnectionCache.clear();
+function rollupCredStatusForProvider(provider: string): CredRollup {
+  const agents = listAgentsWithCredStatusByProvider(provider);
+  const reports = agents.map((a) => a.credStatus).filter((s): s is AgentCredStatus => s != null);
+
+  if (reports.length === 0) {
+    return {
+      state: "unverified",
+      workers: agents.length,
+      reports: 0,
+      latestLiveTest: null,
+      latestMissing: [],
+      oldestReportAgeMs: null,
+    };
+  }
+
+  // Pick the most-recent passing live test, if any, then fall back to
+  // most-recent live test of any kind.
+  const ttl = getCredVerifyTtlMs();
+  const now = Date.now();
+  const passing = reports
+    .filter((r) => r.liveTest?.ok === true && now - (r.liveTest?.testedAt ?? 0) < ttl)
+    .sort((a, b) => (b.liveTest?.testedAt ?? 0) - (a.liveTest?.testedAt ?? 0));
+  const anyLive = reports
+    .filter((r) => r.liveTest != null)
+    .sort((a, b) => (b.liveTest?.testedAt ?? 0) - (a.liveTest?.testedAt ?? 0));
+  const latestLiveTest = passing[0]?.liveTest ?? anyLive[0]?.liveTest ?? null;
+
+  const anyReady = reports.some((r) => r.ready);
+  const state: CredRollupState =
+    passing.length > 0 ? "verified" : anyReady ? "configured" : "unverified";
+
+  // For UI hints, pick the most-recent missing[] from a not-ready report.
+  const latestNotReady = reports
+    .filter((r) => !r.ready)
+    .sort((a, b) => b.reportedAt - a.reportedAt)[0];
+  const latestMissing = latestNotReady?.missing ?? [];
+
+  const oldestReportAgeMs =
+    reports.length > 0 ? Math.max(...reports.map((r) => now - r.reportedAt)) : null;
+
+  return {
+    state,
+    workers: agents.length,
+    reports: reports.length,
+    latestLiveTest,
+    latestMissing,
+    oldestReportAgeMs,
+  };
 }
 
 // ─── Identity ────────────────────────────────────────────────────────────────
@@ -175,51 +238,79 @@ function harnessMilestone(): SetupMilestone {
   }
 
   // Only emit `provider` on the milestone when the env value is a canonical
-  // provider name. Unknown values still flow through the rest of the logic
-  // (so `unverified` is reported), but the UI doesn't get a bogus name.
+  // provider name. Unknown values still flow through (so `unverified` is
+  // reported), but the UI doesn't get a bogus name.
   const parsed = ProviderNameSchema.safeParse(providerRaw);
   const providerName = parsed.success ? parsed.data : undefined;
 
-  let credsReady = false;
-  try {
-    const creds = checkProviderCredentials(providerRaw, process.env);
-    credsReady = creds.ready;
-  } catch {
-    // Unknown provider — treat as unverified, no creds.
-    credsReady = false;
-  }
-
-  if (!credsReady) {
+  if (!providerName) {
     return {
       id: "harness",
       label: "Harness configured",
       state: "unverified",
-      hint: providerName
-        ? "Harness provider is set but credentials are missing."
-        : `Unknown harness provider "${providerRaw}". Use one of: claude, codex, pi, devin, claude-managed, opencode.`,
+      hint: `Unknown harness provider "${providerRaw}". Use one of: claude, codex, pi, devin, claude-managed, opencode.`,
       action_url: "/integrations",
-      ...(providerName ? { provider: providerName } : {}),
     };
   }
 
-  if (isCachedVerified(providerRaw)) {
+  const roll = rollupCredStatusForProvider(providerName);
+
+  if (roll.workers === 0) {
+    return {
+      id: "harness",
+      label: "Harness configured",
+      state: "unverified",
+      hint: `No workers registered for "${providerName}" yet. Start a worker configured for the ${providerName} harness.`,
+      action_url: "/agents",
+      provider: providerName,
+    };
+  }
+
+  if (roll.reports === 0) {
+    return {
+      id: "harness",
+      label: "Harness configured",
+      state: "unverified",
+      hint: "Workers registered but none have reported credential status yet — they may be booting or have CRED_CHECK_DISABLE=1 set.",
+      action_url: "/agents",
+      provider: providerName,
+    };
+  }
+
+  if (roll.state === "verified") {
     return {
       id: "harness",
       label: "Harness configured",
       state: "verified",
-      hint: "Live test passed within the last hour.",
+      hint: "At least one worker has a passing live test within the verify TTL.",
       action_url: "/integrations",
-      ...(providerName ? { provider: providerName } : {}),
+      provider: providerName,
     };
   }
 
+  if (roll.state === "configured") {
+    return {
+      id: "harness",
+      label: "Harness configured",
+      state: "configured",
+      hint: 'Workers report credentials present — click "Test connection" to surface the latest live test.',
+      action_url: "/integrations",
+      provider: providerName,
+    };
+  }
+
+  // Unverified with reports → workers say creds are missing.
+  const missingHint =
+    roll.latestMissing.length > 0
+      ? `Workers report missing: ${roll.latestMissing.join(", ")}.`
+      : "Workers report missing credentials.";
   return {
     id: "harness",
     label: "Harness configured",
-    state: "configured",
-    hint: 'Credentials present — click "Test connection" to verify.',
+    state: "unverified",
+    hint: missingHint,
     action_url: "/integrations",
-    ...(providerName ? { provider: providerName } : {}),
+    provider: providerName,
   };
 }
 
@@ -510,16 +601,35 @@ export async function handleStatus(
     if (!parsed) return true;
 
     const { provider } = parsed.body;
-    const result = await validateProviderCredentials(provider);
-    if (result.ok) {
-      testConnectionCache.set(provider, { ok: true, verifiedAt: Date.now() });
-    } else {
-      // Cache the failure too so the UI can render the latest result without
-      // racing against a fresh GET. We only emit `verified` on `ok === true`
-      // so a cached failure simply leaves the state at `configured`.
-      testConnectionCache.set(provider, { ok: false, verifiedAt: Date.now() });
+    const roll = rollupCredStatusForProvider(provider);
+
+    // No workers registered for this provider — the operator needs to start
+    // a worker before any live test can run. Surface as a soft failure so
+    // the UI can render the hint inline.
+    if (roll.workers === 0) {
+      json(res, {
+        ok: false,
+        error: `No workers registered with HARNESS_PROVIDER=${provider}. Start a worker — its boot loop will run a live test and report it here.`,
+        latency_ms: 0,
+      });
+      return true;
     }
-    json(res, result);
+
+    if (!roll.latestLiveTest) {
+      json(res, {
+        ok: false,
+        error:
+          "Workers are registered but none have run a live test yet (still booting, or CRED_CHECK_DISABLE=1 was set).",
+        latency_ms: 0,
+      });
+      return true;
+    }
+
+    json(res, {
+      ok: roll.latestLiveTest.ok,
+      ...(roll.latestLiveTest.error ? { error: roll.latestLiveTest.error } : {}),
+      latency_ms: roll.latestLiveTest.latency_ms,
+    });
     return true;
   }
 

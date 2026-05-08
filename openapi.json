@@ -730,6 +730,89 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "cred_status": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "ready": {
+                        "type": "boolean"
+                      },
+                      "missing": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": []
+                      },
+                      "satisfiedBy": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "env",
+                          "file",
+                          "side-effect-pending",
+                          null
+                        ],
+                        "default": null
+                      },
+                      "hint": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "default": null
+                      },
+                      "liveTest": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "properties": {
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "latency_ms": {
+                            "type": "number"
+                          },
+                          "testedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "default": null,
+                        "required": [
+                          "ok",
+                          "latency_ms",
+                          "testedAt"
+                        ]
+                      },
+                      "reportedAt": {
+                        "type": "number"
+                      },
+                      "reportKind": {
+                        "type": "string",
+                        "enum": [
+                          "boot",
+                          "post_task"
+                        ],
+                        "default": "boot"
+                      }
+                    },
+                    "required": [
+                      "ready",
+                      "reportedAt"
+                    ]
                   }
                 },
                 "required": [

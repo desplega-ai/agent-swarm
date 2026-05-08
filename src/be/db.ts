@@ -6,6 +6,7 @@ import { configureDbResolver } from "../prompts/resolver";
 import type {
   ActiveSession,
   Agent,
+  AgentCredStatus,
   AgentLog,
   AgentLogEventType,
   AgentMcpServer,
@@ -559,6 +560,8 @@ type AgentRow = {
   credentialMissing: string | null;
   /** Phase 1.5: per-agent harness provider pushed on worker registration. */
   harness_provider: string | null;
+  /** Migration 055: worker-self-reported credential snapshot (JSON of AgentCredStatus). NULL = unreported. */
+  cred_status: string | null;
 };
 
 function rowToAgent(row: AgentRow): Agent {
@@ -586,6 +589,7 @@ function rowToAgent(row: AgentRow): Agent {
     credentialMissing: row.credentialMissing
       ? (JSON.parse(row.credentialMissing) as string[])
       : null,
+    credStatus: row.cred_status ? (JSON.parse(row.cred_status) as AgentCredStatus) : null,
   };
 }
 
@@ -725,6 +729,45 @@ export function setAgentHarnessProvider(id: string, provider: ProviderName | nul
     )
     .get(provider, id);
   return row ? rowToAgent(row) : null;
+}
+
+/**
+ * Migration 055 — write the worker-self-reported credential snapshot.
+ * Pass `null` to clear (e.g. on agent re-registration). Validation against
+ * the JSON shape happens at the API layer via `AgentCredStatusSchema`.
+ *
+ * Worker reports this alongside the existing `updateAgentCredentialState`
+ * call; we keep the writes in two functions so the dispatch pattern stays
+ * one-row-one-fact, and the PATCH handler can choose which to call based
+ * on which fields the request body carried.
+ */
+export function updateAgentCredStatus(
+  id: string,
+  credStatus: AgentCredStatus | null,
+): Agent | null {
+  const json = credStatus ? JSON.stringify(credStatus) : null;
+  const row = getDb()
+    .prepare<AgentRow, [string | null, string]>(
+      `UPDATE agents SET cred_status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    )
+    .get(json, id);
+  return row ? rowToAgent(row) : null;
+}
+
+/**
+ * Migration 055 — read all agents whose `harness_provider` matches a given
+ * provider, with their reported `cred_status`. Used by the credential-status
+ * API endpoint to roll up "is this provider working across the fleet?".
+ *
+ * Agents with NULL `cred_status` (never reported, or CRED_CHECK_DISABLE=1)
+ * are still returned — the caller surfaces them as "unreported".
+ */
+export function listAgentsWithCredStatusByProvider(provider: string): Agent[] {
+  const rows = getDb()
+    .prepare<AgentRow, [string]>(`SELECT * FROM agents WHERE harness_provider = ? ORDER BY name`)
+    .all(provider);
+  return rows.map(rowToAgent);
 }
 
 /**
