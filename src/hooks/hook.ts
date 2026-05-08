@@ -4,12 +4,11 @@ import pkg from "../../package.json";
 import {
   buildRatingsFromLlm,
   buildSummaryWithRatingsPrompt,
-  extractSummaryFromClaudeStdout,
   fetchRetrievalsForTask,
   isLlmRaterEnabled,
-  parseSummaryWithRatings,
   postRatings,
   type RetrievalRow,
+  SummaryWithRatingsSchema,
 } from "../be/memory/raters/llm";
 import type { Agent } from "../types";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
@@ -1079,9 +1078,19 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
         }
       }
 
-      // Session summarization via Claude Haiku
-      // Skip if this is a child session spawned by the summarization itself (prevents recursion)
-      if (agentInfo?.id && msg.transcript_path && !process.env.SKIP_SESSION_SUMMARY) {
+      // Session summarization + LLM rater piggyback via OpenRouter (Vercel AI SDK).
+      //
+      // No-op when OPENROUTER_API_KEY is unset — self-hosters / OSS users
+      // without OpenRouter skip session summary + LLM ratings entirely. The
+      // previous `claude -p` path silently produced "Not logged in · Please
+      // run /login" rows after the 2026-05-05 CLAUDE_CODE_VERSION bump
+      // stopped propagating CLAUDE_CODE_OAUTH_TOKEN to hook subprocesses.
+      if (
+        agentInfo?.id &&
+        msg.transcript_path &&
+        !process.env.SKIP_SESSION_SUMMARY &&
+        process.env.OPENROUTER_API_KEY
+      ) {
         try {
           let transcript = "";
           try {
@@ -1116,7 +1125,6 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
               });
             }
 
-            // Summarize with Claude Haiku — extract only high-value learnings
             const baseSummarizePrompt = `You are summarizing an AI agent's work session. Extract ONLY high-value learnings.
 
 DO NOT include:
@@ -1136,40 +1144,30 @@ ${taskContext ? `\nTask context: ${taskContext}` : ""}
 Transcript:
 ${transcript}`;
 
-            const wantsRatings = llmRaterEnabled && retrievals.length > 0;
-            const summarizePrompt = wantsRatings
-              ? buildSummaryWithRatingsPrompt(baseSummarizePrompt, retrievals)
-              : baseSummarizePrompt;
+            // Always ask for the structured (summary + ratings) payload — same
+            // cost as the unstructured path. Empty retrievals → empty memory
+            // block → ratings: []; the postRatings gate below still skips the
+            // POST when there's nothing to send.
+            const summarizePrompt = buildSummaryWithRatingsPrompt(baseSummarizePrompt, retrievals);
 
-            const tmpFile = `/tmp/session-summary-${Date.now()}.txt`;
-            await Bun.write(tmpFile, summarizePrompt);
-            const proc = Bun.spawn(
-              ["bash", "-c", `cat "${tmpFile}" | claude -p --model haiku --output-format json`],
-              {
-                stdout: "pipe",
-                stderr: "pipe",
-                env: { ...process.env, SKIP_SESSION_SUMMARY: "1" },
+            const { createOpenAI } = await import("@ai-sdk/openai");
+            const { generateObject } = await import("ai");
+
+            const openrouter = createOpenAI({
+              baseURL: "https://openrouter.ai/api/v1",
+              apiKey: process.env.OPENROUTER_API_KEY,
+            });
+
+            const { object } = await generateObject({
+              model: openrouter("anthropic/claude-haiku-4.5"),
+              schema: SummaryWithRatingsSchema,
+              prompt: summarizePrompt,
+              providerOptions: {
+                openai: { strictJsonSchema: false },
               },
-            );
-            const timeoutId = setTimeout(() => proc.kill(), 30000);
-            const result = { stdout: await new Response(proc.stdout).text() };
-            clearTimeout(timeoutId);
-            await Bun.$`rm -f ${tmpFile}`.quiet();
+            });
 
-            let summary: string;
-            let parsedRatings: ReturnType<typeof parseSummaryWithRatings> = null;
-            if (wantsRatings) {
-              parsedRatings = parseSummaryWithRatings(result.stdout);
-            }
-            if (parsedRatings) {
-              summary = parsedRatings.summary;
-            } else {
-              // Fallback: never index raw JSON. extractSummaryFromClaudeStdout
-              // pulls the `summary` field out of a structured-output payload
-              // whose ratings failed schema validation; otherwise behaves
-              // like the previous unstructured envelope.result extraction.
-              summary = extractSummaryFromClaudeStdout(result.stdout);
-            }
+            const summary = object.summary;
 
             // Skip indexing if the session had no significant learnings
             if (
@@ -1198,23 +1196,15 @@ ${transcript}`;
             }
 
             // Best-effort: post LLM ratings. Never blocks summary indexing.
-            // Failure-path log only — keeps regressions visible without
-            // spamming the runner stderr on every successful Stop hook.
-            if (
-              llmRaterEnabled &&
-              taskId &&
-              retrievals.length > 0 &&
-              (parsedRatings == null || parsedRatings.ratings.length === 0)
-            ) {
+            if (llmRaterEnabled && taskId && retrievals.length > 0 && object.ratings.length === 0) {
               console.error("[memory-rater:llm] piggyback produced no ratings", {
                 retrievalsLen: retrievals.length,
-                parseSuccess: parsedRatings != null,
-                ratingsLen: parsedRatings?.ratings?.length ?? 0,
+                ratingsLen: 0,
               });
             }
-            if (parsedRatings && parsedRatings.ratings.length > 0) {
+            if (llmRaterEnabled && taskId && object.ratings.length > 0) {
               try {
-                const events = buildRatingsFromLlm(parsedRatings.ratings, retrievals);
+                const events = buildRatingsFromLlm(object.ratings, retrievals);
                 if (events.length > 0) {
                   await postRatings({
                     apiUrl,

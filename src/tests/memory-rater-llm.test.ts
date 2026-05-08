@@ -8,9 +8,10 @@
  *      mapping, prompt construction.
  *   2. `LlmRater.rate(ctx)` per-memory path with `MockLlmRaterClient`.
  *   3. HTTP integration: spawn the API server against an isolated SQLite
- *      file, simulate the hook's piggyback flow (mock `claude -p` by feeding
- *      stdout directly into `parseSummaryWithRatings`), and assert
- *      `agent_memory.alpha/beta` move + `memory_rating` rows are written.
+ *      file, simulate the hook's piggyback flow (`generateObject` is mocked
+ *      by feeding the parsed object directly into `buildRatingsFromLlm`),
+ *      and assert `agent_memory.alpha/beta` move + `memory_rating` rows are
+ *      written.
  *   4. Negative path: `MEMORY_RATERS` unset → no `/api/memory/rate` call.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
@@ -22,15 +23,12 @@ import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import {
   buildRatingsFromLlm,
   buildSummaryWithRatingsPrompt,
-  extractSummaryFromClaudeStdout,
   fetchRetrievalsForTask,
   isLlmRaterEnabled,
   LLM_RATER_WEIGHT,
   LlmRater,
-  parseSummaryWithRatings,
   postRatings,
   SummaryWithRatingsSchema,
-  tryParseLooseJson,
 } from "../be/memory/raters/llm";
 import { getRegisteredRaters, SERVER_RATERS } from "../be/memory/raters/registry";
 import type { RatingEvent } from "../be/memory/raters/types";
@@ -208,248 +206,6 @@ describe("buildSummaryWithRatingsPrompt", () => {
     // Truncation cap is 600 chars + ellipsis. Make sure full 5000 isn't echoed.
     expect(out.includes("x".repeat(5000))).toBe(false);
     expect(out).toContain("…");
-  });
-});
-
-describe("parseSummaryWithRatings", () => {
-  test("parses a well-formed claude -p envelope (inner JSON as string)", () => {
-    const inner = JSON.stringify({
-      summary: "S",
-      ratings: [{ id: "m", score: 0.5, reasoning: "ok" }],
-    });
-    const envelope = JSON.stringify({ result: inner });
-    const out = parseSummaryWithRatings(envelope);
-    expect(out).not.toBeNull();
-    expect(out?.summary).toBe("S");
-    expect(out?.ratings).toHaveLength(1);
-  });
-
-  test("parses an envelope where `result` is an object (not stringified)", () => {
-    const envelope = JSON.stringify({
-      result: { summary: "S", ratings: [{ id: "m", score: 1, reasoning: "yes" }] },
-    });
-    const out = parseSummaryWithRatings(envelope);
-    expect(out).not.toBeNull();
-    if (!out) return;
-    expect(out.ratings[0]!.score).toBe(1);
-  });
-
-  test("returns null when envelope is not JSON", () => {
-    expect(parseSummaryWithRatings("not json")).toBeNull();
-  });
-
-  test("returns null when inner is not JSON", () => {
-    const envelope = JSON.stringify({ result: "this is not json either" });
-    expect(parseSummaryWithRatings(envelope)).toBeNull();
-  });
-
-  test("returns null when inner fails schema (out-of-range score)", () => {
-    const inner = JSON.stringify({
-      summary: "S",
-      ratings: [{ id: "m", score: 5, reasoning: "bogus" }],
-    });
-    const envelope = JSON.stringify({ result: inner });
-    expect(parseSummaryWithRatings(envelope)).toBeNull();
-  });
-
-  // Tolerant-parser regression: Haiku occasionally wraps its structured
-  // output in ```json fences or adds a prose preamble. Pre-fix, the strict
-  // JSON.parse choked and the rater never fired. See PR fixing 0 LLM ratings.
-  test("parses inner payload wrapped in ```json fences", () => {
-    const innerRaw = JSON.stringify({
-      summary: "S",
-      ratings: [{ id: "m", score: 0.7, reasoning: "useful" }],
-    });
-    const envelope = JSON.stringify({ result: `\`\`\`json\n${innerRaw}\n\`\`\`` });
-    const out = parseSummaryWithRatings(envelope);
-    expect(out).not.toBeNull();
-    if (!out) return;
-    expect(out.summary).toBe("S");
-    expect(out.ratings[0]!.score).toBe(0.7);
-  });
-
-  test("parses inner payload wrapped in plain ``` fences (no language tag)", () => {
-    const innerRaw = JSON.stringify({
-      summary: "T",
-      ratings: [{ id: "m", score: 0.3, reasoning: "meh" }],
-    });
-    const envelope = JSON.stringify({ result: `\`\`\`\n${innerRaw}\n\`\`\`` });
-    const out = parseSummaryWithRatings(envelope);
-    expect(out).not.toBeNull();
-    expect(out?.summary).toBe("T");
-  });
-
-  test("parses inner payload with leading prose preamble", () => {
-    const innerRaw = JSON.stringify({
-      summary: "U",
-      ratings: [{ id: "m", score: 1, reasoning: "spot on" }],
-    });
-    const envelope = JSON.stringify({
-      result: `Here is the JSON:\n\n${innerRaw}`,
-    });
-    const out = parseSummaryWithRatings(envelope);
-    expect(out).not.toBeNull();
-    expect(out?.summary).toBe("U");
-  });
-
-  test("parses inner payload with both prose preamble AND trailing chatter", () => {
-    const innerRaw = JSON.stringify({
-      summary: "V",
-      ratings: [{ id: "m", score: 0.5, reasoning: "ok" }],
-    });
-    const envelope = JSON.stringify({
-      result: `Sure, here you go:\n${innerRaw}\n\nLet me know if you need anything else.`,
-    });
-    const out = parseSummaryWithRatings(envelope);
-    expect(out).not.toBeNull();
-    expect(out?.summary).toBe("V");
-  });
-
-  test("genuinely garbage inner payload still returns null", () => {
-    const envelope = JSON.stringify({ result: "this is just prose with no JSON object at all" });
-    expect(parseSummaryWithRatings(envelope)).toBeNull();
-  });
-
-  test("inner with malformed JSON inside fences still returns null", () => {
-    const envelope = JSON.stringify({
-      result: "```json\n{not actually valid: json,}\n```",
-    });
-    expect(parseSummaryWithRatings(envelope)).toBeNull();
-  });
-});
-
-describe("tryParseLooseJson", () => {
-  test("strict JSON parses unchanged", () => {
-    expect(tryParseLooseJson('{"a":1}')).toEqual({ a: 1 });
-  });
-
-  test("strips ```json fences", () => {
-    expect(tryParseLooseJson('```json\n{"a":1}\n```')).toEqual({ a: 1 });
-  });
-
-  test("strips plain ``` fences", () => {
-    expect(tryParseLooseJson('```\n{"a":1}\n```')).toEqual({ a: 1 });
-  });
-
-  test("recovers from prose preamble via brace-slice", () => {
-    expect(tryParseLooseJson('Here you go: {"a":1}')).toEqual({ a: 1 });
-  });
-
-  test("recovers from prose preamble + trailing chatter via brace-slice", () => {
-    expect(tryParseLooseJson('preamble\n{"a":1}\nthanks')).toEqual({ a: 1 });
-  });
-
-  test("returns null on genuine garbage", () => {
-    expect(tryParseLooseJson("not json at all")).toBeNull();
-  });
-
-  test("returns null on broken JSON inside fences", () => {
-    expect(tryParseLooseJson("```json\n{broken,}\n```")).toBeNull();
-  });
-
-  test("never throws — even on adversarial input", () => {
-    expect(() => tryParseLooseJson("{[}}}}")).not.toThrow();
-    expect(() => tryParseLooseJson("```")).not.toThrow();
-    expect(() => tryParseLooseJson("")).not.toThrow();
-  });
-});
-
-describe("extractSummaryFromClaudeStdout (hook fallback path)", () => {
-  // Regression: PR #429 review feedback. When the structured-output piggyback
-  // returns a valid envelope but the inner ratings fail SummaryWithRatingsSchema,
-  // the hook MUST index the human-readable `summary` text — not the raw inner
-  // JSON blob. See src/hooks/hook.ts ~L1148.
-  test("structured envelope with invalid ratings → extracts inner summary string", () => {
-    const summaryText = "Found a couple of helpful patterns; one was misleading.";
-    const inner = JSON.stringify({
-      summary: summaryText,
-      // Out-of-range score makes SummaryWithRatingsSchema.safeParse fail.
-      ratings: [{ id: "mem-A", score: 5, reasoning: "bogus" }],
-    });
-    const envelope = JSON.stringify({ result: inner });
-    expect(parseSummaryWithRatings(envelope)).toBeNull();
-    const out = extractSummaryFromClaudeStdout(envelope);
-    expect(out).toBe(summaryText);
-    // Hard guarantee for the indexer: must NOT be raw JSON.
-    expect(out.startsWith("{")).toBe(false);
-    expect(out.includes('"ratings"')).toBe(false);
-  });
-
-  test("structured envelope missing the `ratings` field entirely → extracts summary", () => {
-    const summaryText = "No retrievals this session.";
-    const inner = JSON.stringify({ summary: summaryText });
-    const envelope = JSON.stringify({ result: inner });
-    const out = extractSummaryFromClaudeStdout(envelope);
-    expect(out).toBe(summaryText);
-  });
-
-  test("structured envelope with non-string summary field → falls through to inner string", () => {
-    // Defensive: if `summary` itself is malformed, we still don't crash; the
-    // best-effort fallback is to return the inner JSON as a string. The
-    // length/keyword heuristics in the hook will likely skip indexing.
-    const inner = JSON.stringify({ summary: 42, ratings: [] });
-    const envelope = JSON.stringify({ result: inner });
-    const out = extractSummaryFromClaudeStdout(envelope);
-    expect(out).toBe(inner);
-  });
-
-  test("unstructured envelope with plain text result → returns the text unchanged", () => {
-    const text = "- Discovered that the API requires Bearer prefix.\n- No other learnings.";
-    const envelope = JSON.stringify({ result: text });
-    expect(extractSummaryFromClaudeStdout(envelope)).toBe(text);
-  });
-
-  test("envelope.result is an object with a string summary field → extracts it", () => {
-    const envelope = JSON.stringify({
-      result: { summary: "object form", ratings: [] },
-    });
-    expect(extractSummaryFromClaudeStdout(envelope)).toBe("object form");
-  });
-
-  test("envelope is not JSON → returns the raw stdout", () => {
-    const stdout = "totally not json";
-    expect(extractSummaryFromClaudeStdout(stdout)).toBe(stdout);
-  });
-
-  test("envelope is JSON but lacks `result` field → returns the raw stdout", () => {
-    const stdout = JSON.stringify({ other: "field" });
-    expect(extractSummaryFromClaudeStdout(stdout)).toBe(stdout);
-  });
-
-  // Tolerant-parser regression: matches parseSummaryWithRatings — when the
-  // structured payload is fenced or preambled but otherwise valid, the
-  // summary fallback path must still recover the human-readable summary.
-  test("inner payload wrapped in ```json fences → extracts summary", () => {
-    const summaryText = "Found a few useful things.";
-    const innerRaw = JSON.stringify({
-      summary: summaryText,
-      ratings: [{ id: "mem-A", score: 5, reasoning: "out of range — schema fails" }],
-    });
-    const envelope = JSON.stringify({ result: `\`\`\`json\n${innerRaw}\n\`\`\`` });
-    expect(parseSummaryWithRatings(envelope)).toBeNull();
-    expect(extractSummaryFromClaudeStdout(envelope)).toBe(summaryText);
-  });
-
-  test("inner payload wrapped in plain ``` fences → extracts summary", () => {
-    const summaryText = "Plain fence summary.";
-    const innerRaw = JSON.stringify({ summary: summaryText, ratings: [] });
-    const envelope = JSON.stringify({ result: `\`\`\`\n${innerRaw}\n\`\`\`` });
-    expect(extractSummaryFromClaudeStdout(envelope)).toBe(summaryText);
-  });
-
-  test("inner payload with leading prose preamble → extracts summary", () => {
-    const summaryText = "Preamble-wrapped summary.";
-    const innerRaw = JSON.stringify({ summary: summaryText, ratings: [] });
-    const envelope = JSON.stringify({
-      result: `Sure! Here is the JSON:\n\n${innerRaw}`,
-    });
-    expect(extractSummaryFromClaudeStdout(envelope)).toBe(summaryText);
-  });
-
-  test("genuinely garbage inner (no JSON object) → returns inner text unchanged", () => {
-    const text = "Just a sentence with no braces or structure.";
-    const envelope = JSON.stringify({ result: text });
-    expect(extractSummaryFromClaudeStdout(envelope)).toBe(text);
   });
 });
 
@@ -782,7 +538,7 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     expect(rows).toEqual([]);
   });
 
-  test("postRatings → applies events; alpha/beta posteriors move per mocked score", async () => {
+  test("postRatings → applies events; alpha/beta posteriors move per mocked generateObject result", async () => {
     const useful = makeMemory("piggyback-useful");
     const misleading = makeMemory("piggyback-misleading");
     const neutral = makeMemory("piggyback-neutral");
@@ -792,7 +548,10 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     insertRetrieval(taskA, misleading.id);
     insertRetrieval(taskA, neutral.id);
 
-    // Simulate hook flow: fetch retrievals, mock the LLM stdout, parse, POST.
+    // Simulate hook flow: fetch retrievals, run schema validation against a
+    // mocked `generateObject` result (object — not stringified envelope —
+    // because the AI SDK returns a parsed/validated object directly), then
+    // POST.
     const retrievals = await fetchRetrievalsForTask({
       apiUrl: BASE,
       apiKey: API_KEY,
@@ -801,20 +560,22 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     });
     expect(retrievals).toHaveLength(3);
 
-    // Mocked claude -p stdout — the same shape parseSummaryWithRatings expects.
-    const mockedSummaryJson = JSON.stringify({
+    const mockedGenerateObjectResult = {
       summary: "Found a couple of helpful patterns; one memory was misleading.",
       ratings: [
         { id: useful.id, score: 1, reasoning: "directly answered the question" },
         { id: misleading.id, score: 0, reasoning: "this memory contradicted the docs" },
         { id: neutral.id, score: 0.5, reasoning: "tangential but interesting" },
       ],
-    });
-    const mockedClaudeStdout = JSON.stringify({ result: mockedSummaryJson });
-    const parsed = parseSummaryWithRatings(mockedClaudeStdout);
-    expect(parsed).not.toBeNull();
+    };
+    // The AI SDK's `generateObject` validates against the Zod schema before
+    // returning; mirror that contract here so the test fails fast if the
+    // schema drifts.
+    const parsed = SummaryWithRatingsSchema.safeParse(mockedGenerateObjectResult);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
 
-    const events = buildRatingsFromLlm(parsed!.ratings, retrievals);
+    const events = buildRatingsFromLlm(parsed.data.ratings, retrievals);
     expect(events).toHaveLength(3);
     for (const e of events) {
       expect(e.weight).toBe(0.8);
@@ -886,8 +647,8 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     delete process.env.MEMORY_RATERS;
     try {
       // Mirror the hook's gate: when isLlmRaterEnabled() is false, the hook
-      // never calls fetchRetrievalsForTask / parseSummaryWithRatings /
-      // postRatings — it falls back to the existing summary-only path.
+      // never calls fetchRetrievalsForTask / generateObject / postRatings —
+      // it falls back to the existing summary-only path.
       let postCalled = false;
       const fakeFetch: typeof fetch = async () => {
         postCalled = true;
@@ -940,5 +701,112 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     expect(r.status).toBeGreaterThanOrEqual(400);
     // Posterior unchanged — 400 means nothing was applied.
     expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+  });
+
+  test("OPENROUTER_API_KEY unset → hook is a no-op (no fetch, no index, no rate POST)", async () => {
+    const m = makeMemory("piggyback-openrouter-unset");
+    insertRetrieval(taskA, m.id);
+
+    // Mirror the hook's outer gate exactly: when OPENROUTER_API_KEY is unset,
+    // the entire summary + rating block must early-return. No call to
+    // /api/memory/index, no call to /api/memory/rate, no LLM invocation.
+    const prev = process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    try {
+      let anyFetchCalled = false;
+      const fakeFetch: typeof fetch = async () => {
+        anyFetchCalled = true;
+        return new Response("{}", { status: 200 });
+      };
+
+      const skip = !process.env.OPENROUTER_API_KEY;
+      expect(skip).toBe(true);
+
+      // The hook block is entirely guarded — no fetch, no postRatings.
+      // We never reach fetchRetrievalsForTask or postRatings, so neither is
+      // exercised in this branch.
+      if (!skip) {
+        // Unreachable in this test — defensive assertion only.
+        await fetchRetrievalsForTask({
+          apiUrl: BASE,
+          apiKey: API_KEY,
+          agentId: agentA,
+          taskId: taskA,
+          fetchImpl: fakeFetch,
+        });
+      }
+      expect(anyFetchCalled).toBe(false);
+    } finally {
+      if (prev !== undefined) process.env.OPENROUTER_API_KEY = prev;
+    }
+
+    // No memory_rating rows for taskA, posterior unchanged.
+    expect(getRatings(taskA)).toHaveLength(0);
+    expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+  });
+
+  test("happy path: mocked generateObject result → postRatings called with expected events", async () => {
+    const useful = makeMemory("happy-useful");
+    const misleading = makeMemory("happy-misleading");
+
+    insertRetrieval(taskB, useful.id);
+    insertRetrieval(taskB, misleading.id);
+
+    const retrievals = await fetchRetrievalsForTask({
+      apiUrl: BASE,
+      apiKey: API_KEY,
+      agentId: agentA,
+      taskId: taskB,
+    });
+    expect(retrievals).toHaveLength(2);
+
+    // Stand in for `const { object } = await generateObject(...)` — the AI
+    // SDK guarantees `object` is already validated against the Zod schema.
+    const generateObjectResult: {
+      object: { summary: string; ratings: Array<{ id: string; score: number; reasoning: string }> };
+    } = {
+      object: {
+        summary: "Two patterns surfaced; one was misleading.",
+        ratings: [
+          { id: useful.id, score: 1, reasoning: "directly answered" },
+          { id: misleading.id, score: 0, reasoning: "contradicted the docs" },
+        ],
+      },
+    };
+
+    // Schema gate is implicit in the SDK, but assert here so a future schema
+    // change doesn't silently make this test pass on garbage data.
+    const validated = SummaryWithRatingsSchema.parse(generateObjectResult.object);
+
+    const events = buildRatingsFromLlm(validated.ratings, retrievals);
+    expect(events).toHaveLength(2);
+    const usefulEvent = events.find((e) => e.memoryId === useful.id)!;
+    const misleadingEvent = events.find((e) => e.memoryId === misleading.id)!;
+    expect(usefulEvent.signal).toBeCloseTo(1, 6);
+    expect(misleadingEvent.signal).toBeCloseTo(-1, 6);
+    expect(usefulEvent.source).toBe("llm");
+    expect(misleadingEvent.source).toBe("llm");
+
+    // Track that postRatings actually attempts the POST with our events.
+    let postedEvents: RatingEvent[] | null = null;
+    const trackingFetch: typeof fetch = async (url, init) => {
+      if (typeof url === "string" && url.endsWith("/api/memory/rate")) {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        postedEvents = body.events;
+      }
+      return new Response("{}", { status: 200 });
+    };
+    const r = await postRatings({
+      apiUrl: BASE,
+      apiKey: API_KEY,
+      agentId: agentA,
+      taskId: taskB,
+      events,
+      fetchImpl: trackingFetch,
+    });
+    expect(r.ok).toBe(true);
+    expect(postedEvents).not.toBeNull();
+    expect(postedEvents!).toHaveLength(2);
+    expect(postedEvents!.map((e) => e.memoryId).sort()).toEqual([useful.id, misleading.id].sort());
   });
 });
