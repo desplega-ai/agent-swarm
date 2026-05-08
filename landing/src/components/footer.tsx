@@ -84,7 +84,7 @@ export function Footer() {
             <span className="font-semibold text-zinc-950 tracking-[-0.01em]">Agent Swarm</span>
           </div>
           <p className="mt-4 text-[14px] text-zinc-500 leading-[1.6] max-w-xs">
-            Intelligence that compounds. Your agent company OS — open source, MCP-powered.
+            Intelligence that compounds. The Coordination Intelligence layer — open source, MCP-powered.
           </p>
           <p className="mt-5 text-[12px] text-zinc-400 font-mono tracking-[0.04em]">
             Built by{" "}
