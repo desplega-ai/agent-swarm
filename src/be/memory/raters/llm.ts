@@ -241,6 +241,45 @@ export type RetrievalRow = {
 };
 
 /**
+ * Dedupe candidate memories before LLM rating to prevent posterior inflation
+ * for scheduled (cron) tasks.
+ *
+ * **Why this exists.** Scheduled tasks fire the same task text on every run,
+ * and the task-completion path names each memory `"Task: ${task.task.slice(0, 80)}"`
+ * (see `src/tools/store-progress.ts`). When the next run searches memory, its
+ * own past runs surface as "highly similar" rows with byte-identical `name`.
+ * Without dedup, the LLM rater scores 5+ near-clones at +1.0 each and the
+ * alpha posterior on the underlying memory pattern gets bumped 5x in a single
+ * session — distorting the Beta(α,β) ranking vs. a normal one-shot session.
+ *
+ * Concrete case (Lead's audit of the first 37 `llm` ratings, post-PR #450):
+ * the **Claude Code Changelog Monitor** hourly cron (taskId
+ * `f938d74d-05af-44a7-a0aa-3463d22be502`) produced 5 saturating +1s in one
+ * rater pass — every rated memory was a prior hourly run with the same name.
+ *
+ * **Strategy.** Group by exact `name` (cheapest viable filter — cron-task
+ * names ARE byte-identical because the task text is templated). Keep the
+ * first occurrence in input order: `getRetrievalsForAgent` already orders
+ * `ORDER BY mr.retrievedAt DESC`, so "first" = "most recently surfaced",
+ * i.e. the freshest clone. Distinct names pass through untouched.
+ *
+ * **Out of scope.** No embeddings, no DB lookups, no posterior-update math
+ * changes. If a future scheduled-task naming pattern slips through (e.g. a
+ * timestamp baked into the name), upgrade to similarity-based dedup; until
+ * then exact-match catches the documented case at near-zero cost.
+ */
+export function dedupeRetrievalsForRater<T extends { name: string }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const row of rows) {
+    if (seen.has(row.name)) continue;
+    seen.add(row.name);
+    out.push(row);
+  }
+  return out;
+}
+
+/**
  * GET `/api/memory/retrievals?taskId=` — best-effort. Returns `[]` on any
  * failure so a transient API outage never blocks the summary-indexing path.
  */

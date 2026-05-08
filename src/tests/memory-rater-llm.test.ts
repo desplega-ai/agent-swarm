@@ -23,11 +23,13 @@ import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import {
   buildRatingsFromLlm,
   buildSummaryWithRatingsPrompt,
+  dedupeRetrievalsForRater,
   fetchRetrievalsForTask,
   isLlmRaterEnabled,
   LLM_RATER_WEIGHT,
   LlmRater,
   postRatings,
+  type RetrievalRow,
   SummaryWithRatingsSchema,
 } from "../be/memory/raters/llm";
 import { getRegisteredRaters, SERVER_RATERS } from "../be/memory/raters/registry";
@@ -206,6 +208,47 @@ describe("buildSummaryWithRatingsPrompt", () => {
     // Truncation cap is 600 chars + ellipsis. Make sure full 5000 isn't echoed.
     expect(out.includes("x".repeat(5000))).toBe(false);
     expect(out).toContain("…");
+  });
+});
+
+describe("dedupeRetrievalsForRater", () => {
+  // Regression: the LLM rater audit (post-PR #450) found scheduled-task self-
+  // similarity inflated alpha posteriors 5x in one rater pass — the Claude
+  // Code Changelog Monitor cron surfaced 5 memories with identical names from
+  // its own past runs and got each rated +1.0. Dedup before the prompt is
+  // assembled keeps one representative per `name` group.
+
+  test("collapses 5 identical-name cron memories + 1 distinct → 2 rows", () => {
+    const cronName = "Task: Claude Code Changelog Monitor — check for new entries";
+    const distinctName = "Task: Refactor MCP tool list";
+    const rows: RetrievalRow[] = [
+      // Newest cron run first (API returns DESC by retrievedAt).
+      { id: "cron-5", name: cronName, content: "run 5", retrievedAt: "2026-05-08T05:00:00Z" },
+      { id: "cron-4", name: cronName, content: "run 4", retrievedAt: "2026-05-08T04:00:00Z" },
+      { id: "cron-3", name: cronName, content: "run 3", retrievedAt: "2026-05-08T03:00:00Z" },
+      { id: "cron-2", name: cronName, content: "run 2", retrievedAt: "2026-05-08T02:00:00Z" },
+      { id: "cron-1", name: cronName, content: "run 1", retrievedAt: "2026-05-08T01:00:00Z" },
+      { id: "distinct", name: distinctName, content: "x", retrievedAt: "2026-05-07T12:00:00Z" },
+    ];
+
+    const out = dedupeRetrievalsForRater(rows);
+
+    expect(out).toHaveLength(2);
+    // First-seen wins → freshest cron run is the representative.
+    expect(out.map((r) => r.id)).toEqual(["cron-5", "distinct"]);
+  });
+
+  test("preserves rows with distinct names unchanged", () => {
+    const rows: RetrievalRow[] = [
+      { id: "a", name: "alpha", content: "" },
+      { id: "b", name: "beta", content: "" },
+      { id: "c", name: "gamma", content: "" },
+    ];
+    expect(dedupeRetrievalsForRater(rows)).toEqual(rows);
+  });
+
+  test("empty input → empty output", () => {
+    expect(dedupeRetrievalsForRater([])).toEqual([]);
   });
 });
 
