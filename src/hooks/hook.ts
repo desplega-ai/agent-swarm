@@ -4,6 +4,7 @@ import pkg from "../../package.json";
 import {
   buildRatingsFromLlm,
   buildSummaryWithRatingsPrompt,
+  dedupeRetrievalsForRater,
   fetchRetrievalsForTask,
   isLlmRaterEnabled,
   postRatings,
@@ -1117,12 +1118,15 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
             const llmRaterEnabled = isLlmRaterEnabled();
             let retrievals: RetrievalRow[] = [];
             if (llmRaterEnabled && taskId) {
-              retrievals = await fetchRetrievalsForTask({
+              const rawRetrievals = await fetchRetrievalsForTask({
                 apiUrl,
                 apiKey,
                 agentId: agentInfo.id,
                 taskId,
               });
+              // Dedup self-similar cron-task memories before sending to the
+              // rater — see `dedupeRetrievalsForRater` doc for the why.
+              retrievals = dedupeRetrievalsForRater(rawRetrievals);
             }
 
             const baseSummarizePrompt = `You are summarizing an AI agent's work session. Extract ONLY high-value learnings.
