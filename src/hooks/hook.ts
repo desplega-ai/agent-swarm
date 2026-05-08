@@ -1158,8 +1158,13 @@ ${transcript}`;
               apiKey: process.env.OPENROUTER_API_KEY,
             });
 
+            // Default to Gemini 3 Flash on OpenRouter — materially cheaper
+            // than Claude Haiku 4.5 for an equivalent structured-output call.
+            // `MEMORY_RATER_LLM_MODEL` lets self-hosters pin a different slug.
+            const modelId = process.env.MEMORY_RATER_LLM_MODEL ?? "google/gemini-3-flash-preview";
+
             const { object } = await generateObject({
-              model: openrouter("anthropic/claude-haiku-4.5"),
+              model: openrouter(modelId),
               schema: SummaryWithRatingsSchema,
               prompt: summarizePrompt,
               providerOptions: {
