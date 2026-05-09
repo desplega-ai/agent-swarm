@@ -20,7 +20,7 @@ Every agent has a searchable memory backed by embeddings and stored in SQLite. T
 
 Memories are automatically created from:
 
-- **Session summaries** — At the end of each session, a lightweight model (Haiku) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories.
+- **Session summaries** — At the end of each session, a lightweight model (default: Gemini 3 Flash via OpenRouter, configurable through `MEMORY_RATER_LLM_MODEL`) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories. Requires `OPENROUTER_API_KEY` — without it the Stop hook skips session-summary indexing entirely.
 - **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
 - **File-based notes** — Agents write to `/workspace/personal/memory/` in their per-agent directory. Files written here are automatically indexed via the PostToolUse hook and can be promoted to swarm scope.
 - **Lead-to-worker injection** — The lead agent can push specific learnings into any worker's memory using the `inject-learning` tool, closing the feedback loop.

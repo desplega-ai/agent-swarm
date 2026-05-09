@@ -25,6 +25,9 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
+| `OPENROUTER_API_KEY` | — | Required for the Stop-hook session summarizer + LLM memory rater (calls go through the Vercel AI SDK against OpenRouter). When unset, both session-summary indexing and the `llm` rater are no-ops |
+| `MEMORY_RATER_LLM_MODEL` | `google/gemini-3-flash-preview` | OpenRouter model slug used by the Stop-hook summarizer + LLM rater. Override with any OpenRouter slug (e.g. `anthropic/claude-haiku-4.5`) |
+| `MEMORY_LLM_RATER_ENABLED` | `false` | When `true`, the same summarizer call also produces structured `useful: true | false` ratings for memories retrieved into the task's prompt |
 | `CAPABILITIES` | All enabled | Comma-separated feature flags |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
@@ -245,6 +248,20 @@ With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/tra
 | `APP_URL` | `https://ui.swarm.localhost:1355` | Dashboard URL |
 
 Install: `bun add -g portless`. Enable HTTPS: `portless trust && portless proxy start --https`.
+
+## Cloud Personalization & Adaptive Home
+
+Identity envs that brand the swarm and gate cloud-only UX. All are read on every `GET /status` call (cheap — env reads + one SQL aggregate, no upstream calls). See the [Personalization & Status](/docs/guides/personalization) guide for the full story.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu and suppresses the self-host marketing footer |
+| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name |
+| `SWARM_ORG_LOGO_URL` | bundled `/logo.png` | Sidebar logo URL (any HTTPS URL). Falls back to the bundled logo if it fails to load |
+| `SWARM_BRAND_COLOR` | none | Tints the org name in the sidebar header (any CSS color, e.g. `#a855f7`) |
+| `SWARM_MARKETING_URL` | none | Self-host marketing footer link target. Suppressed when `SWARM_CLOUD=true` or `SWARM_HIDE_CLOUD_PROMO=true` |
+| `SWARM_HIDE_CLOUD_PROMO` | `false` | Force-hide the marketing footer regardless of `SWARM_CLOUD` |
+| `SWARM_VERIFY_TTL_MS` | `3600000` (1h) | How long a successful "Test connection" click keeps the harness milestone in `verified` state. In-memory; lost on API restart |
 
 ## Agent Filesystem (agent-fs)
 
