@@ -49,9 +49,28 @@ export {
   useTaskUsage,
   useUsageSummary,
 } from "./use-costs";
+export { useCredentialMissingAgents } from "./use-credential-missing-agents";
 export { useDbQuery, useTableColumns, useTableList } from "./use-db-query";
 export type { FeatureGateResult } from "./use-feature-gate";
 export { useFeatureGate } from "./use-feature-gate";
+export type {
+  BlockingInboxItem,
+  BlockingInboxResult,
+  BrokenInboxItem,
+  BrokenInboxResult,
+  ToReadInboxItem,
+  ToReadInboxResult,
+  ToStartInboxItem,
+  ToStartInboxResult,
+} from "./use-inbox";
+export {
+  useBlockingInbox,
+  useBrokenInbox,
+  useToReadInbox,
+  useToStartInbox,
+} from "./use-inbox";
+export type { UpdateInboxItemInput, UseInboxStateOptions } from "./use-inbox-state";
+export { useInboxState, useUpdateInboxItem } from "./use-inbox-state";
 export {
   useDisconnectMcpOAuth,
   useMcpOAuthMetadata,
@@ -113,6 +132,8 @@ export {
 } from "./use-skills";
 export { useApiVersion, useHealth, useLogs, useStats } from "./use-stats";
 export { useStatus, useTestConnection } from "./use-status";
+export type { UseTaskTemplatesOptions } from "./use-task-templates";
+export { useTaskTemplates } from "./use-task-templates";
 export type { TaskFilters } from "./use-tasks";
 export {
   useCancelTask,

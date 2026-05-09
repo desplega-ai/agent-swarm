@@ -4,6 +4,7 @@ import { useFeatureGate } from "@/api/hooks";
 import { useAgentActivity } from "@/api/hooks/use-agent-activity";
 import { AgentCanvas } from "@/components/dashboard/agent-canvas";
 import { AgentTable } from "@/components/dashboard/agent-table";
+import { InboxPanel } from "@/components/dashboard/inbox-panel";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import LegacyDashboard from "./legacy-dashboard";
@@ -90,9 +91,12 @@ function NewDashboard() {
         )}
       </div>
 
-      {/* Phase 6 inbox slot — kept empty here so the regions are reviewable
-          independently. Phase 6 mounts <ActionItemsInbox /> in this slot. */}
-      <div className="flex-1 min-h-0" data-dashboard-inbox-slot />
+      {/* Phase 6 action-items inbox — four buckets (Blocking / Broken /
+          To read / To start). Sources its own data hooks; sees its own
+          5s polling tick. */}
+      <div className="flex-1 min-h-0" data-dashboard-inbox-slot>
+        <InboxPanel />
+      </div>
     </div>
   );
 }

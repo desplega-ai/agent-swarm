@@ -14,8 +14,15 @@ import type {
   ChannelMessage,
   ChannelsResponse,
   CreateUserInput,
+  CredentialMissingAgent,
+  CredentialMissingAgentsResponse,
   DashboardCostResponse,
   EventDefinition,
+  InboxItemState,
+  InboxItemStatus,
+  InboxItemType,
+  InboxStateResponse,
+  InboxStateUpsertResponse,
   LogsResponse,
   McpOAuthMetadataResponse,
   McpOAuthStatusResponse,
@@ -47,6 +54,9 @@ import type {
   SwarmReposResponse,
   TaskContextResponse,
   TasksResponse,
+  TaskTemplate,
+  TaskTemplateKind,
+  TaskTemplatesResponse,
   TaskWithLogs,
   UpsertPromptTemplateInput,
   UsageSummaryResponse,
@@ -1565,6 +1575,76 @@ class ApiClient {
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch session: ${res.status}`);
     return res.json();
+  }
+
+  // ─── Task Templates (Phase 6 ≥1.76.0) ─────────────────────────────────────
+
+  async listTaskTemplates(opts?: {
+    category?: string;
+    /** v2 hook — v1 callers always pass `kind=task` (or omit). */
+    kind?: TaskTemplateKind;
+    query?: string;
+  }): Promise<TaskTemplate[]> {
+    const params = new URLSearchParams();
+    if (opts?.category) params.set("category", opts.category);
+    if (opts?.kind) params.set("kind", opts.kind);
+    if (opts?.query) params.set("query", opts.query);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/task-templates${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to list task templates: ${res.status}`);
+    const data = (await res.json()) as TaskTemplatesResponse;
+    return data.templates;
+  }
+
+  // ─── Inbox State (Phase 6 ≥1.76.0) ────────────────────────────────────────
+
+  async listInboxState(opts: {
+    userId: string;
+    status?: InboxItemStatus;
+    itemType?: InboxItemType;
+  }): Promise<InboxItemState[]> {
+    const params = new URLSearchParams();
+    params.set("userId", opts.userId);
+    if (opts.status) params.set("status", opts.status);
+    if (opts.itemType) params.set("itemType", opts.itemType);
+    const url = `${this.getBaseUrl()}/api/inbox-state?${params.toString()}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to list inbox state: ${res.status}`);
+    const data = (await res.json()) as InboxStateResponse;
+    return data.items;
+  }
+
+  async patchInboxState(body: {
+    userId: string;
+    itemType: InboxItemType;
+    itemId: string;
+    status: InboxItemStatus;
+    /** ISO 8601 datetime; required when status === "snoozed". */
+    snoozeUntil?: string;
+  }): Promise<InboxItemState> {
+    const url = `${this.getBaseUrl()}/api/inbox-state`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to update inbox state" }));
+      throw new Error(err.error || `Failed to update inbox state: ${res.status}`);
+    }
+    const data = (await res.json()) as InboxStateUpsertResponse;
+    return data.item;
+  }
+
+  // ─── Credential-Missing Agents (Phase 6 ≥1.76.0) ──────────────────────────
+
+  async listCredentialMissingAgents(): Promise<CredentialMissingAgent[]> {
+    const url = `${this.getBaseUrl()}/api/agents/credential-status?status=waiting_for_credentials`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to list credential-missing agents: ${res.status}`);
+    const data = (await res.json()) as CredentialMissingAgentsResponse;
+    return data.agents;
   }
 }
 

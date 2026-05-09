@@ -636,11 +636,12 @@ Budget: ~5 polled requests/5s on the dashboard. Inbox-state filtering happens cl
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI type-check: `cd ui && pnpm exec tsc -b`
-- [ ] UI lint: `cd ui && pnpm lint`
-- [ ] Design tokens: `cd ui && pnpm check:tokens`
+- [x] UI type-check: `cd ui && pnpm exec tsc -b`
+- [x] UI lint: `cd ui && pnpm lint`
+- [x] Design tokens: `cd ui && pnpm check:tokens`
 
 #### Automated QA:
+_All four scenarios deferred to Phase 7's consolidated qa-use sweep (per Phases 3-5 deferral pattern)._
 - [ ] qa-use scenario L: seed a pending approval + a `waiting_for_credentials` agent + a `failed` task + a recently completed root session via API; load `/`; all four buckets render the seeded items.
 - [ ] qa-use scenario M: dismiss an inbox item; reload — item stays dismissed.
 - [ ] qa-use scenario N: snooze for 1h; verify `inbox_item_state.snoozeUntil` is ~1h in the future via SQL.
