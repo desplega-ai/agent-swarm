@@ -140,14 +140,14 @@ export function SessionTimeline({ rootTaskId, chain, className }: SessionTimelin
         {/* Root user message bubble — the original task text. */}
         <article
           aria-label="Session root message"
-          className="rounded-md border border-border bg-card px-4 py-3"
+          className="min-w-0 overflow-hidden rounded-md border border-border bg-card px-4 py-3"
         >
           <header className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
             <span className="font-medium uppercase tracking-wider text-[9px]">User</span>
             <span aria-hidden="true">·</span>
             <span>{new Date(root.createdAt).toLocaleString()}</span>
           </header>
-          <div className="text-sm">
+          <div className="min-w-0 break-words text-sm [&_pre]:overflow-x-auto [&_pre]:max-w-full">
             <Streamdown>{root.task}</Streamdown>
           </div>
         </article>

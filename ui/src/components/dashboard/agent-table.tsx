@@ -92,6 +92,8 @@ export function AgentTable({ rows, className }: AgentTableProps) {
         minWidth: 110,
         type: "numericColumn",
         sort: "desc",
+        cellClass: "text-right",
+        headerClass: "ag-right-aligned-header",
       },
       {
         headerName: "Cost (24h)",
@@ -100,6 +102,8 @@ export function AgentTable({ rows, className }: AgentTableProps) {
         minWidth: 110,
         type: "numericColumn",
         valueFormatter: (params) => formatCost(Number(params.value ?? 0)),
+        cellClass: "text-right font-mono",
+        headerClass: "ag-right-aligned-header",
       },
     ],
     [],

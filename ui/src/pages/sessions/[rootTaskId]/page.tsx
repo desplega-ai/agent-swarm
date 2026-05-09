@@ -85,15 +85,17 @@ export default function SessionDetailPage() {
           />
         </aside>
 
-        <section className="flex flex-col min-h-0">
+        <section className="flex flex-col min-h-0 min-w-0">
           {/* Header strip */}
-          <header className="border-b border-border px-4 py-3 flex flex-col gap-2">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex flex-col gap-1 min-w-0">
+          <header className="border-b border-border px-4 py-3 flex flex-col gap-2 min-w-0">
+            <div className="flex items-start justify-between gap-3 min-w-0">
+              <div className="flex flex-col gap-1 min-w-0 flex-1">
                 {detailLoading ? (
                   <Skeleton className="h-4 w-64" />
                 ) : detail ? (
-                  <h2 className="text-sm font-semibold truncate">{detail.root.task}</h2>
+                  <h2 className="text-sm font-semibold truncate" title={detail.root.task}>
+                    {detail.root.task}
+                  </h2>
                 ) : (
                   <p className="text-sm text-muted-foreground">Session not found.</p>
                 )}
