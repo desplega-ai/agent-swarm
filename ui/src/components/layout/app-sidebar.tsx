@@ -149,25 +149,11 @@ export function AppSidebar() {
                         item.path === "/"
                           ? location.pathname === "/"
                           : location.pathname.startsWith(item.path);
-                      // Soft-degrade gated entries (Phase 4 ≥1.76.0). When
-                      // the gate fails we render a disabled span with a
-                      // tooltip pointing at the upgrade docs.
+                      // Soft-degrade gated entries (Phase 4 ≥1.76.0): hide
+                      // entirely when the API doesn't meet the minimum
+                      // version, rather than rendering a disabled stub.
                       const gated = item.gate?.minVersion === "1.76.0" && !sessionsGate.supported;
-                      if (gated) {
-                        return (
-                          <SidebarMenuItem key={item.path}>
-                            <SidebarMenuButton
-                              tooltip={`Requires API ≥ ${item.gate?.minVersion}`}
-                              aria-disabled
-                              className="opacity-50 cursor-not-allowed"
-                              onClick={(e) => e.preventDefault()}
-                            >
-                              <item.icon className="size-4" />
-                              <span>{item.title}</span>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        );
-                      }
+                      if (gated) return null;
                       return (
                         <SidebarMenuItem key={item.path}>
                           <SidebarMenuButton asChild isActive={isActive}>
