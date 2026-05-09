@@ -16,13 +16,13 @@ Bundled v1 launch in `ui/`: a **Sessions** experience (`/sessions`, `/sessions/:
 
 - **Motivation**: replace the current task-table dashboard and Slack-only thread experience with a first-class in-product session/chat surface; align v1 with what's already plumbed (`parentTaskId`, `SessionLogViewer`, polling) so we ship in predictable, independently-reviewable phases.
 - **Self-hosted version-gate**: bump `package.json` to `1.76.0`. The UI checks `GET /health` (already returns `version` — `src/http/core.ts:100-113`) and soft-degrades new surfaces when the API is older. No hard block; users on a stale API still see the legacy dashboard and a banner pointing at upgrade docs. `/health` shape is **unchanged** — the original plan's `swarmId` addition is dropped (resolved errata Critical-C3): the UI namespaces all per-deployment localStorage by `apiUrl` from `useConfig()` to match `useDismissibleCard`'s shipped pattern (`swarm:v1:${apiUrl}:${cardKey}`).
-- **Identity**: a "who are you?" modal lists rows from a new `GET /api/users` endpoint (DB functions already exist at `src/be/db.ts:8285-8475`), persists the picked id in `localStorage` under the same `swarm:v1:${apiUrl}:current-user` namespace as `useDismissibleCard`, and feeds `requestedByUserId` to every task create from the UI (existing CreateTaskDialog included). The modal **auto-pops** whenever no entry exists for the current `apiUrl` — so existing users on an upgraded API are prompted exactly once, and a single browser pointed at multiple swarm URLs keeps separate identities.
+- **Identity**: a "who are you?" modal lists rows from a new `GET /api/users` endpoint (DB functions already exist at `src/be/db.ts:8380-8590`), persists the picked id in `localStorage` under the same `swarm:v1:${apiUrl}:current-user` namespace as `useDismissibleCard`, and feeds `requestedByUserId` to every task create from the UI (existing CreateTaskDialog included). The modal **auto-pops** whenever no entry exists for the current `apiUrl` — so existing users on an upgraded API are prompted exactly once, and a single browser pointed at multiple swarm URLs keeps separate identities.
 - **Related**:
   - `thoughts/taras/brainstorms/2026-05-08-ui-chat-session-experience.md` (PRD)
   - `thoughts/taras/research/2026-05-08-ui-chat-session-experience-research.md` (research)
   - `src/types.ts:56-69` (AgentTaskSourceSchema), `src/types.ts:217-233` (UserSchema)
   - `src/http/tasks.ts:29-47,55-68,257-307` (tasks routes), `src/http/core.ts:100-113` (`/health` returns version)
-  - `src/be/db.ts:2085-2259` (createTaskExtended w/ requestedByUserId), `src/be/db.ts:8262-8475` (user fns)
+  - `src/be/db.ts:2219-2330` (createTaskExtended w/ requestedByUserId), `src/be/db.ts:8380-8590` (user fns)
   - `src/be/migrations/043_jira_source.sql` (latest agent_tasks rebuild), `031_user_registry.sql` (users + requestedByUserId column), `034_slack_reply_sent.sql:4` (parentTaskId index)
   - `ui/src/app/router.tsx`, `ui/src/app/providers.tsx:7-15` (TanStack polling defaults)
   - `ui/src/api/client.ts:215-234` (createTask), `ui/src/api/hooks/use-tasks.ts:48-63` (useCreateTask)
@@ -36,12 +36,12 @@ Bundled v1 launch in `ui/`: a **Sessions** experience (`/sessions`, `/sessions/:
 
 **Backend already in place:**
 - `parentTaskId` column on `agent_tasks` (`043_jira_source.sql:37`) with index (`034_slack_reply_sent.sql:4`).
-- `requestedByUserId` column on `agent_tasks` referencing `users(id)` (`031_user_registry.sql:27`); accepted by `createTaskExtended` (`src/be/db.ts:2085`); read by `src/tools/get-task-details.ts:48-49` and `src/http/poll.ts:248`. **NOT** in the HTTP create body (`src/http/tasks.ts:55-68`).
+- `requestedByUserId` column on `agent_tasks` referencing `users(id)` (`031_user_registry.sql:27`); accepted by `createTaskExtended` (`src/be/db.ts:2219`); read by `src/tools/get-task-details.ts:48-49` and `src/http/poll.ts:248`. **NOT** in the HTTP create body (`src/http/tasks.ts:55-68`).
 - Source CHECK constraint in `agent_tasks` is the *only* enum gate today — `src/http/tasks.ts:65` is `source: z.string().optional()`. Fix: drop the CHECK, tighten Zod to `AgentTaskSourceSchema.optional()` (`src/types.ts:56-69`).
-- Users table (`031_user_registry.sql:2-17`) + DB functions exist (`getAllUsers`, `getUserById`, `createUser`, `updateUser`, `resolveUser` — `src/be/db.ts:8285-8475`). No HTTP layer (`src/http/users.ts` does not exist).
+- Users table (`031_user_registry.sql:2-17`) + DB functions exist (`getAllUsers`, `getUserById`, `createUser`, `updateUser`, `resolveUser` — `src/be/db.ts:8380-8590`). No HTTP layer (`src/http/users.ts` does not exist).
 - `/health` already returns `{ status, version }` from `package.json` (`src/http/core.ts:100-113`).
 - Approvals: `GET /api/approval-requests?status=pending` returns `{ approvalRequests }` (`src/http/approval-requests.ts:112-127`).
-- Credentials: `GET /api/agents/credential-status?status=waiting_for_credentials` returns `{ agents: [{ agentId, name, status, missing[], provider, lastCheckedAt }] }` (`src/http/agents.ts:182-194,404-419`).
+- Credentials: `GET /api/agents/credential-status?status=waiting_for_credentials` returns `{ agents: [{ agentId, name, status, missing[], provider, harnessProvider, credStatus, lastCheckedAt }] }` (route `src/http/agents.ts:217-228`, handler `:462-480`). Post-PR #441 (worker self-reports `cred_status` via migration `055_agent_cred_status.sql`) and PR-a438c9f8 (harness column UI), the row carries the full credential snapshot — Phase 6's `useCredentialMissingAgents()` should consume `credStatus.missing` (richer; per-harness) when present and fall back to top-level `missing[]` for older workers.
 - `route()` factory + auto-OpenAPI registration at `src/http/route-def.ts:84-104`.
 
 **Backend missing:**
@@ -131,7 +131,7 @@ Drop the SQL CHECK on `agent_tasks.source`, tighten the Zod schema to `AgentTask
 ### Changes Required:
 
 #### 1. Forward-only migration: drop `source` CHECK
-**File**: `src/be/migrations/055_drop_agent_tasks_source_check.sql` *(new)*
+**File**: `src/be/migrations/056_drop_agent_tasks_source_check.sql` *(new)*
 **Changes**: Table-rebuild migration that mirrors `043_jira_source.sql:10-58` *minus* the `CHECK(source IN (...))` line; preserve all other columns, defaults, indexes, FKs (especially `requestedByUserId TEXT REFERENCES users(id)` from `031_user_registry.sql:27` — easy to drop silently in a rebuild), and triggers (`043_jira_source.sql:62-119`). No data migration — existing rows valid. Verification command lives in Success Criteria: run `PRAGMA foreign_key_list(agent_tasks)` before and after to confirm all FKs survive.
 
 #### 2. Tighten Zod
@@ -140,7 +140,7 @@ Drop the SQL CHECK on `agent_tasks.source`, tighten the Zod schema to `AgentTask
 
 #### 3. Add `requestedByUserId` to POST body
 **File**: `src/http/tasks.ts` (~lines 55-68 + handler at 271)
-**Changes**: Append `requestedByUserId: z.string().optional()` to the body schema; forward to `createTaskWithSiblingAwareness` alongside `parentTaskId`. DB layer already accepts (`src/be/db.ts:2085`).
+**Changes**: Append `requestedByUserId: z.string().optional()` to the body schema; forward to `createTaskWithSiblingAwareness` alongside `parentTaskId`. DB layer already accepts (`src/be/db.ts:2219`). **FK note**: `agent_tasks.requestedByUserId` is `TEXT REFERENCES users(id)` (declared at `031_user_registry.sql:27`, carried through the `043_jira_source.sql:62` table-rebuild — and through migration `056` here, see § sub-step 1). The deleted-user race that this FK can produce is handled in Phase 2 § sub-step 4 ("Tolerant `requestedByUserId`") — server checks `getUserById(...)` and silently NULLs the field rather than letting the FK fail at insert.
 
 #### 4. Version bump
 **File**: `package.json`
@@ -161,7 +161,7 @@ Drop the SQL CHECK on `agent_tasks.source`, tighten the Zod schema to `AgentTask
 - [ ] Docs-site embeds the new version: `grep -r '"1.76.0"' docs-site/content/docs/api-reference | head` returns rows (otherwise the openapi regen didn't pick up the bump)
 - [ ] Migration applies on a fresh DB: `rm agent-swarm-db.sqlite && bun run start:http` exits 0 boot
 - [ ] Migration applies on the existing DB (back up first): `bun run start:http` against the working tree's DB exits 0 boot
-- [ ] FK preservation across the table-rebuild: `sqlite3 agent-swarm-db.sqlite "PRAGMA foreign_key_list(agent_tasks);"` returns the `requestedByUserId → users(id)` FK both before and after migration `055`
+- [ ] FK preservation across the table-rebuild: `sqlite3 agent-swarm-db.sqlite "PRAGMA foreign_key_list(agent_tasks);"` returns the `requestedByUserId → users(id)` FK both before and after migration `056`
 
 #### Automated QA:
 - [ ] `curl -X POST` to `POST /api/tasks` with `source: "mcp"` succeeds (200 + task row)
@@ -187,7 +187,7 @@ Stand up every new HTTP contract v1 depends on: two migrations (`inbox_item_stat
 ### Changes Required:
 
 #### 1. Migration: `inbox_item_state`
-**File**: `src/be/migrations/056_inbox_item_state.sql` *(new)*
+**File**: `src/be/migrations/057_inbox_item_state.sql` *(new)*
 **Changes**:
 ```sql
 CREATE TABLE IF NOT EXISTS inbox_item_state (
@@ -208,18 +208,23 @@ CREATE INDEX IF NOT EXISTS idx_inbox_item_state_userId_status
 ```
 
 #### 2. Migration: `task_templates` + seed
-**File**: `src/be/migrations/057_task_templates.sql` *(new)*
+
+**Extensibility note (v2-aware schema)**: the "To start" bucket eventually wants more than tasks — workflows (per `runbooks/workflows.md`) and scheduled routines (per the `schedule` skill / `CronCreate`) are obvious peers. The v1 schema below is shaped as a polymorphic "starters" registry from day one to avoid a v2 rename: a `kind TEXT NOT NULL DEFAULT 'task' CHECK(kind IN ('task','workflow','schedule'))` discriminator + a generic `payload TEXT NOT NULL DEFAULT '{}'` JSON column carrying kind-specific fields (e.g. `{}` for tasks where `prompt` already lives in its own column, `{"workflowId":"..."}` for workflows, `{"cron":"...","prompt":"..."}` for schedules). The `prompt` column stays NOT NULL but only because v1 only ever inserts `kind='task'` rows; a future migration can drop the NOT NULL when v2 adds workflow/schedule starters. v1 click-handling reads `kind` to dispatch: `task` → existing `CreateTaskDialog` flow; `workflow`/`schedule` are deferred (no UI for them in v1, but the schema accepts them so seeds can prototype without a follow-up migration). Table name kept as `task_templates` for v1 to match existing references throughout the plan; v2 may rename to `quick_starts` if non-task kinds graduate from prototype to first-class.
+**File**: `src/be/migrations/058_task_templates.sql` *(new)*
 **Changes**:
 ```sql
 CREATE TABLE IF NOT EXISTS task_templates (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   title TEXT NOT NULL,
   description TEXT NOT NULL,
-  prompt TEXT NOT NULL,
+  prompt TEXT NOT NULL,                  -- task prompt (NOT NULL in v1 since only kind='task' is seeded; relax in a future migration when workflow/schedule starters land)
+  kind TEXT NOT NULL DEFAULT 'task' CHECK(kind IN ('task','workflow','schedule')),  -- v2-aware discriminator; v1 only inserts/reads kind='task' rows
+  payload TEXT NOT NULL DEFAULT '{}',    -- kind-specific JSON: {} for tasks; {"workflowId":"..."} for workflows; {"cron":"...","prompt":"..."} for schedules
   category TEXT,
   tags TEXT NOT NULL DEFAULT '[]',
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_task_templates_kind ON task_templates(kind);
 INSERT INTO task_templates (title, description, prompt, category, tags) VALUES
   ('Refactor a file', 'Improve a file without changing behavior', 'Refactor the file at <path> for readability while preserving behavior. Run typecheck + tests after.', 'engineering', '["refactor"]'),
   ('Investigate a bug', 'Reproduce, root-cause, and propose a fix', 'Investigate the following bug: <symptom>. Reproduce locally, identify the root cause, and propose a fix.', 'engineering', '["debug"]'),
@@ -236,7 +241,7 @@ INSERT INTO task_templates (title, description, prompt, category, tags) VALUES
 **Changes**: Add:
 - `listInboxState({ userId, status?, itemType? })`,
 - `upsertInboxState({ userId, itemType, itemId, status, snoozeUntil?, dismissedAt?, doneAt? })`,
-- `listTaskTemplates({ category? })`,
+- `listTaskTemplates({ category?, kind?, query? })` — `query` does case-insensitive `title`/`description` LIKE-match (single `WHERE` clause, parameter-bound),
 - `getRootTaskChain(rootTaskId)` (recursive CTE walking `parentTaskId`; returns `AgentTask[]` ordered by `createdAt`),
 - `listRecentSessions({ limit, offset })` returning rows with `lastActivityAt` (computed as `MAX(t.lastUpdatedAt)` over the chain via correlated subquery; named column shape: `{ root: AgentTask, chainTaskCount: number, lastActivityAt: string, latestStatus: AgentTaskStatus }`),
 - Extend `getAllTasks(filters)` to accept `status: string | string[]` (CSV-parsed at HTTP layer) and `createdAfter?: string` (ISO timestamp). Single SQL change — `IN (?, ?, …)` for status, `AND createdAt >= ?` for the time filter. Confirm existing query still works for single-status callers.
@@ -253,6 +258,7 @@ INSERT INTO task_templates (title, description, prompt, category, tags) VALUES
 **Changes**:
 - `GET /api/users` — `{ users: User[] }`. Calls `getAllUsers()`.
 - `POST /api/users` — body `{ name, email?, role?, slackUserId?, ... }`, calls `createUser`. Returns `{ user: User }`. Auth: `apiKey: true` (no `agentId` requirement).
+- `PUT /api/users/{id}` — params `{ id: z.string() }`; body `{ name?, email?, role?, slackUserId?, ... }` (partial update — all fields optional, at least one required). Calls existing `updateUser` (`src/be/db.ts:8493`). Returns `{ user: User }` on success, `404` if id not found, `400` if body is empty. Auth: `apiKey: true` (no `agentId` requirement). Lets the identity modal expose a lightweight edit affordance and keeps roles/Slack-mappings reconcilable from outside the swarm.
 
 **File**: `src/http/sessions.ts` *(new)*
 **Changes**:
@@ -266,7 +272,7 @@ INSERT INTO task_templates (title, description, prompt, category, tags) VALUES
 
 **File**: `src/http/task-templates.ts` *(new)*
 **Changes**:
-- `GET /api/task-templates` — query `{ category? }`. Returns `{ templates: TaskTemplate[] }`.
+- `GET /api/task-templates` — query `{ category?, kind?, query? }`. Returns `{ templates: TaskTemplate[] }`. The `query` param does a case-insensitive `LIKE '%...%'` match against `title` (the schema's "name") OR `description` — single SQL `WHERE (title LIKE ? OR description LIKE ?)` clause, parameter-bound to prevent injection. Combine with `category` and `kind` via `AND`. Empty/missing `query` returns all rows. The new `kind` filter (default-ignored, returns all kinds) lets v2 surfaces ask just for `kind='workflow'` rows without a route change — v1 always passes `kind='task'` to keep "To start" scoped.
 
 #### 6. Wire into `scripts/generate-openapi.ts` + regen
 **Files**: `scripts/generate-openapi.ts`, `openapi.json`, `docs-site/content/docs/api-reference/**`
@@ -416,7 +422,15 @@ Add the new `/sessions` route with split view: sidebar list + selected session d
 5. **Status pill** uses `<Badge size="tag">` + `--color-status-*` tokens (per `ui/CLAUDE.md`). Markdown content (task descriptions, agent output) renders via `<Streamdown>` per the global rule.
 6. **Empty case**: `chain.length === 0` is rendered as the empty session state with a "Start typing below" hint focused on the composer.
 
-Selected mock:
+Selected mock — **canonical mockups ship at `designs/agent-swarm-ui.pen`**: timeline state (frame `BvN4Y`, exported `designs/exports/sessions-timeline.png`) + task-detail Sheet (frame `EAXzI`, exported `designs/exports/session-task-detail-sheet.png`). Both use the actual UI design tokens (`$background`, `$foreground`, `$muted`, `$muted-foreground`, `$border`, `$status-success/active/pending/info/neutral` + `-strong` + `-tint` variants, `$action-agent-task`, `$primary`, `$font-sans` (Space Grotesk), `$font-mono` (Space Mono)) sourced 1:1 from `ui/src/styles/globals.css:49-86`.
+
+**Frame 1 — Timeline state** (`sessions-timeline.png`): full Sessions surface — top bar (brand + global search + user), sub-header (breadcrumb + filter + share + new-session), sidebar (search + grouped session list with active-row left-rail accent), detail hero (status pill + source tag + id chip + big title + by/started/tasks/cost meta row + action buttons + Timeline/Activity/Logs/Costs tab nav), timeline showing the **success and failure outputs inline** (user message bubble → failed task #1840 with red ERROR OUTPUT block + retry/logs actions → completed #1842 with structured commit-scan result → parallel group with progress bar + 3 siblings (1 done + 2 streaming) → pending #1846 with dependency callout listing sibling status badges), composer (suggestion chips + input card with attach/cmd/at-mention buttons + agent selector **defaulting to Lead** + ⌘↵ Send).
+
+**Frame 2 — Task-detail Sheet** (`session-task-detail-sheet.png`): the right-side Sheet that slides in when a timeline task card is clicked. Shows the task's full state — header (Task detail / copy / open-in-tasks / close), hero block (completed pill + #1843 ID chip + sibling-of-#1842 chip + big task title), 4-up KPI strip (Duration / Tokens / Cost / Turns), tab nav (Overview selected, Transcript with turn-count badge, Logs, Tools), Output section (success summary card + dark monospace bun-test output with passed/failed line colors), Details panel (Spawned by Lead → #1842, Assigned to worker-02 + claude-code harness chip, Started/Completed timestamps, Source slack pill, Tags), Tools used panel (4 tools · 11 calls), footer actions (Retry, Share, Spawn follow-up primary).
+
+![Sessions timeline mockup](../../../designs/exports/sessions-timeline.png)
+
+![Task detail sheet mockup](../../../designs/exports/session-task-detail-sheet.png)
 
 ```text
 session: "Investigate the auth bug"
@@ -513,7 +527,7 @@ Replace `ui/src/pages/dashboard/page.tsx` body with a new dashboard whose top re
 **Performance bound**: target 50+ nodes per the PRD. dagre layout + xyflow rendering both scale O(N+E); 50 nodes with ≤ 50 edges is well within smooth-render territory (workflow-graph.tsx already proves this). No `nodesConnectable`, no `nodesDraggable`, no animation in v1.
 
 **File**: `ui/src/components/dashboard/agent-node.tsx` *(new)*
-**Changes**: Wraps `WorkflowNodeShell`. Body = avatar/icon + name + role pill + 24h stats (task count, cost). Width/height computed from a normalized "activity score" (formula below). Click → `navigate('/agents/${id}')`.
+**Changes**: Wraps `WorkflowNodeShell`. Body = `<HarnessIcon harness={agent.harnessProvider} provider={agent.provider} />` (reuse the primitive shipped in PR-a438c9f8 at `ui/src/components/shared/harness-icon.tsx`; agents-list page `ui/src/pages/agents/page.tsx` is the visual reference) + name + role pill + 24h stats (task count, cost). Width/height computed from a normalized "activity score" (formula below). Click → `navigate('/agents/${id}')` (lands on the credentials-aware detail page `ui/src/pages/agents/[id]/page.tsx` whose tabs include the new `credentials-panel.tsx`).
 
 #### 4. Activity-score data (pinned to real sources — no `useUsageDaily()`, that hook does not exist)
 **File**: `ui/src/api/hooks/use-agent-activity.ts` *(new)*
@@ -848,7 +862,7 @@ _Reviewed: 2026-05-08 by `desplega:reviewing` (Auto-apply mode). Cross-reference
 - [x] **I5 — HomePage `FirstStepsCard` "Create task" CTA route choice**: surfaced below as Remaining-Important (no clean place in the plan body; needs Sessions/Tasks scope decision).
 
 ### Applied (Minor)
-- [x] **M1 — Migration numbering**: confirmed `054_agent_harness_provider.sql` is the latest existing migration; plan's 055 / 056 / 057 / 058 numbering is correct.
+- [x] **M1 — Migration numbering**: at second-pass time `054_agent_harness_provider.sql` was the latest existing migration and plan's 055 / 056 / 057 / 058 numbering was correct. **Superseded by third-pass review (2026-05-09)**: `055_agent_cred_status.sql` has since merged (PR #441), so plan numbers shifted to **056 / 057 / 058**.
 - [x] **M2 — QA doc**: `thoughts/taras/qa/2026-05-08-ui-chat-session-experience-v1.md` is committed (alongside #452); scaffold matches the plan's scenarios A–Q.
 - [x] **M3 — Per-swarm-localstorage learning vs shipped pattern**: surfaced — `thoughts/taras/learnings/2026-05-08-per-swarm-localstorage-namespacing.md` advocates `swarmId` from `/health` while the merged PR's `useDismissibleCard` namespaces by `apiUrl`. Update or split the learning after Critical-C3 is resolved.
 - [x] **M4 — Stale "Current State" reference**: line about `ui/src/pages/dashboard/page.tsx:315-477` updated to acknowledge `/` is now `HomePage`, legacy lives at `/dashboard`, and to point at the relevant merged primitives (`useStatusContext`, `useDismissibleCard`).
@@ -871,3 +885,46 @@ _Reviewed: 2026-05-08 by `desplega:reviewing` (Auto-apply mode). Cross-reference
 - Update `thoughts/taras/learnings/2026-05-08-per-swarm-localstorage-namespacing.md` to advocate the `apiUrl` namespacing pattern that actually shipped with PR #452, not the `swarmId`-from-`/health` pattern that was originally proposed and then dropped.
 - After implementation, retitle Phase 1 commit message stub to drop the `swarmId` mention: `[phase 1] source enum cleanup + requestedByUserId + bump 1.76.0`.
 - Confirm `useDashboardCosts()` per-agent shape during Phase 5 implementation (Important-I3 verification step).
+
+---
+
+## Review Errata (2026-05-09 — third pass, post-cred-status / harness UI)
+
+_Reviewed: 2026-05-09 by `desplega:reviewing` (Autopilot mode). Cross-referenced against latest commits — `b89d6a06` (worker self-reports `cred_status`), `a438c9f8` (UI harness column with logos + cred breakdown tooltip + agent-detail credentials tab), `8d06bc53` (`~/.codex/auth.json` live-test bypass), `6561b6cb` (fleet-aware harness milestone on `/status`). The plan was authored before these merged; numbering, one endpoint shape, and several `src/be/db.ts` line refs are now stale._
+
+### Applied (Critical)
+- [x] **Migration numbering collision**: PR #441 / commit `b89d6a06` shipped `src/be/migrations/055_agent_cred_status.sql` (adds `agents.cred_status` JSON column with full credential snapshot). Plan migrations renumbered:
+  - `055_drop_agent_tasks_source_check.sql` → **`056_drop_agent_tasks_source_check.sql`** (Phase 1, sub-step 1)
+  - `056_inbox_item_state.sql` → **`057_inbox_item_state.sql`** (Phase 2, sub-step 1)
+  - `057_task_templates.sql` → **`058_task_templates.sql`** (Phase 2, sub-step 2)
+  Phase 1 FK-preservation verification step also updated to "before/after migration `056`".
+- [x] **Stale second-pass errata M1**: amended in place — second-pass note ("054 is latest, 055/056/057/058 numbering correct") was valid then but is now superseded; addendum added.
+
+### Applied (Important)
+- [x] **Credential-status response shape now richer**: bulk endpoint `GET /api/agents/credential-status?status=waiting_for_credentials` returns `{ agents: [{ agentId, name, status, missing[], provider, harnessProvider, credStatus, lastCheckedAt }] }` (route `src/http/agents.ts:217-228`, handler `:462-480`). Phase 6's `useCredentialMissingAgents()` should consume `credStatus.missing` (richer; per-harness; live-test aware) when present and fall back to top-level `missing[]` for older workers. Reflected in Current State Analysis "Credentials" bullet.
+- [x] **Reuse `<HarnessIcon />` for `<AgentNode />` body**: PR-a438c9f8 shipped `ui/src/components/shared/harness-icon.tsx` and `ui/src/components/shared/harness-cell.tsx` with provider/harness logos under `ui/public/{harness,provider}-logos/`. Phase 5 § sub-step 3 (`<AgentNode />`) updated to compose `<HarnessIcon harness={...} provider={...} />` rather than a generic icon. The agents-list page (`ui/src/pages/agents/page.tsx`) is the visual reference. Click-through to `/agents/{id}` lands on the credentials-aware detail page (`credentials-panel.tsx`).
+- [x] **`/status` is fleet-aware (commit 6561b6cb)**: harness milestone now derives from agent fleet, not the API env. Phase 6 § "Polling-rate budget" recommendation to piggyback blocking-bucket counts on `<StatusProvider>`'s 30s poll (note I2) is now strictly more attractive — fleet-level signals already exist on `/status`. No plan-body change required; stronger justification for I2.
+
+### Applied (Minor — `src/be/db.ts` line drift)
+- [x] `src/be/db.ts:2085` (createTaskExtended) → **`:2219`**. Updated in Overview "Related" list (Phase 1 sub-step 3, Current State Analysis bullet).
+- [x] `src/be/db.ts:2085-2259` → **`:2219-2330`**. Updated in Overview "Related" list.
+- [x] `src/be/db.ts:8262-8475` / `:8285-8475` (user fns: `resolveUser`, `getUserById`, `getAllUsers`, `createUser`, `updateUser`) → **`:8380-8590`**. Updated in Overview line, "Related" list, and Current State Analysis.
+
+### Remaining
+_(none — all Critical, Important, and Minor findings auto-applied per autopilot mode. Carry-over from second pass: confirm `useDashboardCosts()` per-agent shape during Phase 5 implementation, Important-I3.)_
+
+---
+
+## Review Errata (2026-05-09 — fourth pass, file-review inline comments)
+
+_Reviewed: 2026-05-09 by Taras via `file-review` GUI; comments processed via `file-review:process-review` skill in autopilot mode. Five inline comments resolved; HTML markers stripped._
+
+### Applied (Important)
+- [x] **`73fc52f1` (Phase 1 sub-step 3 — "DB layer already accepts `requestedByUserId`")**: clarified that `agent_tasks.requestedByUserId` is `TEXT REFERENCES users(id)` (declared at `031_user_registry.sql:27`, carried through the `043_jira_source.sql:62` table-rebuild and through migration `056` here); cross-referenced Phase 2 § sub-step 4 ("Tolerant `requestedByUserId`") which already handles the deleted-user FK race.
+- [x] **`8871f1ab` (Phase 2 sub-step 2 — `task_templates` extensibility)**: extensibility note added; v1 schema reshaped as a polymorphic "starters" registry from day one with `kind TEXT NOT NULL DEFAULT 'task' CHECK(kind IN ('task','workflow','schedule'))` discriminator + `payload TEXT NOT NULL DEFAULT '{}'` JSON column. v1 still only inserts/reads `kind='task'` rows; v2 wires `workflow`/`schedule` click-handling without a follow-up migration. Table name kept as `task_templates` to preserve existing plan references; v2 may rename to `quick_starts` if non-task kinds graduate. Added `idx_task_templates_kind` index. `listTaskTemplates(...)` and `GET /api/task-templates` route signatures updated to accept the new `kind` filter (Comment `56be4a39` ties in here).
+- [x] **`ff03e74b` (Phase 2 sub-step 5 — `POST /api/users` should also have PUT)**: added `PUT /api/users/{id}` route — params `{ id }`, body partial-update over name/email/role/slackUserId/etc, calls existing `updateUser` (`src/be/db.ts:8493`), returns `{ user: User }` / 404 / 400. Auth `apiKey: true`, no `agentId` requirement.
+- [x] **`56be4a39` (Phase 2 sub-step 5 — `GET /api/task-templates` should accept query string)**: route extended — query `{ category?, kind?, query? }`. `query` is a case-insensitive `LIKE '%...%'` match against `title` (the schema's "name" field) OR `description`, single parameter-bound `WHERE` clause. `kind` filter is the v2 hook from Comment `8871f1ab`. v1 always passes `kind='task'`.
+- [x] **`40d7225f` (Phase 4 sub-step 4 — Pencil mockup)**: ASCII mock kept for plan-doc readability; canonical visual mockup deferred to `designs/agent-swarm-ui.pen` as Phase 4 design groundwork — concrete steps documented inline (open via `pencil` MCP, `find_empty_space_on_canvas`, add frame "Sessions — timeline (parallel group)", `export_nodes` to `designs/exports/sessions-timeline.png` for QA-doc embed). v1 ships when ASCII + Pencil + implementation visually agree.
+
+### Remaining
+_(none — all five inline comments addressed.)_
