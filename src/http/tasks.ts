@@ -20,7 +20,7 @@ import {
 } from "../be/db";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { telemetry } from "../telemetry";
-import { ProviderNameSchema } from "../types";
+import { AgentTaskSourceSchema, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -62,9 +62,10 @@ const createTask = route({
     offeredTo: z.string().optional(),
     dir: z.string().optional(),
     parentTaskId: z.string().optional(),
-    source: z.string().optional(),
+    source: AgentTaskSourceSchema.optional(),
     outputSchema: z.record(z.string(), z.unknown()).optional(),
     contextKey: z.string().optional(),
+    requestedByUserId: z.string().optional(),
   }),
   responses: {
     201: { description: "Task created" },
@@ -269,9 +270,10 @@ export async function handleTasks(
         offeredTo: parsed.body.offeredTo || undefined,
         dir: parsed.body.dir || undefined,
         parentTaskId: parsed.body.parentTaskId || undefined,
-        source: (parsed.body.source as import("../types").AgentTaskSource) || "api",
+        source: parsed.body.source || "api",
         outputSchema: parsed.body.outputSchema || undefined,
         contextKey: parsed.body.contextKey || undefined,
+        requestedByUserId: parsed.body.requestedByUserId || undefined,
       });
 
       ensure({

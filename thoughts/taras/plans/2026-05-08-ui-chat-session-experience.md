@@ -2,7 +2,9 @@
 date: 2026-05-08T00:00:00Z
 topic: "UI Chat/Session Experience — v1 (Sessions surface + Dashboard revamp)"
 author: taras
-status: draft
+status: in-progress
+last_updated: 2026-05-09T16:42:00Z
+last_updated_by: claude (phase 1 sub-agent)
 related:
   - thoughts/taras/brainstorms/2026-05-08-ui-chat-session-experience.md
   - thoughts/taras/research/2026-05-08-ui-chat-session-experience-research.md
@@ -153,21 +155,21 @@ Drop the SQL CHECK on `agent_tasks.source`, tighten the Zod schema to `AgentTask
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `bun run tsc:check`
-- [ ] Lint passes (CI parity): `bun run lint`
-- [ ] Unit tests pass: `bun test`
-- [ ] DB boundary clean: `bash scripts/check-db-boundary.sh`
-- [ ] OpenAPI matches: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
-- [ ] Docs-site embeds the new version: `grep -r '"1.76.0"' docs-site/content/docs/api-reference | head` returns rows (otherwise the openapi regen didn't pick up the bump)
-- [ ] Migration applies on a fresh DB: `rm agent-swarm-db.sqlite && bun run start:http` exits 0 boot
-- [ ] Migration applies on the existing DB (back up first): `bun run start:http` against the working tree's DB exits 0 boot
-- [ ] FK preservation across the table-rebuild: `sqlite3 agent-swarm-db.sqlite "PRAGMA foreign_key_list(agent_tasks);"` returns the `requestedByUserId → users(id)` FK both before and after migration `056`
+- [x] Type-check passes: `bun run tsc:check`
+- [x] Lint passes (CI parity): `bun run lint`
+- [x] Unit tests pass: `bun test`
+- [x] DB boundary clean: `bash scripts/check-db-boundary.sh`
+- [x] OpenAPI matches: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
+- [x] Docs-site embeds the new version: `grep -r '"1.76.0"' docs-site/content/docs/api-reference | head` returns rows (otherwise the openapi regen didn't pick up the bump)
+- [x] Migration applies on a fresh DB: `rm agent-swarm-db.sqlite && bun run start:http` exits 0 boot
+- [x] Migration applies on the existing DB (back up first): `bun run start:http` against the working tree's DB exits 0 boot
+- [x] FK preservation across the table-rebuild: `sqlite3 agent-swarm-db.sqlite "PRAGMA foreign_key_list(agent_tasks);"` returns the `requestedByUserId → users(id)` FK both before and after migration `056`
 
 #### Automated QA:
-- [ ] `curl -X POST` to `POST /api/tasks` with `source: "mcp"` succeeds (200 + task row)
-- [ ] `curl -X POST` to `POST /api/tasks` with `source: "garbage"` returns 400 (Zod rejects, not the SQL CHECK)
-- [ ] `curl -X POST` to `POST /api/tasks` with a valid `requestedByUserId` writes the column (verify via `sqlite3 agent-swarm-db.sqlite "SELECT id, requestedByUserId FROM agent_tasks ORDER BY createdAt DESC LIMIT 1"`)
-- [ ] `curl http://localhost:3013/health` returns `{ status: "ok", version: "1.76.0" }` (shape unchanged from current)
+- [x] `curl -X POST` to `POST /api/tasks` with `source: "mcp"` succeeds (200 + task row)
+- [x] `curl -X POST` to `POST /api/tasks` with `source: "garbage"` returns 400 (Zod rejects, not the SQL CHECK)
+- [x] `curl -X POST` to `POST /api/tasks` with a valid `requestedByUserId` writes the column (verify via `sqlite3 agent-swarm-db.sqlite "SELECT id, requestedByUserId FROM agent_tasks ORDER BY createdAt DESC LIMIT 1"`)
+- [x] `curl http://localhost:3013/health` returns `{ status: "ok", version: "1.76.0" }` (shape unchanged from current)
 
 #### Manual Verification:
 - [ ] Diff `openapi.json` review: only the `source` enum tightening + new `requestedByUserId` field + version bump appear

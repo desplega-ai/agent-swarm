@@ -71,7 +71,12 @@ describe("migration regressions", () => {
     expect(columns).toContain("setupScript");
   });
 
-  test("fresh DB preserves source CHECK constraint on agent_tasks", () => {
+  test("fresh DB drops source CHECK constraint on agent_tasks (Zod is the gate)", () => {
+    // Migration 056 removes the SQL CHECK on agent_tasks.source — the Zod
+    // `AgentTaskSourceSchema` in src/types.ts is now the single source of
+    // truth for the allowed enum, and is enforced at the HTTP/MCP ingress.
+    // Direct SQL inserts no longer fail on unknown sources by design;
+    // adding a new source no longer requires a forward-only migration.
     const database = initDb(FRESH_DB_PATH);
     const now = new Date().toISOString();
 
@@ -81,6 +86,16 @@ describe("migration regressions", () => {
          VALUES (?, ?, ?, ?, ?, ?)`,
         [crypto.randomUUID(), "invalid source", "pending", "not-valid", now, now],
       );
-    }).toThrow();
+    }).not.toThrow();
+
+    // The requestedByUserId FK survives the table-rebuild in migration 056.
+    const fkList = database
+      .prepare<{ table: string; from: string; to: string }, []>(
+        "SELECT \"table\" as \"table\", \"from\", \"to\" FROM pragma_foreign_key_list('agent_tasks')",
+      )
+      .all();
+    const requestedByFk = fkList.find((fk) => fk.from === "requestedByUserId");
+    expect(requestedByFk?.table).toBe("users");
+    expect(requestedByFk?.to).toBe("id");
   });
 });
