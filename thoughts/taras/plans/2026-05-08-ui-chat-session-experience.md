@@ -3,8 +3,8 @@ date: 2026-05-08T00:00:00Z
 topic: "UI Chat/Session Experience — v1 (Sessions surface + Dashboard revamp)"
 author: taras
 status: in-progress
-last_updated: 2026-05-09T20:00:00Z
-last_updated_by: claude (phase 4 sub-agent)
+last_updated: 2026-05-09T21:00:00Z
+last_updated_by: claude (phase 5 sub-agent)
 related:
   - thoughts/taras/brainstorms/2026-05-08-ui-chat-session-experience.md
   - thoughts/taras/research/2026-05-08-ui-chat-session-experience-research.md
@@ -557,11 +557,13 @@ If both dimensions are zero across the swarm, fall back to constant `MIN_SIZE` (
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI type-check: `cd ui && pnpm exec tsc -b`
-- [ ] UI lint: `cd ui && pnpm lint`
-- [ ] Design tokens: `cd ui && pnpm check:tokens`
+- [x] UI type-check: `cd ui && pnpm exec tsc -b`
+- [x] UI lint: `cd ui && pnpm lint`
+- [x] Design tokens: `cd ui && pnpm check:tokens`
 
 #### Automated QA:
+> Note (phase-5 sub-agent, 2026-05-09): qa-use scenarios H / I / J / K below are automated-by-design but **execution is deferred to Phase 7**, where the orchestrator runs the consolidated qa-use sweep against the full stack. Phase 5 implements the code paths these scenarios cover; the boxes stay unchecked until Phase 7 runs them end-to-end.
+
 - [ ] qa-use scenario H: load `/`, canvas renders within 2s, lead at top, ≥1 worker below, edges drawn.
 - [ ] qa-use scenario I: click a worker node, navigates to `/agents/{id}`.
 - [ ] qa-use scenario J: toggle to "Table" view; AG Grid renders the same agents with sortable activity columns.

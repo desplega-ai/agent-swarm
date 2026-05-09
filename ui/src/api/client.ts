@@ -195,6 +195,8 @@ class ApiClient {
     includeHeartbeat?: boolean;
     limit?: number;
     offset?: number;
+    /** Phase 2 (≥1.76.0): ISO 8601 timestamp; backend filters createdAt >= value. */
+    createdAfter?: string;
   }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -204,6 +206,7 @@ class ApiClient {
     if (filters?.includeHeartbeat) params.set("includeHeartbeat", "true");
     if (filters?.limit != null) params.set("limit", String(filters.limit));
     if (filters?.offset != null) params.set("offset", String(filters.offset));
+    if (filters?.createdAfter) params.set("createdAfter", filters.createdAfter);
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });

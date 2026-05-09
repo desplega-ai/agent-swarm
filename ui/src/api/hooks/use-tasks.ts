@@ -9,6 +9,8 @@ export interface TaskFilters {
   includeHeartbeat?: boolean;
   limit?: number;
   offset?: number;
+  /** Phase 2 (≥1.76.0): ISO 8601 timestamp; backend filters createdAt >= value. */
+  createdAfter?: string;
 }
 
 export function useTasks(filters?: TaskFilters) {

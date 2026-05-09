@@ -1,3 +1,17 @@
+export type {
+  AgentActivityRow,
+  UseAgentActivityOptions,
+  UseAgentActivityResult,
+} from "./use-agent-activity";
+export {
+  computeActivityScores,
+  MAX_NODE_HEIGHT,
+  MAX_NODE_WIDTH,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
+  nodeSizeFromScore,
+  useAgentActivity,
+} from "./use-agent-activity";
 export { useAgent, useAgents, useUpdateAgentName, useUpdateAgentProfile } from "./use-agents";
 export type { ApprovalRequestFilters } from "./use-approval-requests";
 export {
@@ -29,9 +43,11 @@ export { useConfigs, useDeleteConfig, useUpsertConfig } from "./use-config-api";
 export type { SessionCostFilters } from "./use-costs";
 export {
   useAgentUsageSummary,
+  useDashboardCosts,
   useMonthlyUsageStats,
   useSessionCosts,
   useTaskUsage,
+  useUsageSummary,
 } from "./use-costs";
 export { useDbQuery, useTableColumns, useTableList } from "./use-db-query";
 export type { FeatureGateResult } from "./use-feature-gate";
