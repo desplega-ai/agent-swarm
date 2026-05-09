@@ -233,6 +233,72 @@ export const UserSchema = z.object({
 
 export type User = z.infer<typeof UserSchema>;
 
+// ============================================================================
+// Inbox Item State (per-user dismiss/snooze/done for action-items inbox)
+// ============================================================================
+//
+// Action-items inbox buckets:
+//   - approval           — pending approval requests
+//   - credential_missing — agents in waiting_for_credentials state
+//   - broken_task        — tasks in failed/cancelled status
+//   - to_read            — sessions/tasks marked unread for the user
+//   - to_start_template  — task-templates the user hasn't dismissed
+//
+// Statuses:
+//   - open      — visible in inbox
+//   - snoozed   — hidden until snoozeUntil; reappears as `open`
+//   - dismissed — hidden permanently (until item itself reactivates)
+//   - done      — user marked complete
+export const InboxItemTypeSchema = z.enum([
+  "approval",
+  "credential_missing",
+  "broken_task",
+  "to_read",
+  "to_start_template",
+]);
+export type InboxItemType = z.infer<typeof InboxItemTypeSchema>;
+
+export const InboxItemStatusSchema = z.enum(["open", "snoozed", "dismissed", "done"]);
+export type InboxItemStatus = z.infer<typeof InboxItemStatusSchema>;
+
+export const InboxItemStateSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  itemType: InboxItemTypeSchema,
+  itemId: z.string(),
+  status: InboxItemStatusSchema,
+  snoozeUntil: z.string().optional(),
+  dismissedAt: z.string().optional(),
+  doneAt: z.string().optional(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type InboxItemState = z.infer<typeof InboxItemStateSchema>;
+
+// ============================================================================
+// Task Templates ("To start" bucket — polymorphic starters registry)
+// ============================================================================
+//
+// kind:
+//   - task     — v1 default; payload is `{}` and the task prompt lives in `prompt`
+//   - workflow — v2 hook; payload `{ workflowId: string }`, prompt may be empty
+//   - schedule — v2 hook; payload `{ cron: string, prompt: string }`
+export const TaskTemplateKindSchema = z.enum(["task", "workflow", "schedule"]);
+export type TaskTemplateKind = z.infer<typeof TaskTemplateKindSchema>;
+
+export const TaskTemplateSchema = z.object({
+  id: z.string(),
+  title: z.string().min(1),
+  description: z.string(),
+  prompt: z.string(),
+  kind: TaskTemplateKindSchema.default("task"),
+  payload: z.record(z.string(), z.unknown()).default({}),
+  category: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+  createdAt: z.string(),
+});
+export type TaskTemplate = z.infer<typeof TaskTemplateSchema>;
+
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline", "waiting_for_credentials"]);
 
 export const AgentSchema = z.object({

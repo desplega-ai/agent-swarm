@@ -91,7 +91,7 @@ describe("migration regressions", () => {
     // The requestedByUserId FK survives the table-rebuild in migration 056.
     const fkList = database
       .prepare<{ table: string; from: string; to: string }, []>(
-        "SELECT \"table\" as \"table\", \"from\", \"to\" FROM pragma_foreign_key_list('agent_tasks')",
+        'SELECT "table" as "table", "from", "to" FROM pragma_foreign_key_list(\'agent_tasks\')',
       )
       .all();
     const requestedByFk = fkList.find((fk) => fk.from === "requestedByUserId");

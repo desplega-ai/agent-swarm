@@ -29,6 +29,7 @@ import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
 import { handleHeartbeat } from "./heartbeat";
+import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleMcp } from "./mcp";
 import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
@@ -40,11 +41,14 @@ import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { handleSchedules } from "./schedules";
 import { handleSessionData } from "./session-data";
+import { handleSessions } from "./sessions";
 import { handleSkills } from "./skills";
 import { handleStats } from "./stats";
 import { handleStatus } from "./status";
+import { handleTaskTemplates } from "./task-templates";
 import { handleTasks } from "./tasks";
 import { handleTrackers } from "./trackers";
+import { handleUsers } from "./users";
 import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflowEvents } from "./workflow-events";
@@ -146,6 +150,10 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleApiKeys(req, res, pathSegments, queryParams),
     () => handleHeartbeat(req, res, pathSegments),
     () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
+    () => handleUsers(req, res, pathSegments, queryParams),
+    () => handleSessions(req, res, pathSegments, queryParams),
+    () => handleInboxState(req, res, pathSegments, queryParams),
+    () => handleTaskTemplates(req, res, pathSegments, queryParams),
     () => handleMcp(req, res, transports),
   ];
 

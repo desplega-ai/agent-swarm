@@ -29,6 +29,9 @@ import type {
   ContextVersion,
   CooldownConfig,
   DevinProviderMeta,
+  InboxItemState,
+  InboxItemStatus,
+  InboxItemType,
   InboxMessage,
   InboxMessageStatus,
   InputValue,
@@ -55,6 +58,8 @@ import type {
   SkillWithInstallInfo,
   SwarmConfig,
   SwarmRepo,
+  TaskTemplate,
+  TaskTemplateKind,
   TriggerConfig,
   User,
   VersionableField,
@@ -1317,7 +1322,8 @@ export function findTaskByVcs(vcsRepo: string, vcsNumber: number): AgentTask | n
 export const findTaskByGitHub = findTaskByVcs;
 
 export interface TaskFilters {
-  status?: AgentTaskStatus;
+  /** Single status (back-compat) OR array of statuses (multi-status filter). */
+  status?: AgentTaskStatus | AgentTaskStatus[];
   agentId?: string;
   search?: string;
   // New filters
@@ -1327,6 +1333,8 @@ export interface TaskFilters {
   taskType?: string;
   tags?: string[];
   scheduleId?: string;
+  /** ISO 8601 timestamp; only return tasks where createdAt >= this. */
+  createdAfter?: string;
   limit?: number;
   offset?: number;
   includeHeartbeat?: boolean;
@@ -1337,8 +1345,19 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   const params: (string | AgentTaskStatus)[] = [];
 
   if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
+    if (Array.isArray(filters.status)) {
+      if (filters.status.length === 1) {
+        conditions.push("status = ?");
+        params.push(filters.status[0]!);
+      } else if (filters.status.length > 1) {
+        const placeholders = filters.status.map(() => "?").join(", ");
+        conditions.push(`status IN (${placeholders})`);
+        for (const s of filters.status) params.push(s);
+      }
+    } else {
+      conditions.push("status = ?");
+      params.push(filters.status);
+    }
   }
 
   if (filters?.agentId) {
@@ -1380,6 +1399,11 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
     params.push(filters.scheduleId);
   }
 
+  if (filters?.createdAfter) {
+    conditions.push("createdAt >= ?");
+    params.push(filters.createdAfter);
+  }
+
   // Exclude heartbeat tasks by default
   if (!filters?.includeHeartbeat) {
     conditions.push("(IFNULL(taskType, '') != 'heartbeat' AND tags NOT LIKE '%\"heartbeat\"%')");
@@ -1415,8 +1439,19 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   const params: (string | AgentTaskStatus)[] = [];
 
   if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
+    if (Array.isArray(filters.status)) {
+      if (filters.status.length === 1) {
+        conditions.push("status = ?");
+        params.push(filters.status[0]!);
+      } else if (filters.status.length > 1) {
+        const placeholders = filters.status.map(() => "?").join(", ");
+        conditions.push(`status IN (${placeholders})`);
+        for (const s of filters.status) params.push(s);
+      }
+    } else {
+      conditions.push("status = ?");
+      params.push(filters.status);
+    }
   }
 
   if (filters?.agentId) {
@@ -1454,6 +1489,11 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   if (filters?.scheduleId) {
     conditions.push("scheduleId = ?");
     params.push(filters.scheduleId);
+  }
+
+  if (filters?.createdAfter) {
+    conditions.push("createdAt >= ?");
+    params.push(filters.createdAfter);
   }
 
   // Exclude heartbeat tasks by default
@@ -8575,6 +8615,280 @@ export function deleteUser(id: string): boolean {
     .run(id);
   const result = getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
   return result.changes > 0;
+}
+
+// ============================================================================
+// Inbox Item State (per-user dismiss/snooze/done for action-items inbox)
+// ============================================================================
+
+interface InboxItemStateRow {
+  id: string;
+  userId: string;
+  itemType: string;
+  itemId: string;
+  status: string;
+  snoozeUntil: string | null;
+  dismissedAt: string | null;
+  doneAt: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+function rowToInboxItemState(row: InboxItemStateRow): InboxItemState {
+  return {
+    id: row.id,
+    userId: row.userId,
+    itemType: row.itemType as InboxItemType,
+    itemId: row.itemId,
+    status: row.status as InboxItemStatus,
+    snoozeUntil: row.snoozeUntil ?? undefined,
+    dismissedAt: row.dismissedAt ?? undefined,
+    doneAt: row.doneAt ?? undefined,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+export function listInboxState(opts: {
+  userId: string;
+  status?: InboxItemStatus;
+  itemType?: InboxItemType;
+}): InboxItemState[] {
+  const conditions: string[] = ["userId = ?"];
+  const params: string[] = [opts.userId];
+
+  if (opts.status) {
+    conditions.push("status = ?");
+    params.push(opts.status);
+  }
+  if (opts.itemType) {
+    conditions.push("itemType = ?");
+    params.push(opts.itemType);
+  }
+
+  const where = conditions.join(" AND ");
+  return getDb()
+    .prepare<InboxItemStateRow, string[]>(
+      `SELECT * FROM inbox_item_state WHERE ${where} ORDER BY lastUpdatedAt DESC`,
+    )
+    .all(...params)
+    .map(rowToInboxItemState);
+}
+
+export function upsertInboxState(opts: {
+  userId: string;
+  itemType: InboxItemType;
+  itemId: string;
+  status: InboxItemStatus;
+  snoozeUntil?: string;
+  dismissedAt?: string;
+  doneAt?: string;
+}): InboxItemState {
+  const now = new Date().toISOString();
+  // Auto-derive timestamps from status when not explicitly provided.
+  const dismissedAt = opts.dismissedAt ?? (opts.status === "dismissed" ? now : null);
+  const doneAt = opts.doneAt ?? (opts.status === "done" ? now : null);
+  const snoozeUntil = opts.snoozeUntil ?? null;
+
+  // SQLite upsert via UNIQUE(userId, itemType, itemId).
+  const row = getDb()
+    .prepare<InboxItemStateRow, (string | null)[]>(
+      `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(userId, itemType, itemId) DO UPDATE SET
+         status = excluded.status,
+         snoozeUntil = excluded.snoozeUntil,
+         dismissedAt = excluded.dismissedAt,
+         doneAt = excluded.doneAt,
+         lastUpdatedAt = excluded.lastUpdatedAt
+       RETURNING *`,
+    )
+    .get(
+      opts.userId,
+      opts.itemType,
+      opts.itemId,
+      opts.status,
+      snoozeUntil,
+      dismissedAt,
+      doneAt,
+      now,
+      now,
+    );
+  if (!row) throw new Error("Failed to upsert inbox state");
+  return rowToInboxItemState(row);
+}
+
+// ============================================================================
+// Task Templates ("To start" bucket — polymorphic starters registry)
+// ============================================================================
+
+interface TaskTemplateRow {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+  kind: string;
+  payload: string;
+  category: string | null;
+  tags: string;
+  createdAt: string;
+}
+
+function rowToTaskTemplate(row: TaskTemplateRow): TaskTemplate {
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = JSON.parse(row.payload);
+  } catch {}
+  let tags: string[] = [];
+  try {
+    tags = JSON.parse(row.tags);
+  } catch {}
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    prompt: row.prompt,
+    kind: row.kind as TaskTemplateKind,
+    payload,
+    category: row.category ?? undefined,
+    tags,
+    createdAt: row.createdAt,
+  };
+}
+
+export function listTaskTemplates(opts?: {
+  category?: string;
+  kind?: TaskTemplateKind;
+  query?: string;
+}): TaskTemplate[] {
+  const conditions: string[] = [];
+  const params: string[] = [];
+
+  if (opts?.category) {
+    conditions.push("category = ?");
+    params.push(opts.category);
+  }
+  if (opts?.kind) {
+    conditions.push("kind = ?");
+    params.push(opts.kind);
+  }
+  if (opts?.query && opts.query.trim().length > 0) {
+    // Case-insensitive LIKE match against title OR description, single
+    // parameter-bound WHERE clause to prevent injection.
+    conditions.push("(LOWER(title) LIKE ? OR LOWER(description) LIKE ?)");
+    const needle = `%${opts.query.toLowerCase()}%`;
+    params.push(needle, needle);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  return getDb()
+    .prepare<TaskTemplateRow, string[]>(`SELECT * FROM task_templates ${where} ORDER BY createdAt`)
+    .all(...params)
+    .map(rowToTaskTemplate);
+}
+
+// ============================================================================
+// Sessions — root task chain + recent-sessions list
+// ============================================================================
+
+/**
+ * Walk the parent→child chain rooted at `rootTaskId` via recursive CTE.
+ * Returns the chain ordered by `createdAt` (so the root is first; siblings
+ * appear in creation order; grand-children after their parents).
+ */
+export function getRootTaskChain(rootTaskId: string): AgentTask[] {
+  const rows = getDb()
+    .prepare<AgentTaskRow, string>(
+      `WITH RECURSIVE chain(id) AS (
+         SELECT id FROM agent_tasks WHERE id = ?
+         UNION ALL
+         SELECT t.id FROM agent_tasks t
+         JOIN chain c ON t.parentTaskId = c.id
+       )
+       SELECT t.* FROM agent_tasks t
+       JOIN chain ON chain.id = t.id
+       ORDER BY t.createdAt`,
+    )
+    .all(rootTaskId);
+  return rows.map(rowToAgentTask);
+}
+
+export interface SessionListItem {
+  root: AgentTask;
+  chainTaskCount: number;
+  lastActivityAt: string;
+  latestStatus: AgentTaskStatus;
+}
+
+/**
+ * List the most recent sessions ordered by chain-wide latest activity.
+ * A "session" here is any task with `parentTaskId IS NULL` — its descendants
+ * (children, grand-children, …) are summarized via the recursive CTE.
+ *
+ * `lastActivityAt` is `MAX(t.lastUpdatedAt)` over the entire chain rooted at
+ * the candidate task, computed as a correlated subquery so the outer ORDER
+ * BY can sort against it.
+ */
+export function listRecentSessions(opts?: { limit?: number; offset?: number }): SessionListItem[] {
+  const limit = opts?.limit ?? 25;
+  const offset = opts?.offset ?? 0;
+
+  // Pull root tasks ordered by chain-wide last activity.
+  const rootRows = getDb()
+    .prepare<
+      AgentTaskRow & { __chainCount: number; __lastActivityAt: string; __latestStatus: string },
+      [number, number]
+    >(
+      `SELECT
+         r.*,
+         (SELECT COUNT(*) FROM agent_tasks d
+            WHERE d.id IN (
+              WITH RECURSIVE chain(id) AS (
+                SELECT r.id
+                UNION ALL
+                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
+              )
+              SELECT id FROM chain
+            )
+         ) AS __chainCount,
+         (SELECT MAX(d.lastUpdatedAt) FROM agent_tasks d
+            WHERE d.id IN (
+              WITH RECURSIVE chain(id) AS (
+                SELECT r.id
+                UNION ALL
+                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
+              )
+              SELECT id FROM chain
+            )
+         ) AS __lastActivityAt,
+         (SELECT d.status FROM agent_tasks d
+            WHERE d.id IN (
+              WITH RECURSIVE chain(id) AS (
+                SELECT r.id
+                UNION ALL
+                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
+              )
+              SELECT id FROM chain
+            )
+            ORDER BY d.lastUpdatedAt DESC
+            LIMIT 1
+         ) AS __latestStatus
+       FROM agent_tasks r
+       WHERE r.parentTaskId IS NULL
+       ORDER BY __lastActivityAt DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(limit, offset);
+
+  return rootRows.map((row) => {
+    const { __chainCount, __lastActivityAt, __latestStatus, ...taskRow } = row;
+    return {
+      root: rowToAgentTask(taskRow as AgentTaskRow),
+      chainTaskCount: __chainCount,
+      lastActivityAt: __lastActivityAt ?? row.lastUpdatedAt,
+      latestStatus: (__latestStatus as AgentTaskStatus) ?? row.status,
+    };
+  });
 }
 
 // ============================================================================

@@ -3,8 +3,8 @@ date: 2026-05-08T00:00:00Z
 topic: "UI Chat/Session Experience — v1 (Sessions surface + Dashboard revamp)"
 author: taras
 status: in-progress
-last_updated: 2026-05-09T16:42:00Z
-last_updated_by: claude (phase 1 sub-agent)
+last_updated: 2026-05-09T17:02:00Z
+last_updated_by: claude (phase 2 sub-agent)
 related:
   - thoughts/taras/brainstorms/2026-05-08-ui-chat-session-experience.md
   - thoughts/taras/research/2026-05-08-ui-chat-session-experience-research.md
@@ -283,24 +283,24 @@ INSERT INTO task_templates (title, description, prompt, category, tags) VALUES
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] Unit tests pass: `bun test`
-- [ ] DB boundary clean: `bash scripts/check-db-boundary.sh`
-- [ ] Migrations apply fresh + existing: `rm agent-swarm-db.sqlite && bun run start:http` and again against working DB
-- [ ] OpenAPI matches: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
-- [ ] New unit tests for `getRootTaskChain` and `listRecentSessions` in `src/tests/sessions.test.ts` (covers empty chain, single-root chain, 3-level chain, parallel siblings)
+- [x] Type-check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] Unit tests pass: `bun test`
+- [x] DB boundary clean: `bash scripts/check-db-boundary.sh`
+- [x] Migrations apply fresh + existing: `rm agent-swarm-db.sqlite && bun run start:http` and again against working DB
+- [x] OpenAPI matches: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
+- [x] New unit tests for `getRootTaskChain` and `listRecentSessions` in `src/tests/sessions.test.ts` (covers empty chain, single-root chain, 3-level chain, parallel siblings)
 
 #### Automated QA:
-- [ ] `curl http://localhost:3013/api/users` returns at least one row (seeded migration 031 plus any locally created)
-- [ ] `curl -X POST http://localhost:3013/api/users -d '{"name":"QA Bot"}'` returns 200 + new user
-- [ ] After creating a 3-task chain via `POST /api/tasks` (root → child → grandchild), `curl http://localhost:3013/api/sessions/{root}` returns `{ root, chain: [3 tasks] }` in dependency order
-- [ ] `curl http://localhost:3013/api/sessions?limit=10` returns recent root tasks ordered by `lastActivityAt`
-- [ ] `curl http://localhost:3013/api/task-templates` returns ≥5 seeded rows
-- [ ] `curl -X PATCH http://localhost:3013/api/inbox-state -d '{"userId":"...","itemType":"approval","itemId":"abc","status":"snoozed","snoozeUntil":"2026-05-09T00:00:00Z"}'` upserts; subsequent `GET /api/inbox-state?userId=...` returns it
-- [ ] Multi-status CSV: `curl 'http://localhost:3013/api/tasks?status=failed,cancelled'` returns rows where status ∈ {failed, cancelled} (single round trip)
-- [ ] `createdAfter` filter: `curl 'http://localhost:3013/api/tasks?createdAfter=2026-05-07T00:00:00Z'` returns only tasks created on/after the timestamp
-- [ ] Tolerant `requestedByUserId`: `curl -X POST /api/tasks -d '{"task":"test","requestedByUserId":"<random-non-existent-id>"}'` returns 200, the inserted row has `requestedByUserId` NULL, and a warning is logged (verify via `bun run start:http` stderr)
+- [x] `curl http://localhost:3013/api/users` returns at least one row (seeded migration 031 plus any locally created)
+- [x] `curl -X POST http://localhost:3013/api/users -d '{"name":"QA Bot"}'` returns 200 + new user
+- [x] After creating a 3-task chain via `POST /api/tasks` (root → child → grandchild), `curl http://localhost:3013/api/sessions/{root}` returns `{ root, chain: [3 tasks] }` in dependency order
+- [x] `curl http://localhost:3013/api/sessions?limit=10` returns recent root tasks ordered by `lastActivityAt`
+- [x] `curl http://localhost:3013/api/task-templates` returns ≥5 seeded rows
+- [x] `curl -X PATCH http://localhost:3013/api/inbox-state -d '{"userId":"...","itemType":"approval","itemId":"abc","status":"snoozed","snoozeUntil":"2026-05-09T00:00:00Z"}'` upserts; subsequent `GET /api/inbox-state?userId=...` returns it
+- [x] Multi-status CSV: `curl 'http://localhost:3013/api/tasks?status=failed,cancelled'` returns rows where status ∈ {failed, cancelled} (single round trip)
+- [x] `createdAfter` filter: `curl 'http://localhost:3013/api/tasks?createdAfter=2026-05-07T00:00:00Z'` returns only tasks created on/after the timestamp
+- [x] Tolerant `requestedByUserId`: `curl -X POST /api/tasks -d '{"task":"test","requestedByUserId":"<random-non-existent-id>"}'` returns 200, the inserted row has `requestedByUserId` NULL, and a warning is logged (verify via `bun run start:http` stderr)
 
 #### Manual Verification:
 - [ ] Visual diff of `openapi.json`: only new endpoints + new schemas appear

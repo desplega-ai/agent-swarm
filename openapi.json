@@ -3006,6 +3006,138 @@
         }
       }
     },
+    "/api/inbox-state": {
+      "get": {
+        "summary": "List inbox-item state rows for a user",
+        "tags": [
+          "Inbox State"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "userId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "snoozed",
+                "dismissed",
+                "done"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "approval",
+                "credential_missing",
+                "broken_task",
+                "to_read",
+                "to_start_template"
+              ]
+            },
+            "required": false,
+            "name": "itemType",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Inbox state rows"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Upsert per-user dismiss/snooze/done state for an inbox item",
+        "tags": [
+          "Inbox State"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "itemType": {
+                    "type": "string",
+                    "enum": [
+                      "approval",
+                      "credential_missing",
+                      "broken_task",
+                      "to_read",
+                      "to_start_template"
+                    ]
+                  },
+                  "itemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "snoozed",
+                      "dismissed",
+                      "done"
+                    ]
+                  },
+                  "snoozeUntil": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "userId",
+                  "itemType",
+                  "itemId",
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upserted inbox state row"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
     "/api/integrations/claude-managed/test": {
       "post": {
         "summary": "Test the claude-managed integration: resolves ANTHROPIC_API_KEY + MANAGED_AGENT_ID from swarm_config and calls beta.agents.retrieve.",
@@ -5738,6 +5870,85 @@
         }
       }
     },
+    "/api/sessions": {
+      "get": {
+        "summary": "List recent task sessions (root tasks + chain summary)",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent sessions ordered by chain-wide last activity"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/sessions/{rootTaskId}": {
+      "get": {
+        "summary": "Get a session — root task + the entire descendant chain",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "rootTaskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Root task + chain (ordered by createdAt)"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Root task not found"
+          }
+        }
+      }
+    },
     "/api/skills": {
       "get": {
         "summary": "List skills with optional filters",
@@ -7438,6 +7649,15 @@
           },
           {
             "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "createdAfter",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": [
                 "integer",
                 "null"
@@ -7462,6 +7682,9 @@
         "responses": {
           "200": {
             "description": "Paginated task list"
+          },
+          "400": {
+            "description": "Validation error (e.g. unknown status token)"
           }
         }
       },
@@ -8005,6 +8228,58 @@
         }
       }
     },
+    "/api/task-templates": {
+      "get": {
+        "summary": "List task templates ('To start' bucket)",
+        "tags": [
+          "Task Templates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "task",
+                "workflow",
+                "schedule"
+              ]
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "query",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task template list"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
     "/api/trackers/jira/authorize": {
       "get": {
         "summary": "Redirect to Atlassian OAuth consent screen",
@@ -8376,6 +8651,185 @@
           },
           "503": {
             "description": "Linear not configured"
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "summary": "List all users",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of users"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new user",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "slackUserId": {
+                    "type": "string"
+                  },
+                  "linearUserId": {
+                    "type": "string"
+                  },
+                  "githubUsername": {
+                    "type": "string"
+                  },
+                  "gitlabUsername": {
+                    "type": "string"
+                  },
+                  "emailAliases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "preferredChannel": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/users/{id}": {
+      "put": {
+        "summary": "Update an existing user (partial — at least one field required)",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "slackUserId": {
+                    "type": "string"
+                  },
+                  "linearUserId": {
+                    "type": "string"
+                  },
+                  "githubUsername": {
+                    "type": "string"
+                  },
+                  "gitlabUsername": {
+                    "type": "string"
+                  },
+                  "emailAliases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "preferredChannel": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User updated"
+          },
+          "400": {
+            "description": "Validation error or empty body"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User not found"
           }
         }
       }
