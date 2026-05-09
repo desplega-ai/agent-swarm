@@ -303,12 +303,14 @@ export async function handleTasks(
       requestedByUserId = undefined;
     }
 
-    // Default agent for ingress-created tasks: when no explicit `agentId` and
-    // no `parentTaskId`, route to the lead agent so the session has an owner
-    // immediately rather than sitting unassigned. Mirrors Slack's behaviour
-    // (slack/actions.ts uses `agentId: lead?.id`).
+    // Default agent for ingress-created tasks: when no explicit `agentId` is
+    // provided, route to the lead so the task has an owner immediately
+    // (regardless of whether it's a root or a follow-up under a parentTaskId).
+    // Without this, UI composer follow-ups land unassigned and never get
+    // picked up. Mirrors Slack's pattern (slack/actions.ts uses lead?.id when
+    // there's no working agent).
     let defaultAgentId = parsed.body.agentId || undefined;
-    if (!defaultAgentId && !parsed.body.parentTaskId) {
+    if (!defaultAgentId) {
       const lead = getLeadAgent();
       if (lead) defaultAgentId = lead.id;
     }

@@ -11,6 +11,8 @@
 
 import { ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useTaskContext, useTaskSessionLogs } from "@/api/hooks/use-tasks";
 import type { AgentTask } from "@/api/types";
@@ -26,6 +28,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { normalizeNewlines } from "@/lib/utils";
 
 export interface TaskDetailSheetProps {
   taskId: string;
@@ -120,22 +123,24 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
           (task.status === "failed" || task.status === "cancelled") &&
           task.failureReason &&
           task.failureReason.trim().length > 0 ? (
-            <section className="border-b border-border px-4 py-3 flex flex-col gap-2">
+            <section className="border-b border-border px-4 py-3 flex flex-col gap-2 min-w-0">
               <h4 className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-status-error-strong">
                 {task.status === "cancelled" ? "Cancelled" : "Failure"}
               </h4>
-              <p className="text-xs text-status-error-strong whitespace-pre-wrap break-words">
-                {task.failureReason.trim()}
-              </p>
+              <div className="text-sm leading-relaxed text-status-error-strong min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
+                <Streamdown>{normalizeNewlines(task.failureReason.trim())}</Streamdown>
+              </div>
             </section>
           ) : null}
 
           {task && task.status === "completed" && task.output && task.output.trim().length > 0 ? (
-            <section className="border-b border-border px-4 py-3 flex flex-col gap-2">
+            <section className="border-b border-border px-4 py-3 flex flex-col gap-2 min-w-0">
               <h4 className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
                 Output
               </h4>
-              <p className="text-xs whitespace-pre-wrap break-words">{task.output.trim()}</p>
+              <div className="text-sm leading-relaxed text-foreground/90 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
+                <Streamdown>{normalizeNewlines(task.output.trim())}</Streamdown>
+              </div>
             </section>
           ) : null}
 

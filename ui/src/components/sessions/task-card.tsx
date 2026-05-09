@@ -16,14 +16,16 @@
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { CornerDownRight } from "lucide-react";
+import { ChevronDown, ChevronRight, CornerDownRight } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
 import type { AgentTask, SessionLog } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime, normalizeNewlines } from "@/lib/utils";
 import { TaskDetailSheet } from "./task-detail-sheet";
 
 export interface TaskCardProps {
@@ -148,25 +150,25 @@ function TaskOutcomePreview({ task, fallbackLines }: { task: AgentTask; fallback
     task.failureReason.trim().length > 0
   ) {
     return (
-      <div className="rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 mt-1">
+      <div className="rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 mt-1 min-w-0">
         <p className="text-[10px] uppercase tracking-wider text-status-error-strong font-mono mb-1">
           {task.status === "cancelled" ? "Cancelled" : "Failure"}
         </p>
-        <p className="text-xs text-status-error-strong whitespace-pre-wrap break-words">
-          {task.failureReason.trim()}
-        </p>
+        <div className="text-xs text-status-error-strong min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
+          <Streamdown>{normalizeNewlines(task.failureReason.trim())}</Streamdown>
+        </div>
       </div>
     );
   }
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
     return (
-      <div className="rounded-md border border-border bg-muted/30 px-3 py-2 mt-1">
+      <div className="rounded-md border border-border bg-muted/30 px-3 py-2 mt-1 min-w-0">
         <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-1">
           Output
         </p>
-        <p className="text-xs text-foreground whitespace-pre-wrap break-words">
-          {task.output.trim()}
-        </p>
+        <div className="text-xs text-foreground min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
+          <Streamdown>{normalizeNewlines(task.output.trim())}</Streamdown>
+        </div>
       </div>
     );
   }
@@ -189,21 +191,34 @@ export interface ParallelGroupProps {
 }
 
 /**
- * Wrapper for siblings sharing a `parentTaskId`. Uses neutral design tokens
- * (no raw palette literals — would fail `pnpm check:tokens`).
+ * Wrapper for siblings sharing a `parentTaskId`. Collapsible — header click
+ * toggles. Default expanded for 2-3 children, default collapsed for 4+
+ * (otherwise large parallel groups bury the rest of the timeline).
  */
 export function ParallelGroup({ count, children, className }: ParallelGroupProps) {
+  const [expanded, setExpanded] = useState<boolean>(count <= 3);
   return (
     <div
       data-slot="session-parallel-group"
       className={cn("border border-border bg-muted/30 rounded-md overflow-hidden", className)}
     >
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/40">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/40 hover:bg-muted/60 transition-colors text-left"
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Expand"} parallel group of ${count} tasks`}
+      >
+        {expanded ? (
+          <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+        )}
         <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-mono font-medium">
           parallel · {count} tasks
         </span>
-      </div>
-      <div className="flex flex-col divide-y divide-border">{children}</div>
+      </button>
+      {expanded ? <div className="flex flex-col divide-y divide-border">{children}</div> : null}
     </div>
   );
 }
