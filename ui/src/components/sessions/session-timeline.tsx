@@ -153,7 +153,7 @@ export function SessionTimeline({ rootTaskId, chain, className }: SessionTimelin
         </article>
 
         {/* The root is also a task — render it as a card so the user can drill in. */}
-        <TaskCard task={root} />
+        <TaskCard task={root} isRoot />
 
         {/* Recursive descendants. */}
         <ChildrenChain task={root} childrenByParent={tree.childrenByParent} />

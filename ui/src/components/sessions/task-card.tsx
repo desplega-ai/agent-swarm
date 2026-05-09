@@ -16,10 +16,12 @@
  */
 
 import { useQueryClient } from "@tanstack/react-query";
+import { CornerDownRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { AgentTask, SessionLog } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { TaskDetailSheet } from "./task-detail-sheet";
@@ -31,6 +33,8 @@ export interface TaskCardProps {
    * Lets us drop the outer card chrome to ride inside the group's border.
    */
   insideParallelGroup?: boolean;
+  /** `true` when this is the root (session-starting) task. Adds a ROOT pill. */
+  isRoot?: boolean;
   className?: string;
 }
 
@@ -40,7 +44,7 @@ function summarizeLog(log: SessionLog): string {
   return firstLine.trim().slice(0, 120);
 }
 
-export function TaskCard({ task, insideParallelGroup, className }: TaskCardProps) {
+export function TaskCard({ task, insideParallelGroup, isRoot, className }: TaskCardProps) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
 
@@ -72,13 +76,29 @@ export function TaskCard({ task, insideParallelGroup, className }: TaskCardProps
         aria-label={`Open task ${task.id}`}
         className={cn(
           "cursor-pointer transition-colors hover:bg-muted/30 py-3 gap-2",
+          isRoot && "border-l-2 border-l-primary",
           insideParallelGroup && "border-0 shadow-none rounded-none bg-transparent py-2",
           className,
         )}
       >
-        <CardContent className="px-4 flex flex-col gap-1.5">
+        <CardContent
+          className={cn("px-4 flex flex-col gap-1.5", insideParallelGroup && "pl-7 relative")}
+        >
+          {insideParallelGroup ? (
+            <CornerDownRight
+              aria-hidden="true"
+              className="absolute left-2 top-2 h-3 w-3 text-muted-foreground/60"
+            />
+          ) : null}
           <div className="flex items-start justify-between gap-3">
-            <p className="text-sm font-medium truncate min-w-0">{task.task}</p>
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              {isRoot ? (
+                <Badge variant="outline" size="tag" className="shrink-0">
+                  ROOT
+                </Badge>
+              ) : null}
+              <p className="text-sm font-medium truncate min-w-0">{task.task}</p>
+            </div>
             <StatusBadge status={task.status} className="shrink-0" />
           </div>
 

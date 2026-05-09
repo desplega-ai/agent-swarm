@@ -80,7 +80,10 @@ export function SessionComposer({ rootTaskId, latestLeafTaskId, className }: Ses
 
   return (
     <form
-      className={cn("flex flex-col gap-2 border-t border-border bg-card p-3", className)}
+      className={cn(
+        "sticky bottom-0 flex flex-col gap-2 border-t border-border bg-card p-3 shrink-0",
+        className,
+      )}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -95,7 +98,7 @@ export function SessionComposer({ rootTaskId, latestLeafTaskId, className }: Ses
         }
         disabled={!userId || createTask.isPending}
         rows={3}
-        className="resize-none"
+        className="min-h-[72px] max-h-[200px] resize-none overflow-y-auto"
       />
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] text-muted-foreground">

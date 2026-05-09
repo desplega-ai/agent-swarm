@@ -59,20 +59,24 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
         side="right"
         className="w-full sm:max-w-2xl flex flex-col gap-0 p-0 overflow-hidden"
       >
-        <SheetHeader className="border-b border-border px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex flex-col gap-1 min-w-0">
+        <SheetHeader className="border-b border-border pl-4 pr-12 py-3">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="flex flex-col gap-1 min-w-0 flex-1">
               <SheetTitle className="text-sm font-medium truncate min-w-0">
                 {task?.task ?? `Task ${taskId.slice(0, 8)}…`}
               </SheetTitle>
-              <SheetDescription className="text-xs font-mono text-muted-foreground">
+              <SheetDescription className="text-xs font-mono text-muted-foreground truncate">
                 {taskId}
               </SheetDescription>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {task ? <StatusBadge status={task.status} /> : null}
-              <Button asChild variant="ghost" size="sm">
-                <Link to={`/tasks/${taskId}`} aria-label="Open task detail page">
+              <Button asChild variant="ghost" size="icon" className="h-7 w-7">
+                <Link
+                  to={`/tasks/${taskId}`}
+                  aria-label="Open task detail page"
+                  title="Open task detail page"
+                >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </Link>
               </Button>
