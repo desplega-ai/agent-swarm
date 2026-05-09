@@ -9,6 +9,7 @@ import {
   getDb,
   getLogsByTaskId,
   getPausedTasksForAgent,
+  getLeadAgent,
   getTaskById,
   getTasksCount,
   getUserById,
@@ -302,9 +303,19 @@ export async function handleTasks(
       requestedByUserId = undefined;
     }
 
+    // Default agent for ingress-created tasks: when no explicit `agentId` and
+    // no `parentTaskId`, route to the lead agent so the session has an owner
+    // immediately rather than sitting unassigned. Mirrors Slack's behaviour
+    // (slack/actions.ts uses `agentId: lead?.id`).
+    let defaultAgentId = parsed.body.agentId || undefined;
+    if (!defaultAgentId && !parsed.body.parentTaskId) {
+      const lead = getLeadAgent();
+      if (lead) defaultAgentId = lead.id;
+    }
+
     try {
       const task = createTaskWithSiblingAwareness(parsed.body.task, {
-        agentId: parsed.body.agentId || undefined,
+        agentId: defaultAgentId,
         creatorAgentId: myAgentId || undefined,
         taskType: parsed.body.taskType || undefined,
         tags: parsed.body.tags || undefined,
