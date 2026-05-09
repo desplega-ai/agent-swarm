@@ -203,19 +203,21 @@ function SetupRow({
 // ─── Tour-completion gate ────────────────────────────────────────────────────
 
 /**
- * The four MVP milestones from the brainstorm: harness, any integration
- * verified, workers, first_task. We treat the "any integration" leg as
+ * The MVP milestones we surface in the home checklist: harness, any
+ * integration verified, first_task. We treat the "any integration" leg as
  * verified iff at least one of {slack, github, linear, jira} is verified.
+ *
+ * `workers` is intentionally not part of this gate — fleet status is
+ * tracked elsewhere (header / dashboard) and shouldn't gate the home tour.
  */
 function isTourComplete(setup: SetupMilestone[]): boolean {
   const byId = new Map(setup.map((m) => [m.id, m]));
   const harnessOk = byId.get("harness")?.state === "verified";
-  const workersOk = byId.get("workers")?.state === "verified";
   const firstTaskOk = byId.get("first_task")?.state === "verified";
   const anyIntegrationOk = (["slack", "github", "linear", "jira"] as const).some(
     (id) => byId.get(id)?.state === "verified",
   );
-  return harnessOk && workersOk && firstTaskOk && anyIntegrationOk;
+  return harnessOk && firstTaskOk && anyIntegrationOk;
 }
 
 // ─── SetupChecklist ──────────────────────────────────────────────────────────
@@ -231,7 +233,6 @@ export function SetupChecklist({ setup, harnessProvider }: SetupChecklistProps) 
   const harnessRow = setup.find((m) => m.id === "harness");
   const slackRow = setup.find((m) => m.id === "slack");
   const githubRow = setup.find((m) => m.id === "github");
-  const workersRow = setup.find((m) => m.id === "workers");
   const firstTaskRow = setup.find((m) => m.id === "first_task");
 
   // Tour-completion flag — sticky once set. The first time the user
@@ -320,7 +321,6 @@ export function SetupChecklist({ setup, harnessProvider }: SetupChecklistProps) 
               </a>
             </div>
 
-            {workersRow ? <SetupRow milestone={workersRow} harnessProvider={null} /> : null}
             {firstTaskRow ? <SetupRow milestone={firstTaskRow} harnessProvider={null} /> : null}
           </CardContent>
         </Card>

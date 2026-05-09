@@ -23,11 +23,11 @@ import {
   ExternalLink,
   ListTodo,
   Loader2,
+  MessageSquarePlus,
   Sparkles,
-  Users,
   X,
 } from "lucide-react";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import type { ProviderName, SetupMilestone, StatusResponse } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
@@ -88,6 +88,56 @@ function WelcomeCard({ status }: { status: StatusResponse }) {
   );
 }
 
+// ─── New-session shortcut ────────────────────────────────────────────────────
+
+/**
+ * Always-visible CTA card that drops you straight into a new session. The
+ * input is a passive prompt — pressing Enter or clicking the button forwards
+ * the typed text to `/sessions` via a query param, which the new-session
+ * composer reads on mount.
+ */
+function NewSessionShortcut() {
+  const navigate = useNavigate();
+  const [draft, setDraft] = useState("");
+  const submit = () => {
+    const trimmed = draft.trim();
+    if (trimmed.length === 0) {
+      navigate("/sessions");
+      return;
+    }
+    navigate(`/sessions?seed=${encodeURIComponent(trimmed)}`);
+  };
+  return (
+    <Card className="border-primary/30 bg-primary/[0.04]">
+      <CardContent className="p-4 flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <MessageSquarePlus className="h-4 w-4 text-primary" aria-hidden="true" />
+          <h2 className="text-sm font-semibold">What do you have in mind?</h2>
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+          className="flex items-center gap-2"
+        >
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Investigate a flaky test, draft a spec, kick off a research crew…"
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            aria-label="Describe what you want the swarm to do"
+          />
+          <Button type="submit" size="sm">
+            Start session <ArrowRight className="ml-1 h-3 w-3" aria-hidden="true" />
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 function HomePageContent() {
@@ -124,23 +174,20 @@ function HomePageContent() {
         {/* Welcome card (Phase 4) */}
         <WelcomeCard status={status} />
 
+        {/* Quick-start session shortcut — primary CTA on the home page. */}
+        <NewSessionShortcut />
+
         {/* Activity */}
         <section className="space-y-2">
           <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
             Activity
           </h2>
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
             <StatPanel
               icon={Crown}
               label="Leads online"
               value={activity.leads_online}
               tone={activity.leads_online > 0 ? "success" : "neutral"}
-            />
-            <StatPanel
-              icon={Users}
-              label="Agents online"
-              value={activity.agents_online}
-              tone={activity.agents_online > 0 ? "active" : "neutral"}
             />
             <StatPanel
               icon={ListTodo}

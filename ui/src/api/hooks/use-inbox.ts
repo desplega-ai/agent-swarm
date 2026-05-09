@@ -158,11 +158,14 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 export function useBrokenInbox(): BrokenInboxResult {
   const { userId } = useCurrentUser();
   // Phase 2 multi-status CSV: one call instead of two. `createdAfter` is
-  // server-side filtering on `agent_tasks.createdAt >= value`.
+  // server-side filtering on `agent_tasks.createdAt >= value`. `source: ["ui"]`
+  // restricts to human-initiated chat tasks — Lead-spawned subtasks (source=mcp)
+  // and other channels stay out of this dashboard bucket.
   const sevenDaysAgo = useMemo(() => new Date(Date.now() - SEVEN_DAYS_MS).toISOString(), []);
   const tasksQ = useTasks({
     status: "failed,cancelled",
     createdAfter: sevenDaysAgo,
+    source: ["ui"],
     limit: 100,
   });
   const stateQ = useInboxState({ userId });
@@ -216,8 +219,9 @@ export interface ToReadInboxResult {
 
 export function useToReadInbox(): ToReadInboxResult {
   const { userId } = useCurrentUser();
-  // Cached query — shared with the `/sessions` sidebar (Phase 4).
-  const sessionsQ = useSessions({ limit: 50 });
+  // `source: ["ui"]` matches the `/sessions` sidebar default — only
+  // human-initiated chat sessions show up in this bucket.
+  const sessionsQ = useSessions({ limit: 50, source: ["ui"] });
   const stateQ = useInboxState({ userId });
   const now = Date.now();
 

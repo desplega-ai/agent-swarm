@@ -362,6 +362,24 @@ fi
 
 # ---- agent-fs registration ----
 if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_ID" ]; then
+  # Wait until agent-fs is reachable. compose-template adds
+  # `depends_on: agent-fs: service_healthy` so this should be fast (<5s),
+  # but keep a short retry loop so a transient hiccup doesn't silently
+  # blackhole AGENT_FS_SHARED_ORG_ID into "" — that's the symptom we
+  # spent half a day debugging.
+  AF_HEALTH_RETRIES=0
+  AF_HEALTH_MAX=30  # ~30s @ 1s intervals
+  while [ "$AF_HEALTH_RETRIES" -lt "$AF_HEALTH_MAX" ]; do
+    if curl -sf -o /dev/null -m 2 "${AGENT_FS_API_URL}/health" 2>/dev/null; then
+      break
+    fi
+    AF_HEALTH_RETRIES=$((AF_HEALTH_RETRIES + 1))
+    sleep 1
+  done
+  if [ "$AF_HEALTH_RETRIES" -ge "$AF_HEALTH_MAX" ]; then
+    echo "[agent-fs] WARN: agent-fs at $AGENT_FS_API_URL did not become healthy after ${AF_HEALTH_MAX}s — proceeding anyway"
+  fi
+
   if [ -z "$AGENT_FS_API_KEY" ]; then
     echo "[agent-fs] Registering with agent-fs at $AGENT_FS_API_URL..."
     AF_EMAIL="${AGENT_EMAIL:-${AGENT_ID}@swarm.local}"

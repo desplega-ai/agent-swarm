@@ -23,6 +23,7 @@ import {
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { telemetry } from "../telemetry";
 import {
+  type AgentTaskSource,
   AgentTaskSourceSchema,
   type AgentTaskStatus,
   AgentTaskStatusSchema,
@@ -48,6 +49,8 @@ const listTasks = route({
     includeHeartbeat: z.enum(["true", "false"]).optional(),
     /** ISO 8601 — return only tasks created on/after this timestamp. */
     createdAfter: z.string().datetime().optional(),
+    /** Comma-separated source filter (e.g. `ui,slack`). Omit to include all. */
+    source: z.string().optional(),
     limit: z.coerce.number().int().optional(),
     offset: z.coerce.number().int().optional(),
   }),
@@ -272,6 +275,24 @@ export async function handleTasks(
       status = validated.length === 1 ? validated[0] : validated;
     }
 
+    let source: AgentTaskSource[] | undefined;
+    if (parsed.query.source) {
+      const tokens = parsed.query.source
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const validated: AgentTaskSource[] = [];
+      for (const tok of tokens) {
+        const result = AgentTaskSourceSchema.safeParse(tok);
+        if (!result.success) {
+          jsonError(res, `Invalid source token: ${tok}`, 400);
+          return true;
+        }
+        validated.push(result.data);
+      }
+      if (validated.length > 0) source = validated;
+    }
+
     const filters = {
       status,
       agentId: parsed.query.agentId || undefined,
@@ -279,6 +300,7 @@ export async function handleTasks(
       search: parsed.query.search || undefined,
       includeHeartbeat: parsed.query.includeHeartbeat === "true" || undefined,
       createdAfter: parsed.query.createdAfter || undefined,
+      source,
       limit: parsed.query.limit,
       offset: parsed.query.offset,
     };

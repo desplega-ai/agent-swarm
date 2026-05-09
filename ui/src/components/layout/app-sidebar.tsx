@@ -141,7 +141,38 @@ export function AppSidebar() {
           if (items.length === 0) return null;
           return (
             <SidebarGroup key={group.label}>
-              <CollapsibleSection title={group.label} defaultOpen>
+              {/* Section title is hidden in icon-collapsed mode — the items
+                  themselves stay so you still get the navigation, just
+                  without the truncated "COR / AI / OPE…" labels. */}
+              <div className="group-data-[collapsible=icon]:hidden">
+                <CollapsibleSection title={group.label} defaultOpen>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {items.map((item) => {
+                        const isActive =
+                          item.path === "/"
+                            ? location.pathname === "/"
+                            : location.pathname.startsWith(item.path);
+                        const gated = item.gate?.minVersion === "1.76.0" && !sessionsGate.supported;
+                        if (gated) return null;
+                        return (
+                          <SidebarMenuItem key={item.path}>
+                            <SidebarMenuButton asChild isActive={isActive}>
+                              <NavLink to={item.path} end={item.path === "/"}>
+                                <item.icon className="size-4" />
+                                <span>{item.title}</span>
+                              </NavLink>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        );
+                      })}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </CollapsibleSection>
+              </div>
+              {/* Icon-only mirror — rendered only when sidebar is collapsed.
+                  Same items, no section header chrome. */}
+              <div className="hidden group-data-[collapsible=icon]:block">
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {items.map((item) => {
@@ -149,14 +180,11 @@ export function AppSidebar() {
                         item.path === "/"
                           ? location.pathname === "/"
                           : location.pathname.startsWith(item.path);
-                      // Soft-degrade gated entries (Phase 4 ≥1.76.0): hide
-                      // entirely when the API doesn't meet the minimum
-                      // version, rather than rendering a disabled stub.
                       const gated = item.gate?.minVersion === "1.76.0" && !sessionsGate.supported;
                       if (gated) return null;
                       return (
                         <SidebarMenuItem key={item.path}>
-                          <SidebarMenuButton asChild isActive={isActive}>
+                          <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
                             <NavLink to={item.path} end={item.path === "/"}>
                               <item.icon className="size-4" />
                               <span>{item.title}</span>
@@ -167,7 +195,7 @@ export function AppSidebar() {
                     })}
                   </SidebarMenu>
                 </SidebarGroupContent>
-              </CollapsibleSection>
+              </div>
             </SidebarGroup>
           );
         })}

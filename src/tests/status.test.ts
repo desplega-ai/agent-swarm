@@ -732,12 +732,11 @@ describe("computeHealth (Phase 2)", () => {
     expect(payload.health).toBe("degraded");
   });
 
-  test("`degraded` when workers are `configured` (agents exist, no recent heartbeat)", () => {
+  test("`ok` when workers are `configured` (heartbeat drift is a runtime concern, not setup health)", () => {
+    // Workers in `configured` state means agents exist but haven't posted a
+    // heartbeat in the last 5 minutes. This is surfaced on /agents and the
+    // dashboard canvas — it should NOT degrade the header health dot.
     const lead = createAgent({ name: "lead-d", isLead: true, status: "idle", capabilities: [] });
-    // No updateAgentActivity → workers row stays `configured`, not `verified`.
-    // Seed lead's cred_status as `verified` (live test passed) so harness
-    // doesn't break the rollup. Then workers === configured alone pushes
-    // health to degraded.
     seedCredStatus(lead.id, "claude", {
       ready: true,
       satisfiedBy: "env",
@@ -745,7 +744,7 @@ describe("computeHealth (Phase 2)", () => {
     });
     const payload = buildStatusPayload();
     expect(getMilestone(payload, "workers").state).toBe("configured");
-    expect(payload.health).toBe("degraded");
+    expect(payload.health).toBe("ok");
   });
 
   test("`ok` when harness verified and workers verified (no other integration is `configured`)", () => {

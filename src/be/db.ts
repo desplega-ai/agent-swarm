@@ -1332,6 +1332,8 @@ export interface TaskFilters {
   taskType?: string;
   tags?: string[];
   scheduleId?: string;
+  /** Filter to tasks whose `source` is in this list. Empty/undefined → no filter. */
+  source?: AgentTaskSource[];
   /** ISO 8601 timestamp; only return tasks where createdAt >= this. */
   createdAfter?: string;
   limit?: number;
@@ -1396,6 +1398,12 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   if (filters?.scheduleId) {
     conditions.push("scheduleId = ?");
     params.push(filters.scheduleId);
+  }
+
+  if (filters?.source && filters.source.length > 0) {
+    const placeholders = filters.source.map(() => "?").join(", ");
+    conditions.push(`source IN (${placeholders})`);
+    for (const s of filters.source) params.push(s);
   }
 
   if (filters?.createdAfter) {
@@ -1488,6 +1496,12 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   if (filters?.scheduleId) {
     conditions.push("scheduleId = ?");
     params.push(filters.scheduleId);
+  }
+
+  if (filters?.source && filters.source.length > 0) {
+    const placeholders = filters.source.map(() => "?").join(", ");
+    conditions.push(`source IN (${placeholders})`);
+    for (const s of filters.source) params.push(s);
   }
 
   if (filters?.createdAfter) {

@@ -207,6 +207,8 @@ class ApiClient {
     offset?: number;
     /** Phase 2 (≥1.76.0): ISO 8601 timestamp; backend filters createdAt >= value. */
     createdAfter?: string;
+    /** Filter to tasks whose `source` is in this list. Empty/undefined → all. */
+    source?: string[];
   }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -217,6 +219,8 @@ class ApiClient {
     if (filters?.limit != null) params.set("limit", String(filters.limit));
     if (filters?.offset != null) params.set("offset", String(filters.offset));
     if (filters?.createdAfter) params.set("createdAfter", filters.createdAfter);
+    if (filters?.source && filters.source.length > 0)
+      params.set("source", filters.source.join(","));
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });

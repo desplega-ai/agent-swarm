@@ -141,9 +141,11 @@ export function InboxPanel({ className }: { className?: string }) {
     items: toStart.items,
     isLoading: toStart.isLoading,
     activate: (it) => {
-      // Per file header: navigate to `TasksPage` with prefill query params.
-      // The existing `?new=true` wiring auto-opens the dialog.
-      navigate(`/tasks?new=true&prefill=${encodeURIComponent(it.template.id)}`);
+      // Open the new-session view with the template's id pre-fed via query
+      // param — the composer reads `?prefill=<templateId>` and seeds itself
+      // from the template's prompt so submitting starts a brand-new session
+      // chained to the Lead.
+      navigate(`/sessions?prefill=${encodeURIComponent(it.template.id)}`);
     },
     cardTone: () => "border-l-2 border-l-status-neutral",
   };

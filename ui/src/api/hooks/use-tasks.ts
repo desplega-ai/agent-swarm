@@ -11,6 +11,8 @@ export interface TaskFilters {
   offset?: number;
   /** Phase 2 (≥1.76.0): ISO 8601 timestamp; backend filters createdAt >= value. */
   createdAfter?: string;
+  /** Filter to tasks whose `source` is in this list. Empty/undefined → all. */
+  source?: string[];
 }
 
 export function useTasks(filters?: TaskFilters) {
@@ -21,11 +23,12 @@ export function useTasks(filters?: TaskFilters) {
   });
 }
 
-export function useTask(id: string) {
+export function useTask(id: string, opts?: { refetchInterval?: number | false }) {
   return useQuery({
     queryKey: ["task", id],
     queryFn: () => api.fetchTask(id),
     enabled: !!id,
+    refetchInterval: opts?.refetchInterval,
   });
 }
 

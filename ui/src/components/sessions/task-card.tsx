@@ -25,6 +25,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { cn, formatRelativeTime, normalizeNewlines } from "@/lib/utils";
+import { ChainOfThought } from "./chain-of-thought";
 import { TaskDetailSheet } from "./task-detail-sheet";
 
 export interface TaskCardProps {
@@ -39,6 +40,13 @@ export interface TaskCardProps {
   /** Parent task's agentId — used to render a "via {ParentAgent}" caption
    *  when work was delegated across agents. Set by the timeline. */
   parentAgentId?: string | null;
+  /**
+   * Skip rendering `<TaskOutcome>` inside the card. Used by the timeline
+   * for parent tasks that finished after their direct children — the
+   * outcome is rendered later, attached to the closing chip, so it lands
+   * in chronological position instead of at the top of the parent's row.
+   */
+  deferOutput?: boolean;
   className?: string;
 }
 
@@ -68,6 +76,7 @@ export function TaskCard({
   hideTaskText,
   insideParallelGroup,
   parentAgentId,
+  deferOutput,
   className,
 }: TaskCardProps) {
   const queryClient = useQueryClient();
@@ -138,11 +147,34 @@ export function TaskCard({
             <span aria-hidden="true" className="text-muted-foreground">
               ·
             </span>
-            <span className="text-muted-foreground whitespace-nowrap">
+            <span
+              className="text-muted-foreground whitespace-nowrap"
+              title={`Started ${new Date(task.createdAt).toLocaleString()}`}
+            >
               {formatRelativeTime(task.createdAt)}
             </span>
+            {/* Finish-time hint for terminal turns — chains can complete out
+                of chronological order (a parent's review aggregates after its
+                children finish), so the start time alone is misleading. */}
+            {(task.status === "completed" ||
+              task.status === "failed" ||
+              task.status === "cancelled") &&
+            task.lastUpdatedAt &&
+            task.lastUpdatedAt !== task.createdAt ? (
+              <>
+                <span aria-hidden="true" className="text-muted-foreground">
+                  ·
+                </span>
+                <span
+                  className="text-muted-foreground/70 whitespace-nowrap"
+                  title={`Finished ${new Date(task.lastUpdatedAt).toLocaleString()}`}
+                >
+                  finished {formatRelativeTime(task.lastUpdatedAt)}
+                </span>
+              </>
+            ) : null}
             {showPill ? <StatusBadge status={task.status} /> : null}
-            <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+            <div className="ml-auto flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
               <Button
                 size="icon"
                 variant="ghost"
@@ -162,13 +194,15 @@ export function TaskCard({
             </p>
           ) : null}
 
-          {hideTaskText ? null : (
-            <blockquote className="border-l-2 border-border pl-3 py-0.5 text-xs text-muted-foreground italic min-w-0 break-words whitespace-pre-wrap">
-              {task.task}
-            </blockquote>
-          )}
+          {hideTaskText ? null : <TaskBrief text={task.task} />}
 
-          <TaskOutcome task={task} fallbackLines={summaryLines} />
+          {/* Activity stream — always rendered so the user keeps the
+              breadcrumb of "what the agent did". Active tasks show it
+              expanded with a shimmering live step; terminal tasks show a
+              collapsed one-liner that expands on click. */}
+          <ChainOfThought taskId={task.id} status={task.status} />
+
+          {deferOutput ? null : <TaskOutcome task={task} fallbackLines={summaryLines} />}
         </div>
       </article>
 
@@ -177,7 +211,49 @@ export function TaskCard({
   );
 }
 
-function TaskOutcome({ task, fallbackLines }: { task: AgentTask; fallbackLines: string[] }) {
+/**
+ * The "brief" rendered for non-user-typed turns — Lead-spawned subtasks
+ * etc. Renders inside a left-rule blockquote in italic muted text. Long
+ * briefs (>3 visual lines) clamp by default with a Show more / Show less
+ * toggle so the timeline doesn't drown in delegation prompts.
+ */
+function TaskBrief({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  // Cheap "is long" heuristic — line-clamp can't tell us itself without DOM
+  // measurement, so trigger the toggle for either ≥3 newlines or ≥240 chars.
+  const isLong = text.length > 240 || text.split("\n").length > 3;
+  return (
+    <blockquote className="border-l-2 border-border pl-3 py-0.5 text-xs text-muted-foreground italic min-w-0 break-words">
+      <span
+        className={cn(
+          "block whitespace-pre-wrap",
+          !expanded && isLong && "line-clamp-3",
+        )}
+      >
+        {text}
+      </span>
+      {isLong ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="not-italic text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors mt-1"
+          aria-expanded={expanded}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </blockquote>
+  );
+}
+
+export function TaskOutcome({
+  task,
+  fallbackLines,
+}: {
+  task: AgentTask;
+  fallbackLines?: string[];
+}) {
+  fallbackLines = fallbackLines ?? [];
   if (
     (task.status === "failed" || task.status === "cancelled") &&
     task.failureReason &&
@@ -194,6 +270,9 @@ function TaskOutcome({ task, fallbackLines }: { task: AgentTask; fallbackLines: 
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
     return <OutcomeProse text={task.output} />;
   }
+  // The chain-of-thought above already covers active states — only fall
+  // through to the cached summaryLines as a final fallback when nothing
+  // else has surfaced.
   if (fallbackLines.length === 0) return null;
   return (
     <ul className="text-xs text-muted-foreground space-y-0.5 italic">
@@ -222,7 +301,7 @@ function OutcomeProse({ text }: { text: string }) {
         size="icon"
         variant="ghost"
         onClick={() => copy(trimmed)}
-        className="absolute top-0 right-0 h-6 w-6 opacity-0 group-hover/outcome:opacity-70 hover:opacity-100 transition-opacity"
+        className="absolute top-0 right-0 h-6 w-6 opacity-70 md:opacity-0 md:group-hover/outcome:opacity-70 hover:opacity-100 transition-opacity"
         title={copied ? "Copied" : "Copy output"}
         aria-label={copied ? "Copied" : "Copy output to clipboard"}
       >

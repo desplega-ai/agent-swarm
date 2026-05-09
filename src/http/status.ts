@@ -518,19 +518,23 @@ function buildSetup(): SetupMilestone[] {
 // ─── Health aggregate (Phase 2) ──────────────────────────────────────────────
 
 /**
- * Roll the 7-milestone setup state into a single tri-state health value.
+ * Roll the setup state into a single tri-state health value used by the
+ * header dot.
  *
  * Decision matrix:
  * - Harness `unverified` (no creds at all) → `broken` — the swarm cannot run a task.
  * - Workers `unverified` (no agents ever) → `broken` — same reason.
  * - Harness `configured` (creds present, never live-tested) → `degraded`.
- * - Workers `configured` (agents exist but no recent heartbeat) → `degraded`.
  * - Any of {slack, github, linear, jira} `configured` (i.e. half-set-up) → `degraded`.
  * - Otherwise → `ok`.
  *
- * Note: integrations in `unverified` are NOT degrading on their own — most
- * deployments don't connect every integration. They only nudge the rollup if
- * paired with another integration in `configured` (the brainstorm contract).
+ * Notes:
+ * - Worker `configured` (fleet exists but missed recent heartbeats) does NOT
+ *   degrade the rollup. Heartbeat drift is a runtime concern surfaced on the
+ *   /agents page and the dashboard canvas — not a setup health signal.
+ * - Integrations in `unverified` are NOT degrading on their own — most
+ *   deployments don't connect every integration. They only nudge the rollup if
+ *   paired with another integration in `configured` (the brainstorm contract).
  */
 export function computeHealth(setup: SetupMilestone[]): StatusHealth {
   const byId = new Map(setup.map((m) => [m.id, m] as const));
@@ -543,7 +547,6 @@ export function computeHealth(setup: SetupMilestone[]): StatusHealth {
 
   // `degraded` rules.
   if (harness.state === "configured") return "degraded";
-  if (workers.state === "configured") return "degraded";
 
   for (const id of ["slack", "github", "linear", "jira"] as const) {
     const m = byId.get(id);

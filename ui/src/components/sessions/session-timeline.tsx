@@ -12,13 +12,96 @@
  *      <ParallelGroup> with a visible left rail and "N in parallel" header.
  */
 
-import { MessageSquarePlus } from "lucide-react";
+import { CornerLeftUp, MessageSquarePlus } from "lucide-react";
 import { useMemo } from "react";
+import { useAgent } from "@/api/hooks/use-agents";
 import type { AgentTask } from "@/api/types";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
-import { cn } from "@/lib/utils";
-import { ParallelGroup, TaskCard } from "./task-card";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import { ParallelGroup, TaskCard, TaskOutcome } from "./task-card";
 import { UserPromptBubble } from "./user-prompt-bubble";
+
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+/**
+ * Quiet closing block rendered after a parent task's direct children when
+ * the parent itself reached a terminal state and finished AFTER its
+ * children. The block has two parts:
+ *   1. A small chip header — "↩ Lead closed this fork · finished Xm ago"
+ *   2. The parent's actual outcome (`<TaskOutcome>`) directly under the
+ *      chip. Since the parent rendered its row at the top of the fork
+ *      WITHOUT its outcome (`deferOutput`), the outcome lands here in its
+ *      true chronological position.
+ */
+function ParentClosingChip({ parent }: { parent: AgentTask }) {
+  const { data: agent } = useAgent(parent.agentId ?? "");
+  const name = agent?.name ?? (parent.agentId ? `${parent.agentId.slice(0, 8)}…` : "Agent");
+  return (
+    <div data-slot="parent-closing-chip" className="ml-9 mt-1 flex flex-col gap-1.5 min-w-0">
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground/80">
+        <CornerLeftUp className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <AgentAvatar
+          agentId={parent.agentId}
+          agentName={agent?.name}
+          size="xs"
+          className="shrink-0"
+        />
+        <span>
+          <span className="text-foreground/80 font-medium">{name}</span>
+          {parent.status === "completed"
+            ? " closed this fork"
+            : parent.status === "failed"
+              ? " gave up here"
+              : " was cancelled"}
+          <span className="text-muted-foreground/70">
+            {" · finished "}
+            <time
+              dateTime={parent.lastUpdatedAt}
+              title={new Date(parent.lastUpdatedAt).toLocaleString()}
+            >
+              {formatRelativeTime(parent.lastUpdatedAt)}
+            </time>
+          </span>
+        </span>
+      </div>
+      {/* Parent's actual outcome — rendered here instead of inside the
+          parent's TaskCard so it shows up in chronological position. */}
+      <div className="pl-5 min-w-0">
+        <TaskOutcome task={parent} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * `true` when the parent has at least one direct child AND its own
+ * `lastUpdatedAt` lands strictly later than every direct child's
+ * `lastUpdatedAt`.
+ *
+ * We deliberately ONLY check direct children. Indirect descendants don't
+ * count because in this codebase every follow-up turn chains under the
+ * previous task via `parentTaskId` — so a 30-minutes-later "Nice" reply
+ * becomes a descendant of the original Lead task and would otherwise
+ * suppress the chip. The semantics we want is "parent closed *its own*
+ * wait loop after its direct children", which matches direct fan-in only.
+ */
+function parentClosedAfterDirectChildren(
+  parent: AgentTask,
+  childrenByParent: Map<string, AgentTask[]>,
+): boolean {
+  if (!TERMINAL_STATUSES.has(parent.status)) return false;
+  const directChildren = childrenByParent.get(parent.id) ?? [];
+  if (directChildren.length === 0) return false;
+  const parentTs = Date.parse(parent.lastUpdatedAt);
+  if (!Number.isFinite(parentTs)) return false;
+  for (const child of directChildren) {
+    const ts = Date.parse(child.lastUpdatedAt);
+    if (!Number.isFinite(ts)) return false;
+    if (ts >= parentTs) return false;
+  }
+  return true;
+}
 
 export interface SessionTimelineProps {
   rootTaskId: string;
@@ -75,11 +158,15 @@ function TaskTurn({
   task,
   parentAgentId,
   insideParallelGroup,
+  deferOutput,
 }: {
   task: AgentTask;
   /** Agent who owned the parent task — used to render "via X" delegation hint. */
   parentAgentId?: string | null;
   insideParallelGroup?: boolean;
+  /** When true, the task's `<TaskOutcome>` is suppressed in this row — it
+   *  will be re-rendered later inside the closing chip. */
+  deferOutput?: boolean;
 }) {
   const isUserTyped = task.source === "ui";
   return (
@@ -96,6 +183,7 @@ function TaskTurn({
         hideTaskText={isUserTyped}
         insideParallelGroup={insideParallelGroup}
         parentAgentId={parentAgentId}
+        deferOutput={deferOutput}
       />
     </>
   );
@@ -111,11 +199,20 @@ function ChildrenChain({ task, childrenByParent }: SubtreeProps) {
   if (children.length === 0) return null;
   const parentAgentId = task.agentId;
 
+  // Closer renders RIGHT AFTER the direct children — before recursing into
+  // their downstream chains. That way "↩ Lead closed this fork" lands
+  // immediately under the child(ren) the parent was waiting on. Whenever
+  // the closer fires we also defer the parent's TaskOutcome to render
+  // attached to the closer (chronologically correct).
+  const showCloser = parentClosedAfterDirectChildren(task, childrenByParent);
+
   if (children.length === 1) {
     const child = children[0];
+    const childDefers = parentClosedAfterDirectChildren(child, childrenByParent);
     return (
       <>
-        <TaskTurn task={child} parentAgentId={parentAgentId} />
+        <TaskTurn task={child} parentAgentId={parentAgentId} deferOutput={childDefers} />
+        {showCloser ? <ParentClosingChip parent={task} /> : null}
         <ChildrenChain task={child} childrenByParent={childrenByParent} />
       </>
     );
@@ -124,10 +221,20 @@ function ChildrenChain({ task, childrenByParent }: SubtreeProps) {
   return (
     <>
       <ParallelGroup count={children.length}>
-        {children.map((child) => (
-          <TaskTurn key={child.id} task={child} parentAgentId={parentAgentId} insideParallelGroup />
-        ))}
+        {children.map((child) => {
+          const childDefers = parentClosedAfterDirectChildren(child, childrenByParent);
+          return (
+            <TaskTurn
+              key={child.id}
+              task={child}
+              parentAgentId={parentAgentId}
+              insideParallelGroup
+              deferOutput={childDefers}
+            />
+          );
+        })}
       </ParallelGroup>
+      {showCloser ? <ParentClosingChip parent={task} /> : null}
       {children.map((child) => (
         <ChildrenChain key={child.id} task={child} childrenByParent={childrenByParent} />
       ))}
@@ -158,6 +265,7 @@ export function SessionTimeline({ rootTaskId, chain, className }: SessionTimelin
 
   const root = tree.root;
   const hasChildren = (tree.childrenByParent.get(root.id)?.length ?? 0) > 0;
+  const rootDefers = parentClosedAfterDirectChildren(root, tree.childrenByParent);
 
   return (
     <div className={cn("max-w-3xl mx-auto w-full", className)}>
@@ -165,7 +273,7 @@ export function SessionTimeline({ rootTaskId, chain, className }: SessionTimelin
           (so user bubbles don't sit on a stray line). Adjacent rows touch
           via padding-bottom on each row, forming a continuous spine. */}
       <div className="flex flex-col">
-        <TaskTurn task={root} />
+        <TaskTurn task={root} deferOutput={rootDefers} />
         <ChildrenChain task={root} childrenByParent={tree.childrenByParent} />
 
         {!hasChildren && root.status === "completed" ? (

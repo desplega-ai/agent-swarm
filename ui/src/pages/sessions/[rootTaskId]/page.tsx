@@ -8,7 +8,8 @@
  *   - A floating <ComposerDock>-backed <SessionComposer> at the bottom.
  */
 
-import { useMemo } from "react";
+import { ChevronDown } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -19,7 +20,9 @@ import { SessionComposer } from "@/components/sessions/session-composer";
 import { SessionTimeline } from "@/components/sessions/session-timeline";
 import { SessionsShell } from "@/components/sessions/sessions-shell";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAutoScroll } from "@/hooks/use-auto-scroll";
 
 const usdFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -46,6 +49,17 @@ export default function SessionDetailPage() {
   }, [detail, users]);
 
   const totalCost = costs?.reduce((sum, c) => sum + c.totalCostUsd, 0) ?? 0;
+
+  // Signature changes whenever the chain shape changes (new task) or any
+  // existing task's status/output updates. Stable when polling returns the
+  // same data, so auto-scroll doesn't fire on no-op refetches.
+  const chainSignature = useMemo(
+    () => detail?.chain.map((t) => `${t.id}:${t.status}:${t.lastUpdatedAt}`).join(",") ?? "",
+    [detail?.chain],
+  );
+
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const { isFollowing, scrollToBottom } = useAutoScroll(scrollEl, [chainSignature]);
 
   if (!gate.supported) {
     return (
@@ -104,21 +118,40 @@ export default function SessionDetailPage() {
         ) : null}
       </header>
 
-      {/* Timeline (scrollable) */}
-      <div className="flex-1 min-h-0 overflow-auto px-6 py-6">
-        {detailLoading ? (
-          <div className="flex flex-col gap-3 max-w-3xl mx-auto w-full">
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
-          </div>
-        ) : detail ? (
-          <SessionTimeline rootTaskId={rootTaskId} chain={detail.chain} />
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Couldn't load this session. It may have been deleted, or the API server is offline.
-          </p>
-        )}
+      {/* Timeline (scrollable) — wrapped in a relative container so the
+          "Jump to latest" button can float over its bottom-right corner
+          when the user has scrolled away from the tail. */}
+      <div className="relative flex-1 min-h-0">
+        <div ref={setScrollEl} className="absolute inset-0 overflow-auto px-6 py-6">
+          {detailLoading ? (
+            <div className="flex flex-col gap-3 max-w-3xl mx-auto w-full">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
+          ) : detail ? (
+            <SessionTimeline rootTaskId={rootTaskId} chain={detail.chain} />
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Couldn't load this session. It may have been deleted, or the API server is offline.
+            </p>
+          )}
+        </div>
+
+        {/* Floating "back to bottom" — only when user has scrolled up. */}
+        {!isFollowing ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={scrollToBottom}
+            className="absolute bottom-3 right-4 h-8 rounded-full px-3 shadow-md bg-card/90 backdrop-blur-sm"
+            aria-label="Jump to latest"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+            <span className="text-xs">Latest</span>
+          </Button>
+        ) : null}
       </div>
 
       {/* Composer dock pinned to bottom */}

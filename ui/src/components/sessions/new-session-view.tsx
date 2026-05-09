@@ -5,9 +5,10 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
+import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { Badge } from "@/components/ui/badge";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { ComposerDock } from "./composer-dock";
@@ -24,6 +25,32 @@ export function NewSessionView() {
   const queryClient = useQueryClient();
   const { userId } = useCurrentUser();
   const [draft, setDraft] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const prefillTemplateId = searchParams.get("prefill");
+  const seedText = searchParams.get("seed");
+
+  // ?seed=<text> — home page's "what do you have in mind?" shortcut forwards
+  // typed text directly. Strip the param so refreshing doesn't re-seed.
+  useEffect(() => {
+    if (!seedText) return;
+    setDraft(seedText);
+    const next = new URLSearchParams(searchParams);
+    next.delete("seed");
+    setSearchParams(next, { replace: true });
+  }, [seedText, searchParams, setSearchParams]);
+
+  // ?prefill=<templateId> — dashboard "To start" bucket. Look up the template
+  // and seed the composer with its prompt.
+  const templatesQ = useTaskTemplates({ kind: "task" });
+  useEffect(() => {
+    if (!prefillTemplateId || !templatesQ.data) return;
+    const tmpl = templatesQ.data.find((t) => t.id === prefillTemplateId);
+    if (!tmpl) return;
+    setDraft(tmpl.prompt);
+    const next = new URLSearchParams(searchParams);
+    next.delete("prefill");
+    setSearchParams(next, { replace: true });
+  }, [prefillTemplateId, templatesQ.data, searchParams, setSearchParams]);
 
   const create = useMutation({
     mutationFn: (input: { task: string; requestedByUserId?: string }) =>
