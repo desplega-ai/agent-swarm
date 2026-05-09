@@ -21,6 +21,7 @@ import { MessageSquarePlus } from "lucide-react";
 import { useMemo } from "react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
+import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask } from "@/api/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ParallelGroup, TaskCard } from "./task-card";
@@ -110,6 +111,12 @@ function ChildrenChain({ task, childrenByParent }: SubtreeProps) {
 
 export function SessionTimeline({ rootTaskId, chain, className }: SessionTimelineProps) {
   const tree = useMemo(() => buildTimelineTree(rootTaskId, chain), [rootTaskId, chain]);
+  const { data: users } = useUsers();
+  const requesterName = useMemo(() => {
+    const requestedByUserId = tree.root?.requestedByUserId;
+    if (!requestedByUserId || !users) return null;
+    return users.find((u) => u.id === requestedByUserId)?.name ?? null;
+  }, [tree.root, users]);
 
   if (tree.orphans.length > 0) {
     // Defensive — chain endpoint should never return foreign roots.
@@ -143,7 +150,7 @@ export function SessionTimeline({ rootTaskId, chain, className }: SessionTimelin
           className="min-w-0 overflow-hidden rounded-md border border-border bg-card px-4 py-3"
         >
           <header className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-            <span className="font-medium uppercase tracking-wider text-[9px]">User</span>
+            <span className="font-medium text-foreground">{requesterName ?? "User"}</span>
             <span aria-hidden="true">·</span>
             <span>{new Date(root.createdAt).toLocaleString()}</span>
           </header>

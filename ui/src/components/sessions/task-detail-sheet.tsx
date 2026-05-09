@@ -112,14 +112,37 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
           </span>
         </div>
 
-        {/* Transcript section — the ONLY scroll surface inside the sheet. */}
-        <section className="flex-1 min-h-0 flex flex-col">
-          <header className="border-b border-border px-4 py-2 shrink-0">
+        {/* Body — single scroll surface containing Outcome (if any) +
+            Transcript. The Sheet header / meta / section headers are
+            shrink-0 above; this div is the only thing that scrolls. */}
+        <div className="flex-1 min-h-0 overflow-auto">
+          {task &&
+          (task.status === "failed" || task.status === "cancelled") &&
+          task.failureReason &&
+          task.failureReason.trim().length > 0 ? (
+            <section className="border-b border-border px-4 py-3 flex flex-col gap-2">
+              <h4 className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-status-error-strong">
+                {task.status === "cancelled" ? "Cancelled" : "Failure"}
+              </h4>
+              <p className="text-xs text-status-error-strong whitespace-pre-wrap break-words">
+                {task.failureReason.trim()}
+              </p>
+            </section>
+          ) : null}
+
+          {task && task.status === "completed" && task.output && task.output.trim().length > 0 ? (
+            <section className="border-b border-border px-4 py-3 flex flex-col gap-2">
+              <h4 className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+                Output
+              </h4>
+              <p className="text-xs whitespace-pre-wrap break-words">{task.output.trim()}</p>
+            </section>
+          ) : null}
+
+          <section className="px-4 py-3 flex flex-col gap-2">
             <h4 className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
               Transcript
             </h4>
-          </header>
-          <div className="flex-1 min-h-0 overflow-auto px-4 py-3">
             {logsLoading ? (
               <Skeleton className="h-32 w-full" />
             ) : logs && logs.length > 0 ? (
@@ -127,8 +150,8 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
             ) : (
               <p className="text-xs text-muted-foreground italic">No transcript yet.</p>
             )}
-          </div>
-        </section>
+          </section>
+        </div>
       </SheetContent>
     </Sheet>
   );

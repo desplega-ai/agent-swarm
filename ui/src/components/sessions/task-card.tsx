@@ -106,7 +106,7 @@ export function TaskCard({ task, insideParallelGroup, isRoot, className }: TaskC
             <div className="flex items-center gap-1.5 min-w-0 flex-1">
               {isRoot ? (
                 <Badge variant="outline" size="tag" className="shrink-0">
-                  ROOT
+                  Session start
                 </Badge>
               ) : null}
               <p className="text-sm font-medium truncate min-w-0">{task.task}</p>
@@ -147,19 +147,27 @@ function TaskOutcomePreview({ task, fallbackLines }: { task: AgentTask; fallback
     task.failureReason &&
     task.failureReason.trim().length > 0
   ) {
-    const text = task.failureReason.trim();
     return (
-      <p className="text-xs text-status-error-strong line-clamp-3 whitespace-pre-wrap break-words mt-0.5">
-        {text.length > 200 ? `${text.slice(0, 200)}…` : text}
-      </p>
+      <div className="rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 mt-1">
+        <p className="text-[10px] uppercase tracking-wider text-status-error-strong font-mono mb-1">
+          {task.status === "cancelled" ? "Cancelled" : "Failure"}
+        </p>
+        <p className="text-xs text-status-error-strong whitespace-pre-wrap break-words">
+          {task.failureReason.trim()}
+        </p>
+      </div>
     );
   }
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
-    const text = task.output.trim();
     return (
-      <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap break-words mt-0.5">
-        {text.length > 200 ? `${text.slice(0, 200)}…` : text}
-      </p>
+      <div className="rounded-md border border-border bg-muted/30 px-3 py-2 mt-1">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-1">
+          Output
+        </p>
+        <p className="text-xs text-foreground whitespace-pre-wrap break-words">
+          {task.output.trim()}
+        </p>
+      </div>
     );
   }
   if (fallbackLines.length === 0) return null;
