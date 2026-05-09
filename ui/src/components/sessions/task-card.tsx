@@ -16,7 +16,7 @@
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, CornerDownRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, CornerDownRight, Maximize2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
@@ -24,7 +24,9 @@ import type { AgentTask, SessionLog } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { cn, formatRelativeTime, normalizeNewlines } from "@/lib/utils";
 import { TaskDetailSheet } from "./task-detail-sheet";
 
@@ -78,18 +80,8 @@ export function TaskCard({ task, insideParallelGroup, isRoot, className }: TaskC
     <>
       <Card
         data-slot="session-task-card"
-        onClick={() => setOpen(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setOpen(true);
-          }
-        }}
-        tabIndex={0}
-        role="button"
-        aria-label={`Open task ${task.id}`}
         className={cn(
-          "cursor-pointer transition-colors hover:bg-muted/30 py-3 gap-2",
+          "transition-colors py-3 gap-2",
           isRoot && "border-l-2 border-l-primary",
           insideParallelGroup && "border-0 shadow-none rounded-none bg-transparent py-2",
           className,
@@ -113,7 +105,19 @@ export function TaskCard({ task, insideParallelGroup, isRoot, className }: TaskC
               ) : null}
               <p className="text-sm font-medium truncate min-w-0">{task.task}</p>
             </div>
-            <StatusBadge status={task.status} className="shrink-0" />
+            <div className="flex items-center gap-1 shrink-0">
+              <StatusBadge status={task.status} />
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setOpen(true)}
+                className="h-7 w-7"
+                title="Open task details"
+                aria-label="Open task details"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -143,6 +147,56 @@ export function TaskCard({ task, insideParallelGroup, isRoot, className }: TaskC
  *   3. running with cached log lines → first 1-2 plain-prose log lines
  *      (JSON tool envelopes are skipped — see `summarizeLog`)
  */
+function OutcomeBlock({
+  label,
+  text,
+  tone,
+}: {
+  label: string;
+  text: string;
+  tone: "error" | "neutral";
+}) {
+  const { copied, copy } = useCopyToClipboard();
+  const trimmed = text.trim();
+  return (
+    <div
+      className={cn(
+        "rounded-md border px-3 py-2 mt-1 min-w-0 relative group",
+        tone === "error" ? "border-status-error/30 bg-status-error/5" : "border-border bg-muted/30",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <p
+          className={cn(
+            "text-[10px] uppercase tracking-wider font-mono",
+            tone === "error" ? "text-status-error-strong" : "text-muted-foreground",
+          )}
+        >
+          {label}
+        </p>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => copy(trimmed)}
+          className="h-6 w-6 -mr-1 opacity-60 hover:opacity-100"
+          title={copied ? "Copied" : "Copy output"}
+          aria-label={copied ? "Copied" : "Copy output to clipboard"}
+        >
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        </Button>
+      </div>
+      <div
+        className={cn(
+          "text-xs min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full",
+          tone === "error" ? "text-status-error-strong" : "text-foreground",
+        )}
+      >
+        <Streamdown>{normalizeNewlines(trimmed)}</Streamdown>
+      </div>
+    </div>
+  );
+}
+
 function TaskOutcomePreview({ task, fallbackLines }: { task: AgentTask; fallbackLines: string[] }) {
   if (
     (task.status === "failed" || task.status === "cancelled") &&
@@ -150,27 +204,15 @@ function TaskOutcomePreview({ task, fallbackLines }: { task: AgentTask; fallback
     task.failureReason.trim().length > 0
   ) {
     return (
-      <div className="rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 mt-1 min-w-0">
-        <p className="text-[10px] uppercase tracking-wider text-status-error-strong font-mono mb-1">
-          {task.status === "cancelled" ? "Cancelled" : "Failure"}
-        </p>
-        <div className="text-xs text-status-error-strong min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
-          <Streamdown>{normalizeNewlines(task.failureReason.trim())}</Streamdown>
-        </div>
-      </div>
+      <OutcomeBlock
+        label={task.status === "cancelled" ? "Cancelled" : "Failure"}
+        text={task.failureReason}
+        tone="error"
+      />
     );
   }
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
-    return (
-      <div className="rounded-md border border-border bg-muted/30 px-3 py-2 mt-1 min-w-0">
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-1">
-          Output
-        </p>
-        <div className="text-xs text-foreground min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
-          <Streamdown>{normalizeNewlines(task.output.trim())}</Streamdown>
-        </div>
-      </div>
-    );
+    return <OutcomeBlock label="Output" text={task.output} tone="neutral" />;
   }
   if (fallbackLines.length === 0) return null;
   return (
