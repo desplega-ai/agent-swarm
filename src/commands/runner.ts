@@ -25,6 +25,7 @@ import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import { parseRateLimitResetTime } from "../utils/error-tracker.ts";
+import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
@@ -209,6 +210,13 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
 interface ResolvedEnvResult {
   env: Record<string, string | undefined>;
   credentialSelections: CredentialSelection[];
+  /**
+   * Effective `HARNESS_PROVIDER` after layering swarm_config over the base
+   * env. Callers should prefer this over `process.env.HARNESS_PROVIDER` so
+   * that an operator's swarm_config row (repo > agent > global) actually
+   * takes effect on the worker.
+   */
+  resolvedProvider: ProviderName;
 }
 
 async function fetchResolvedEnv(
@@ -246,6 +254,8 @@ async function fetchResolvedEnv(
     }
   }
 
+  const resolvedProvider = resolveHarnessProvider(env, baseEnv);
+
   const credentialSelections = await resolveCredentialPools(env, {
     apiUrl,
     apiKey,
@@ -253,10 +263,13 @@ async function fetchResolvedEnv(
     // CLAUDE_CODE_OAUTH_TOKEN stamped on their task record (and vice
     // versa) just because both env vars happen to be set in the worker
     // container. See `PROVIDER_CREDENTIAL_VARS` in src/utils/credentials.ts.
-    provider: process.env.HARNESS_PROVIDER,
+    //
+    // Use the resolved provider (swarm_config > env) so an operator can flip
+    // the worker's harness from the dashboard without restarting the container.
+    provider: resolvedProvider,
   });
 
-  return { env, credentialSelections };
+  return { env, credentialSelections, resolvedProvider };
 }
 
 /** Tools that produce noise — skip auto-progress for these */
@@ -540,6 +553,12 @@ export async function ensureTaskFinished(
   exitCode: number,
   failureReason?: string,
   providerOutput?: string,
+  /**
+   * Active provider for this task. When provided, gates the structured-output
+   * fallback path correctly even if `process.env.HARNESS_PROVIDER` differs
+   * from the resolved swarm_config value. Falls back to env when omitted.
+   */
+  provider?: ProviderName,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
@@ -565,7 +584,7 @@ export async function ensureTaskFinished(
     body.output = providerOutput;
   } else {
     // Try structured output fallback if the task has an outputSchema
-    const adapterType = process.env.HARNESS_PROVIDER || "claude";
+    const adapterType = provider ?? process.env.HARNESS_PROVIDER ?? "claude";
     const fallback = await handleStructuredOutputFallback(config, taskId, adapterType);
 
     console.log(`[${role}] Task ${taskId.slice(0, 8)} fallback result: ${fallback.kind}`);
@@ -897,7 +916,15 @@ function setupShutdownHandlers(
               console.warn(
                 `[${role}] Failed to pause task ${taskId.slice(0, 8)}, marking as failed instead`,
               );
-              await ensureTaskFinished(apiConfig, role, taskId, 1);
+              await ensureTaskFinished(
+                apiConfig,
+                role,
+                taskId,
+                1,
+                undefined,
+                undefined,
+                state.harnessProvider,
+              );
             }
           }
         }
@@ -965,6 +992,14 @@ interface RunningTask {
 interface RunnerState {
   activeTasks: Map<string, RunningTask>;
   maxConcurrent: number;
+  /**
+   * Effective harness provider for this worker boot session — resolved
+   * from `swarm_config` (overlay) > `process.env.HARNESS_PROVIDER` > "claude".
+   * Used by error / cleanup paths so the structured-output fallback runs the
+   * right adapter even when env disagrees with swarm_config. Section 4
+   * (per-task live re-resolution) will mutate this between tasks.
+   */
+  harnessProvider: ProviderName;
 }
 
 /** Buffer for session logs */
@@ -1342,6 +1377,13 @@ async function registerAgent(opts: {
   role?: string;
   capabilities?: string[];
   maxTasks?: number;
+  /**
+   * Resolved harness provider (swarm_config > env > "claude"). Sent as both
+   * the legacy `provider` field and the canonical `harness_provider` column.
+   * Defaults to `process.env.HARNESS_PROVIDER || "claude"` for callers that
+   * haven't migrated to passing it explicitly.
+   */
+  harnessProvider?: ProviderName;
 }): Promise<void> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -1351,7 +1393,8 @@ async function registerAgent(opts: {
     headers.Authorization = `Bearer ${opts.apiKey}`;
   }
 
-  const provider = (process.env.HARNESS_PROVIDER || "claude") as ProviderName;
+  const provider: ProviderName =
+    opts.harnessProvider ?? ((process.env.HARNESS_PROVIDER || "claude") as ProviderName);
 
   // Phase 1.5 (cloud-personalization): also push the canonical
   // `harness_provider` field so the API can persist it in its own column
@@ -1359,7 +1402,7 @@ async function registerAgent(opts: {
   // (defaulting to "claude" when HARNESS_PROVIDER is unset) so agents that
   // don't explicitly set the env var still self-report instead of leaving
   // the column NULL — matches how `provider` already defaults above.
-  const harnessProvider = (process.env.HARNESS_PROVIDER?.trim() || "claude") as ProviderName;
+  const harnessProvider: ProviderName = provider;
 
   const response = await fetch(`${opts.apiUrl}/api/agents`, {
     method: "POST",
@@ -2200,6 +2243,7 @@ async function checkCompletedProcesses(
         result.exitCode,
         failureReason,
         result.output,
+        state.harnessProvider,
       );
 
       ensure({
@@ -2310,9 +2354,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Initialize Business-Use SDK for worker-side instrumentation
   initialize();
 
-  // Create provider adapter based on HARNESS_PROVIDER env var (default: claude)
-  const adapter = createProviderAdapter(process.env.HARNESS_PROVIDER || "claude");
-
   const sessionId = process.env.SESSION_ID || crypto.randomUUID().slice(0, 8);
   const baseLogDir = opts.logsDir || process.env.LOG_DIR || "/logs";
   const logDir = `${baseLogDir}/${sessionId}`;
@@ -2327,6 +2368,28 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const swarmUrl = process.env.SWARM_URL || "localhost";
+  const apiKey = process.env.API_KEY || "";
+
+  // Resolve the boot harness provider from swarm_config (repo > agent > global,
+  // overlaid on top of `process.env`). This is what selects the adapter for
+  // this worker's lifetime. On a fresh worker (agentId="unknown") only global
+  // swarm_config applies; once registered, an operator writing an agent-scoped
+  // HARNESS_PROVIDER row takes effect on the next reconciliation cycle (Section 4)
+  // or worker restart.
+  //
+  // Failures (network, API down, malformed value) fall back to env then "claude"
+  // so a swarm_config outage cannot wedge boot.
+  let bootProvider: ProviderName;
+  try {
+    bootProvider = (await fetchResolvedEnv(apiUrl, apiKey, agentId)).resolvedProvider;
+  } catch (err) {
+    console.warn(`[runner] fetchResolvedEnv failed at boot, falling back to env: ${err}`);
+    bootProvider = resolveHarnessProvider({}, process.env);
+  }
+  console.log(`[runner] Resolved HARNESS_PROVIDER: ${bootProvider}`);
+
+  // Create provider adapter using the resolved value.
+  const adapter = createProviderAdapter(bootProvider);
 
   // Configure HTTP-based template resolution (workers resolve via API, not local DB)
   if (process.env.API_KEY) {
@@ -2475,7 +2538,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   console.log(`[${role}] Total system prompt length: ${resolvedSystemPrompt.length} chars`);
 
   const isAiLoop = opts.aiLoop || process.env.AI_LOOP === "true";
-  const apiKey = process.env.API_KEY || "";
 
   // Constants for polling
   const PollIntervalMs = 2000; // 2 seconds between polls
@@ -2523,6 +2585,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     const state: RunnerState = {
       activeTasks: new Map(),
       maxConcurrent,
+      harnessProvider: bootProvider,
     };
 
     // Track tasks already signaled for cancellation to avoid repeated SIGTERM
@@ -2557,6 +2620,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         isLead,
         capabilities,
         maxTasks: maxConcurrent,
+        harnessProvider: bootProvider,
       });
       console.log(`[${role}] Registered as "${agentName}" (ID: ${agentId})`);
     } catch (error) {
@@ -2572,7 +2636,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // CRED_CHECK_DISABLE=1 opts out entirely: the worker trusts the operator
     // and starts polling immediately, with a NULL `cred_status` row that the
     // dashboard surfaces as "unreported."
-    const harnessProvider = process.env.HARNESS_PROVIDER || "claude";
+    const harnessProvider = bootProvider;
     cachedCredHarnessProvider = harnessProvider;
     if (isCredCheckDisabled(process.env)) {
       console.log(`[${role}] CRED_CHECK_DISABLE=1, skipping credential checks`);
@@ -3053,7 +3117,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             console.error(
               `[${role}] Failed to spawn process for resumed task ${task.id.slice(0, 8)}: ${errMsg}`,
             );
-            await ensureTaskFinished(apiConfig, role, task.id, 1, `Spawn failed: ${errMsg}`);
+            await ensureTaskFinished(
+              apiConfig,
+              role,
+              task.id,
+              1,
+              `Spawn failed: ${errMsg}`,
+              undefined,
+              state.harnessProvider,
+            );
             continue;
           }
 
@@ -3428,6 +3500,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 trigger.taskId,
                 1,
                 `Spawn failed: ${errMsg}`,
+                undefined,
+                state.harnessProvider,
               );
             }
             continue;

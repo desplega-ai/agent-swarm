@@ -20,7 +20,6 @@ import { Check, ChevronDown, ChevronRight, CircleDot, Sparkles } from "lucide-re
 import { useMemo, useState } from "react";
 import { useTask } from "@/api/hooks/use-tasks";
 import type { AgentLog, AgentTaskStatus } from "@/api/types";
-import { Button } from "@/components/ui/button";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 const ACTIVE_STATUSES = new Set<AgentTaskStatus>([
@@ -146,21 +145,20 @@ export function ChainOfThought({ taskId, status, className }: ChainOfThoughtProp
   return (
     <div className={cn("flex flex-col gap-1", className)} aria-live="polite">
       {!isActive ? (
-        <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-          <Sparkles className="h-3 w-3" aria-hidden="true" />
-          <span>Activity</span>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            onClick={() => setExpanded(false)}
-            className="h-4 w-4 ml-auto"
-            aria-label="Hide activity"
-            title="Hide activity"
-          >
-            <ChevronDown className="h-3 w-3" />
-          </Button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="group flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors text-left min-w-0 self-start"
+          aria-expanded={true}
+          aria-label={`Hide ${steps.length} activity steps`}
+        >
+          <ChevronDown
+            className="h-3 w-3 shrink-0 group-hover:text-foreground"
+            aria-hidden="true"
+          />
+          <Sparkles className="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />
+          <span>Activity · {steps.length}</span>
+        </button>
       ) : null}
       <ol className="flex flex-col gap-1 text-xs" aria-label="Agent reasoning">
         {steps.map((step, idx) => {

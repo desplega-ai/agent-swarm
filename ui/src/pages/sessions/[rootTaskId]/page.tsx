@@ -8,7 +8,7 @@
  *   - A floating <ComposerDock>-backed <SessionComposer> at the bottom.
  */
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Eye, EyeOff } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useSessionCosts } from "@/api/hooks/use-costs";
@@ -23,6 +23,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
 
 const usdFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -60,6 +61,21 @@ export default function SessionDetailPage() {
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isFollowing, scrollToBottom } = useAutoScroll(scrollEl, [chainSignature]);
+
+  // Off by default — internal handoff/review tasks (`source=system`,
+  // `taskType=follow-up`) are operational, not conversational. Power users
+  // can flip the toggle to see the full chain. Persisted per-deployment.
+  const [showInternalHandoffs, setShowInternalHandoffs] = useLocalToggle(
+    "sessions:show-internal-handoffs",
+    false,
+  );
+
+  // Show the toggle only when the chain actually contains hidden rows —
+  // otherwise it's a control with nothing to control.
+  const hasInternalHandoffs = useMemo(
+    () => detail?.chain.some((t) => t.source === "system" && t.taskType === "follow-up") ?? false,
+    [detail?.chain],
+  );
 
   if (!gate.supported) {
     return (
@@ -114,6 +130,26 @@ export default function SessionDetailPage() {
                 <span className="font-mono">{usdFormatter.format(totalCost)}</span>
               </>
             ) : null}
+            {hasInternalHandoffs ? (
+              <button
+                type="button"
+                onClick={() => setShowInternalHandoffs(!showInternalHandoffs)}
+                className="ml-auto inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                title={
+                  showInternalHandoffs
+                    ? "Hide auto-spawned review tasks"
+                    : "Show auto-spawned review tasks as full rows"
+                }
+                aria-pressed={showInternalHandoffs}
+              >
+                {showInternalHandoffs ? (
+                  <EyeOff className="h-3 w-3" />
+                ) : (
+                  <Eye className="h-3 w-3" />
+                )}
+                <span>Handoffs · {showInternalHandoffs ? "On" : "Off"}</span>
+              </button>
+            ) : null}
           </div>
         ) : null}
       </header>
@@ -130,7 +166,11 @@ export default function SessionDetailPage() {
               <Skeleton className="h-16 w-full" />
             </div>
           ) : detail ? (
-            <SessionTimeline rootTaskId={rootTaskId} chain={detail.chain} />
+            <SessionTimeline
+              rootTaskId={rootTaskId}
+              chain={detail.chain}
+              showInternalHandoffs={showInternalHandoffs}
+            />
           ) : (
             <p className="text-xs text-muted-foreground">
               Couldn't load this session. It may have been deleted, or the API server is offline.

@@ -9,7 +9,14 @@
  *   2. Tasks NOT initiated by a human render as a single agent-side row
  *      with the task text as the body.
  *   3. Sibling tasks sharing a `parentTaskId` collapse into a
- *      <ParallelGroup> with a visible left rail and "N in parallel" header.
+ *      <ParallelGroup> with a single muted "N in parallel · via {parent}"
+ *      caption — no chrome, just a click-to-collapse header.
+ *   4. Auto-spawned "review needed" follow-ups (`source === "system"` and
+ *      `taskType === "follow-up"`) are hidden by default — the system
+ *      generates these to nudge the Lead after a worker finishes, but they
+ *      add no conversational value. They collapse into a `<ReviewAck>` chip
+ *      attached to the worker row they reviewed. Use the page-level
+ *      "Show handoffs" toggle to bring them back as full rows.
  */
 
 import { CornerLeftUp, MessageSquarePlus } from "lucide-react";
@@ -23,6 +30,15 @@ import { ParallelGroup, TaskCard, TaskOutcome } from "./task-card";
 import { UserPromptBubble } from "./user-prompt-bubble";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+/**
+ * `true` for the orchestrator's auto-spawned review follow-ups —
+ * "Worker task completed — review needed." rows. Identified structurally
+ * by the wire fields, not by sniffing task text.
+ */
+function isAutoReview(task: AgentTask): boolean {
+  return task.source === "system" && task.taskType === "follow-up";
+}
 
 /**
  * Quiet closing block rendered after a parent task's direct children when
@@ -106,42 +122,94 @@ function parentClosedAfterDirectChildren(
 export interface SessionTimelineProps {
   rootTaskId: string;
   chain: AgentTask[];
+  /** When `true`, render auto-review (`source=system`, `taskType=follow-up`)
+   *  rows as full turns. When `false` (default), hide them and surface a
+   *  `<ReviewAck>` chip under the worker row they reviewed. */
+  showInternalHandoffs?: boolean;
   className?: string;
 }
 
 interface TimelineTree {
   root: AgentTask | null;
   childrenByParent: Map<string, AgentTask[]>;
+  /** Hidden auto-review tasks grouped by the worker (the review's parent)
+   *  they reviewed. Keyed by the *visible* worker's task id. */
+  acksByWorker: Map<string, AgentTask[]>;
   orphans: AgentTask[];
 }
 
-function buildTimelineTree(rootTaskId: string, chain: AgentTask[]): TimelineTree {
+function buildTimelineTree(
+  rootTaskId: string,
+  chain: AgentTask[],
+  opts: { hideAutoReviews: boolean },
+): TimelineTree {
+  const byId = new Map<string, AgentTask>(chain.map((t) => [t.id, t]));
+
+  // First pass: which tasks are hidden? In the default mode every auto-review
+  // is hidden; in "show handoffs" mode none are.
+  const hidden = new Set<string>();
+  if (opts.hideAutoReviews) {
+    for (const task of chain) {
+      if (isAutoReview(task)) hidden.add(task.id);
+    }
+  }
+
+  // When we hide a node, its children re-parent to the nearest visible
+  // ancestor. This walks up the parent chain skipping hidden nodes.
+  const resolveVisibleParent = (parentId: string | null | undefined): string | null => {
+    let p = parentId ?? null;
+    while (p && hidden.has(p)) {
+      const t = byId.get(p);
+      p = t?.parentTaskId ?? null;
+    }
+    return p ?? null;
+  };
+
   const childrenByParent = new Map<string, AgentTask[]>();
+  const acksByWorker = new Map<string, AgentTask[]>();
   let root: AgentTask | null = null;
   const orphans: AgentTask[] = [];
 
   for (const task of chain) {
-    if (task.parentTaskId == null) {
-      if (task.id === rootTaskId) {
-        root = task;
-      } else {
-        orphans.push(task);
+    if (hidden.has(task.id)) {
+      // Attach the ack to the closest visible ancestor (typically the
+      // worker the review was about). If that worker is itself hidden
+      // (unusual), the ack rolls up to whatever sits above in the chain.
+      const worker = resolveVisibleParent(task.parentTaskId);
+      if (worker) {
+        const list = acksByWorker.get(worker);
+        if (list) list.push(task);
+        else acksByWorker.set(worker, [task]);
       }
       continue;
     }
-    const list = childrenByParent.get(task.parentTaskId);
-    if (list) {
-      list.push(task);
-    } else {
-      childrenByParent.set(task.parentTaskId, [task]);
+    if (task.parentTaskId == null) {
+      if (task.id === rootTaskId) root = task;
+      else orphans.push(task);
+      continue;
     }
+    const visibleParent = resolveVisibleParent(task.parentTaskId);
+    if (visibleParent == null) {
+      // Parent chain dissolves into hidden nodes all the way up — extremely
+      // unlikely (the root is `source: "ui"`, never hidden) but route to
+      // orphan rather than dropping silently.
+      if (task.id === rootTaskId) root = task;
+      else orphans.push(task);
+      continue;
+    }
+    const list = childrenByParent.get(visibleParent);
+    if (list) list.push(task);
+    else childrenByParent.set(visibleParent, [task]);
   }
 
   for (const list of childrenByParent.values()) {
     list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
+  for (const list of acksByWorker.values()) {
+    list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
 
-  return { root, childrenByParent, orphans };
+  return { root, childrenByParent, acksByWorker, orphans };
 }
 
 /**
@@ -159,6 +227,7 @@ function TaskTurn({
   parentAgentId,
   insideParallelGroup,
   deferOutput,
+  reviewAcks,
 }: {
   task: AgentTask;
   /** Agent who owned the parent task — used to render "via X" delegation hint. */
@@ -167,6 +236,9 @@ function TaskTurn({
   /** When true, the task's `<TaskOutcome>` is suppressed in this row — it
    *  will be re-rendered later inside the closing chip. */
   deferOutput?: boolean;
+  /** Hidden auto-review tasks attached to this worker — collapsed into a
+   *  single `<ReviewAck>` chip under the outcome. */
+  reviewAcks?: AgentTask[];
 }) {
   const isUserTyped = task.source === "ui";
   return (
@@ -182,8 +254,12 @@ function TaskTurn({
         task={task}
         hideTaskText={isUserTyped}
         insideParallelGroup={insideParallelGroup}
-        parentAgentId={parentAgentId}
+        // Suppress the "↳ via X" delegation hint on user-typed turns —
+        // it would (mis)imply the previous agent delegated TO the agent
+        // replying to the user, which is conceptually backwards.
+        parentAgentId={isUserTyped ? null : parentAgentId}
         deferOutput={deferOutput}
+        reviewAcks={reviewAcks}
       />
     </>
   );
@@ -192,9 +268,10 @@ function TaskTurn({
 interface SubtreeProps {
   task: AgentTask;
   childrenByParent: Map<string, AgentTask[]>;
+  acksByWorker: Map<string, AgentTask[]>;
 }
 
-function ChildrenChain({ task, childrenByParent }: SubtreeProps) {
+function ChildrenChain({ task, childrenByParent, acksByWorker }: SubtreeProps) {
   const children = childrenByParent.get(task.id) ?? [];
   if (children.length === 0) return null;
   const parentAgentId = task.agentId;
@@ -211,39 +288,64 @@ function ChildrenChain({ task, childrenByParent }: SubtreeProps) {
     const childDefers = parentClosedAfterDirectChildren(child, childrenByParent);
     return (
       <>
-        <TaskTurn task={child} parentAgentId={parentAgentId} deferOutput={childDefers} />
+        <TaskTurn
+          task={child}
+          parentAgentId={parentAgentId}
+          deferOutput={childDefers}
+          reviewAcks={acksByWorker.get(child.id)}
+        />
         {showCloser ? <ParentClosingChip parent={task} /> : null}
-        <ChildrenChain task={child} childrenByParent={childrenByParent} />
+        <ChildrenChain
+          task={child}
+          childrenByParent={childrenByParent}
+          acksByWorker={acksByWorker}
+        />
       </>
     );
   }
 
   return (
     <>
-      <ParallelGroup count={children.length}>
+      <ParallelGroup count={children.length} parentAgentId={parentAgentId}>
         {children.map((child) => {
           const childDefers = parentClosedAfterDirectChildren(child, childrenByParent);
           return (
             <TaskTurn
               key={child.id}
               task={child}
-              parentAgentId={parentAgentId}
+              // Suppress the per-child "↳ via X" hint — the parallel group's
+              // caption already says "N in parallel · via {parent}".
+              parentAgentId={null}
               insideParallelGroup
               deferOutput={childDefers}
+              reviewAcks={acksByWorker.get(child.id)}
             />
           );
         })}
       </ParallelGroup>
       {showCloser ? <ParentClosingChip parent={task} /> : null}
       {children.map((child) => (
-        <ChildrenChain key={child.id} task={child} childrenByParent={childrenByParent} />
+        <ChildrenChain
+          key={child.id}
+          task={child}
+          childrenByParent={childrenByParent}
+          acksByWorker={acksByWorker}
+        />
       ))}
     </>
   );
 }
 
-export function SessionTimeline({ rootTaskId, chain, className }: SessionTimelineProps) {
-  const tree = useMemo(() => buildTimelineTree(rootTaskId, chain), [rootTaskId, chain]);
+export function SessionTimeline({
+  rootTaskId,
+  chain,
+  showInternalHandoffs = false,
+  className,
+}: SessionTimelineProps) {
+  const tree = useMemo(
+    () => buildTimelineTree(rootTaskId, chain, { hideAutoReviews: !showInternalHandoffs }),
+    [rootTaskId, chain, showInternalHandoffs],
+  );
 
   if (tree.orphans.length > 0) {
     console.warn(
@@ -269,12 +371,20 @@ export function SessionTimeline({ rootTaskId, chain, className }: SessionTimelin
 
   return (
     <div className={cn("max-w-3xl mx-auto w-full", className)}>
-      {/* Single timeline column — agent rows draw their own spine fragments
-          (so user bubbles don't sit on a stray line). Adjacent rows touch
-          via padding-bottom on each row, forming a continuous spine. */}
+      {/* Single timeline column — no spine. Each row's `pb-*` provides the
+          rhythm between turns; grouping comes from indentation + the
+          parallel-group caption. */}
       <div className="flex flex-col">
-        <TaskTurn task={root} deferOutput={rootDefers} />
-        <ChildrenChain task={root} childrenByParent={tree.childrenByParent} />
+        <TaskTurn
+          task={root}
+          deferOutput={rootDefers}
+          reviewAcks={tree.acksByWorker.get(root.id)}
+        />
+        <ChildrenChain
+          task={root}
+          childrenByParent={tree.childrenByParent}
+          acksByWorker={tree.acksByWorker}
+        />
 
         {!hasChildren && root.status === "completed" ? (
           <p className="text-xs text-muted-foreground italic pl-12">

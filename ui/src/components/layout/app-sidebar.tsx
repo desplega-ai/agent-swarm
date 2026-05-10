@@ -118,7 +118,7 @@ export function AppSidebar() {
             onError={(e) => {
               // Fall back to bundled logo if the configured logo URL fails.
               const img = e.currentTarget;
-              if (img.src !== window.location.origin + "/logo.png") {
+              if (img.src !== `${window.location.origin}/logo.png`) {
                 img.src = "/logo.png";
               }
             }}

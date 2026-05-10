@@ -1,31 +1,53 @@
 /**
  * Sessions surface — single agent turn rendered inside the session timeline.
  *
- * No outer card chrome. Each turn is a flex row composed of:
- *   - An <AgentAvatar> that visually sits on the timeline spine (rendered by
- *     <SessionTimeline>) — it shares the spine's left coordinate via z-index.
- *   - A content column with a single header line (agent name · time · status
- *     when not completed · hover actions) and the agent's output rendered as
- *     Streamdown markdown directly (no nested border).
+ * No outer card chrome, no timeline spine. Each turn is a flex row of an
+ * <AgentAvatar> + a content column with a single header line (agent name ·
+ * time · status when not completed · hover actions) and the agent's output
+ * rendered as Streamdown markdown directly. Vertical rhythm comes from per-
+ * row `pb-*` rather than a connecting line.
  *
  * The tinted "outcome block" only survives for `failed` / `cancelled` turns —
  * those genuinely benefit from a colored frame; success doesn't.
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronRight, Copy, GitBranch, Maximize2 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import {
+  Ban,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Maximize2,
+  Pause,
+  Play,
+  Split,
+} from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { useAgent } from "@/api/hooks/use-agents";
+import { useCancelTask, usePauseTask, useResumeTask } from "@/api/hooks/use-tasks";
 import type { AgentTask, SessionLog } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { StatusBadge } from "@/components/shared/status-badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { cn, formatRelativeTime, normalizeNewlines } from "@/lib/utils";
 import { ChainOfThought } from "./chain-of-thought";
+import { ReviewAck } from "./review-ack";
 import { TaskDetailSheet } from "./task-detail-sheet";
 
 export interface TaskCardProps {
@@ -47,6 +69,9 @@ export interface TaskCardProps {
    * in chronological position instead of at the top of the parent's row.
    */
   deferOutput?: boolean;
+  /** Hidden auto-review tasks attached to this turn — collapsed into a
+   *  single muted `<ReviewAck>` chip below the outcome. */
+  reviewAcks?: AgentTask[];
   className?: string;
 }
 
@@ -77,10 +102,41 @@ export function TaskCard({
   insideParallelGroup,
   parentAgentId,
   deferOutput,
+  reviewAcks,
   className,
 }: TaskCardProps) {
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
+
+  // Sheet open-state lives in the URL (`?task=<id>`) so links to a session
+  // with a particular task expanded are shareable. `replace: true` keeps the
+  // back button useful — opening/closing sheets doesn't litter history.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const open = searchParams.get("task") === task.id;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setSearchParams(
+        (prev) => {
+          const sp = new URLSearchParams(prev);
+          if (next) sp.set("task", task.id);
+          else if (sp.get("task") === task.id) sp.delete("task");
+          return sp;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams, task.id],
+  );
+
+  const cancelTask = useCancelTask();
+  const pauseTask = usePauseTask();
+  const resumeTask = useResumeTask();
+
+  const isTerminal =
+    task.status === "completed" || task.status === "failed" || task.status === "cancelled";
+  const canCancel = !isTerminal && task.status !== "paused";
+  const canPause = task.status === "in_progress";
+  const canResume = task.status === "paused";
+
   const { data: agent } = useAgent(task.agentId ?? "");
   const showDelegation = !!parentAgentId && !!task.agentId && parentAgentId !== task.agentId;
   const { data: parentAgent } = useAgent(showDelegation ? (parentAgentId ?? "") : "");
@@ -104,32 +160,13 @@ export function TaskCard({
     <>
       <article
         data-slot="session-task-card"
-        className={cn(
-          "group relative flex gap-3 min-w-0",
-          insideParallelGroup ? "pl-4 pb-5" : "pb-7",
-          className,
-        )}
+        className={cn("group flex gap-3 min-w-0", insideParallelGroup ? "pb-4" : "pb-6", className)}
       >
-        {/* Per-row spine fragment — only on top-level rows (parallel groups
-            draw their own dashed sub-spine). Each row's spine spans top to
-            bottom, so adjacent rows form a continuous line via touching
-            paddings. The line is hidden behind the avatar by `ring-4
-            ring-background` on the avatar. */}
-        {insideParallelGroup ? null : (
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute top-0 bottom-0 left-3.5 w-px bg-border/70"
-          />
-        )}
         <AgentAvatar
           agentId={task.agentId}
           agentName={agent?.name}
-          size={insideParallelGroup ? "sm" : "md"}
-          className={cn(
-            "relative z-10 mt-0.5 shrink-0",
-            insideParallelGroup ? "ring-2 ring-background" : "ring-4 ring-background",
-            isRunning && "ring-primary/40 animate-pulse",
-          )}
+          size="md"
+          className={cn("mt-0.5 shrink-0", isRunning && "ring-2 ring-primary/40 animate-pulse")}
         />
         <div className="flex-1 min-w-0 flex flex-col gap-1.5 pb-1">
           <header className="flex items-center gap-2 min-w-0 text-xs">
@@ -175,6 +212,66 @@ export function TaskCard({
             ) : null}
             {showPill ? <StatusBadge status={task.status} /> : null}
             <div className="ml-auto flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+              {canCancel ? (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 hover:text-status-error hover:bg-status-error/10"
+                      title="Cancel task"
+                      aria-label="Cancel task"
+                    >
+                      <Ban className="h-3 w-3" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Cancel Task</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Are you sure you want to cancel this task? This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Keep Task</AlertDialogCancel>
+                      <AlertDialogAction
+                        variant="destructive"
+                        onClick={() =>
+                          cancelTask.mutate({ id: task.id, reason: "Cancelled from session" })
+                        }
+                      >
+                        Cancel Task
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              ) : null}
+              {canPause ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => pauseTask.mutate(task.id)}
+                  disabled={pauseTask.isPending}
+                  className="h-6 w-6"
+                  title="Pause task"
+                  aria-label="Pause task"
+                >
+                  <Pause className="h-3 w-3" />
+                </Button>
+              ) : null}
+              {canResume ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => resumeTask.mutate(task.id)}
+                  disabled={resumeTask.isPending}
+                  className="h-6 w-6"
+                  title="Resume task"
+                  aria-label="Resume task"
+                >
+                  <Play className="h-3 w-3" />
+                </Button>
+              ) : null}
               <Button
                 size="icon"
                 variant="ghost"
@@ -203,6 +300,8 @@ export function TaskCard({
           <ChainOfThought taskId={task.id} status={task.status} />
 
           {deferOutput ? null : <TaskOutcome task={task} fallbackLines={summaryLines} />}
+
+          {reviewAcks && reviewAcks.length > 0 ? <ReviewAck reviews={reviewAcks} /> : null}
         </div>
       </article>
 
@@ -224,12 +323,7 @@ function TaskBrief({ text }: { text: string }) {
   const isLong = text.length > 240 || text.split("\n").length > 3;
   return (
     <blockquote className="border-l-2 border-border pl-3 py-0.5 text-xs text-muted-foreground italic min-w-0 break-words">
-      <span
-        className={cn(
-          "block whitespace-pre-wrap",
-          !expanded && isLong && "line-clamp-3",
-        )}
-      >
+      <span className={cn("block whitespace-pre-wrap", !expanded && isLong && "line-clamp-3")}>
         {text}
       </span>
       {isLong ? (
@@ -349,43 +443,54 @@ function OutcomeFrame({ label, text, tone }: { label: string; text: string; tone
 
 export interface ParallelGroupProps {
   count: number;
+  /** Agent that spawned the parallel children — used to render
+   *  "{count} in parallel · via {Agent}" so the per-child "↳ via X"
+   *  delegation hint can be suppressed. */
+  parentAgentId?: string | null;
   children: React.ReactNode;
   className?: string;
 }
 
 /**
- * Wraps sibling turns that share a parent into a visually distinct branched
- * sub-tree: a labelled header chip + an indented dashed sub-spine. Children
- * leave the main spine and sit on the sub-spine via `insideParallelGroup`
- * (smaller avatars + thinner ring).
+ * Quiet header above sibling turns that share a parent. Single muted line
+ * — `⏵ 2 in parallel · via Lead` — clickable to collapse/expand. No chip,
+ * no sub-spine; the children render at the same indent as everything else
+ * and rely on the caption for the "these belong together" signal.
  *
- * Default expanded for ≤3 children; collapsed for 4+ (otherwise large
- * fan-outs bury the rest of the timeline).
+ * Default expanded for ≤3 children; collapsed for 4+ so a large fan-out
+ * doesn't bury the rest of the timeline.
  */
-export function ParallelGroup({ count, children, className }: ParallelGroupProps) {
+export function ParallelGroup({ count, parentAgentId, children, className }: ParallelGroupProps) {
   const [expanded, setExpanded] = useState<boolean>(count <= 3);
+  const { data: parentAgent } = useAgent(parentAgentId ?? "");
+  const parentName = parentAgent?.name ?? null;
   return (
-    <div data-slot="session-parallel-group" className={cn("relative ml-9", className)}>
+    <div data-slot="session-parallel-group" className={cn("ml-11", className)}>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className={cn(
-          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border",
-          "text-[10px] uppercase tracking-wider font-mono font-medium",
-          "bg-muted/60 text-foreground/80 hover:bg-muted transition-colors",
+          "inline-flex items-center gap-1.5 mb-2",
+          "text-[10px] font-mono uppercase tracking-wider",
+          "text-muted-foreground/80 hover:text-foreground transition-colors",
         )}
         aria-expanded={expanded}
         aria-label={`${expanded ? "Collapse" : "Expand"} parallel group of ${count} tasks`}
       >
-        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <GitBranch className="h-3 w-3 text-primary" />
-        <span>{count} in parallel</span>
+        {expanded ? (
+          <ChevronDown className="h-3 w-3 shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0" />
+        )}
+        <Split className="h-3 w-3 shrink-0 text-primary/70" aria-hidden="true" />
+        <span>
+          {count} in parallel
+          {parentName ? (
+            <span className="text-muted-foreground/60"> · via {parentName}</span>
+          ) : null}
+        </span>
       </button>
-      {expanded ? (
-        <div className="mt-3 pl-4 border-l-2 border-dashed border-border/70 flex flex-col gap-4 py-1">
-          {children}
-        </div>
-      ) : null}
+      {expanded ? <div className="flex flex-col">{children}</div> : null}
     </div>
   );
 }
