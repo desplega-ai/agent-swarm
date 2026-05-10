@@ -9,7 +9,7 @@ tags: [plan, memory, session-summary, harness-providers, pi, opencode, codex, cl
 status: in-progress
 autonomy: critical
 last_updated: 2026-05-11
-last_updated_by: Claude (phase-3 sub-agent)
+last_updated_by: Claude (phase-4 sub-agent)
 revisions:
   - "v1 (2026-05-10): scaffold"
   - "v2 (2026-05-10): full draft after research + critical questions; reframed around reusable structured-output abstraction; added Phase 4 (claude migration with CLAUDE_CODE_OAUTH_TOKEN fallback)"
@@ -954,11 +954,11 @@ test("CLAUDE_CODE_OAUTH_TOKEN-only env → claude-cli kind", async () => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Claude Stop hook tests pass: `bun test src/tests/claude-stop-hook.test.ts`
-- [ ] Full unit suite passes: `bun test`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] Claude Stop hook tests pass: `bun test src/tests/claude-stop-hook.test.ts`
+- [x] Full unit suite passes: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
 - [ ] **`CLAUDE_CODE_OAUTH_TOKEN`-only fallback** (sub-agent): bring up the stack with ONLY `CLAUDE_CODE_OAUTH_TOKEN` set (no OpenRouter/Anthropic/OpenAI keys). Run a claude task. Assert a `session_summary` row is produced via the `claude -p` fallback path. Verify by tailing worker logs for a line like `internal-ai: kind=claude-cli` (add this log in Phase 0).
