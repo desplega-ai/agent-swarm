@@ -24,8 +24,8 @@ import { cn } from "@/lib/utils";
 // Phase 2: cloud-mode menu link defaults. These are placeholders configurable
 // via marketing — the brainstorm calls them out as "Docs / Support / Billing".
 const CLOUD_DOCS_URL = "https://docs.agent-swarm.dev";
-const CLOUD_SUPPORT_URL = "mailto:contact@desplega.sh";
-const CLOUD_BILLING_URL = "https://cloud.agent-swarm.dev/billing";
+const CLOUD_SUPPORT_URL = "mailto:t@desplega.sh";
+const CLOUD_BILLING_URL = "https://cloud.agent-swarm.dev/dashboard/settings/billing";
 
 export function SwarmSwitcher() {
   const { connections, activeConnection, switchConnection } = useConfig();

@@ -29,6 +29,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useUsers } from "@/api/hooks/use-users";
 import type { User } from "@/api/types";
 import { useConfig } from "@/hooks/use-config";
@@ -58,7 +59,8 @@ function readStoredUserId(storageKey: string): string | null {
 }
 
 export function CurrentUserProvider({ children }: { children: ReactNode }) {
-  const { config } = useConfig();
+  const { config, pendingIdentity, clearPendingIdentity } = useConfig();
+  const { supported: identitySupported } = useFeatureGate("1.76.0");
   const storageKey = useMemo(() => deriveStorageKey(config.apiUrl, CARD_KEY), [config.apiUrl]);
 
   const usersQuery = useUsers();
@@ -105,6 +107,40 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     }
     setStoredUserId(null);
   }, [storageKey]);
+
+  // Auto-bind identity from ?email= / ?name= URL params (parsed in useConfig).
+  // Match strategy: email-only, case-insensitive, against User.email and
+  // User.emailAliases. Name is purely a hint for IdentityModal prefill on no-match.
+  //
+  // Soft-degrade: while `identitySupported` is false (version query in-flight
+  // OR server < 1.76.0) we simply wait. We do NOT clear pendingIdentity in that
+  // case — that would wipe the prefill before the modal mounts. If the server
+  // really is unsupported, IdentityGate never renders the modal, so the
+  // leftover in-memory state is harmless.
+  useEffect(() => {
+    if (!pendingIdentity) return;
+    if (!identitySupported) return;
+    if (usersQuery.isLoading) return;
+
+    const email = pendingIdentity.email?.trim().toLowerCase();
+    if (email) {
+      const match = (usersQuery.data ?? []).find(
+        (u) =>
+          u.email?.toLowerCase() === email || u.emailAliases.some((a) => a.toLowerCase() === email),
+      );
+      if (match) {
+        setUserId(match.id);
+        clearPendingIdentity();
+      }
+    }
+  }, [
+    pendingIdentity,
+    identitySupported,
+    usersQuery.isLoading,
+    usersQuery.data,
+    setUserId,
+    clearPendingIdentity,
+  ]);
 
   // Derive state + matched user from (storedUserId, users list).
   const { state, user } = useMemo<{ state: CurrentUserState; user: User | null }>(() => {

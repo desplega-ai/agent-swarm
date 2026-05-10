@@ -13,7 +13,7 @@ The memory system was redesigned in [#212](https://github.com/desplega-ai/agent-
 
 Every agent has a searchable memory backed by embeddings and stored in SQLite. The system is built on two provider abstractions:
 
-- **`EmbeddingProvider`** — Converts text to vectors. Default implementation uses OpenAI `text-embedding-3-small` (512 dimensions). Swappable for other providers.
+- **`EmbeddingProvider`** — Converts text to vectors. Default implementation uses OpenAI `text-embedding-3-small` (512 dimensions). The model, dimensions, API key, and base URL are configurable via `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_API_KEY`, and `EMBEDDING_API_BASE_URL` — point it at any OpenAI-compatible endpoint (Azure OpenAI, Together, vLLM, Ollama, etc.). Swappable for other providers in code.
 - **`MemoryStore`** — Persists and retrieves memories. Default implementation uses SQLite with [sqlite-vec](https://alexgarcia.xyz/sqlite-vec/) for KNN vector search. Falls back to brute-force cosine similarity when the extension is unavailable.
 
 ### Memory Sources

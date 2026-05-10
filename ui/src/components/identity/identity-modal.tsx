@@ -38,15 +38,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useConfig } from "@/hooks/use-config";
 
 export function IdentityModal() {
   const { state, setUserId } = useCurrentUser();
+  const { pendingIdentity, clearPendingIdentity } = useConfig();
   const usersQuery = useUsers();
   const createUser = useCreateUser();
-  const [mode, setMode] = useState<"select" | "create">("select");
+  const [mode, setMode] = useState<"select" | "create">(pendingIdentity ? "create" : "select");
   const [selected, setSelected] = useState<string>("");
-  const [newName, setNewName] = useState("");
-  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState(pendingIdentity?.name ?? "");
+  const [newEmail, setNewEmail] = useState(pendingIdentity?.email ?? "");
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const open = state === "needs-pick";
@@ -65,6 +67,7 @@ export function IdentityModal() {
     e.preventDefault();
     if (!selected) return;
     setUserId(selected);
+    clearPendingIdentity();
   }
 
   async function handleCreateSubmit(e: FormEvent) {
@@ -78,6 +81,7 @@ export function IdentityModal() {
         ...(newEmail.trim().length > 0 && { email: newEmail.trim() }),
       });
       setUserId(user.id);
+      clearPendingIdentity();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to create user");
     }
@@ -187,6 +191,7 @@ export function IdentityModal() {
                   onClick={() => {
                     setMode("select");
                     setSubmitError(null);
+                    clearPendingIdentity();
                   }}
                 >
                   Back to list

@@ -14,7 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs, useDeleteConfig, useUpsertConfig } from "@/api/hooks/use-config-api";
 import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
@@ -1135,9 +1135,27 @@ function WelcomeCard() {
 // Main ConfigPage
 // ---------------------------------------------------------------------------
 
+type ConfigTab = "connections" | "secrets";
+const CONFIG_TABS: readonly ConfigTab[] = ["connections", "secrets"] as const;
+
 export default function ConfigPage() {
   const { isConfigured } = useConfig();
-  const [tab, setTab] = useState<"connections" | "secrets">("connections");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const tab: ConfigTab = CONFIG_TABS.includes(tabParam as ConfigTab)
+    ? (tabParam as ConfigTab)
+    : "connections";
+
+  function setTab(next: ConfigTab) {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        params.set("tab", next);
+        return params;
+      },
+      { replace: true },
+    );
+  }
 
   if (!isConfigured) {
     return <WelcomeCard />;
@@ -1146,11 +1164,7 @@ export default function ConfigPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
       <PageHeader title="Settings" />
-      <Tabs
-        value={tab}
-        onValueChange={(v) => setTab(v as "connections" | "secrets")}
-        className="flex-1 min-h-0"
-      >
+      <Tabs value={tab} onValueChange={(v) => setTab(v as ConfigTab)} className="flex-1 min-h-0">
         <TabsList variant="line">
           <TabsTrigger value="connections">Connections</TabsTrigger>
           <TabsTrigger value="secrets">Secrets</TabsTrigger>

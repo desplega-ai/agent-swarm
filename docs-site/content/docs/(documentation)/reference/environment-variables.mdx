@@ -20,7 +20,11 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SECRETS_ENCRYPTION_KEY` | Auto-generated on first boot | Master key for encrypting `swarm_config` secret rows at rest. Accepts base64 (43-char, e.g. `openssl rand -base64 32`) **or** 64-char hex (e.g. `openssl rand -hex 32`). Decodes to exactly 32 bytes. **Reserved**: cannot be stored in the DB config store. See [Encryption Key](/docs/guides/deployment#encryption-key). |
 | `SECRETS_ENCRYPTION_KEY_FILE` | — | Alternative to `SECRETS_ENCRYPTION_KEY`: absolute path to a file whose contents are the base64- or hex-encoded key. Useful with Docker secrets or k8s `Secret` volume mounts. |
 | `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
-| `OPENAI_API_KEY` | — | OpenAI key for memory embeddings |
+| `OPENAI_API_KEY` | — | Fallback key for memory embeddings (used when `EMBEDDING_API_KEY` is unset). |
+| `EMBEDDING_API_KEY` | — | API key for the embedding provider. Takes precedence over `OPENAI_API_KEY`. |
+| `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model slug sent to the provider. |
+| `EMBEDDING_DIMENSIONS` | `512` | Vector dimensions requested from the model. Must match what the model supports. |
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Days until memory recency decay reaches 0.5 |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |

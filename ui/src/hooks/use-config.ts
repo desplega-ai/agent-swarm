@@ -19,6 +19,11 @@ export interface PendingConnection {
   apiKey: string;
 }
 
+export interface PendingIdentity {
+  email?: string;
+  name?: string;
+}
+
 interface ConfigContextValue {
   /** All saved connections */
   connections: Connection[];
@@ -44,45 +49,64 @@ interface ConfigContextValue {
   pendingConnection: PendingConnection | null;
   /** Clear the pending connection state */
   clearPendingConnection: () => void;
+  /** Pending identity hint from URL params (?email=, ?name=) */
+  pendingIdentity: PendingIdentity | null;
+  /** Clear the pending identity state */
+  clearPendingIdentity: () => void;
 }
 
 export const ConfigContext = createContext<ConfigContextValue | null>(null);
 
 /**
- * Extract ?apiUrl= and ?apiKey= from the URL, strip them, and return values if both present.
- * If a matching connection already exists, activate it and return null.
+ * Extract ?apiUrl=, ?apiKey=, ?email=, ?name= from the URL, strip them, and
+ * return the pending connection + identity hints. If a connection with the
+ * given apiUrl+apiKey already exists, activate it and return a null
+ * pendingConnection (the identity hint is still returned separately).
  */
 function extractUrlParams(
   connections: Connection[],
   activateFn: (id: string) => void,
-): PendingConnection | null {
+): { pendingConnection: PendingConnection | null; pendingIdentity: PendingIdentity | null } {
   const params = new URLSearchParams(window.location.search);
   const apiUrl = params.get("apiUrl");
   const apiKey = params.get("apiKey");
+  const email = params.get("email");
+  const name = params.get("name");
 
-  // Always strip the params from the URL
-  if (params.has("apiUrl") || params.has("apiKey")) {
+  const hasAny =
+    params.has("apiUrl") || params.has("apiKey") || params.has("email") || params.has("name");
+  if (hasAny) {
     const url = new URL(window.location.href);
     url.searchParams.delete("apiUrl");
     url.searchParams.delete("apiKey");
+    url.searchParams.delete("email");
+    url.searchParams.delete("name");
     window.history.replaceState({}, "", url.toString());
   }
 
-  // Only act if we have both values
-  if (!apiUrl || !apiKey) return null;
+  const pendingIdentity: PendingIdentity | null =
+    email || name
+      ? {
+          ...(email ? { email } : {}),
+          ...(name ? { name } : {}),
+        }
+      : null;
+
+  if (!apiUrl || !apiKey) {
+    return { pendingConnection: null, pendingIdentity };
+  }
 
   const normalizedUrl = apiUrl.replace(/\/+$/, "");
 
-  // Check if a connection with matching URL+key already exists
   const existing = connections.find(
     (c) => c.apiUrl.replace(/\/+$/, "") === normalizedUrl && c.apiKey === apiKey,
   );
   if (existing) {
     activateFn(existing.id);
-    return null;
+    return { pendingConnection: null, pendingIdentity };
   }
 
-  return { apiUrl: normalizedUrl, apiKey };
+  return { pendingConnection: { apiUrl: normalizedUrl, apiKey }, pendingIdentity };
 }
 
 function loadState(): { connections: Connection[]; activeConnection: Connection | null } {
@@ -99,14 +123,22 @@ export function useConfigProvider() {
     setState(loadState());
   }, []);
 
-  // Extract URL params on init — may set pendingConnection or activate an existing one
-  const [pendingConnection, setPendingConnection] = useState<PendingConnection | null>(() => {
+  // Extract URL params on init — may set pendingConnection, pendingIdentity, or
+  // activate an existing connection.
+  const initialUrlParams = useState(() => {
     const initial = loadState();
     return extractUrlParams(initial.connections, (id) => {
       setActiveConnection(id);
       // State will be loaded fresh on next render
     });
-  });
+  })[0];
+
+  const [pendingConnection, setPendingConnection] = useState<PendingConnection | null>(
+    initialUrlParams.pendingConnection,
+  );
+  const [pendingIdentity, setPendingIdentity] = useState<PendingIdentity | null>(
+    initialUrlParams.pendingIdentity,
+  );
 
   // Re-load state if URL params activated an existing connection
   useState(() => {
@@ -117,6 +149,10 @@ export function useConfigProvider() {
 
   const clearPendingConnection = useCallback(() => {
     setPendingConnection(null);
+  }, []);
+
+  const clearPendingIdentity = useCallback(() => {
+    setPendingIdentity(null);
   }, []);
 
   // If there's a pending connection, use its credentials for the config
@@ -174,6 +210,7 @@ export function useConfigProvider() {
     resetStoredConfig();
     refreshState();
     setPendingConnection(null);
+    setPendingIdentity(null);
   }, [refreshState]);
 
   const isConfigured = !!config.apiKey;
@@ -191,6 +228,8 @@ export function useConfigProvider() {
     isConfigured,
     pendingConnection,
     clearPendingConnection,
+    pendingIdentity,
+    clearPendingIdentity,
   };
 }
 
