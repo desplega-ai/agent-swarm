@@ -6,10 +6,10 @@ branch: main
 repository: agent-swarm
 topic: "Fix session summarization across worker harness providers (pi, opencode, codex, claude) + reusable structured-output abstraction"
 tags: [plan, memory, session-summary, harness-providers, pi, opencode, codex, claude, pi-ai, structured-output]
-status: draft
+status: in-progress
 autonomy: critical
-last_updated: 2026-05-10
-last_updated_by: Claude
+last_updated: 2026-05-11
+last_updated_by: Claude (phase-0 sub-agent)
 revisions:
   - "v1 (2026-05-10): scaffold"
   - "v2 (2026-05-10): full draft after research + critical questions; reframed around reusable structured-output abstraction; added Phase 4 (claude migration with CLAUDE_CODE_OAUTH_TOKEN fallback)"
@@ -349,15 +349,15 @@ This is a no-op refactor for now (claude's hook still inlines its own copy until
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase 0 unit tests pass: `bun test src/tests/internal-ai/`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] No lockfile drift: `bun install --frozen-lockfile` (run after any `package.json` edit)
-- [ ] `grep -r "bun:sqlite" src/utils/internal-ai/` returns zero matches.
+- [x] Phase 0 unit tests pass: `bun test src/tests/internal-ai/` (44 pass / 0 fail)
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint` (warnings only; exit 0)
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] No lockfile drift: `bun install --frozen-lockfile` (run after any `package.json` edit)
+- [x] `grep -r "bun:sqlite" src/utils/internal-ai/` returns zero matches. (Doc-comments mention the term; `grep -rE "from\s+[\"']bun:sqlite"` confirms zero real imports.)
 
 #### Automated QA:
-- [ ] **Credential resolver matrix** (sub-agent): import `resolveCredential`, mock env vars one combination at a time (just OPENROUTER, just ANTHROPIC, both, codex-OAuth-only, CLAUDE_CODE_OAUTH_TOKEN-only, none), print the resolved `{kind, modelDefault}` table. Assert against expected precedence.
+- [x] **Credential resolver matrix** (sub-agent): import `resolveCredential`, mock env vars one combination at a time (just OPENROUTER, just ANTHROPIC, both, codex-OAuth-only, CLAUDE_CODE_OAUTH_TOKEN-only, none), print the resolved `{kind, modelDefault}` table. Assert against expected precedence. — Covered by `src/tests/internal-ai/credentials.test.ts`.
 - [ ] **End-to-end happy path with real OpenRouter** (gated on `OPENROUTER_API_KEY`): a test calls `summarizeSession({harness:"pi", transcript:"<minimal real transcript>", retrievals:[], taskContext:{sourceTaskId:"t1",agentId:"a1"}})` and asserts the returned object has a non-empty `summary` field. `describe.skipIf(!process.env.OPENROUTER_API_KEY)` so CI doesn't require the key.
 
 #### Manual Verification:
