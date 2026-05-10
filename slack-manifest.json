@@ -60,7 +60,6 @@
         "channels:read",
         "chat:write",
         "chat:write.customize",
-        "chat:write.public",
         "commands",
         "files:read",
         "files:write",
@@ -69,9 +68,6 @@
         "im:history",
         "im:read",
         "im:write",
-        "mpim:history",
-        "mpim:read",
-        "mpim:write",
         "reactions:write",
         "users:read"
       ]
@@ -85,7 +81,6 @@
         "message.channels",
         "message.groups",
         "message.im",
-        "message.mpim",
         "assistant_thread_started"
       ]
     },
@@ -94,7 +89,7 @@
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": true,
-    "token_rotation_enabled": false,
+    "token_rotation_enabled": true,
     "is_mcp_enabled": true
   }
 }
