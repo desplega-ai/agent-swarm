@@ -6,15 +6,16 @@ branch: main
 repository: agent-swarm
 topic: "Fix session summarization across worker harness providers (pi, opencode, codex, claude) + reusable structured-output abstraction"
 tags: [plan, memory, session-summary, harness-providers, pi, opencode, codex, claude, pi-ai, structured-output]
-status: in-progress
+status: completed
 autonomy: critical
 last_updated: 2026-05-11
-last_updated_by: Claude (phase-4 sub-agent)
+last_updated_by: Claude (orchestrator)
 revisions:
   - "v1 (2026-05-10): scaffold"
   - "v2 (2026-05-10): full draft after research + critical questions; reframed around reusable structured-output abstraction; added Phase 4 (claude migration with CLAUDE_CODE_OAUTH_TOKEN fallback)"
   - "v3 (2026-05-10): review pass — applied Important + Minor fixes (typebox derail note, plugin import path gate, kind=<provider> log spec, fetchTaskDetails citations, status → draft, Phase 0 commit scope) + Critical fixes (harness/callerTag, opencode auth split, newCredentials persistence, pi-ai discriminator locked to type:'toolCall'/arguments)"
   - "v4 (2026-05-10): file-review pass — corrected LlmRater 'dead code' mis-read (alive worker-side, 461 events/24h in prod); narrowed Phase 5 to only delete ClaudeCliLlmRaterClient + runMemoryRater; LlmRater migration spun out as a separate Linear issue; renamed default openai/openai-codex models to gpt-5.4-mini"
+  - "v5 (2026-05-11): Phases 0–4 implemented and committed on branch fix-session-summarization-workers (commits 49e44ffb, e9cfb966, ab6984db, 5f8a144d, dc21da86, 633de31a). **Phase 5 cancelled** per Taras after the documented blocker hit during execution: deleting llm-client.ts is intrinsically coupled to migrating LlmRater (which uses ClaudeCliLlmRaterClient as its default client). All Phase 5 cleanup (llm-client.ts/llm-summarizer.ts removal, MEMORY_LLM_RATER_PROVIDER sweep, runbook updates, soft-deprecation warning) is folded into DES-363."
 ---
 
 # Fix Session Summarization Across Worker Harness Providers — Implementation Plan
@@ -971,7 +972,9 @@ test("CLAUDE_CODE_OAUTH_TOKEN-only env → claude-cli kind", async () => {
 
 ---
 
-## Phase 5: Cleanup — narrow deletions only (`ClaudeCliLlmRaterClient` + `runMemoryRater`)
+## Phase 5: Cleanup — narrow deletions only (`ClaudeCliLlmRaterClient` + `runMemoryRater`) — **CANCELLED**
+
+> **Status: CANCELLED (2026-05-11).** During execution the Phase 5 pre-check (see §1 below) confirmed the documented blocker: `src/be/memory/raters/llm.ts:20` imports `ClaudeCliLlmRaterClient` from `llm-client.ts` and `LlmRater`'s constructor uses it as a default at `:97` — so `llm-client.ts` cannot be deleted without modifying `LlmRater` itself, which v4 errata explicitly defers to **[DES-363](https://linear.app/desplega-labs/issue/DES-363/migrate-llmrater-to-completestructured-break-openrouter-hardcode)**. Phases 0–4 (the user-visible fix) shipped on branch `fix-session-summarization-workers`. All Phase 5 cleanup work (delete `llm-client.ts` + `llm-summarizer.ts`, sweep `MEMORY_LLM_RATER_PROVIDER`, soft-deprecation warning, runbook + CHANGELOG updates) is folded into DES-363.
 
 ### Overview
 
