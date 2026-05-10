@@ -9,7 +9,7 @@ tags: [plan, memory, session-summary, harness-providers, pi, opencode, codex, cl
 status: in-progress
 autonomy: critical
 last_updated: 2026-05-11
-last_updated_by: Claude (phase-1 sub-agent)
+last_updated_by: Claude (phase-2 sub-agent)
 revisions:
   - "v1 (2026-05-10): scaffold"
   - "v2 (2026-05-10): full draft after research + critical questions; reframed around reusable structured-output abstraction; added Phase 4 (claude migration with CLAUDE_CODE_OAUTH_TOKEN fallback)"
@@ -687,14 +687,14 @@ Add unit tests in `plugin/opencode-plugins/tests/opencode-auth.test.ts` (NEW fil
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Opencode plugin tests pass: `bun test src/tests/opencode-plugin.test.ts`
-- [ ] Full unit suite passes: `bun test`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] Docker worker still builds: `bun run docker:build:worker` (the plugin is bundled in — confirm path resolution works inside the worker image)
-- [ ] **Plugin import path hard gate**: bundling the opencode plugin MUST successfully resolve `@desplega.ai/agent-swarm/utils/internal-ai` and `@desplega.ai/agent-swarm/be/memory/raters/llm`. Verify by running the plugin bundle step (whatever `Dockerfile.worker:244-252` runs) and confirming the resulting JS contains references to `internal-ai` symbols. If resolution fails, fall back to one of: (a) vendor the helpers into `plugin/opencode-plugins/`, (b) add an esbuild alias mapping the package paths to repo-local sources. Do not ship Phase 2 with an unresolved import.
-- [ ] `grep -n "claude -p\|Bun.spawn" plugin/opencode-plugins/agent-swarm.ts` returns zero matches.
+- [x] Opencode plugin tests pass: `bun test src/tests/opencode-plugin.test.ts`
+- [x] Full unit suite passes: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] Docker worker still builds: `bun run docker:build:worker` (the plugin is bundled in — confirm path resolution works inside the worker image)
+- [x] **Plugin import path hard gate**: bundling the opencode plugin MUST successfully resolve `@desplega.ai/agent-swarm/utils/internal-ai` and `@desplega.ai/agent-swarm/be/memory/raters/llm`. Verify by running the plugin bundle step (whatever `Dockerfile.worker:244-252` runs) and confirming the resulting JS contains references to `internal-ai` symbols. If resolution fails, fall back to one of: (a) vendor the helpers into `plugin/opencode-plugins/`, (b) add an esbuild alias mapping the package paths to repo-local sources. Do not ship Phase 2 with an unresolved import. **Resolved (a): the agent-swarm package is not resolvable inside opencode's bundled-Bun plugin runtime; vendored minimal helpers into `plugin/opencode-plugins/lib/{summarize,opencode-auth}.ts` and updated `Dockerfile.worker` to COPY the whole `lib/` directory.**
+- [x] `grep -n "claude -p\|Bun.spawn" plugin/opencode-plugins/agent-swarm.ts` returns zero matches.
 
 #### Automated QA:
 - [ ] **Real opencode session** (sub-agent): bring up the stack, set `OPENROUTER_API_KEY` (or populate `~/.local/share/opencode/auth.json`), create an opencode task, wait for completion, assert a `session_summary` row exists for the task.

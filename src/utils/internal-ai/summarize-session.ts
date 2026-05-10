@@ -22,6 +22,7 @@ import {
   SummaryWithRatingsSchema,
 } from "../../be/memory/raters/llm.js";
 import { completeStructured } from "./complete-structured.js";
+import type { ResolvedCredential } from "./credentials.js";
 
 export interface SummarizeSessionOptions {
   /** Diagnostic tag only — propagated into `callerTag`, not into `completeStructured` directly. */
@@ -35,6 +36,13 @@ export interface SummarizeSessionOptions {
   apiUrl: string;
   apiKey: string;
   signal?: AbortSignal;
+  /**
+   * Bypass `resolveCredential` entirely — opencode auth path (and tests) pass
+   * an already-resolved credential through to `completeStructured`. Phase 2
+   * amendment: clean injection point so harnesses with their own credential
+   * stores (opencode's `auth.json`) can skip the harness-agnostic resolver.
+   */
+  _credentialOverride?: ResolvedCredential;
   /** Test injection. */
   _completeStructured?: typeof completeStructured;
 }
@@ -88,5 +96,6 @@ export async function summarizeSession(
     apiKey: opts.apiKey,
     signal: opts.signal,
     retries: 3,
+    ...(opts._credentialOverride ? { _credentialOverride: opts._credentialOverride } : {}),
   });
 }
