@@ -1171,6 +1171,8 @@ export interface StatusIdentity {
   is_cloud: boolean;
   marketing_url: string | null;
   hide_cloud_promo: boolean;
+  /** Stable org/tenant identifier (set via `SWARM_ORG_ID`); null on self-host. */
+  org_id: string | null;
 }
 
 export interface StatusActivity {

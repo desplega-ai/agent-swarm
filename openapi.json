@@ -7368,6 +7368,12 @@
                         },
                         "hide_cloud_promo": {
                           "type": "boolean"
+                        },
+                        "org_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
                         }
                       },
                       "required": [
@@ -7376,7 +7382,8 @@
                         "brand_color",
                         "is_cloud",
                         "marketing_url",
-                        "hide_cloud_promo"
+                        "hide_cloud_promo",
+                        "org_id"
                       ]
                     },
                     "setup": {

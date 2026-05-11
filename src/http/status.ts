@@ -87,6 +87,13 @@ export const StatusIdentitySchema = z.object({
   is_cloud: z.boolean(),
   marketing_url: z.string().nullable(),
   hide_cloud_promo: z.boolean(),
+  /**
+   * Stable identifier for the org/tenant this swarm belongs to. Set by the
+   * orchestrator on cloud deployments via `SWARM_ORG_ID`; null on self-host
+   * unless the operator opts in. Threaded into telemetry events so multi-org
+   * cloud installs can be sliced server-side.
+   */
+  org_id: z.string().nullable(),
 });
 export type StatusIdentity = z.infer<typeof StatusIdentitySchema>;
 
@@ -240,6 +247,7 @@ function buildIdentity(): StatusIdentity {
     is_cloud: cloudRaw === "true" || cloudRaw === "1",
     marketing_url: process.env.SWARM_MARKETING_URL?.trim() || null,
     hide_cloud_promo: hideRaw === "true" || hideRaw === "1",
+    org_id: process.env.SWARM_ORG_ID?.trim() || null,
   };
 }
 

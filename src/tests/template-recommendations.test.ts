@@ -29,6 +29,7 @@ function makeStatus(overrides: {
       is_cloud: false,
       marketing_url: null,
       hide_cloud_promo: false,
+      org_id: null,
     },
     setup: [
       { id: "harness", label: "Harness", state: "unverified" },

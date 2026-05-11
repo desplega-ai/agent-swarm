@@ -77,6 +77,7 @@ async function removeDbFiles(path: string): Promise<void> {
 const ENV_KEYS_TO_RESET = [
   "SWARM_CLOUD",
   "SWARM_ORG_NAME",
+  "SWARM_ORG_ID",
   "SWARM_ORG_LOGO_URL",
   "SWARM_BRAND_COLOR",
   "SWARM_MARKETING_URL",
@@ -161,12 +162,14 @@ describe("buildStatusPayload — identity", () => {
       is_cloud: false,
       marketing_url: null,
       hide_cloud_promo: false,
+      org_id: null,
     });
   });
 
   test("reflects SWARM_* envs when all set", () => {
     process.env.SWARM_CLOUD = "true";
     process.env.SWARM_ORG_NAME = "Acme";
+    process.env.SWARM_ORG_ID = "org_acme_123";
     process.env.SWARM_ORG_LOGO_URL = "https://acme.example/logo.png";
     process.env.SWARM_BRAND_COLOR = "#ff5500";
     process.env.SWARM_MARKETING_URL = "https://swarm.acme.example";
@@ -180,6 +183,7 @@ describe("buildStatusPayload — identity", () => {
       is_cloud: true,
       marketing_url: "https://swarm.acme.example",
       hide_cloud_promo: true,
+      org_id: "org_acme_123",
     });
   });
 
