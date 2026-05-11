@@ -415,13 +415,19 @@ export function humanizeToolName(name: string): string {
 export function toolCallToProgress(toolName: string, args: unknown): string | null {
   if (SKIP_PROGRESS_TOOLS.has(toolName)) return null;
 
+  const a = args as Record<string, unknown>;
+  const maybeMcpServer = typeof a?.server === "string" ? a.server : undefined;
+  const maybeMcpTool = typeof a?.tool === "string" ? a.tool : undefined;
+  const effectiveToolName =
+    maybeMcpServer && maybeMcpTool ? `mcp__${maybeMcpServer}__${maybeMcpTool}` : toolName;
+  if (SKIP_PROGRESS_TOOLS.has(effectiveToolName)) return null;
+
   // Normalize: pi-mono uses lowercase ("read"), Claude uses PascalCase ("Read")
   const normalized =
-    toolName.startsWith("mcp__") || toolName.includes("_")
-      ? toolName
-      : toolName.charAt(0).toUpperCase() + toolName.slice(1);
+    effectiveToolName.startsWith("mcp__") || effectiveToolName.includes("_")
+      ? effectiveToolName
+      : effectiveToolName.charAt(0).toUpperCase() + effectiveToolName.slice(1);
 
-  const a = args as Record<string, unknown>;
   const shortPath = (p: unknown) => {
     if (typeof p !== "string") return "";
     // Show last 2 path segments for readability
@@ -450,8 +456,8 @@ export function toolCallToProgress(toolName: string, args: unknown): string | nu
       return `⚙️ Running /${a.skill}`;
     default: {
       // MCP tools: mcp__server__tool
-      if (toolName.startsWith("mcp__")) {
-        const parts = toolName.split("__");
+      if (effectiveToolName.startsWith("mcp__")) {
+        const parts = effectiveToolName.split("__");
         if (parts.length >= 3) {
           const server = parts[1];
           const tool = parts.slice(2).join("__");
@@ -465,8 +471,18 @@ export function toolCallToProgress(toolName: string, args: unknown): string | nu
           // Other MCP servers: "🔌 server: Humanized tool"
           return `🔌 ${server}: ${humanizeToolName(tool)}`;
         }
-        return `🔌 ${toolName}`;
+        return `🔌 ${effectiveToolName}`;
       }
+
+      // Pi-mono exposes tools from the built-in swarm MCP endpoint as bare
+      // names ("store-progress", "send-task", ...), not as mcp__ names.
+      // Treat those names as agent-swarm tools so activity stays readable.
+      if (toolName.includes("-")) {
+        const label = SWARM_TOOL_LABELS[toolName];
+        if (label === null) return null;
+        if (label) return label;
+      }
+
       return `🔧 ${toolName}`;
     }
   }
