@@ -95,8 +95,16 @@ async function defaultSpawnClaudeCli(
   if (jsonSchema) {
     cmd.push("--json-schema", JSON.stringify(jsonSchema));
   }
+  // The hook subprocess receives an empty CLAUDE_CODE_OAUTH_TOKEN (claude
+  // CLI strips it from hooks). Restore it from the mirror set by
+  // claude-adapter.ts so the inner `claude -p` invocation authenticates.
+  const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN && env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN) {
+    env.CLAUDE_CODE_OAUTH_TOKEN = env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN;
+  }
   const proc = Bun.spawn({
     cmd,
+    env,
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",

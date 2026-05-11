@@ -156,7 +156,10 @@ export async function resolveCredential(
   }
 
   // 5. CLAUDE_CODE_OAUTH_TOKEN → claude-cli fallback.
-  if (env.CLAUDE_CODE_OAUTH_TOKEN) {
+  // `AGENT_SWARM_CLAUDE_OAUTH_TOKEN` is the mirror set by claude-adapter.ts
+  // before spawning `claude` — the CLI strips `CLAUDE_CODE_OAUTH_TOKEN` from
+  // hook subprocesses (security), so the hook reads the mirror instead.
+  if (env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN || env.CLAUDE_CODE_OAUTH_TOKEN) {
     return {
       kind: "claude-cli",
       modelDefault: resolveModelString("claude-cli"),

@@ -157,6 +157,19 @@ describe("resolveCredential", () => {
     }
   });
 
+  test("AGENT_SWARM_CLAUDE_OAUTH_TOKEN mirror also resolves claude-cli (used in Stop-hook env)", async () => {
+    // claude CLI strips CLAUDE_CODE_OAUTH_TOKEN from hook subprocesses;
+    // claude-adapter.ts sets AGENT_SWARM_CLAUDE_OAUTH_TOKEN as a mirror so
+    // the hook can still resolve the claude-cli fallback.
+    const cred = await resolveCredential(
+      makeOpts({ env: { AGENT_SWARM_CLAUDE_OAUTH_TOKEN: "mirror-oauth" } }),
+    );
+    expect(cred?.kind).toBe("claude-cli");
+    if (cred?.kind === "claude-cli") {
+      expect(cred.modelDefault).toBe("haiku");
+    }
+  });
+
   test("returns null when no creds resolve", async () => {
     const cred = await resolveCredential(makeOpts({ env: {} }));
     expect(cred).toBeNull();
