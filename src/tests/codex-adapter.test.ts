@@ -6,7 +6,7 @@
  * adapter's event normalization loop without pulling in the real SDK.
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type {
@@ -15,6 +15,7 @@ import type {
   ThreadEvent,
   ThreadItem,
 } from "@openai/codex-sdk";
+import type { SummarizeSessionForCodexDeps } from "../providers/codex-adapter";
 import { buildCodexConfig, CodexAdapter } from "../providers/codex-adapter";
 import { writeCodexAgentsMd } from "../providers/codex-agents-md";
 import {
@@ -135,13 +136,21 @@ async function runSessionWithFakeThread(
 
 describe("CodexSession event mapping", () => {
   const tmpLogDir = `/tmp/codex-adapter-test-${Date.now()}`;
+  let prevSkipEnv: string | undefined;
 
   beforeAll(() => {
     mkdirSync(tmpLogDir, { recursive: true });
+    // Prevent the new Phase 3 session-end summarization path from firing real
+    // LLM/HTTP calls during the legacy event-mapping tests. The summarization
+    // tests below explicitly unset this within their own scope.
+    prevSkipEnv = process.env.SKIP_SESSION_SUMMARY;
+    process.env.SKIP_SESSION_SUMMARY = "1";
   });
 
   afterAll(() => {
     rmSync(tmpLogDir, { recursive: true, force: true });
+    if (prevSkipEnv === undefined) delete process.env.SKIP_SESSION_SUMMARY;
+    else process.env.SKIP_SESSION_SUMMARY = prevSkipEnv;
   });
 
   test("happy path: session_init → message → result", async () => {
@@ -958,5 +967,431 @@ describe("buildCodexConfig", () => {
     globalThis.fetch = stubFetch({ servers: [] });
     const merged = await buildCodexConfig(cfg(), "gpt-5.3-codex", () => {});
     expect(merged.model).toBe("gpt-5.3-codex");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 3 — session-end summarization
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Drive a CodexSession through a fake `Thread` AND inject summarization deps.
+ * Mirrors `runSessionWithFakeThread` but also lets the caller stub out
+ * `runSummarize` / `fetchRetrievalsForTask` / `postRatings` / `buildRatingsFromLlm`
+ * via the adapter constructor.
+ */
+async function runSessionWithFakeThreadAndDeps(
+  events: ThreadEvent[],
+  config: ProviderSessionConfig,
+  summarizeDeps: SummarizeSessionForCodexDeps,
+): Promise<{ emitted: ProviderEvent[]; result: ProviderResult }> {
+  const sdk = await import("@openai/codex-sdk");
+  const originalStartThread = (
+    sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
+  ).startThread;
+
+  const fakeThread = makeFakeThread(events);
+  (sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }).startThread =
+    function startThread(): unknown {
+      return fakeThread as unknown;
+    };
+
+  try {
+    const adapter = new CodexAdapter({ summarizeDeps });
+    const session = await adapter.createSession(config);
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => emitted.push(e));
+    const result = await session.waitForCompletion();
+    return { emitted, result };
+  } finally {
+    (
+      sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
+    ).startThread = originalStartThread;
+  }
+}
+
+type RunSummarizeArgs = Parameters<NonNullable<SummarizeSessionForCodexDeps["runSummarize"]>>[0];
+type RunSummarizeResult = Awaited<
+  ReturnType<NonNullable<SummarizeSessionForCodexDeps["runSummarize"]>>
+>;
+type PostRatingsArgs = Parameters<NonNullable<SummarizeSessionForCodexDeps["postRatings"]>>[0];
+
+describe("CodexSession session-end summarization", () => {
+  const tmpLogDir = `/tmp/codex-adapter-summary-test-${Date.now()}`;
+  let prevSkipEnv: string | undefined;
+  let prevMemoryRaters: string | undefined;
+  const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+  const consoleErrors: unknown[][] = [];
+  const origFetch = globalThis.fetch;
+  const origConsoleError = console.error;
+  type FetchHandlerResp = {
+    ok: boolean;
+    status: number;
+    text: () => Promise<string>;
+    json: () => Promise<unknown>;
+  };
+  let fetchHandler: ((url: string, init?: RequestInit) => Promise<FetchHandlerResp>) | null = null;
+
+  beforeAll(() => {
+    mkdirSync(tmpLogDir, { recursive: true });
+    // Capture so we don't clobber the outer describe's env override on exit.
+    prevSkipEnv = process.env.SKIP_SESSION_SUMMARY;
+    prevMemoryRaters = process.env.MEMORY_RATERS;
+    delete process.env.SKIP_SESSION_SUMMARY;
+    delete process.env.MEMORY_RATERS;
+  });
+
+  afterAll(() => {
+    rmSync(tmpLogDir, { recursive: true, force: true });
+    if (prevSkipEnv === undefined) delete process.env.SKIP_SESSION_SUMMARY;
+    else process.env.SKIP_SESSION_SUMMARY = prevSkipEnv;
+    if (prevMemoryRaters === undefined) delete process.env.MEMORY_RATERS;
+    else process.env.MEMORY_RATERS = prevMemoryRaters;
+  });
+
+  beforeEach(() => {
+    fetchCalls.length = 0;
+    consoleErrors.length = 0;
+    fetchHandler = async (url) => {
+      if (url.includes("/api/memory/index")) {
+        return {
+          ok: true,
+          status: 202,
+          text: async () => "",
+          json: async () => ({ queued: true, memoryIds: ["mem-1"] }),
+        };
+      }
+      return { ok: true, status: 200, text: async () => "", json: async () => ({}) };
+    };
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      fetchCalls.push({ url: urlStr, init });
+      if (!fetchHandler) return new Response("{}", { status: 200 });
+      return fetchHandler(urlStr, init) as unknown as Response;
+    }) as typeof fetch;
+    console.error = (...args: unknown[]) => {
+      consoleErrors.push(args);
+    };
+  });
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    console.error = origConsoleError;
+    delete process.env.SKIP_SESSION_SUMMARY;
+    delete process.env.MEMORY_RATERS;
+  });
+
+  /**
+   * Helper: build the canonical event sequence used by every summarization
+   * test: thread.started → turn.started → tool started → tool completed →
+   * agent_message → turn.completed. Each test customises the agent_message
+   * text or omits a step as needed.
+   */
+  function buildSummaryEvents(opts: { agentText?: string } = {}): ThreadEvent[] {
+    const cmdItem: CommandExecutionItem = {
+      id: "cmd-1",
+      type: "command_execution",
+      command: "ls",
+      aggregated_output: "file1\nfile2",
+      exit_code: 0,
+      status: "completed",
+    };
+    const agentMsg: AgentMessageItem = {
+      id: "msg-1",
+      type: "agent_message",
+      text: opts.agentText ?? "I listed the files.",
+    };
+    return [
+      { type: "thread.started", thread_id: "t1" },
+      { type: "turn.started" },
+      { type: "item.started", item: cmdItem as ThreadItem },
+      { type: "item.completed", item: cmdItem as ThreadItem },
+      { type: "item.completed", item: agentMsg as ThreadItem },
+      {
+        type: "turn.completed",
+        usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 },
+      },
+    ];
+  }
+
+  test("happy path: runSummarize is invoked + POST /api/memory/index captured", async () => {
+    const events = buildSummaryEvents();
+
+    let runSummarizeCalls = 0;
+    let lastRunSummarizeArgs: RunSummarizeArgs | null = null;
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async (args) => {
+        runSummarizeCalls += 1;
+        lastRunSummarizeArgs = args;
+        return {
+          summary: "Listed files in the current working directory.",
+          ratings: [],
+        } as RunSummarizeResult;
+      },
+    };
+
+    const config = testConfig({
+      logFile: join(tmpLogDir, "happy.log"),
+      cwd: "",
+      prompt: "what's in this dir?",
+    });
+
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    expect(runSummarizeCalls).toBe(1);
+    expect(lastRunSummarizeArgs).not.toBeNull();
+    expect(lastRunSummarizeArgs!.harness).toBe("codex");
+    expect(lastRunSummarizeArgs!.taskContext.sourceTaskId).toBe("task-test");
+    expect(lastRunSummarizeArgs!.taskContext.agentId).toBe("agent-test");
+    expect(lastRunSummarizeArgs!.apiUrl).toBe("http://localhost:0");
+    expect(lastRunSummarizeArgs!.apiKey).toBe("test");
+
+    // Transcript must contain all four signal lines.
+    const transcript = lastRunSummarizeArgs!.transcript;
+    expect(transcript).toContain("User: what's in this dir?");
+    expect(transcript).toContain("Tool[bash] started:");
+    expect(transcript).toContain("Tool[bash] completed:");
+    expect(transcript).toContain("Assistant: I listed the files.");
+
+    // /api/memory/index POST captured with expected body.
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(1);
+    const body = JSON.parse(indexCalls[0]!.init?.body as string) as Record<string, unknown>;
+    expect(body.scope).toBe("agent");
+    expect(body.source).toBe("session_summary");
+    expect(body.sourceTaskId).toBe("task-test");
+    expect(body.agentId).toBe("agent-test");
+    expect(body.name).toBe("session-summary");
+    expect(body.content).toBe("Listed files in the current working directory.");
+
+    expect(consoleErrors.length).toBe(0);
+  });
+
+  test("SKIP_SESSION_SUMMARY=1 → no runSummarize call, no POST", async () => {
+    process.env.SKIP_SESSION_SUMMARY = "1";
+    const events = buildSummaryEvents();
+
+    let runSummarizeCalls = 0;
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () => {
+        runSummarizeCalls += 1;
+        return null;
+      },
+    };
+
+    const config = testConfig({
+      logFile: join(tmpLogDir, "skip.log"),
+      cwd: "",
+    });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    expect(runSummarizeCalls).toBe(0);
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(0);
+  });
+
+  test("missing taskId → no runSummarize call, no POST", async () => {
+    const events = buildSummaryEvents();
+
+    let runSummarizeCalls = 0;
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () => {
+        runSummarizeCalls += 1;
+        return null;
+      },
+    };
+
+    const config = testConfig({
+      logFile: join(tmpLogDir, "no-task.log"),
+      cwd: "",
+      taskId: "", // falsy
+    });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    expect(runSummarizeCalls).toBe(0);
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(0);
+  });
+
+  test("runSummarize throws → existing logFileHandle.end() + agentsMdHandle.cleanup() still run", async () => {
+    // Use a real temp dir as cwd so we exercise writeCodexAgentsMd, then spy on
+    // the resulting AGENTS.md file. After cleanup the file MUST be gone.
+    const cwd = `/tmp/codex-summary-cleanup-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    mkdirSync(cwd, { recursive: true });
+    const agentsMdPath = join(cwd, "AGENTS.md");
+
+    const events = buildSummaryEvents();
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () => {
+        throw new Error("boom");
+      },
+    };
+
+    const logFile = join(tmpLogDir, "throw.log");
+    const config = testConfig({
+      logFile,
+      cwd,
+      systemPrompt: "test system prompt", // ensures AGENTS.md gets written
+    });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    // AGENTS.md cleanup must have run despite the summarize throw.
+    expect(await Bun.file(agentsMdPath).exists()).toBe(false);
+
+    // Log file flush must have run despite the summarize throw — the log file
+    // exists and contains at least one event JSONL line.
+    const logContent = await Bun.file(logFile).text();
+    expect(logContent.length).toBeGreaterThan(0);
+    expect(logContent).toContain("session_init");
+
+    // The summarize failure was logged via console.error.
+    const summaryErrors = consoleErrors.filter(
+      (args) =>
+        typeof args[0] === "string" &&
+        (args[0] as string).startsWith("session_summary failed (codex):"),
+    );
+    expect(summaryErrors.length).toBe(1);
+
+    // No /api/memory/index POST attempted.
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(0);
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  test("length gate — summary ≤ 20 chars → no POST", async () => {
+    const events = buildSummaryEvents();
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () => ({ summary: "tiny", ratings: [] }) as RunSummarizeResult,
+    };
+
+    const config = testConfig({ logFile: join(tmpLogDir, "short.log"), cwd: "" });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(0);
+  });
+
+  test("'no significant learnings' gate → no POST", async () => {
+    const events = buildSummaryEvents();
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () =>
+        ({
+          summary: "No significant learnings from this session.",
+          ratings: [],
+        }) as RunSummarizeResult,
+    };
+
+    const config = testConfig({ logFile: join(tmpLogDir, "no-learn.log"), cwd: "" });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(0);
+  });
+
+  test("null runSummarize result → no POST, no error log", async () => {
+    const events = buildSummaryEvents();
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () => null,
+    };
+
+    const config = testConfig({ logFile: join(tmpLogDir, "null.log"), cwd: "" });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(0);
+    expect(consoleErrors.length).toBe(0);
+  });
+
+  test("ratings path — MEMORY_RATERS=llm → postRatings called with `events:` key (NOT `ratings:`)", async () => {
+    process.env.MEMORY_RATERS = "llm";
+    const events = buildSummaryEvents();
+
+    const retrievalRow = { id: "mem-A", name: "memory A", content: "..." };
+
+    let lastPostRatingsArgs: PostRatingsArgs | null = null;
+    const deps: SummarizeSessionForCodexDeps = {
+      fetchRetrievalsForTask: async () => [retrievalRow] as never,
+      runSummarize: async (args) => {
+        expect(args.retrievals.length).toBe(1);
+        expect(args.retrievals[0]!.id).toBe("mem-A");
+        return {
+          summary: "Long-enough summary with real content for the index POST.",
+          ratings: [{ id: "mem-A", score: 0.8, reasoning: "useful" }],
+        } as RunSummarizeResult;
+      },
+      postRatings: async (args) => {
+        lastPostRatingsArgs = args;
+        return { ok: true, status: 200 };
+      },
+      buildRatingsFromLlm: (ratings, retrievals) => {
+        const allowed = new Set(retrievals.map((r) => r.id));
+        return ratings
+          .filter((r) => allowed.has(r.id))
+          .map((r) => ({
+            memoryId: r.id,
+            signal: 2 * r.score - 1,
+            weight: 0.8,
+            source: "llm",
+            reasoning: r.reasoning,
+          }));
+      },
+    };
+
+    const config = testConfig({ logFile: join(tmpLogDir, "ratings.log"), cwd: "" });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    // Index POST happened
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(1);
+
+    // postRatings was called with `events:` key, NOT `ratings:` — guards
+    // against the plan/signature mismatch flagged by the orchestrator.
+    expect(lastPostRatingsArgs).not.toBeNull();
+    expect(lastPostRatingsArgs!.apiUrl).toBe("http://localhost:0");
+    expect(lastPostRatingsArgs!.agentId).toBe("agent-test");
+    expect(lastPostRatingsArgs!.taskId).toBe("task-test");
+    expect(Array.isArray(lastPostRatingsArgs!.events)).toBe(true);
+    expect(lastPostRatingsArgs!.events.length).toBe(1);
+    expect(lastPostRatingsArgs!.events[0]!.memoryId).toBe("mem-A");
+    expect(lastPostRatingsArgs!.events[0]!.source).toBe("llm");
+
+    // Guard against accidentally passing a `ratings:` key.
+    expect((lastPostRatingsArgs as unknown as Record<string, unknown>).ratings).toBeUndefined();
+
+    expect(consoleErrors.length).toBe(0);
+  });
+
+  test("POST /api/memory/index 500 → exactly one console.error('… (codex):', …)", async () => {
+    const events = buildSummaryEvents();
+    fetchHandler = async (url) => {
+      if (url.includes("/api/memory/index")) {
+        return {
+          ok: false,
+          status: 500,
+          text: async () => "internal server error",
+          json: async () => ({}),
+        };
+      }
+      return { ok: true, status: 200, text: async () => "", json: async () => ({}) };
+    };
+
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () =>
+        ({
+          summary: "A valid long-enough summary that passes the length gate.",
+          ratings: [],
+        }) as RunSummarizeResult,
+    };
+
+    const config = testConfig({ logFile: join(tmpLogDir, "post500.log"), cwd: "" });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    const matching = consoleErrors.filter(
+      (args) =>
+        typeof args[0] === "string" &&
+        (args[0] as string).startsWith("session_summary: /api/memory/index POST failed (codex):"),
+    );
+    expect(matching.length).toBe(1);
+    expect(matching[0]![1]).toBe(500);
   });
 });

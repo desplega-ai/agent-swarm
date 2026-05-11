@@ -73,6 +73,32 @@ interface TrackOptions {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Read SWARM_ORG_ID / SWARM_ORG_NAME from process.env at call time. Reading
+ * fresh each track() lets reloaded swarm_config values land in telemetry
+ * without restarting (loadGlobalConfigsIntoEnv mutates process.env on
+ * `POST /api/config/reload` with override=true). Returns only the keys that
+ * are set, so the spread below stays a clean noop on self-host.
+ */
+function getOrgIdentity(): { organization_id?: string; organization_name?: string } {
+  const out: { organization_id?: string; organization_name?: string } = {};
+  const orgId = process.env.SWARM_ORG_ID?.trim();
+  if (orgId) out.organization_id = orgId;
+  const orgName = process.env.SWARM_ORG_NAME?.trim();
+  if (orgName) out.organization_name = orgName;
+  return out;
+}
+
+/**
+ * Mirror of `buildIdentity()`'s SWARM_CLOUD parsing — accepts "true" or "1".
+ * Always emitted (not optional) so consumers can split cloud vs self-host
+ * cohorts without ambiguity between "false" and "unset".
+ */
+function isCloudDeployment(): boolean {
+  const raw = process.env.SWARM_CLOUD;
+  return raw === "true" || raw === "1";
+}
+
 /** Fire-and-forget telemetry event. Never throws, never blocks. */
 export function track(options: TrackOptions): void {
   if (!isEnabled() || !installationId) return;
@@ -89,6 +115,8 @@ export function track(options: TrackOptions): void {
         transport: "https",
         schema_version: 1,
         environment: process.env.NODE_ENV ?? "production",
+        is_cloud: isCloudDeployment(),
+        ...getOrgIdentity(),
         ...options.metadata,
       },
     };

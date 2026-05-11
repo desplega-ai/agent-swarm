@@ -57,6 +57,30 @@ export const SummaryWithRatingsSchema = z.object({
 export type LlmRating = z.infer<typeof RatingSchema>;
 export type SummaryWithRatings = z.infer<typeof SummaryWithRatingsSchema>;
 
+/**
+ * Base prompt for session summarization. Extracted from `src/hooks/hook.ts`
+ * so both the claude Stop hook and the worker-side `summarizeSession` helper
+ * in `src/utils/internal-ai/summarize-session.ts` share one source of truth.
+ *
+ * Callers append a `Task: <prompt>` line (optional) and `Transcript:\n<text>`
+ * block, then wrap with `buildSummaryWithRatingsPrompt(basePrompt, retrievals)`.
+ */
+export const BASE_SUMMARIZE_PROMPT = `You are summarizing an AI agent's work session. Extract ONLY high-value learnings.
+
+DO NOT include:
+- Generic descriptions of what was done ("worked on task X")
+- Tool calls or file reads
+- Routine progress updates
+
+DO include (if present):
+- **Mistakes made and corrections** — what went wrong and what fixed it
+- **Discovered patterns** — reusable approaches, APIs, or codebase conventions
+- **Codebase knowledge** — important file paths, architecture decisions, gotchas
+- **Environment knowledge** — service URLs, config details, tool quirks
+- **Failed approaches** — what was tried and didn't work (and why)
+
+Format as a bulleted list of concrete, reusable facts. If the session was routine with no significant learnings, respond with exactly: "No significant learnings."`;
+
 /** Context augmentations LlmRater consumes when called directly (per-memory path). */
 export type LlmRatingContext = RatingContext & {
   /** What the agent asked the memory system. */
@@ -293,6 +317,7 @@ export function dedupeRetrievalsForRater<T extends { scheduleId?: string | null 
   return out;
 }
 
+// Worker-safe: uses fetch() only, no bun:sqlite import.
 /**
  * GET `/api/memory/retrievals?taskId=` — best-effort. Returns `[]` on any
  * failure so a transient API outage never blocks the summary-indexing path.
@@ -327,6 +352,7 @@ export async function fetchRetrievalsForTask(opts: {
   }
 }
 
+// Worker-safe: uses fetch() only, no bun:sqlite import.
 /**
  * POST `/api/memory/rate` — best-effort. Logs on 4xx/5xx, never throws. The
  * worker hook wraps the whole rating block in its own try/catch as a final

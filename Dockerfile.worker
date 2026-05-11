@@ -246,9 +246,19 @@ RUN mkdir -p /home/worker/.codex/skills && \
 # plugin — the bundled binary's `import.meta.dir` is /usr/local/bin which
 # doesn't help, and relying on opencode's auto-discovery is implicit (it
 # silently breaks if discovery rules change or OPENCODE_CONFIG suppresses it).
-RUN mkdir -p /home/worker/.config/opencode/plugins && \
+#
+# Phase 2 (session-summarization fix): the plugin entrypoint imports adjacent
+# vendored helpers (`./opencode-auth`, `./summarize`). opencode's plugin
+# loader runs the TS files inside its own bundled Bun runtime, which only
+# exposes `@opencode-ai/{plugin,sdk}` — so the helpers are vendored, NOT
+# imported from `@desplega.ai/agent-swarm`. COPY them next to the entrypoint
+# so the relative imports resolve. Tests live in a sibling `tests/`
+# subdirectory and are intentionally NOT copied (opencode auto-discovers
+# `.ts` files in this directory and would try to load them as plugins).
+RUN mkdir -p /home/worker/.config/opencode/plugins/lib && \
     chown -R worker:worker /home/worker/.config
 COPY --chown=worker:worker plugin/opencode-plugins/agent-swarm.ts /home/worker/.config/opencode/plugins/agent-swarm.ts
+COPY --chown=worker:worker plugin/opencode-plugins/lib/ /home/worker/.config/opencode/plugins/lib/
 ENV OPENCODE_SWARM_PLUGIN_PATH=/home/worker/.config/opencode/plugins/agent-swarm.ts
 
 # Create directories and copy entrypoint

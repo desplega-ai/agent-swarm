@@ -225,7 +225,15 @@ describe("auto-reload debouncer", () => {
     }
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Drain any reload state that leaked from earlier test files in the full
+    // suite (e.g. swarm-config-reserved-keys.test.ts does global PUT/DELETE on
+    // /api/config, which schedules a 250ms reload). If we reset() while a
+    // prior timer was still mid-flight, the leaked .finally() can race against
+    // our test body and stomp the module state — first symptom is
+    // `expect(pending).toBe(true)` failing because `inFlightReload` was still
+    // truthy when `scheduleIntegrationsReload` ran. Flush first, then reset.
+    await flushPendingIntegrationsReload();
     _resetAutoReloadForTests();
   });
 

@@ -259,8 +259,9 @@ Identity envs that brand the swarm and gate cloud-only UX. All are read on every
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu and suppresses the self-host marketing footer |
-| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name |
+| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu, suppresses the self-host marketing footer, and is sent as `metadata.is_cloud` (always present) on every anonymized telemetry event |
+| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name. Also sent as `metadata.organization_name` on every anonymized telemetry event when set |
+| `SWARM_ORG_ID` | none | Stable org/tenant identifier exposed on `/status` as `identity.org_id` and sent as `metadata.organization_id` on every anonymized telemetry event when set. Set by the orchestrator on cloud deployments |
 | `SWARM_ORG_LOGO_URL` | bundled `/logo.png` | Sidebar logo URL (any HTTPS URL). Falls back to the bundled logo if it fails to load |
 | `SWARM_BRAND_COLOR` | none | Tints the org name in the sidebar header (any CSS color, e.g. `#a855f7`) |
 | `SWARM_MARKETING_URL` | none | Self-host marketing footer link target. Suppressed when `SWARM_CLOUD=true` or `SWARM_HIDE_CLOUD_PROMO=true` |

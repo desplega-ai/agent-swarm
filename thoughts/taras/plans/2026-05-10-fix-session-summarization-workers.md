@@ -6,15 +6,16 @@ branch: main
 repository: agent-swarm
 topic: "Fix session summarization across worker harness providers (pi, opencode, codex, claude) + reusable structured-output abstraction"
 tags: [plan, memory, session-summary, harness-providers, pi, opencode, codex, claude, pi-ai, structured-output]
-status: draft
+status: completed
 autonomy: critical
-last_updated: 2026-05-10
-last_updated_by: Claude
+last_updated: 2026-05-11
+last_updated_by: Claude (orchestrator)
 revisions:
   - "v1 (2026-05-10): scaffold"
   - "v2 (2026-05-10): full draft after research + critical questions; reframed around reusable structured-output abstraction; added Phase 4 (claude migration with CLAUDE_CODE_OAUTH_TOKEN fallback)"
   - "v3 (2026-05-10): review pass — applied Important + Minor fixes (typebox derail note, plugin import path gate, kind=<provider> log spec, fetchTaskDetails citations, status → draft, Phase 0 commit scope) + Critical fixes (harness/callerTag, opencode auth split, newCredentials persistence, pi-ai discriminator locked to type:'toolCall'/arguments)"
   - "v4 (2026-05-10): file-review pass — corrected LlmRater 'dead code' mis-read (alive worker-side, 461 events/24h in prod); narrowed Phase 5 to only delete ClaudeCliLlmRaterClient + runMemoryRater; LlmRater migration spun out as a separate Linear issue; renamed default openai/openai-codex models to gpt-5.4-mini"
+  - "v5 (2026-05-11): Phases 0–4 implemented and committed on branch fix-session-summarization-workers (commits 49e44ffb, e9cfb966, ab6984db, 5f8a144d, dc21da86, 633de31a). **Phase 5 cancelled** per Taras after the documented blocker hit during execution: deleting llm-client.ts is intrinsically coupled to migrating LlmRater (which uses ClaudeCliLlmRaterClient as its default client). All Phase 5 cleanup (llm-client.ts/llm-summarizer.ts removal, MEMORY_LLM_RATER_PROVIDER sweep, runbook updates, soft-deprecation warning) is folded into DES-363."
 ---
 
 # Fix Session Summarization Across Worker Harness Providers — Implementation Plan
@@ -349,16 +350,16 @@ This is a no-op refactor for now (claude's hook still inlines its own copy until
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase 0 unit tests pass: `bun test src/tests/internal-ai/`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] No lockfile drift: `bun install --frozen-lockfile` (run after any `package.json` edit)
-- [ ] `grep -r "bun:sqlite" src/utils/internal-ai/` returns zero matches.
+- [x] Phase 0 unit tests pass: `bun test src/tests/internal-ai/` (44 pass / 0 fail)
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint` (warnings only; exit 0)
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] No lockfile drift: `bun install --frozen-lockfile` (run after any `package.json` edit)
+- [x] `grep -r "bun:sqlite" src/utils/internal-ai/` returns zero matches. (Doc-comments mention the term; `grep -rE "from\s+[\"']bun:sqlite"` confirms zero real imports.)
 
 #### Automated QA:
-- [ ] **Credential resolver matrix** (sub-agent): import `resolveCredential`, mock env vars one combination at a time (just OPENROUTER, just ANTHROPIC, both, codex-OAuth-only, CLAUDE_CODE_OAUTH_TOKEN-only, none), print the resolved `{kind, modelDefault}` table. Assert against expected precedence.
-- [ ] **End-to-end happy path with real OpenRouter** (gated on `OPENROUTER_API_KEY`): a test calls `summarizeSession({harness:"pi", transcript:"<minimal real transcript>", retrievals:[], taskContext:{sourceTaskId:"t1",agentId:"a1"}})` and asserts the returned object has a non-empty `summary` field. `describe.skipIf(!process.env.OPENROUTER_API_KEY)` so CI doesn't require the key.
+- [x] **Credential resolver matrix** (sub-agent): import `resolveCredential`, mock env vars one combination at a time (just OPENROUTER, just ANTHROPIC, both, codex-OAuth-only, CLAUDE_CODE_OAUTH_TOKEN-only, none), print the resolved `{kind, modelDefault}` table. Assert against expected precedence. — Covered by `src/tests/internal-ai/credentials.test.ts`.
+- [x] **End-to-end happy path with real OpenRouter** (gated on `OPENROUTER_API_KEY`): a test calls `summarizeSession({harness:"pi", transcript:"<minimal real transcript>", retrievals:[], taskContext:{sourceTaskId:"t1",agentId:"a1"}})` and asserts the returned object has a non-empty `summary` field. `describe.skipIf(!process.env.OPENROUTER_API_KEY)` so CI doesn't require the key.
 
 #### Manual Verification:
 - [ ] Read `src/utils/internal-ai/credentials.ts` and confirm the codex-OAuth shape reshaping (`{access, refresh, expires} → { "openai-codex": creds }`) matches pi-ai's `getOAuthApiKey` expectation.
@@ -483,12 +484,12 @@ Rewrite `src/providers/pi-mono-extension.ts:280-376` to call `summarizeSession` 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Pi extension tests pass: `bun test src/tests/pi-mono-extension.test.ts`
-- [ ] Full unit suite passes: `bun test`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] `grep -n "Bun.spawn" src/providers/pi-mono-extension.ts` returns zero matches (the shellout is gone).
+- [x] Pi extension tests pass: `bun test src/tests/pi-mono-extension.test.ts` (9 pass / 0 fail)
+- [x] Full unit suite passes: `bun test` (3690 pass / 0 fail)
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint` (exit 0; pre-existing warnings only)
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] `grep -n "Bun.spawn" src/providers/pi-mono-extension.ts` returns zero matches in code (1 doc-comment mention of the removed shellout remains by design).
 
 #### Automated QA:
 - [ ] **Real pi session against local API server** (sub-agent): bring up the stack with `bun run pm2-start`, set `OPENROUTER_API_KEY`, create a pi task that does a small piece of real work, wait for completion, then `GET /api/memory/list?source=session_summary&taskId=<id>` and assert a non-empty row. Capture the memory id and content for the report.
@@ -687,18 +688,18 @@ Add unit tests in `plugin/opencode-plugins/tests/opencode-auth.test.ts` (NEW fil
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Opencode plugin tests pass: `bun test src/tests/opencode-plugin.test.ts`
-- [ ] Full unit suite passes: `bun test`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] Docker worker still builds: `bun run docker:build:worker` (the plugin is bundled in — confirm path resolution works inside the worker image)
-- [ ] **Plugin import path hard gate**: bundling the opencode plugin MUST successfully resolve `@desplega.ai/agent-swarm/utils/internal-ai` and `@desplega.ai/agent-swarm/be/memory/raters/llm`. Verify by running the plugin bundle step (whatever `Dockerfile.worker:244-252` runs) and confirming the resulting JS contains references to `internal-ai` symbols. If resolution fails, fall back to one of: (a) vendor the helpers into `plugin/opencode-plugins/`, (b) add an esbuild alias mapping the package paths to repo-local sources. Do not ship Phase 2 with an unresolved import.
-- [ ] `grep -n "claude -p\|Bun.spawn" plugin/opencode-plugins/agent-swarm.ts` returns zero matches.
+- [x] Opencode plugin tests pass: `bun test src/tests/opencode-plugin.test.ts`
+- [x] Full unit suite passes: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] Docker worker still builds: `bun run docker:build:worker` (the plugin is bundled in — confirm path resolution works inside the worker image)
+- [x] **Plugin import path hard gate**: bundling the opencode plugin MUST successfully resolve `@desplega.ai/agent-swarm/utils/internal-ai` and `@desplega.ai/agent-swarm/be/memory/raters/llm`. Verify by running the plugin bundle step (whatever `Dockerfile.worker:244-252` runs) and confirming the resulting JS contains references to `internal-ai` symbols. If resolution fails, fall back to one of: (a) vendor the helpers into `plugin/opencode-plugins/`, (b) add an esbuild alias mapping the package paths to repo-local sources. Do not ship Phase 2 with an unresolved import. **Resolved (a): the agent-swarm package is not resolvable inside opencode's bundled-Bun plugin runtime; vendored minimal helpers into `plugin/opencode-plugins/lib/{summarize,opencode-auth}.ts` and updated `Dockerfile.worker` to COPY the whole `lib/` directory.**
+- [x] `grep -n "claude -p\|Bun.spawn" plugin/opencode-plugins/agent-swarm.ts` returns zero matches.
 
 #### Automated QA:
-- [ ] **Real opencode session** (sub-agent): bring up the stack, set `OPENROUTER_API_KEY` (or populate `~/.local/share/opencode/auth.json`), create an opencode task, wait for completion, assert a `session_summary` row exists for the task.
-- [ ] **Plugin import path verification**: have the sub-agent run `docker run --rm <worker-image> sh -c 'cat /home/worker/.opencode/swarm/agent-swarm.js | grep -c "summarizeSessionForOpencode"'` — confirm the bundled plugin includes the new function.
+- [x] **Real opencode session** (sub-agent): bring up the stack, set `OPENROUTER_API_KEY` (or populate `~/.local/share/opencode/auth.json`), create an opencode task, wait for completion, assert a `session_summary` row exists for the task.
+- [x] **Plugin import path verification**: have the sub-agent run `docker run --rm <worker-image> sh -c 'cat /home/worker/.opencode/swarm/agent-swarm.js | grep -c "summarizeSessionForOpencode"'` — confirm the bundled plugin includes the new function. (Actual path: `/home/worker/.config/opencode/plugins/agent-swarm.ts`. `summarizeSessionForOpencode` is imported and invoked on `session.idle` — see line 16, line 264.)
 
 #### Manual Verification:
 - [ ] Inspect `flattenOpencodeTranscript` output from a real session: confirm tool calls + text alternations read coherently (not garbled JSON).
@@ -866,16 +867,16 @@ import { fetchRetrievalsForTask, postRatings, buildRatingsFromLlm } from "../be/
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Codex adapter tests pass: `bun test src/tests/codex-adapter.test.ts`
-- [ ] Full unit suite passes: `bun test`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] Codex adapter tests pass: `bun test src/tests/codex-adapter.test.ts`
+- [x] Full unit suite passes: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
-- [ ] **Real codex session against local API server** (sub-agent): bring up the stack with codex OAuth configured (`bun run src/cli.tsx codex-oauth-login` per `thoughts/taras/plans/2026-04-10-codex-oauth-support.md`), create a codex task, wait for completion, assert a `session_summary` row exists.
-- [ ] **Env fallback path** (sub-agent): same as above but with `OPENAI_API_KEY` env set and no codex OAuth → confirm summary still indexed (the wrapper falls through env precedence).
-- [ ] **Cleanup-after-failure** (in the unit test): inject a fault that makes `runSummarize` reject, assert `agentsMdHandle.cleanup()` still runs.
+- [x] **Real codex session against local API server** (sub-agent): bring up the stack with codex OAuth configured (`bun run src/cli.tsx codex-oauth-login` per `thoughts/taras/plans/2026-04-10-codex-oauth-support.md`), create a codex task, wait for completion, assert a `session_summary` row exists.
+- [x] **Env fallback path** (sub-agent): same as above but with `OPENAI_API_KEY` env set and no codex OAuth → confirm summary still indexed (the wrapper falls through env precedence).
+- [x] **Cleanup-after-failure** (in the unit test): inject a fault that makes `runSummarize` reject, assert `agentsMdHandle.cleanup()` still runs.
 
 #### Manual Verification:
 - [ ] On a real codex session, eyeball the indexed `session_summary` content for coherence (codex transcript is event-buffered rather than file-sourced; quality may differ from claude's). If garbled, refine `shortenItemResult`.
@@ -954,15 +955,15 @@ test("CLAUDE_CODE_OAUTH_TOKEN-only env → claude-cli kind", async () => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Claude Stop hook tests pass: `bun test src/tests/claude-stop-hook.test.ts`
-- [ ] Full unit suite passes: `bun test`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] Claude Stop hook tests pass: `bun test src/tests/claude-stop-hook.test.ts`
+- [x] Full unit suite passes: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
 - [ ] **`CLAUDE_CODE_OAUTH_TOKEN`-only fallback** (sub-agent): bring up the stack with ONLY `CLAUDE_CODE_OAUTH_TOKEN` set (no OpenRouter/Anthropic/OpenAI keys). Run a claude task. Assert a `session_summary` row is produced via the `claude -p` fallback path. Verify by tailing worker logs for a line like `internal-ai: kind=claude-cli` (add this log in Phase 0).
-- [ ] **OpenRouter precedence** (sub-agent): same with `OPENROUTER_API_KEY` also set → confirm the OpenRouter path takes precedence (the `claude-cli` shellout is NOT invoked — verify by absence of `kind=claude-cli` log line and presence of `kind=openrouter`).
+- [x] **OpenRouter precedence** (sub-agent): same with `OPENROUTER_API_KEY` also set → confirm the OpenRouter path takes precedence (the `claude-cli` shellout is NOT invoked — verify by absence of `kind=claude-cli` log line and presence of `kind=openrouter`).
 
 #### Manual Verification:
 - [ ] Compare a Phase 4 claude `session_summary` row (via wrapper, OpenRouter path) to a pre-Phase 4 row (via old `runMemoryRater`): content quality should be equivalent. If degraded, investigate the typebox tool-call schema vs the old `response_format: json_schema` approach (the tool-call retry loop may help or hurt — eyeball a few examples).
@@ -971,7 +972,9 @@ test("CLAUDE_CODE_OAUTH_TOKEN-only env → claude-cli kind", async () => {
 
 ---
 
-## Phase 5: Cleanup — narrow deletions only (`ClaudeCliLlmRaterClient` + `runMemoryRater`)
+## Phase 5: Cleanup — narrow deletions only (`ClaudeCliLlmRaterClient` + `runMemoryRater`) — **CANCELLED**
+
+> **Status: CANCELLED (2026-05-11).** During execution the Phase 5 pre-check (see §1 below) confirmed the documented blocker: `src/be/memory/raters/llm.ts:20` imports `ClaudeCliLlmRaterClient` from `llm-client.ts` and `LlmRater`'s constructor uses it as a default at `:97` — so `llm-client.ts` cannot be deleted without modifying `LlmRater` itself, which v4 errata explicitly defers to **[DES-363](https://linear.app/desplega-labs/issue/DES-363/migrate-llmrater-to-completestructured-break-openrouter-hardcode)**. Phases 0–4 (the user-visible fix) shipped on branch `fix-session-summarization-workers`. All Phase 5 cleanup work (delete `llm-client.ts` + `llm-summarizer.ts`, sweep `MEMORY_LLM_RATER_PROVIDER`, soft-deprecation warning, runbook + CHANGELOG updates) is folded into DES-363.
 
 ### Overview
 

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.76.2",
+    "version": "1.76.3",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -7368,6 +7368,12 @@
                         },
                         "hide_cloud_promo": {
                           "type": "boolean"
+                        },
+                        "org_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
                         }
                       },
                       "required": [
@@ -7376,7 +7382,8 @@
                         "brand_color",
                         "is_cloud",
                         "marketing_url",
-                        "hide_cloud_promo"
+                        "hide_cloud_promo",
+                        "org_id"
                       ]
                     },
                     "setup": {

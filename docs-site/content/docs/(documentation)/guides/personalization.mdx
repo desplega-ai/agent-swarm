@@ -11,10 +11,11 @@ All identity envs are read on every `/status` request. Set them in your `.env`, 
 
 | Env | Default | Where it shows |
 |---|---|---|
-| `SWARM_ORG_NAME` | `"Swarm"` | Sidebar header (next to logo) |
+| `SWARM_ORG_NAME` | `"Swarm"` | Sidebar header (next to logo). Also sent as `metadata.organization_name` on every anonymized telemetry event when set. |
+| `SWARM_ORG_ID` | none | Stable org/tenant identifier exposed on `/status` as `identity.org_id` and sent as `metadata.organization_id` on every anonymized telemetry event when set. Set by the orchestrator on cloud deployments; safe to leave unset on self-host. |
 | `SWARM_ORG_LOGO_URL` | bundled `/logo.png` | Sidebar header logo. Any HTTPS URL. If the URL fails to load, the sidebar reverts to the bundled logo. |
 | `SWARM_BRAND_COLOR` | none | Tints the org name in the sidebar header. Any CSS color (`#a855f7`, `rebeccapurple`, etc.). |
-| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Gates the user-menu Docs/Support/Billing items (Phase 2) and suppresses the self-host marketing link. |
+| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Gates the user-menu Docs/Support/Billing items (Phase 2), suppresses the self-host marketing link, and is sent as `metadata.is_cloud` (boolean, always present) on every anonymized telemetry event. |
 | `SWARM_MARKETING_URL` | none | Footer marketing link target on self-hosted deployments (Phase 2). Suppressed when `SWARM_CLOUD=true` or `SWARM_HIDE_CLOUD_PROMO=true`. |
 | `SWARM_HIDE_CLOUD_PROMO` | `false` | Force-hide the marketing footer regardless of `SWARM_CLOUD`. Useful for self-hosted swarms that don't want promotional UI. |
 | `SWARM_VERIFY_TTL_MS` | `3_600_000` (1h) | How long a successful "Test connection" click keeps the harness milestone in `verified` state before re-asking. In-memory; lost on API restart. |
@@ -52,7 +53,8 @@ The single source of truth the UI leans on for "what does this swarm look like, 
     "brand_color": "#ff5500",
     "is_cloud": false,
     "marketing_url": "https://swarm.acme.example.com",
-    "hide_cloud_promo": false
+    "hide_cloud_promo": false,
+    "org_id": "org_acme_123"
   },
   "setup": [
     {
