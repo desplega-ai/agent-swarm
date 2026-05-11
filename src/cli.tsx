@@ -34,7 +34,6 @@ interface ParsedArgs {
   systemPrompt: string;
   systemPromptFile: string;
   additionalArgs: string[];
-  aiLoop: boolean;
   preset: string;
   open: boolean;
   showHelp: boolean;
@@ -54,7 +53,6 @@ function parseArgs(args: string[]): ParsedArgs {
   let systemPrompt = "";
   let systemPromptFile = "";
   let additionalArgs: string[] = [];
-  let aiLoop = false;
   let preset = "";
   let open = false;
   let showHelp = false;
@@ -92,8 +90,6 @@ function parseArgs(args: string[]): ParsedArgs {
     } else if (arg === "--system-prompt-file") {
       systemPromptFile = mainArgs[i + 1] || systemPromptFile;
       i++;
-    } else if (arg === "--ai-loop") {
-      aiLoop = true;
     } else if (arg === "--preset") {
       preset = mainArgs[i + 1] || preset;
       i++;
@@ -122,7 +118,6 @@ function parseArgs(args: string[]): ParsedArgs {
     systemPrompt,
     systemPromptFile,
     additionalArgs,
-    aiLoop,
     preset,
     open,
     showHelp,
@@ -207,7 +202,6 @@ const COMMAND_HELP: Record<
       "  --yolo                      Continue on errors instead of stopping",
       "  --system-prompt <text>      Custom system prompt (appended to Claude)",
       "  --system-prompt-file <path> Read system prompt from file",
-      "  --ai-loop                   Use AI-based polling (legacy mode)",
       "  -- <args...>                Additional arguments to pass to Claude CLI",
       "  -h, --help                  Show this help",
     ].join("\n"),
@@ -226,7 +220,6 @@ const COMMAND_HELP: Record<
       "  --yolo                      Continue on errors instead of stopping",
       "  --system-prompt <text>      Custom system prompt",
       "  --system-prompt-file <path> Read system prompt from file",
-      "  --ai-loop                   Use AI-based polling (legacy mode)",
       "  -- <args...>                Additional arguments to pass to Claude CLI",
       "  -h, --help                  Show this help",
     ].join("\n"),
@@ -406,7 +399,6 @@ interface RunnerProps {
   systemPrompt: string;
   systemPromptFile: string;
   additionalArgs: string[];
-  aiLoop: boolean;
 }
 
 function WorkerRunner({
@@ -415,7 +407,6 @@ function WorkerRunner({
   systemPrompt,
   systemPromptFile,
   additionalArgs,
-  aiLoop,
 }: RunnerProps) {
   const { exit } = useApp();
 
@@ -427,25 +418,17 @@ function WorkerRunner({
       systemPromptFile: systemPromptFile || undefined,
       additionalArgs,
       logsDir: "./logs",
-      aiLoop,
     }).catch((err) => {
       console.error("[error] Worker encountered an error:", err);
       exit(err);
     });
     // Note: runWorker runs indefinitely, so we don't call exit() on success
-  }, [prompt, yolo, systemPrompt, systemPromptFile, additionalArgs, aiLoop, exit]);
+  }, [prompt, yolo, systemPrompt, systemPromptFile, additionalArgs, exit]);
 
   return null;
 }
 
-function LeadRunner({
-  prompt,
-  yolo,
-  systemPrompt,
-  systemPromptFile,
-  additionalArgs,
-  aiLoop,
-}: RunnerProps) {
+function LeadRunner({ prompt, yolo, systemPrompt, systemPromptFile, additionalArgs }: RunnerProps) {
   const { exit } = useApp();
 
   useEffect(() => {
@@ -456,13 +439,12 @@ function LeadRunner({
       systemPromptFile: systemPromptFile || undefined,
       additionalArgs,
       logsDir: "./logs",
-      aiLoop,
     }).catch((err) => {
       console.error("[error] Lead encountered an error:", err);
       exit(err);
     });
     // Note: runLead runs indefinitely, so we don't call exit() on success
-  }, [prompt, yolo, systemPrompt, systemPromptFile, additionalArgs, aiLoop, exit]);
+  }, [prompt, yolo, systemPrompt, systemPromptFile, additionalArgs, exit]);
 
   return null;
 }
@@ -495,7 +477,6 @@ function App({ args }: { args: ParsedArgs }) {
     systemPrompt,
     systemPromptFile,
     additionalArgs,
-    aiLoop,
     preset,
   } = args;
 
@@ -516,7 +497,6 @@ function App({ args }: { args: ParsedArgs }) {
           systemPrompt={systemPrompt}
           systemPromptFile={systemPromptFile}
           additionalArgs={additionalArgs}
-          aiLoop={aiLoop}
         />
       );
     case "lead":
@@ -527,7 +507,6 @@ function App({ args }: { args: ParsedArgs }) {
           systemPrompt={systemPrompt}
           systemPromptFile={systemPromptFile}
           additionalArgs={additionalArgs}
-          aiLoop={aiLoop}
         />
       );
     // version, help, docs handled before render()
