@@ -1,5 +1,11 @@
 /**
- * x402 Payment Module
+ * x402 Payment Module — **Alpha / Opt-in**
+ *
+ * @alpha
+ *
+ * This module is experimental and not imported by any core swarm path.
+ * Include it explicitly when you need automatic x402 micropayment support.
+ * See `src/x402/README.md` for setup, env vars, and usage examples.
  *
  * Gives agents the ability to make x402 payments when calling external APIs.
  * Uses USDC on Base (or Base Sepolia for testing) with automatic 402 handling.

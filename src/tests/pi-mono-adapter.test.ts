@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { PiMonoAdapter } from "../providers/pi-mono-adapter";
+import { PiMonoAdapter, resolveModel } from "../providers/pi-mono-adapter";
 
 describe("PiMonoAdapter", () => {
   test("name is 'pi'", () => {
@@ -112,6 +112,68 @@ describe("Model name mapping", () => {
     const [provider, modelId] = modelStr.split("/", 2);
     expect(provider).toBe("anthropic");
     expect(modelId).toBe("claude-opus-4-20250514");
+  });
+});
+
+describe("resolveModel — OpenRouter reroute for anthropic shortnames", () => {
+  // Regression coverage for task 37a4a87a: workers spawned with
+  // `provider: pi` + `OPENROUTER_API_KEY` (no ANTHROPIC_API_KEY) and a task
+  // model of `sonnet` / `haiku` / `opus` previously crashed at
+  // session-start with "No API key found for anthropic" because pi-ai's
+  // anthropic provider only checks ANTHROPIC_OAUTH_TOKEN / ANTHROPIC_API_KEY.
+  // The adapter now reroutes the shortname through the OpenRouter mirror.
+
+  test("sonnet → openrouter/anthropic/claude-sonnet-4 when only OPENROUTER_API_KEY is set", () => {
+    const env = { OPENROUTER_API_KEY: "sk-or-..." };
+    const model = resolveModel("sonnet", env);
+    expect(model).toBeDefined();
+    expect(model?.provider).toBe("openrouter");
+    expect(model?.id).toBe("anthropic/claude-sonnet-4");
+  });
+
+  test("haiku → openrouter/anthropic/claude-haiku-4.5 when only OPENROUTER_API_KEY is set", () => {
+    const env = { OPENROUTER_API_KEY: "sk-or-..." };
+    const model = resolveModel("haiku", env);
+    expect(model).toBeDefined();
+    expect(model?.provider).toBe("openrouter");
+    expect(model?.id).toBe("anthropic/claude-haiku-4.5");
+  });
+
+  test("opus → openrouter/anthropic/claude-opus-4 when only OPENROUTER_API_KEY is set", () => {
+    const env = { OPENROUTER_API_KEY: "sk-or-..." };
+    const model = resolveModel("opus", env);
+    expect(model).toBeDefined();
+    expect(model?.provider).toBe("openrouter");
+    expect(model?.id).toBe("anthropic/claude-opus-4");
+  });
+
+  test("anthropic native path wins when ANTHROPIC_API_KEY is set (even alongside OPENROUTER_API_KEY)", () => {
+    const env = { ANTHROPIC_API_KEY: "sk-ant-...", OPENROUTER_API_KEY: "sk-or-..." };
+    const model = resolveModel("sonnet", env);
+    expect(model).toBeDefined();
+    expect(model?.provider).toBe("anthropic");
+    expect(model?.id).toBe("claude-sonnet-4-20250514");
+  });
+
+  test("ANTHROPIC_OAUTH_TOKEN alone also wins over OPENROUTER reroute", () => {
+    const env = { ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat-...", OPENROUTER_API_KEY: "sk-or-..." };
+    const model = resolveModel("sonnet", env);
+    expect(model).toBeDefined();
+    expect(model?.provider).toBe("anthropic");
+  });
+
+  test("no rerouting for non-shortname `anthropic/<model>` strings", () => {
+    // Explicit provider prefix should not be silently swapped — that path is
+    // the caller's explicit choice, surface as-is.
+    const env = { OPENROUTER_API_KEY: "sk-or-..." };
+    const model = resolveModel("anthropic/claude-sonnet-4-20250514", env);
+    expect(model?.provider).toBe("anthropic");
+  });
+
+  test("default env arg falls back to process.env (smoke test — no creds set)", () => {
+    // Just confirm the default parameter doesn't throw — the actual model
+    // resolution depends on the test runner's env.
+    expect(() => resolveModel("unknown-model-id")).not.toThrow();
   });
 });
 
