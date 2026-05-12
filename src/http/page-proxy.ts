@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getPage } from "../be/db";
-import { parseCookieHeader, verifyPageSession } from "../utils/page-session";
+import { extractAndVerifyCookie } from "../utils/page-session";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -119,8 +119,7 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
   const queryPart = queryIdx === -1 ? "" : url.slice(queryIdx);
 
   // ─── Cookie validation ────────────────────────────────────────────────────
-  const cookieToken = parseCookieHeader(req.headers.cookie, "page_session");
-  const payload = await verifyPageSession(cookieToken);
+  const payload = await extractAndVerifyCookie(req);
   if (!payload) {
     jsonError(res, "no page session", 401);
     return true;

@@ -2,7 +2,10 @@
 id: step-4
 name: Authed mode on /p/:id
 depends_on: [step-3]
-status: ready
+status: done
+claimed_by: orchestrator-step-4-2026-05-12
+last_updated: 2026-05-12
+last_updated_by: orchestrator-step-4-2026-05-12
 ---
 
 # step-4: Authed mode on `/p/:id`
@@ -54,13 +57,14 @@ Make `auth_mode='authed'` work end-to-end at the API layer. The cookie + proxy s
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New tests pass: `bun test src/tests/pages-authed-mode.test.ts src/tests/page-proxy-authed.test.ts src/tests/launch-password-rejection.test.ts`
-- [ ] Lint: `bun run lint`
-- [ ] Typecheck: `bun run tsc:check`
-- [ ] No new OpenAPI routes; spec stays clean: `bun run docs:openapi && test -z "$(git status --porcelain openapi.json)"`
+- [x] New tests pass: `bun test src/tests/pages-authed-mode.test.ts src/tests/page-proxy-authed.test.ts src/tests/launch-password-rejection.test.ts`
+- [x] Lint: `bun run lint`
+- [x] Typecheck: `bun run tsc:check`
+- [x] No new OpenAPI routes; spec stays clean: `bun run docs:openapi && test -z "$(git status --porcelain openapi.json)"`
+  - Note: response-only additions (`400` on launch, `403` on `/p/:id` + `/p/:id.json`) are committed. No new paths/operations.
 
 #### Automated QA:
-- [ ] Full cookie-gated flow via curl, end-to-end:
+- [x] Full cookie-gated flow via curl, end-to-end:
   ```bash
   curl -sS -X POST http://localhost:3013/api/pages \
     -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \

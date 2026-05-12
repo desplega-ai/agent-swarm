@@ -80,10 +80,15 @@ const getPageRoute = route({
 });
 
 /**
- * Issue a page-session cookie for a given page id. Until step-3 narrows the
- * authorization story per `auth_mode`, this endpoint accepts any page and
- * issues a cookie purely on bearer auth. Used by the SPA iframe shell when
- * loading `/artifacts/:id`.
+ * Issue a page-session cookie for a given page id. Bearer-authed.
+ *
+ * Per auth_mode:
+ *   - `public`: cookie issued (uniform path — even public pages can be loaded
+ *     with cookie context if desired).
+ *   - `authed`: cookie issued (normal flow).
+ *   - `password`: rejected with 400 — password pages must be unlocked via
+ *     `?key=` query / HTTP Basic on `/p/:id` directly (step-5). Bearer-side
+ *     issuance would bypass the password check entirely.
  *
  * Response: 204 No Content + `Set-Cookie: page_session=<signed>; HttpOnly; ...`.
  */
@@ -96,6 +101,7 @@ const launchPageRoute = route({
   params: z.object({ id: z.string() }),
   responses: {
     204: { description: "Cookie issued" },
+    400: { description: "Launch not supported for this page (e.g. password mode)" },
     404: { description: "Page not found" },
   },
 });
@@ -508,8 +514,19 @@ export async function handlePages(
       return true;
     }
 
-    // step-3 will narrow this per `page.authMode`. For now, any authed
-    // (bearer) caller can mint a session cookie for any page id.
+    // Password mode bypasses the bearer-launch path entirely. Otherwise a
+    // caller with API_KEY could mint a cookie for a password-protected page
+    // without ever knowing the password. step-5 issues the password-mode
+    // cookie from the public `/p/:id?key=...` route, where the password is
+    // actually verified.
+    if (page.authMode === "password") {
+      applyLaunchCors(req, res);
+      jsonError(res, "use ?key= or Basic auth on /p/:id directly", 400);
+      return true;
+    }
+
+    // public + authed both mint a cookie here. No per-page ACL in v1: the
+    // bearer is the API_KEY, same trust as the rest of the API.
     const exp = Math.floor(Date.now() / 1000) + PAGE_SESSION_TTL_SECONDS;
     const token = await signPageSession({ pageId: page.id, exp });
     const cookie = buildSetCookie(token, { dev: isDevRequest(req) });

@@ -25,6 +25,7 @@ import { z } from "zod";
 import { BROWSER_SDK_JS } from "../artifact-sdk/browser-sdk";
 import { getPage } from "../be/db";
 import type { Page } from "../types";
+import { extractAndVerifyCookie } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 
@@ -41,6 +42,7 @@ const publicPageRoute = route({
     200: { description: "Rendered HTML page" },
     302: { description: "Redirect to SPA for JSON content" },
     401: { description: "Page requires an authenticated session" },
+    403: { description: "Cookie does not match this page id" },
     404: { description: "Page not found" },
   },
   auth: { apiKey: false },
@@ -56,6 +58,7 @@ const publicPageJsonRoute = route({
   responses: {
     200: { description: "Page JSON" },
     401: { description: "Page requires an authenticated session" },
+    403: { description: "Cookie does not match this page id" },
     404: { description: "Page not found" },
   },
   auth: { apiKey: false },
@@ -125,20 +128,46 @@ function buildCsp(): string {
 }
 
 /**
- * Decide whether a page is reachable by an unauthenticated request. Only
- * `public` is permitted in step-3; `authed` (step-4) and `password` (step-5)
- * return 401 here. The narrowing happens in subsequent steps.
+ * Decide whether a page is reachable. Public pages are always reachable;
+ * authed pages require a valid `page_session` cookie SCOPED TO THE SAME PAGE
+ * ID; password pages are still 401 here until step-5 wires `?key=` / Basic.
+ *
+ * The caller passes the cookie payload (already verified by
+ * `extractAndVerifyCookie`) — `null` when no cookie was sent or it failed
+ * verification. Cross-page reuse (cookie for page A presented for page B)
+ * surfaces as a distinct `403` so misconfigurations are debuggable, NOT a
+ * generic 401.
  */
-function isAccessible(page: Page): { ok: true } | { ok: false; reason: string } {
+type AccessResult = { ok: true } | { ok: false; status: 401 | 403; reason: string };
+
+function isAccessible(
+  page: Page,
+  cookiePayload: { pageId: string; exp: number } | null,
+): AccessResult {
   if (page.authMode === "public") return { ok: true };
   if (page.authMode === "authed") {
-    return {
-      ok: false,
-      reason: "authed mode requires page-session cookie; visit /artifacts/:id",
-    };
+    if (!cookiePayload) {
+      return {
+        ok: false,
+        status: 401,
+        reason: "authed mode requires page-session cookie; POST /api/pages/:id/launch first",
+      };
+    }
+    if (cookiePayload.pageId !== page.id) {
+      return {
+        ok: false,
+        status: 403,
+        reason: "page-session cookie scoped to a different page id",
+      };
+    }
+    return { ok: true };
   }
-  // password
-  return { ok: false, reason: "password mode not yet implemented on /p/:id" };
+  // password — step-5 handles this.
+  return {
+    ok: false,
+    status: 401,
+    reason: "password mode not yet implemented on /p/:id",
+  };
 }
 
 // ─── Handler ────────────────────────────────────────────────────────────────
@@ -181,9 +210,14 @@ export async function handlePagesPublic(
     return true;
   }
 
-  const access = isAccessible(page);
+  // Pull + verify the page-session cookie ONCE — `null` covers "no cookie",
+  // "tampered signature", "expired", "malformed". The access decision below
+  // discriminates per-authMode.
+  const cookiePayload = await extractAndVerifyCookie(req);
+
+  const access = isAccessible(page, cookiePayload);
   if (!access.ok) {
-    res.writeHead(401, { "Content-Type": "application/json" });
+    res.writeHead(access.status, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: scrubSecrets(access.reason) }));
     return true;
   }

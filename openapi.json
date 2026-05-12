@@ -4131,6 +4131,9 @@
           "204": {
             "description": "Cookie issued"
           },
+          "400": {
+            "description": "Launch not supported for this page (e.g. password mode)"
+          },
           "404": {
             "description": "Page not found"
           }
@@ -4234,6 +4237,9 @@
           "401": {
             "description": "Page requires an authenticated session"
           },
+          "403": {
+            "description": "Cookie does not match this page id"
+          },
           "404": {
             "description": "Page not found"
           }
@@ -4262,6 +4268,9 @@
           },
           "401": {
             "description": "Page requires an authenticated session"
+          },
+          "403": {
+            "description": "Cookie does not match this page id"
           },
           "404": {
             "description": "Page not found"

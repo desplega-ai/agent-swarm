@@ -189,3 +189,23 @@ export function parseCookieHeader(
   const match = header.match(re);
   return match ? match[1] : undefined;
 }
+
+/**
+ * One-shot helper: pull `page_session` out of a request's `Cookie` header and
+ * verify it. Returns the parsed payload on success, `null` on any failure
+ * (no cookie, malformed, bad signature, expired, etc.).
+ *
+ * Shared by `/@swarm/api/*` (`src/http/page-proxy.ts`) and the authed `/p/:id`
+ * branch (`src/http/pages-public.ts`) so both call sites converge on the same
+ * verification semantics.
+ *
+ * Accepts an object with a `headers.cookie` field — duck-typed to keep this
+ * helper test-friendly without dragging `node:http` types into the utility.
+ */
+export async function extractAndVerifyCookie(req: {
+  headers: { cookie?: string | string[] | undefined };
+}): Promise<PageSessionPayload | null> {
+  const token = parseCookieHeader(req.headers.cookie, "page_session");
+  if (!token) return null;
+  return verifyPageSession(token);
+}
