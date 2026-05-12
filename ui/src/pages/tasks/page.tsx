@@ -1,14 +1,18 @@
-import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { ChevronLeft, ChevronRight, Clock, GitBranch, Plus, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Plus, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useScheduledTasks } from "@/api/hooks/use-schedules";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { useCreateTask, useTasks } from "@/api/hooks/use-tasks";
-import type { AgentTask, AgentTaskStatus } from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
+import type { AgentTask } from "@/api/types";
 import { StatusBadge } from "@/components/shared/status-badge";
+import {
+  ignoreRowClickFromInteractives,
+  TasksColumnsMenu,
+  TasksTable,
+  useTasksColumns,
+} from "@/components/shared/tasks-table";
 import { TemplateRecommendationCard } from "@/components/shared/template-recommendation-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
   SelectContent,
@@ -33,7 +38,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 interface TaskFormData {
   task: string;
@@ -413,145 +417,15 @@ export default function TasksPage() {
     setSearchParams(new URLSearchParams());
   }, [setSearchParams]);
 
-  const columnDefs = useMemo<ColDef<AgentTask>[]>(
-    () => [
-      {
-        field: "task",
-        headerName: "Description",
-        flex: 1,
-        minWidth: 250,
-        cellRenderer: (params: { value: string }) => (
-          <span className="truncate">{params.value}</span>
-        ),
-      },
-      {
-        field: "status",
-        headerName: "Status",
-        width: 130,
-        cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
-      },
-      {
-        field: "source",
-        headerName: "Source",
-        width: 95,
-        cellRenderer: (params: { value: string | undefined }) =>
-          params.value ? (
-            <Badge variant="outline" size="tag">
-              {params.value}
-            </Badge>
-          ) : null,
-      },
-      {
-        field: "priority",
-        headerName: "Priority",
-        width: 70,
-        cellRenderer: (params: { value: number | undefined }) => {
-          const v = params.value;
-          if (!v) return null;
-          const color =
-            v >= 80 ? "text-status-active" : v >= 60 ? "text-foreground" : "text-muted-foreground";
-          return <span className={`text-xs font-medium ${color}`}>{v}</span>;
-        },
-      },
-      {
-        field: "model",
-        headerName: "Model",
-        width: 80,
-        cellRenderer: (params: { value: string | undefined }) =>
-          params.value ? (
-            <Badge variant="outline" size="tag">
-              {params.value}
-            </Badge>
-          ) : null,
-      },
-      {
-        field: "taskType",
-        headerName: "Type",
-        width: 110,
-        cellRenderer: (params: { value: string | undefined }) =>
-          params.value ? (
-            <Badge variant="outline" size="tag">
-              {params.value}
-            </Badge>
-          ) : null,
-      },
-      {
-        field: "agentId",
-        headerName: "Agent",
-        width: 150,
-        valueFormatter: (params) =>
-          params.value
-            ? (agentMapRef.current.get(params.value) ?? `${params.value.slice(0, 8)}...`)
-            : "Unassigned",
-      },
-      {
-        headerName: "Elapsed",
-        width: 100,
-        valueGetter: (params) => {
-          const task = params.data;
-          if (!task) return "";
-          const start = task.acceptedAt ?? task.createdAt;
-          const end = task.finishedAt;
-          const isActive =
-            !end &&
-            (task.status === "in_progress" ||
-              task.status === "pending" ||
-              task.status === "offered");
-          return isActive ? formatElapsed(start) : end ? formatElapsed(start, end) : "—";
-        },
-      },
-      {
-        field: "dependsOn",
-        headerName: "Deps",
-        width: 90,
-        cellRenderer: (params: { value: string[] | undefined; data: AgentTask | undefined }) => {
-          const deps = params.value;
-          if (!deps || deps.length === 0) return null;
-          return (
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <GitBranch className="h-3 w-3 shrink-0" />
-              <span className="text-[10px] font-mono">{deps.length}</span>
-            </div>
-          );
-        },
-        sortable: false,
-      },
-      {
-        field: "tags",
-        headerName: "Tags",
-        width: 200,
-        cellRenderer: (params: { value: string[] }) => (
-          <div className="flex gap-1 items-center">
-            {params.value?.slice(0, 2).map((tag) => (
-              <Badge key={tag} variant="outline" size="tag" className="shrink-0">
-                {tag}
-              </Badge>
-            ))}
-            {(params.value?.length ?? 0) > 2 && (
-              <span className="text-[9px] text-muted-foreground font-medium shrink-0">
-                +{(params.value?.length ?? 0) - 2}
-              </span>
-            )}
-          </div>
-        ),
-        sortable: false,
-      },
-      {
-        field: "createdAt",
-        headerName: "Created",
-        width: 150,
-        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
-      },
-    ],
-    [],
-  );
-
-  const onRowClicked = useCallback(
-    (event: RowClickedEvent<AgentTask>) => {
-      if (event.data) navigate(`/tasks/${event.data.id}`);
-    },
+  const onRowClicked = useMemo(
+    () =>
+      ignoreRowClickFromInteractives<AgentTask>((event) => {
+        if (event.data) navigate(`/tasks/${event.data.id}`);
+      }),
     [navigate],
   );
+
+  const tasksColumns = useTasksColumns({ storageKey: "tasks-page" });
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -578,68 +452,72 @@ export default function TasksPage() {
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={(v) => setParam("status", v)}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="in_progress">In Progress</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="failed">Failed</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={agentFilter} onValueChange={(v) => setParam("agent", v)}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Agent" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Agents</SelectItem>
-            {agents?.map((a) => (
-              <SelectItem key={a.id} value={a.id}>
-                {a.name}
-                {a.isLead ? " (Lead)" : ""}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={scheduleFilter} onValueChange={(v) => setParam("schedule", v)}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Schedule" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Schedules</SelectItem>
-            {schedules?.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                <div className="flex items-center gap-1.5">
-                  <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-                  <span className="truncate">{s.name}</span>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SearchableSelect
+          value={statusFilter}
+          onChange={(v) => setParam("status", v)}
+          triggerClassName="w-[160px]"
+          placeholder="Status"
+          options={[
+            { value: "all", label: "All Statuses" },
+            { value: "pending", label: "Pending" },
+            { value: "in_progress", label: "In Progress" },
+            { value: "completed", label: "Completed" },
+            { value: "failed", label: "Failed" },
+            { value: "cancelled", label: "Cancelled" },
+          ]}
+        />
+        <SearchableSelect
+          value={agentFilter}
+          onChange={(v) => setParam("agent", v)}
+          triggerClassName="w-[200px]"
+          placeholder="Agent"
+          searchPlaceholder="Search agents…"
+          options={[
+            { value: "all", label: "All Agents" },
+            ...(agents ?? []).map((a) => ({
+              value: a.id,
+              label: a.name,
+              hint: a.isLead ? "lead" : undefined,
+            })),
+          ]}
+        />
+        <SearchableSelect
+          value={scheduleFilter}
+          onChange={(v) => setParam("schedule", v)}
+          triggerClassName="w-[200px]"
+          placeholder="Schedule"
+          searchPlaceholder="Search schedules…"
+          options={[
+            { value: "all", label: "All Schedules" },
+            ...(schedules ?? []).map((s) => ({
+              value: s.id,
+              label: s.name,
+              icon: <Clock className="h-3 w-3 shrink-0 text-muted-foreground" />,
+            })),
+          ]}
+        />
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
           <Switch
             size="sm"
             checked={includeHeartbeat}
             onCheckedChange={(checked) => setParam("heartbeat", checked ? "true" : "")}
           />
-          Heartbeat
+          Show system
         </label>
-        {hasActiveFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-auto text-xs text-muted-foreground"
-            onClick={clearFilters}
-          >
-            <X className="h-3 w-3 mr-1" />
-            Clear filters
-          </Button>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground"
+              onClick={clearFilters}
+            >
+              <X className="h-3 w-3 mr-1" />
+              Clear filters
+            </Button>
+          )}
+          <TasksColumnsMenu state={tasksColumns} />
+        </div>
       </div>
 
       {/* Phase 3: smart empty state — when the swarm has zero tasks total
@@ -654,13 +532,12 @@ export default function TasksPage() {
         </div>
       ) : null}
 
-      <DataGrid
+      <TasksTable
         rowData={tasksData?.tasks ?? []}
-        columnDefs={columnDefs}
-        onRowClicked={onRowClicked}
         loading={isLoading}
-        emptyMessage="No tasks found"
-        pagination={false}
+        onRowClicked={onRowClicked}
+        agentNameById={agentMapRef.current}
+        columns={tasksColumns}
       />
 
       {/* Server-side pagination controls */}

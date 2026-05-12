@@ -1,6 +1,5 @@
-import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ArrowLeft, Clock, ListTodo, Pencil, Play, Timer, Trash2 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import {
@@ -10,9 +9,13 @@ import {
   useUpdateSchedule,
 } from "@/api/hooks/use-schedules";
 import { useTasks } from "@/api/hooks/use-tasks";
-import type { AgentTask, AgentTaskStatus } from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
-import { StatusBadge } from "@/components/shared/status-badge";
+import type { AgentTask } from "@/api/types";
+import {
+  ignoreRowClickFromInteractives,
+  TasksColumnsMenu,
+  TasksTable,
+  useTasksColumns,
+} from "@/components/shared/tasks-table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,7 +60,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { describeCron, formatInterval } from "@/lib/schedule-format";
-import { formatElapsed, formatSmartTime, formatUTCTime } from "@/lib/utils";
+import { formatSmartTime, formatUTCTime } from "@/lib/utils";
 
 function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
   const navigate = useNavigate();
@@ -72,74 +75,31 @@ function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
     return m;
   }, [agents]);
 
-  const columnDefs = useMemo<ColDef<AgentTask>[]>(
-    () => [
-      {
-        field: "task",
-        headerName: "Description",
-        flex: 1,
-        minWidth: 250,
-        cellRenderer: (params: { value: string }) => (
-          <span className="truncate">{params.value}</span>
-        ),
-      },
-      {
-        field: "status",
-        headerName: "Status",
-        width: 130,
-        cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
-      },
-      {
-        field: "agentId",
-        headerName: "Agent",
-        width: 150,
-        valueFormatter: (params) =>
-          params.value
-            ? (agentMap.get(params.value) ?? `${params.value.slice(0, 8)}...`)
-            : "Unassigned",
-      },
-      {
-        headerName: "Elapsed",
-        width: 100,
-        valueGetter: (params) => {
-          const task = params.data;
-          if (!task) return "";
-          const start = task.acceptedAt ?? task.createdAt;
-          const end = task.finishedAt;
-          const isActive =
-            !end &&
-            (task.status === "in_progress" ||
-              task.status === "pending" ||
-              task.status === "offered");
-          return isActive ? formatElapsed(start) : end ? formatElapsed(start, end) : "—";
-        },
-      },
-      {
-        field: "createdAt",
-        headerName: "Created",
-        width: 150,
-        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
-      },
-    ],
-    [agentMap],
-  );
+  const columns = useTasksColumns({ storageKey: "schedule-tasks" });
 
-  const onRowClicked = useCallback(
-    (event: RowClickedEvent<AgentTask>) => {
-      if (event.data) navigate(`/tasks/${event.data.id}`);
-    },
+  const onRowClicked = useMemo(
+    () =>
+      ignoreRowClickFromInteractives<AgentTask>((event) => {
+        if (event.data) navigate(`/tasks/${event.data.id}`);
+      }),
     [navigate],
   );
 
   return (
-    <DataGrid
-      rowData={tasksData?.tasks ?? []}
-      columnDefs={columnDefs}
-      onRowClicked={onRowClicked}
-      loading={isLoading}
-      emptyMessage="No tasks created by this schedule"
-      domLayout="autoHeight"
-    />
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-end">
+        <TasksColumnsMenu state={columns} />
+      </div>
+      <TasksTable
+        rowData={tasksData?.tasks ?? []}
+        loading={isLoading}
+        onRowClicked={onRowClicked}
+        agentNameById={agentMap}
+        columns={columns}
+        emptyMessage="No tasks created by this schedule"
+        domLayout="autoHeight"
+      />
+    </div>
   );
 }
 

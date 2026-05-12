@@ -748,7 +748,10 @@ class CodexSession implements ProviderSession {
           }
           case "error": {
             const errItem = item as ErrorItem;
-            this.emit({ type: "error", message: this.formatTerminalError(errItem.message) });
+            this.emit({
+              type: "error",
+              message: this.formatTerminalError(errItem.message).message,
+            });
             break;
           }
         }
@@ -792,12 +795,12 @@ class CodexSession implements ProviderSession {
         break;
       }
       case "turn.failed": {
-        const message = this.formatTerminalError(event.error.message);
+        const { message } = this.formatTerminalError(event.error.message);
         this.emit({ type: "error", message });
         break;
       }
       case "error": {
-        const message = this.formatTerminalError(event.message);
+        const { message } = this.formatTerminalError(event.message);
         this.emit({ type: "error", message });
         break;
       }
@@ -805,22 +808,27 @@ class CodexSession implements ProviderSession {
   }
 
   /**
-   * Detect context-window-exceeded errors from the Codex CLI / SDK and rewrite
-   * them with a clearer, actionable message. Codex does not auto-compact like
-   * Claude does — when context fills, the next model call hard-fails. We can't
-   * compact retroactively, so we just mark the failure with a recognizable
-   * `[context-overflow]` prefix that the runner can flag in dashboards. See
-   * Linear DES-143 (codex auto-compaction follow-up) for the long-term fix.
+   * Categorize a terminal error from the Codex SDK and rewrite with a clearer
+   * prefix that the runner / dashboard can key on. The Codex app-server emits a
+   * structured `codexErrorInfo` discriminator
+   * (https://developers.openai.com/codex/app-server#errors) with values like
+   * `ContextWindowExceeded`, `UsageLimitExceeded`, `Unauthorized`, etc. — but
+   * `@openai/codex-sdk`'s `ThreadError` only surfaces the flat `message`
+   * string, so we still detect by pattern. Patterns below match the canonical
+   * `codexErrorInfo` name (which sometimes appears literally in the message)
+   * AND the human-readable text Codex puts in `error.message`.
    *
-   * Patterns observed in the wild (case-insensitive):
-   *   - "context length exceeded"
-   *   - "maximum context length"
-   *   - "too many tokens"
-   *   - "input too long"
-   *   - "request too large"
+   * Categories returned are consumed two ways:
+   *   1. `errorCategory` on the `result` event (dashboard surfacing).
+   *   2. The bracketed prefix in `failureReason` (`[usage-limit]` etc.) is
+   *      what runner.ts pattern-matches to flag the credential as
+   *      rate-limited in the rotation pool.
    */
-  private formatTerminalError(raw: string): string {
+  private formatTerminalError(raw: string): { message: string; category?: string } {
     const normalized = raw.toLowerCase();
+
+    // Context window exceeded — Codex has no auto-compact like Claude.
+    // See Linear DES-143 for the long-term fix.
     const overflowPatterns = [
       "context length exceeded",
       "maximum context length",
@@ -828,11 +836,60 @@ class CodexSession implements ProviderSession {
       "input too long",
       "request too large",
       "context_length_exceeded",
+      "contextwindowexceeded",
     ];
     if (overflowPatterns.some((p) => normalized.includes(p))) {
-      return `[context-overflow] Codex turn exceeded the model's context window for ${this.resolvedModel} (${this.contextWindow.toLocaleString()} tokens). Codex does not auto-compact conversation history like Claude does — start a fresh task or split the work into smaller turns. Original error: ${raw}`;
+      return {
+        message: `[context-overflow] Codex turn exceeded the model's context window for ${this.resolvedModel} (${this.contextWindow.toLocaleString()} tokens). Codex does not auto-compact conversation history like Claude does — start a fresh task or split the work into smaller turns. Original error: ${raw}`,
+        category: "context_overflow",
+      };
     }
-    return raw;
+
+    // Pro / business quota exhausted — codexErrorInfo: "UsageLimitExceeded".
+    // Message text typically reads "You've hit your usage limit. Upgrade to Pro …".
+    const usageLimitPatterns = ["usage limit", "upgrade to pro", "usagelimitexceeded"];
+    if (usageLimitPatterns.some((p) => normalized.includes(p))) {
+      return {
+        message: `[usage-limit] Codex account quota exhausted — upgrade plan or wait for monthly reset. Original error: ${raw}`,
+        category: "usage_limit",
+      };
+    }
+
+    // Per-minute / per-hour API rate limiting (HTTP 429).
+    const rateLimitPatterns = [
+      "rate limit",
+      "rate_limit",
+      "ratelimit",
+      "too many requests",
+      "http 429",
+      " 429 ",
+    ];
+    if (rateLimitPatterns.some((p) => normalized.includes(p))) {
+      return {
+        message: `[rate-limit] Codex API rate limit hit. Original error: ${raw}`,
+        category: "rate_limit",
+      };
+    }
+
+    // Bad / missing / invalid API key — codexErrorInfo: "Unauthorized".
+    const authPatterns = [
+      "unauthorized",
+      "http 401",
+      " 401 ",
+      "invalid api key",
+      "invalid_api_key",
+      "missing api key",
+      "no api key",
+      "authentication failed",
+    ];
+    if (authPatterns.some((p) => normalized.includes(p))) {
+      return {
+        message: `[auth-error] Codex authentication failed — check OPENAI_API_KEY or ChatGPT login. Original error: ${raw}`,
+        category: "authentication_failed",
+      };
+    }
+
+    return { message: raw };
   }
 
   private async runSession(): Promise<void> {
@@ -840,7 +897,7 @@ class CodexSession implements ProviderSession {
     // Expose the controller to the swarm event handler so it can trigger an
     // abort from outside this method (tool-loop detection, cancellation poll).
     this.abortRef.current = this.abortController;
-    let terminalError: string | undefined;
+    let terminalError: { message: string; category?: string } | undefined;
     let sawTurnCompleted = false;
 
     try {
@@ -897,14 +954,14 @@ class CodexSession implements ProviderSession {
         type: "result",
         cost,
         isError,
-        errorCategory: terminalError ? "turn_failed" : undefined,
+        errorCategory: terminalError ? (terminalError.category ?? "turn_failed") : undefined,
       });
       this.settle({
         exitCode: isError ? 1 : 0,
         sessionId: this._sessionId,
         cost,
         isError,
-        failureReason: terminalError,
+        failureReason: terminalError?.message,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

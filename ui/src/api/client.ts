@@ -197,6 +197,29 @@ class ApiClient {
     return res.json();
   }
 
+  async updateAgentRuntime(data: {
+    id: string;
+    harnessProvider: "claude" | "codex" | "pi" | "opencode";
+    model: string;
+    allowCustomModel?: boolean;
+  }): Promise<AgentWithTasks> {
+    const url = `${this.getBaseUrl()}/api/agents/${data.id}/runtime`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify({
+        harness_provider: data.harnessProvider,
+        model: data.model,
+        allow_custom_model: data.allowCustomModel ?? false,
+      }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to update runtime" }));
+      throw new Error(error.error || `Failed to update runtime: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchTasks(filters?: {
     status?: string;
     agentId?: string;

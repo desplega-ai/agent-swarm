@@ -57,3 +57,21 @@ export function useUpdateAgentProfile() {
     },
   });
 }
+
+export function useUpdateAgentRuntime() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: {
+      id: string;
+      harnessProvider: "claude" | "codex" | "pi" | "opencode";
+      model: string;
+      allowCustomModel?: boolean;
+    }) => api.updateAgentRuntime(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: ["agent"] });
+      queryClient.invalidateQueries({ queryKey: ["configs"] });
+    },
+  });
+}

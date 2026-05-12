@@ -41,11 +41,21 @@ export class ScriptExecutor extends BaseExecutor<
     try {
       const result = await Promise.race([this.runScript(config), this.timeoutPromise(timeoutMs)]);
 
+      // Non-zero exit code is a hard failure — mark the step failed so the
+      // workflow engine stops the branch and operators can see what went wrong.
+      if (result.exitCode !== 0) {
+        return {
+          status: "failed",
+          error: result.stderr || `Script exited with code ${result.exitCode}`,
+          output: result as unknown as z.infer<typeof ScriptOutputSchema>,
+        };
+      }
+
       // If stdout is valid JSON object, merge parsed fields into output
       // so downstream nodes can access them via {{myScript.field}} interpolation
       // (mirrors how agent-task nodes parse JSON in resume.ts)
       let output: Record<string, unknown> = result;
-      if (result.exitCode === 0 && result.stdout) {
+      if (result.stdout) {
         try {
           const parsed = JSON.parse(result.stdout);
           if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
@@ -58,8 +68,8 @@ export class ScriptExecutor extends BaseExecutor<
 
       return {
         status: "success",
-        output: output as typeof result,
-        nextPort: result.exitCode === 0 ? "success" : "failure",
+        output: output as z.infer<typeof ScriptOutputSchema>,
+        nextPort: "success",
       };
     } catch (err) {
       return {

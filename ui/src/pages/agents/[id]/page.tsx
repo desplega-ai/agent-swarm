@@ -1,22 +1,21 @@
-import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { ArrowLeft, Check, Crown, GitBranch, Pencil, Search, X } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { ArrowLeft, Check, Crown, Pencil, Search, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAgent, useUpdateAgentName, useUpdateAgentProfile } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useAgentMcpServers, useUninstallMcpServer } from "@/api/hooks/use-mcp-servers";
 import { useAgentSkills, useUninstallSkill } from "@/api/hooks/use-skills";
 import { useTasks } from "@/api/hooks/use-tasks";
-import type {
-  Agent,
-  AgentSkill,
-  AgentTask,
-  AgentTaskStatus,
-  McpServerWithInstallInfo,
-} from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
+import type { Agent, AgentSkill, AgentTask, McpServerWithInstallInfo } from "@/api/types";
+import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
 import { HarnessCell } from "@/components/shared/harness-cell";
 import { StatusBadge } from "@/components/shared/status-badge";
+import {
+  ignoreRowClickFromInteractives,
+  TasksColumnsMenu,
+  TasksTable,
+  useTasksColumns,
+} from "@/components/shared/tasks-table";
 import { UsageSummary } from "@/components/shared/usage-summary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,7 +38,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { formatElapsed, formatSmartTime } from "@/lib/utils";
+import { formatSmartTime } from "@/lib/utils";
 import { CredentialsPanel } from "./credentials-panel";
 
 const PAGE_SIZE = 100;
@@ -190,82 +189,18 @@ export default function AgentDetailPage() {
     }
   }
 
-  const taskColDefs = useMemo<ColDef<AgentTask>[]>(
-    () => [
-      {
-        field: "task",
-        headerName: "Description",
-        flex: 1,
-        minWidth: 250,
-        cellRenderer: (params: { value: string }) => (
-          <span className="truncate">{params.value}</span>
-        ),
-      },
-      {
-        field: "status",
-        headerName: "Status",
-        width: 130,
-        cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
-      },
-      {
-        field: "taskType",
-        headerName: "Type",
-        width: 110,
-        cellRenderer: (params: { value: string | undefined }) =>
-          params.value ? (
-            <Badge variant="outline" size="tag">
-              {params.value}
-            </Badge>
-          ) : null,
-      },
-      {
-        headerName: "Elapsed",
-        width: 100,
-        valueGetter: (params) => {
-          const task = params.data;
-          if (!task) return "";
-          const start = task.acceptedAt ?? task.createdAt;
-          const end = task.finishedAt;
-          const isActive =
-            !end &&
-            (task.status === "in_progress" ||
-              task.status === "pending" ||
-              task.status === "offered");
-          return isActive ? formatElapsed(start) : end ? formatElapsed(start, end) : "—";
-        },
-      },
-      {
-        field: "dependsOn",
-        headerName: "Deps",
-        width: 90,
-        cellRenderer: (params: { value: string[] | undefined }) => {
-          const deps = params.value;
-          if (!deps || deps.length === 0) return null;
-          return (
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <GitBranch className="h-3 w-3 shrink-0" />
-              <span className="text-[10px] font-mono">{deps.length}</span>
-            </div>
-          );
-        },
-        sortable: false,
-      },
-      {
-        field: "createdAt",
-        headerName: "Created",
-        width: 150,
-        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
-      },
-    ],
-    [],
-  );
-
-  const onTaskClicked = useCallback(
-    (event: RowClickedEvent<AgentTask>) => {
-      if (event.data) navigate(`/tasks/${event.data.id}`);
-    },
+  const onTaskClicked = useMemo(
+    () =>
+      ignoreRowClickFromInteractives<AgentTask>((event) => {
+        if (event.data) navigate(`/tasks/${event.data.id}`);
+      }),
     [navigate],
   );
+
+  const taskColumns = useTasksColumns({
+    storageKey: "agent-detail-tasks",
+    hiddenColumns: ["agent"],
+  });
 
   if (isLoading) {
     return (
@@ -350,6 +285,9 @@ export default function AgentDetailPage() {
                         harnessProvider={agent.harnessProvider}
                         credStatus={agent.credStatus}
                       />
+                    </InfoRow>
+                    <InfoRow label="Runtime">
+                      <AgentRuntimeSettings agent={agent} />
                     </InfoRow>
                     {agent.role && <InfoRow label="Role">{agent.role}</InfoRow>}
                     {agent.description && (
@@ -469,15 +407,17 @@ export default function AgentDetailPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
+            <div className="ml-auto">
+              <TasksColumnsMenu state={taskColumns} />
+            </div>
           </div>
 
-          <DataGrid
+          <TasksTable
             rowData={tasksData?.tasks ?? []}
-            columnDefs={taskColDefs}
-            onRowClicked={onTaskClicked}
             loading={tasksLoading}
+            onRowClicked={onTaskClicked}
+            columns={taskColumns}
             emptyMessage="No tasks for this agent"
-            pagination={false}
           />
 
           <div className="flex items-center justify-between shrink-0 text-sm text-muted-foreground">

@@ -386,12 +386,22 @@ export const AgentCredStatusLiveTestSchema = z.object({
 });
 export type AgentCredStatusLiveTest = z.infer<typeof AgentCredStatusLiveTestSchema>;
 
+export const AgentLatestModelSchema = z.object({
+  model: z.string().min(1),
+  source: z.enum(["task", "agent_config", "adapter_default", "custom"]),
+  taskId: z.string().nullable().default(null),
+  harnessProvider: ProviderNameSchema.nullable().default(null),
+  reportedAt: z.number(), // unix ms
+});
+export type AgentLatestModel = z.infer<typeof AgentLatestModelSchema>;
+
 export const AgentCredStatusSchema = z.object({
   ready: z.boolean(),
   missing: z.array(z.string()).default([]),
   satisfiedBy: z.enum(["env", "file", "side-effect-pending"]).nullable().default(null),
   hint: z.string().nullable().default(null),
   liveTest: AgentCredStatusLiveTestSchema.nullable().default(null),
+  latestModel: AgentLatestModelSchema.nullable().default(null),
   reportedAt: z.number(), // unix ms
   reportKind: z.enum(["boot", "post_task"]).default("boot"),
 });

@@ -389,6 +389,88 @@ describe("CodexSession event mapping", () => {
     expect(result.failureReason).toContain("[context-overflow]");
   });
 
+  test("turn.failed with usage-limit message rewrites + sets errorCategory=usage_limit", async () => {
+    // Codex Pro-quota exhausted: codexErrorInfo: "UsageLimitExceeded".
+    // Adapter must prefix `[usage-limit]` so runner.ts marks the credential
+    // as rate-limited in the rotation pool.
+    const events: ThreadEvent[] = [
+      { type: "thread.started", thread_id: "thread-usage" },
+      { type: "turn.started" },
+      {
+        type: "turn.failed",
+        error: {
+          message: "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/pricing).",
+        },
+      },
+    ];
+
+    const { emitted, result } = await runSessionWithFakeThread(
+      events,
+      testConfig({ logFile: join(tmpLogDir, "usage.log"), cwd: "" }),
+    );
+
+    const errorEvent = emitted.find((e) => e.type === "error");
+    expect(errorEvent?.type === "error" && errorEvent.message).toContain("[usage-limit]");
+
+    const resultEvent = emitted.findLast((e) => e.type === "result");
+    expect(resultEvent?.type === "result" && resultEvent.errorCategory).toBe("usage_limit");
+
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toContain("[usage-limit]");
+  });
+
+  test("turn.failed with rate-limit message rewrites + sets errorCategory=rate_limit", async () => {
+    const events: ThreadEvent[] = [
+      { type: "thread.started", thread_id: "thread-rate" },
+      { type: "turn.started" },
+      {
+        type: "turn.failed",
+        error: { message: "Request failed: 429 Too Many Requests — rate_limit_exceeded." },
+      },
+    ];
+
+    const { emitted, result } = await runSessionWithFakeThread(
+      events,
+      testConfig({ logFile: join(tmpLogDir, "rate.log"), cwd: "" }),
+    );
+
+    const errorEvent = emitted.find((e) => e.type === "error");
+    expect(errorEvent?.type === "error" && errorEvent.message).toContain("[rate-limit]");
+
+    const resultEvent = emitted.findLast((e) => e.type === "result");
+    expect(resultEvent?.type === "result" && resultEvent.errorCategory).toBe("rate_limit");
+
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toContain("[rate-limit]");
+  });
+
+  test("turn.failed with auth error rewrites + sets errorCategory=authentication_failed", async () => {
+    const events: ThreadEvent[] = [
+      { type: "thread.started", thread_id: "thread-auth" },
+      { type: "turn.started" },
+      {
+        type: "turn.failed",
+        error: { message: "Request failed: HTTP 401 Unauthorized — Invalid API key provided." },
+      },
+    ];
+
+    const { emitted, result } = await runSessionWithFakeThread(
+      events,
+      testConfig({ logFile: join(tmpLogDir, "auth.log"), cwd: "" }),
+    );
+
+    const errorEvent = emitted.find((e) => e.type === "error");
+    expect(errorEvent?.type === "error" && errorEvent.message).toContain("[auth-error]");
+
+    const resultEvent = emitted.findLast((e) => e.type === "result");
+    expect(resultEvent?.type === "result" && resultEvent.errorCategory).toBe(
+      "authentication_failed",
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toContain("[auth-error]");
+  });
+
   test("abort() resolves the session with cancelled result", async () => {
     // Patch startThread with a fake whose runStreamed yields a long stream
     // that respects the AbortSignal — yields one event, awaits, and only

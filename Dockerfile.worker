@@ -194,24 +194,44 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
     "@sentry/cli": "3.3.4",
     "@desplega.ai/wts": "0.2.3",
     "@desplega.ai/localtunnel": "2.2.0",
-    "@desplega.ai/qa-use": "2.17.0",
-    "@desplega.ai/agent-fs": "0.5.1"
+    "@desplega.ai/qa-use": "2.18.0",
+    "@desplega.ai/agent-fs": "0.5.3"
   },
   "overrides": {
-    "@huggingface/hub": "2.11.0"
+    "@huggingface/hub": "2.11.0",
+    "chromadb": "npm:empty-npm-package@1.0.0",
+    "chromadb-default-embed": "npm:empty-npm-package@1.0.0",
+    "@xenova/transformers": "npm:empty-npm-package@1.0.0",
+    "tree-sitter-wasms": "npm:empty-npm-package@1.0.0",
+    "web-tree-sitter": "npm:empty-npm-package@1.0.0",
+    "cohere-ai": "npm:empty-npm-package@1.0.0",
+    "voyageai": "npm:empty-npm-package@1.0.0",
+    "ollama": "npm:empty-npm-package@1.0.0"
   }
 }
 EOF
-RUN cd /opt/global-deps && npm install --no-audit --no-fund \
-    && for bin in /opt/global-deps/node_modules/.bin/*; do \
-        ln -sf "$bin" "/usr/local/bin/$(basename "$bin")"; \
-       done \
-    && qa-use install-deps
 
-# Re-assert worker ownership of $HOME — the root-side npm/qa-use installs above
-# (and earlier claude-plugin steps) seed cache/config dirs as root, which breaks
-# runtime tools that expect to write under $HOME (e.g. opencode's ~/.cache/opencode).
-RUN chown -R worker:worker /home/worker
+# Playwright browsers live in a system path so they're shared across users at
+# runtime AND so the install doesn't pollute /home/worker (which would force a
+# multi-GB chown layer). The ENV is also read by Playwright at runtime.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+
+# Install global deps + Playwright chromium. CRITICAL: `ENV HOME=/home/worker`
+# (line 70) is still active under `USER root`, so without the inline override
+# below npm/Playwright would dump ~/.npm (~830 MB) and ~/.cache/ms-playwright
+# (~930 MB) into /home/worker as root-owned files — which previously required
+# a `chown -R worker:worker /home/worker` step that re-wrote the entire HOME
+# as a 5+ GB duplicate layer. By keeping HOME=/root and the npm cache in
+# /tmp, then cleaning them in the same RUN, the chown becomes unnecessary.
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    sh -c 'mkdir -p /opt/playwright \
+      && cd /opt/global-deps && npm install --no-audit --no-fund \
+      && for bin in /opt/global-deps/node_modules/.bin/*; do \
+           ln -sf "$bin" "/usr/local/bin/$(basename "$bin")"; \
+         done \
+      && qa-use install-deps' \
+    && rm -rf /tmp/npm-cache /root/.npm /root/.cache \
+    && chmod -R a+rX /opt/playwright
 
 # Install archil CLI for FUSE/R2-backed disk mounts
 RUN curl https://s3.amazonaws.com/archil-client/install | sh

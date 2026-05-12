@@ -58,6 +58,28 @@ async function setCredentialStatus(id: string, ready: boolean, missing: string[]
   if (!r.ok) throw new Error(`credential-status ${id}: HTTP ${r.status} ${await r.text()}`);
 }
 
+async function reportLatestModel(
+  id: string,
+  model: string,
+  harnessProvider: string,
+  source: "task" | "agent_config" | "adapter_default" | "custom" = "agent_config",
+) {
+  const r = await fetch(`${API}/api/agents/${id}/credential-status`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({
+      latest_model: {
+        model,
+        source,
+        taskId: null,
+        harnessProvider,
+        reportedAt: Date.now(),
+      },
+    }),
+  });
+  if (!r.ok) throw new Error(`latest_model ${id}: HTTP ${r.status} ${await r.text()}`);
+}
+
 async function main() {
   console.log(`seeding via ${API}…`);
 
@@ -71,6 +93,7 @@ async function main() {
     maxTasks: 10,
     harness_provider: "claude",
   });
+  await reportLatestModel(lead.id, "claude-opus-4-7", "claude");
   console.log(`  ✓ lead              ${lead.id}  (idle, recent heartbeat)`);
 
   // 2. Worker, idle, recent heartbeat.
@@ -82,6 +105,7 @@ async function main() {
     maxTasks: 3,
     harness_provider: "claude",
   });
+  await reportLatestModel(idleWorker.id, "claude-sonnet-4-6", "claude");
   console.log(`  ✓ worker (idle)     ${idleWorker.id}`);
 
   // 3. Worker, busy, recent heartbeat. Mark credential-ready first; the "busy"
@@ -96,7 +120,47 @@ async function main() {
     harness_provider: "claude",
   });
   await setCredentialStatus(busyWorker.id, true);
+  await reportLatestModel(busyWorker.id, "claude-haiku-4-5", "claude", "task");
   console.log(`  ✓ worker (busy)     ${busyWorker.id}`);
+
+  // 3b. Pi worker reporting an OpenRouter-routed model.
+  const piWorker = await registerAgent({
+    name: "demo-worker-pi",
+    description: "Pi-Mono worker on Gemini Flash (via OpenRouter).",
+    role: "Worker",
+    capabilities: ["python", "research"],
+    maxTasks: 2,
+    harness_provider: "pi",
+  });
+  await setCredentialStatus(piWorker.id, true);
+  await reportLatestModel(piWorker.id, "openrouter/google/gemini-3-flash-preview", "pi");
+  console.log(`  ✓ worker (pi)       ${piWorker.id}  (gemini via openrouter)`);
+
+  // 3c. Opencode worker on a Qwen model.
+  const opencodeWorker = await registerAgent({
+    name: "demo-worker-opencode",
+    description: "Opencode worker on Qwen Coder Flash.",
+    role: "Worker",
+    capabilities: ["rust", "systems"],
+    maxTasks: 1,
+    harness_provider: "opencode",
+  });
+  await setCredentialStatus(opencodeWorker.id, true);
+  await reportLatestModel(opencodeWorker.id, "openrouter/qwen/qwen3-coder-flash", "opencode");
+  console.log(`  ✓ worker (opencode) ${opencodeWorker.id}  (qwen coder flash)`);
+
+  // 3d. Codex worker reporting a GPT-5 model (so the "OpenAI" provider icon shows).
+  const gptWorker = await registerAgent({
+    name: "demo-worker-gpt",
+    description: "Codex worker on GPT-5.4.",
+    role: "Worker",
+    capabilities: ["typescript"],
+    maxTasks: 1,
+    harness_provider: "codex",
+  });
+  await setCredentialStatus(gptWorker.id, true);
+  await reportLatestModel(gptWorker.id, "gpt-5.4", "codex");
+  console.log(`  ✓ worker (gpt)      ${gptWorker.id}  (gpt-5.4)`);
 
   // 4. Worker, waiting_for_credentials.
   const blockedWorker = await registerAgent({
@@ -140,6 +204,9 @@ async function main() {
   setHeartbeat.run(now, lead.id);
   setHeartbeat.run(now, idleWorker.id);
   setStatusAndHeartbeat.run("busy", now, busyWorker.id);
+  setHeartbeat.run(now, piWorker.id);
+  setHeartbeat.run(now, opencodeWorker.id);
+  setHeartbeat.run(now, gptWorker.id);
   setHeartbeat.run(now, blockedWorker.id);
   // Stale heartbeat + offline status for the 5th.
   setStatusAndHeartbeat.run("offline", oneHourAgo, offlineWorker.id);

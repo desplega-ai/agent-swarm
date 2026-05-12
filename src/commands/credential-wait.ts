@@ -46,8 +46,17 @@ export class BootMaxWaitExceededError extends Error {
 }
 
 export interface AwaitCredentialsOptions {
-  /** Harness provider name — picks the predicate to run. */
+  /** Initial harness provider name — picks the predicate to run. */
   provider: string;
+  /**
+   * Optional getter that re-reads the harness provider on each tick. Lets the
+   * caller swap the harness mid-wait when an operator flips `HARNESS_PROVIDER`
+   * in `swarm_config` to escape a missing-credentials wedge. When unset, the
+   * static `provider` is used for the whole wait. The caller is responsible
+   * for any side effects of the swap (adapter, prompt rebuild, etc.) inside
+   * `refreshEnv` or out-of-band.
+   */
+  getProvider?: () => string;
   /** Pull latest swarm_config values into env. Resolves to the merged env. */
   refreshEnv: () => Promise<Record<string, string | undefined>>;
   /** Callback invoked on every tick — Phase 3 wires this to the status-report API. */
@@ -118,10 +127,17 @@ export async function awaitCredentials(opts: AwaitCredentialsOptions): Promise<C
   const initialEnv = opts.initialEnv ?? process.env;
   const backoff = resolveBackoff(opts.backoff, initialEnv);
 
+  // Re-read on every iteration so an operator flipping HARNESS_PROVIDER in
+  // swarm_config during the wait actually flips the predicate.
+  const readProvider = () => opts.getProvider?.() ?? opts.provider;
+
   // Fast path: already satisfied at boot.
-  let status = checkProviderCredentials(opts.provider, initialEnv, opts.credCheckOptions);
+  let currentProvider = readProvider();
+  let status = checkProviderCredentials(currentProvider, initialEnv, opts.credCheckOptions);
   if (status.ready) {
-    log(`[boot] credentials ready (provider=${opts.provider}, satisfiedBy=${status.satisfiedBy})`);
+    log(
+      `[boot] credentials ready (provider=${currentProvider}, satisfiedBy=${status.satisfiedBy})`,
+    );
     return status;
   }
 
@@ -143,7 +159,7 @@ export async function awaitCredentials(opts: AwaitCredentialsOptions): Promise<C
 
     log(
       `[boot] waiting for ${status.missing.join(", ") || "credentials"} ` +
-        `(attempt ${attempt}, retry in ${delayMs}ms)${status.hint ? ` — ${status.hint}` : ""}`,
+        `(attempt ${attempt}, retry in ${delayMs}ms, provider=${currentProvider})${status.hint ? ` — ${status.hint}` : ""}`,
     );
 
     await sleep(delayMs);
@@ -158,7 +174,16 @@ export async function awaitCredentials(opts: AwaitCredentialsOptions): Promise<C
       log(`[boot] env refresh failed (non-fatal): ${err}`);
     }
 
-    status = checkProviderCredentials(opts.provider, process.env, opts.credCheckOptions);
+    // Re-read provider in case the operator flipped HARNESS_PROVIDER during
+    // the wait. The caller is expected to have already swapped adapter/prompt
+    // (typically inside `refreshEnv`); we just pivot the predicate here.
+    const nextProvider = readProvider();
+    if (nextProvider !== currentProvider) {
+      log(`[boot] provider changed mid-wait: ${currentProvider} → ${nextProvider}`);
+      currentProvider = nextProvider;
+    }
+
+    status = checkProviderCredentials(currentProvider, process.env, opts.credCheckOptions);
 
     if (!status.ready) {
       // Exponential backoff with cap.
@@ -174,7 +199,7 @@ export async function awaitCredentials(opts: AwaitCredentialsOptions): Promise<C
   }
 
   log(
-    `[boot] credentials ready (provider=${opts.provider}, satisfiedBy=${status.satisfiedBy}, attempts=${attempt})`,
+    `[boot] credentials ready (provider=${currentProvider}, satisfiedBy=${status.satisfiedBy}, attempts=${attempt})`,
   );
   // Final tick so callers can clear the waiting state.
   try {

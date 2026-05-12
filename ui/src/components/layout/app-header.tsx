@@ -1,4 +1,4 @@
-import { Moon, Sun } from "lucide-react";
+import { Github, Moon, Sun } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useHealth } from "@/api/hooks/use-stats";
 import type { StatusHealth } from "@/api/types";
@@ -92,6 +92,29 @@ export function AppHeader() {
 
         {/* Identity switcher — current user + change/create. */}
         <UserSwitcher />
+
+        {/* GitHub repo link */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="Open agent-swarm on GitHub"
+            >
+              <a
+                href="https://github.com/desplega-ai/agent-swarm"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Github className="size-4" />
+                <span className="sr-only">GitHub repository</span>
+              </a>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">View on GitHub</TooltipContent>
+        </Tooltip>
 
         {/* Theme toggle */}
         <Tooltip>

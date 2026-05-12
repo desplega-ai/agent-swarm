@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.76.3",
+    "version": "1.77.3",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -448,6 +448,73 @@
         }
       }
     },
+    "/api/agents/{id}/runtime": {
+      "patch": {
+        "summary": "Update an agent's runtime harness and default model",
+        "description": "Updates `agents.harness_provider` and upserts agent-scoped `swarm_config` rows for HARNESS_PROVIDER and MODEL_OVERRIDE. The settings apply to future provider sessions.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "harness_provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "opencode"
+                    ]
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "allow_custom_model": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "harness_provider",
+                  "model"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated agent row"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        }
+      }
+    },
     "/api/agents/{id}/name": {
       "put": {
         "summary": "Update agent name",
@@ -797,6 +864,59 @@
                           "testedAt"
                         ]
                       },
+                      "latestModel": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "properties": {
+                          "model": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "task",
+                              "agent_config",
+                              "adapter_default",
+                              "custom"
+                            ]
+                          },
+                          "taskId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "harnessProvider": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "pi",
+                              "devin",
+                              "claude-managed",
+                              "opencode",
+                              null
+                            ],
+                            "default": null
+                          },
+                          "reportedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "default": null,
+                        "required": [
+                          "model",
+                          "source",
+                          "reportedAt"
+                        ]
+                      },
                       "reportedAt": {
                         "type": "number"
                       },
@@ -813,11 +933,57 @@
                       "ready",
                       "reportedAt"
                     ]
+                  },
+                  "latest_model": {
+                    "type": "object",
+                    "properties": {
+                      "model": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "task",
+                          "agent_config",
+                          "adapter_default",
+                          "custom"
+                        ]
+                      },
+                      "taskId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "default": null
+                      },
+                      "harnessProvider": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "claude",
+                          "codex",
+                          "pi",
+                          "devin",
+                          "claude-managed",
+                          "opencode",
+                          null
+                        ],
+                        "default": null
+                      },
+                      "reportedAt": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "model",
+                      "source",
+                      "reportedAt"
+                    ]
                   }
-                },
-                "required": [
-                  "ready"
-                ]
+                }
               }
             }
           }

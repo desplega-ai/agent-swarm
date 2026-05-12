@@ -33,8 +33,10 @@ import { interpolate } from "../workflows/template.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
 import {
   buildCredStatusReport,
+  buildLatestModelReport,
   isCredCheckDisabled,
   reportCredStatus,
+  reportLatestModel,
 } from "./provider-credentials.ts";
 // Side-effect import: registers runner trigger/resumption templates
 import "./templates.ts";
@@ -272,6 +274,66 @@ async function fetchResolvedEnv(
   return { env, credentialSelections, resolvedProvider };
 }
 
+/**
+ * Keys we permit `applyResolvedEnvToProcessEnv` to mutate live.
+ *
+ * Anything not in this list is considered unsafe to overwrite post-boot:
+ *
+ * - **Boot-time identity / connectivity** (AGENT_ID, API_KEY, MCP_BASE_URL,
+ *   AGENT_ROLE, MANAGED_*): mutating these mid-flight effectively makes the
+ *   worker a different agent talking to a different API. Reboot, don't reload.
+ * - **Credential pool members** (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY,
+ *   OPENAI_API_KEY, etc.): `resolveCredentialPools` picks one randomly *per
+ *   task* from a comma-separated pool. Persisting the picked value into
+ *   process.env freezes the rotation. Re-resolution happens per spawn anyway,
+ *   so we deliberately leave these alone.
+ * - **Coordinated values with paired state** (HARNESS_PROVIDER): swapping
+ *   the env without also swapping the adapter and rebuilding the system
+ *   prompt produces an inconsistent worker. Handled by its own reconcile
+ *   path that updates state.harnessProvider + adapter atomically.
+ * - **Process-runtime / OS-level** (PATH, HOME, NODE_OPTIONS, HOSTNAME, …):
+ *   never overwrite. Some of these are read once by libraries at boot.
+ * - **Values memoized at boot** (TEMPLATE_ID, AGENT_NAME): the cached
+ *   in-process value wins anyway — overwriting just creates confusion.
+ *
+ * For values that affect runner-loop behavior (like MAX_CONCURRENT_TASKS),
+ * prefer mutating `RunnerState` directly — no round-trip through process.env.
+ */
+const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
+  "MODEL_OVERRIDE",
+  "AGENT_FS_SHARED_ORG_ID",
+]);
+
+/**
+ * Apply a fresh resolved env to `process.env` for keys safe to mutate live.
+ * Returns the list of keys that actually changed (useful for logging).
+ */
+function applyResolvedEnvToProcessEnv(freshEnv: Record<string, string | undefined>): string[] {
+  const changed: string[] = [];
+  for (const key of RELOADABLE_ENV_KEYS) {
+    const next = freshEnv[key];
+    if (next !== undefined && next !== process.env[key]) {
+      process.env[key] = next;
+      changed.push(key);
+    }
+  }
+  return changed;
+}
+
+/** Compute effective max concurrent tasks from env > template default > role default. */
+function resolveMaxConcurrent(
+  env: Record<string, string | undefined>,
+  templateMax: number | undefined,
+  defaultMaxTasks: number,
+): number {
+  const raw = env.MAX_CONCURRENT_TASKS;
+  if (raw) {
+    const parsed = parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return templateMax ?? defaultMaxTasks;
+}
+
 /** Tools that produce noise — skip auto-progress for these */
 const SKIP_PROGRESS_TOOLS = new Set(["ToolSearch", "TodoRead", "TodoWrite"]);
 
@@ -355,13 +417,19 @@ export function humanizeToolName(name: string): string {
 export function toolCallToProgress(toolName: string, args: unknown): string | null {
   if (SKIP_PROGRESS_TOOLS.has(toolName)) return null;
 
+  const a = args as Record<string, unknown>;
+  const maybeMcpServer = typeof a?.server === "string" ? a.server : undefined;
+  const maybeMcpTool = typeof a?.tool === "string" ? a.tool : undefined;
+  const effectiveToolName =
+    maybeMcpServer && maybeMcpTool ? `mcp__${maybeMcpServer}__${maybeMcpTool}` : toolName;
+  if (SKIP_PROGRESS_TOOLS.has(effectiveToolName)) return null;
+
   // Normalize: pi-mono uses lowercase ("read"), Claude uses PascalCase ("Read")
   const normalized =
-    toolName.startsWith("mcp__") || toolName.includes("_")
-      ? toolName
-      : toolName.charAt(0).toUpperCase() + toolName.slice(1);
+    effectiveToolName.startsWith("mcp__") || effectiveToolName.includes("_")
+      ? effectiveToolName
+      : effectiveToolName.charAt(0).toUpperCase() + effectiveToolName.slice(1);
 
-  const a = args as Record<string, unknown>;
   const shortPath = (p: unknown) => {
     if (typeof p !== "string") return "";
     // Show last 2 path segments for readability
@@ -390,8 +458,8 @@ export function toolCallToProgress(toolName: string, args: unknown): string | nu
       return `⚙️ Running /${a.skill}`;
     default: {
       // MCP tools: mcp__server__tool
-      if (toolName.startsWith("mcp__")) {
-        const parts = toolName.split("__");
+      if (effectiveToolName.startsWith("mcp__")) {
+        const parts = effectiveToolName.split("__");
         if (parts.length >= 3) {
           const server = parts[1];
           const tool = parts.slice(2).join("__");
@@ -405,8 +473,18 @@ export function toolCallToProgress(toolName: string, args: unknown): string | nu
           // Other MCP servers: "🔌 server: Humanized tool"
           return `🔌 ${server}: ${humanizeToolName(tool)}`;
         }
-        return `🔌 ${toolName}`;
+        return `🔌 ${effectiveToolName}`;
       }
+
+      // Pi-mono exposes tools from the built-in swarm MCP endpoint as bare
+      // names ("store-progress", "send-task", ...), not as mcp__ names.
+      // Treat those names as agent-swarm tools so activity stays readable.
+      if (toolName.includes("-")) {
+        const label = SWARM_TOOL_LABELS[toolName];
+        if (label === null) return null;
+        if (label) return label;
+      }
+
       return `🔧 ${toolName}`;
     }
   }
@@ -962,7 +1040,6 @@ export interface RunnerOptions {
   systemPromptFile?: string;
   logsDir?: string;
   additionalArgs?: string[];
-  aiLoop?: boolean; // Use AI-based loop (old behavior)
 }
 
 /** Running task state for parallel execution */
@@ -1677,6 +1754,7 @@ async function spawnProviderProcess(
     iteration: number;
     taskId?: string;
     model?: string;
+    harnessProvider: ProviderName;
     cwd?: string;
     vcsRepo?: string;
   },
@@ -1708,7 +1786,8 @@ async function spawnProviderProcess(
     process.env.AGENT_FS_SHARED_ORG_ID = freshEnv.AGENT_FS_SHARED_ORG_ID as string;
   }
 
-  const model = opts.model || (freshEnv.MODEL_OVERRIDE as string) || "";
+  const configModel = (freshEnv.MODEL_OVERRIDE as string | undefined) || "";
+  const model = opts.model || configModel || "";
 
   const config: ProviderSessionConfig = {
     prompt: opts.prompt,
@@ -1728,6 +1807,18 @@ async function spawnProviderProcess(
   };
 
   const session = await adapter.createSession(config);
+  const initialModelReport = buildLatestModelReport({
+    model,
+    taskModel: opts.model,
+    configModel,
+    taskId: realTaskId,
+    harnessProvider: opts.harnessProvider,
+  });
+  if (initialModelReport) {
+    reportLatestModel(opts.apiUrl, opts.apiKey, opts.agentId, initialModelReport).catch((err) =>
+      console.warn(`[runner] Failed to report latest model: ${err}`),
+    );
+  }
 
   let oauthSelection: CredentialSelection | undefined;
   if (adapter.name === "codex" && credentialSelections.length === 0) {
@@ -1885,6 +1976,20 @@ async function spawnProviderProcess(
         break;
       }
       case "result":
+        {
+          const latestModel = buildLatestModelReport({
+            model: event.cost.model,
+            taskModel: opts.model,
+            configModel,
+            taskId: realTaskId,
+            harnessProvider: opts.harnessProvider,
+          });
+          if (latestModel) {
+            reportLatestModel(opts.apiUrl, opts.apiKey, opts.agentId, latestModel).catch((err) =>
+              console.warn(`[runner] Failed to report latest model: ${err}`),
+            );
+          }
+        }
         // Cost save is handled in waitForCompletion().then() to ensure
         // it completes before the process exits (fire-and-forget here
         // races with container shutdown).
@@ -2099,68 +2204,6 @@ async function spawnProviderProcess(
   return runningTask;
 }
 
-/** Run a single provider iteration (blocking) - used for AI-loop mode */
-async function runProviderIteration(
-  adapter: ReturnType<typeof createProviderAdapter>,
-  opts: {
-    prompt: string;
-    logFile: string;
-    systemPrompt?: string;
-    additionalArgs?: string[];
-    role: string;
-    apiUrl: string;
-    apiKey: string;
-    agentId: string;
-    taskId?: string;
-    cwd?: string;
-  },
-): Promise<ProviderResult> {
-  const { env: freshEnv } = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
-  const model = (freshEnv.MODEL_OVERRIDE as string) || "";
-
-  const config: ProviderSessionConfig = {
-    prompt: opts.prompt,
-    systemPrompt: opts.systemPrompt || "",
-    model,
-    role: opts.role,
-    agentId: opts.agentId,
-    taskId: opts.taskId || crypto.randomUUID(),
-    apiUrl: opts.apiUrl,
-    apiKey: opts.apiKey,
-    cwd: opts.cwd || process.cwd(),
-    logFile: opts.logFile,
-    additionalArgs: opts.additionalArgs,
-    env: freshEnv as Record<string, string>,
-  };
-
-  const session = await adapter.createSession(config);
-
-  let lastAiLoopProgressTime = 0;
-  session.onEvent((event) => {
-    if (event.type === "raw_log") prettyPrintLine(event.content, opts.role);
-    if (event.type === "raw_stderr") prettyPrintStderr(event.content, opts.role);
-    if (event.type === "session_init" && opts.taskId) {
-      saveProviderSessionId(
-        opts.apiUrl,
-        opts.apiKey,
-        opts.taskId,
-        event.sessionId,
-        event.provider,
-        event.providerMeta,
-      ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
-    }
-    if (event.type === "progress" && opts.taskId) {
-      const now = Date.now();
-      if (now - lastAiLoopProgressTime >= PROGRESS_THROTTLE_MS) {
-        lastAiLoopProgressTime = now;
-        updateProgressViaAPI(opts.apiUrl, opts.apiKey, opts.taskId, event.message).catch(() => {});
-      }
-    }
-  });
-
-  return session.waitForCompletion();
-}
-
 /** Check for completed processes and remove them from active tasks */
 async function checkCompletedProcesses(
   state: RunnerState,
@@ -2214,8 +2257,14 @@ async function checkCompletedProcesses(
         failureReason = result.failureReason;
         console.log(`[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`);
 
-        // If rate-limited and we know which key was used, report it
-        if (credentialInfo && /rate.?limit|hit your limit/i.test(failureReason)) {
+        // If rate-limited and we know which key was used, report it.
+        // Codex adapter prefixes failure reasons with `[rate-limit]` /
+        // `[usage-limit]` (see codex-adapter.formatTerminalError); Claude
+        // surfaces "rate limit" / "hit your limit" via SessionErrorTracker.
+        if (
+          credentialInfo &&
+          /rate.?limit|hit your limit|usage[ _-]?limit|too many requests/i.test(failureReason)
+        ) {
           // Try to extract reset time from the error message (e.g. "resets 3pm (UTC)")
           const parsedResetTime = parseRateLimitResetTime(failureReason);
           const defaultCooldownMs = 5 * 60 * 1000;
@@ -2541,86 +2590,142 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   );
   console.log(`[${role}] Total system prompt length: ${resolvedSystemPrompt.length} chars`);
 
-  const isAiLoop = opts.aiLoop || process.env.AI_LOOP === "true";
-
   // Constants for polling
   const PollIntervalMs = 2000; // 2 seconds between polls
   const PollTimeoutMs = 60000; // 1 minute timeout before retrying
 
   let iteration = 0;
 
-  if (!isAiLoop) {
-    // Fetch template early (before registration) so defaults can be applied
-    const templateId = process.env.TEMPLATE_ID;
-    const registryUrl = process.env.TEMPLATE_REGISTRY_URL || "https://templates.agent-swarm.dev";
-    let cachedTemplate: TemplateResponse | null = null;
+  // Fetch template early (before registration) so defaults can be applied
+  const templateId = process.env.TEMPLATE_ID;
+  const registryUrl = process.env.TEMPLATE_REGISTRY_URL || "https://templates.agent-swarm.dev";
+  let cachedTemplate: TemplateResponse | null = null;
 
-    if (templateId) {
-      try {
-        cachedTemplate = await fetchTemplate(templateId, registryUrl, "/workspace/.template-cache");
-        if (cachedTemplate) {
-          console.log(`[${role}] Fetched template: ${templateId}`);
+  if (templateId) {
+    try {
+      cachedTemplate = await fetchTemplate(templateId, registryUrl, "/workspace/.template-cache");
+      if (cachedTemplate) {
+        console.log(`[${role}] Fetched template: ${templateId}`);
 
-          // Apply agentDefaults as fallbacks (env/config takes precedence)
-          const defaults = cachedTemplate.config.agentDefaults;
-          if (config.role === "worker" && defaults.role) {
-            role = defaults.role;
-          }
-          if (!capabilities?.length && defaults.capabilities?.length) {
-            capabilities = defaults.capabilities;
-          }
+        // Apply agentDefaults as fallbacks (env/config takes precedence)
+        const defaults = cachedTemplate.config.agentDefaults;
+        if (config.role === "worker" && defaults.role) {
+          role = defaults.role;
         }
+        if (!capabilities?.length && defaults.capabilities?.length) {
+          capabilities = defaults.capabilities;
+        }
+      }
+    } catch (err) {
+      console.warn(`[${role}] Failed to fetch template ${templateId}: ${err}`);
+    }
+  }
+
+  // Runner-level polling mode with parallel execution support
+  const isLeadFromConfig = config.role === "lead";
+  const isLead = isLeadFromConfig || (cachedTemplate?.config.agentDefaults?.isLead ?? false);
+  const defaultMaxTasks = isLead ? 2 : 1;
+  const templateMaxTasks = cachedTemplate?.config.agentDefaults?.maxTasks;
+  const maxConcurrent = resolveMaxConcurrent(process.env, templateMaxTasks, defaultMaxTasks);
+  console.log(`[${role}] Mode: runner-level polling`);
+  console.log(`[${role}] Max concurrent tasks: ${maxConcurrent}`);
+
+  // Initialize runner state for parallel execution
+  const state: RunnerState = {
+    activeTasks: new Map(),
+    maxConcurrent,
+    harnessProvider: bootProvider,
+  };
+
+  // Track tasks already signaled for cancellation to avoid repeated SIGTERM
+  const cancelledSignaled = new Set<string>();
+
+  // Migration 055 — cache the harness_provider value used when we last
+  // built a `cred_status` snapshot. Re-runs the post-task check only when
+  // the resolved provider changes. Section 4 of the swarm_config-overrides-
+  // HARNESS_PROVIDER work makes this dynamic: state.harnessProvider is
+  // reconciled below from `swarm_config`, so an operator's change reaches
+  // here without a worker restart.
+  let cachedCredHarnessProvider: string | null = null;
+
+  // Throttle for live HARNESS_PROVIDER reconciliation. Each reconciliation
+  // calls `fetchResolvedEnv` which also re-resolves credential pools — we
+  // don't want that on every 2s poll. 10s gives operator changes a near-
+  // immediate effect from a UX perspective without hammering the API.
+  let lastHarnessReconcileAt = 0;
+  const HARNESS_RECONCILE_INTERVAL_MS = 10_000;
+
+  // Create API config for ping/close
+  const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
+
+  // Setup graceful shutdown handlers with API config and runner state access
+  setupShutdownHandlers(role, apiConfig, () => state);
+
+  // Register agent before starting
+  const agentName =
+    process.env.AGENT_NAME ||
+    cachedTemplate?.config.displayName ||
+    `${role}-${agentId.slice(0, 8)}`;
+
+  /**
+   * Reconcile RunnerState + process.env against a freshly resolved swarm
+   * config snapshot. Single source of truth for live config drift; used
+   * both during the credential-wait (so operator flips reach the predicate
+   * mid-loop) and from the post-boot periodic reconciler.
+   *
+   * Returns whether anything agent-visible (provider, maxConcurrent)
+   * changed — callers use this to decide whether to re-register.
+   */
+  const applySwarmConfigDrift = async (
+    freshEnv: Record<string, string | undefined>,
+    resolvedProvider: ProviderName,
+  ): Promise<{ agentVisibleChanged: boolean }> => {
+    let agentVisibleChanged = false;
+
+    // (1) Harness provider — swap adapter + rebuild prompt atomically.
+    if (resolvedProvider !== state.harnessProvider) {
+      const previous = state.harnessProvider;
+      console.log(`[${role}] [harness] Reconciling adapter: ${previous} → ${resolvedProvider}`);
+      try {
+        adapter = createProviderAdapter(resolvedProvider);
+        state.harnessProvider = resolvedProvider;
+        basePrompt = await buildSystemPrompt();
+        resolvedSystemPrompt = additionalSystemPrompt
+          ? `${basePrompt}\n\n${additionalSystemPrompt}`
+          : basePrompt;
+        cachedCredHarnessProvider = null;
+        agentVisibleChanged = true;
+        console.log(
+          `[${role}] [harness] Swapped to ${resolvedProvider} (basePrompt rebuilt: ${basePrompt.length} chars)`,
+        );
       } catch (err) {
-        console.warn(`[${role}] Failed to fetch template ${templateId}: ${err}`);
+        console.warn(
+          `[${role}] [harness] Failed to swap to ${resolvedProvider} (staying on ${previous}): ${err}`,
+        );
       }
     }
 
-    // Runner-level polling mode with parallel execution support
-    const isLeadFromConfig = config.role === "lead";
-    const isLead = isLeadFromConfig || (cachedTemplate?.config.agentDefaults?.isLead ?? false);
-    const defaultMaxTasks = isLead ? 2 : 1;
-    const maxConcurrent = process.env.MAX_CONCURRENT_TASKS
-      ? parseInt(process.env.MAX_CONCURRENT_TASKS, 10)
-      : (cachedTemplate?.config.agentDefaults?.maxTasks ?? defaultMaxTasks);
-    console.log(`[${role}] Mode: runner-level polling (use --ai-loop for AI-based polling)`);
-    console.log(`[${role}] Max concurrent tasks: ${maxConcurrent}`);
+    // (2) Max concurrency — operator can tune from the dashboard live.
+    // Note: shrinking below activeTasks.size won't kill in-flight tasks; new
+    // spawns are simply gated until in-flight drain back under the new cap.
+    const nextMax = resolveMaxConcurrent(freshEnv, templateMaxTasks, defaultMaxTasks);
+    if (nextMax !== state.maxConcurrent) {
+      console.log(`[${role}] [config] maxConcurrent: ${state.maxConcurrent} → ${nextMax}`);
+      state.maxConcurrent = nextMax;
+      agentVisibleChanged = true;
+    }
 
-    // Initialize runner state for parallel execution
-    const state: RunnerState = {
-      activeTasks: new Map(),
-      maxConcurrent,
-      harnessProvider: bootProvider,
-    };
+    // (3) Apply the small allowlist of safe-to-mutate env keys to process.env.
+    const changedKeys = applyResolvedEnvToProcessEnv(freshEnv);
+    if (changedKeys.length > 0) {
+      console.log(`[${role}] [env-reload] Updated process.env: ${changedKeys.join(", ")}`);
+    }
 
-    // Track tasks already signaled for cancellation to avoid repeated SIGTERM
-    const cancelledSignaled = new Set<string>();
+    return { agentVisibleChanged };
+  };
 
-    // Migration 055 — cache the harness_provider value used when we last
-    // built a `cred_status` snapshot. Re-runs the post-task check only when
-    // the resolved provider changes. Section 4 of the swarm_config-overrides-
-    // HARNESS_PROVIDER work makes this dynamic: state.harnessProvider is
-    // reconciled below from `swarm_config`, so an operator's change reaches
-    // here without a worker restart.
-    let cachedCredHarnessProvider: string | null = null;
-
-    // Throttle for live HARNESS_PROVIDER reconciliation. Each reconciliation
-    // calls `fetchResolvedEnv` which also re-resolves credential pools — we
-    // don't want that on every 2s poll. 10s gives operator changes a near-
-    // immediate effect from a UX perspective without hammering the API.
-    let lastHarnessReconcileAt = 0;
-    const HARNESS_RECONCILE_INTERVAL_MS = 10_000;
-
-    // Create API config for ping/close
-    const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
-
-    // Setup graceful shutdown handlers with API config and runner state access
-    setupShutdownHandlers(role, apiConfig, () => state);
-
-    // Register agent before starting
-    const agentName =
-      process.env.AGENT_NAME ||
-      cachedTemplate?.config.displayName ||
-      `${role}-${agentId.slice(0, 8)}`;
+  /** Push the current live state back to the API so the dashboard reflects it. */
+  const reregisterAgent = async () => {
     try {
       await registerAgent({
         apiUrl,
@@ -2630,1055 +2735,990 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         role,
         isLead,
         capabilities,
-        maxTasks: maxConcurrent,
-        harnessProvider: bootProvider,
+        maxTasks: state.maxConcurrent,
+        harnessProvider: state.harnessProvider,
       });
-      console.log(`[${role}] Registered as "${agentName}" (ID: ${agentId})`);
-    } catch (error) {
-      console.error(`[${role}] Failed to register: ${error}`);
-      process.exit(1);
+    } catch (err) {
+      console.warn(`[${role}] [config] Re-register failed (non-fatal): ${err}`);
     }
+  };
+  try {
+    await registerAgent({
+      apiUrl,
+      apiKey,
+      agentId,
+      name: agentName,
+      role,
+      isLead,
+      capabilities,
+      maxTasks: maxConcurrent,
+      harnessProvider: bootProvider,
+    });
+    console.log(`[${role}] Registered as "${agentName}" (ID: ${agentId})`);
+  } catch (error) {
+    console.error(`[${role}] Failed to register: ${error}`);
+    process.exit(1);
+  }
 
-    // Block until harness credentials are present in env. This loop replaces
-    // the old bash-level fail-fast in `docker-entrypoint.sh` — the worker is
-    // already registered (visible to the dashboard) and self-heals once
-    // creds appear in `swarm_config`. See plans/2026-05-06-worker-credential-safe-loop.md.
-    //
-    // CRED_CHECK_DISABLE=1 opts out entirely: the worker trusts the operator
-    // and starts polling immediately, with a NULL `cred_status` row that the
-    // dashboard surfaces as "unreported."
-    const harnessProvider = bootProvider;
-    cachedCredHarnessProvider = harnessProvider;
-    if (isCredCheckDisabled(process.env)) {
-      console.log(`[${role}] CRED_CHECK_DISABLE=1, skipping credential checks`);
-    } else {
-      try {
-        await awaitCredentials({
-          provider: harnessProvider,
-          refreshEnv: async () => {
-            const { env } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
-            return env;
-          },
-          onTick: (status) => {
-            // Best-effort status report — the dispatcher uses it to route
-            // around blocked agents. Failures are non-fatal (the wait loop
-            // already swallows onTick exceptions). We do NOT include
-            // `cred_status` here — the live test runs once the worker is
-            // ready (below), and intermediate ticks are presence-only.
-            fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
-              method: "PUT",
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "X-Agent-ID": agentId,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ ready: status.ready, missing: status.missing }),
-            }).catch(() => {
-              // Swallowed — Phase 2 wait loop logs every tick anyway.
-            });
-          },
-        });
-      } catch (err) {
-        if (err instanceof BootMaxWaitExceededError) {
-          console.error(`[${role}] ${err.message}`);
-          process.exit(EX_CONFIG);
-        }
-        throw err;
-      }
-
-      // Migration 055: build the full snapshot (presence + live test) once
-      // creds are ready and POST it to the agent row. Status endpoint reads
-      // this instead of running predicates server-side.
-      try {
-        const snapshot = await buildCredStatusReport(harnessProvider, process.env, {}, "boot");
-        await reportCredStatus(apiUrl, apiKey, agentId, snapshot);
-      } catch (err) {
-        // Non-fatal — worker proceeds even if reporting fails.
-        console.warn(`[${role}] cred_status boot report failed (non-fatal): ${err}`);
-      }
-    }
-
-    // Clean up any stale active sessions from previous runs (crash recovery)
-    await cleanupActiveSessions(apiConfig);
-    console.log(`[${role}] Cleaned up stale active sessions`);
-
-    // Fetch full agent profile to get soul/identity content
+  // Block until harness credentials are present in env. This loop replaces
+  // the old bash-level fail-fast in `docker-entrypoint.sh` — the worker is
+  // already registered (visible to the dashboard) and self-heals once
+  // creds appear in `swarm_config`. See plans/2026-05-06-worker-credential-safe-loop.md.
+  //
+  // CRED_CHECK_DISABLE=1 opts out entirely: the worker trusts the operator
+  // and starts polling immediately, with a NULL `cred_status` row that the
+  // dashboard surfaces as "unreported."
+  cachedCredHarnessProvider = state.harnessProvider;
+  if (isCredCheckDisabled(process.env)) {
+    console.log(`[${role}] CRED_CHECK_DISABLE=1, skipping credential checks`);
+  } else {
     try {
-      const resp = await fetch(`${apiUrl}/me`, {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "X-Agent-ID": agentId,
+      await awaitCredentials({
+        provider: state.harnessProvider,
+        // Re-read each tick so an operator's HARNESS_PROVIDER flip during
+        // the wait pivots the credential predicate (and onwards).
+        getProvider: () => state.harnessProvider,
+        refreshEnv: async () => {
+          const { env, resolvedProvider } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
+          // Apply drift inside the wait so adapter/prompt/state stay in
+          // sync if the operator flips HARNESS_PROVIDER mid-loop. The
+          // helper is idempotent when nothing changed.
+          const { agentVisibleChanged } = await applySwarmConfigDrift(env, resolvedProvider);
+          if (agentVisibleChanged) {
+            // Fire-and-forget — dashboard reflects the live values, the
+            // wait loop doesn't block on it.
+            reregisterAgent().catch(() => {});
+          }
+          return env;
+        },
+        onTick: (status) => {
+          // Best-effort status report — the dispatcher uses it to route
+          // around blocked agents. Failures are non-fatal (the wait loop
+          // already swallows onTick exceptions). We do NOT include
+          // `cred_status` here — the live test runs once the worker is
+          // ready (below), and intermediate ticks are presence-only.
+          fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "X-Agent-ID": agentId,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ ready: status.ready, missing: status.missing }),
+          }).catch(() => {
+            // Swallowed — Phase 2 wait loop logs every tick anyway.
+          });
         },
       });
-      if (resp.ok) {
-        const profile = (await resp.json()) as {
-          soulMd?: string;
-          identityMd?: string;
-          claudeMd?: string;
-          setupScript?: string;
-          toolsMd?: string;
-          heartbeatMd?: string;
-          name?: string;
-          description?: string;
-        };
-        agentSoulMd = profile.soulMd;
-        agentIdentityMd = profile.identityMd;
-        agentSetupScript = profile.setupScript;
-        agentToolsMd = profile.toolsMd;
-        agentClaudeMd = profile.claudeMd;
-        agentHeartbeatMd = profile.heartbeatMd;
-        agentProfileName = profile.name;
-        agentDescription = profile.description;
+    } catch (err) {
+      if (err instanceof BootMaxWaitExceededError) {
+        console.error(`[${role}] ${err.message}`);
+        process.exit(EX_CONFIG);
+      }
+      throw err;
+    }
 
-        // Generate default templates if missing (runner registers via POST /api/agents
-        // which doesn't generate templates like join-swarm does)
-        if (
-          !agentSoulMd ||
-          !agentIdentityMd ||
-          !agentToolsMd ||
-          !agentClaudeMd ||
-          !agentHeartbeatMd
-        ) {
-          // Use already-fetched template (from pre-registration step)
-          if (cachedTemplate) {
-            const ctx = {
-              agent: {
-                name: agentProfileName || agentName,
-                role: role,
-                description: agentDescription || "",
-                capabilities: (capabilities || []).join(", "),
-              },
-            };
-            if (!agentSoulMd) agentSoulMd = interpolate(cachedTemplate.files.soulMd, ctx).result;
-            if (!agentIdentityMd)
-              agentIdentityMd = interpolate(cachedTemplate.files.identityMd, ctx).result;
-            if (!agentToolsMd) agentToolsMd = interpolate(cachedTemplate.files.toolsMd, ctx).result;
-            if (!agentClaudeMd)
-              agentClaudeMd = interpolate(cachedTemplate.files.claudeMd, ctx).result;
-            if (!agentSetupScript)
-              agentSetupScript = interpolate(cachedTemplate.files.setupScript, ctx).result;
-            if (!agentHeartbeatMd)
-              agentHeartbeatMd = interpolate(cachedTemplate.files.heartbeatMd, ctx).result;
-            console.log(`[${role}] Applied template: ${templateId}`);
-          }
+    // Migration 055: build the full snapshot (presence + live test) once
+    // creds are ready and POST it to the agent row. Status endpoint reads
+    // this instead of running predicates server-side. Always uses the
+    // *current* state.harnessProvider in case it flipped during the wait.
+    try {
+      const snapshot = await buildCredStatusReport(state.harnessProvider, process.env, {}, "boot");
+      await reportCredStatus(apiUrl, apiKey, agentId, snapshot);
+    } catch (err) {
+      // Non-fatal — worker proceeds even if reporting fails.
+      console.warn(`[${role}] cred_status boot report failed (non-fatal): ${err}`);
+    }
+  }
 
-          // Fallback to generic defaults for any still-missing fields
-          const agentInfo = {
-            name: agentProfileName || agentName,
-            role: role,
-            description: agentDescription,
-            capabilities: config.capabilities,
+  // Clean up any stale active sessions from previous runs (crash recovery)
+  await cleanupActiveSessions(apiConfig);
+  console.log(`[${role}] Cleaned up stale active sessions`);
+
+  // Fetch full agent profile to get soul/identity content
+  try {
+    const resp = await fetch(`${apiUrl}/me`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Agent-ID": agentId,
+      },
+    });
+    if (resp.ok) {
+      const profile = (await resp.json()) as {
+        soulMd?: string;
+        identityMd?: string;
+        claudeMd?: string;
+        setupScript?: string;
+        toolsMd?: string;
+        heartbeatMd?: string;
+        name?: string;
+        description?: string;
+      };
+      agentSoulMd = profile.soulMd;
+      agentIdentityMd = profile.identityMd;
+      agentSetupScript = profile.setupScript;
+      agentToolsMd = profile.toolsMd;
+      agentClaudeMd = profile.claudeMd;
+      agentHeartbeatMd = profile.heartbeatMd;
+      agentProfileName = profile.name;
+      agentDescription = profile.description;
+
+      // Generate default templates if missing (runner registers via POST /api/agents
+      // which doesn't generate templates like join-swarm does)
+      if (
+        !agentSoulMd ||
+        !agentIdentityMd ||
+        !agentToolsMd ||
+        !agentClaudeMd ||
+        !agentHeartbeatMd
+      ) {
+        // Use already-fetched template (from pre-registration step)
+        if (cachedTemplate) {
+          const ctx = {
+            agent: {
+              name: agentProfileName || agentName,
+              role: role,
+              description: agentDescription || "",
+              capabilities: (capabilities || []).join(", "),
+            },
           };
-          if (!agentSoulMd) agentSoulMd = generateDefaultSoulMd(agentInfo);
-          if (!agentIdentityMd) agentIdentityMd = generateDefaultIdentityMd(agentInfo);
-          if (!agentToolsMd) agentToolsMd = generateDefaultToolsMd(agentInfo);
-          if (!agentClaudeMd) agentClaudeMd = generateDefaultClaudeMd(agentInfo);
+          if (!agentSoulMd) agentSoulMd = interpolate(cachedTemplate.files.soulMd, ctx).result;
+          if (!agentIdentityMd)
+            agentIdentityMd = interpolate(cachedTemplate.files.identityMd, ctx).result;
+          if (!agentToolsMd) agentToolsMd = interpolate(cachedTemplate.files.toolsMd, ctx).result;
+          if (!agentClaudeMd)
+            agentClaudeMd = interpolate(cachedTemplate.files.claudeMd, ctx).result;
+          if (!agentSetupScript)
+            agentSetupScript = interpolate(cachedTemplate.files.setupScript, ctx).result;
+          if (!agentHeartbeatMd)
+            agentHeartbeatMd = interpolate(cachedTemplate.files.heartbeatMd, ctx).result;
+          console.log(`[${role}] Applied template: ${templateId}`);
+        }
 
-          // Push generated templates to server
+        // Fallback to generic defaults for any still-missing fields
+        const agentInfo = {
+          name: agentProfileName || agentName,
+          role: role,
+          description: agentDescription,
+          capabilities: config.capabilities,
+        };
+        if (!agentSoulMd) agentSoulMd = generateDefaultSoulMd(agentInfo);
+        if (!agentIdentityMd) agentIdentityMd = generateDefaultIdentityMd(agentInfo);
+        if (!agentToolsMd) agentToolsMd = generateDefaultToolsMd(agentInfo);
+        if (!agentClaudeMd) agentClaudeMd = generateDefaultClaudeMd(agentInfo);
+
+        // Push generated templates to server
+        try {
+          const profileUpdate: Record<string, string> = {};
+          if (!profile.soulMd) profileUpdate.soulMd = agentSoulMd;
+          if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
+          if (!profile.toolsMd) profileUpdate.toolsMd = agentToolsMd;
+          if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
+          if (!profile.setupScript && agentSetupScript)
+            profileUpdate.setupScript = agentSetupScript;
+          if (!profile.heartbeatMd && agentHeartbeatMd)
+            profileUpdate.heartbeatMd = agentHeartbeatMd;
+
+          await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "X-Agent-ID": agentId,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(profileUpdate),
+          });
+          console.log(`[${role}] Generated and saved default identity templates`);
+        } catch {
+          console.warn(`[${role}] Could not save generated templates to server`);
+        }
+      }
+
+      // Fetch installed skills for system prompt
+      try {
+        const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "X-Agent-ID": agentId,
+          },
+        });
+        if (skillsResp.ok) {
+          const skillsData = (await skillsResp.json()) as {
+            skills: {
+              name: string;
+              description: string;
+              isActive: boolean;
+              isEnabled: boolean;
+            }[];
+          };
+          agentSkillsSummary = skillsData.skills
+            .filter((s) => s.isActive && s.isEnabled)
+            .map((s) => ({ name: s.name, description: s.description }));
+          if (agentSkillsSummary.length > 0) {
+            console.log(`[${role}] Loaded ${agentSkillsSummary.length} skills for system prompt`);
+          }
+        }
+      } catch {
+        // Non-fatal — skills are optional
+      }
+
+      // Fetch installed MCP servers for system prompt
+      try {
+        const mcpServersResp = await fetch(`${apiUrl}/api/agents/${agentId}/mcp-servers`, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "X-Agent-ID": agentId,
+          },
+        });
+        if (mcpServersResp.ok) {
+          const mcpServersData = (await mcpServersResp.json()) as {
+            servers: {
+              name: string;
+              transport: string;
+              description: string | null;
+              isActive: boolean;
+              isEnabled: boolean;
+            }[];
+          };
+          const activeMcpServers = mcpServersData.servers.filter((s) => s.isActive && s.isEnabled);
+          if (activeMcpServers.length > 0) {
+            agentMcpServersSummary = activeMcpServers
+              .map((s) => `- **${s.name}** (${s.transport}): ${s.description || "No description"}`)
+              .join("\n");
+            console.log(
+              `[${role}] Loaded ${activeMcpServers.length} MCP servers for system prompt`,
+            );
+          }
+        }
+      } catch {
+        // Non-fatal — MCP servers are optional
+      }
+
+      // Rebuild system prompt with identity
+      basePrompt = await buildSystemPrompt();
+      resolvedSystemPrompt = additionalSystemPrompt
+        ? `${basePrompt}\n\n${additionalSystemPrompt}`
+        : basePrompt;
+      console.log(
+        `[${role}] Loaded agent identity (soul: ${agentSoulMd ? "yes" : "no"}, identity: ${agentIdentityMd ? "yes" : "no"}, tools: ${agentToolsMd ? "yes" : "no"}, claude: ${agentClaudeMd ? "yes" : "no"})`,
+      );
+      console.log(`[${role}] Updated system prompt length: ${resolvedSystemPrompt.length} chars`);
+    }
+  } catch {
+    console.warn(`[${role}] Could not fetch agent profile for identity — proceeding without`);
+  }
+
+  // Write SOUL.md and IDENTITY.md to workspace before spawning Claude
+  const SOUL_MD_PATH = "/workspace/SOUL.md";
+  const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
+
+  if (agentSoulMd) {
+    try {
+      await Bun.write(SOUL_MD_PATH, agentSoulMd);
+      console.log(`[${role}] Wrote SOUL.md to workspace`);
+    } catch (err) {
+      console.warn(`[${role}] Could not write SOUL.md: ${(err as Error).message}`);
+    }
+  }
+  if (agentIdentityMd) {
+    try {
+      await Bun.write(IDENTITY_MD_PATH, agentIdentityMd);
+      console.log(`[${role}] Wrote IDENTITY.md to workspace`);
+    } catch (err) {
+      console.warn(`[${role}] Could not write IDENTITY.md: ${(err as Error).message}`);
+    }
+  }
+
+  // Write setup script to workspace (agent can edit during session)
+  // Only create if it doesn't exist — the entrypoint already composed/prepended it at container start
+  if (agentSetupScript) {
+    try {
+      if (!(await Bun.file("/workspace/start-up.sh").exists())) {
+        await Bun.write("/workspace/start-up.sh", `#!/bin/bash\n${agentSetupScript}\n`);
+        console.log(`[${role}] Wrote start-up.sh to workspace`);
+      }
+    } catch (err) {
+      console.warn(`[${role}] Could not write start-up.sh: ${(err as Error).message}`);
+    }
+  }
+
+  // Write TOOLS.md to workspace (agent can edit during session)
+  if (agentToolsMd) {
+    try {
+      await Bun.write("/workspace/TOOLS.md", agentToolsMd);
+      console.log(`[${role}] Wrote TOOLS.md to workspace`);
+    } catch (err) {
+      console.warn(`[${role}] Could not write TOOLS.md: ${(err as Error).message}`);
+    }
+  }
+
+  // Write HEARTBEAT.md to workspace (lead's periodic checklist)
+  if (agentHeartbeatMd) {
+    try {
+      await Bun.write("/workspace/HEARTBEAT.md", agentHeartbeatMd);
+      console.log(`[${role}] Wrote HEARTBEAT.md to workspace`);
+    } catch (err) {
+      console.warn(`[${role}] Could not write HEARTBEAT.md: ${(err as Error).message}`);
+    }
+  }
+
+  // Write CLAUDE.md to workspace (agent-level instructions)
+  if (agentClaudeMd) {
+    try {
+      await Bun.write("/workspace/CLAUDE.md", agentClaudeMd);
+      console.log(`[${role}] Wrote CLAUDE.md to workspace`);
+    } catch (err) {
+      console.warn(`[${role}] Could not write CLAUDE.md: ${(err as Error).message}`);
+    }
+  }
+
+  // ========== Sync skills to filesystem ==========
+  try {
+    console.log(`[${role}] Syncing skills to filesystem...`);
+    const syncHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Agent-ID": agentId,
+    };
+    if (apiKey) syncHeaders.Authorization = `Bearer ${apiKey}`;
+    const syncRes = await fetch(`${swarmUrl}/api/skills/sync-filesystem`, {
+      method: "POST",
+      headers: syncHeaders,
+    });
+    if (syncRes.ok) {
+      const syncResult = (await syncRes.json()) as {
+        synced: number;
+        removed: number;
+        errors: string[];
+      };
+      console.log(
+        `[${role}] Skills synced: ${syncResult.synced} written, ${syncResult.removed} removed`,
+      );
+      if (syncResult.errors.length > 0) {
+        console.warn(`[${role}] Skill sync errors: ${syncResult.errors.join(", ")}`);
+      }
+    } else {
+      console.warn(`[${role}] Skill sync failed: HTTP ${syncRes.status}`);
+    }
+  } catch (err) {
+    console.warn(`[${role}] Skill sync failed: ${(err as Error).message}`);
+  }
+
+  // ========== Resume paused tasks with PRIORITY ==========
+  // Check for paused tasks from previous shutdown and resume them before normal polling
+  try {
+    console.log(`[${role}] Checking for paused tasks to resume...`);
+    const pausedTasks = await getPausedTasksFromAPI(apiConfig);
+
+    if (pausedTasks.length > 0) {
+      console.log(`[${role}] Found ${pausedTasks.length} paused task(s) to resume`);
+
+      for (const task of pausedTasks) {
+        // Defensive: skip tasks that already have completion data (zombie prevention)
+        if (task.finishedAt || task.output) {
+          console.warn(
+            `[${role}] Skipping zombie task ${task.id.slice(0, 8)} — already has completion data (finishedAt: ${!!task.finishedAt}, output: ${!!task.output})`,
+          );
+          continue;
+        }
+
+        // Wait if at capacity (though unlikely on fresh startup)
+        while (state.activeTasks.size >= state.maxConcurrent) {
+          await checkCompletedProcesses(state, role, apiConfig);
+          await Bun.sleep(1000);
+        }
+
+        console.log(
+          `[${role}] Resuming paused task ${task.id.slice(0, 8)}: "${task.task.slice(0, 50)}..."`,
+        );
+
+        // Resume the task via API (marks as in_progress)
+        const resumed = await resumeTaskViaAPI(apiConfig, task.id);
+        if (!resumed) {
+          console.warn(`[${role}] Failed to resume task ${task.id.slice(0, 8)} via API, skipping`);
+          continue;
+        }
+
+        // Build prompt with resume context + memory injection
+        let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter), {
+          hasMcp: adapter.traits.hasMcp,
+        });
+
+        // Inject relevant memories for resumed tasks
+        const resumeMemoryContext = await fetchRelevantMemories(
+          apiUrl,
+          apiKey,
+          agentId,
+          task.task,
+          task.id,
+        );
+        if (resumeMemoryContext) {
+          resumePrompt += resumeMemoryContext;
+          console.log(`[${role}] Injected relevant memories into resumed task prompt`);
+        }
+
+        // Resolve --resume: prefer own session ID, then parent's
+        let resumeAdditionalArgs = opts.additionalArgs || [];
+        if (task.claudeSessionId) {
+          resumeAdditionalArgs = [...resumeAdditionalArgs, "--resume", task.claudeSessionId];
+          console.log(`[${role}] Resuming task's own session ${task.claudeSessionId.slice(0, 8)}`);
+        } else if (task.parentTaskId) {
+          const parentSessionId = await fetchProviderSessionId(apiUrl, apiKey, task.parentTaskId);
+          if (parentSessionId) {
+            resumeAdditionalArgs = [...resumeAdditionalArgs, "--resume", parentSessionId];
+            console.log(`[${role}] Resuming parent session ${parentSessionId.slice(0, 8)}`);
+          }
+        }
+
+        // Spawn Claude process for resumed task
+        iteration++;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const logFile = `${logDir}/${timestamp}-resume-${task.id.slice(0, 8)}.jsonl`;
+
+        console.log(`\n[${role}] === Resuming paused task (iteration ${iteration}) ===`);
+        console.log(`[${role}] Logging to: ${logFile}`);
+        console.log(`[${role}] Prompt: ${resumePrompt.slice(0, 100)}...`);
+
+        const metadata = {
+          type: metadataType,
+          sessionId,
+          iteration,
+          timestamp: new Date().toISOString(),
+          prompt: resumePrompt,
+          trigger: "task_resumed",
+          resumedTaskId: task.id,
+          yolo: isYolo,
+        };
+        await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
+
+        // Resolve cwd for resumed task (mirrors normal task path: task.dir > vcsRepo clonePath)
+        let resumeCwd: string | undefined;
+        if (task.dir) {
           try {
-            const profileUpdate: Record<string, string> = {};
-            if (!profile.soulMd) profileUpdate.soulMd = agentSoulMd;
-            if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
-            if (!profile.toolsMd) profileUpdate.toolsMd = agentToolsMd;
-            if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
-            if (!profile.setupScript && agentSetupScript)
-              profileUpdate.setupScript = agentSetupScript;
-            if (!profile.heartbeatMd && agentHeartbeatMd)
-              profileUpdate.heartbeatMd = agentHeartbeatMd;
+            if (existsSync(task.dir) && statSync(task.dir).isDirectory()) {
+              resumeCwd = task.dir;
+            } else {
+              console.warn(
+                `[${role}] Resume task dir "${task.dir}" does not exist or is not a directory, falling back to default cwd`,
+              );
+            }
+          } catch {
+            console.warn(
+              `[${role}] Failed to check resume task dir "${task.dir}", falling back to default cwd`,
+            );
+          }
+        }
 
-            await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
-              method: "PUT",
+        if (!resumeCwd && task.vcsRepo && apiUrl) {
+          const repoConfig = await fetchRepoConfig(apiUrl, apiKey, task.vcsRepo);
+          const effectiveConfig = repoConfig ?? {
+            url: task.vcsRepo,
+            name: task.vcsRepo.split("/").pop() || task.vcsRepo,
+            clonePath: `/workspace/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
+            defaultBranch: "main",
+          };
+          const repoContext = await ensureRepoForTask(effectiveConfig, role);
+          if (repoContext?.clonePath) {
+            resumeCwd = repoContext.clonePath;
+          }
+        }
+
+        // Per-task runner session ID so session logs are scoped to this task
+        const resumeRunnerSessionId = crypto.randomUUID();
+
+        let runningTask: RunningTask;
+        try {
+          runningTask = await spawnProviderProcess(
+            adapter,
+            {
+              prompt: resumePrompt,
+              logFile,
+              systemPrompt: resolvedSystemPrompt,
+              additionalArgs: resumeAdditionalArgs,
+              role,
+              apiUrl,
+              apiKey,
+              agentId,
+              runnerSessionId: resumeRunnerSessionId,
+              iteration,
+              taskId: task.id,
+              model: (task as { model?: string }).model,
+              harnessProvider: state.harnessProvider,
+              cwd: resumeCwd,
+              vcsRepo: task.vcsRepo,
+            },
+            logDir,
+            isYolo,
+          );
+        } catch (spawnErr) {
+          const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+          console.error(
+            `[${role}] Failed to spawn process for resumed task ${task.id.slice(0, 8)}: ${errMsg}`,
+          );
+          await ensureTaskFinished(
+            apiConfig,
+            role,
+            task.id,
+            1,
+            `Spawn failed: ${errMsg}`,
+            undefined,
+            state.harnessProvider,
+          );
+          continue;
+        }
+
+        state.activeTasks.set(task.id, runningTask);
+        registerActiveSession(apiConfig, {
+          taskId: task.id,
+          triggerType: "task_resumed",
+          taskDescription: task.task?.slice(0, 200),
+          runnerSessionId: resumeRunnerSessionId,
+        });
+        console.log(
+          `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
+        );
+      }
+
+      console.log(`[${role}] All paused tasks resumed. Entering normal polling...`);
+    } else {
+      console.log(`[${role}] No paused tasks found. Entering normal polling...`);
+    }
+  } catch (error) {
+    console.error(`[${role}] Error checking/resuming paused tasks: ${error}`);
+    // Continue to normal polling even if resume fails
+  }
+  // ========== END: Resume paused tasks ==========
+
+  // ========== Lead startup self-check ==========
+  if (isLead) {
+    console.log(`[${role}] Running startup heartbeat sweep...`);
+    const swept = await triggerHeartbeatSweep(apiConfig);
+    if (swept) {
+      console.log(`[${role}] Startup heartbeat sweep completed`);
+    } else {
+      console.warn(`[${role}] Startup heartbeat sweep failed (non-fatal)`);
+    }
+  }
+
+  // Phase 4 — exponential back-off state for `budget_refused` triggers.
+  // Resets to 0 on any non-refused outcome. Lives outside the loop so
+  // state persists across iterations.
+  let consecutiveBudgetRefusals = 0;
+
+  // Track last finished task check for leads (to avoid re-processing)
+  while (true) {
+    // Ping server on each iteration to keep status updated
+    await pingServer(apiConfig, role);
+
+    // Check for completed processes first and ensure tasks are marked as finished
+    await checkCompletedProcesses(state, role, apiConfig);
+
+    // Live HARNESS_PROVIDER reconciliation. Re-fetches `swarm_config` (overlaid
+    // on env) and swaps the adapter if the resolved provider changed —
+    // typically because an operator PATCH'd /api/agents/:id/harness-provider
+    // (which writes a swarm_config row) or upserted a config row directly.
+    //
+    // Safety: in-flight sessions hold their own `ProviderSession` references
+    // and continue on the old adapter unaffected. New spawns (below) read
+    // the current `adapter` binding and pick up the swap. `basePrompt` is
+    // rebuilt because traits (and therefore prompt content) may differ across
+    // providers.
+    if (Date.now() - lastHarnessReconcileAt > HARNESS_RECONCILE_INTERVAL_MS) {
+      lastHarnessReconcileAt = Date.now();
+      try {
+        const { env: freshEnv, resolvedProvider } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
+        const { agentVisibleChanged } = await applySwarmConfigDrift(freshEnv, resolvedProvider);
+        if (agentVisibleChanged) {
+          // Re-register so the agents row + dashboard reflect the live
+          // harness_provider / maxTasks. Idempotent: only writes columns
+          // that actually changed (see src/http/agents.ts).
+          await reregisterAgent();
+        }
+      } catch (err) {
+        console.warn(`[${role}] [harness] Reconcile fetch failed (non-fatal): ${err}`);
+      }
+    }
+
+    // Migration 055 — post-task credential refresh, cache-keyed on the
+    // *resolved* harness_provider. Re-runs the snapshot when the provider
+    // changes (boot, or after a live swap above) so the dashboard shows
+    // up-to-date credential status for the active adapter.
+    if (!isCredCheckDisabled(process.env)) {
+      const currentHarness = state.harnessProvider;
+      if (currentHarness !== cachedCredHarnessProvider) {
+        cachedCredHarnessProvider = currentHarness;
+        buildCredStatusReport(currentHarness, process.env, {}, "post_task")
+          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
+          .catch((err) =>
+            console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
+          );
+      }
+    }
+
+    // Periodic VCS detection for running tasks (fire-and-forget, throttled per task)
+    const now = Date.now();
+    for (const [taskId, task] of state.activeTasks) {
+      if (vcsDetectedTasks.has(taskId)) continue;
+      const lastCheck = vcsCheckTimestamps.get(taskId) ?? 0;
+      if (now - lastCheck < VCS_CHECK_INTERVAL) continue;
+      if (!task.workingDir) continue;
+
+      vcsCheckTimestamps.set(taskId, now);
+      detectVcsForTask(apiUrl, apiKey, taskId, task.workingDir);
+    }
+
+    // Check for cancelled tasks and signal their subprocesses
+    if (state.activeTasks.size > 0) {
+      for (const [taskId, task] of state.activeTasks) {
+        if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM
+        try {
+          const cancelResp = await fetch(
+            `${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`,
+            {
               headers: {
                 Authorization: `Bearer ${apiKey}`,
                 "X-Agent-ID": agentId,
-                "Content-Type": "application/json",
               },
-              body: JSON.stringify(profileUpdate),
-            });
-            console.log(`[${role}] Generated and saved default identity templates`);
-          } catch {
-            console.warn(`[${role}] Could not save generated templates to server`);
-          }
-        }
-
-        // Fetch installed skills for system prompt
-        try {
-          const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "X-Agent-ID": agentId,
             },
-          });
-          if (skillsResp.ok) {
-            const skillsData = (await skillsResp.json()) as {
-              skills: {
-                name: string;
-                description: string;
-                isActive: boolean;
-                isEnabled: boolean;
-              }[];
-            };
-            agentSkillsSummary = skillsData.skills
-              .filter((s) => s.isActive && s.isEnabled)
-              .map((s) => ({ name: s.name, description: s.description }));
-            if (agentSkillsSummary.length > 0) {
-              console.log(`[${role}] Loaded ${agentSkillsSummary.length} skills for system prompt`);
-            }
-          }
-        } catch {
-          // Non-fatal — skills are optional
-        }
-
-        // Fetch installed MCP servers for system prompt
-        try {
-          const mcpServersResp = await fetch(`${apiUrl}/api/agents/${agentId}/mcp-servers`, {
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "X-Agent-ID": agentId,
-            },
-          });
-          if (mcpServersResp.ok) {
-            const mcpServersData = (await mcpServersResp.json()) as {
-              servers: {
-                name: string;
-                transport: string;
-                description: string | null;
-                isActive: boolean;
-                isEnabled: boolean;
-              }[];
-            };
-            const activeMcpServers = mcpServersData.servers.filter(
-              (s) => s.isActive && s.isEnabled,
-            );
-            if (activeMcpServers.length > 0) {
-              agentMcpServersSummary = activeMcpServers
-                .map(
-                  (s) => `- **${s.name}** (${s.transport}): ${s.description || "No description"}`,
-                )
-                .join("\n");
-              console.log(
-                `[${role}] Loaded ${activeMcpServers.length} MCP servers for system prompt`,
-              );
-            }
-          }
-        } catch {
-          // Non-fatal — MCP servers are optional
-        }
-
-        // Rebuild system prompt with identity
-        basePrompt = await buildSystemPrompt();
-        resolvedSystemPrompt = additionalSystemPrompt
-          ? `${basePrompt}\n\n${additionalSystemPrompt}`
-          : basePrompt;
-        console.log(
-          `[${role}] Loaded agent identity (soul: ${agentSoulMd ? "yes" : "no"}, identity: ${agentIdentityMd ? "yes" : "no"}, tools: ${agentToolsMd ? "yes" : "no"}, claude: ${agentClaudeMd ? "yes" : "no"})`,
-        );
-        console.log(`[${role}] Updated system prompt length: ${resolvedSystemPrompt.length} chars`);
-      }
-    } catch {
-      console.warn(`[${role}] Could not fetch agent profile for identity — proceeding without`);
-    }
-
-    // Write SOUL.md and IDENTITY.md to workspace before spawning Claude
-    const SOUL_MD_PATH = "/workspace/SOUL.md";
-    const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
-
-    if (agentSoulMd) {
-      try {
-        await Bun.write(SOUL_MD_PATH, agentSoulMd);
-        console.log(`[${role}] Wrote SOUL.md to workspace`);
-      } catch (err) {
-        console.warn(`[${role}] Could not write SOUL.md: ${(err as Error).message}`);
-      }
-    }
-    if (agentIdentityMd) {
-      try {
-        await Bun.write(IDENTITY_MD_PATH, agentIdentityMd);
-        console.log(`[${role}] Wrote IDENTITY.md to workspace`);
-      } catch (err) {
-        console.warn(`[${role}] Could not write IDENTITY.md: ${(err as Error).message}`);
-      }
-    }
-
-    // Write setup script to workspace (agent can edit during session)
-    // Only create if it doesn't exist — the entrypoint already composed/prepended it at container start
-    if (agentSetupScript) {
-      try {
-        if (!(await Bun.file("/workspace/start-up.sh").exists())) {
-          await Bun.write("/workspace/start-up.sh", `#!/bin/bash\n${agentSetupScript}\n`);
-          console.log(`[${role}] Wrote start-up.sh to workspace`);
-        }
-      } catch (err) {
-        console.warn(`[${role}] Could not write start-up.sh: ${(err as Error).message}`);
-      }
-    }
-
-    // Write TOOLS.md to workspace (agent can edit during session)
-    if (agentToolsMd) {
-      try {
-        await Bun.write("/workspace/TOOLS.md", agentToolsMd);
-        console.log(`[${role}] Wrote TOOLS.md to workspace`);
-      } catch (err) {
-        console.warn(`[${role}] Could not write TOOLS.md: ${(err as Error).message}`);
-      }
-    }
-
-    // Write HEARTBEAT.md to workspace (lead's periodic checklist)
-    if (agentHeartbeatMd) {
-      try {
-        await Bun.write("/workspace/HEARTBEAT.md", agentHeartbeatMd);
-        console.log(`[${role}] Wrote HEARTBEAT.md to workspace`);
-      } catch (err) {
-        console.warn(`[${role}] Could not write HEARTBEAT.md: ${(err as Error).message}`);
-      }
-    }
-
-    // Write CLAUDE.md to workspace (agent-level instructions)
-    if (agentClaudeMd) {
-      try {
-        await Bun.write("/workspace/CLAUDE.md", agentClaudeMd);
-        console.log(`[${role}] Wrote CLAUDE.md to workspace`);
-      } catch (err) {
-        console.warn(`[${role}] Could not write CLAUDE.md: ${(err as Error).message}`);
-      }
-    }
-
-    // ========== Sync skills to filesystem ==========
-    try {
-      console.log(`[${role}] Syncing skills to filesystem...`);
-      const syncHeaders: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-Agent-ID": agentId,
-      };
-      if (apiKey) syncHeaders.Authorization = `Bearer ${apiKey}`;
-      const syncRes = await fetch(`${swarmUrl}/api/skills/sync-filesystem`, {
-        method: "POST",
-        headers: syncHeaders,
-      });
-      if (syncRes.ok) {
-        const syncResult = (await syncRes.json()) as {
-          synced: number;
-          removed: number;
-          errors: string[];
-        };
-        console.log(
-          `[${role}] Skills synced: ${syncResult.synced} written, ${syncResult.removed} removed`,
-        );
-        if (syncResult.errors.length > 0) {
-          console.warn(`[${role}] Skill sync errors: ${syncResult.errors.join(", ")}`);
-        }
-      } else {
-        console.warn(`[${role}] Skill sync failed: HTTP ${syncRes.status}`);
-      }
-    } catch (err) {
-      console.warn(`[${role}] Skill sync failed: ${(err as Error).message}`);
-    }
-
-    // ========== Resume paused tasks with PRIORITY ==========
-    // Check for paused tasks from previous shutdown and resume them before normal polling
-    try {
-      console.log(`[${role}] Checking for paused tasks to resume...`);
-      const pausedTasks = await getPausedTasksFromAPI(apiConfig);
-
-      if (pausedTasks.length > 0) {
-        console.log(`[${role}] Found ${pausedTasks.length} paused task(s) to resume`);
-
-        for (const task of pausedTasks) {
-          // Defensive: skip tasks that already have completion data (zombie prevention)
-          if (task.finishedAt || task.output) {
-            console.warn(
-              `[${role}] Skipping zombie task ${task.id.slice(0, 8)} — already has completion data (finishedAt: ${!!task.finishedAt}, output: ${!!task.output})`,
-            );
-            continue;
-          }
-
-          // Wait if at capacity (though unlikely on fresh startup)
-          while (state.activeTasks.size >= state.maxConcurrent) {
-            await checkCompletedProcesses(state, role, apiConfig);
-            await Bun.sleep(1000);
-          }
-
-          console.log(
-            `[${role}] Resuming paused task ${task.id.slice(0, 8)}: "${task.task.slice(0, 50)}..."`,
           );
-
-          // Resume the task via API (marks as in_progress)
-          const resumed = await resumeTaskViaAPI(apiConfig, task.id);
-          if (!resumed) {
-            console.warn(
-              `[${role}] Failed to resume task ${task.id.slice(0, 8)} via API, skipping`,
-            );
-            continue;
+          if (cancelResp.ok) {
+            const cancelData = (await cancelResp.json()) as {
+              cancelled: Array<{ id: string }>;
+            };
+            if (cancelData.cancelled?.some((t) => t.id === taskId)) {
+              console.log(
+                `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
+              );
+              task.session.abort().catch(() => {});
+              cancelledSignaled.add(taskId);
+            }
           }
+        } catch {
+          // Non-blocking — cancellation check is best-effort
+        }
+      }
+    }
 
-          // Build prompt with resume context + memory injection
-          let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter), {
-            hasMcp: adapter.traits.hasMcp,
+    // Only poll if we have capacity
+    if (state.activeTasks.size < state.maxConcurrent) {
+      console.log(
+        `[${role}] Polling for triggers (${state.activeTasks.size}/${state.maxConcurrent} active)...`,
+      );
+
+      // Use shorter timeout if tasks are running (to check completion more often)
+      const effectiveTimeout = state.activeTasks.size > 0 ? 5000 : PollTimeoutMs;
+
+      const trigger = await pollForTrigger({
+        apiUrl,
+        apiKey,
+        agentId,
+        pollInterval: PollIntervalMs,
+        pollTimeout: effectiveTimeout,
+      });
+
+      if (trigger) {
+        // Phase 4 — server refused to admit a claim because the agent or
+        // global budget is exhausted. Log a structured payload (scrubbed
+        // at egress per project convention) and back off exponentially.
+        // We deliberately `continue` BEFORE the empty-poll counter logic
+        // below — refusals are not empty polls.
+        if (trigger.type === "budget_refused") {
+          consecutiveBudgetRefusals++;
+          const backoffMs = computeBudgetBackoffMs(consecutiveBudgetRefusals, PollIntervalMs);
+          const refusalPayload = JSON.stringify({
+            event: "budget_refused",
+            cause: trigger.cause,
+            agentSpend: trigger.agentSpend,
+            agentBudget: trigger.agentBudget,
+            globalSpend: trigger.globalSpend,
+            globalBudget: trigger.globalBudget,
+            resetAt: trigger.resetAt,
+            consecutiveRefusals: consecutiveBudgetRefusals,
+            backoffMs,
           });
+          console.log(
+            `[${role}] budget_refused — backing off ${backoffMs}ms: ${scrubSecrets(refusalPayload)}`,
+          );
+          await Bun.sleep(backoffMs);
+          continue;
+        }
 
-          // Inject relevant memories for resumed tasks
-          const resumeMemoryContext = await fetchRelevantMemories(
+        // Any other non-null trigger means we're being admitted normally —
+        // reset the back-off so the next refusal starts at base interval.
+        consecutiveBudgetRefusals = 0;
+
+        console.log(`[${role}] Trigger received: ${trigger.type}`);
+
+        if (
+          trigger.taskId &&
+          (trigger.type === "task_assigned" || trigger.type === "task_offered")
+        ) {
+          ensure({
+            id: "worker_received",
+            flow: "task",
+            runId: trigger.taskId,
+            depIds: ["started"],
+            data: {
+              taskId: trigger.taskId,
+              agentId,
+              triggerType: trigger.type,
+              role,
+            },
+            // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+            filter: ({}, ctx) => ctx.deps.length > 0,
+            conditions: [{ timeout_ms: 60_000 }], // 1 min: immediate after poll
+          });
+        }
+
+        // Build prompt based on trigger
+        let triggerPrompt = await buildPromptForTrigger(
+          trigger,
+          prompt,
+          adapter.formatCommand.bind(adapter),
+          { hasMcp: adapter.traits.hasMcp },
+        );
+
+        // Enrich prompt with relevant memories from past sessions
+        if (trigger.type === "task_assigned" || trigger.type === "task_offered") {
+          const task =
+            trigger.task && typeof trigger.task === "object" && "task" in trigger.task
+              ? (trigger.task as { task: string; id?: string })
+              : null;
+          if (task?.task) {
+            const memoryContext = await fetchRelevantMemories(
+              apiUrl,
+              apiKey,
+              agentId,
+              task.task,
+              task.id,
+            );
+            if (memoryContext) {
+              triggerPrompt += memoryContext;
+              console.log(`[${role}] Injected relevant memories into task prompt`);
+            }
+          }
+        }
+
+        // Resolve --resume for child tasks with parentTaskId
+        let effectiveAdditionalArgs = opts.additionalArgs || [];
+        const taskObj = trigger.task as { parentTaskId?: string } | undefined;
+        if (taskObj?.parentTaskId) {
+          const parentSessionId = await fetchProviderSessionId(
             apiUrl,
             apiKey,
-            agentId,
-            task.task,
-            task.id,
+            taskObj.parentTaskId,
           );
-          if (resumeMemoryContext) {
-            resumePrompt += resumeMemoryContext;
-            console.log(`[${role}] Injected relevant memories into resumed task prompt`);
-          }
-
-          // Resolve --resume: prefer own session ID, then parent's
-          let resumeAdditionalArgs = opts.additionalArgs || [];
-          if (task.claudeSessionId) {
-            resumeAdditionalArgs = [...resumeAdditionalArgs, "--resume", task.claudeSessionId];
+          if (parentSessionId) {
+            effectiveAdditionalArgs = [...effectiveAdditionalArgs, "--resume", parentSessionId];
             console.log(
-              `[${role}] Resuming task's own session ${task.claudeSessionId.slice(0, 8)}`,
+              `[${role}] Child task — resuming parent session ${parentSessionId.slice(0, 8)}`,
             );
-          } else if (task.parentTaskId) {
-            const parentSessionId = await fetchProviderSessionId(apiUrl, apiKey, task.parentTaskId);
-            if (parentSessionId) {
-              resumeAdditionalArgs = [...resumeAdditionalArgs, "--resume", parentSessionId];
-              console.log(`[${role}] Resuming parent session ${parentSessionId.slice(0, 8)}`);
-            }
+          } else {
+            console.log(`[${role}] Child task — parent session ID not found, starting fresh`);
           }
+        }
 
-          // Spawn Claude process for resumed task
-          iteration++;
-          const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-          const logFile = `${logDir}/${timestamp}-resume-${task.id.slice(0, 8)}.jsonl`;
+        // Extract model from task data for per-task model selection
+        const taskModel = (trigger.task as { model?: string } | undefined)?.model;
 
-          console.log(`\n[${role}] === Resuming paused task (iteration ${iteration}) ===`);
-          console.log(`[${role}] Logging to: ${logFile}`);
-          console.log(`[${role}] Prompt: ${resumePrompt.slice(0, 100)}...`);
+        // Detect Slack context for conditional prompt sections
+        const taskSlackChannelId = (trigger.task as { slackChannelId?: string } | undefined)
+          ?.slackChannelId;
+        const taskSlackThreadTs = (trigger.task as { slackThreadTs?: string } | undefined)
+          ?.slackThreadTs;
+        currentTaskSlackContext = taskSlackChannelId
+          ? { channelId: taskSlackChannelId, threadTs: taskSlackThreadTs }
+          : undefined;
 
-          const metadata = {
-            type: metadataType,
-            sessionId,
-            iteration,
-            timestamp: new Date().toISOString(),
-            prompt: resumePrompt,
-            trigger: "task_resumed",
-            resumedTaskId: task.id,
-            yolo: isYolo,
+        // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
+        const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
+        if (taskVcsRepo && apiUrl) {
+          const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskVcsRepo);
+          // Fall back to convention-based config if repo is not registered
+          const effectiveConfig = repoConfig ?? {
+            url: taskVcsRepo,
+            name: taskVcsRepo.split("/").pop() || taskVcsRepo,
+            clonePath: `/workspace/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
+            defaultBranch: "main",
           };
-          await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
+          const repoResult = await ensureRepoForTask(effectiveConfig, role);
+          currentRepoContext = {
+            ...repoResult,
+            guidelines: repoConfig?.guidelines ?? null,
+          };
+        } else {
+          currentRepoContext = undefined;
+        }
 
-          // Resolve cwd for resumed task (mirrors normal task path: task.dir > vcsRepo clonePath)
-          let resumeCwd: string | undefined;
-          if (task.dir) {
-            try {
-              if (existsSync(task.dir) && statSync(task.dir).isDirectory()) {
-                resumeCwd = task.dir;
-              } else {
-                console.warn(
-                  `[${role}] Resume task dir "${task.dir}" does not exist or is not a directory, falling back to default cwd`,
-                );
-              }
-            } catch {
+        // Resolve effective working directory (priority: task.dir > repoContext.clonePath > process.cwd())
+        const taskDir = (trigger.task as { dir?: string } | undefined)?.dir;
+        let effectiveCwd: string | undefined;
+
+        if (taskDir) {
+          try {
+            if (existsSync(taskDir) && statSync(taskDir).isDirectory()) {
+              effectiveCwd = taskDir;
+            } else {
               console.warn(
-                `[${role}] Failed to check resume task dir "${task.dir}", falling back to default cwd`,
+                `[${role}] Task dir "${taskDir}" does not exist or is not a directory, falling back to default cwd`,
               );
             }
-          }
-
-          if (!resumeCwd && task.vcsRepo && apiUrl) {
-            const repoConfig = await fetchRepoConfig(apiUrl, apiKey, task.vcsRepo);
-            const effectiveConfig = repoConfig ?? {
-              url: task.vcsRepo,
-              name: task.vcsRepo.split("/").pop() || task.vcsRepo,
-              clonePath: `/workspace/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
-              defaultBranch: "main",
-            };
-            const repoContext = await ensureRepoForTask(effectiveConfig, role);
-            if (repoContext?.clonePath) {
-              resumeCwd = repoContext.clonePath;
-            }
-          }
-
-          // Per-task runner session ID so session logs are scoped to this task
-          const resumeRunnerSessionId = crypto.randomUUID();
-
-          let runningTask: RunningTask;
-          try {
-            runningTask = await spawnProviderProcess(
-              adapter,
-              {
-                prompt: resumePrompt,
-                logFile,
-                systemPrompt: resolvedSystemPrompt,
-                additionalArgs: resumeAdditionalArgs,
-                role,
-                apiUrl,
-                apiKey,
-                agentId,
-                runnerSessionId: resumeRunnerSessionId,
-                iteration,
-                taskId: task.id,
-                model: (task as { model?: string }).model,
-                cwd: resumeCwd,
-                vcsRepo: task.vcsRepo,
-              },
-              logDir,
-              isYolo,
+          } catch {
+            console.warn(
+              `[${role}] Failed to check task dir "${taskDir}", falling back to default cwd`,
             );
-          } catch (spawnErr) {
-            const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
-            console.error(
-              `[${role}] Failed to spawn process for resumed task ${task.id.slice(0, 8)}: ${errMsg}`,
-            );
+          }
+        }
+
+        if (!effectiveCwd && currentRepoContext?.clonePath) {
+          effectiveCwd = currentRepoContext.clonePath;
+        }
+
+        // Annotate prompt with working directory context
+        if (effectiveCwd && effectiveCwd !== process.cwd()) {
+          triggerPrompt += `\n\n---\n**Working Directory**: You are starting in \`${effectiveCwd}\`. `;
+          if (taskDir) {
+            triggerPrompt += "This was explicitly set on the task.";
+          } else if (currentRepoContext?.clonePath) {
+            triggerPrompt += "This is the repository clone path for this task's VCS repo.";
+          }
+          triggerPrompt +=
+            " You can still access any path on the filesystem — this is just your starting directory.";
+        }
+
+        // Warn in system prompt when task dir was specified but doesn't exist
+        let cwdWarning = "";
+        if (taskDir && !effectiveCwd) {
+          cwdWarning = `\n\nNote: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`;
+        }
+
+        // Rebuild system prompt with per-task repo context
+        const taskBasePrompt = await buildSystemPrompt();
+        const taskSystemPrompt =
+          (additionalSystemPrompt
+            ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`
+            : taskBasePrompt) + cwdWarning;
+
+        iteration++;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const taskIdSlice = trigger.taskId?.slice(0, 8) || "notask";
+        const logFile = `${logDir}/${timestamp}-${taskIdSlice}.jsonl`;
+
+        console.log(`\n[${role}] === Iteration ${iteration} ===`);
+        console.log(`[${role}] Logging to: ${logFile}`);
+        console.log(`[${role}] Prompt: ${triggerPrompt.slice(0, 100)}...`);
+        if (effectiveCwd) {
+          console.log(`[${role}] Working directory: ${effectiveCwd}`);
+        }
+
+        const metadata = {
+          type: metadataType,
+          sessionId,
+          iteration,
+          timestamp: new Date().toISOString(),
+          prompt: triggerPrompt,
+          trigger: trigger.type,
+          yolo: isYolo,
+        };
+        await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
+
+        // Per-task runner session ID so session logs are scoped to this task
+        const taskRunnerSessionId = crypto.randomUUID();
+
+        // Spawn without blocking (await to set up session, but process runs async)
+        let runningTask: RunningTask;
+        try {
+          runningTask = await spawnProviderProcess(
+            adapter,
+            {
+              prompt: triggerPrompt,
+              logFile,
+              systemPrompt: taskSystemPrompt,
+              additionalArgs: effectiveAdditionalArgs,
+              role,
+              apiUrl,
+              apiKey,
+              agentId,
+              runnerSessionId: taskRunnerSessionId,
+              iteration,
+              taskId: trigger.taskId,
+              model: taskModel,
+              harnessProvider: state.harnessProvider,
+              cwd: effectiveCwd,
+              vcsRepo: taskVcsRepo,
+            },
+            logDir,
+            isYolo,
+          );
+        } catch (spawnErr) {
+          const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+          console.error(
+            `[${role}] Failed to spawn process for task ${trigger.taskId?.slice(0, 8) || "unknown"}: ${errMsg}`,
+          );
+          if (trigger.taskId) {
             await ensureTaskFinished(
               apiConfig,
               role,
-              task.id,
+              trigger.taskId,
               1,
               `Spawn failed: ${errMsg}`,
               undefined,
               state.harnessProvider,
             );
-            continue;
           }
-
-          state.activeTasks.set(task.id, runningTask);
-          registerActiveSession(apiConfig, {
-            taskId: task.id,
-            triggerType: "task_resumed",
-            taskDescription: task.task?.slice(0, 200),
-            runnerSessionId: resumeRunnerSessionId,
-          });
-          console.log(
-            `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
-          );
+          continue;
         }
 
-        console.log(`[${role}] All paused tasks resumed. Entering normal polling...`);
-      } else {
-        console.log(`[${role}] No paused tasks found. Entering normal polling...`);
-      }
-    } catch (error) {
-      console.error(`[${role}] Error checking/resuming paused tasks: ${error}`);
-      // Continue to normal polling even if resume fails
-    }
-    // ========== END: Resume paused tasks ==========
-
-    // ========== Lead startup self-check ==========
-    if (isLead) {
-      console.log(`[${role}] Running startup heartbeat sweep...`);
-      const swept = await triggerHeartbeatSweep(apiConfig);
-      if (swept) {
-        console.log(`[${role}] Startup heartbeat sweep completed`);
-      } else {
-        console.warn(`[${role}] Startup heartbeat sweep failed (non-fatal)`);
-      }
-    }
-
-    // Phase 4 — exponential back-off state for `budget_refused` triggers.
-    // Resets to 0 on any non-refused outcome. Lives outside the loop so
-    // state persists across iterations.
-    let consecutiveBudgetRefusals = 0;
-
-    // Track last finished task check for leads (to avoid re-processing)
-    while (true) {
-      // Ping server on each iteration to keep status updated
-      await pingServer(apiConfig, role);
-
-      // Check for completed processes first and ensure tasks are marked as finished
-      await checkCompletedProcesses(state, role, apiConfig);
-
-      // Live HARNESS_PROVIDER reconciliation. Re-fetches `swarm_config` (overlaid
-      // on env) and swaps the adapter if the resolved provider changed —
-      // typically because an operator PATCH'd /api/agents/:id/harness-provider
-      // (which writes a swarm_config row) or upserted a config row directly.
-      //
-      // Safety: in-flight sessions hold their own `ProviderSession` references
-      // and continue on the old adapter unaffected. New spawns (below) read
-      // the current `adapter` binding and pick up the swap. `basePrompt` is
-      // rebuilt because traits (and therefore prompt content) may differ across
-      // providers.
-      if (Date.now() - lastHarnessReconcileAt > HARNESS_RECONCILE_INTERVAL_MS) {
-        lastHarnessReconcileAt = Date.now();
-        try {
-          const { resolvedProvider } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
-          if (resolvedProvider !== state.harnessProvider) {
-            const previous = state.harnessProvider;
-            console.log(
-              `[${role}] [harness] Reconciling adapter: ${previous} → ${resolvedProvider}`,
-            );
-            try {
-              adapter = createProviderAdapter(resolvedProvider);
-              state.harnessProvider = resolvedProvider;
-              basePrompt = await buildSystemPrompt();
-              resolvedSystemPrompt = additionalSystemPrompt
-                ? `${basePrompt}\n\n${additionalSystemPrompt}`
-                : basePrompt;
-              // Force a fresh cred_status report below for the new provider.
-              cachedCredHarnessProvider = null;
-              console.log(
-                `[${role}] [harness] Swapped to ${resolvedProvider} (basePrompt rebuilt: ${basePrompt.length} chars)`,
-              );
-            } catch (err) {
-              console.warn(
-                `[${role}] [harness] Failed to swap to ${resolvedProvider} (staying on ${previous}): ${err}`,
-              );
-            }
-          }
-        } catch (err) {
-          console.warn(`[${role}] [harness] Reconcile fetch failed (non-fatal): ${err}`);
-        }
-      }
-
-      // Migration 055 — post-task credential refresh, cache-keyed on the
-      // *resolved* harness_provider. Re-runs the snapshot when the provider
-      // changes (boot, or after a live swap above) so the dashboard shows
-      // up-to-date credential status for the active adapter.
-      if (!isCredCheckDisabled(process.env)) {
-        const currentHarness = state.harnessProvider;
-        if (currentHarness !== cachedCredHarnessProvider) {
-          cachedCredHarnessProvider = currentHarness;
-          buildCredStatusReport(currentHarness, process.env, {}, "post_task")
-            .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
-            .catch((err) =>
-              console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
-            );
-        }
-      }
-
-      // Periodic VCS detection for running tasks (fire-and-forget, throttled per task)
-      const now = Date.now();
-      for (const [taskId, task] of state.activeTasks) {
-        if (vcsDetectedTasks.has(taskId)) continue;
-        const lastCheck = vcsCheckTimestamps.get(taskId) ?? 0;
-        if (now - lastCheck < VCS_CHECK_INTERVAL) continue;
-        if (!task.workingDir) continue;
-
-        vcsCheckTimestamps.set(taskId, now);
-        detectVcsForTask(apiUrl, apiKey, taskId, task.workingDir);
-      }
-
-      // Check for cancelled tasks and signal their subprocesses
-      if (state.activeTasks.size > 0) {
-        for (const [taskId, task] of state.activeTasks) {
-          if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM
-          try {
-            const cancelResp = await fetch(
-              `${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`,
-              {
-                headers: {
-                  Authorization: `Bearer ${apiKey}`,
-                  "X-Agent-ID": agentId,
-                },
-              },
-            );
-            if (cancelResp.ok) {
-              const cancelData = (await cancelResp.json()) as {
-                cancelled: Array<{ id: string }>;
-              };
-              if (cancelData.cancelled?.some((t) => t.id === taskId)) {
-                console.log(
-                  `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
-                );
-                task.session.abort().catch(() => {});
-                cancelledSignaled.add(taskId);
-              }
-            }
-          } catch {
-            // Non-blocking — cancellation check is best-effort
-          }
-        }
-      }
-
-      // Only poll if we have capacity
-      if (state.activeTasks.size < state.maxConcurrent) {
-        console.log(
-          `[${role}] Polling for triggers (${state.activeTasks.size}/${state.maxConcurrent} active)...`,
-        );
-
-        // Use shorter timeout if tasks are running (to check completion more often)
-        const effectiveTimeout = state.activeTasks.size > 0 ? 5000 : PollTimeoutMs;
-
-        const trigger = await pollForTrigger({
-          apiUrl,
-          apiKey,
-          agentId,
-          pollInterval: PollIntervalMs,
-          pollTimeout: effectiveTimeout,
+        ensure({
+          id: "worker_process_spawned",
+          flow: "task",
+          runId: runningTask.taskId,
+          depIds: ["worker_received"],
+          data: {
+            taskId: runningTask.taskId,
+            agentId,
+            role,
+            model: taskModel,
+          },
+          // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+          filter: ({}, ctx) => ctx.deps.length > 0,
+          conditions: [{ timeout_ms: 60_000 }], // 1 min: process startup
         });
 
-        if (trigger) {
-          // Phase 4 — server refused to admit a claim because the agent or
-          // global budget is exhausted. Log a structured payload (scrubbed
-          // at egress per project convention) and back off exponentially.
-          // We deliberately `continue` BEFORE the empty-poll counter logic
-          // below — refusals are not empty polls.
-          if (trigger.type === "budget_refused") {
-            consecutiveBudgetRefusals++;
-            const backoffMs = computeBudgetBackoffMs(consecutiveBudgetRefusals, PollIntervalMs);
-            const refusalPayload = JSON.stringify({
-              event: "budget_refused",
-              cause: trigger.cause,
-              agentSpend: trigger.agentSpend,
-              agentBudget: trigger.agentBudget,
-              globalSpend: trigger.globalSpend,
-              globalBudget: trigger.globalBudget,
-              resetAt: trigger.resetAt,
-              consecutiveRefusals: consecutiveBudgetRefusals,
-              backoffMs,
-            });
-            console.log(
-              `[${role}] budget_refused — backing off ${backoffMs}ms: ${scrubSecrets(refusalPayload)}`,
-            );
-            await Bun.sleep(backoffMs);
-            continue;
-          }
+        // Attach trigger metadata for logging
+        runningTask.triggerType = trigger.type;
+        runningTask.workingDir = effectiveCwd;
 
-          // Any other non-null trigger means we're being admitted normally —
-          // reset the back-off so the next refusal starts at base interval.
-          consecutiveBudgetRefusals = 0;
+        // Attach deferred cursor updates for channel_activity triggers
+        if (trigger.type === "channel_activity" && trigger.cursorUpdates) {
+          runningTask.cursorUpdates = trigger.cursorUpdates as Array<{
+            channelId: string;
+            ts: string;
+          }>;
+        }
 
-          console.log(`[${role}] Trigger received: ${trigger.type}`);
+        state.activeTasks.set(runningTask.taskId, runningTask);
 
-          if (
-            trigger.taskId &&
-            (trigger.type === "task_assigned" || trigger.type === "task_offered")
-          ) {
-            ensure({
-              id: "worker_received",
-              flow: "task",
-              runId: trigger.taskId,
-              depIds: ["started"],
-              data: {
-                taskId: trigger.taskId,
-                agentId,
-                triggerType: trigger.type,
-                role,
-              },
-              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-              filter: ({}, ctx) => ctx.deps.length > 0,
-              conditions: [{ timeout_ms: 60_000 }], // 1 min: immediate after poll
-            });
-          }
-
-          // Build prompt based on trigger
-          let triggerPrompt = await buildPromptForTrigger(
-            trigger,
-            prompt,
-            adapter.formatCommand.bind(adapter),
-            { hasMcp: adapter.traits.hasMcp },
-          );
-
-          // Enrich prompt with relevant memories from past sessions
-          if (trigger.type === "task_assigned" || trigger.type === "task_offered") {
-            const task =
-              trigger.task && typeof trigger.task === "object" && "task" in trigger.task
-                ? (trigger.task as { task: string; id?: string })
-                : null;
-            if (task?.task) {
-              const memoryContext = await fetchRelevantMemories(
-                apiUrl,
-                apiKey,
-                agentId,
-                task.task,
-                task.id,
-              );
-              if (memoryContext) {
-                triggerPrompt += memoryContext;
-                console.log(`[${role}] Injected relevant memories into task prompt`);
-              }
-            }
-          }
-
-          // Resolve --resume for child tasks with parentTaskId
-          let effectiveAdditionalArgs = opts.additionalArgs || [];
-          const taskObj = trigger.task as { parentTaskId?: string } | undefined;
-          if (taskObj?.parentTaskId) {
-            const parentSessionId = await fetchProviderSessionId(
-              apiUrl,
-              apiKey,
-              taskObj.parentTaskId,
-            );
-            if (parentSessionId) {
-              effectiveAdditionalArgs = [...effectiveAdditionalArgs, "--resume", parentSessionId];
-              console.log(
-                `[${role}] Child task — resuming parent session ${parentSessionId.slice(0, 8)}`,
-              );
-            } else {
-              console.log(`[${role}] Child task — parent session ID not found, starting fresh`);
-            }
-          }
-
-          // Extract model from task data for per-task model selection
-          const taskModel = (trigger.task as { model?: string } | undefined)?.model;
-
-          // Detect Slack context for conditional prompt sections
-          const taskSlackChannelId = (trigger.task as { slackChannelId?: string } | undefined)
-            ?.slackChannelId;
-          const taskSlackThreadTs = (trigger.task as { slackThreadTs?: string } | undefined)
-            ?.slackThreadTs;
-          currentTaskSlackContext = taskSlackChannelId
-            ? { channelId: taskSlackChannelId, threadTs: taskSlackThreadTs }
+        // Register active session for concurrency awareness
+        const taskDesc =
+          trigger.task && typeof trigger.task === "object" && "task" in trigger.task
+            ? String((trigger.task as { task: string }).task).slice(0, 200)
             : undefined;
+        registerActiveSession(apiConfig, {
+          taskId: runningTask.taskId,
+          triggerType: trigger.type,
+          taskDescription: taskDesc,
+          runnerSessionId: taskRunnerSessionId,
+        });
 
-          // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
-          const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
-          if (taskVcsRepo && apiUrl) {
-            const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskVcsRepo);
-            // Fall back to convention-based config if repo is not registered
-            const effectiveConfig = repoConfig ?? {
-              url: taskVcsRepo,
-              name: taskVcsRepo.split("/").pop() || taskVcsRepo,
-              clonePath: `/workspace/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
-              defaultBranch: "main",
-            };
-            const repoResult = await ensureRepoForTask(effectiveConfig, role);
-            currentRepoContext = {
-              ...repoResult,
-              guidelines: repoConfig?.guidelines ?? null,
-            };
-          } else {
-            currentRepoContext = undefined;
-          }
-
-          // Resolve effective working directory (priority: task.dir > repoContext.clonePath > process.cwd())
-          const taskDir = (trigger.task as { dir?: string } | undefined)?.dir;
-          let effectiveCwd: string | undefined;
-
-          if (taskDir) {
-            try {
-              if (existsSync(taskDir) && statSync(taskDir).isDirectory()) {
-                effectiveCwd = taskDir;
-              } else {
-                console.warn(
-                  `[${role}] Task dir "${taskDir}" does not exist or is not a directory, falling back to default cwd`,
-                );
-              }
-            } catch {
-              console.warn(
-                `[${role}] Failed to check task dir "${taskDir}", falling back to default cwd`,
-              );
-            }
-          }
-
-          if (!effectiveCwd && currentRepoContext?.clonePath) {
-            effectiveCwd = currentRepoContext.clonePath;
-          }
-
-          // Annotate prompt with working directory context
-          if (effectiveCwd && effectiveCwd !== process.cwd()) {
-            triggerPrompt += `\n\n---\n**Working Directory**: You are starting in \`${effectiveCwd}\`. `;
-            if (taskDir) {
-              triggerPrompt += "This was explicitly set on the task.";
-            } else if (currentRepoContext?.clonePath) {
-              triggerPrompt += "This is the repository clone path for this task's VCS repo.";
-            }
-            triggerPrompt +=
-              " You can still access any path on the filesystem — this is just your starting directory.";
-          }
-
-          // Warn in system prompt when task dir was specified but doesn't exist
-          let cwdWarning = "";
-          if (taskDir && !effectiveCwd) {
-            cwdWarning = `\n\nNote: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`;
-          }
-
-          // Rebuild system prompt with per-task repo context
-          const taskBasePrompt = await buildSystemPrompt();
-          const taskSystemPrompt =
-            (additionalSystemPrompt
-              ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`
-              : taskBasePrompt) + cwdWarning;
-
-          iteration++;
-          const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-          const taskIdSlice = trigger.taskId?.slice(0, 8) || "notask";
-          const logFile = `${logDir}/${timestamp}-${taskIdSlice}.jsonl`;
-
-          console.log(`\n[${role}] === Iteration ${iteration} ===`);
-          console.log(`[${role}] Logging to: ${logFile}`);
-          console.log(`[${role}] Prompt: ${triggerPrompt.slice(0, 100)}...`);
-          if (effectiveCwd) {
-            console.log(`[${role}] Working directory: ${effectiveCwd}`);
-          }
-
-          const metadata = {
-            type: metadataType,
-            sessionId,
-            iteration,
-            timestamp: new Date().toISOString(),
-            prompt: triggerPrompt,
-            trigger: trigger.type,
-            yolo: isYolo,
-          };
-          await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
-
-          // Per-task runner session ID so session logs are scoped to this task
-          const taskRunnerSessionId = crypto.randomUUID();
-
-          // Spawn without blocking (await to set up session, but process runs async)
-          let runningTask: RunningTask;
-          try {
-            runningTask = await spawnProviderProcess(
-              adapter,
-              {
-                prompt: triggerPrompt,
-                logFile,
-                systemPrompt: taskSystemPrompt,
-                additionalArgs: effectiveAdditionalArgs,
-                role,
-                apiUrl,
-                apiKey,
-                agentId,
-                runnerSessionId: taskRunnerSessionId,
-                iteration,
-                taskId: trigger.taskId,
-                model: taskModel,
-                cwd: effectiveCwd,
-                vcsRepo: taskVcsRepo,
-              },
-              logDir,
-              isYolo,
-            );
-          } catch (spawnErr) {
-            const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
-            console.error(
-              `[${role}] Failed to spawn process for task ${trigger.taskId?.slice(0, 8) || "unknown"}: ${errMsg}`,
-            );
-            if (trigger.taskId) {
-              await ensureTaskFinished(
-                apiConfig,
-                role,
-                trigger.taskId,
-                1,
-                `Spawn failed: ${errMsg}`,
-                undefined,
-                state.harnessProvider,
-              );
-            }
-            continue;
-          }
-
-          ensure({
-            id: "worker_process_spawned",
-            flow: "task",
-            runId: runningTask.taskId,
-            depIds: ["worker_received"],
-            data: {
-              taskId: runningTask.taskId,
-              agentId,
-              role,
-              model: taskModel,
-            },
-            // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-            filter: ({}, ctx) => ctx.deps.length > 0,
-            conditions: [{ timeout_ms: 60_000 }], // 1 min: process startup
-          });
-
-          // Attach trigger metadata for logging
-          runningTask.triggerType = trigger.type;
-          runningTask.workingDir = effectiveCwd;
-
-          // Attach deferred cursor updates for channel_activity triggers
-          if (trigger.type === "channel_activity" && trigger.cursorUpdates) {
-            runningTask.cursorUpdates = trigger.cursorUpdates as Array<{
-              channelId: string;
-              ts: string;
-            }>;
-          }
-
-          state.activeTasks.set(runningTask.taskId, runningTask);
-
-          // Register active session for concurrency awareness
-          const taskDesc =
-            trigger.task && typeof trigger.task === "object" && "task" in trigger.task
-              ? String((trigger.task as { task: string }).task).slice(0, 200)
-              : undefined;
-          registerActiveSession(apiConfig, {
-            taskId: runningTask.taskId,
-            triggerType: trigger.type,
-            taskDescription: taskDesc,
-            runnerSessionId: taskRunnerSessionId,
-          });
-
-          console.log(
-            `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active, trigger: ${trigger.type})`,
-          );
-        }
-      } else {
         console.log(
-          `[${role}] At capacity (${state.activeTasks.size}/${state.maxConcurrent}), waiting for completion...`,
+          `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active, trigger: ${trigger.type})`,
         );
-        await Bun.sleep(1000);
       }
-    }
-  } else {
-    // Original AI-loop mode (existing behavior)
-    console.log(`[${role}] Mode: AI-based polling (legacy)`);
-
-    // Create API config for ping/close
-    const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
-
-    // Setup graceful shutdown handlers with API config for close on exit
-    setupShutdownHandlers(role, apiConfig);
-
-    while (true) {
-      // Ping server on each iteration to keep status updated
-      await pingServer(apiConfig, role);
-
-      iteration++;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const logFile = `${logDir}/${timestamp}.jsonl`;
-
-      console.log(`\n[${role}] === Iteration ${iteration} ===`);
-      console.log(`[${role}] Logging to: ${logFile}`);
-
-      const metadata = {
-        type: metadataType,
-        sessionId,
-        iteration,
-        timestamp: new Date().toISOString(),
-        prompt,
-        yolo: isYolo,
-      };
-      await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
-
-      const iterationResult = await runProviderIteration(adapter, {
-        prompt,
-        logFile,
-        systemPrompt: resolvedSystemPrompt,
-        additionalArgs: opts.additionalArgs,
-        role,
-        apiUrl,
-        apiKey,
-        agentId,
-      });
-
-      if (iterationResult.exitCode !== 0) {
-        const failureReason =
-          iterationResult.failureReason || `Process exited with code ${iterationResult.exitCode}`;
-
-        const errorLog = {
-          timestamp: new Date().toISOString(),
-          iteration,
-          exitCode: iterationResult.exitCode,
-          failureReason,
-          error: true,
-        };
-
-        const errorsFile = `${logDir}/errors.jsonl`;
-        const errorsFileRef = Bun.file(errorsFile);
-        const existingErrors = (await errorsFileRef.exists()) ? await errorsFileRef.text() : "";
-        await Bun.write(errorsFile, `${existingErrors}${JSON.stringify(errorLog)}\n`);
-
-        if (!isYolo) {
-          console.error(`[${role}] ${failureReason}. Stopping.`);
-          console.error(`[${role}] Error logged to: ${errorsFile}`);
-          process.exit(iterationResult.exitCode);
-        }
-
-        console.warn(`[${role}] ${failureReason}. YOLO mode - continuing...`);
-      }
-
-      console.log(`[${role}] Iteration ${iteration} complete. Starting next iteration...`);
+    } else {
+      console.log(
+        `[${role}] At capacity (${state.activeTasks.size}/${state.maxConcurrent}), waiting for completion...`,
+      );
+      await Bun.sleep(1000);
     }
   }
 }

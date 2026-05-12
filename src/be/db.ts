@@ -1411,9 +1411,14 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
     params.push(filters.createdAfter);
   }
 
-  // Exclude heartbeat tasks by default
+  // Exclude system/heartbeat tasks by default. The flag is still called
+  // `includeHeartbeat` for backward compat with existing API callers, but we
+  // also gate boot-triage + heartbeat-checklist behind it since those are
+  // equally noisy in the dashboard task list.
   if (!filters?.includeHeartbeat) {
-    conditions.push("(IFNULL(taskType, '') != 'heartbeat' AND tags NOT LIKE '%\"heartbeat\"%')");
+    conditions.push(
+      "(IFNULL(taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND tags NOT LIKE '%\"heartbeat\"%')",
+    );
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -1509,9 +1514,14 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
     params.push(filters.createdAfter);
   }
 
-  // Exclude heartbeat tasks by default
+  // Exclude system/heartbeat tasks by default. The flag is still called
+  // `includeHeartbeat` for backward compat with existing API callers, but we
+  // also gate boot-triage + heartbeat-checklist behind it since those are
+  // equally noisy in the dashboard task list.
   if (!filters?.includeHeartbeat) {
-    conditions.push("(IFNULL(taskType, '') != 'heartbeat' AND tags NOT LIKE '%\"heartbeat\"%')");
+    conditions.push(
+      "(IFNULL(taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND tags NOT LIKE '%\"heartbeat\"%')",
+    );
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";

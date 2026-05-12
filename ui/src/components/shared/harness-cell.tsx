@@ -158,6 +158,16 @@ function CredBreakdown({
             </>
           )}
 
+          {credStatus.latestModel ? (
+            <>
+              <dt className="opacity-60">Latest model</dt>
+              <dd className="break-words font-mono">
+                {credStatus.latestModel.model}
+                {credStatus.latestModel.source ? ` · ${credStatus.latestModel.source}` : ""}
+              </dd>
+            </>
+          ) : null}
+
           {credStatus.missing && credStatus.missing.length > 0 ? (
             <>
               <dt className="opacity-60">Missing</dt>

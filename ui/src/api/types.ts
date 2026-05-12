@@ -76,8 +76,17 @@ export interface AgentCredStatus {
   satisfiedBy?: "env" | "file" | "side-effect-pending" | null;
   hint?: string | null;
   liveTest?: AgentCredStatusLiveTest | null;
+  latestModel?: AgentLatestModel | null;
   reportedAt: number;
   reportKind?: "boot" | "post_task";
+}
+
+export interface AgentLatestModel {
+  model: string;
+  source: "task" | "agent_config" | "adapter_default" | "custom";
+  taskId?: string | null;
+  harnessProvider?: ProviderName | null;
+  reportedAt: number;
 }
 
 export interface AgentTask {

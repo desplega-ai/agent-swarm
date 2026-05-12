@@ -28,7 +28,7 @@ import {
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
 
 const TEST_DB_PATH = "./test-agents-harness-provider.sqlite";
-const TEST_PORT = 13059;
+const TEST_PORT = 13059 + (process.pid % 1000);
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -42,7 +42,7 @@ async function removeDbFiles(path: string): Promise<void> {
 
 function makeTestServer(): Server {
   return createHttpServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", `http://localhost:${TEST_PORT}`);
+    const url = new URL(req.url ?? "/", "http://localhost");
     const pathSegments = url.pathname.split("/").filter(Boolean);
     const queryParams = url.searchParams;
     const myAgentId = (req.headers["x-agent-id"] as string | undefined) ?? undefined;
@@ -329,5 +329,46 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
     const harnessRow2 = rows2.find((r) => r.key === "HARNESS_PROVIDER");
     expect(harnessRow2?.value).toBe("claude");
     expect(rows2.filter((r) => r.key === "HARNESS_PROVIDER")).toHaveLength(1);
+  });
+});
+
+describe("PATCH /api/agents/:id/runtime", () => {
+  test("updates harness_provider and agent-scoped runtime config rows", async () => {
+    const a = createAgent({
+      name: "runtime-target-1",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "codex", model: "gpt-5.4" }),
+    });
+    expect(res.status).toBe(200);
+
+    const row = getAgentById(a.id);
+    expect(row?.harnessProvider).toBe("codex");
+
+    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    expect(rows.find((r) => r.key === "HARNESS_PROVIDER")?.value).toBe("codex");
+    expect(rows.find((r) => r.key === "MODEL_OVERRIDE")?.value).toBe("gpt-5.4");
+  });
+
+  test("rejects non-local harnesses for runtime editing", async () => {
+    const a = createAgent({
+      name: "runtime-target-2",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "devin", model: "devin" }),
+    });
+    expect(res.status).toBe(400);
   });
 });

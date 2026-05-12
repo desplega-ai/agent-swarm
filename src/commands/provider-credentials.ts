@@ -25,7 +25,7 @@ import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import { checkPiMonoCredentials } from "../providers/pi-mono-adapter";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
-import type { AgentCredStatus } from "../types";
+import type { AgentCredStatus, AgentLatestModel, ProviderName } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export type SupportedProvider = "claude" | "claude-managed" | "codex" | "devin" | "opencode" | "pi";
@@ -392,6 +392,7 @@ export async function buildCredStatusReport(
     satisfiedBy: presence.satisfiedBy ?? null,
     hint: presence.hint ?? null,
     liveTest,
+    latestModel: null,
     reportedAt: Date.now(),
     reportKind: kind,
   };
@@ -431,4 +432,54 @@ export async function reportCredStatus(
   } catch (err) {
     console.warn(`[cred-status] POST failed (non-fatal): ${err}`);
   }
+}
+
+export async function reportLatestModel(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  latestModel: AgentLatestModel,
+): Promise<void> {
+  try {
+    await fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Agent-ID": agentId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        latest_model: latestModel,
+      }),
+    });
+  } catch (err) {
+    console.warn(`[latest-model] POST failed (non-fatal): ${err}`);
+  }
+}
+
+export function buildLatestModelReport(opts: {
+  model: string;
+  taskModel?: string;
+  configModel?: string;
+  taskId?: string;
+  harnessProvider: ProviderName;
+}): AgentLatestModel | null {
+  const model = opts.model.trim();
+  if (!model) return null;
+  const taskModel = opts.taskModel?.trim();
+  const configModel = opts.configModel?.trim();
+  return {
+    model,
+    source:
+      taskModel && model === taskModel
+        ? "task"
+        : configModel && model === configModel
+          ? "agent_config"
+          : taskModel || configModel
+            ? "custom"
+            : "adapter_default",
+    taskId: opts.taskId ?? null,
+    harnessProvider: opts.harnessProvider,
+    reportedAt: Date.now(),
+  };
 }

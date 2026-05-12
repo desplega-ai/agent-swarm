@@ -20,7 +20,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
  */
 
 const TEST_DB_PATH = "./test-credential-status-api.sqlite";
-const TEST_PORT = 13041;
+const TEST_PORT = 13041 + (process.pid % 1000);
 
 function createTestServer(): Server {
   return createHttpServer(async (req, res) => {
@@ -219,5 +219,44 @@ describe("Phase 4 — credential-status HTTP endpoints", () => {
       }),
     });
     expect(resp.status).toBe(400);
+  });
+
+  test("PUT /credential-status merges latest_model without clobbering readiness", async () => {
+    const snapshot = {
+      ready: true,
+      missing: [],
+      satisfiedBy: "env" as const,
+      hint: null,
+      liveTest: { ok: true, error: null, latency_ms: 45, testedAt: Date.now() },
+      reportedAt: Date.now(),
+      reportKind: "boot" as const,
+    };
+    await fetch(`${baseUrl}/api/agents/${readyAgentId}/credential-status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ready: true, missing: [], cred_status: snapshot }),
+    });
+
+    const modelReport = {
+      model: "gpt-5.4",
+      source: "agent_config" as const,
+      taskId: "task-123",
+      harnessProvider: "codex" as const,
+      reportedAt: Date.now(),
+    };
+    const put = await fetch(`${baseUrl}/api/agents/${readyAgentId}/credential-status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ latest_model: modelReport }),
+    });
+    expect(put.status).toBe(200);
+
+    const get = await fetch(`${baseUrl}/api/agents/${readyAgentId}/credential-status`);
+    const body = (await get.json()) as {
+      credStatus: typeof snapshot & { latestModel?: typeof modelReport };
+    };
+    expect(body.credStatus.ready).toBe(true);
+    expect(body.credStatus.liveTest).toMatchObject({ ok: true, latency_ms: 45 });
+    expect(body.credStatus.latestModel).toMatchObject({ model: "gpt-5.4", source: "agent_config" });
   });
 });

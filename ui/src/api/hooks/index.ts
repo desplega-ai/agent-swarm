@@ -12,7 +12,13 @@ export {
   nodeSizeFromScore,
   useAgentActivity,
 } from "./use-agent-activity";
-export { useAgent, useAgents, useUpdateAgentName, useUpdateAgentProfile } from "./use-agents";
+export {
+  useAgent,
+  useAgents,
+  useUpdateAgentName,
+  useUpdateAgentProfile,
+  useUpdateAgentRuntime,
+} from "./use-agents";
 export type { ApprovalRequestFilters } from "./use-approval-requests";
 export {
   useApprovalRequest,
