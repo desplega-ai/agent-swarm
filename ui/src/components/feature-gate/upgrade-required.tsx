@@ -22,13 +22,13 @@ export interface UpgradeRequiredProps {
   docsUrl?: string;
 }
 
-const DEFAULT_DOCS_URL = "https://docs.agent-swarm.dev/upgrade";
+const DEFAULT_UPGRADE_DOCS_URL = "https://github.com/desplega-ai/agent-swarm/releases";
 
 export function UpgradeRequired({
   feature,
   requiredVersion,
   currentVersion,
-  docsUrl = DEFAULT_DOCS_URL,
+  docsUrl = DEFAULT_UPGRADE_DOCS_URL,
 }: UpgradeRequiredProps) {
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-4 p-1">
@@ -50,7 +50,7 @@ export function UpgradeRequired({
             Other parts of the dashboard remain available — only {feature.toLowerCase()} is gated.
           </p>
           <a
-            href={docsUrl}
+            href={`${docsUrl}/tag/v${requiredVersion}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-primary hover:underline w-fit"
