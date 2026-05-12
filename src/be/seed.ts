@@ -7,7 +7,6 @@
  */
 
 import { getAllTemplateDefinitions } from "../prompts/registry";
-import { getPromptTemplates, resetPromptTemplateToDefault, upsertPromptTemplate } from "./db";
 
 // Side-effect imports: register ALL template definitions so they're seeded on API startup.
 // Webhook handler templates (github, gitlab, etc.) are loaded transitively by the API server's
@@ -17,6 +16,21 @@ import "../prompts/session-templates";
 import "../commands/templates";
 import "../tools/templates";
 
+type TemplateEntry = { id: string; scopeId: string | null; isDefault: boolean; body: string };
+
+type SeedDeps = {
+  getPromptTemplates: (filters?: { eventType?: string; scope?: string }) => TemplateEntry[];
+  upsertPromptTemplate: (data: {
+    eventType: string;
+    scope: "global" | "agent" | "repo";
+    body: string;
+    createdBy?: string | null;
+    changeReason?: string | null;
+    isDefault?: boolean;
+  }) => unknown;
+  resetPromptTemplateToDefault: (id: string, defaultBody: string) => unknown;
+};
+
 /**
  * Seed default templates into the DB.
  *
@@ -24,13 +38,17 @@ import "../tools/templates";
  * - If no global record exists at all, insert one as default (isDefault=true, state=enabled)
  * - If a global default (isDefault=true) exists and its body differs from code, update it
  * - Never touch records where isDefault=false (user customizations)
+ *
+ * Accepts DB functions as parameters to avoid a circular import with db.ts.
  */
-export function seedDefaultTemplates(): void {
+export function seedDefaultTemplates(deps: SeedDeps): void {
   const definitions = getAllTemplateDefinitions();
 
   if (definitions.length === 0) {
     return; // No templates registered yet — expected during early phases
   }
+
+  const { getPromptTemplates, upsertPromptTemplate, resetPromptTemplateToDefault } = deps;
 
   for (const def of definitions) {
     // Look for ALL existing global records for this eventType (both default and customized)

@@ -272,7 +272,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   configureDbResolver(resolvePromptTemplate);
 
   // Seed default prompt templates from the in-memory code registry
-  seedDefaultTemplates();
+  seedDefaultTemplates({ getPromptTemplates, upsertPromptTemplate, resetPromptTemplateToDefault });
 
   const hasExistingEncryptedSecrets =
     (database

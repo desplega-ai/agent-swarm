@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getPromptTemplates, initDb, upsertPromptTemplate } from "../be/db";
+import {
+  closeDb,
+  getPromptTemplates,
+  initDb,
+  resetPromptTemplateToDefault,
+  upsertPromptTemplate,
+} from "../be/db";
 import { seedDefaultTemplates } from "../be/seed";
+
+const seedDeps = { getPromptTemplates, upsertPromptTemplate, resetPromptTemplateToDefault };
 import {
   clearTemplateDefinitions,
   getAllTemplateDefinitions,
@@ -502,7 +510,7 @@ describe("Prompt Template Resolver", () => {
         category: "system",
       });
 
-      seedDefaultTemplates();
+      seedDefaultTemplates(seedDeps);
 
       const alphaTemplates = getPromptTemplates({
         eventType: "seed.test.alpha",
@@ -531,7 +539,7 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      seedDefaultTemplates();
+      seedDefaultTemplates(seedDeps);
 
       const before = getPromptTemplates({
         eventType: "seed.test.reseed",
@@ -551,7 +559,7 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      seedDefaultTemplates();
+      seedDefaultTemplates(seedDeps);
 
       const after = getPromptTemplates({
         eventType: "seed.test.reseed",
@@ -571,7 +579,7 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      seedDefaultTemplates();
+      seedDefaultTemplates(seedDeps);
 
       // User customizes the template (upsert at global scope flips isDefault to false)
       upsertPromptTemplate({
@@ -600,7 +608,7 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      seedDefaultTemplates();
+      seedDefaultTemplates(seedDeps);
 
       // User customization should be untouched (isDefault=false won't match the filter)
       const afterReseed = getPromptTemplates({
@@ -615,7 +623,7 @@ describe("Prompt Template Resolver", () => {
     test("seeding with no registered templates is a no-op", () => {
       clearTemplateDefinitions();
       // Should not throw
-      seedDefaultTemplates();
+      seedDefaultTemplates(seedDeps);
     });
   });
 });
