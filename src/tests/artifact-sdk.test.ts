@@ -536,27 +536,29 @@ describe("artifact CLI command", () => {
           const url = new URL(req.url);
           if (url.pathname === "/api/services") {
             return new Response(
-              JSON.stringify([
-                {
-                  id: "svc-1",
-                  name: "artifact-dashboard",
-                  agentId: "agent-123",
-                  status: "healthy",
-                  metadata: {
-                    type: "artifact",
-                    artifactName: "dashboard",
-                    port: 3001,
-                    publicUrl: "https://test.lt.example.com",
+              JSON.stringify({
+                services: [
+                  {
+                    id: "svc-1",
+                    name: "artifact-dashboard",
+                    agentId: "agent-123",
+                    status: "healthy",
+                    metadata: {
+                      type: "artifact",
+                      artifactName: "dashboard",
+                      port: 3001,
+                      publicUrl: "https://test.lt.example.com",
+                    },
                   },
-                },
-                {
-                  id: "svc-2",
-                  name: "some-other-service",
-                  agentId: "agent-456",
-                  status: "healthy",
-                  metadata: { type: "web" },
-                },
-              ]),
+                  {
+                    id: "svc-2",
+                    name: "some-other-service",
+                    agentId: "agent-456",
+                    status: "healthy",
+                    metadata: { type: "web" },
+                  },
+                ],
+              }),
             );
           }
           return new Response("Not found", { status: 404 });
@@ -593,7 +595,7 @@ describe("artifact CLI command", () => {
       const mockPort = await getAvailablePort();
       const mockServer = Bun.serve({
         port: mockPort,
-        fetch: () => new Response(JSON.stringify([])),
+        fetch: () => new Response(JSON.stringify({ services: [] })),
       });
 
       const origEnv = { ...process.env };
@@ -626,22 +628,24 @@ describe("artifact CLI command", () => {
         port: mockPort,
         fetch: () =>
           new Response(
-            JSON.stringify([
-              {
-                id: "s1",
-                name: "web-server",
-                agentId: "a1",
-                status: "healthy",
-                metadata: { type: "web" },
-              },
-              {
-                id: "s2",
-                name: "api-server",
-                agentId: "a2",
-                status: "healthy",
-                metadata: {},
-              },
-            ]),
+            JSON.stringify({
+              services: [
+                {
+                  id: "s1",
+                  name: "web-server",
+                  agentId: "a1",
+                  status: "healthy",
+                  metadata: { type: "web" },
+                },
+                {
+                  id: "s2",
+                  name: "api-server",
+                  agentId: "a2",
+                  status: "healthy",
+                  metadata: {},
+                },
+              ],
+            }),
           ),
       });
 
@@ -682,13 +686,15 @@ describe("artifact CLI command", () => {
           const url = new URL(req.url);
           if (req.method === "GET" && url.pathname === "/api/services") {
             return new Response(
-              JSON.stringify([
-                {
-                  id: "svc-to-delete",
-                  name: "artifact-my-report",
-                  metadata: { type: "artifact", artifactName: "my-report" },
-                },
-              ]),
+              JSON.stringify({
+                services: [
+                  {
+                    id: "svc-to-delete",
+                    name: "artifact-my-report",
+                    metadata: { type: "artifact", artifactName: "my-report" },
+                  },
+                ],
+              }),
             );
           }
           if (req.method === "DELETE" && url.pathname.startsWith("/api/services/")) {

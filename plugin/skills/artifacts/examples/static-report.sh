@@ -14,4 +14,4 @@ cat > "$ARTIFACT_DIR/index.html" << 'HTML'
 </html>
 HTML
 
-artifact serve "$ARTIFACT_DIR" --name "my-report"
+agent-swarm artifact serve "$ARTIFACT_DIR" --name "my-report"
