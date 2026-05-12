@@ -11,7 +11,7 @@ kubectl create secret generic agent-swarm-secrets \
   --from-literal=CLAUDE_CODE_OAUTH_TOKEN=<your-token>
 
 # 2. Install.
-helm install swarm oci://ghcr.io/capchase/charts/agent-swarm \
+helm install swarm oci://ghcr.io/desplega-ai/charts/agent-swarm \
   --version 0.1.0 \
   --set auth.existingSecret=agent-swarm-secrets
 ```
@@ -31,8 +31,6 @@ That's a minimal install: API + lead + 1 coder pool, no agent-fs, no litestream.
 | Litestream sidecar | opt-in | `litestream.enabled: true`. Streams the SQLite WAL to S3-compatible object storage. |
 | agent-fs | opt-in | `agentFs.enabled: true`. Cross-agent searchable filesystem service. |
 | RWX shared volume | opt-in | `sharedVolume.existingClaim`. Mount a pre-existing RWX PVC at `/workspace/shared` on every pool pod. |
-| NetworkPolicy | opt-in | `networkPolicy.enabled: true`. |
-| RBAC (Role + RoleBinding) | opt-in | `rbac.create: true`. |
 
 ## Identity model
 
@@ -156,7 +154,7 @@ See [`values.yaml`](./values.yaml) for the full configuration surface. Every fie
 ```bash
 helm lint .
 helm template .
-helm template . --set agentFs.enabled=true --set litestream.enabled=true | kubectl apply --dry-run=client -f -
+helm template . --set agentFs.enabled=true --set litestream.enabled=true
 ```
 
 ## License
