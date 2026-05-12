@@ -29,8 +29,10 @@ import { AlertCircle, Braces, ExternalLink, Lock, Maximize2, Minimize2 } from "l
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { usePage } from "@/api/hooks/use-pages";
 import type { PageMetadata } from "@/api/types";
+import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -216,6 +218,7 @@ export default function ArtifactPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const fullMode = searchParams.get("mode") === "full";
+  const gate = useFeatureGate("1.79.0");
 
   const { data, error, isLoading } = useQuery({
     queryKey: ["page-metadata", id],
@@ -230,6 +233,15 @@ export default function ArtifactPage() {
     retry: false,
   });
 
+  if (!gate.supported) {
+    return (
+      <UpgradeRequired
+        feature="Pages"
+        requiredVersion={gate.requiredVersion}
+        currentVersion={gate.currentVersion}
+      />
+    );
+  }
   if (!id) {
     return <ArtifactPageError message="Missing artifact id in URL." />;
   }

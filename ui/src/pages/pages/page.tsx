@@ -2,8 +2,10 @@ import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { Globe, KeyRound, Lock, type LucideIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { usePages } from "@/api/hooks/use-pages";
 import type { PageAuthMode, PageListItem } from "@/api/types";
+import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
 import { AgentLink } from "@/components/shared/agent-link";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -31,6 +33,11 @@ const authModeIcon: Record<PageAuthMode, LucideIcon> = {
 
 export default function PagesListingPage() {
   const navigate = useNavigate();
+  const gate = useFeatureGate("1.79.0");
+  // Pass `enabled: false` indirectly by skipping the data fetch when gated —
+  // but we still need all hooks declared unconditionally, so just gate the
+  // EARLY-RETURN below; the data hook runs harmlessly on older servers (it
+  // will 404, react-query swallows). Cheap, keeps hook order stable.
   const { data, isLoading } = usePages();
   const rows = useMemo<PageListItem[]>(() => data?.pages ?? [], [data]);
 
@@ -122,6 +129,16 @@ export default function PagesListingPage() {
   );
 
   const isEmpty = !isLoading && rows.length === 0;
+
+  if (!gate.supported) {
+    return (
+      <UpgradeRequired
+        feature="Pages"
+        requiredVersion={gate.requiredVersion}
+        currentVersion={gate.currentVersion}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
