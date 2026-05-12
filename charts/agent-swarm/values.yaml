@@ -290,14 +290,3 @@ litestream:
     # LITESTREAM_SECRET_ACCESS_KEY. When set, inline values are ignored.
     existingSecret: ""
 
-# Cluster-scoped extras. Both default-off; turn on if your cluster expects
-# explicit NetworkPolicy or you need the chart to manage RBAC.
-networkPolicy:
-  enabled: false
-  # -- Additional egress rules. The chart ships only DNS + intra-release
-  # traffic; whatever your providers/integrations need (Anthropic, OpenAI,
-  # GitHub, Slack, etc.) goes here. Standard NetworkPolicy egress shape.
-  extraEgress: []
-
-rbac:
-  create: false
