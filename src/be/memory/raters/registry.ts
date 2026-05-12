@@ -1,4 +1,6 @@
+import { ExplicitSelfRatingRater } from "./explicit-self";
 import { ImplicitCitationRater } from "./implicit-citation";
+import { LlmRater } from "./llm";
 import { NoopRater } from "./noop";
 import type { MemoryRater } from "./types";
 
@@ -26,6 +28,8 @@ type RaterFactory = () => MemoryRater;
 const FACTORIES: Record<string, RaterFactory> = {
   noop: () => new NoopRater(),
   "implicit-citation": () => new ImplicitCitationRater(),
+  "explicit-self": () => new ExplicitSelfRatingRater(),
+  llm: () => new LlmRater(),
 };
 
 /**

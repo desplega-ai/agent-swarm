@@ -321,8 +321,8 @@ const FILE_INDEX_PATHS = [
   "src/providers/claude.ts",
   "src/providers/codex.ts",
   "src/utils/secret-scrubber.ts",
-  "new-ui/src/api/client.ts",
-  "new-ui/src/pages/memory/page.tsx",
+  "ui/src/api/client.ts",
+  "ui/src/pages/memory/page.tsx",
   "runbooks/local-development.md",
   "CLAUDE.md",
   "openapi.json",
@@ -346,7 +346,7 @@ const FILE_INDEX_SNIPPETS: Record<string, { content: string; tags: string[] }> =
   },
   "runbooks/local-development.md": {
     content:
-      "Local dev setup: Bun + SQLite + portless. Default API_KEY=123123, MCP_BASE_URL=http://localhost:3013. `bun run start:http` for API, `pnpm dev` in new-ui for dashboard on :5274.",
+      "Local dev setup: Bun + SQLite + portless. Default API_KEY=123123, MCP_BASE_URL=http://localhost:3013. `bun run start:http` for API, `pnpm dev` in ui for dashboard on :5274.",
     tags: ["docs", "local-dev"],
   },
   "CLAUDE.md": {
@@ -366,7 +366,7 @@ const TASK_COMPLETION_NOTES = [
   {
     name: "memory-debug-page",
     content:
-      "Shipped /memory debug page in new-ui. POST /api/memory/list endpoint supports cross-agent search; UI offers query, file-path, scope, source filters with a side-sheet detail view.",
+      "Shipped /memory debug page in ui. POST /api/memory/list endpoint supports cross-agent search; UI offers query, file-path, scope, source filters with a side-sheet detail view.",
     tags: ["memory", "ui", "completed"],
   },
   {

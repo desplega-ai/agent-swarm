@@ -7,10 +7,12 @@ import {
   failTask,
   getAllTasks,
   getDb,
+  getLeadAgent,
   getLogsByTaskId,
   getPausedTasksForAgent,
   getTaskById,
   getTasksCount,
+  getUserById,
   pauseTask,
   resumeTask,
   updateAgentStatusFromCapacity,
@@ -20,7 +22,13 @@ import {
 } from "../be/db";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { telemetry } from "../telemetry";
-import { ProviderNameSchema } from "../types";
+import {
+  type AgentTaskSource,
+  AgentTaskSourceSchema,
+  type AgentTaskStatus,
+  AgentTaskStatusSchema,
+  ProviderNameSchema,
+} from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -33,16 +41,22 @@ const listTasks = route({
   summary: "List tasks with filters",
   tags: ["Tasks"],
   query: z.object({
+    /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
     status: z.string().optional(),
     agentId: z.string().optional(),
     scheduleId: z.string().optional(),
     search: z.string().optional(),
     includeHeartbeat: z.enum(["true", "false"]).optional(),
+    /** ISO 8601 — return only tasks created on/after this timestamp. */
+    createdAfter: z.string().datetime().optional(),
+    /** Comma-separated source filter (e.g. `ui,slack`). Omit to include all. */
+    source: z.string().optional(),
     limit: z.coerce.number().int().optional(),
     offset: z.coerce.number().int().optional(),
   }),
   responses: {
     200: { description: "Paginated task list" },
+    400: { description: "Validation error (e.g. unknown status token)" },
   },
 });
 
@@ -62,9 +76,10 @@ const createTask = route({
     offeredTo: z.string().optional(),
     dir: z.string().optional(),
     parentTaskId: z.string().optional(),
-    source: z.string().optional(),
+    source: AgentTaskSourceSchema.optional(),
     outputSchema: z.record(z.string(), z.unknown()).optional(),
     contextKey: z.string().optional(),
+    requestedByUserId: z.string().optional(),
   }),
   responses: {
     201: { description: "Task created" },
@@ -239,12 +254,53 @@ export async function handleTasks(
   if (listTasks.match(req.method, pathSegments)) {
     const parsed = await listTasks.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+
+    // Multi-status CSV: split on `,` and validate each token against the
+    // canonical enum. Empty / single-status callers still work.
+    let status: AgentTaskStatus | AgentTaskStatus[] | undefined;
+    if (parsed.query.status) {
+      const tokens = parsed.query.status
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const validated: AgentTaskStatus[] = [];
+      for (const tok of tokens) {
+        const result = AgentTaskStatusSchema.safeParse(tok);
+        if (!result.success) {
+          jsonError(res, `Invalid status token: ${tok}`, 400);
+          return true;
+        }
+        validated.push(result.data);
+      }
+      status = validated.length === 1 ? validated[0] : validated;
+    }
+
+    let source: AgentTaskSource[] | undefined;
+    if (parsed.query.source) {
+      const tokens = parsed.query.source
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const validated: AgentTaskSource[] = [];
+      for (const tok of tokens) {
+        const result = AgentTaskSourceSchema.safeParse(tok);
+        if (!result.success) {
+          jsonError(res, `Invalid source token: ${tok}`, 400);
+          return true;
+        }
+        validated.push(result.data);
+      }
+      if (validated.length > 0) source = validated;
+    }
+
     const filters = {
-      status: (parsed.query.status as import("../types").AgentTaskStatus) || undefined,
+      status,
       agentId: parsed.query.agentId || undefined,
       scheduleId: parsed.query.scheduleId || undefined,
       search: parsed.query.search || undefined,
       includeHeartbeat: parsed.query.includeHeartbeat === "true" || undefined,
+      createdAfter: parsed.query.createdAfter || undefined,
+      source,
       limit: parsed.query.limit,
       offset: parsed.query.offset,
     };
@@ -258,9 +314,32 @@ export async function handleTasks(
     const parsed = await createTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
+    // Tolerant `requestedByUserId`: prevent the deleted-user race from
+    // becoming a 500 — if the referenced user doesn't exist, log and drop
+    // the field rather than letting the FK fail at INSERT.
+    let requestedByUserId = parsed.body.requestedByUserId || undefined;
+    if (requestedByUserId && !getUserById(requestedByUserId)) {
+      console.warn(
+        `[tasks] requestedByUserId ${requestedByUserId} does not exist — coercing to NULL`,
+      );
+      requestedByUserId = undefined;
+    }
+
+    // Default agent for ingress-created tasks: when no explicit `agentId` is
+    // provided, route to the lead so the task has an owner immediately
+    // (regardless of whether it's a root or a follow-up under a parentTaskId).
+    // Without this, UI composer follow-ups land unassigned and never get
+    // picked up. Mirrors Slack's pattern (slack/actions.ts uses lead?.id when
+    // there's no working agent).
+    let defaultAgentId = parsed.body.agentId || undefined;
+    if (!defaultAgentId) {
+      const lead = getLeadAgent();
+      if (lead) defaultAgentId = lead.id;
+    }
+
     try {
       const task = createTaskWithSiblingAwareness(parsed.body.task, {
-        agentId: parsed.body.agentId || undefined,
+        agentId: defaultAgentId,
         creatorAgentId: myAgentId || undefined,
         taskType: parsed.body.taskType || undefined,
         tags: parsed.body.tags || undefined,
@@ -269,9 +348,10 @@ export async function handleTasks(
         offeredTo: parsed.body.offeredTo || undefined,
         dir: parsed.body.dir || undefined,
         parentTaskId: parsed.body.parentTaskId || undefined,
-        source: (parsed.body.source as import("../types").AgentTaskSource) || "api",
+        source: parsed.body.source || "api",
         outputSchema: parsed.body.outputSchema || undefined,
         contextKey: parsed.body.contextKey || undefined,
+        requestedByUserId,
       });
 
       ensure({

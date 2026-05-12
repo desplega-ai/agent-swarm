@@ -97,7 +97,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@mariozechner/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match @openai/codex-sdk in package.json — enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.125.0
+ARG CODEX_VERSION=0.128.0
 RUN sudo npm install -g @openai/codex@${CODEX_VERSION}
 RUN which codex && codex --version
 
@@ -172,21 +172,66 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
   } \
 }' > /home/worker/.claude/settings.json
 
-# Install global npm tools (pinned versions for cache stability)
+# Install global npm tools (pinned versions for cache stability).
+#
+# We use a staging-dir `npm install` + symlink pattern instead of `npm install -g`
+# so we can apply an `overrides` workaround for a broken upstream transitive:
+#   @desplega.ai/agent-fs -> chonkie -> @huggingface/hub@2.11.1
+#     -> @huggingface/xetchunk-wasm@0.0.4
+# xetchunk-wasm@0.0.4 was published with `gearhash-jit: workspace:*` and
+# `@huggingface/blake3-jit: workspace:*` — neither sibling is on npm, so a
+# global install hits EUNSUPPORTEDPROTOCOL in uncached environments. Pinning
+# `@huggingface/hub` to 2.11.0 (the last version before xetchunk-wasm became
+# a dep) sidesteps it. Drop this workaround once HF republishes a clean
+# xetchunk-wasm and chonkie / agent-fs pull it in.
 USER root
-RUN npm install -g \
-    pm2@6.0.14 \
-    @sentry/cli@3.3.4 \
-    @desplega.ai/wts@0.2.3 \
-    @desplega.ai/localtunnel@2.2.0 \
-    @desplega.ai/qa-use@2.15.3 \
-    @desplega.ai/agent-fs@0.5.1 \
-    && qa-use install-deps
+RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
+{
+  "name": "global-deps",
+  "private": true,
+  "dependencies": {
+    "pm2": "6.0.14",
+    "@sentry/cli": "3.3.4",
+    "@desplega.ai/wts": "0.2.3",
+    "@desplega.ai/localtunnel": "2.2.0",
+    "@desplega.ai/qa-use": "2.18.0",
+    "@desplega.ai/agent-fs": "0.5.3"
+  },
+  "overrides": {
+    "@huggingface/hub": "2.11.0",
+    "chromadb": "npm:empty-npm-package@1.0.0",
+    "chromadb-default-embed": "npm:empty-npm-package@1.0.0",
+    "@xenova/transformers": "npm:empty-npm-package@1.0.0",
+    "tree-sitter-wasms": "npm:empty-npm-package@1.0.0",
+    "web-tree-sitter": "npm:empty-npm-package@1.0.0",
+    "cohere-ai": "npm:empty-npm-package@1.0.0",
+    "voyageai": "npm:empty-npm-package@1.0.0",
+    "ollama": "npm:empty-npm-package@1.0.0"
+  }
+}
+EOF
 
-# Re-assert worker ownership of $HOME — the root-side npm/qa-use installs above
-# (and earlier claude-plugin steps) seed cache/config dirs as root, which breaks
-# runtime tools that expect to write under $HOME (e.g. opencode's ~/.cache/opencode).
-RUN chown -R worker:worker /home/worker
+# Playwright browsers live in a system path so they're shared across users at
+# runtime AND so the install doesn't pollute /home/worker (which would force a
+# multi-GB chown layer). The ENV is also read by Playwright at runtime.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+
+# Install global deps + Playwright chromium. CRITICAL: `ENV HOME=/home/worker`
+# (line 70) is still active under `USER root`, so without the inline override
+# below npm/Playwright would dump ~/.npm (~830 MB) and ~/.cache/ms-playwright
+# (~930 MB) into /home/worker as root-owned files — which previously required
+# a `chown -R worker:worker /home/worker` step that re-wrote the entire HOME
+# as a 5+ GB duplicate layer. By keeping HOME=/root and the npm cache in
+# /tmp, then cleaning them in the same RUN, the chown becomes unnecessary.
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    sh -c 'mkdir -p /opt/playwright \
+      && cd /opt/global-deps && npm install --no-audit --no-fund \
+      && for bin in /opt/global-deps/node_modules/.bin/*; do \
+           ln -sf "$bin" "/usr/local/bin/$(basename "$bin")"; \
+         done \
+      && qa-use install-deps' \
+    && rm -rf /tmp/npm-cache /root/.npm /root/.cache \
+    && chmod -R a+rX /opt/playwright
 
 # Install archil CLI for FUSE/R2-backed disk mounts
 RUN curl https://s3.amazonaws.com/archil-client/install | sh
@@ -221,9 +266,19 @@ RUN mkdir -p /home/worker/.codex/skills && \
 # plugin — the bundled binary's `import.meta.dir` is /usr/local/bin which
 # doesn't help, and relying on opencode's auto-discovery is implicit (it
 # silently breaks if discovery rules change or OPENCODE_CONFIG suppresses it).
-RUN mkdir -p /home/worker/.config/opencode/plugins && \
+#
+# Phase 2 (session-summarization fix): the plugin entrypoint imports adjacent
+# vendored helpers (`./opencode-auth`, `./summarize`). opencode's plugin
+# loader runs the TS files inside its own bundled Bun runtime, which only
+# exposes `@opencode-ai/{plugin,sdk}` — so the helpers are vendored, NOT
+# imported from `@desplega.ai/agent-swarm`. COPY them next to the entrypoint
+# so the relative imports resolve. Tests live in a sibling `tests/`
+# subdirectory and are intentionally NOT copied (opencode auto-discovers
+# `.ts` files in this directory and would try to load them as plugins).
+RUN mkdir -p /home/worker/.config/opencode/plugins/lib && \
     chown -R worker:worker /home/worker/.config
 COPY --chown=worker:worker plugin/opencode-plugins/agent-swarm.ts /home/worker/.config/opencode/plugins/agent-swarm.ts
+COPY --chown=worker:worker plugin/opencode-plugins/lib/ /home/worker/.config/opencode/plugins/lib/
 ENV OPENCODE_SWARM_PLUGIN_PATH=/home/worker/.config/opencode/plugins/agent-swarm.ts
 
 # Create directories and copy entrypoint

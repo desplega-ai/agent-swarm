@@ -100,7 +100,6 @@ agent-swarm worker --system-prompt "You are a Python specialist"
 | `--yolo` | Continue on errors instead of stopping |
 | `--system-prompt <text>` | Custom system prompt (appended to Claude) |
 | `--system-prompt-file <path>` | Read system prompt from file |
-| `--ai-loop` | Use AI-based polling (legacy mode) |
 | `-- <args...>` | Additional arguments to pass to Claude CLI |
 
 ### lead
@@ -248,15 +247,15 @@ bun run docs:mcp
 
 ## Dashboard UI
 
-The React-based monitoring dashboard is in the `new-ui/` directory:
+The React-based monitoring dashboard is in the `ui/` directory:
 
 ```bash
-cd new-ui
-bun install
-bun run dev
+cd ui
+pnpm install
+pnpm run dev
 ```
 
-Opens at `http://localhost:5173`. Provides real-time visibility into:
+Opens at `http://localhost:5274`. Provides real-time visibility into:
 - Agent status and activity
 - Task list and progress
 - Inter-agent chat messages

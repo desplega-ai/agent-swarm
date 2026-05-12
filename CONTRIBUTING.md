@@ -111,7 +111,7 @@ bun run dev:http
 # → https://api.swarm.localhost:1355
 
 # Start UI (separate terminal)
-cd new-ui && pnpm dev
+cd ui && pnpm dev
 # → https://ui.swarm.localhost:1355
 
 # Or start everything with PM2

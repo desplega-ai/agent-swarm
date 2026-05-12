@@ -11,12 +11,29 @@ import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type {
   CostData,
+  CredStatus,
   ProviderAdapter,
   ProviderEvent,
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
 } from "./types";
+
+/**
+ * Predicate used by the worker boot loop and the credential-status endpoint.
+ * The claude harness needs EITHER `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or
+ * `ANTHROPIC_API_KEY` — both are listed as missing when neither is present.
+ */
+export function checkClaudeCredentials(env: Record<string, string | undefined>): CredStatus {
+  if (env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  return {
+    ready: false,
+    missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+    hint: "Set either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (one is enough).",
+  };
+}
 
 /** Task file data written to /tmp for hook to read */
 interface TaskFileData {
@@ -171,12 +188,25 @@ class ClaudeSession implements ProviderSession {
       `\x1b[2m[${config.role}]\x1b[0m \x1b[36m▸\x1b[0m Spawning Claude (model: ${model}) for task ${config.taskId.slice(0, 8)}`,
     );
 
+    const sourceEnv = config.env || process.env;
     this.proc = Bun.spawn(cmd, {
       cwd: this.config.cwd,
       env: {
         ENABLE_PROMPT_CACHING_1H: "1",
-        ...(config.env || process.env),
+        ...sourceEnv,
         TASK_FILE: taskFilePath,
+        // Belt-and-braces: TASK_FILE on disk can disappear mid-session (race
+        // with task lifecycle), which silently drops the Stop-hook memory
+        // rater. The hook prefers these env vars when present. See PR #444.
+        AGENT_SWARM_TASK_ID: config.taskId,
+        AGENT_SWARM_AGENT_ID: config.agentId,
+        // claude CLI strips CLAUDE_CODE_OAUTH_TOKEN from hook subprocess env
+        // (security: prevents OAuth-token leakage to user-written hooks).
+        // Mirror it under a name claude doesn't recognize so the Stop hook
+        // can resolve the claude-cli fallback in internal-ai/credentials.ts.
+        ...(sourceEnv.CLAUDE_CODE_OAUTH_TOKEN
+          ? { AGENT_SWARM_CLAUDE_OAUTH_TOKEN: sourceEnv.CLAUDE_CODE_OAUTH_TOKEN }
+          : {}),
       } as Record<string, string>,
       stdout: "pipe",
       stderr: "pipe",

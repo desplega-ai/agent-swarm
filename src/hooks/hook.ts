@@ -1,7 +1,16 @@
 #!/usr/bin/env bun
 
 import pkg from "../../package.json";
+import {
+  buildRatingsFromLlm,
+  dedupeRetrievalsForRater,
+  fetchRetrievalsForTask,
+  isLlmRaterEnabled,
+  postRatings,
+  type RetrievalRow,
+} from "../be/memory/raters/llm";
 import type { Agent } from "../types";
+import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
@@ -192,6 +201,194 @@ async function restoreClaudeMdBackup(): Promise<void> {
   } else {
     // No backup existed, remove the agent's CLAUDE.md
     await Bun.$`rm -f ${CLAUDE_MD_PATH}`.quiet();
+  }
+}
+
+/**
+ * Resolve task context for the Stop-hook session-summary / memory-rater
+ * piggyback. Prefers the AGENT_SWARM_TASK_ID env var (set by the harness in
+ * `claude-adapter.ts`) so the rater still works when the on-disk TASK_FILE
+ * was already cleaned up — the silent-drop bug PR #444 traced.
+ */
+export async function resolveStopHookTaskContext(
+  env: Record<string, string | undefined> = process.env,
+): Promise<{ taskContext: string; taskId: string | undefined }> {
+  let taskContext = "";
+  let taskId: string | undefined = env.AGENT_SWARM_TASK_ID || undefined;
+  const taskFile = env.TASK_FILE;
+  if (taskFile) {
+    try {
+      const taskData = JSON.parse(await Bun.file(taskFile).text());
+      taskContext = `Task: ${taskData.task || "Unknown"}`;
+      if (!taskId) taskId = taskData.id;
+    } catch (err) {
+      // Don't blackhole the read failure — log it once so future regressions
+      // are visible. Same one-line debug pattern as PR #444's gate trace.
+      console.error("[memory-rater:llm] TASK_FILE read failed:", (err as Error).message);
+    }
+  }
+  return { taskContext, taskId };
+}
+
+/**
+ * Test-injection points for `runStopHookSessionSummary`. Production callers
+ * omit `deps` entirely — the claude Stop hook uses the default implementations
+ * bound at module-import time.
+ *
+ * Why explicit DI: `bun:test`'s `mock.module()` is process-wide and leaks
+ * across test files, so the Stop-hook test cannot stub out `runSummarize` /
+ * `postRatings` via module mocking without breaking siblings. Mirrors the
+ * `summarizeSessionForPi` pattern in `src/providers/pi-mono-extension.ts`.
+ */
+export interface RunStopHookSessionSummaryDeps {
+  runSummarize?: typeof runSummarize;
+  fetchRetrievalsForTask?: typeof fetchRetrievalsForTask;
+  postRatings?: typeof postRatings;
+  buildRatingsFromLlm?: typeof buildRatingsFromLlm;
+}
+
+export interface RunStopHookSessionSummaryOpts {
+  agentId: string;
+  transcriptPath: string;
+  /** Defaulted to `process.env`; injectable for tests. */
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Run session summarization for the claude Stop hook via the shared
+ * `internal-ai` abstraction. Replaces the previous `runMemoryRater` call so
+ * `CLAUDE_CODE_OAUTH_TOKEN`-only environments (Pro/Max OAuth users without
+ * OpenRouter) keep working via the `claude -p` fallback inside the wrapper.
+ *
+ * Flow:
+ *   1. Read tail of transcript file (last 20 KB).
+ *   2. Resolve task context + (optionally) memory retrievals for ratings.
+ *   3. Call `runSummarize` from `src/utils/internal-ai` — picks credentials
+ *      out of env / codex OAuth / CLAUDE_CODE_OAUTH_TOKEN, returns structured
+ *      `{summary, ratings}`.
+ *   4. Apply length/quality gate; POST summary to `/api/memory/index`.
+ *   5. If `MEMORY_RATERS` includes `llm` AND ratings came back, POST them
+ *      via `postRatings` (events-based).
+ *
+ * Non-blocking — any thrown error is swallowed so session shutdown never blocks.
+ */
+export async function runStopHookSessionSummary(
+  opts: RunStopHookSessionSummaryOpts,
+  deps: RunStopHookSessionSummaryDeps = {},
+): Promise<void> {
+  const env = opts.env ?? process.env;
+  if (env.SKIP_SESSION_SUMMARY) return;
+
+  const _runSummarize = deps.runSummarize ?? runSummarize;
+  const _fetchRetrievals = deps.fetchRetrievalsForTask ?? fetchRetrievalsForTask;
+  const _postRatings = deps.postRatings ?? postRatings;
+  const _buildRatings = deps.buildRatingsFromLlm ?? buildRatingsFromLlm;
+
+  try {
+    let transcript = "";
+    try {
+      const fullTranscript = await Bun.file(opts.transcriptPath).text();
+      transcript = fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
+    } catch {
+      /* no transcript */
+    }
+
+    if (transcript.length <= 100) return;
+
+    // Prefer AGENT_SWARM_TASK_ID env var; fall back to TASK_FILE on
+    // disk. PR #444 gate-trace showed the file disappears mid-session
+    // and the silent catch dropped every LLM rater piggyback.
+    const { taskContext, taskId } = await resolveStopHookTaskContext(env);
+
+    const apiUrl = env.MCP_BASE_URL || `http://localhost:${env.PORT || "3013"}`;
+    const apiKey = env.API_KEY || "";
+
+    // Memory-rater v1.5 step-4: piggyback per-memory ratings on the
+    // existing summary call when MEMORY_RATERS includes `llm`.
+    const llmRaterEnabled = isLlmRaterEnabled();
+    let retrievals: RetrievalRow[] = [];
+    if (llmRaterEnabled && taskId) {
+      const rawRetrievals = await _fetchRetrievals({
+        apiUrl,
+        apiKey,
+        agentId: opts.agentId,
+        taskId,
+      });
+      // Dedup self-similar cron-task memories before sending to the
+      // rater — see `dedupeRetrievalsForRater` doc for the why.
+      retrievals = dedupeRetrievalsForRater(rawRetrievals);
+    }
+
+    const result = await _runSummarize({
+      harness: "claude",
+      transcript,
+      retrievals,
+      taskContext: {
+        sourceTaskId: taskId ?? "",
+        agentId: opts.agentId,
+        // claude's path doesn't pass the user prompt here today — leave undefined.
+        prompt: undefined,
+      },
+      apiUrl,
+      apiKey,
+    });
+    // null = no auth resolved (no OPENROUTER, ANTHROPIC, OPENAI, codex OAuth,
+    // or CLAUDE_CODE_OAUTH_TOKEN) — silent skip, same as today's no-key behavior.
+    if (!result) return;
+
+    const summary = result.summary.trim();
+    const ratings = result.ratings ?? [];
+
+    // Skip indexing if the session had no significant learnings.
+    if (summary.length > 20 && !summary.toLowerCase().includes("no significant learnings")) {
+      await fetch(`${apiUrl}/api/memory/index`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          "X-Agent-ID": opts.agentId,
+        },
+        body: JSON.stringify({
+          agentId: opts.agentId,
+          content: summary,
+          name: taskContext
+            ? `Session: ${taskContext.slice(0, 80)}`
+            : `Session: ${new Date().toISOString().slice(0, 16)}`,
+          scope: "agent",
+          source: "session_summary",
+          ...(taskId ? { sourceTaskId: taskId } : {}),
+        }),
+      });
+    }
+
+    // Best-effort: post LLM ratings. Never blocks summary indexing.
+    if (llmRaterEnabled && taskId && retrievals.length > 0 && ratings.length === 0) {
+      console.error("[memory-rater:llm] piggyback produced no ratings", {
+        retrievalsLen: retrievals.length,
+        ratingsLen: 0,
+      });
+    }
+    if (llmRaterEnabled && taskId && ratings.length > 0) {
+      try {
+        const events = _buildRatings(ratings, retrievals);
+        if (events.length > 0) {
+          await _postRatings({
+            apiUrl,
+            apiKey,
+            agentId: opts.agentId,
+            taskId,
+            events,
+          });
+        }
+      } catch (err) {
+        console.error(
+          "[memory-rater:llm] piggyback rating emission failed:",
+          (err as Error).message,
+        );
+      }
+    }
+  } catch {
+    // Non-blocking — session summarization failure should never block shutdown
   }
 }
 
@@ -1043,110 +1240,17 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
         }
       }
 
-      // Session summarization via Claude Haiku
-      // Skip if this is a child session spawned by the summarization itself (prevents recursion)
-      if (agentInfo?.id && msg.transcript_path && !process.env.SKIP_SESSION_SUMMARY) {
-        try {
-          let transcript = "";
-          try {
-            const fullTranscript = await Bun.file(msg.transcript_path).text();
-            transcript =
-              fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
-          } catch {
-            /* no transcript */
-          }
-
-          if (transcript.length > 100) {
-            // Read task context if available
-            let taskContext = "";
-            let taskId: string | undefined;
-            const taskFile = process.env.TASK_FILE;
-            if (taskFile) {
-              try {
-                const taskData = JSON.parse(await Bun.file(taskFile).text());
-                taskContext = `Task: ${taskData.task || "Unknown"}`;
-                taskId = taskData.id;
-              } catch {
-                /* no task file */
-              }
-            }
-
-            // Summarize with Claude Haiku — extract only high-value learnings
-            const summarizePrompt = `You are summarizing an AI agent's work session. Extract ONLY high-value learnings.
-
-DO NOT include:
-- Generic descriptions of what was done ("worked on task X")
-- Tool calls or file reads
-- Routine progress updates
-
-DO include (if present):
-- **Mistakes made and corrections** — what went wrong and what fixed it
-- **Discovered patterns** — reusable approaches, APIs, or codebase conventions
-- **Codebase knowledge** — important file paths, architecture decisions, gotchas
-- **Environment knowledge** — service URLs, config details, tool quirks
-- **Failed approaches** — what was tried and didn't work (and why)
-
-Format as a bulleted list of concrete, reusable facts. If the session was routine with no significant learnings, respond with exactly: "No significant learnings."
-${taskContext ? `\nTask context: ${taskContext}` : ""}
-Transcript:
-${transcript}`;
-
-            const tmpFile = `/tmp/session-summary-${Date.now()}.txt`;
-            await Bun.write(tmpFile, summarizePrompt);
-            const proc = Bun.spawn(
-              ["bash", "-c", `cat "${tmpFile}" | claude -p --model haiku --output-format json`],
-              {
-                stdout: "pipe",
-                stderr: "pipe",
-                env: { ...process.env, SKIP_SESSION_SUMMARY: "1" },
-              },
-            );
-            const timeoutId = setTimeout(() => proc.kill(), 30000);
-            const result = { stdout: await new Response(proc.stdout).text() };
-            clearTimeout(timeoutId);
-            await Bun.$`rm -f ${tmpFile}`.quiet();
-
-            let summary: string;
-            try {
-              const summaryOutput = JSON.parse(result.stdout);
-              summary = summaryOutput.result ?? result.stdout;
-            } catch {
-              summary = result.stdout;
-            }
-
-            // Skip indexing if the session had no significant learnings
-            if (
-              summary &&
-              summary.length > 20 &&
-              !summary.trim().toLowerCase().includes("no significant learnings")
-            ) {
-              const apiUrl =
-                process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
-              const apiKey = process.env.API_KEY || "";
-
-              await fetch(`${apiUrl}/api/memory/index`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-                  "X-Agent-ID": agentInfo.id,
-                },
-                body: JSON.stringify({
-                  agentId: agentInfo.id,
-                  content: summary,
-                  name: taskContext
-                    ? `Session: ${taskContext.slice(0, 80)}`
-                    : `Session: ${new Date().toISOString().slice(0, 16)}`,
-                  scope: "agent",
-                  source: "session_summary",
-                  ...(taskId ? { sourceTaskId: taskId } : {}),
-                }),
-              });
-            }
-          }
-        } catch {
-          // Non-blocking — session summarization failure should never block shutdown
-        }
+      // Session summarization + LLM rater piggyback via the shared internal-ai
+      // wrapper (OpenRouter → Anthropic → OpenAI → codex OAuth →
+      // CLAUDE_CODE_OAUTH_TOKEN → claude -p fallback). The wrapper handles
+      // credential resolution and returns null when nothing resolves, so Pro/Max
+      // OAuth users keep working without OpenRouter (the working path PR #450
+      // restored). Non-blocking — failures never block shutdown.
+      if (agentInfo?.id && msg.transcript_path) {
+        await runStopHookSessionSummary({
+          agentId: agentInfo.id,
+          transcriptPath: msg.transcript_path,
+        });
       }
 
       // Mark the agent as offline

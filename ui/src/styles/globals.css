@@ -1,0 +1,350 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  /* shadcn/ui Zinc theme — light base with amber primary */
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.141 0.005 285.823);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.141 0.005 285.823);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.141 0.005 285.823);
+  --color-primary: oklch(0.555 0.163 48.998);
+  --color-primary-foreground: oklch(0.985 0 0);
+  --color-secondary: oklch(0.967 0.001 286.375);
+  --color-secondary-foreground: oklch(0.21 0.006 285.885);
+  --color-muted: oklch(0.967 0.001 286.375);
+  --color-muted-foreground: oklch(0.552 0.016 285.938);
+  --color-accent: oklch(0.967 0.001 286.375);
+  --color-accent-foreground: oklch(0.21 0.006 285.885);
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-border: oklch(0.92 0.004 286.32);
+  --color-input: oklch(0.92 0.004 286.32);
+  --color-ring: oklch(0.555 0.163 48.998);
+  --color-chart-1: oklch(0.646 0.222 41.116);
+  --color-chart-2: oklch(0.6 0.118 184.704);
+  --color-chart-3: oklch(0.398 0.07 227.392);
+  --color-chart-4: oklch(0.828 0.189 84.429);
+  --color-chart-5: oklch(0.769 0.188 70.08);
+  --color-sidebar: oklch(0.985 0 0);
+  --color-sidebar-foreground: oklch(0.141 0.005 285.823);
+  --color-sidebar-primary: oklch(0.555 0.163 48.998);
+  --color-sidebar-primary-foreground: oklch(0.985 0 0);
+  --color-sidebar-accent: oklch(0.967 0.001 286.375);
+  --color-sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --color-sidebar-border: oklch(0.92 0.004 286.32);
+  --color-sidebar-ring: oklch(0.555 0.163 48.998);
+
+  /* Semantic status tokens — light mode
+     Source: existing utility OKLCH literals being replaced (see audit doc).
+     Canonical token = fill stop (matches `bg-{color}-500` literals).
+     `-strong` variant = text-emphasis stop (one Tailwind stop darker for
+     contrast on neutral surfaces — matches `text-{color}-600` literals).
+     `-foreground` variant = legible text on the colored fill.
+     Pixel parity preserved: existing `bg-{color}-500 + text-{color}-600`
+     pairs migrate to `bg-status-X + text-status-X-strong`. */
+  --color-status-success: oklch(0.696 0.17 162.48);          /* emerald-500 */
+  --color-status-success-strong: oklch(0.596 0.145 163.225); /* emerald-600 */
+  --color-status-success-foreground: oklch(0.985 0 0);
+  --color-status-active: oklch(0.769 0.188 70.08);           /* amber-500 */
+  --color-status-active-strong: oklch(0.666 0.179 58.318);   /* amber-600 */
+  --color-status-active-foreground: oklch(0.141 0.005 285.823);
+  --color-status-error: oklch(0.637 0.237 25.331);           /* red-500 */
+  --color-status-error-strong: oklch(0.577 0.245 27.325);    /* red-600 */
+  --color-status-error-foreground: oklch(0.985 0 0);
+  --color-status-info: oklch(0.685 0.169 237.323);           /* sky-500 */
+  --color-status-info-strong: oklch(0.588 0.158 241.966);    /* sky-600 */
+  --color-status-info-foreground: oklch(0.985 0 0);
+  --color-status-pending: oklch(0.795 0.184 86.047);         /* yellow-500 */
+  --color-status-pending-strong: oklch(0.681 0.162 75.834);  /* yellow-600 */
+  --color-status-pending-foreground: oklch(0.141 0.005 285.823);
+  --color-status-warning: oklch(0.705 0.213 47.604);         /* orange-500 */
+  --color-status-warning-strong: oklch(0.646 0.222 41.116);  /* orange-600 */
+  --color-status-warning-foreground: oklch(0.985 0 0);
+  --color-status-paused: oklch(0.623 0.214 259.815);         /* blue-500 */
+  --color-status-paused-strong: oklch(0.546 0.245 262.881);  /* blue-600 */
+  --color-status-paused-foreground: oklch(0.985 0 0);
+  --color-status-neutral: oklch(0.552 0.016 285.938);        /* zinc-500 */
+  --color-status-neutral-foreground: oklch(0.985 0 0);
+
+  /* Action-type tokens — light mode
+     Source: components/workflows/action-node.tsx L18-L72 and
+             components/workflows/condition-node.tsx L17-L50.
+     Light values match the *-500 stops used for borders/handles;
+     dark values match the *-400 stops used for text. The /10 alpha
+     fills used as backgrounds are emitted as Tailwind opacity utilities
+     (e.g. `bg-action-webhook/10`) — no separate -bg token needed. */
+  --color-action-agent-task: oklch(0.606 0.25 292.717);       /* violet-500 */
+  --color-action-script: oklch(0.715 0.143 215.221);          /* cyan-500 */
+  --color-action-notify: oklch(0.704 0.14 182.503);           /* teal-500 */
+  --color-action-human-in-the-loop: oklch(0.705 0.213 47.604); /* orange-500 */
+  --color-action-create-task: oklch(0.585 0.233 277.117);     /* indigo-500 */
+  --color-action-send-message: oklch(0.656 0.241 354.308);    /* pink-500 */
+  --color-action-delegate-to-agent: oklch(0.627 0.265 303.9); /* purple-500 */
+  --color-action-default: oklch(0.623 0.214 259.815);         /* blue-500 — fallback action */
+  --color-action-property-match: oklch(0.769 0.188 70.08);    /* amber-500 — condition */
+  --color-action-code-match: oklch(0.795 0.184 86.047);       /* yellow-500 — condition */
+  --color-action-raw-llm: oklch(0.685 0.169 237.323);         /* sky-500 — condition */
+
+  /* Fonts */
+  --font-sans: "Space Grotesk", sans-serif;
+  --font-mono: "Space Mono", monospace;
+
+  /* Border radius — shadcn/ui default */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+}
+
+/* Dark mode overrides */
+.dark,
+.dark * {
+  --color-background: oklch(0.141 0.005 285.823);
+  --color-foreground: oklch(0.985 0 0);
+  --color-card: oklch(0.21 0.006 285.885);
+  --color-card-foreground: oklch(0.985 0 0);
+  --color-popover: oklch(0.21 0.006 285.885);
+  --color-popover-foreground: oklch(0.985 0 0);
+  --color-primary: oklch(0.769 0.188 70.08);
+  --color-primary-foreground: oklch(0.21 0.006 285.885);
+  --color-secondary: oklch(0.274 0.006 286.033);
+  --color-secondary-foreground: oklch(0.985 0 0);
+  --color-muted: oklch(0.274 0.006 286.033);
+  --color-muted-foreground: oklch(0.705 0.015 286.067);
+  --color-accent: oklch(0.274 0.006 286.033);
+  --color-accent-foreground: oklch(0.985 0 0);
+  --color-destructive: oklch(0.704 0.191 22.216);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-border: oklch(1 0 0 / 10%);
+  --color-input: oklch(1 0 0 / 15%);
+  --color-ring: oklch(0.769 0.188 70.08);
+  --color-chart-1: oklch(0.488 0.243 264.376);
+  --color-chart-2: oklch(0.696 0.17 162.48);
+  --color-chart-3: oklch(0.769 0.188 70.08);
+  --color-chart-4: oklch(0.627 0.265 303.9);
+  --color-chart-5: oklch(0.645 0.246 16.439);
+  --color-sidebar: oklch(0.21 0.006 285.885);
+  --color-sidebar-foreground: oklch(0.985 0 0);
+  --color-sidebar-primary: oklch(0.769 0.188 70.08);
+  --color-sidebar-primary-foreground: oklch(0.985 0 0);
+  --color-sidebar-accent: oklch(0.274 0.006 286.033);
+  --color-sidebar-accent-foreground: oklch(0.985 0 0);
+  --color-sidebar-border: oklch(1 0 0 / 10%);
+  --color-sidebar-ring: oklch(0.769 0.188 70.08);
+
+  /* Semantic status tokens — dark mode
+     Match the lighter *-400 palette stops the codebase already uses
+     for `dark:text-*-400` overrides in status-badge.tsx etc.
+     `-strong` variants mirror the canonical *-400 stops in dark mode —
+     existing pairs `bg-{color}-500 + dark:text-{color}-400` and
+     `text-{color}-600 + dark:text-{color}-400` both become
+     `bg-status-X + text-status-X-strong` with identical dark output. */
+  --color-status-success: oklch(0.765 0.177 163.223);        /* emerald-400 */
+  --color-status-success-strong: oklch(0.765 0.177 163.223); /* emerald-400 */
+  --color-status-success-foreground: oklch(0.21 0.006 285.885);
+  --color-status-active: oklch(0.828 0.189 84.429);          /* amber-400 */
+  --color-status-active-strong: oklch(0.828 0.189 84.429);   /* amber-400 */
+  --color-status-active-foreground: oklch(0.21 0.006 285.885);
+  --color-status-error: oklch(0.704 0.191 22.216);           /* red-400 */
+  --color-status-error-strong: oklch(0.704 0.191 22.216);    /* red-400 */
+  --color-status-error-foreground: oklch(0.21 0.006 285.885);
+  --color-status-info: oklch(0.746 0.16 232.661);            /* sky-400 */
+  --color-status-info-strong: oklch(0.746 0.16 232.661);     /* sky-400 */
+  --color-status-info-foreground: oklch(0.21 0.006 285.885);
+  --color-status-pending: oklch(0.852 0.199 91.936);         /* yellow-400 */
+  --color-status-pending-strong: oklch(0.852 0.199 91.936);  /* yellow-400 */
+  --color-status-pending-foreground: oklch(0.21 0.006 285.885);
+  --color-status-warning: oklch(0.75 0.183 55.934);          /* orange-400 */
+  --color-status-warning-strong: oklch(0.75 0.183 55.934);   /* orange-400 */
+  --color-status-warning-foreground: oklch(0.21 0.006 285.885);
+  --color-status-paused: oklch(0.707 0.165 254.624);         /* blue-400 */
+  --color-status-paused-strong: oklch(0.707 0.165 254.624);  /* blue-400 */
+  --color-status-paused-foreground: oklch(0.21 0.006 285.885);
+  --color-status-neutral: oklch(0.705 0.015 286.067);        /* zinc-400 */
+  --color-status-neutral-foreground: oklch(0.21 0.006 285.885);
+
+  /* Action-type tokens — dark mode (lighter *-400 stops for legibility) */
+  --color-action-agent-task: oklch(0.702 0.183 293.541);      /* violet-400 */
+  --color-action-script: oklch(0.789 0.154 211.53);           /* cyan-400 */
+  --color-action-notify: oklch(0.777 0.152 181.912);          /* teal-400 */
+  --color-action-human-in-the-loop: oklch(0.75 0.183 55.934); /* orange-400 */
+  --color-action-create-task: oklch(0.673 0.182 276.935);     /* indigo-400 */
+  --color-action-send-message: oklch(0.718 0.202 349.761);    /* pink-400 */
+  --color-action-delegate-to-agent: oklch(0.714 0.203 305.504); /* purple-400 */
+  --color-action-default: oklch(0.707 0.165 254.624);         /* blue-400 */
+  --color-action-property-match: oklch(0.828 0.189 84.429);   /* amber-400 */
+  --color-action-code-match: oklch(0.852 0.199 91.936);       /* yellow-400 */
+  --color-action-raw-llm: oklch(0.746 0.16 232.661);          /* sky-400 */
+}
+
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted-foreground);
+}
+
+/* Shimmer text — used by the inline "chain of thought" indicator on
+ * in-progress agent turns. A linear gradient slides across the text via
+ * background-clip:text, giving a subtle "live / streaming" pulse. */
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted-foreground) 0%,
+    var(--color-foreground) 50%,
+    var(--color-muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-slide 2s linear infinite;
+}
+
+@keyframes shimmer-slide {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+    -webkit-text-fill-color: var(--color-foreground);
+    color: var(--color-foreground);
+  }
+}
+
+/* Chat message markdown prose */
+.prose-chat {
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.prose-chat p {
+  margin: 0 0 0.25em;
+}
+
+.prose-chat p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-chat code {
+  font-size: 0.8em;
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  background: var(--color-muted);
+  font-family: "Space Mono", monospace;
+}
+
+.prose-chat pre {
+  margin: 0.5em 0;
+  padding: 0.75em;
+  border-radius: 6px;
+  background: var(--color-muted);
+  overflow-x: auto;
+  font-size: 0.8em;
+}
+
+.prose-chat pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.prose-chat ul,
+.prose-chat ol {
+  margin: 0.25em 0;
+  padding-left: 1.5em;
+}
+
+.prose-chat li {
+  margin: 0.1em 0;
+}
+
+.prose-chat blockquote {
+  margin: 0.5em 0;
+  padding-left: 0.75em;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-muted-foreground);
+}
+
+.prose-chat a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.prose-chat a:hover {
+  text-decoration: underline;
+}
+
+.prose-chat table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.85em;
+}
+
+.prose-chat th,
+.prose-chat td {
+  border: 1px solid var(--color-border);
+  padding: 0.3em 0.6em;
+}
+
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  margin: 0.5em 0 0.25em;
+  font-weight: 600;
+}
+
+.prose-chat h1 {
+  font-size: 1.1em;
+}
+.prose-chat h2 {
+  font-size: 1em;
+}
+.prose-chat h3 {
+  font-size: 0.95em;
+}
+
+/* Session log prose — tighter than chat */
+.prose-session-log {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.prose-session-log pre {
+  max-height: 24rem;
+}

@@ -136,8 +136,8 @@ Required headers on every call:
 Defaults: UI on `APP_URL` (port 5274), API on `http://localhost:3013` (overridable via `VITE_API_URL`).
 
 ```bash
-cd new-ui && pnpm run dev        # port 5274
-cd new-ui && pnpm run dev --port 5275   # if 5274 is taken
+cd ui && pnpm run dev        # port 5274
+cd ui && pnpm run dev --port 5275   # if 5274 is taken
 ```
 
 ### When you need to verify a UI change
@@ -148,7 +148,7 @@ Use the `qa-use` tool family:
 - `/qa-use:verify` — verify a defined feature
 - `/qa-use:test-run` — run existing E2E tests
 
-**PR requirement**: any PR touching `new-ui/`, `landing/`, or `templates-ui/` must include a `qa-use` session with screenshots of the change running locally. Merge-gate enforces this.
+**PR requirement**: any PR touching `ui/` or `templates-ui/` must include a `qa-use` session with screenshots of the change running locally. Merge-gate enforces this.
 
 ### Port-conflict resolution
 

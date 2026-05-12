@@ -6,6 +6,7 @@ import { configureDbResolver } from "../prompts/resolver";
 import type {
   ActiveSession,
   Agent,
+  AgentCredStatus,
   AgentLog,
   AgentLogEventType,
   AgentMcpServer,
@@ -27,7 +28,9 @@ import type {
   ContextSnapshotEventType,
   ContextVersion,
   CooldownConfig,
-  DevinProviderMeta,
+  InboxItemState,
+  InboxItemStatus,
+  InboxItemType,
   InboxMessage,
   InboxMessageStatus,
   InputValue,
@@ -54,6 +57,8 @@ import type {
   SkillWithInstallInfo,
   SwarmConfig,
   SwarmRepo,
+  TaskTemplate,
+  TaskTemplateKind,
   TriggerConfig,
   User,
   VersionableField,
@@ -555,6 +560,12 @@ type AgentRow = {
   provider: string | null;
   createdAt: string;
   lastUpdatedAt: string;
+  /** JSON array of env-var names; populated only when status is `waiting_for_credentials`. */
+  credentialMissing: string | null;
+  /** Phase 1.5: per-agent harness provider pushed on worker registration. */
+  harness_provider: string | null;
+  /** Migration 055: worker-self-reported credential snapshot (JSON of AgentCredStatus). NULL = unreported. */
+  cred_status: string | null;
 };
 
 function rowToAgent(row: AgentRow): Agent {
@@ -576,15 +587,23 @@ function rowToAgent(row: AgentRow): Agent {
     heartbeatMd: row.heartbeatMd ?? undefined,
     lastActivityAt: row.lastActivityAt ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
+    harnessProvider: (row.harness_provider as ProviderName | null) ?? null,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
+    credentialMissing: row.credentialMissing
+      ? (JSON.parse(row.credentialMissing) as string[])
+      : null,
+    credStatus: row.cred_status ? (JSON.parse(row.cred_status) as AgentCredStatus) : null,
   };
 }
 
 export const agentQueries = {
   insert: () =>
-    getDb().prepare<AgentRow, [string, string, number, AgentStatus, number, string | null]>(
-      "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
+    getDb().prepare<
+      AgentRow,
+      [string, string, number, AgentStatus, number, string | null, string | null]
+    >(
+      "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, harness_provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
     ),
 
   getById: () => getDb().prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?"),
@@ -596,8 +615,35 @@ export const agentQueries = {
       "UPDATE agents SET status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
     ),
 
+  updateCredentialState: () =>
+    getDb().prepare<AgentRow, [AgentStatus, string | null, string]>(
+      "UPDATE agents SET status = ?, credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+    ),
+
   delete: () => getDb().prepare<null, [string]>("DELETE FROM agents WHERE id = ?"),
 };
+
+/**
+ * Phase 3 of the worker credential safe-loop plan.
+ *
+ * `ready=true` clears the waiting state — the agent transitions to `idle`
+ * and the dispatcher will start handing it tasks again.
+ *
+ * `ready=false` parks the agent on `waiting_for_credentials` with the env-var
+ * names it's blocked on. The capacity dispatch query already filters
+ * `status === 'idle'` so the new value is implicitly excluded with no other
+ * code change.
+ */
+export function updateAgentCredentialState(
+  agentId: string,
+  ready: boolean,
+  missing: string[] | null,
+): Agent | null {
+  const status: AgentStatus = ready ? "idle" : "waiting_for_credentials";
+  const missingJson = ready ? null : missing && missing.length > 0 ? JSON.stringify(missing) : null;
+  const row = agentQueries.updateCredentialState().get(status, missingJson, agentId);
+  return row ? rowToAgent(row) : null;
+}
 
 export function createAgent(
   agent: Omit<Agent, "id" | "createdAt" | "lastUpdatedAt"> & { id?: string },
@@ -606,7 +652,15 @@ export function createAgent(
   const maxTasks = agent.maxTasks ?? 1;
   const row = agentQueries
     .insert()
-    .get(id, agent.name, agent.isLead ? 1 : 0, agent.status, maxTasks, agent.provider ?? null);
+    .get(
+      id,
+      agent.name,
+      agent.isLead ? 1 : 0,
+      agent.status,
+      maxTasks,
+      agent.provider ?? null,
+      agent.harnessProvider ?? null,
+    );
   if (!row) throw new Error("Failed to create agent");
   try {
     createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
@@ -662,6 +716,83 @@ export function updateAgentProvider(id: string, provider: ProviderName): Agent |
     )
     .get(provider, id);
   return row ? rowToAgent(row) : null;
+}
+
+/**
+ * Phase 1.5 (cloud-personalization): set the per-agent `harness_provider`
+ * column. Pass `null` to clear. Validation against the canonical provider
+ * list happens at the API layer via `ProviderNameSchema`.
+ *
+ * Returns the updated row, or null if the agent does not exist.
+ */
+export function setAgentHarnessProvider(id: string, provider: ProviderName | null): Agent | null {
+  const row = getDb()
+    .prepare<AgentRow, [string | null, string]>(
+      `UPDATE agents SET harness_provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    )
+    .get(provider, id);
+  return row ? rowToAgent(row) : null;
+}
+
+/**
+ * Migration 055 — write the worker-self-reported credential snapshot.
+ * Pass `null` to clear (e.g. on agent re-registration). Validation against
+ * the JSON shape happens at the API layer via `AgentCredStatusSchema`.
+ *
+ * Worker reports this alongside the existing `updateAgentCredentialState`
+ * call; we keep the writes in two functions so the dispatch pattern stays
+ * one-row-one-fact, and the PATCH handler can choose which to call based
+ * on which fields the request body carried.
+ */
+export function updateAgentCredStatus(
+  id: string,
+  credStatus: AgentCredStatus | null,
+): Agent | null {
+  const json = credStatus ? JSON.stringify(credStatus) : null;
+  const row = getDb()
+    .prepare<AgentRow, [string | null, string]>(
+      `UPDATE agents SET cred_status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    )
+    .get(json, id);
+  return row ? rowToAgent(row) : null;
+}
+
+/**
+ * Migration 055 — read all agents whose `harness_provider` matches a given
+ * provider, with their reported `cred_status`. Used by the credential-status
+ * API endpoint to roll up "is this provider working across the fleet?".
+ *
+ * Agents with NULL `cred_status` (never reported, or CRED_CHECK_DISABLE=1)
+ * are still returned — the caller surfaces them as "unreported".
+ */
+export function listAgentsWithCredStatusByProvider(provider: string): Agent[] {
+  const rows = getDb()
+    .prepare<AgentRow, [string]>(`SELECT * FROM agents WHERE harness_provider = ? ORDER BY name`)
+    .all(provider);
+  return rows.map(rowToAgent);
+}
+
+/**
+ * Phase 1.5 (cloud-personalization): aggregate count of registered agents
+ * by `harness_provider`. NULL rows (agents that registered before the
+ * migration or never pushed a value) are excluded — they show up in the
+ * total agent count but not here.
+ *
+ * Used by future fleet displays. Not consumed in this phase.
+ */
+export function getAgentHarnessProviders(): Array<{ provider: string; count: number }> {
+  const rows = getDb()
+    .prepare<{ provider: string; count: number }, []>(
+      `SELECT harness_provider AS provider, COUNT(*) AS count
+       FROM agents
+       WHERE harness_provider IS NOT NULL
+       GROUP BY harness_provider
+       ORDER BY harness_provider`,
+    )
+    .all();
+  return rows.map((r) => ({ provider: r.provider, count: r.count }));
 }
 
 export function updateAgentActivity(id: string): void {
@@ -774,6 +905,10 @@ export function getRemainingCapacity(agentId: string): number {
 export function updateAgentStatusFromCapacity(agentId: string): void {
   const agent = getAgentById(agentId);
   if (!agent || agent.status === "offline") return;
+  // `waiting_for_credentials` is owned by the worker's credential-wait
+  // tick — task-completion shouldn't accidentally promote a blocked agent
+  // back to idle.
+  if (agent.status === "waiting_for_credentials") return;
 
   const activeCount = getActiveTaskCount(agentId);
   const newStatus = activeCount > 0 ? "busy" : "idle";
@@ -1186,7 +1321,8 @@ export function findTaskByVcs(vcsRepo: string, vcsNumber: number): AgentTask | n
 export const findTaskByGitHub = findTaskByVcs;
 
 export interface TaskFilters {
-  status?: AgentTaskStatus;
+  /** Single status (back-compat) OR array of statuses (multi-status filter). */
+  status?: AgentTaskStatus | AgentTaskStatus[];
   agentId?: string;
   search?: string;
   // New filters
@@ -1196,6 +1332,10 @@ export interface TaskFilters {
   taskType?: string;
   tags?: string[];
   scheduleId?: string;
+  /** Filter to tasks whose `source` is in this list. Empty/undefined → no filter. */
+  source?: AgentTaskSource[];
+  /** ISO 8601 timestamp; only return tasks where createdAt >= this. */
+  createdAfter?: string;
   limit?: number;
   offset?: number;
   includeHeartbeat?: boolean;
@@ -1206,8 +1346,19 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   const params: (string | AgentTaskStatus)[] = [];
 
   if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
+    if (Array.isArray(filters.status)) {
+      if (filters.status.length === 1) {
+        conditions.push("status = ?");
+        params.push(filters.status[0]!);
+      } else if (filters.status.length > 1) {
+        const placeholders = filters.status.map(() => "?").join(", ");
+        conditions.push(`status IN (${placeholders})`);
+        for (const s of filters.status) params.push(s);
+      }
+    } else {
+      conditions.push("status = ?");
+      params.push(filters.status);
+    }
   }
 
   if (filters?.agentId) {
@@ -1249,9 +1400,25 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
     params.push(filters.scheduleId);
   }
 
-  // Exclude heartbeat tasks by default
+  if (filters?.source && filters.source.length > 0) {
+    const placeholders = filters.source.map(() => "?").join(", ");
+    conditions.push(`source IN (${placeholders})`);
+    for (const s of filters.source) params.push(s);
+  }
+
+  if (filters?.createdAfter) {
+    conditions.push("createdAt >= ?");
+    params.push(filters.createdAfter);
+  }
+
+  // Exclude system/heartbeat tasks by default. The flag is still called
+  // `includeHeartbeat` for backward compat with existing API callers, but we
+  // also gate boot-triage + heartbeat-checklist behind it since those are
+  // equally noisy in the dashboard task list.
   if (!filters?.includeHeartbeat) {
-    conditions.push("(IFNULL(taskType, '') != 'heartbeat' AND tags NOT LIKE '%\"heartbeat\"%')");
+    conditions.push(
+      "(IFNULL(taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND tags NOT LIKE '%\"heartbeat\"%')",
+    );
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -1284,8 +1451,19 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   const params: (string | AgentTaskStatus)[] = [];
 
   if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
+    if (Array.isArray(filters.status)) {
+      if (filters.status.length === 1) {
+        conditions.push("status = ?");
+        params.push(filters.status[0]!);
+      } else if (filters.status.length > 1) {
+        const placeholders = filters.status.map(() => "?").join(", ");
+        conditions.push(`status IN (${placeholders})`);
+        for (const s of filters.status) params.push(s);
+      }
+    } else {
+      conditions.push("status = ?");
+      params.push(filters.status);
+    }
   }
 
   if (filters?.agentId) {
@@ -1325,9 +1503,25 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
     params.push(filters.scheduleId);
   }
 
-  // Exclude heartbeat tasks by default
+  if (filters?.source && filters.source.length > 0) {
+    const placeholders = filters.source.map(() => "?").join(", ");
+    conditions.push(`source IN (${placeholders})`);
+    for (const s of filters.source) params.push(s);
+  }
+
+  if (filters?.createdAfter) {
+    conditions.push("createdAt >= ?");
+    params.push(filters.createdAfter);
+  }
+
+  // Exclude system/heartbeat tasks by default. The flag is still called
+  // `includeHeartbeat` for backward compat with existing API callers, but we
+  // also gate boot-triage + heartbeat-checklist behind it since those are
+  // equally noisy in the dashboard task list.
   if (!filters?.includeHeartbeat) {
-    conditions.push("(IFNULL(taskType, '') != 'heartbeat' AND tags NOT LIKE '%\"heartbeat\"%')");
+    conditions.push(
+      "(IFNULL(taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND tags NOT LIKE '%\"heartbeat\"%')",
+    );
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -8447,6 +8641,301 @@ export function deleteUser(id: string): boolean {
 }
 
 // ============================================================================
+// Inbox Item State (per-user dismiss/snooze/done for action-items inbox)
+// ============================================================================
+
+interface InboxItemStateRow {
+  id: string;
+  userId: string;
+  itemType: string;
+  itemId: string;
+  status: string;
+  snoozeUntil: string | null;
+  dismissedAt: string | null;
+  doneAt: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+function rowToInboxItemState(row: InboxItemStateRow): InboxItemState {
+  return {
+    id: row.id,
+    userId: row.userId,
+    itemType: row.itemType as InboxItemType,
+    itemId: row.itemId,
+    status: row.status as InboxItemStatus,
+    snoozeUntil: row.snoozeUntil ?? undefined,
+    dismissedAt: row.dismissedAt ?? undefined,
+    doneAt: row.doneAt ?? undefined,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+export function listInboxState(opts: {
+  userId: string;
+  status?: InboxItemStatus;
+  itemType?: InboxItemType;
+}): InboxItemState[] {
+  const conditions: string[] = ["userId = ?"];
+  const params: string[] = [opts.userId];
+
+  if (opts.status) {
+    conditions.push("status = ?");
+    params.push(opts.status);
+  }
+  if (opts.itemType) {
+    conditions.push("itemType = ?");
+    params.push(opts.itemType);
+  }
+
+  const where = conditions.join(" AND ");
+  return getDb()
+    .prepare<InboxItemStateRow, string[]>(
+      `SELECT * FROM inbox_item_state WHERE ${where} ORDER BY lastUpdatedAt DESC`,
+    )
+    .all(...params)
+    .map(rowToInboxItemState);
+}
+
+export function upsertInboxState(opts: {
+  userId: string;
+  itemType: InboxItemType;
+  itemId: string;
+  status: InboxItemStatus;
+  snoozeUntil?: string;
+  dismissedAt?: string;
+  doneAt?: string;
+}): InboxItemState {
+  const now = new Date().toISOString();
+  // Auto-derive timestamps from status when not explicitly provided.
+  const dismissedAt = opts.dismissedAt ?? (opts.status === "dismissed" ? now : null);
+  const doneAt = opts.doneAt ?? (opts.status === "done" ? now : null);
+  const snoozeUntil = opts.snoozeUntil ?? null;
+
+  // SQLite upsert via UNIQUE(userId, itemType, itemId).
+  const row = getDb()
+    .prepare<InboxItemStateRow, (string | null)[]>(
+      `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(userId, itemType, itemId) DO UPDATE SET
+         status = excluded.status,
+         snoozeUntil = excluded.snoozeUntil,
+         dismissedAt = excluded.dismissedAt,
+         doneAt = excluded.doneAt,
+         lastUpdatedAt = excluded.lastUpdatedAt
+       RETURNING *`,
+    )
+    .get(
+      opts.userId,
+      opts.itemType,
+      opts.itemId,
+      opts.status,
+      snoozeUntil,
+      dismissedAt,
+      doneAt,
+      now,
+      now,
+    );
+  if (!row) throw new Error("Failed to upsert inbox state");
+  return rowToInboxItemState(row);
+}
+
+// ============================================================================
+// Task Templates ("To start" bucket — polymorphic starters registry)
+// ============================================================================
+
+interface TaskTemplateRow {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+  kind: string;
+  payload: string;
+  category: string | null;
+  tags: string;
+  createdAt: string;
+}
+
+function rowToTaskTemplate(row: TaskTemplateRow): TaskTemplate {
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = JSON.parse(row.payload);
+  } catch {}
+  let tags: string[] = [];
+  try {
+    tags = JSON.parse(row.tags);
+  } catch {}
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    prompt: row.prompt,
+    kind: row.kind as TaskTemplateKind,
+    payload,
+    category: row.category ?? undefined,
+    tags,
+    createdAt: row.createdAt,
+  };
+}
+
+export function listTaskTemplates(opts?: {
+  category?: string;
+  kind?: TaskTemplateKind;
+  query?: string;
+}): TaskTemplate[] {
+  const conditions: string[] = [];
+  const params: string[] = [];
+
+  if (opts?.category) {
+    conditions.push("category = ?");
+    params.push(opts.category);
+  }
+  if (opts?.kind) {
+    conditions.push("kind = ?");
+    params.push(opts.kind);
+  }
+  if (opts?.query && opts.query.trim().length > 0) {
+    // Case-insensitive LIKE match against title OR description, single
+    // parameter-bound WHERE clause to prevent injection.
+    conditions.push("(LOWER(title) LIKE ? OR LOWER(description) LIKE ?)");
+    const needle = `%${opts.query.toLowerCase()}%`;
+    params.push(needle, needle);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  return getDb()
+    .prepare<TaskTemplateRow, string[]>(`SELECT * FROM task_templates ${where} ORDER BY createdAt`)
+    .all(...params)
+    .map(rowToTaskTemplate);
+}
+
+// ============================================================================
+// Sessions — root task chain + recent-sessions list
+// ============================================================================
+
+/**
+ * Walk the parent→child chain rooted at `rootTaskId` via recursive CTE.
+ * Returns the chain ordered by `createdAt` (so the root is first; siblings
+ * appear in creation order; grand-children after their parents).
+ */
+export function getRootTaskChain(rootTaskId: string): AgentTask[] {
+  const rows = getDb()
+    .prepare<AgentTaskRow, string>(
+      `WITH RECURSIVE chain(id) AS (
+         SELECT id FROM agent_tasks WHERE id = ?
+         UNION ALL
+         SELECT t.id FROM agent_tasks t
+         JOIN chain c ON t.parentTaskId = c.id
+       )
+       SELECT t.* FROM agent_tasks t
+       JOIN chain ON chain.id = t.id
+       ORDER BY t.createdAt`,
+    )
+    .all(rootTaskId);
+  return rows.map(rowToAgentTask);
+}
+
+export interface SessionListItem {
+  root: AgentTask;
+  chainTaskCount: number;
+  lastActivityAt: string;
+  latestStatus: AgentTaskStatus;
+}
+
+/**
+ * List the most recent sessions ordered by chain-wide latest activity.
+ * A "session" here is any task with `parentTaskId IS NULL` — its descendants
+ * (children, grand-children, …) are summarized via the recursive CTE.
+ *
+ * `lastActivityAt` is `MAX(t.lastUpdatedAt)` over the entire chain rooted at
+ * the candidate task, computed as a correlated subquery so the outer ORDER
+ * BY can sort against it.
+ */
+export function listRecentSessions(opts?: {
+  limit?: number;
+  offset?: number;
+  /** Filter to root tasks whose `source` is in this list. Empty/undefined → no source filter. */
+  source?: string[];
+  /** Case-insensitive substring match against `r.task`. */
+  q?: string;
+}): SessionListItem[] {
+  const limit = opts?.limit ?? 25;
+  const offset = opts?.offset ?? 0;
+  const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
+  const q = opts?.q?.trim();
+
+  const conditions: string[] = ["r.parentTaskId IS NULL"];
+  const params: (string | number)[] = [];
+
+  if (sources.length > 0) {
+    conditions.push(`r.source IN (${sources.map(() => "?").join(", ")})`);
+    params.push(...sources);
+  }
+  if (q && q.length > 0) {
+    conditions.push("lower(r.task) LIKE ?");
+    params.push(`%${q.toLowerCase()}%`);
+  }
+  params.push(limit, offset);
+
+  const rootRows = getDb()
+    .prepare<
+      AgentTaskRow & { __chainCount: number; __lastActivityAt: string; __latestStatus: string },
+      typeof params
+    >(
+      `SELECT
+         r.*,
+         (SELECT COUNT(*) FROM agent_tasks d
+            WHERE d.id IN (
+              WITH RECURSIVE chain(id) AS (
+                SELECT r.id
+                UNION ALL
+                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
+              )
+              SELECT id FROM chain
+            )
+         ) AS __chainCount,
+         (SELECT MAX(d.lastUpdatedAt) FROM agent_tasks d
+            WHERE d.id IN (
+              WITH RECURSIVE chain(id) AS (
+                SELECT r.id
+                UNION ALL
+                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
+              )
+              SELECT id FROM chain
+            )
+         ) AS __lastActivityAt,
+         (SELECT d.status FROM agent_tasks d
+            WHERE d.id IN (
+              WITH RECURSIVE chain(id) AS (
+                SELECT r.id
+                UNION ALL
+                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
+              )
+              SELECT id FROM chain
+            )
+            ORDER BY d.lastUpdatedAt DESC
+            LIMIT 1
+         ) AS __latestStatus
+       FROM agent_tasks r
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY __lastActivityAt DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...params);
+
+  return rootRows.map((row) => {
+    const { __chainCount, __lastActivityAt, __latestStatus, ...taskRow } = row;
+    return {
+      root: rowToAgentTask(taskRow as AgentTaskRow),
+      chainTaskCount: __chainCount,
+      lastActivityAt: __lastActivityAt ?? row.lastUpdatedAt,
+      latestStatus: (__latestStatus as AgentTaskStatus) ?? row.status,
+    };
+  });
+}
+
+// ============================================================================
 // Budgets, daily-spend aggregation, and budget-refusal notifications (Phase 2)
 // ----------------------------------------------------------------------------
 // `budgets` and `budget_refusal_notifications` use INTEGER epoch-ms for their
@@ -8874,4 +9363,79 @@ export function setBudgetRefusalFollowUpTaskId(
       "UPDATE budget_refusal_notifications SET follow_up_task_id = ? WHERE task_id = ? AND date = ?",
     )
     .run(followUpTaskId, taskId, date);
+}
+
+// ============================================================================
+// /status helpers — instance activity + first-task milestone
+// ============================================================================
+
+/**
+ * Count agents that have heartbeated within the last `minutes` minutes,
+ * grouped by lead/worker. Used by the `workers` setup milestone on
+ * `GET /status` to flip from `configured` → `verified` only when both a lead
+ * and at least one worker are alive.
+ *
+ * "Recent" defaults to 5 minutes — a multiple of `ACTIVITY_THROTTLE_MS = 5_000`
+ * (`src/providers/swarm-events-shared.ts:48-49`) plus margin for missed
+ * heartbeats. Agents with `status = 'offline'` are excluded.
+ */
+export function getLiveAgentCounts(minutes: number = 5): {
+  leads_alive: number;
+  workers_alive: number;
+} {
+  const row = getDb()
+    .prepare<{ leads_alive: number | null; workers_alive: number | null }, [number]>(
+      `SELECT
+         SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads_alive,
+         SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers_alive
+       FROM agents
+       WHERE lastActivityAt IS NOT NULL
+         AND lastActivityAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?1 || ' minutes')
+         AND status != 'offline'`,
+    )
+    .get(minutes);
+  return {
+    leads_alive: row?.leads_alive ?? 0,
+    workers_alive: row?.workers_alive ?? 0,
+  };
+}
+
+/**
+ * Aggregate activity numbers for `GET /status`'s `activity` block.
+ * - `agents_online` / `leads_online`: heartbeated within the last 5 minutes.
+ * - `recent_tasks_count`: agent_tasks rows created in the last 24 hours.
+ *
+ * `agents_online` reports total alive agents (leads + workers) so the home
+ * page can show a single "online" stat without summing on the client.
+ */
+export function getInstanceActivity(): {
+  agents_online: number;
+  leads_online: number;
+  recent_tasks_count: number;
+} {
+  const { leads_alive, workers_alive } = getLiveAgentCounts(5);
+  const tasksRow = getDb()
+    .prepare<{ count: number }, []>(
+      `SELECT COUNT(*) AS count FROM agent_tasks
+       WHERE createdAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')`,
+    )
+    .get();
+  return {
+    agents_online: leads_alive + workers_alive,
+    leads_online: leads_alive,
+    recent_tasks_count: tasksRow?.count ?? 0,
+  };
+}
+
+/**
+ * `first_task` milestone: true once any task has reached `status = 'completed'`.
+ * Cheap LIMIT 1 probe; the row's contents don't matter, only existence.
+ */
+export function hasFirstCompletedTask(): boolean {
+  const row = getDb()
+    .prepare<{ one: number }, []>(
+      `SELECT 1 AS one FROM agent_tasks WHERE status = 'completed' LIMIT 1`,
+    )
+    .get();
+  return row !== null;
 }

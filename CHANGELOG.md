@@ -6,6 +6,99 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.77.3] - 2026-05-12
+
+### Fixed
+- **Codex adapter rate-limit handling** (b5023b08) — adapter now backs off cleanly on Codex rate-limit errors instead of bubbling them up as task failures.
+
+## [1.77.2] - 2026-05-12
+
+### Added
+- **Worker reports `latest_model` to the API** (175c579d) — `buildLatestModelReport` + `reportLatestModel` (`src/commands/provider-credentials.ts`) post the worker's effective model to `PUT /api/agents/{id}/credential-status` along with provenance (`task` / `agent_config` / `custom` / `adapter_default`). Surfaces in the dashboard so operators can see which model a worker is actually running per task.
+
+## [1.77.1] - 2026-05-12
+
+### Changed
+- **Pretty-printed runner progress for `pi` and `codex` harnesses** (55e3b1ea) — runner now emits compact, human-readable progress lines for tool-call events from non-Claude harnesses instead of raw JSON.
+
+## [1.77.0] - 2026-05-12
+
+### Added
+- **Live env reload from `swarm_config`** (314168b4) — runner re-reads `MODEL_OVERRIDE` and `AGENT_FS_SHARED_ORG_ID` from `swarm_config` on every poll tick and applies them to `process.env` mid-flight. Other env keys (boot identity, credential-pool members, paired-state values, OS-level vars) are intentionally **not** reloadable — see the `RELOADABLE_ENV_KEYS` list in `src/commands/runner.ts` for the rationale per category.
+- **Provider can flip mid-credential-wait** (`src/commands/credential-wait.ts`) — `awaitCredentials` now accepts an optional `getProvider()` callback that is re-read on every tick. An operator flipping `HARNESS_PROVIDER` in `swarm_config` while a worker is parked in `waiting_for_credentials` now actually pivots the predicate, no container restart needed.
+
+### Changed
+- **`Dockerfile.worker` size optimization** (314168b4) — eliminated the multi-GB `chown -R worker:worker /home/worker` layer that was duplicating the entire `$HOME` tree. Root-side installs (`npm install`, `qa-use install-deps`, `playwright install`) now run with `HOME=/root` + `NPM_CONFIG_CACHE=/tmp/npm-cache` + `PLAYWRIGHT_BROWSERS_PATH=/opt/playwright` overrides inline, so caches never land in `/home/worker`. Adds extensive npm `overrides` for transitive bloaters (`chromadb`, `chromadb-default-embed`, `@xenova/transformers`, `tree-sitter-wasms`, `web-tree-sitter`, `cohere-ai`, `voyageai`, `ollama`) — all stubbed via `npm:empty-npm-package@1.0.0`. Bumps `@desplega.ai/qa-use` 2.17.0 → 2.18.0 and `@desplega.ai/agent-fs` 0.5.1 → 0.5.3. Full rationale in [`runbooks/docker-images.md`](./runbooks/docker-images.md).
+- **opencode plugin: vendored `lib/` helpers + Dockerfile COPY** (#460) — opencode's plugin loader runs inside its own bundled Bun runtime which only exposes `@opencode-ai/{plugin,sdk}`. Session-summary helpers (`opencode-auth.ts`, `summarize.ts`) are now vendored under `plugin/opencode-plugins/lib/` and copied into `/home/worker/.config/opencode/plugins/lib/` by `Dockerfile.worker` so the plugin's relative imports resolve.
+
+### Fixed
+- **Session summarization across worker harness providers (claude, pi, opencode, codex)** (#460) — extracts a single shared `internal-ai` abstraction (`src/utils/internal-ai/`) for structured-output LLM calls, with a credential resolver that handles `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → Codex OAuth → `CLAUDE_CODE_OAUTH_TOKEN` precedence. All four worker harnesses now use it for end-of-session summarization:
+  - **claude** (`src/hooks/hook.ts`) — Stop hook now goes through `summarizeSession` from `internal-ai` instead of the OpenRouter-only `runMemoryRater`. Pro/Max OAuth users with no OpenRouter key keep working via the `claude -p --json-schema` fallback. The wrapper now passes `--json-schema` AND appends the schema inline to the user prompt, with a tolerant `stripJsonFences` parser (defense-in-depth) — fixes the earlier silent failure where `JSON.parse("No significant learnings.")` always threw and dropped every summary. `claude-adapter` mirrors `CLAUDE_CODE_OAUTH_TOKEN` to `AGENT_SWARM_CLAUDE_OAUTH_TOKEN` to survive Claude CLI's hook env-stripping.
+  - **pi** (`src/providers/pi-mono-extension.ts`) — migrated off the previous direct-rater path onto the shared wrapper, with explicit DI for testability.
+  - **opencode** (`plugin/opencode-plugins/agent-swarm.ts`) — replaced the dead `claude -p` shellout (which always ran with `sessionFile=undefined` in production) with an SDK-sourced transcript fetched at `session.idle` time, flattened to text + completed tool calls only. Plugin uses a new opencode-specific credential resolver that reads `~/.local/share/opencode/auth.json` (ApiAuth / WellKnownAuth / anthropic OAuth with refresh + persist) plus env vars.
+  - **codex** (`src/providers/codex-adapter.ts`) — codex now buffers its transcript and runs the same shared session-summary call at session end.
+
+### Removed
+- **`--ai-loop` CLI flag** (`src/cli.tsx`) — removed from `worker` and `lead` commands. The legacy AI-based polling mode it gated has been the default for some time; the flag was a no-op carry-over.
+
+## [1.76.0] - 2026-05-10
+
+### Added
+- **Sessions UI + new tables/endpoints — Phases 1–3 + Sessions experience** (#455) — full session-as-first-class-citizen rework of the dashboard backed by four new HTTP routes and three new migrations.
+  - **Phase 1 — source enum cleanup + `requestedByUserId` + 1.76.0 bump**: migration `056_drop_agent_tasks_source_check.sql` (table-rebuild) drops the `agent_tasks.source` SQL CHECK constraint in favor of Zod `AgentTaskSourceSchema` validation in `src/http/tasks.ts`. Preserves the `requestedByUserId → users(id)` FK and post-043 provider/providerMeta columns. Migration-runner regression test flipped from CHECK-throws to Zod-rejects (HTTP 400). `openapi.json` + `docs-site/content/docs/api-reference/**` regenerated for the bump.
+  - **Phase 2 — new tables + endpoints**: migrations `057_inbox_item_state.sql` and `058_task_templates.sql` (with v2-aware `kind`/`payload` polymorphism + 5 seed rows). New Zod schemas in `src/types.ts`: `InboxItemTypeSchema`, `InboxItemStatusSchema`, `InboxItemStateSchema`, `TaskTemplateSchema`. New DB helpers: `listInboxState`, `upsertInboxState`, `listTaskTemplates`, `getRootTaskChain` (recursive CTE), `listRecentSessions`. `getAllTasks` now accepts `string | string[]` status (CSV-friendly) + `createdAfter` ISO filter.
+    Four new HTTP route files via the `route()` factory (auto-registered in OpenAPI):
+    - `src/http/users.ts` → `GET / POST / PUT /api/users` (3 endpoints)
+    - `src/http/sessions.ts` → `GET /api/sessions`, `GET /api/sessions/{rootTaskId}` (2 endpoints)
+    - `src/http/inbox-state.ts` → `GET, PATCH /api/inbox-state` (2 endpoints)
+    - `src/http/task-templates.ts` → `GET /api/task-templates` (kind + query + category filters)
+    Existing `POST /api/tasks` is now tolerant of unknown `requestedByUserId` (coerces to `NULL` + warn instead of FK 500). `GET /api/tasks` accepts CSV `status` and `createdAfter` filters.
+  - **Phase 3 — identity boot gate + `parentTaskId` / `requestedByUserId` plumbing**: composer follow-ups now route correctly via the lead by default for any task without an explicit `agentId` (drops the `!parentTaskId` guard). UI composer follow-ups are no longer left unassigned.
+  - **Sessions UI**: brand-new `/sessions` route with `SessionsShell`, `SessionTimeline`, collapsible `ParallelGroup`, `TaskCard` (passive — opens `TaskDetailSheet` via Maximize2 button), `<OutcomeBlock>` with copy-to-clipboard, Markdown-rendered failure / output sections (via `<Streamdown>`), session timeline showing the actual requesting user name resolved from `useUsers` cache, "Session start" badge, and an Eye-off toggle to hide system tasks (default hidden, count surfaced in tooltip, persisted under `agent-swarm-sessions-show-system`). Session detail page at `/sessions/[rootTaskId]`.
+- **`HARNESS_PROVIDER` overridable via `swarm_config` (live reconcile)** (#455) — workers now resolve their effective harness from `swarm_config` (repo > agent > global) overlaid on `process.env`, defaulting to `"claude"`. Poll loop re-fetches every ~10s and swaps the adapter live (with `basePrompt` rebuild) when the resolved value changes — operators flip a worker's provider from the dashboard without restarting. Symmetric to `MODEL_OVERRIDE` precedence. `PATCH /api/agents/{id}/harness-provider` now mirrors its value into a `swarm_config` row at `scope=agent`. New `validateConfigValue` guard rejects invalid `HARNESS_PROVIDER` values at write time (HTTP 400 + MCP error). `docker-entrypoint.sh` skips `HARNESS_PROVIDER` when baking config to env (so a deleted `swarm_config` row isn't shadowed by a stale env value). 17 new tests in `harness-provider-resolution.test.ts` + PATCH side-effect coverage; E2E in docker covers boot default → PUT swarm_config → PATCH route → DELETE fallback to env.
+- **Cloud personalization & adaptive home — phases 1–4** (#452) — agent-swarm now feels like *your* deployment from the moment a user opens it.
+  - **Phase 1 + 1.5 + 1.6** — `GET /status` (identity + 7 setup milestones + activity + agent_fs), `POST /status/test-connection` for live harness verification, new `HomePage` at `/` (legacy `DashboardPage` demoted to `/dashboard`), per-agent `harness_provider` column (migration 054), iteration & polish (sidebar branding, OAuth-aware credential validation, harness column on `/agents`, demo seed script, [Personalization & Status guide](docs-site/.../guides/personalization.mdx)).
+  - **Phase 2** — additive `health` rollup on `/status`, `StatusContext` that dedupes fetches, `AppHeader` health badge polling every 30s with Page Visibility pause, cloud-aware Docs/Support/Billing menu items in the swarm switcher, subtle self-host marketing footer.
+  - **Phase 3** — `template-recommendations.ts` maps detected integrations to starter templates (`slack+github` → `pr-triage`, `linear+github` → `issue-to-pr`, `jira` → `bug-intake`, fallback → `hello-world`). Empty states on `/templates`, `/tasks`, `/workflows` plus a "First steps" card on home. Four template stubs land under `templates/official/`.
+  - **Phase 4** — `useDismissibleCard` hook namespaced by `apiUrl` (storage key `swarm:v1:${apiUrl}:${cardKey}`), welcome card on home, per-milestone collapse, and tour-completion full-section collapse once the four MVP milestones have each been verified at least once.
+  - New cloud envs: `SWARM_CLOUD`, `SWARM_ORG_NAME`, `SWARM_ORG_LOGO_URL`, `SWARM_BRAND_COLOR`, `SWARM_MARKETING_URL`, `SWARM_HIDE_CLOUD_PROMO`, `SWARM_VERIFY_TTL_MS`. Worker-side `HARNESS_PROVIDER` is now reported on register and drives the harness milestone.
+
+### Changed
+- **Slack manifest scopes trimmed for App Directory submission** (#454) — drops 4 redundant bot scopes (`chat:write.public`, `mpim:read` / `mpim:history` / `mpim:write`) and the matching `message.mpim` event. Group-DM support isn't used by any handler in `src/slack/`, and reviewers prefer explicit bot invites over `chat:write.public`. Also flips `token_rotation_enabled` to `true` (marketplace requirement). Socket mode preserved — HTTP migration is a separate PR.
+- **Memory rater — Stop-hook summarizer swapped to OpenRouter SDK** (#450) — the sub-`claude` CLI piggyback path silently produced "Not logged in · Please run /login" rows after the 2026-05-05 `CLAUDE_CODE_VERSION` bump (2.1.112 → 2.1.126) stopped propagating `CLAUDE_CODE_OAUTH_TOKEN` to hook subprocesses (0 LLM rater rows ever, 417 garbage session-summary rows over 2 days). Replaced with a Vercel AI SDK `generateObject` call against OpenRouter — schema-validated `{summary, ratings}` output, no manual envelope/fence parsing. Default model: `google/gemini-3-flash-preview` (Gemini 3 Flash via OpenRouter — materially cheaper than Haiku 4.5: $0.5/M input + $3/M completion vs $1/M + $5/M). Override via `MEMORY_RATER_LLM_MODEL`. **No-op when `OPENROUTER_API_KEY` is unset** — self-hosters / OSS users skip session summary + LLM ratings entirely rather than falling back to the broken claude path. Drops 251 LOC of dead JSON-fence parsing code (`parseSummaryWithRatings`, `extractSummaryFromClaudeStdout`, `tryParseLooseJson`).
+- **Worker self-reports `cred_status`** (b89d6a06) — credentials adapter import removed from the API bundle; the worker reports its credential status directly via `PUT /api/agents/{id}/credential-status` instead of having the API duplicate provider-specific resolution logic. Reduces API bundle size and keeps provider knowledge worker-side.
+- **Status: harness milestone is fleet-derived** (6561b6cb) — `GET /status` no longer reads `process.env.HARNESS_PROVIDER` on the API process (a worker-side env var). Instead it derives the milestone from the registered worker fleet — surfaces a clear "No workers registered with `HARNESS_PROVIDER=…`" hint when the live-test target has no agents.
+
+### Fixed
+- **Memory rater dedupes scheduled-task self-similar memories** (#451) — scheduled tasks fire byte-identical `task.task` text every run, and task-completion memories are named `Task: ${task.task.slice(0, 80)}`. The previous LLM rater scored 5+ near-clones at +1.0 each in one cron pass, inflating `alpha` 5x in a single session. New `dedupeRetrievalsForRater` in the Stop hook keeps the freshest occurrence per memory name. Includes regression tests (5 cron clones + 1 distinct → 2 rows).
+- **Codex creds: `~/.codex/auth.json` is a valid live-test bypass** (8d06bc53) — the harness milestone live-test now treats the on-disk Codex auth file as a successful credential bypass, matching the documented Codex provider precedence (OAuth file > API key).
+- **Memory rater Stop-hook regression chain** (#444, #445, #447) — the LLM piggyback rater introduced in #429 had been silent in production since deploy. Three follow-ups landed the fix:
+  - **#444** — gate-trace logging in the Stop hook to expose which precondition was failing
+  - **#445** — pass `taskId` via `AGENT_SWARM_TASK_ID` (and `AGENT_SWARM_AGENT_ID`) env vars instead of relying on the on-disk `TASK_FILE`. The file disappeared mid-session in production, so `Bun.file().text()` threw ENOENT; the catch swallowed it and `taskId` stayed undefined, which short-circuited `fetchRetrievalsForTask`
+  - **#447** — tolerant JSON parser (`tryParseLooseJson`) for Haiku output that occasionally wrapped the inner `result` in ` ```json ` fences or prefixed it with a short prose preamble. Strict `JSON.parse` rejected those shapes; the new helper strips fences and falls back to first-`{` / last-`}` slicing. The summarizer prompt also got an explicit no-fences / no-preamble directive as defense-in-depth. Includes regression tests for both `parseSummaryWithRatings` and `extractSummaryFromClaudeStdout`
+
+### Changed
+- **`Dockerfile.worker`** — bumped `CODEX_VERSION` from 0.125.0 to 0.128.0; matching `@openai/codex-sdk` bump from `^0.125.0` to `^0.128.0` in `package.json` (#442)
+- **`Dockerfile.worker`** — `@desplega.ai/qa-use` bumped to 2.17.0 to dodge a `workspace:*` resolution failure in 2.15.3 that broke uncached Docker Build CI; pinned `@huggingface/hub` to 2.11.0 via npm overrides to work around `@huggingface/xetchunk-wasm@0.0.4` shipping unpublished `workspace:*` siblings. Switched the global-tool install pattern from `npm install -g` to staging-dir install + symlink-to-`/usr/local/bin` so the override applies (#447)
+
+## [1.75.0] - 2026-05-06
+
+### Added
+- **Memory rater v1.5 — completion (steps 4–7)**:
+  - **Step 4 (#429)** — `LlmRater` (`src/be/memory/raters/llm.ts`) that piggybacks on the existing Stop-hook session-summary Haiku call. When `MEMORY_LLM_RATER_ENABLED=true` the summarizer prompt is augmented to also rate retrieved memories `useful: true | false`; ratings are POSTed to `/api/memory/rate` with `source: "llm"`. Zero extra LLM round-trips on the worker hot path
+  - **Step 5 (#428)** — `memory_rate` MCP tool. Agents can record explicit usefulness ratings on a retrieved memory in their current task (`useful`, optional short `note`, optional `referencesSource` external pointer). Spam-guarded by the `memory_retrieval` row produced when the memory was surfaced; out-of-task calls are rejected. Wired through the worker `ExplicitSelfRatingRater` and surfaced in the runner-injected memory recall prompt (`src/prompts/memories.ts`)
+  - **Step 6 (#436)** — `referencesSource` edges. The optional free-form `<source>:<identifier>` field on `memory_rate` (e.g. `github:owner/repo#N`, `linear:KEY-N`, `customer:<slug>`, `slack:<channel>:<ts>`) creates/updates an edge from the rated memory to the external artifact it cites. Sanitized for NUL bytes and control characters
+  - **Step 7 (#440)** — v1.5 capstone: docs + business-use flow instrumentation + cross-cutting end-to-end tests covering the implicit-citation, llm, and explicit-self rater paths. `MCP.md` regenerated to surface the new `memory_rate` tool entry
+- **Worker credential safe-loop** (#441) — workers no longer crash-loop when harness credentials are missing. The TypeScript-level `awaitCredentials` (`src/commands/credential-wait.ts`) replaces the bash-level fail-fast in `docker-entrypoint.sh`. The container always boots, calls `join-swarm`, and parks in a `waiting_for_credentials` agent status while polling `swarm_config` for the missing variables. Status is reported via `PUT /api/agents/{id}/credential-status`; the dispatcher's `getIdleWorkersWithCapacity` predicate already excludes non-`idle` workers, so blocked agents are routed around without any extra condition. Self-heals as soon as the credential lands — no container restart required. The single hard exit retained is `API_KEY` (without it the worker can't talk to the API at all)
+
+### Changed
+- **`new-ui` directory renamed to `ui`** (a2e86719) — README, configs, and CI workflows updated to reference the canonical `ui/` path. Standalone landing site removed (60bb0ea8) in favor of the rewritten `agent-swarm.dev` (#438)
+- **`new-ui` design system migration** (#439) — tokens, primitives, and composition layer for the dashboard. Lays groundwork for shared-component reuse across the dashboard, templates UI, and docs site
+- **Landing v2 — Coordination Intelligence rewrite of `agent-swarm.dev`** (#438)
+
+### Fixed
+- **Thin meta descriptions across landing & docs pages** (#433) — automated SEO pass expanded short/missing meta descriptions to improve search snippets
+
 ## [1.74.4] - 2026-05-06
 
 ### Added

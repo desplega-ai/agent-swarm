@@ -1,7 +1,6 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import {
-  createTaskExtended,
   getAgentById,
   getAgentWorkingOnThread,
   getLeadAgent,

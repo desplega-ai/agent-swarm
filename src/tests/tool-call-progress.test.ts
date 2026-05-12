@@ -175,6 +175,50 @@ describe("toolCallToProgress", () => {
     expect(result).toBe("🔌 context7: Query docs");
   });
 
+  // --- Provider-normalized MCP variants ---
+
+  test("bare agent-swarm store-progress is skipped", () => {
+    expect(toolCallToProgress("store-progress", {})).toBeNull();
+  });
+
+  test("bare agent-swarm send-task has pretty label", () => {
+    const result = toolCallToProgress("send-task", {});
+    expect(result).toBe("📤 Delegating task");
+  });
+
+  test("bare agent-swarm db-query has pretty label", () => {
+    const result = toolCallToProgress("db-query", {});
+    expect(result).toBe("🗃️ Querying database");
+  });
+
+  test("codex MCP args with agent-swarm server use pretty labels", () => {
+    const result = toolCallToProgress("send-task", {
+      server: "agent-swarm",
+      tool: "send-task",
+      arguments: { task: "ping" },
+    });
+    expect(result).toBe("📤 Delegating task");
+  });
+
+  test("codex MCP args with agent-swarm store-progress are skipped", () => {
+    expect(
+      toolCallToProgress("store-progress", {
+        server: "agent-swarm",
+        tool: "store-progress",
+        arguments: { status: "completed" },
+      }),
+    ).toBeNull();
+  });
+
+  test("codex MCP args with external server keep server prefix", () => {
+    const result = toolCallToProgress("list-issues", {
+      server: "linear",
+      tool: "list-issues",
+      arguments: {},
+    });
+    expect(result).toBe("🔌 linear: List issues");
+  });
+
   // --- Short path helper (tested implicitly) ---
 
   test("Read with short path (<=2 segments) keeps full path", () => {

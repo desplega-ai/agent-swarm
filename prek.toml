@@ -57,19 +57,19 @@ stages = ["pre-push"]
 repo = "local"
 
 [[repos.hooks]]
-id = "new-ui-lint"
-name = "New UI Biome lint"
+id = "ui-lint"
+name = "UI Biome lint"
 language = "system"
-entry = "bash -c 'cd new-ui && pnpm lint'"
-files = "^new-ui/"
+entry = "bash -c 'cd ui && pnpm lint'"
+files = "^ui/"
 pass_filenames = false
 stages = ["pre-push"]
 
 [[repos.hooks]]
-id = "new-ui-typecheck"
-name = "New UI TypeScript type check"
+id = "ui-typecheck"
+name = "UI TypeScript type check"
 language = "system"
-entry = "bash -c 'cd new-ui && pnpm exec tsc -b'"
-files = "^new-ui/"
+entry = "bash -c 'cd ui && pnpm exec tsc -b'"
+files = "^ui/"
 pass_filenames = false
 stages = ["pre-push"]

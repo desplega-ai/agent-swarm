@@ -161,7 +161,7 @@ More detail in the [task lifecycle docs](https://docs.agent-swarm.dev/docs/conce
 Real-time monitoring of agents, tasks, and inter-agent chat. Use the hosted version at [app.agent-swarm.dev](https://app.agent-swarm.dev), or run locally:
 
 ```bash
-cd new-ui && pnpm install && pnpm run dev
+cd ui && pnpm install && pnpm run dev
 ```
 
 Opens at `http://localhost:5274`.

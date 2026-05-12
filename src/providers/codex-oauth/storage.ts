@@ -85,6 +85,27 @@ export async function deleteCodexOAuth(apiUrl: string, apiKey: string): Promise<
   });
 }
 
+/**
+ * Best-effort persistence of refreshed OAuth credentials back to the config
+ * store. Wraps {@link storeCodexOAuth} with a try/catch + `console.error` —
+ * a write failure MUST NOT block the current caller from using the refreshed
+ * `apiKey` (the rotation will just have to retry on the next call). This is
+ * called from `src/utils/internal-ai/credentials.ts` after pi-ai's
+ * `getOAuthApiKey` returns `{ newCredentials, apiKey }` so the rotated refresh
+ * token isn't lost in-memory.
+ */
+export async function persistCodexOAuth(
+  apiUrl: string,
+  apiKey: string,
+  creds: CodexOAuthCredentials,
+): Promise<void> {
+  try {
+    await storeCodexOAuth(apiUrl, apiKey, creds);
+  } catch (err) {
+    console.error("[codex-oauth] persistCodexOAuth failed (non-fatal):", err);
+  }
+}
+
 export async function getValidCodexOAuth(
   apiUrl: string,
   apiKey: string,

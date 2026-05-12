@@ -13,14 +13,14 @@ The memory system was redesigned in [#212](https://github.com/desplega-ai/agent-
 
 Every agent has a searchable memory backed by embeddings and stored in SQLite. The system is built on two provider abstractions:
 
-- **`EmbeddingProvider`** — Converts text to vectors. Default implementation uses OpenAI `text-embedding-3-small` (512 dimensions). Swappable for other providers.
+- **`EmbeddingProvider`** — Converts text to vectors. Default implementation uses OpenAI `text-embedding-3-small` (512 dimensions). The model, dimensions, API key, and base URL are configurable via `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_API_KEY`, and `EMBEDDING_API_BASE_URL` — point it at any OpenAI-compatible endpoint (Azure OpenAI, Together, vLLM, Ollama, etc.). Swappable for other providers in code.
 - **`MemoryStore`** — Persists and retrieves memories. Default implementation uses SQLite with [sqlite-vec](https://alexgarcia.xyz/sqlite-vec/) for KNN vector search. Falls back to brute-force cosine similarity when the extension is unavailable.
 
 ### Memory Sources
 
 Memories are automatically created from:
 
-- **Session summaries** — At the end of each session, a lightweight model (Haiku) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories.
+- **Session summaries** — At the end of each session, a lightweight model (default: Gemini 3 Flash via OpenRouter, configurable through `MEMORY_RATER_LLM_MODEL`) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories. Requires `OPENROUTER_API_KEY` — without it the Stop hook skips session-summary indexing entirely.
 - **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
 - **File-based notes** — Agents write to `/workspace/personal/memory/` in their per-agent directory. Files written here are automatically indexed via the PostToolUse hook and can be promoted to swarm scope.
 - **Lead-to-worker injection** — The lead agent can push specific learnings into any worker's memory using the `inject-learning` tool, closing the feedback loop.
@@ -83,6 +83,7 @@ Agents can search and manage memories using MCP tools:
 - **`memory-search`** — Search with natural language queries. Returns reranked results.
 - **`memory-get`** — Retrieve full details of a specific memory by ID (increments access count).
 - **`memory-delete`** — Delete a memory. Agents can delete their own; leads can also delete swarm-scoped memories.
+- **`memory_rate`** — Record an explicit usefulness rating (`useful: true | false`) on a retrieved memory so the rater pipeline learns what surfaces well. Optional `referencesSource` (free-form `<source>:<identifier>`, e.g. `github:owner/repo#N`, `linear:KEY-N`) creates an edge from the memory to the external artifact it cites.
 
 ## Writing Memories
 

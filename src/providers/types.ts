@@ -111,3 +111,37 @@ export interface ProviderAdapter {
   canResume(sessionId: string): Promise<boolean>;
   formatCommand(commandName: string): string;
 }
+
+/**
+ * Status returned by per-adapter `checkCredentials(env, opts)` predicates.
+ *
+ * `ready=false` means the worker should park in the credential-wait loop
+ * (Phase 2). `missing` lists env-var names (or absolute file paths) the
+ * adapter would accept; the dashboard surfaces this list as the "blocked
+ * on …" hint.
+ *
+ * `satisfiedBy`:
+ * - `'env'` — env-var(s) directly satisfy the adapter
+ * - `'file'` — an existing on-disk auth.json was found
+ * - `'side-effect-pending'` — env-vars are present but a follow-up step
+ *   (e.g. `codex login --with-api-key`) still needs to run before the
+ *   adapter can use them. Workers should treat this as "ready" for the
+ *   purposes of the boot loop — the side-effect is the entrypoint's job.
+ */
+export interface CredStatus {
+  ready: boolean;
+  missing: string[];
+  satisfiedBy?: "env" | "file" | "side-effect-pending";
+  hint?: string;
+}
+
+/**
+ * Options threaded into `checkCredentials` for testability — the codex and
+ * pi/opencode predicates probe the filesystem for `~/.codex/auth.json`,
+ * `~/.pi/agent/auth.json`, `~/.local/share/opencode/auth.json`. Tests inject
+ * a fake `fs` + `homeDir` to exercise the file-vs-env branches deterministically.
+ */
+export interface CredCheckOptions {
+  homeDir?: string;
+  fs?: { existsSync(p: string): boolean };
+}

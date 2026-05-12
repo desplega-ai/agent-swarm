@@ -9,8 +9,12 @@ import {
   maskSecrets,
   upsertSwarmConfig,
 } from "../be/db";
-import { isReservedConfigKey, reservedKeyError } from "../be/swarm-config-guard";
-import { reloadGlobalConfigsAndIntegrations } from "./core";
+import {
+  isReservedConfigKey,
+  reservedKeyError,
+  validateConfigValue,
+} from "../be/swarm-config-guard";
+import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -100,7 +104,8 @@ const upsertConfig = route({
   method: "put",
   path: "/api/config",
   pattern: ["api", "config"],
-  summary: "Create or update a config entry (reserved env-only keys are rejected)",
+  summary:
+    "Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call.",
   tags: ["Config"],
   body: z.object({
     scope: z.enum(["global", "agent", "repo"]),
@@ -121,7 +126,8 @@ const deleteConfig = route({
   method: "delete",
   path: "/api/config/{id}",
   pattern: ["api", "config", null],
-  summary: "Delete a config entry by ID (including legacy reserved rows for cleanup)",
+  summary:
+    "Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload.",
   tags: ["Config"],
   params: z.object({ id: z.string() }),
   responses: {
@@ -230,6 +236,12 @@ export async function handleConfig(
       return true;
     }
 
+    const validationError = validateConfigValue(key, value);
+    if (validationError) {
+      jsonError(res, validationError, 400);
+      return true;
+    }
+
     try {
       const includeSecrets = queryParams.get("includeSecrets") === "true";
       const config = upsertSwarmConfig({
@@ -241,6 +253,13 @@ export async function handleConfig(
         envPath: envPath || null,
         description: description || null,
       });
+      // Auto-reload integrations when a global-scoped config changes so callers
+      // (CLI, automation, dashboard) don't have to remember to hit /reload.
+      // Debounced to coalesce sequential single-key upserts from the dashboard
+      // batch save (no bulk endpoint exists).
+      if (scope === "global") {
+        scheduleIntegrationsReload();
+      }
       const result = includeSecrets || !config.isSecret ? config : maskSecrets([config])[0];
       json(res, result);
     } catch (_error) {
@@ -261,6 +280,9 @@ export async function handleConfig(
     if (!deleted) {
       jsonError(res, "Config not found", 404);
       return true;
+    }
+    if (existing.scope === "global") {
+      scheduleIntegrationsReload();
     }
     json(res, { success: true });
     return true;

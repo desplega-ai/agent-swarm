@@ -179,8 +179,8 @@ describe("Tool Annotations & Classification", () => {
     expect(overlap).toEqual([]);
   });
 
-  test("CORE_TOOLS contains exactly 14 tools", () => {
-    expect(CORE_TOOLS.size).toBe(14);
+  test("CORE_TOOLS contains exactly 15 tools", () => {
+    expect(CORE_TOOLS.size).toBe(15);
   });
 
   test("ALL_TOOLS equals CORE_TOOLS union DEFERRED_TOOLS", () => {

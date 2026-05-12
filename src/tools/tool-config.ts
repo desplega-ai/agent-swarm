@@ -31,6 +31,7 @@ export const CORE_TOOLS = new Set([
   "memory-search", // recall relevant context
   "memory-get", // retrieve full memory content
   "memory-delete", // delete own memories
+  "memory_rate", // rate a memory used in this task (worker→server)
 
   // Swarm awareness
   "get-swarm", // check who's online

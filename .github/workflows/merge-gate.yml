@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.check.outputs.code }}
-      new-ui: ${{ steps.check.outputs.new-ui }}
+      ui: ${{ steps.check.outputs.ui }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,22 +25,22 @@ jobs:
         id: check
         run: |
           CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
-          CODE_CHANGED=$(echo "$CHANGED" | grep -v '^docs-site/' | grep -v '^landing/' | grep -v '^$' || true)
+          CODE_CHANGED=$(echo "$CHANGED" | grep -v '^docs-site/' | grep -v '^$' || true)
           if [ -n "$CODE_CHANGED" ]; then
             echo "code=true" >> $GITHUB_OUTPUT
             echo "Code files changed:"
             echo "$CODE_CHANGED"
           else
             echo "code=false" >> $GITHUB_OUTPUT
-            echo "No code files changed (only docs-site/ or landing/)"
+            echo "No code files changed (only docs-site/)"
           fi
-          UI_CHANGED=$(echo "$CHANGED" | grep '^new-ui/' || true)
+          UI_CHANGED=$(echo "$CHANGED" | grep '^ui/' || true)
           if [ -n "$UI_CHANGED" ]; then
-            echo "new-ui=true" >> $GITHUB_OUTPUT
-            echo "new-ui files changed:"
+            echo "ui=true" >> $GITHUB_OUTPUT
+            echo "ui files changed:"
             echo "$UI_CHANGED"
           else
-            echo "new-ui=false" >> $GITHUB_OUTPUT
+            echo "ui=false" >> $GITHUB_OUTPUT
           fi
 
   lint-and-typecheck:
@@ -185,14 +185,14 @@ jobs:
           push: false
           tags: test-image:latest
 
-  new-ui-lint:
-    name: New UI Lint and Type Check
+  ui-lint:
+    name: UI Lint and Type Check
     needs: detect-changes
-    if: needs.detect-changes.outputs.new-ui == 'true'
+    if: needs.detect-changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: new-ui
+        working-directory: ui
 
     steps:
       - name: Checkout repository
@@ -209,6 +209,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check design tokens (no raw color literals)
+        run: pnpm run check:tokens
+
       - name: Run Biome linter
         run: pnpm lint
 
@@ -217,7 +220,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, openapi-freshness, docker-build, new-ui-lint]
+    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, openapi-freshness, docker-build, ui-lint]
     if: always()
     runs-on: ubuntu-latest
 

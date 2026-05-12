@@ -84,7 +84,7 @@ const requests: SeedRequest[] = [
         description: `## Release notes
 
 - feat(providers): claude-managed harness provider
-- feat(new-ui): budgets + spend dashboard at \`/budgets\`
+- feat(ui): budgets + spend dashboard at \`/budgets\`
 - feat: per-agent + global daily cost budgets
 
 > Production cluster will be rolled in two waves. Rollback via \`pm2 restart\` if anomalies.`,

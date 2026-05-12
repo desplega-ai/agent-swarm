@@ -35,9 +35,7 @@
   },
   "exclude": [
     "ui",
-    "new-ui",
     "templates-ui",
-    "landing",
     "node_modules",
     "scripts",
     "src/tests",

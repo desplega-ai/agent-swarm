@@ -60,6 +60,8 @@ export function usefulness(alpha: number, beta: number): number {
  * Beta-Binomial usefulness. With default Beta(1,1) and default
  * MEMORY_DEMOTION_FLOOR=1.0, the usefulness factor is exactly 1.0 and this
  * computation matches the pre-rater behaviour byte-for-byte.
+ *
+ * v2: optional edge-aware boost — see thoughts/taras/plans/2026-05-05-memory-rater-v1.5/root.md
  */
 export function computeScore(candidate: MemoryCandidate, now: Date): number {
   return (

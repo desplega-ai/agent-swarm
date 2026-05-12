@@ -20,7 +20,7 @@ src/
     migrations/        # Forward-only SQL migrations
   prompts/             # System-prompt composition
   github/, slack/      # Integration handlers
-new-ui/                # Dashboard (Next.js, port 5274)
+ui/                    # Dashboard (Next.js, port 5274)
 templates-ui/          # Templates registry (Next.js)
 templates/             # Official + community template data
 docs-site/             # Fumadocs site (MDX)
@@ -127,6 +127,18 @@ See [BUSINESS_USE.md](./BUSINESS_USE.md) for flow diagrams. Flows: `task` (runId
 
 </important>
 
+<important if="you are editing Dockerfile or Dockerfile.worker, adding/bumping a global dep in /opt/global-deps, or trying to reduce image size">
+
+Rules + traps before you change anything: [runbooks/docker-images.md](./runbooks/docker-images.md).
+
+Top rules — internalize these before editing:
+- **Never `chown -R /home/worker` in its own layer** — it duplicates the full HOME (multi-GB layer). Either don't pollute HOME under `USER root`, or chown in the same RUN as the install.
+- **`ENV HOME=/home/worker` survives `USER root`** — `npm install` / `playwright install` / curl-pipe-bash under root will dump caches into `/home/worker/.{npm,cache}`. Override `HOME=/root` and redirect caches (`NPM_CONFIG_CACHE=/tmp/...`, `PLAYWRIGHT_BROWSERS_PATH=/opt/playwright`) inline, then clean in the same RUN.
+- **`npm overrides` only apply at the install root** — monorepo root overrides do NOT travel with packages published to npm. To stub a transitive bloater (e.g. chromadb, onnxruntime variants) for a globally-installed dep, put the override in `/opt/global-deps/package.json` inside the Dockerfile, not in the source repo.
+- Always measure: `docker history <img> --format "{{.Size}}\t{{.CreatedBy}}" | sort -h -r | head -10`.
+
+</important>
+
 <important if="you are writing code that logs, prints, stores, or transports sensitive values (secrets, tokens, OAuth creds, API keys, DB URLs, webhook payloads)">
 
 Any path emitting to logs, stdout/stderr, the `session_logs` table, or `/workspace/logs/*.jsonl` MUST go through `scrubSecrets` from `src/utils/secret-scrubber.ts` at the **egress** point. Never print raw env values, credential-pool entries, OAuth payloads, webhook bodies, or tool output that may embed tokens.
@@ -142,18 +154,18 @@ Full setup — env files, env vars, OAuth flows (Linear/Jira/Codex), portless de
 Quick reference:
 - Auth: `Authorization: Bearer ${API_KEY}` (default `123123`).
 - Server URL: `MCP_BASE_URL` (default `http://localhost:3013`).
-- Provider: `HARNESS_PROVIDER=claude|pi|codex|devin|claude-managed`. `claude-managed` runs in Anthropic's cloud sandbox — requires `ANTHROPIC_API_KEY`, `MANAGED_AGENT_ID`, `MANAGED_ENVIRONMENT_ID`, an HTTPS-public `MCP_BASE_URL`, and the one-time `bun run src/cli.tsx claude-managed-setup` step. The `new-ui/` integrations dashboard surfaces the same config (Phase 7). See [runbooks/local-development.md § Claude Managed Agents](./runbooks/local-development.md#claude-managed-agents).
+- Provider: `HARNESS_PROVIDER=claude|pi|codex|devin|claude-managed`. `claude-managed` runs in Anthropic's cloud sandbox — requires `ANTHROPIC_API_KEY`, `MANAGED_AGENT_ID`, `MANAGED_ENVIRONMENT_ID`, an HTTPS-public `MCP_BASE_URL`, and the one-time `bun run src/cli.tsx claude-managed-setup` step. The `ui/` integrations dashboard surfaces the same config (Phase 7). See [runbooks/local-development.md § Claude Managed Agents](./runbooks/local-development.md#claude-managed-agents).
 - Disable integrations: `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE=true`.
 
 </important>
 
-<important if="you are writing or running tests, drafting a plan with verification / E2E / QA steps, or preparing a frontend PR (new-ui/, landing/, templates-ui/)">
+<important if="you are writing or running tests, drafting a plan with verification / E2E / QA steps, or preparing a frontend PR (ui/, templates-ui/)">
 
 Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md, qa-use, swarm-local-e2e skill, memory tests, Slack E2E.
 
 Hard rules:
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
-- Frontend PRs (`new-ui/`, `landing/`, `templates-ui/`) MUST include a `qa-use` session with screenshots — enforced by merge gate.
+- Frontend PRs (`ui/`, `templates-ui/`) MUST include a `qa-use` session with screenshots — enforced by merge gate.
 
 </important>
 
@@ -181,10 +193,10 @@ Drift checks — run only if you touched the trigger files, MUST commit any rege
 
 - Edited `plugin/commands/*.md`? → `bun run build:pi-skills`
 - Edited an HTTP route OR bumped `package.json` `version`? → `bun run docs:openapi` (regenerates `openapi.json` AND `docs-site/content/docs/api-reference/**`)
-- Touched `new-ui/`? → `cd new-ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b` (CI uses `tsc -b`, not `--noEmit`)
+- Touched `ui/`? → `cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b` (CI uses `tsc -b`, not `--noEmit`)
 - Touched `Dockerfile` / `Dockerfile.worker` / files they COPY? → `docker build -f <Dockerfile> .`
 
-Frontend (`new-ui/`, `landing/`, `templates-ui/`) PRs additionally require a `qa-use` session with screenshots.
+Frontend (`ui/`, `templates-ui/`) PRs additionally require a `qa-use` session with screenshots.
 
 </important>
 

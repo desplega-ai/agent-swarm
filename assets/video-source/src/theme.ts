@@ -1,6 +1,6 @@
-// Mirrors the new-ui + landing tokens: shadcn Zinc (dark) + amber primary.
+// Mirrors the ui tokens: shadcn Zinc (dark) + amber primary.
 // Colors converted from oklch() at render time via CSS-compatible hex/rgba.
-// Source of truth: new-ui/src/styles/globals.css, landing/src/app/globals.css
+// Source of truth: ui/src/styles/globals.css
 export const theme = {
   // Background / foreground
   bg: "#09090b",              // oklch(0.141 0.005 285.823)
@@ -11,7 +11,7 @@ export const theme = {
   border: "rgba(255,255,255,0.10)",
   borderStrong: "rgba(255,255,255,0.18)",
 
-  // Brand accent — amber (matches landing/new-ui primary in dark mode)
+  // Brand accent — amber (matches ui primary in dark mode)
   accent: "#f2a93b",          // oklch(0.769 0.188 70.08)
   accentDim: "#7a4d12",
   accentFg: "#1a1409",        // oklch(0.205 0.022 47.604)

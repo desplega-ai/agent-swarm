@@ -7,9 +7,11 @@
  */
 
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
+import { summarizeSession as runSummarize } from "../utils/internal-ai";
 
-interface SwarmHooksConfig {
+export interface SwarmHooksConfig {
   apiUrl: string;
   apiKey: string;
   agentId: string;
@@ -276,12 +278,53 @@ async function fetchConcurrentContext(config: SwarmHooksConfig): Promise<string 
   }
 }
 
-/** Run session summarization via Claude Haiku on shutdown */
-async function summarizeSession(
+/**
+ * Test-injection points for `summarizeSessionForPi`. Production callers omit
+ * `deps` entirely — pi-mono-extension's `session_shutdown` handler uses the
+ * default implementations bound via `import` at the top of this file.
+ *
+ * Why this exists: `bun:test`'s `mock.module()` is process-wide and leaks
+ * across test files, so the pi-mono-extension test cannot stub out
+ * `runSummarize`/`postRatings` via module mocking without breaking siblings
+ * that import the real symbols (e.g. `buildRatingsFromLlm` step-6 tests,
+ * `summarize-session.test.ts`). Explicit DI is the safer pattern.
+ */
+export interface SummarizeSessionForPiDeps {
+  runSummarize?: typeof runSummarize;
+  fetchRetrievalsForTask?: typeof fetchRetrievalsForTask;
+  postRatings?: typeof postRatings;
+  buildRatingsFromLlm?: typeof buildRatingsFromLlm;
+}
+
+/**
+ * Run session summarization via the shared `internal-ai` abstraction on
+ * shutdown. Replaces the previous `Bun.spawn(claude -p ...)` shellout
+ * (which silently failed in production because pi sessions typically don't
+ * have Anthropic CLI auth).
+ *
+ * Flow:
+ *   1. Read tail of session transcript file.
+ *   2. Fetch task details + (optionally) memory retrievals for ratings.
+ *   3. Call `runSummarize` from `src/utils/internal-ai` — picks credentials
+ *      out of env / codex OAuth, returns structured `{summary, ratings}`.
+ *   4. Apply length/quality gate; POST summary to `/api/memory/index`.
+ *   5. If `MEMORY_RATERS` includes `llm` AND ratings came back, POST them
+ *      via `postRatings` (events-based; mirrors the claude Stop hook).
+ *
+ * All catches log via `console.error(..., err)` — silent-fail behavior is
+ * gone.
+ */
+export async function summarizeSessionForPi(
   config: SwarmHooksConfig,
   sessionFile: string | undefined,
+  deps: SummarizeSessionForPiDeps = {},
 ): Promise<void> {
   if (!sessionFile) return;
+
+  const _runSummarize = deps.runSummarize ?? runSummarize;
+  const _fetchRetrievals = deps.fetchRetrievalsForTask ?? fetchRetrievalsForTask;
+  const _postRatings = deps.postRatings ?? postRatings;
+  const _buildRatings = deps.buildRatingsFromLlm ?? buildRatingsFromLlm;
 
   try {
     let transcript = "";
@@ -294,84 +337,78 @@ async function summarizeSession(
 
     if (transcript.length <= 100) return;
 
-    let taskContext = "";
-    try {
-      const taskDetails = await fetchTaskDetails(config);
-      if (taskDetails) {
-        taskContext = `Task: ${taskDetails.task}`;
-      }
-    } catch {
-      /* no task context */
-    }
+    const sourceTaskId = config.taskId;
+    const agentId = config.agentId;
+    if (!sourceTaskId || !agentId) return;
 
-    const summarizePrompt = `You are summarizing an AI agent's work session. Extract ONLY high-value learnings.
+    const taskDetails = await fetchTaskDetails(config).catch(() => null);
 
-DO NOT include:
-- Generic descriptions of what was done ("worked on task X")
-- Tool calls or file reads
-- Routine progress updates
+    const memoryRaters = (process.env.MEMORY_RATERS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const wantRatings = memoryRaters.includes("llm");
+    const retrievals = wantRatings
+      ? await _fetchRetrievals({
+          apiUrl: config.apiUrl,
+          apiKey: config.apiKey,
+          agentId,
+          taskId: sourceTaskId,
+        }).catch(() => [])
+      : [];
 
-DO include (if present):
-- **Mistakes made and corrections** — what went wrong and what fixed it
-- **Discovered patterns** — reusable approaches, APIs, or codebase conventions
-- **Codebase knowledge** — important file paths, architecture decisions, gotchas
-- **Environment knowledge** — service URLs, config details, tool quirks
-- **Failed approaches** — what was tried and didn't work (and why)
-
-Format as a bulleted list of concrete, reusable facts. If the session was routine with no significant learnings, respond with exactly: "No significant learnings."
-${taskContext ? `\nTask context: ${taskContext}` : ""}
-Transcript:
-${transcript}`;
-
-    const tmpFile = `/tmp/session-summary-${Date.now()}.txt`;
-    await Bun.write(tmpFile, summarizePrompt);
-    const proc = Bun.spawn(
-      [
-        "bash",
-        "-c",
-        `cat "${tmpFile}" | ${process.env.CLAUDE_BINARY || "claude"} -p --model haiku --output-format json`,
-      ],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, SKIP_SESSION_SUMMARY: "1" },
+    const result = await _runSummarize({
+      harness: "pi",
+      transcript,
+      retrievals,
+      taskContext: {
+        sourceTaskId,
+        agentId,
+        prompt: taskDetails?.task,
       },
-    );
-    const timeoutId = setTimeout(() => proc.kill(), 30000);
-    const result = { stdout: await new Response(proc.stdout).text() };
-    clearTimeout(timeoutId);
-    await Bun.$`rm -f ${tmpFile}`.quiet();
+      apiUrl: config.apiUrl,
+      apiKey: config.apiKey,
+    });
+    // null = no auth resolved or wrapper exhausted retries (already logged inside)
+    if (!result) return;
 
-    let summary: string;
-    try {
-      const summaryOutput = JSON.parse(result.stdout);
-      summary = summaryOutput.result ?? result.stdout;
-    } catch {
-      summary = result.stdout;
+    const summary = result.summary.trim();
+    if (summary.length <= 20 || summary.toLowerCase().includes("no significant learnings")) {
+      return;
     }
 
-    if (
-      summary &&
-      summary.length > 20 &&
-      !summary.trim().toLowerCase().includes("no significant learnings")
-    ) {
-      await fetch(`${config.apiUrl}/api/memory/index`, {
-        method: "POST",
-        headers: apiHeaders(config),
-        body: JSON.stringify({
-          agentId: config.agentId,
-          content: summary,
-          name: taskContext
-            ? `Session: ${taskContext.slice(0, 80)}`
-            : `Session: ${new Date().toISOString().slice(0, 16)}`,
-          scope: "agent",
-          source: "session_summary",
-          sourceTaskId: config.taskId,
-        }),
-      });
+    const indexResp = await fetch(`${config.apiUrl}/api/memory/index`, {
+      method: "POST",
+      headers: apiHeaders(config),
+      body: JSON.stringify({
+        scope: "agent",
+        source: "session_summary",
+        sourceTaskId,
+        content: summary,
+        name: "session-summary",
+        agentId,
+      }),
+    });
+    if (!indexResp.ok) {
+      const text = await indexResp.text().catch(() => "");
+      console.error("session_summary: /api/memory/index POST failed (pi):", indexResp.status, text);
+      return;
     }
-  } catch {
-    /* non-blocking */
+
+    if (wantRatings && result.ratings && result.ratings.length > 0) {
+      const ratingEvents = _buildRatings(result.ratings, retrievals);
+      if (ratingEvents.length > 0) {
+        await _postRatings({
+          apiUrl: config.apiUrl,
+          apiKey: config.apiKey,
+          agentId,
+          taskId: sourceTaskId,
+          events: ratingEvents,
+        }).catch((err) => console.error("session_summary: postRatings failed (pi):", err));
+      }
+    }
+  } catch (err) {
+    console.error("session_summary failed (pi):", err);
   }
 }
 
@@ -661,7 +698,7 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
       // Session summarization — get session file from context's session manager
       const sessionFile = ctx.sessionManager.getSessionFile?.();
       if (!process.env.SKIP_SESSION_SUMMARY) {
-        await summarizeSession(config, sessionFile);
+        await summarizeSessionForPi(config, sessionFile);
       }
 
       // Mark agent offline

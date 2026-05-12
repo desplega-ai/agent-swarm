@@ -13,20 +13,11 @@
  */
 
 import type { Plugin } from "@opencode-ai/plugin";
-
-interface SwarmConfig {
-  apiUrl: string;
-  apiKey: string;
-  agentId: string;
-  taskId: string;
-  isLead: boolean;
-}
+import { type SwarmConfig, summarizeSessionForOpencode } from "./lib/summarize";
 
 function readConfig(): SwarmConfig {
   return {
-    apiUrl:
-      process.env.SWARM_API_URL ||
-      `http://localhost:${process.env.PORT || "3013"}`,
+    apiUrl: process.env.SWARM_API_URL || `http://localhost:${process.env.PORT || "3013"}`,
     apiKey: process.env.SWARM_API_KEY || "",
     agentId: process.env.SWARM_AGENT_ID || "",
     taskId: process.env.SWARM_TASK_ID || "",
@@ -232,106 +223,8 @@ async function fetchConcurrentContext(config: SwarmConfig): Promise<string | nul
   }
 }
 
-/** Run session summarization via Claude Haiku on shutdown */
-async function summarizeSession(
-  config: SwarmConfig,
-  sessionFile: string | undefined,
-): Promise<void> {
-  if (!sessionFile) return;
-
-  try {
-    let transcript = "";
-    try {
-      const fullTranscript = await Bun.file(sessionFile).text();
-      transcript = fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
-    } catch {
-      return;
-    }
-
-    if (transcript.length <= 100) return;
-
-    let taskContext = "";
-    try {
-      const taskDetails = await fetchTaskDetails(config);
-      if (taskDetails) {
-        taskContext = `Task: ${taskDetails.task}`;
-      }
-    } catch {
-      /* no task context */
-    }
-
-    const summarizePrompt = `You are summarizing an AI agent's work session. Extract ONLY high-value learnings.
-
-DO NOT include:
-- Generic descriptions of what was done ("worked on task X")
-- Tool calls or file reads
-- Routine progress updates
-
-DO include (if present):
-- **Mistakes made and corrections** — what went wrong and what fixed it
-- **Discovered patterns** — reusable approaches, APIs, or codebase conventions
-- **Codebase knowledge** — important file paths, architecture decisions, gotchas
-- **Environment knowledge** — service URLs, config details, tool quirks
-- **Failed approaches** — what was tried and didn't work (and why)
-
-Format as a bulleted list of concrete, reusable facts. If the session was routine with no significant learnings, respond with exactly: "No significant learnings."
-${taskContext ? `\nTask context: ${taskContext}` : ""}
-Transcript:
-${transcript}`;
-
-    const tmpFile = `/tmp/session-summary-${Date.now()}.txt`;
-    await Bun.write(tmpFile, summarizePrompt);
-    const proc = Bun.spawn(
-      [
-        "bash",
-        "-c",
-        `cat "${tmpFile}" | ${process.env.CLAUDE_BINARY || "claude"} -p --model haiku --output-format json`,
-      ],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, SKIP_SESSION_SUMMARY: "1" },
-      },
-    );
-    const timeoutId = setTimeout(() => proc.kill(), 30000);
-    const result = { stdout: await new Response(proc.stdout).text() };
-    clearTimeout(timeoutId);
-    await Bun.$`rm -f ${tmpFile}`.quiet();
-
-    let summary: string;
-    try {
-      const summaryOutput = JSON.parse(result.stdout) as { result?: string };
-      summary = summaryOutput.result ?? result.stdout;
-    } catch {
-      summary = result.stdout;
-    }
-
-    if (
-      summary &&
-      summary.length > 20 &&
-      !summary.trim().toLowerCase().includes("no significant learnings")
-    ) {
-      await fetch(`${config.apiUrl}/api/memory/index`, {
-        method: "POST",
-        headers: apiHeaders(config),
-        body: JSON.stringify({
-          agentId: config.agentId,
-          content: summary,
-          name: taskContext
-            ? `Session: ${taskContext.slice(0, 80)}`
-            : `Session: ${new Date().toISOString().slice(0, 16)}`,
-          scope: "agent",
-          source: "session_summary",
-          sourceTaskId: config.taskId,
-        }),
-      });
-    }
-  } catch {
-    /* non-blocking */
-  }
-}
-
-const plugin: Plugin = async (_input) => {
+const plugin: Plugin = async (input) => {
+  const { client } = input;
   const config = readConfig();
 
   return {
@@ -363,10 +256,12 @@ const plugin: Plugin = async (_input) => {
         // Final identity sync
         await syncIdentityFilesToServer(config);
 
-        // Session summary — opencode does not expose a transcript file path,
-        // so summarizeSession is a no-op here (sessionFile = undefined).
+        // Session summary — sources the transcript from opencode's SDK via
+        // `client.session.messages` (Phase 2 migration off the previous
+        // shellout-based path). Fire-and-forget; the helper handles all
+        // errors internally.
         if (!process.env.SKIP_SESSION_SUMMARY) {
-          void summarizeSession(config, undefined);
+          void summarizeSessionForOpencode(config, client, event.properties.sessionID);
         }
 
         // Notify server session is closing

@@ -5,7 +5,7 @@ Remotion project used to render the videos under `assets/`:
 - `DailyEvolution` → `../agent-swarm.mp4` (README hero) — the "compounding memory" pitch
 - `SlackToPR` → `../agent-swarm-slack-to-pr.mp4` — dramatizes how a Slack thread became [PR #350](https://github.com/desplega-ai/agent-swarm/pull/350)
 
-Both are low-fi wireframes with stubbed data. Design tokens mirror `new-ui/` and `landing/` (Space Grotesk + Space Mono, shadcn Zinc dark palette, amber primary).
+Both are low-fi wireframes with stubbed data. Design tokens mirror `ui/` (Space Grotesk + Space Mono, shadcn Zinc dark palette, amber primary).
 
 ## Render
 
@@ -40,7 +40,7 @@ src/
   Root.tsx                  # registers all compositions
   index.ts                  # registerRoot(Root)
   fonts.ts                  # loads Google Fonts (Space Grotesk, Space Mono)
-  theme.ts                  # brand tokens (mirrors new-ui/landing)
+  theme.ts                  # brand tokens (mirrors ui)
   compositions/
     DailyEvolution.tsx      # composition root — stitches scenes + audio
     SlackToPR.tsx
