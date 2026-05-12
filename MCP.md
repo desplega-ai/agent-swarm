@@ -1155,6 +1155,7 @@ Update a skill's content or settings. Re-parses frontmatter if content changes.
 | `skillId` | `string` | No | - | Skill ID to update |
 | `content` | `string` | No | - | New SKILL.md content (re-parses frontmatter) |
 | `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
+| `scope` | `agent \| swarm` | No | - | Scope: agent (personal) or swarm (shared). Only leads can promote a skill to swarm scope (used by the skill-approval flow). |
 
 ### skill-create
 
