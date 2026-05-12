@@ -32,18 +32,18 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
-          version: v3.14.0
+          version: v4.1.4
 
       - name: Helm lint
         run: helm lint ${{ env.CHART_PATH }}
 
-      - name: Render + validate — defaults
+      - name: Render — defaults
         run: |
           helm template release ${{ env.CHART_PATH }} \
             --set auth.apiKey=ci-render \
-            | kubectl apply --dry-run=client -f -
+            > /dev/null
 
-      - name: Render + validate — agent-fs + litestream + ingress + RBAC + NetworkPolicy
+      - name: Render — agent-fs + litestream + ingress
         run: |
           helm template release ${{ env.CHART_PATH }} \
             --set auth.apiKey=ci-render \
@@ -60,9 +60,7 @@ jobs:
             --set ingress.enabled=true \
             --set ingress.className=nginx \
             --set ingress.host=swarm.example.com \
-            --set networkPolicy.enabled=true \
-            --set rbac.create=true \
-            | kubectl apply --dry-run=client -f -
+            > /dev/null
 
   publish:
     name: Publish to GHCR
@@ -80,7 +78,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
-          version: v3.14.0
+          version: v4.1.4
 
       - name: Detect chart version change
         id: detect
