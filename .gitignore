@@ -1,6 +1,7 @@
 # Tests
 .encryption-key
 
+.claude/scheduled_tasks.lock
 .roam
 
 # MCP

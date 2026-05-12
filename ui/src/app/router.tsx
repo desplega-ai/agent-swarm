@@ -3,10 +3,13 @@ import { createBrowserRouter } from "react-router-dom";
 import { RootLayout } from "@/components/layout/root-layout";
 
 const DashboardPage = lazy(() => import("@/pages/dashboard/page"));
+const HomePage = lazy(() => import("@/pages/home/page"));
 const AgentsPage = lazy(() => import("@/pages/agents/page"));
 const AgentDetailPage = lazy(() => import("@/pages/agents/[id]/page"));
 const TasksPage = lazy(() => import("@/pages/tasks/page"));
 const TaskDetailPage = lazy(() => import("@/pages/tasks/[id]/page"));
+const SessionsPage = lazy(() => import("@/pages/sessions/page"));
+const SessionDetailPage = lazy(() => import("@/pages/sessions/[rootTaskId]/page"));
 const ChatPage = lazy(() => import("@/pages/chat/page"));
 const ServicesPage = lazy(() => import("@/pages/services/page"));
 const SchedulesPage = lazy(() => import("@/pages/schedules/page"));
@@ -42,11 +45,14 @@ export const router = createBrowserRouter([
     path: "/",
     element: <RootLayout />,
     children: [
-      { index: true, element: <DashboardPage /> },
+      { index: true, element: <HomePage /> },
+      { path: "dashboard", element: <DashboardPage /> },
       { path: "agents", element: <AgentsPage /> },
       { path: "agents/:id", element: <AgentDetailPage /> },
       { path: "tasks", element: <TasksPage /> },
       { path: "tasks/:id", element: <TaskDetailPage /> },
+      { path: "sessions", element: <SessionsPage /> },
+      { path: "sessions/:rootTaskId", element: <SessionDetailPage /> },
       { path: "chat", element: <ChatPage /> },
       { path: "chat/:channelId", element: <ChatPage /> },
       { path: "services", element: <ServicesPage /> },

@@ -215,6 +215,40 @@ body {
   background: var(--color-muted-foreground);
 }
 
+/* Shimmer text — used by the inline "chain of thought" indicator on
+ * in-progress agent turns. A linear gradient slides across the text via
+ * background-clip:text, giving a subtle "live / streaming" pulse. */
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted-foreground) 0%,
+    var(--color-foreground) 50%,
+    var(--color-muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-slide 2s linear infinite;
+}
+
+@keyframes shimmer-slide {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+    -webkit-text-fill-color: var(--color-foreground);
+    color: var(--color-foreground);
+  }
+}
+
 /* Chat message markdown prose */
 .prose-chat {
   font-size: 0.85rem;

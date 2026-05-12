@@ -2,7 +2,7 @@ export {
   checkProviderCredentials,
   REQUIRED_CRED_VARS_BY_PROVIDER,
   type SupportedProvider,
-} from "./credentials";
+} from "../commands/provider-credentials";
 export type {
   CostData,
   CredCheckOptions,

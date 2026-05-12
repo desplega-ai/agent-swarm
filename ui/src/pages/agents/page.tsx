@@ -1,12 +1,15 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { Crown, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import type { AgentStatus, AgentWithTasks } from "@/api/types";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { DataGrid } from "@/components/shared/data-grid";
+import { HarnessCell } from "@/components/shared/harness-cell";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -16,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { findKnownModel } from "@/lib/agent-runtime-models";
 import { formatSmartTime } from "@/lib/utils";
 
 export default function AgentsPage() {
@@ -25,6 +29,8 @@ export default function AgentsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") ?? "all");
 
+  const modelColumnGate = useFeatureGate("1.77.2");
+
   const filteredAgents = useMemo(() => {
     if (!agents) return [];
     const filtered =
@@ -32,21 +38,53 @@ export default function AgentsPage() {
     return filtered.sort((a, b) => (b.isLead ? 1 : 0) - (a.isLead ? 1 : 0));
   }, [agents, statusFilter]);
 
-  const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(
-    () => [
+  const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(() => {
+    const modelColumn: ColDef<AgentWithTasks> = {
+      headerName: "Model",
+      width: 200,
+      valueGetter: (params) => params.data?.credStatus?.latestModel?.model ?? "",
+      cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => {
+        const id = params.value;
+        if (!id) return <span className="text-muted-foreground">—</span>;
+        const known = findKnownModel(id);
+        return (
+          <span className="flex items-center gap-1.5">
+            <ProviderIcon provider={known?.providerId} className="h-3.5 w-3.5" />
+            <span className="truncate">{known?.label ?? id}</span>
+          </span>
+        );
+      },
+    };
+    return [
       {
         field: "name",
         headerName: "Name",
         width: 250,
         minWidth: 180,
         cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => (
-          <span className="flex items-center gap-1.5 font-semibold">
+          <span className="flex items-center gap-2 font-semibold">
+            <AgentAvatar
+              agentId={params.data?.id}
+              agentName={params.data?.name ?? params.value}
+              size="sm"
+              className="shrink-0"
+            />
             {params.value}
-            {params.data?.isLead && <Crown className="h-3.5 w-3.5 text-primary shrink-0" />}
           </span>
         ),
       },
       { field: "role", headerName: "Role", width: 150 },
+      {
+        field: "harnessProvider",
+        headerName: "Harness",
+        width: 200,
+        cellRenderer: (params: { data: AgentWithTasks | undefined }) => (
+          <HarnessCell
+            harnessProvider={params.data?.harnessProvider}
+            credStatus={params.data?.credStatus}
+          />
+        ),
+      },
       {
         field: "status",
         headerName: "Status",
@@ -55,50 +93,45 @@ export default function AgentsPage() {
       },
       {
         headerName: "Capacity",
-        width: 90,
+        width: 110,
         valueGetter: (params) => {
           const agent = params.data;
           if (!agent) return "";
-          if (agent.capacity) return `${agent.capacity.current}/${agent.capacity.max}`;
-          if (agent.maxTasks != null) return `–/${agent.maxTasks}`;
-          return "–";
+          const max = agent.capacity?.max ?? agent.maxTasks ?? null;
+          const current = agent.capacity?.current ?? null;
+          if (max == null && current == null) return "–";
+          return `${current ?? "–"}/${max ?? "∞"}`;
         },
-        cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => {
+        cellRenderer: (params: { data: AgentWithTasks | undefined }) => {
           const agent = params.data;
-          const atCapacity = agent?.capacity && agent.capacity.available === 0;
-          return <span className={atCapacity ? "text-status-error" : ""}>{params.value}</span>;
+          if (!agent) return null;
+          const max = agent.capacity?.max ?? agent.maxTasks ?? null;
+          const current = agent.capacity?.current ?? null;
+          const atCapacity = agent.capacity?.available === 0;
+          if (max == null && current == null) {
+            return <span className="text-muted-foreground">—</span>;
+          }
+          return (
+            <span className="inline-flex items-baseline gap-1 tabular-nums">
+              <span className={atCapacity ? "text-status-error" : "text-muted-foreground"}>
+                {current ?? "–"}
+              </span>
+              <span className="text-muted-foreground/60">/</span>
+              <span className="font-medium text-foreground">{max ?? "∞"}</span>
+            </span>
+          );
         },
       },
-      {
-        field: "capabilities",
-        headerName: "Capabilities",
-        flex: 1,
-        minWidth: 250,
-        cellRenderer: (params: { value: string[] | undefined }) => (
-          <div className="flex gap-1 items-center justify-center">
-            {params.value?.slice(0, 2).map((cap) => (
-              <Badge key={cap} variant="outline" size="tag" className="shrink-0">
-                {cap}
-              </Badge>
-            ))}
-            {(params.value?.length ?? 0) > 2 && (
-              <span className="text-[9px] text-muted-foreground font-medium shrink-0">
-                +{(params.value?.length ?? 0) - 2}
-              </span>
-            )}
-          </div>
-        ),
-        sortable: false,
-      },
+      ...(modelColumnGate.supported ? [modelColumn] : []),
       {
         field: "lastUpdatedAt",
         headerName: "Last Updated",
-        width: 150,
+        flex: 1,
+        minWidth: 150,
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
-    ],
-    [],
-  );
+    ];
+  }, [modelColumnGate.supported]);
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<AgentWithTasks>) => {

@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import {
+  buildCredStatusReport,
+  checkProviderCredentials,
+  isCredCheckDisabled,
+  REQUIRED_CRED_VARS_BY_PROVIDER,
+} from "../commands/provider-credentials";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
-import { checkProviderCredentials, REQUIRED_CRED_VARS_BY_PROVIDER } from "../providers/credentials";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import { checkPiMonoCredentials } from "../providers/pi-mono-adapter";
@@ -332,5 +337,31 @@ describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
       expect(REQUIRED_CRED_VARS_BY_PROVIDER[p]).toBeDefined();
       expect(REQUIRED_CRED_VARS_BY_PROVIDER[p].length).toBeGreaterThan(0);
     }
+  });
+});
+
+// ─── Migration 055: report composition + opt-out ────────────────────────────
+
+describe("isCredCheckDisabled", () => {
+  test("true only when CRED_CHECK_DISABLE === '1'", () => {
+    expect(isCredCheckDisabled({})).toBe(false);
+    expect(isCredCheckDisabled({ CRED_CHECK_DISABLE: "0" })).toBe(false);
+    expect(isCredCheckDisabled({ CRED_CHECK_DISABLE: "true" })).toBe(false);
+    expect(isCredCheckDisabled({ CRED_CHECK_DISABLE: "1" })).toBe(true);
+  });
+});
+
+describe("buildCredStatusReport", () => {
+  test("not ready → no live test, snapshot mirrors presence check", async () => {
+    const snap = await buildCredStatusReport("claude", {}, {}, "boot");
+    expect(snap.ready).toBe(false);
+    expect(snap.liveTest).toBeNull();
+    expect(snap.reportKind).toBe("boot");
+    expect(snap.missing.length).toBeGreaterThan(0);
+  });
+
+  test("post_task kind is preserved on the snapshot", async () => {
+    const snap = await buildCredStatusReport("claude", {}, {}, "post_task");
+    expect(snap.reportKind).toBe("post_task");
   });
 });

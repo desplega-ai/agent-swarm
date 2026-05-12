@@ -345,7 +345,15 @@ if [ -n "$AGENT_ID" ]; then
         CONFIG_COUNT=$(jq '.configs | length' /tmp/swarm_config.json 2>/dev/null || echo "0")
         if [ "$CONFIG_COUNT" -gt 0 ]; then
             echo "Found $CONFIG_COUNT config entries, exporting as env vars..."
-            jq -r '.configs[] | select(.key != "codex_oauth") | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
+            # Skip keys whose value is read dynamically by the runner from
+            # /api/config/resolved on each iteration. Baking them into env at
+            # boot would persist a stale value if the operator later deletes
+            # the swarm_config row (env would shadow the now-missing config).
+            #   - codex_oauth: provider auth blob, read on demand
+            #   - HARNESS_PROVIDER: live-reconciled by runner.ts poll loop;
+            #     baking it would also defeat the precedence invariant
+            #     (swarm_config > env > "claude")
+            jq -r '.configs[] | select(.key != "codex_oauth" and .key != "HARNESS_PROVIDER") | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
             if [ -f /tmp/swarm_config.env ]; then
                 set -a
                 . /tmp/swarm_config.env
@@ -362,6 +370,24 @@ fi
 
 # ---- agent-fs registration ----
 if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_ID" ]; then
+  # Wait until agent-fs is reachable. compose-template adds
+  # `depends_on: agent-fs: service_healthy` so this should be fast (<5s),
+  # but keep a short retry loop so a transient hiccup doesn't silently
+  # blackhole AGENT_FS_SHARED_ORG_ID into "" — that's the symptom we
+  # spent half a day debugging.
+  AF_HEALTH_RETRIES=0
+  AF_HEALTH_MAX=30  # ~30s @ 1s intervals
+  while [ "$AF_HEALTH_RETRIES" -lt "$AF_HEALTH_MAX" ]; do
+    if curl -sf -o /dev/null -m 2 "${AGENT_FS_API_URL}/health" 2>/dev/null; then
+      break
+    fi
+    AF_HEALTH_RETRIES=$((AF_HEALTH_RETRIES + 1))
+    sleep 1
+  done
+  if [ "$AF_HEALTH_RETRIES" -ge "$AF_HEALTH_MAX" ]; then
+    echo "[agent-fs] WARN: agent-fs at $AGENT_FS_API_URL did not become healthy after ${AF_HEALTH_MAX}s — proceeding anyway"
+  fi
+
   if [ -z "$AGENT_FS_API_KEY" ]; then
     echo "[agent-fs] Registering with agent-fs at $AGENT_FS_API_URL..."
     AF_EMAIL="${AGENT_EMAIL:-${AGENT_ID}@swarm.local}"

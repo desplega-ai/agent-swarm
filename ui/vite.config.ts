@@ -23,6 +23,10 @@ export default defineConfig({
         target: process.env.VITE_PROXY_TARGET || "http://localhost:3013",
         changeOrigin: true,
       },
+      "/status": {
+        target: process.env.VITE_PROXY_TARGET || "http://localhost:3013",
+        changeOrigin: true,
+      },
     },
   },
 });

@@ -57,6 +57,7 @@ export const AgentTaskSourceSchema = z.enum([
   "mcp",
   "slack",
   "api",
+  "ui",
   "github",
   "gitlab",
   "agentmail",
@@ -233,6 +234,72 @@ export const UserSchema = z.object({
 
 export type User = z.infer<typeof UserSchema>;
 
+// ============================================================================
+// Inbox Item State (per-user dismiss/snooze/done for action-items inbox)
+// ============================================================================
+//
+// Action-items inbox buckets:
+//   - approval           — pending approval requests
+//   - credential_missing — agents in waiting_for_credentials state
+//   - broken_task        — tasks in failed/cancelled status
+//   - to_read            — sessions/tasks marked unread for the user
+//   - to_start_template  — task-templates the user hasn't dismissed
+//
+// Statuses:
+//   - open      — visible in inbox
+//   - snoozed   — hidden until snoozeUntil; reappears as `open`
+//   - dismissed — hidden permanently (until item itself reactivates)
+//   - done      — user marked complete
+export const InboxItemTypeSchema = z.enum([
+  "approval",
+  "credential_missing",
+  "broken_task",
+  "to_read",
+  "to_start_template",
+]);
+export type InboxItemType = z.infer<typeof InboxItemTypeSchema>;
+
+export const InboxItemStatusSchema = z.enum(["open", "snoozed", "dismissed", "done"]);
+export type InboxItemStatus = z.infer<typeof InboxItemStatusSchema>;
+
+export const InboxItemStateSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  itemType: InboxItemTypeSchema,
+  itemId: z.string(),
+  status: InboxItemStatusSchema,
+  snoozeUntil: z.string().optional(),
+  dismissedAt: z.string().optional(),
+  doneAt: z.string().optional(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type InboxItemState = z.infer<typeof InboxItemStateSchema>;
+
+// ============================================================================
+// Task Templates ("To start" bucket — polymorphic starters registry)
+// ============================================================================
+//
+// kind:
+//   - task     — v1 default; payload is `{}` and the task prompt lives in `prompt`
+//   - workflow — v2 hook; payload `{ workflowId: string }`, prompt may be empty
+//   - schedule — v2 hook; payload `{ cron: string, prompt: string }`
+export const TaskTemplateKindSchema = z.enum(["task", "workflow", "schedule"]);
+export type TaskTemplateKind = z.infer<typeof TaskTemplateKindSchema>;
+
+export const TaskTemplateSchema = z.object({
+  id: z.string(),
+  title: z.string().min(1),
+  description: z.string(),
+  prompt: z.string(),
+  kind: TaskTemplateKindSchema.default("task"),
+  payload: z.record(z.string(), z.unknown()).default({}),
+  category: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+  createdAt: z.string(),
+});
+export type TaskTemplate = z.infer<typeof TaskTemplateSchema>;
+
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline", "waiting_for_credentials"]);
 
 export const AgentSchema = z.object({
@@ -272,13 +339,73 @@ export const AgentSchema = z.object({
   // Harness provider this agent runs (claude, opencode, codex, ...)
   provider: ProviderNameSchema.optional(),
 
+  // Phase 1.5 (cloud-personalization): harness provider pushed by the worker
+  // on registration. Mirrors `provider` but lives in its own column so the
+  // server can answer "what harnesses are deployed?" without joining
+  // anywhere else, and so an operator can re-assign via
+  // PATCH /api/agents/:id/harness-provider without restarting the worker.
+  // Worker boot path is NOT yet rewritten (DES-359 tracks that) — the
+  // PATCH is a planning/forecast mechanism today; on next worker restart,
+  // the env-driven value wins.
+  harnessProvider: ProviderNameSchema.nullable().optional(),
+
   // Env-var names the worker is blocked on when status is
   // `waiting_for_credentials`. Null otherwise.
   credentialMissing: z.array(z.string()).nullable().optional(),
 
+  // Worker-self-reported credential snapshot for this agent's harness.
+  // Pairs with `harnessProvider`. Null = unreported (worker hasn't booted
+  // yet, or CRED_CHECK_DISABLE=1 was set). Migration 055 adds the column.
+  credStatus: z
+    .lazy(() => AgentCredStatusSchema)
+    .nullable()
+    .optional(),
+
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
 });
+
+// ---------------------------------------------------------------------------
+// Worker-reported credential snapshot
+// ---------------------------------------------------------------------------
+// `provider` is intentionally absent from the JSON — already on the agent row
+// as `harnessProvider`; the status endpoint joins them at read time.
+//
+// `reportKind` records the trigger that produced the report:
+//   - "boot": worker startup, full check (presence + live test).
+//   - "post_task": worker finished a task and `harness_provider` differed
+//     from its cached value, so it re-ran a full check (presence + live test).
+//
+// The cache-hit post-task path does NOT produce a new report; the row's
+// `reportedAt` deliberately stays at the last actual check.
+export const AgentCredStatusLiveTestSchema = z.object({
+  ok: z.boolean(),
+  error: z.string().nullable().default(null),
+  latency_ms: z.number(),
+  testedAt: z.number(), // unix ms
+});
+export type AgentCredStatusLiveTest = z.infer<typeof AgentCredStatusLiveTestSchema>;
+
+export const AgentLatestModelSchema = z.object({
+  model: z.string().min(1),
+  source: z.enum(["task", "agent_config", "adapter_default", "custom"]),
+  taskId: z.string().nullable().default(null),
+  harnessProvider: ProviderNameSchema.nullable().default(null),
+  reportedAt: z.number(), // unix ms
+});
+export type AgentLatestModel = z.infer<typeof AgentLatestModelSchema>;
+
+export const AgentCredStatusSchema = z.object({
+  ready: z.boolean(),
+  missing: z.array(z.string()).default([]),
+  satisfiedBy: z.enum(["env", "file", "side-effect-pending"]).nullable().default(null),
+  hint: z.string().nullable().default(null),
+  liveTest: AgentCredStatusLiveTestSchema.nullable().default(null),
+  latestModel: AgentLatestModelSchema.nullable().default(null),
+  reportedAt: z.number(), // unix ms
+  reportKind: z.enum(["boot", "post_task"]).default("boot"),
+});
+export type AgentCredStatus = z.infer<typeof AgentCredStatusSchema>;
 
 export const AgentWithTasksSchema = AgentSchema.extend({
   tasks: z.array(AgentTaskSchema).default([]),

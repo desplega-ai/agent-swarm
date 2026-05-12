@@ -117,7 +117,26 @@ export function createProviderAdapter(provider: string): ProviderAdapter {
 }
 ```
 
-The runner reads `HARNESS_PROVIDER` in [`src/commands/runner.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/runner.ts) and calls the factory once per agent: `createProviderAdapter(process.env.HARNESS_PROVIDER || "claude")`.
+The runner reads the *resolved* `HARNESS_PROVIDER` and calls the factory once at boot. The resolved value comes from `swarm_config` overlaid on `process.env`, with this precedence (highest first):
+
+1. `swarm_config` `HARNESS_PROVIDER` — repo > agent > global, via `/api/config/resolved`
+2. `process.env.HARNESS_PROVIDER` — container env
+3. `"claude"` — default
+
+Resolution lives in `src/utils/harness-provider.ts` (`resolveHarnessProvider`); it's threaded through `fetchResolvedEnv` in [`src/commands/runner.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/runner.ts) so credential pool selection uses the same resolved value.
+
+### Switching providers without restart
+
+The worker re-evaluates the resolved provider on each poll iteration (throttled to ~10s). When the value changes — typically because an operator wrote a new `swarm_config` row, or called `PATCH /api/agents/{id}/harness-provider` (which mirrors the value into `swarm_config` at scope=agent) — the worker:
+
+1. Creates a fresh adapter via `createProviderAdapter(resolvedProvider)`.
+2. Updates `state.harnessProvider`.
+3. Rebuilds `basePrompt` so traits-driven prompt sections (e.g. local-environment vs. cloud-managed) match the new provider.
+4. Resets the cached `cred_status` snapshot so the dashboard shows credential health for the new adapter.
+
+In-flight task sessions hold their own `ProviderSession` reference and continue on the old adapter unaffected; only future spawns pick up the swap. Failures during reconciliation (network blip, invalid value, adapter init error) log a warning and stay on the current provider — the worker is never wedged by a bad config.
+
+Invalid `HARNESS_PROVIDER` values are rejected at write time (`validateConfigValue` in `src/be/swarm-config-guard.ts`), so a typo via `PUT /api/config` or the `set-config` MCP tool returns 400 instead of being silently stored.
 
 ### Per-task `outputSchema` support
 

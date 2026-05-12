@@ -11,7 +11,19 @@ export type AgentTaskStatus =
   | "completed"
   | "failed"
   | "cancelled";
-export type AgentTaskSource = "mcp" | "slack" | "api";
+export type AgentTaskSource =
+  | "mcp"
+  | "slack"
+  | "api"
+  | "ui"
+  | "github"
+  | "gitlab"
+  | "agentmail"
+  | "system"
+  | "schedule"
+  | "workflow"
+  | "linear"
+  | "jira";
 export type ChannelType = "public" | "dm";
 
 export interface Agent {
@@ -37,8 +49,44 @@ export interface Agent {
   /** Env-var names the worker is blocked on when status is `waiting_for_credentials`. */
   credentialMissing?: string[] | null;
   provider?: string;
+  /**
+   * Phase 1.5: canonical harness provider the worker reported at registration
+   * time (or `null`/missing for legacy rows from before migration 054).
+   */
+  harnessProvider?: ProviderName | null;
+  /**
+   * Migration 055: worker-self-reported credential snapshot. Null when the
+   * worker hasn't booted yet, or `CRED_CHECK_DISABLE=1` opted it out.
+   */
+  credStatus?: AgentCredStatus | null;
   createdAt: string;
   lastUpdatedAt: string;
+}
+
+export interface AgentCredStatusLiveTest {
+  ok: boolean;
+  error?: string | null;
+  latency_ms: number;
+  testedAt: number;
+}
+
+export interface AgentCredStatus {
+  ready: boolean;
+  missing: string[];
+  satisfiedBy?: "env" | "file" | "side-effect-pending" | null;
+  hint?: string | null;
+  liveTest?: AgentCredStatusLiveTest | null;
+  latestModel?: AgentLatestModel | null;
+  reportedAt: number;
+  reportKind?: "boot" | "post_task";
+}
+
+export interface AgentLatestModel {
+  model: string;
+  source: "task" | "agent_config" | "adapter_default" | "custom";
+  taskId?: string | null;
+  harnessProvider?: ProviderName | null;
+  reportedAt: number;
 }
 
 export interface AgentTask {
@@ -83,9 +131,13 @@ export interface AgentTask {
   swarmVersion?: string;
   provider?: ProviderName;
   providerMeta?: DevinProviderMeta | Record<string, never>;
+  /** Phase 1 (≥1.76.0): canonical user who requested this task. */
+  requestedByUserId?: string;
+  /** Phase 1 (≥1.76.0): cross-ingress context key for the conversation/thread. */
+  contextKey?: string;
 }
 
-export type ProviderName = "claude" | "codex" | "pi" | "devin";
+export type ProviderName = "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
 export type DevinProviderMeta = {
   sessionUrl: string;
   maxAcuLimit?: number;
@@ -94,6 +146,153 @@ export type DevinProviderMeta = {
 
 export interface AgentWithTasks extends Agent {
   tasks: AgentTask[];
+}
+
+/**
+ * Identity (Phase 2 ≥1.76.0). Mirrors `UserSchema` in `src/types.ts` —
+ * canonical row from the new `users` table.
+ */
+export interface User {
+  id: string;
+  name: string;
+  email?: string;
+  role?: string;
+  notes?: string;
+  slackUserId?: string;
+  linearUserId?: string;
+  githubUsername?: string;
+  gitlabUsername?: string;
+  emailAliases: string[];
+  preferredChannel: string;
+  timezone?: string;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface UsersResponse {
+  users: User[];
+}
+
+export interface CreateUserInput {
+  name: string;
+  email?: string;
+  role?: string;
+  notes?: string;
+  slackUserId?: string;
+  linearUserId?: string;
+  githubUsername?: string;
+  gitlabUsername?: string;
+  emailAliases?: string[];
+  preferredChannel?: string;
+  timezone?: string;
+}
+
+/**
+ * Sessions surface (Phase 4 ≥1.76.0). Mirrors `SessionListItem` from
+ * `src/be/db.ts:8816-8821` — root task plus chain-wide summary used by the
+ * `/sessions` sidebar.
+ */
+export interface SessionListItem {
+  root: AgentTask;
+  chainTaskCount: number;
+  lastActivityAt: string;
+  latestStatus: AgentTaskStatus;
+}
+
+/**
+ * Inbox-state (Phase 6 ≥1.76.0). Mirrors `InboxItemTypeSchema` /
+ * `InboxItemStatusSchema` / `InboxItemStateSchema` in `src/types.ts:252-276`.
+ *
+ * One row per (userId, itemType, itemId) tuple; the dashboard inbox joins
+ * server source data (approvals, agents, tasks, sessions, templates) against
+ * these rows to filter out items the user has dismissed/snoozed/done.
+ */
+export type InboxItemType =
+  | "approval"
+  | "credential_missing"
+  | "broken_task"
+  | "to_read"
+  | "to_start_template";
+
+export type InboxItemStatus = "open" | "snoozed" | "dismissed" | "done";
+
+export interface InboxItemState {
+  id: string;
+  userId: string;
+  itemType: InboxItemType;
+  itemId: string;
+  status: InboxItemStatus;
+  snoozeUntil?: string;
+  dismissedAt?: string;
+  doneAt?: string;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface InboxStateResponse {
+  items: InboxItemState[];
+}
+
+export interface InboxStateUpsertResponse {
+  item: InboxItemState;
+}
+
+/**
+ * Task templates (Phase 6 ≥1.76.0). Mirrors `TaskTemplateSchema` in
+ * `src/types.ts:289-300`. Powers the "To start" inbox bucket.
+ */
+export type TaskTemplateKind = "task" | "workflow" | "schedule";
+
+export interface TaskTemplate {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+  kind: TaskTemplateKind;
+  payload: Record<string, unknown>;
+  category?: string;
+  tags: string[];
+  createdAt: string;
+}
+
+export interface TaskTemplatesResponse {
+  templates: TaskTemplate[];
+}
+
+/**
+ * Bulk credential-status row from `GET /api/agents/credential-status`. Mirrors
+ * the handler shape at `src/http/agents.ts:466-477`. Used by the Blocking
+ * inbox bucket to surface agents stuck on missing creds.
+ */
+export interface CredentialMissingAgent {
+  agentId: string;
+  name: string;
+  status: AgentStatus;
+  /** Top-level missing[] (older worker fallback). */
+  missing: string[];
+  provider: string | null;
+  harnessProvider: ProviderName | null;
+  /** Migration 055 worker self-report; richer per-harness snapshot. */
+  credStatus: AgentCredStatus | null;
+  lastCheckedAt: string;
+}
+
+export interface CredentialMissingAgentsResponse {
+  agents: CredentialMissingAgent[];
+}
+
+export interface SessionsListResponse {
+  sessions: SessionListItem[];
+}
+
+/**
+ * Full chain payload from `GET /api/sessions/:rootTaskId`. The chain is
+ * already ordered by `createdAt` server-side (via the recursive CTE) so the
+ * UI can DFS from `root` without resorting.
+ */
+export interface SessionDetailResponse {
+  root: AgentTask;
+  chain: AgentTask[];
 }
 
 export type AgentLogEventType =
@@ -945,4 +1144,74 @@ export interface MemoryListResponse {
   results: MemoryEntry[];
   total: number;
   mode: "semantic" | "list";
+}
+
+// ─── /status (Phase 1: cloud personalization) ──────────────────────────────
+
+export type SetupMilestoneState = "unverified" | "configured" | "verified";
+
+export type MilestoneId =
+  | "harness"
+  | "slack"
+  | "github"
+  | "linear"
+  | "jira"
+  | "workers"
+  | "first_task";
+
+export interface SetupMilestone {
+  id: MilestoneId;
+  label: string;
+  state: SetupMilestoneState;
+  hint?: string;
+  action_url?: string;
+  /**
+   * Phase 1.5: only the `harness` milestone populates this. The UI uses
+   * it directly (no hint-string regex). Undefined when HARNESS_PROVIDER
+   * is unset or unknown.
+   */
+  provider?: ProviderName;
+}
+
+export interface StatusIdentity {
+  name: string;
+  logo_url: string | null;
+  brand_color: string | null;
+  is_cloud: boolean;
+  marketing_url: string | null;
+  hide_cloud_promo: boolean;
+  /** Stable org/tenant identifier (set via `SWARM_ORG_ID`); null on self-host. */
+  org_id: string | null;
+}
+
+export interface StatusActivity {
+  agents_online: number;
+  leads_online: number;
+  recent_tasks_count: number;
+}
+
+export interface StatusAgentFs {
+  configured: boolean;
+  base_url: string | null;
+}
+
+/**
+ * Phase 2: Aggregate health rolled up server-side from the setup milestones.
+ * Drives the always-on header badge color.
+ */
+export type StatusHealth = "ok" | "degraded" | "broken";
+
+export interface StatusResponse {
+  identity: StatusIdentity;
+  setup: SetupMilestone[];
+  activity: StatusActivity;
+  agent_fs: StatusAgentFs;
+  /** Phase 2: rolled-up health for the always-on header badge. */
+  health: StatusHealth;
+}
+
+export interface TestConnectionResponse {
+  ok: boolean;
+  error?: string;
+  latency_ms: number;
 }

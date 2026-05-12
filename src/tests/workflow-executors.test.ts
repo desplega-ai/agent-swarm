@@ -475,22 +475,31 @@ describe("ScriptExecutor", () => {
     expect(result.nextPort).toBe("success");
   });
 
-  test("captures stderr on failure", async () => {
+  test("marks step failed and captures stderr on non-zero exit", async () => {
     const result = await executor.run(
       input({ runtime: "bash", script: "echo err >&2; exit 1" }, {}),
     );
-    expect(result.status).toBe("success"); // executor succeeds, script fails
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("err");
     const out = result.output as { exitCode: number; stdout: string; stderr: string };
     expect(out.exitCode).toBe(1);
     expect(out.stderr).toBe("err");
-    expect(result.nextPort).toBe("failure");
   });
 
-  test("returns failure port on non-zero exit code", async () => {
-    const result = await executor.run(input({ runtime: "bash", script: "exit 42" }, {}));
-    expect(result.nextPort).toBe("failure");
+  test("marks step failed on non-zero exit code (exit 1)", async () => {
+    const result = await executor.run(input({ runtime: "bash", script: "exit 1" }, {}));
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("Script exited with code 1");
     const out = result.output as { exitCode: number };
-    expect(out.exitCode).toBe(42);
+    expect(out?.exitCode).toBe(1);
+  });
+
+  test("marks step failed with exit code in error when no stderr (exit 42)", async () => {
+    const result = await executor.run(input({ runtime: "bash", script: "exit 42" }, {}));
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("Script exited with code 42");
+    const out = result.output as { exitCode: number };
+    expect(out?.exitCode).toBe(42);
   });
 
   test("runs TypeScript script via bun", async () => {

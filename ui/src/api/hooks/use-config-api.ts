@@ -17,6 +17,18 @@ export function useConfigs(filters?: ConfigFilters) {
   });
 }
 
+export function useResolvedConfigs(filters?: {
+  agentId?: string;
+  repoId?: string;
+  includeSecrets?: boolean;
+}) {
+  return useQuery({
+    queryKey: ["configs", "resolved", filters],
+    queryFn: () => api.fetchResolvedConfig(filters),
+    select: (data) => data.configs,
+  });
+}
+
 export function useUpsertConfig() {
   const queryClient = useQueryClient();
 

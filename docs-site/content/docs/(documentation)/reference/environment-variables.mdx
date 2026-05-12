@@ -20,11 +20,18 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SECRETS_ENCRYPTION_KEY` | Auto-generated on first boot | Master key for encrypting `swarm_config` secret rows at rest. Accepts base64 (43-char, e.g. `openssl rand -base64 32`) **or** 64-char hex (e.g. `openssl rand -hex 32`). Decodes to exactly 32 bytes. **Reserved**: cannot be stored in the DB config store. See [Encryption Key](/docs/guides/deployment#encryption-key). |
 | `SECRETS_ENCRYPTION_KEY_FILE` | — | Alternative to `SECRETS_ENCRYPTION_KEY`: absolute path to a file whose contents are the base64- or hex-encoded key. Useful with Docker secrets or k8s `Secret` volume mounts. |
 | `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
-| `OPENAI_API_KEY` | — | OpenAI key for memory embeddings |
+| `OPENAI_API_KEY` | — | Fallback key for memory embeddings (used when `EMBEDDING_API_KEY` is unset). |
+| `EMBEDDING_API_KEY` | — | API key for the embedding provider. Takes precedence over `OPENAI_API_KEY`. |
+| `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model slug sent to the provider. |
+| `EMBEDDING_DIMENSIONS` | `512` | Vector dimensions requested from the model. Must match what the model supports. |
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Days until memory recency decay reaches 0.5 |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
+| `OPENROUTER_API_KEY` | — | Required for the Stop-hook session summarizer + LLM memory rater (calls go through the Vercel AI SDK against OpenRouter). When unset, both session-summary indexing and the `llm` rater are no-ops |
+| `MEMORY_RATER_LLM_MODEL` | `google/gemini-3-flash-preview` | OpenRouter model slug used by the Stop-hook summarizer + LLM rater. Override with any OpenRouter slug (e.g. `anthropic/claude-haiku-4.5`) |
+| `MEMORY_LLM_RATER_ENABLED` | `false` | When `true`, the same summarizer call also produces structured `useful: true | false` ratings for memories retrieved into the task's prompt |
 | `CAPABILITIES` | All enabled | Comma-separated feature flags |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
@@ -245,6 +252,21 @@ With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/tra
 | `APP_URL` | `https://ui.swarm.localhost:1355` | Dashboard URL |
 
 Install: `bun add -g portless`. Enable HTTPS: `portless trust && portless proxy start --https`.
+
+## Cloud Personalization & Adaptive Home
+
+Identity envs that brand the swarm and gate cloud-only UX. All are read on every `GET /status` call (cheap — env reads + one SQL aggregate, no upstream calls). See the [Personalization & Status](/docs/guides/personalization) guide for the full story.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu, suppresses the self-host marketing footer, and is sent as `metadata.is_cloud` (always present) on every anonymized telemetry event |
+| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name. Also sent as `metadata.organization_name` on every anonymized telemetry event when set |
+| `SWARM_ORG_ID` | none | Stable org/tenant identifier exposed on `/status` as `identity.org_id` and sent as `metadata.organization_id` on every anonymized telemetry event when set. Set by the orchestrator on cloud deployments |
+| `SWARM_ORG_LOGO_URL` | bundled `/logo.png` | Sidebar logo URL (any HTTPS URL). Falls back to the bundled logo if it fails to load |
+| `SWARM_BRAND_COLOR` | none | Tints the org name in the sidebar header (any CSS color, e.g. `#a855f7`) |
+| `SWARM_MARKETING_URL` | none | Self-host marketing footer link target. Suppressed when `SWARM_CLOUD=true` or `SWARM_HIDE_CLOUD_PROMO=true` |
+| `SWARM_HIDE_CLOUD_PROMO` | `false` | Force-hide the marketing footer regardless of `SWARM_CLOUD` |
+| `SWARM_VERIFY_TTL_MS` | `3600000` (1h) | How long a successful "Test connection" click keeps the harness milestone in `verified` state. In-memory; lost on API restart |
 
 ## Agent Filesystem (agent-fs)
 

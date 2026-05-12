@@ -1,4 +1,24 @@
-export { useAgent, useAgents, useUpdateAgentName, useUpdateAgentProfile } from "./use-agents";
+export type {
+  AgentActivityRow,
+  UseAgentActivityOptions,
+  UseAgentActivityResult,
+} from "./use-agent-activity";
+export {
+  computeActivityScores,
+  MAX_NODE_HEIGHT,
+  MAX_NODE_WIDTH,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
+  nodeSizeFromScore,
+  useAgentActivity,
+} from "./use-agent-activity";
+export {
+  useAgent,
+  useAgents,
+  useUpdateAgentName,
+  useUpdateAgentProfile,
+  useUpdateAgentRuntime,
+} from "./use-agents";
 export type { ApprovalRequestFilters } from "./use-approval-requests";
 export {
   useApprovalRequest,
@@ -29,11 +49,34 @@ export { useConfigs, useDeleteConfig, useUpsertConfig } from "./use-config-api";
 export type { SessionCostFilters } from "./use-costs";
 export {
   useAgentUsageSummary,
+  useDashboardCosts,
   useMonthlyUsageStats,
   useSessionCosts,
   useTaskUsage,
+  useUsageSummary,
 } from "./use-costs";
+export { useCredentialMissingAgents } from "./use-credential-missing-agents";
 export { useDbQuery, useTableColumns, useTableList } from "./use-db-query";
+export type { FeatureGateResult } from "./use-feature-gate";
+export { useFeatureGate } from "./use-feature-gate";
+export type {
+  BlockingInboxItem,
+  BlockingInboxResult,
+  BrokenInboxItem,
+  BrokenInboxResult,
+  ToReadInboxItem,
+  ToReadInboxResult,
+  ToStartInboxItem,
+  ToStartInboxResult,
+} from "./use-inbox";
+export {
+  useBlockingInbox,
+  useBrokenInbox,
+  useToReadInbox,
+  useToStartInbox,
+} from "./use-inbox";
+export type { UpdateInboxItemInput, UseInboxStateOptions } from "./use-inbox-state";
+export { useInboxState, useUpdateInboxItem } from "./use-inbox-state";
 export {
   useDisconnectMcpOAuth,
   useMcpOAuthMetadata,
@@ -78,6 +121,8 @@ export {
 } from "./use-schedules";
 export type { ServiceFilters } from "./use-services";
 export { useServices } from "./use-services";
+export type { UseSessionsOptions } from "./use-sessions";
+export { useSession, useSessions } from "./use-sessions";
 export type { SkillFilters } from "./use-skills";
 export {
   useAgentSkills,
@@ -91,7 +136,10 @@ export {
   useUninstallSkill,
   useUpdateSkill,
 } from "./use-skills";
-export { useHealth, useLogs, useStats } from "./use-stats";
+export { useApiVersion, useHealth, useLogs, useStats } from "./use-stats";
+export { useStatus, useTestConnection } from "./use-status";
+export type { UseTaskTemplatesOptions } from "./use-task-templates";
+export { useTaskTemplates } from "./use-task-templates";
 export type { TaskFilters } from "./use-tasks";
 export {
   useCancelTask,
@@ -103,6 +151,7 @@ export {
   useTaskSessionLogs,
   useTasks,
 } from "./use-tasks";
+export { useCreateUser, useUsers } from "./use-users";
 export {
   useAllWorkflowRuns,
   useDeleteWorkflow,

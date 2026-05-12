@@ -1,0 +1,21 @@
+-- 054_agent_harness_provider.sql
+--
+-- Phase 1.5 of the cloud-personalization plan
+-- (thoughts/taras/plans/2026-05-08-cloud-personalization-phases-1-4.md).
+--
+-- Add a first-class `harness_provider` column on `agents` so each agent's
+-- harness (claude / codex / pi / devin / claude-managed / opencode) is
+-- queryable per-row, independent of `process.env.HARNESS_PROVIDER` at
+-- worker boot.
+--
+-- Workers push their `HARNESS_PROVIDER` value on registration; an operator
+-- can later re-assign via `PATCH /api/agents/:id/harness-provider`. The
+-- worker itself does NOT yet react in real time — picked up on next worker
+-- restart. Full per-agent harness with dynamic adapter loading lives in
+-- Linear DES-359.
+--
+-- Forward-only. NULL default = backward-compat for already-registered
+-- agents (their column stays NULL until they re-register or an operator
+-- patches it).
+
+ALTER TABLE agents ADD COLUMN harness_provider TEXT NULL;

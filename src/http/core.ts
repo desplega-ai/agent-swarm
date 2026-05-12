@@ -84,6 +84,114 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
   };
 }
 
+// ─── Auto-reload debouncer ────────────────────────────────────────────────────
+// Why this exists: the integrations dashboard saves a row at a time (no bulk
+// endpoint — see ui/src/api/hooks/use-config-api.ts useUpsertConfigsBatch),
+// so a "save" of N keys produces N upsert calls in tight succession. Reloading
+// after each one would tear Slack's socket down N times. Coalesce instead.
+let pendingReloadTimer: ReturnType<typeof setTimeout> | null = null;
+let inFlightReload: Promise<ReloadConfigResult> | null = null;
+let reloadRerunRequested = false;
+let autoReloadInvocations = 0;
+const AUTO_RELOAD_DEBOUNCE_MS = 250;
+
+/**
+ * Schedule a coalesced integrations reload. Repeated calls within the debounce
+ * window collapse into a single reload. If a reload is currently running, the
+ * scheduler defers the next one until it finishes (so a save during a reload
+ * still re-runs once afterwards).
+ *
+ * Fire-and-forget — failures are logged and swallowed so callers (HTTP handlers)
+ * don't have to await the reload before responding.
+ */
+export function scheduleIntegrationsReload(delayMs = AUTO_RELOAD_DEBOUNCE_MS): void {
+  if (inFlightReload) {
+    reloadRerunRequested = true;
+    return;
+  }
+  if (pendingReloadTimer) {
+    clearTimeout(pendingReloadTimer);
+  }
+  pendingReloadTimer = setTimeout(() => {
+    pendingReloadTimer = null;
+    autoReloadInvocations += 1;
+    inFlightReload = reloadGlobalConfigsAndIntegrations()
+      .then((r) => {
+        console.log(
+          `[auto-reload] Loaded ${r.configsLoaded} config(s), re-initialized: ${r.integrationsReinitialized.join(", ") || "none"}`,
+        );
+        return r;
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[auto-reload] Failed:", message);
+        throw err;
+      })
+      .finally(() => {
+        inFlightReload = null;
+        if (reloadRerunRequested) {
+          reloadRerunRequested = false;
+          scheduleIntegrationsReload(delayMs);
+        }
+      });
+  }, delayMs);
+}
+
+/**
+ * For tests + shutdown: cancel any pending timer and await any in-flight
+ * reload. Returns once the queue is fully drained.
+ */
+export async function flushPendingIntegrationsReload(): Promise<void> {
+  if (pendingReloadTimer) {
+    clearTimeout(pendingReloadTimer);
+    pendingReloadTimer = null;
+    autoReloadInvocations += 1;
+    inFlightReload = reloadGlobalConfigsAndIntegrations()
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[auto-reload] flush failed:", message);
+        throw err;
+      })
+      .finally(() => {
+        inFlightReload = null;
+      }) as Promise<ReloadConfigResult>;
+  }
+  if (inFlightReload) {
+    try {
+      await inFlightReload;
+    } catch {
+      // Already logged; flush should not throw on caller's path.
+    }
+  }
+  // Drain any reruns queued while we were awaiting.
+  while (reloadRerunRequested) {
+    reloadRerunRequested = false;
+    autoReloadInvocations += 1;
+    inFlightReload = reloadGlobalConfigsAndIntegrations()
+      .catch(() => null)
+      .finally(() => {
+        inFlightReload = null;
+      }) as Promise<ReloadConfigResult>;
+    await inFlightReload;
+  }
+}
+
+// ─── Test helpers (stable surface for src/tests/) ─────────────────────────────
+// Module state is intentionally process-global; tests need to reset it between
+// cases to avoid cross-contamination. Not part of the public HTTP API.
+export function _autoReloadStatsForTests(): { invocations: number; pending: boolean } {
+  return { invocations: autoReloadInvocations, pending: pendingReloadTimer !== null };
+}
+export function _resetAutoReloadForTests(): void {
+  if (pendingReloadTimer) {
+    clearTimeout(pendingReloadTimer);
+    pendingReloadTimer = null;
+  }
+  inFlightReload = null;
+  reloadRerunRequested = false;
+  autoReloadInvocations = 0;
+}
+
 export async function handleCore(
   req: IncomingMessage,
   res: ServerResponse,

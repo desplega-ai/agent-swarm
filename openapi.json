@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.75.0",
+    "version": "1.77.3",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -326,6 +326,17 @@
                       "claude-managed",
                       "opencode"
                     ]
+                  },
+                  "harness_provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode"
+                    ]
                   }
                 },
                 "required": [
@@ -373,6 +384,133 @@
         "responses": {
           "200": {
             "description": "Agent list with capacity info"
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/harness-provider": {
+      "patch": {
+        "summary": "Re-assign an agent's harness_provider (live)",
+        "description": "Updates `agents.harness_provider` and upserts `swarm_config` (scope=agent, key=HARNESS_PROVIDER) so the worker's poll-loop reconciliation picks up the new provider within ~10s. No restart required. The swarm_config row is what actually drives the worker; the column mirrors the latest set value for dashboards.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "harness_provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode"
+                    ]
+                  }
+                },
+                "required": [
+                  "harness_provider"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated agent row"
+          },
+          "400": {
+            "description": "Validation error (unknown provider)"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/runtime": {
+      "patch": {
+        "summary": "Update an agent's runtime harness and default model",
+        "description": "Updates `agents.harness_provider` and upserts agent-scoped `swarm_config` rows for HARNESS_PROVIDER and MODEL_OVERRIDE. The settings apply to future provider sessions.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "harness_provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "opencode"
+                    ]
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "allow_custom_model": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "harness_provider",
+                  "model"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated agent row"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Agent not found"
           }
         }
       }
@@ -659,11 +797,193 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "cred_status": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "ready": {
+                        "type": "boolean"
+                      },
+                      "missing": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": []
+                      },
+                      "satisfiedBy": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "env",
+                          "file",
+                          "side-effect-pending",
+                          null
+                        ],
+                        "default": null
+                      },
+                      "hint": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "default": null
+                      },
+                      "liveTest": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "properties": {
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "latency_ms": {
+                            "type": "number"
+                          },
+                          "testedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "default": null,
+                        "required": [
+                          "ok",
+                          "latency_ms",
+                          "testedAt"
+                        ]
+                      },
+                      "latestModel": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "properties": {
+                          "model": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "task",
+                              "agent_config",
+                              "adapter_default",
+                              "custom"
+                            ]
+                          },
+                          "taskId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "harnessProvider": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "pi",
+                              "devin",
+                              "claude-managed",
+                              "opencode",
+                              null
+                            ],
+                            "default": null
+                          },
+                          "reportedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "default": null,
+                        "required": [
+                          "model",
+                          "source",
+                          "reportedAt"
+                        ]
+                      },
+                      "reportedAt": {
+                        "type": "number"
+                      },
+                      "reportKind": {
+                        "type": "string",
+                        "enum": [
+                          "boot",
+                          "post_task"
+                        ],
+                        "default": "boot"
+                      }
+                    },
+                    "required": [
+                      "ready",
+                      "reportedAt"
+                    ]
+                  },
+                  "latest_model": {
+                    "type": "object",
+                    "properties": {
+                      "model": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "task",
+                          "agent_config",
+                          "adapter_default",
+                          "custom"
+                        ]
+                      },
+                      "taskId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "default": null
+                      },
+                      "harnessProvider": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "claude",
+                          "codex",
+                          "pi",
+                          "devin",
+                          "claude-managed",
+                          "opencode",
+                          null
+                        ],
+                        "default": null
+                      },
+                      "reportedAt": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "model",
+                      "source",
+                      "reportedAt"
+                    ]
                   }
-                },
-                "required": [
-                  "ready"
-                ]
+                }
               }
             }
           }
@@ -1627,7 +1947,7 @@
         }
       },
       "delete": {
-        "summary": "Delete a config entry by ID (including legacy reserved rows for cleanup)",
+        "summary": "Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload.",
         "tags": [
           "Config"
         ],
@@ -1704,7 +2024,7 @@
         }
       },
       "put": {
-        "summary": "Create or update a config entry (reserved env-only keys are rejected)",
+        "summary": "Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call.",
         "tags": [
           "Config"
         ],
@@ -2845,6 +3165,138 @@
         "responses": {
           "200": {
             "description": "Checklist check completed successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/inbox-state": {
+      "get": {
+        "summary": "List inbox-item state rows for a user",
+        "tags": [
+          "Inbox State"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "userId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "snoozed",
+                "dismissed",
+                "done"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "approval",
+                "credential_missing",
+                "broken_task",
+                "to_read",
+                "to_start_template"
+              ]
+            },
+            "required": false,
+            "name": "itemType",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Inbox state rows"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Upsert per-user dismiss/snooze/done state for an inbox item",
+        "tags": [
+          "Inbox State"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "itemType": {
+                    "type": "string",
+                    "enum": [
+                      "approval",
+                      "credential_missing",
+                      "broken_task",
+                      "to_read",
+                      "to_start_template"
+                    ]
+                  },
+                  "itemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "snoozed",
+                      "dismissed",
+                      "done"
+                    ]
+                  },
+                  "snoozeUntil": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "userId",
+                  "itemType",
+                  "itemId",
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upserted inbox state row"
+          },
+          "400": {
+            "description": "Validation error"
           },
           "401": {
             "description": "Unauthorized"
@@ -5584,6 +6036,101 @@
         }
       }
     },
+    "/api/sessions": {
+      "get": {
+        "summary": "List recent task sessions (root tasks + chain summary)",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "q",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent sessions ordered by chain-wide last activity"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/sessions/{rootTaskId}": {
+      "get": {
+        "summary": "Get a session — root task + the entire descendant chain",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "rootTaskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Root task + chain (ordered by createdAt)"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Root task not found"
+          }
+        }
+      }
+    },
     "/api/skills": {
       "get": {
         "summary": "List skills with optional filters",
@@ -6938,6 +7485,301 @@
         }
       }
     },
+    "/status": {
+      "get": {
+        "summary": "Identity + setup readiness + live activity for the swarm dashboard",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 7 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+        "tags": [
+          "Status"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "identity": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "logo_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "brand_color": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "is_cloud": {
+                          "type": "boolean"
+                        },
+                        "marketing_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "hide_cloud_promo": {
+                          "type": "boolean"
+                        },
+                        "org_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "logo_url",
+                        "brand_color",
+                        "is_cloud",
+                        "marketing_url",
+                        "hide_cloud_promo",
+                        "org_id"
+                      ]
+                    },
+                    "setup": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "enum": [
+                              "harness",
+                              "slack",
+                              "github",
+                              "linear",
+                              "jira",
+                              "workers",
+                              "first_task"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "unverified",
+                              "configured",
+                              "verified"
+                            ]
+                          },
+                          "hint": {
+                            "type": "string"
+                          },
+                          "action_url": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "pi",
+                              "devin",
+                              "claude-managed",
+                              "opencode"
+                            ]
+                          },
+                          "providers": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "provider": {
+                                  "type": "string",
+                                  "enum": [
+                                    "claude",
+                                    "codex",
+                                    "pi",
+                                    "devin",
+                                    "claude-managed",
+                                    "opencode"
+                                  ]
+                                },
+                                "state": {
+                                  "type": "string",
+                                  "enum": [
+                                    "unverified",
+                                    "configured",
+                                    "verified"
+                                  ]
+                                },
+                                "workers": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "state",
+                                "workers"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "state"
+                        ]
+                      }
+                    },
+                    "activity": {
+                      "type": "object",
+                      "properties": {
+                        "agents_online": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "leads_online": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "recent_tasks_count": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "agents_online",
+                        "leads_online",
+                        "recent_tasks_count"
+                      ]
+                    },
+                    "agent_fs": {
+                      "type": "object",
+                      "properties": {
+                        "configured": {
+                          "type": "boolean"
+                        },
+                        "base_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "configured",
+                        "base_url"
+                      ]
+                    },
+                    "health": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "degraded",
+                        "broken"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "identity",
+                    "setup",
+                    "activity",
+                    "agent_fs",
+                    "health"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/status/test-connection": {
+      "post": {
+        "summary": "Live-test the harness provider's credentials",
+        "description": "Issues a real upstream call (Anthropic /v1/models, OpenAI /v1/models, etc.) for the given provider. Updates an in-memory cache so the next GET /status reports `harness.state = 'verified'` for SWARM_VERIFY_TTL_MS (default 1h).",
+        "tags": [
+          "Status"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode"
+                    ]
+                  }
+                },
+                "required": [
+                  "provider"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Live-test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "latency_ms": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "latency_ms"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
     "/api/tasks": {
       "get": {
         "summary": "List tasks with filters",
@@ -6996,6 +7838,23 @@
           },
           {
             "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "createdAfter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": [
                 "integer",
                 "null"
@@ -7020,6 +7879,9 @@
         "responses": {
           "200": {
             "description": "Paginated task list"
+          },
+          "400": {
+            "description": "Validation error (e.g. unknown status token)"
           }
         }
       },
@@ -7074,13 +7936,30 @@
                     "type": "string"
                   },
                   "source": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                      "mcp",
+                      "slack",
+                      "api",
+                      "ui",
+                      "github",
+                      "gitlab",
+                      "agentmail",
+                      "system",
+                      "schedule",
+                      "workflow",
+                      "linear",
+                      "jira"
+                    ]
                   },
                   "outputSchema": {
                     "type": "object",
                     "additionalProperties": {}
                   },
                   "contextKey": {
+                    "type": "string"
+                  },
+                  "requestedByUserId": {
                     "type": "string"
                   }
                 },
@@ -7547,6 +8426,58 @@
         }
       }
     },
+    "/api/task-templates": {
+      "get": {
+        "summary": "List task templates ('To start' bucket)",
+        "tags": [
+          "Task Templates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "task",
+                "workflow",
+                "schedule"
+              ]
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "query",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task template list"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
     "/api/trackers/jira/authorize": {
       "get": {
         "summary": "Redirect to Atlassian OAuth consent screen",
@@ -7918,6 +8849,185 @@
           },
           "503": {
             "description": "Linear not configured"
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "summary": "List all users",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of users"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new user",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "slackUserId": {
+                    "type": "string"
+                  },
+                  "linearUserId": {
+                    "type": "string"
+                  },
+                  "githubUsername": {
+                    "type": "string"
+                  },
+                  "gitlabUsername": {
+                    "type": "string"
+                  },
+                  "emailAliases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "preferredChannel": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/users/{id}": {
+      "put": {
+        "summary": "Update an existing user (partial — at least one field required)",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "slackUserId": {
+                    "type": "string"
+                  },
+                  "linearUserId": {
+                    "type": "string"
+                  },
+                  "githubUsername": {
+                    "type": "string"
+                  },
+                  "gitlabUsername": {
+                    "type": "string"
+                  },
+                  "emailAliases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "preferredChannel": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User updated"
+          },
+          "400": {
+            "description": "Validation error or empty body"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User not found"
           }
         }
       }

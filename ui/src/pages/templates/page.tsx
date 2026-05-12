@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { usePromptTemplates } from "@/api/hooks/use-prompt-templates";
 import type { PromptTemplate } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
+import { TemplateRecommendationCard } from "@/components/shared/template-recommendation-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -146,6 +147,15 @@ export default function TemplatesPage() {
           Defaults only
         </Button>
       </div>
+
+      {/* Phase 3: smart empty state — promote a starter template when the
+          prompt-templates list is empty. The recommendation pulls from
+          /status's setup milestones (Slack/GitHub/Linear/Jira). */}
+      {!isLoading && filteredTemplates.length === 0 ? (
+        <div className="py-8">
+          <TemplateRecommendationCard eyebrow="Try this template" actionLabel="Browse templates" />
+        </div>
+      ) : null}
 
       <DataGrid
         rowData={filteredTemplates}

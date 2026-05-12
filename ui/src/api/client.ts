@@ -13,8 +13,16 @@ import type {
   BudgetsResponse,
   ChannelMessage,
   ChannelsResponse,
+  CreateUserInput,
+  CredentialMissingAgent,
+  CredentialMissingAgentsResponse,
   DashboardCostResponse,
   EventDefinition,
+  InboxItemState,
+  InboxItemStatus,
+  InboxItemType,
+  InboxStateResponse,
+  InboxStateUpsertResponse,
   LogsResponse,
   McpOAuthMetadataResponse,
   McpOAuthStatusResponse,
@@ -32,8 +40,11 @@ import type {
   ScheduledTasksResponse,
   ServicesResponse,
   SessionCostsResponse,
+  SessionDetailResponse,
+  SessionListItem,
   SessionLog,
   SessionLogsResponse,
+  SessionsListResponse,
   Skill,
   SkillsResponse,
   Stats,
@@ -43,9 +54,14 @@ import type {
   SwarmReposResponse,
   TaskContextResponse,
   TasksResponse,
+  TaskTemplate,
+  TaskTemplateKind,
+  TaskTemplatesResponse,
   TaskWithLogs,
   UpsertPromptTemplateInput,
   UsageSummaryResponse,
+  User,
+  UsersResponse,
   Workflow,
   WorkflowRun,
   WorkflowRunStep,
@@ -181,6 +197,29 @@ class ApiClient {
     return res.json();
   }
 
+  async updateAgentRuntime(data: {
+    id: string;
+    harnessProvider: "claude" | "codex" | "pi" | "opencode";
+    model: string;
+    allowCustomModel?: boolean;
+  }): Promise<AgentWithTasks> {
+    const url = `${this.getBaseUrl()}/api/agents/${data.id}/runtime`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify({
+        harness_provider: data.harnessProvider,
+        model: data.model,
+        allow_custom_model: data.allowCustomModel ?? false,
+      }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to update runtime" }));
+      throw new Error(error.error || `Failed to update runtime: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchTasks(filters?: {
     status?: string;
     agentId?: string;
@@ -189,6 +228,10 @@ class ApiClient {
     includeHeartbeat?: boolean;
     limit?: number;
     offset?: number;
+    /** Phase 2 (≥1.76.0): ISO 8601 timestamp; backend filters createdAt >= value. */
+    createdAfter?: string;
+    /** Filter to tasks whose `source` is in this list. Empty/undefined → all. */
+    source?: string[];
   }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -198,6 +241,9 @@ class ApiClient {
     if (filters?.includeHeartbeat) params.set("includeHeartbeat", "true");
     if (filters?.limit != null) params.set("limit", String(filters.limit));
     if (filters?.offset != null) params.set("offset", String(filters.offset));
+    if (filters?.createdAfter) params.set("createdAfter", filters.createdAfter);
+    if (filters?.source && filters.source.length > 0)
+      params.set("source", filters.source.join(","));
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -219,6 +265,14 @@ class ApiClient {
     tags?: string[];
     priority?: number;
     dependsOn?: string[];
+    /** Phase 3 (≥1.76.0): parent task for grouped/parallel sub-tasks. */
+    parentTaskId?: string;
+    /** Phase 3 (≥1.76.0): override the wire `source` ("api"|"mcp"|"slack"). */
+    source?: string;
+    /** Phase 3 (≥1.76.0): identity of the requesting user. */
+    requestedByUserId?: string;
+    /** Phase 3 (≥1.76.0): cross-ingress conversation/thread context key. */
+    contextKey?: string;
   }): Promise<TaskWithLogs> {
     const url = `${this.getBaseUrl()}/api/tasks`;
     const res = await fetch(url, {
@@ -314,6 +368,32 @@ class ApiClient {
     const url = `${baseUrl}/health`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchStatus(): Promise<import("./types").StatusResponse | null> {
+    const url = `${this.getBaseUrl()}/status`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    // 404 = older API server without /status. Return null so consumers can
+    // hide the home page + sidebar entry instead of erroring.
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Failed to fetch status: ${res.status}`);
+    return res.json();
+  }
+
+  async testConnection(
+    provider: import("./types").ProviderName,
+  ): Promise<import("./types").TestConnectionResponse> {
+    const url = `${this.getBaseUrl()}/status/test-connection`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ provider }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to test connection" }));
+      throw new Error(err.error || `Failed to test connection: ${res.status}`);
+    }
     return res.json();
   }
 
@@ -1476,6 +1556,131 @@ class ApiClient {
       throw new Error(err.error || `Failed to delete memory: ${res.status}`);
     }
     return res.json();
+  }
+
+  // ─── Users (Phase 2 ≥1.76.0) ─────────────────────────────────────────────
+
+  async listUsers(): Promise<User[]> {
+    const url = `${this.getBaseUrl()}/api/users`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to list users: ${res.status}`);
+    const data = (await res.json()) as UsersResponse;
+    return data.users;
+  }
+
+  async createUser(data: CreateUserInput): Promise<User> {
+    const url = `${this.getBaseUrl()}/api/users`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to create user" }));
+      throw new Error(err.error || `Failed to create user: ${res.status}`);
+    }
+    const body = (await res.json()) as { user: User };
+    return body.user;
+  }
+
+  // ─── Sessions (Phase 4 ≥1.76.0) ───────────────────────────────────────────
+
+  async listSessions(opts?: {
+    limit?: number;
+    offset?: number;
+    /** Filter root-task source. Empty / undefined → all sources. */
+    source?: string[];
+    /** Case-insensitive substring match against the root task's text. */
+    q?: string;
+  }): Promise<SessionListItem[]> {
+    const params = new URLSearchParams();
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    if (opts?.offset != null) params.set("offset", String(opts.offset));
+    if (opts?.source && opts.source.length > 0) params.set("source", opts.source.join(","));
+    if (opts?.q && opts.q.length > 0) params.set("q", opts.q);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/sessions${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to list sessions: ${res.status}`);
+    const data = (await res.json()) as SessionsListResponse;
+    return data.sessions;
+  }
+
+  async getSession(rootTaskId: string): Promise<SessionDetailResponse> {
+    const url = `${this.getBaseUrl()}/api/sessions/${encodeURIComponent(rootTaskId)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch session: ${res.status}`);
+    return res.json();
+  }
+
+  // ─── Task Templates (Phase 6 ≥1.76.0) ─────────────────────────────────────
+
+  async listTaskTemplates(opts?: {
+    category?: string;
+    /** v2 hook — v1 callers always pass `kind=task` (or omit). */
+    kind?: TaskTemplateKind;
+    query?: string;
+  }): Promise<TaskTemplate[]> {
+    const params = new URLSearchParams();
+    if (opts?.category) params.set("category", opts.category);
+    if (opts?.kind) params.set("kind", opts.kind);
+    if (opts?.query) params.set("query", opts.query);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/task-templates${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to list task templates: ${res.status}`);
+    const data = (await res.json()) as TaskTemplatesResponse;
+    return data.templates;
+  }
+
+  // ─── Inbox State (Phase 6 ≥1.76.0) ────────────────────────────────────────
+
+  async listInboxState(opts: {
+    userId: string;
+    status?: InboxItemStatus;
+    itemType?: InboxItemType;
+  }): Promise<InboxItemState[]> {
+    const params = new URLSearchParams();
+    params.set("userId", opts.userId);
+    if (opts.status) params.set("status", opts.status);
+    if (opts.itemType) params.set("itemType", opts.itemType);
+    const url = `${this.getBaseUrl()}/api/inbox-state?${params.toString()}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to list inbox state: ${res.status}`);
+    const data = (await res.json()) as InboxStateResponse;
+    return data.items;
+  }
+
+  async patchInboxState(body: {
+    userId: string;
+    itemType: InboxItemType;
+    itemId: string;
+    status: InboxItemStatus;
+    /** ISO 8601 datetime; required when status === "snoozed". */
+    snoozeUntil?: string;
+  }): Promise<InboxItemState> {
+    const url = `${this.getBaseUrl()}/api/inbox-state`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to update inbox state" }));
+      throw new Error(err.error || `Failed to update inbox state: ${res.status}`);
+    }
+    const data = (await res.json()) as InboxStateUpsertResponse;
+    return data.item;
+  }
+
+  // ─── Credential-Missing Agents (Phase 6 ≥1.76.0) ──────────────────────────
+
+  async listCredentialMissingAgents(): Promise<CredentialMissingAgent[]> {
+    const url = `${this.getBaseUrl()}/api/agents/credential-status?status=waiting_for_credentials`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to list credential-missing agents: ${res.status}`);
+    const data = (await res.json()) as CredentialMissingAgentsResponse;
+    return data.agents;
   }
 }
 

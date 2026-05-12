@@ -1,8 +1,9 @@
 {
   "display_information": {
     "name": "agent-swarm",
-    "description": "Your Agent Swarm",
-    "background_color": "#000000"
+    "description": "Your favourite Agent Swarm",
+    "background_color": "#a86d07",
+    "long_description": "The official agent-swarm Slack bot. It will allow you to talk with your swarm deployment from where you work: Slack. Available in the cloud hosted solution at cloud.agent-swarm.dev!"
   },
   "features": {
     "app_home": {
@@ -13,19 +14,6 @@
     "bot_user": {
       "display_name": "agent-swarm",
       "always_online": true
-    },
-    "assistant_view": {
-      "assistant_description": "Your Agent Swarm — assign tasks, check status, and interact with your AI agents.",
-      "suggested_commands": [
-        {
-          "title": "Check agent status",
-          "description": "See which agents are online and what they're working on"
-        },
-        {
-          "title": "Assign a task",
-          "description": "Give a task to one of your agents"
-        }
-      ]
     },
     "slash_commands": [
       {
@@ -38,10 +26,33 @@
         "description": "Show help for using the Agent Swarm bot",
         "should_escape": false
       }
-    ]
+    ],
+    "assistant_view": {
+      "assistant_description": "Manage an agent-swarm",
+      "suggested_prompts": []
+    }
   },
   "oauth_config": {
+    "redirect_urls": [
+      "https://cloud.agent-swarm.dev/api/integrations/slack/callback",
+      "https://web.localhost/api/integrations/slack/callback"
+    ],
     "scopes": {
+      "user": [
+        "channels:history",
+        "chat:write",
+        "groups:history",
+        "im:history",
+        "mpim:history",
+        "search:read.files",
+        "search:read.im",
+        "search:read.mpim",
+        "search:read.private",
+        "search:read.public",
+        "search:read.users",
+        "users:read",
+        "users:read.email"
+      ],
       "bot": [
         "app_mentions:read",
         "assistant:write",
@@ -49,7 +60,6 @@
         "channels:read",
         "chat:write",
         "chat:write.customize",
-        "chat:write.public",
         "commands",
         "files:read",
         "files:write",
@@ -58,24 +68,20 @@
         "im:history",
         "im:read",
         "im:write",
-        "mpim:history",
-        "mpim:read",
-        "mpim:write",
         "reactions:write",
         "users:read"
       ]
-    }
+    },
+    "pkce_enabled": false
   },
   "settings": {
     "event_subscriptions": {
       "bot_events": [
         "app_mention",
-        "assistant_thread_started",
-        "assistant_thread_context_changed",
         "message.channels",
         "message.groups",
         "message.im",
-        "message.mpim"
+        "assistant_thread_started"
       ]
     },
     "interactivity": {
@@ -83,6 +89,7 @@
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": true,
-    "token_rotation_enabled": false
+    "token_rotation_enabled": true,
+    "is_mcp_enabled": true
   }
 }

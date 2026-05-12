@@ -1,30 +1,21 @@
-import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import {
-  ArrowLeft,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  GitBranch,
-  Pencil,
-  Search,
-  X,
-} from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { ArrowLeft, Check, Crown, Pencil, Search, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAgent, useUpdateAgentName, useUpdateAgentProfile } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useAgentMcpServers, useUninstallMcpServer } from "@/api/hooks/use-mcp-servers";
 import { useAgentSkills, useUninstallSkill } from "@/api/hooks/use-skills";
 import { useTasks } from "@/api/hooks/use-tasks";
-import type {
-  Agent,
-  AgentSkill,
-  AgentTask,
-  AgentTaskStatus,
-  McpServerWithInstallInfo,
-} from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
+import type { Agent, AgentSkill, AgentTask, McpServerWithInstallInfo } from "@/api/types";
+import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
+import { HarnessCell } from "@/components/shared/harness-cell";
 import { StatusBadge } from "@/components/shared/status-badge";
+import {
+  ignoreRowClickFromInteractives,
+  TasksColumnsMenu,
+  TasksTable,
+  useTasksColumns,
+} from "@/components/shared/tasks-table";
 import { UsageSummary } from "@/components/shared/usage-summary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,7 +26,7 @@ import {
   QuickStat,
   QuickStats,
 } from "@/components/ui/detail-page-layout";
-import { InfoRow } from "@/components/ui/info-row";
+import { DefinitionList, InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -47,95 +38,89 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { formatElapsed, formatSmartTime } from "@/lib/utils";
+import { formatSmartTime } from "@/lib/utils";
+import { CredentialsPanel } from "./credentials-panel";
 
 const PAGE_SIZE = 100;
 
 type MdField = "soulMd" | "identityMd" | "claudeMd" | "toolsMd" | "setupScript" | "heartbeatMd";
 
-function EditableMarkdownField({
-  title,
+const DOCUMENT_FIELDS: Array<{ field: MdField; tab: string; label: string }> = [
+  { field: "soulMd", tab: "soul", label: "SOUL.md" },
+  { field: "identityMd", tab: "identity", label: "IDENTITY.md" },
+  { field: "claudeMd", tab: "claude", label: "CLAUDE.md" },
+  { field: "toolsMd", tab: "tools", label: "TOOLS.md" },
+  { field: "setupScript", tab: "setup", label: "Setup script" },
+  { field: "heartbeatMd", tab: "heartbeat", label: "HEARTBEAT.md" },
+];
+
+function MarkdownDocumentEditor({
   field,
+  label,
   agent,
   onSave,
   saving,
 }: {
-  title: string;
   field: MdField;
+  label: string;
   agent: Agent;
   onSave: (field: MdField, value: string) => void;
   saving: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const value = agent[field] ?? "";
 
-  function startEditing() {
+  function start() {
     setDraft(value);
     setEditing(true);
-    setExpanded(true);
   }
-
   function cancel() {
     setEditing(false);
   }
-
   function save() {
     onSave(field, draft);
     setEditing(false);
   }
 
   return (
-    <div className="rounded-md border border-border/50">
-      <div className="flex w-full items-center gap-2 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="flex flex-1 items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          {title}
-          {!value && (
-            <span className="text-xs font-normal italic text-muted-foreground/60">empty</span>
-          )}
-        </button>
-        {!editing && (
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={startEditing}>
-            <Pencil className="h-3.5 w-3.5" />
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-muted-foreground">{label}</h3>
+        {!editing ? (
+          <Button size="sm" variant="ghost" onClick={start}>
+            <Pencil className="h-3.5 w-3.5 mr-1.5" />
+            Edit
           </Button>
+        ) : (
+          <div className="flex items-center gap-1">
+            <Button size="sm" onClick={save} disabled={saving}>
+              <Check className="h-3.5 w-3.5 mr-1.5" />
+              Save
+            </Button>
+            <Button size="sm" variant="ghost" onClick={cancel}>
+              <X className="h-3.5 w-3.5 mr-1.5" />
+              Cancel
+            </Button>
+          </div>
         )}
       </div>
-      {expanded && (
-        <div className="border-t border-border/50">
-          {editing ? (
-            <div className="p-3 space-y-2">
-              <Textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                className="min-h-40 font-mono text-xs"
-                autoFocus
-              />
-              <div className="flex items-center gap-2">
-                <Button size="sm" onClick={save} disabled={saving}>
-                  <Check className="h-3.5 w-3.5 mr-1" />
-                  Save
-                </Button>
-                <Button size="sm" variant="ghost" onClick={cancel}>
-                  <X className="h-3.5 w-3.5 mr-1" />
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : value ? (
-            <pre className="overflow-auto bg-muted/30 p-3 text-xs font-mono leading-relaxed text-foreground/80 max-h-96">
-              {value}
-            </pre>
-          ) : (
-            <p className="px-3 py-4 text-sm text-muted-foreground/60 italic">
-              No content — click Edit to add
-            </p>
-          )}
+      {editing ? (
+        <Textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="min-h-[420px] font-mono text-xs"
+          autoFocus
+        />
+      ) : value ? (
+        <pre className="rounded-md border border-border/50 bg-muted/30 p-3 text-xs font-mono leading-relaxed text-foreground/80 overflow-auto max-h-[60vh]">
+          {value}
+        </pre>
+      ) : (
+        <div className="rounded-md border border-dashed border-border/50 p-6 text-center">
+          <p className="text-sm text-muted-foreground italic">
+            No content yet — click Edit to add.
+          </p>
         </div>
       )}
     </div>
@@ -204,82 +189,18 @@ export default function AgentDetailPage() {
     }
   }
 
-  const taskColDefs = useMemo<ColDef<AgentTask>[]>(
-    () => [
-      {
-        field: "task",
-        headerName: "Description",
-        flex: 1,
-        minWidth: 250,
-        cellRenderer: (params: { value: string }) => (
-          <span className="truncate">{params.value}</span>
-        ),
-      },
-      {
-        field: "status",
-        headerName: "Status",
-        width: 130,
-        cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
-      },
-      {
-        field: "taskType",
-        headerName: "Type",
-        width: 110,
-        cellRenderer: (params: { value: string | undefined }) =>
-          params.value ? (
-            <Badge variant="outline" size="tag">
-              {params.value}
-            </Badge>
-          ) : null,
-      },
-      {
-        headerName: "Elapsed",
-        width: 100,
-        valueGetter: (params) => {
-          const task = params.data;
-          if (!task) return "";
-          const start = task.acceptedAt ?? task.createdAt;
-          const end = task.finishedAt;
-          const isActive =
-            !end &&
-            (task.status === "in_progress" ||
-              task.status === "pending" ||
-              task.status === "offered");
-          return isActive ? formatElapsed(start) : end ? formatElapsed(start, end) : "—";
-        },
-      },
-      {
-        field: "dependsOn",
-        headerName: "Deps",
-        width: 90,
-        cellRenderer: (params: { value: string[] | undefined }) => {
-          const deps = params.value;
-          if (!deps || deps.length === 0) return null;
-          return (
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <GitBranch className="h-3 w-3 shrink-0" />
-              <span className="text-[10px] font-mono">{deps.length}</span>
-            </div>
-          );
-        },
-        sortable: false,
-      },
-      {
-        field: "createdAt",
-        headerName: "Created",
-        width: 150,
-        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
-      },
-    ],
-    [],
-  );
-
-  const onTaskClicked = useCallback(
-    (event: RowClickedEvent<AgentTask>) => {
-      if (event.data) navigate(`/tasks/${event.data.id}`);
-    },
+  const onTaskClicked = useMemo(
+    () =>
+      ignoreRowClickFromInteractives<AgentTask>((event) => {
+        if (event.data) navigate(`/tasks/${event.data.id}`);
+      }),
     [navigate],
   );
+
+  const taskColumns = useTasksColumns({
+    storageKey: "agent-detail-tasks",
+    hiddenColumns: ["agent"],
+  });
 
   if (isLoading) {
     return (
@@ -309,10 +230,11 @@ export default function AgentDetailPage() {
       <div className="flex items-center gap-3 shrink-0">
         {editing ? (
           <div className="flex items-center gap-2">
+            {agent.isLead && <Crown className="h-7 w-7 text-primary shrink-0" />}
             <Input
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              className="h-9 w-64"
+              className="h-11 w-72 text-2xl font-semibold"
               onKeyDown={(e) => {
                 if (e.key === "Enter") saveName();
                 if (e.key === "Escape") setEditing(false);
@@ -327,12 +249,16 @@ export default function AgentDetailPage() {
             </Button>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">{agent.name}</h1>
+          <div className="flex items-center gap-2.5">
+            {agent.isLead && <Crown className="h-7 w-7 text-primary shrink-0" />}
+            <h1 className="text-3xl font-bold tracking-tight">{agent.name}</h1>
             <Button size="icon" variant="ghost" onClick={startEditing}>
               <Pencil className="h-4 w-4" />
             </Button>
           </div>
+        )}
+        {agent.role && (
+          <span className="text-base text-muted-foreground font-medium">{agent.role}</span>
         )}
         <StatusBadge status={agent.status} size="md" />
       </div>
@@ -340,6 +266,8 @@ export default function AgentDetailPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0">
           <TabsTrigger value="profile">Profile</TabsTrigger>
+          <TabsTrigger value="credentials">Credentials</TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="tasks">Tasks ({taskTotal})</TabsTrigger>
           <TabsTrigger value="skills">Skills ({agentSkillsList.length})</TabsTrigger>
           <TabsTrigger value="mcp-servers">MCP Servers ({agentMcpServersList.length})</TabsTrigger>
@@ -349,36 +277,18 @@ export default function AgentDetailPage() {
         <TabsContent value="profile" className="mt-4 overflow-y-auto">
           <DetailPageBody
             main={
-              <div className="space-y-4">
-                {agent.status === "waiting_for_credentials" &&
-                  agent.credentialMissing &&
-                  agent.credentialMissing.length > 0 && (
-                    <Card className="border-status-warning/30">
-                      <CardContent className="p-4 space-y-2">
-                        <InfoRow label="Waiting for credentials">
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {agent.credentialMissing.map((key) => (
-                              <Badge
-                                key={key}
-                                variant="outline"
-                                size="tag"
-                                className="border-status-warning/30 text-status-warning-strong"
-                              >
-                                {key}
-                              </Badge>
-                            ))}
-                          </div>
-                        </InfoRow>
-                        <p className="text-xs text-muted-foreground">
-                          Worker is registered but parked. Set the missing key(s) via{" "}
-                          <code className="text-[10px]">PUT /api/config</code> (scope=agent) and the
-                          worker will resume polling within 30s.
-                        </p>
-                      </CardContent>
-                    </Card>
-                  )}
-                <Card>
-                  <CardContent className="p-4 space-y-3">
+              <Card>
+                <CardContent className="p-4">
+                  <DefinitionList>
+                    <InfoRow label="Harness">
+                      <HarnessCell
+                        harnessProvider={agent.harnessProvider}
+                        credStatus={agent.credStatus}
+                      />
+                    </InfoRow>
+                    <InfoRow label="Runtime">
+                      <AgentRuntimeSettings agent={agent} />
+                    </InfoRow>
                     {agent.role && <InfoRow label="Role">{agent.role}</InfoRow>}
                     {agent.description && (
                       <InfoRow label="Description">{agent.description}</InfoRow>
@@ -394,58 +304,19 @@ export default function AgentDetailPage() {
                         </div>
                       </InfoRow>
                     )}
-                  </CardContent>
-                </Card>
-
-                <EditableMarkdownField
-                  title="SOUL.md"
-                  field="soulMd"
-                  agent={agent}
-                  onSave={saveField}
-                  saving={updateProfile.isPending}
-                />
-                <EditableMarkdownField
-                  title="IDENTITY.md"
-                  field="identityMd"
-                  agent={agent}
-                  onSave={saveField}
-                  saving={updateProfile.isPending}
-                />
-                <EditableMarkdownField
-                  title="CLAUDE.md"
-                  field="claudeMd"
-                  agent={agent}
-                  onSave={saveField}
-                  saving={updateProfile.isPending}
-                />
-                <EditableMarkdownField
-                  title="TOOLS.md"
-                  field="toolsMd"
-                  agent={agent}
-                  onSave={saveField}
-                  saving={updateProfile.isPending}
-                />
-                <EditableMarkdownField
-                  title="Setup Script"
-                  field="setupScript"
-                  agent={agent}
-                  onSave={saveField}
-                  saving={updateProfile.isPending}
-                />
-                <EditableMarkdownField
-                  title="HEARTBEAT.md"
-                  field="heartbeatMd"
-                  agent={agent}
-                  onSave={saveField}
-                  saving={updateProfile.isPending}
-                />
-              </div>
+                    <InfoRow label="Joined">{formatSmartTime(agent.createdAt)}</InfoRow>
+                    <InfoRow label="Last update">{formatSmartTime(agent.lastUpdatedAt)}</InfoRow>
+                  </DefinitionList>
+                </CardContent>
+              </Card>
             }
             rail={
               <DetailPageRail>
                 <QuickStats>
                   <QuickStat label="Status" value={agent.status} />
-                  {agent.role && <QuickStat label="Role" value={agent.role} />}
+                  {agent.harnessProvider && (
+                    <QuickStat label="Harness" value={agent.harnessProvider} mono />
+                  )}
                   {(agent.capacity || agent.maxTasks != null) && (
                     <QuickStat
                       label="Capacity"
@@ -463,6 +334,44 @@ export default function AgentDetailPage() {
               </DetailPageRail>
             }
           />
+        </TabsContent>
+
+        <TabsContent value="credentials" className="mt-4 overflow-y-auto">
+          <CredentialsPanel agent={agent} />
+        </TabsContent>
+
+        <TabsContent
+          value="documents"
+          className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden"
+        >
+          <Tabs defaultValue="soul" className="flex flex-col flex-1 min-h-0">
+            <TabsList className="shrink-0 w-full justify-start">
+              {DOCUMENT_FIELDS.map(({ tab, label, field }) => {
+                const empty = !agent[field];
+                return (
+                  <TabsTrigger key={tab} value={tab} className="gap-1.5">
+                    {label}
+                    {empty && (
+                      <span className="text-[9px] uppercase tracking-wide text-muted-foreground/60">
+                        empty
+                      </span>
+                    )}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+            {DOCUMENT_FIELDS.map(({ tab, label, field }) => (
+              <TabsContent key={tab} value={tab} className="mt-3 overflow-y-auto">
+                <MarkdownDocumentEditor
+                  field={field}
+                  label={label}
+                  agent={agent}
+                  onSave={saveField}
+                  saving={updateProfile.isPending}
+                />
+              </TabsContent>
+            ))}
+          </Tabs>
         </TabsContent>
 
         <TabsContent value="tasks" className="flex flex-col flex-1 min-h-0 mt-4 gap-3">
@@ -498,15 +407,17 @@ export default function AgentDetailPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
+            <div className="ml-auto">
+              <TasksColumnsMenu state={taskColumns} />
+            </div>
           </div>
 
-          <DataGrid
+          <TasksTable
             rowData={tasksData?.tasks ?? []}
-            columnDefs={taskColDefs}
-            onRowClicked={onTaskClicked}
             loading={tasksLoading}
+            onRowClicked={onTaskClicked}
+            columns={taskColumns}
             emptyMessage="No tasks for this agent"
-            pagination={false}
           />
 
           <div className="flex items-center justify-between shrink-0 text-sm text-muted-foreground">

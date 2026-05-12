@@ -15,7 +15,13 @@ export function ConfigGuard({ children }: ConfigGuardProps) {
   }
 
   if (!isConfigured) {
-    return <Navigate to="/config" replace />;
+    return (
+      <Navigate
+        to="/config"
+        replace
+        state={{ from: `${location.pathname}${location.search}${location.hash}` }}
+      />
+    );
   }
 
   return <>{children}</>;

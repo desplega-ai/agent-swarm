@@ -3,8 +3,10 @@ import { Link, useLocation } from "react-router-dom";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 
 const routeLabels: Record<string, string> = {
+  dashboard: "Dashboard",
   agents: "Agents",
   tasks: "Tasks",
+  sessions: "Sessions",
   chat: "Chat",
   services: "Services",
   schedules: "Schedules",
@@ -14,12 +16,15 @@ const routeLabels: Record<string, string> = {
   skills: "Skills",
   "mcp-servers": "MCP Servers",
   usage: "Usage",
+  budgets: "Budgets",
+  memory: "Memory",
   config: "Config",
   repos: "Repos",
   templates: "Templates",
   history: "History",
   debug: "Debug",
   integrations: "Integrations",
+  keys: "API Keys",
   "api-keys": "API Keys",
 };
 

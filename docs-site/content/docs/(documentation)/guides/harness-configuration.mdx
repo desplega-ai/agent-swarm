@@ -188,9 +188,11 @@ pi-mono supports several authentication methods depending on which model provide
 |----------|---------|-------------|
 | **Anthropic** | `ANTHROPIC_API_KEY` | Direct Anthropic API access |
 | **OpenRouter** | `OPENROUTER_API_KEY` | Access 100+ models via OpenRouter |
+| **OpenAI** | `OPENAI_API_KEY` | Direct OpenAI API access |
+| **Google** | `GOOGLE_API_KEY` | Direct Google AI API access (only honored when `MODEL_OVERRIDE` starts with `google/`) |
 | **Auth file** | `~/.pi/agent/auth.json` | Pre-configured auth file |
 
-At least one of these must be available. The Docker entrypoint validates this on startup.
+At least one of these must be available. The Docker entrypoint validates this on startup. When `MODEL_OVERRIDE` starts with a provider prefix, only the matching key is required; when it's unset, any one of `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OPENAI_API_KEY` suffices.
 
 ### Environment Variables
 
@@ -199,6 +201,8 @@ At least one of these must be available. The Docker entrypoint validates this on
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `pi` |
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider access |
+| `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
+| `GOOGLE_API_KEY` | When prefixed | — | Google AI API key — required only when `MODEL_OVERRIDE` uses a `google/` prefix |
 
 \* At least one credential source is required (API key or `~/.pi/agent/auth.json`).
 
@@ -210,11 +214,15 @@ At least one of these must be available. The Docker entrypoint validates this on
 
 pi-mono resolves models using a `provider/model-id` format. Set the model via `MODEL_OVERRIDE` in your environment:
 
-| Format | Example | Model Reference |
-|--------|---------|-----------------|
-| Shortname | `opus`, `sonnet`, `haiku` | Maps to Anthropic Claude models |
-| Provider/model | `anthropic/claude-sonnet-4-6` | [Anthropic model IDs](https://platform.claude.com/docs/en/about-claude/models/overview) |
-| OpenRouter | `moonshotai/kimi-k2.5` | [OpenRouter model catalog](https://openrouter.ai/models) |
+The prefix before the first `/` selects the provider and the matching credential — the rest is passed through as the model ID (so OpenRouter IDs that themselves contain `/` work fine).
+
+| Format | Example | Required Credential |
+|--------|---------|--------------------|
+| Shortname | `opus`, `sonnet`, `haiku` | `ANTHROPIC_API_KEY` (maps to Anthropic Claude models) |
+| `anthropic/<id>` | `anthropic/claude-sonnet-4-6` ([Anthropic model IDs](https://platform.claude.com/docs/en/about-claude/models/overview)) | `ANTHROPIC_API_KEY` |
+| `openrouter/<id>` | `openrouter/moonshotai/kimi-k2.5` ([OpenRouter catalog](https://openrouter.ai/models)) | `OPENROUTER_API_KEY` |
+| `openai/<id>` | `openai/gpt-4o` | `OPENAI_API_KEY` |
+| `google/<id>` | `google/gemini-2.5-pro` | `GOOGLE_API_KEY` |
 
 ### pi-mono Specifics
 
@@ -341,7 +349,7 @@ GITHUB_TOKEN=ghp_...
 # .env.docker
 HARNESS_PROVIDER=pi
 OPENROUTER_API_KEY=sk-or-...         # Or ANTHROPIC_API_KEY
-MODEL_OVERRIDE=moonshotai/kimi-k2.5  # See https://openrouter.ai/models
+MODEL_OVERRIDE=openrouter/moonshotai/kimi-k2.5  # See https://openrouter.ai/models
 API_KEY=your-api-key
 MCP_BASE_URL=http://host.docker.internal:3013
 AGENT_ID=your-worker-uuid

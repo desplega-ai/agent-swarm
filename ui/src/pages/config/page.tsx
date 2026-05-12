@@ -13,11 +13,12 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs, useDeleteConfig, useUpsertConfig } from "@/api/hooks/use-config-api";
 import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
+import { Combobox } from "@/components/shared/combobox";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -52,6 +53,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useConfig } from "@/hooks/use-config";
 import type { Connection } from "@/lib/config";
 import { generateSlug } from "@/lib/slugs";
@@ -241,6 +243,10 @@ function ConfigDetailDialog({
   const [showValue, setShowValue] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  useEffect(() => {
+    setShowValue(config ? !config.isSecret : false);
+  }, [config]);
+
   function handleCopy() {
     if (!config) return;
     navigator.clipboard.writeText(config.value);
@@ -288,18 +294,20 @@ function ConfigDetailDialog({
                   {showValue ? config.value : "••••••••••••••••"}
                 </code>
                 <div className="flex flex-col gap-1 shrink-0">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7"
-                    onClick={() => setShowValue(!showValue)}
-                  >
-                    {showValue ? (
-                      <EyeOff className="h-3.5 w-3.5" />
-                    ) : (
-                      <Eye className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
+                  {config.isSecret && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => setShowValue(!showValue)}
+                    >
+                      {showValue ? (
+                        <EyeOff className="h-3.5 w-3.5" />
+                      ) : (
+                        <Eye className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  )}
                   <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleCopy}>
                     {copied ? (
                       <Check className="h-3.5 w-3.5 text-status-success" />
@@ -336,6 +344,12 @@ function SwarmConfigSection() {
   const [deleteTarget, setDeleteTarget] = useState<SwarmConfig | null>(null);
   const [detailEntry, setDetailEntry] = useState<SwarmConfig | null>(null);
   const [scopeFilter, setScopeFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [agentFilter, setAgentFilter] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (scopeFilter !== "agent") setAgentFilter(null);
+  }, [scopeFilter]);
 
   function handleAdd() {
     setEditEntry(null);
@@ -373,8 +387,25 @@ function SwarmConfigSection() {
     if (event.data) setDetailEntry(event.data);
   }, []);
 
-  const filteredConfigs =
-    scopeFilter === "all" ? configs : configs?.filter((c) => c.scope === scopeFilter);
+  const filteredConfigs = useMemo(() => {
+    if (!configs) return [];
+    const q = search.trim().toLowerCase();
+    return configs.filter((c) => {
+      if (scopeFilter !== "all" && c.scope !== scopeFilter) return false;
+      if (scopeFilter === "agent" && agentFilter && c.scopeId !== agentFilter) return false;
+      if (q) {
+        const agentName = c.scopeId ? (agentMap.get(c.scopeId) ?? "") : "";
+        const haystack = `${c.key} ${c.description ?? ""} ${agentName}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [configs, scopeFilter, agentFilter, search, agentMap]);
+
+  const agentOptions = useMemo(
+    () => (agents ?? []).map((a) => ({ value: a.id, label: a.name })),
+    [agents],
+  );
 
   const columnDefs = useMemo<ColDef<SwarmConfig>[]>(
     () => [
@@ -414,8 +445,9 @@ function SwarmConfigSection() {
       {
         field: "value",
         headerName: "Value",
-        flex: 1,
-        minWidth: 200,
+        width: 260,
+        minWidth: 160,
+        maxWidth: 320,
         cellRenderer: (params: ICellRendererParams<SwarmConfig>) => {
           const cfg = params.data;
           if (!cfg) return null;
@@ -428,8 +460,8 @@ function SwarmConfigSection() {
       {
         field: "description",
         headerName: "Description",
-        width: 200,
-        minWidth: 120,
+        flex: 1,
+        minWidth: 160,
         cellRenderer: (params: { value: string | null }) => (
           <span className="text-muted-foreground truncate">{params.value ?? "—"}</span>
         ),
@@ -475,15 +507,14 @@ function SwarmConfigSection() {
   );
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Swarm Configuration</h2>
-        <Button onClick={handleAdd} size="sm" className="gap-1 bg-primary hover:bg-primary/90">
-          <Plus className="h-3.5 w-3.5" /> Add Entry
-        </Button>
-      </div>
-
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Input
+          placeholder="Search by key, description, or agent…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-xs"
+        />
         <Select value={scopeFilter} onValueChange={setScopeFilter}>
           <SelectTrigger className="w-[140px]">
             <SelectValue />
@@ -495,6 +526,26 @@ function SwarmConfigSection() {
             <SelectItem value="repo">Repo</SelectItem>
           </SelectContent>
         </Select>
+        {scopeFilter === "agent" && (
+          <Combobox
+            options={agentOptions}
+            value={agentFilter}
+            onChange={setAgentFilter}
+            placeholder="All agents"
+            searchPlaceholder="Search agents…"
+            emptyMessage="No agents found"
+            allowClear
+            clearLabel="All agents"
+            triggerClassName="w-[220px]"
+          />
+        )}
+        <Button
+          onClick={handleAdd}
+          size="sm"
+          className="gap-1 bg-primary hover:bg-primary/90 ml-auto"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add Entry
+        </Button>
       </div>
 
       <DataGrid
@@ -503,7 +554,6 @@ function SwarmConfigSection() {
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No configuration entries"
-        domLayout="autoHeight"
         enableCellTextSelection
       />
 
@@ -919,9 +969,17 @@ function ConnectionsSection() {
 // Unconfigured Welcome Card — shown when no connections exist
 // ---------------------------------------------------------------------------
 
+function resolvePostConnectRedirect(from: unknown): string {
+  if (typeof from !== "string") return "/";
+  if (!from.startsWith("/")) return "/";
+  if (from === "/config" || from.startsWith("/config?") || from.startsWith("/config#")) return "/";
+  return from;
+}
+
 function WelcomeCard() {
   const { addConnection, switchConnection } = useConfig();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [name, setName] = useState("");
   const [apiUrl, setApiUrl] = useState("http://localhost:3013");
@@ -960,7 +1018,8 @@ function WelcomeCard() {
       switchConnection(created.id);
       setStatus("success");
 
-      setTimeout(() => navigate("/"), 500);
+      const target = resolvePostConnectRedirect((location.state as { from?: string } | null)?.from);
+      setTimeout(() => navigate(target, { replace: true }), 500);
     } catch (err) {
       setStatus("error");
       setErrorMsg(err instanceof Error ? err.message : "Connection failed");
@@ -1076,22 +1135,47 @@ function WelcomeCard() {
 // Main ConfigPage
 // ---------------------------------------------------------------------------
 
+type ConfigTab = "connections" | "secrets";
+const CONFIG_TABS: readonly ConfigTab[] = ["connections", "secrets"] as const;
+
 export default function ConfigPage() {
   const { isConfigured } = useConfig();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const tab: ConfigTab = CONFIG_TABS.includes(tabParam as ConfigTab)
+    ? (tabParam as ConfigTab)
+    : "connections";
+
+  function setTab(next: ConfigTab) {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        params.set("tab", next);
+        return params;
+      },
+      { replace: true },
+    );
+  }
 
   if (!isConfigured) {
     return <WelcomeCard />;
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-8">
+    <div className="flex flex-col flex-1 min-h-0 gap-6">
       <PageHeader title="Settings" />
-
-      {/* Multi-connection management */}
-      <ConnectionsSection />
-
-      {/* Swarm Config CRUD (operates on active connection's API) */}
-      <SwarmConfigSection />
+      <Tabs value={tab} onValueChange={(v) => setTab(v as ConfigTab)} className="flex-1 min-h-0">
+        <TabsList variant="line">
+          <TabsTrigger value="connections">Connections</TabsTrigger>
+          <TabsTrigger value="secrets">Secrets</TabsTrigger>
+        </TabsList>
+        <TabsContent value="connections" className="mt-4 overflow-y-auto">
+          <ConnectionsSection />
+        </TabsContent>
+        <TabsContent value="secrets" className="mt-4 flex flex-col min-h-0">
+          <SwarmConfigSection />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

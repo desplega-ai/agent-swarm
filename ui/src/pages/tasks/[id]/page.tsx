@@ -43,6 +43,7 @@ import {
   useTaskContext,
   useTaskSessionLogs,
 } from "@/api/hooks/use-tasks";
+import { useUsers } from "@/api/hooks/use-users";
 import type {
   AgentLog,
   DevinProviderMeta,
@@ -454,6 +455,7 @@ export default function TaskDetailPage() {
   const { data: task, isLoading } = useTask(id!);
   const { data: sessionLogs } = useTaskSessionLogs(id!);
   const { data: agents } = useAgents();
+  const { data: users } = useUsers();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
   const { data: contextData, isLoading: contextLoading } = useTaskContext(id!);
   const cancelTask = useCancelTask();
@@ -463,6 +465,12 @@ export default function TaskDetailPage() {
     if (!task?.agentId || !agents) return null;
     return agents.find((a) => a.id === task.agentId)?.name ?? null;
   }, [task, agents]);
+  // Phase 3: read-only "Requested by" lookup. `useUsers()` is shared cache —
+  // the identity boot modal already populated it.
+  const requestedByUserName = useMemo(() => {
+    if (!task?.requestedByUserId || !users) return null;
+    return users.find((u) => u.id === task.requestedByUserId)?.name ?? null;
+  }, [task, users]);
 
   // Phase 17 — collapsible right rail (Activity feed). Persists to
   // localStorage so the choice survives reloads and route changes.
@@ -517,6 +525,13 @@ export default function TaskDetailPage() {
       {task.creatorAgentId && task.creatorAgentId !== task.agentId && (
         <MetaRow icon={User} label="Created by">
           <AgentLink agentId={task.creatorAgentId} />
+        </MetaRow>
+      )}
+      {task.requestedByUserId && (
+        <MetaRow icon={User} label="Requested by">
+          <span className="text-xs">
+            {requestedByUserName ?? `${task.requestedByUserId.slice(0, 8)}…`}
+          </span>
         </MetaRow>
       )}
       <MetaRow icon={Calendar} label="Created">

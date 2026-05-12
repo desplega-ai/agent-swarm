@@ -10,15 +10,23 @@ import {
   getDb,
   getSwarmConfigs,
   resetEmptyPollCount,
+  setAgentHarnessProvider,
   updateAgentActivity,
   updateAgentCredentialState,
+  updateAgentCredStatus,
   updateAgentMaxTasks,
   updateAgentName,
   updateAgentProfile,
   updateAgentProvider,
   updateAgentStatus,
+  upsertSwarmConfig,
 } from "../be/db";
-import { ProviderNameSchema } from "../types";
+import {
+  AgentCredStatusSchema,
+  AgentLatestModelSchema,
+  type ProviderName,
+  ProviderNameSchema,
+} from "../types";
 import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
 
@@ -38,11 +46,59 @@ const registerAgent = route({
     capabilities: z.array(z.string()).optional(),
     maxTasks: z.number().int().optional(),
     provider: ProviderNameSchema.optional(),
+    /**
+     * Phase 1.5 (cloud-personalization): worker-pushed canonical harness
+     * provider. Persists to `agents.harness_provider`. Validated against
+     * the canonical list — unknown values reject the request with 400.
+     */
+    harness_provider: ProviderNameSchema.optional(),
   }),
   responses: {
     200: { description: "Agent re-registered (already existed)" },
     201: { description: "Agent created" },
     400: { description: "Validation error" },
+  },
+});
+
+const setAgentHarnessProviderRoute = route({
+  method: "patch",
+  path: "/api/agents/{id}/harness-provider",
+  pattern: ["api", "agents", null, "harness-provider"],
+  summary: "Re-assign an agent's harness_provider (live)",
+  description:
+    "Updates `agents.harness_provider` and upserts `swarm_config` (scope=agent, key=HARNESS_PROVIDER) so the worker's poll-loop reconciliation picks up the new provider within ~10s. No restart required. The swarm_config row is what actually drives the worker; the column mirrors the latest set value for dashboards.",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    harness_provider: ProviderNameSchema,
+  }),
+  responses: {
+    200: { description: "Updated agent row" },
+    400: { description: "Validation error (unknown provider)" },
+    404: { description: "Agent not found" },
+  },
+});
+
+const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode"]);
+
+const updateAgentRuntimeRoute = route({
+  method: "patch",
+  path: "/api/agents/{id}/runtime",
+  pattern: ["api", "agents", null, "runtime"],
+  summary: "Update an agent's runtime harness and default model",
+  description:
+    "Updates `agents.harness_provider` and upserts agent-scoped `swarm_config` rows for HARNESS_PROVIDER and MODEL_OVERRIDE. The settings apply to future provider sessions.",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    harness_provider: LocalHarnessProviderSchema,
+    model: z.string().trim().min(1),
+    allow_custom_model: z.boolean().optional().default(false),
+  }),
+  responses: {
+    200: { description: "Updated agent row" },
+    400: { description: "Validation error" },
+    404: { description: "Agent not found" },
   },
 });
 
@@ -147,9 +203,21 @@ const getAgent = route({
 // ─── Credential-status (Phase 3 + 4 of the credential safe-loop plan) ───────
 
 const credentialStatusBody = z.object({
-  ready: z.boolean(),
+  ready: z.boolean().optional(),
   /** Env-var names (or absolute file paths) the worker is blocked on. Empty/null when ready. */
   missing: z.array(z.string()).optional().nullable(),
+  /**
+   * Migration 055: full credential snapshot (presence + live test). Optional
+   * for backward compat — older workers may only POST `{ready, missing}`.
+   * When present, written to `agents.cred_status` as JSON; the dashboard
+   * reads the row instead of running its own check.
+   */
+  cred_status: AgentCredStatusSchema.optional().nullable(),
+  /**
+   * Worker-reported latest model telemetry. Optional and merge-only: when sent
+   * without `cred_status`, the API preserves existing readiness/live-test data.
+   */
+  latest_model: AgentLatestModelSchema.optional(),
 });
 
 const updateAgentCredentialStatusRoute = route({
@@ -219,6 +287,17 @@ export async function handleAgentRegister(
         if (parsed.body.provider && parsed.body.provider !== existingAgent.provider) {
           updateAgentProvider(existingAgent.id, parsed.body.provider);
         }
+        // Phase 1.5: worker-pushed harness_provider always wins on
+        // re-registration. Env-driven, by design (per-agent live override
+        // belongs to DES-359). NULL => leave existing column untouched
+        // so PATCH /harness-provider doesn't get clobbered by re-register
+        // payloads from older workers.
+        if (
+          parsed.body.harness_provider &&
+          parsed.body.harness_provider !== existingAgent.harnessProvider
+        ) {
+          setAgentHarnessProvider(existingAgent.id, parsed.body.harness_provider);
+        }
         resetEmptyPollCount(existingAgent.id);
         return { agent: getAgentById(agentId), created: false };
       }
@@ -233,6 +312,7 @@ export async function handleAgentRegister(
         capabilities: parsed.body.capabilities ?? [],
         maxTasks: parsed.body.maxTasks ?? 1,
         provider: parsed.body.provider,
+        harnessProvider: parsed.body.harness_provider ?? null,
       });
 
       return { agent, created: true };
@@ -399,6 +479,63 @@ export async function handleAgentsRest(
     return true;
   }
 
+  if (setAgentHarnessProviderRoute.match(req.method, pathSegments)) {
+    const parsed = await setAgentHarnessProviderRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const agent = setAgentHarnessProvider(parsed.params.id, parsed.body.harness_provider);
+    if (!agent) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+    // Mirror to swarm_config (scope=agent) so the worker's reconciliation
+    // loop actually reads the new value. The column above is for dashboard
+    // visibility; this row is the live override.
+    upsertSwarmConfig({
+      scope: "agent",
+      scopeId: parsed.params.id,
+      key: "HARNESS_PROVIDER",
+      value: parsed.body.harness_provider,
+      description: "Set via PATCH /api/agents/{id}/harness-provider",
+    });
+    json(res, agentWithCapacity(agent));
+    return true;
+  }
+
+  if (updateAgentRuntimeRoute.match(req.method, pathSegments)) {
+    const parsed = await updateAgentRuntimeRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const agent = getDb().transaction(() => {
+      const updated = setAgentHarnessProvider(
+        parsed.params.id,
+        parsed.body.harness_provider as ProviderName,
+      );
+      if (!updated) return null;
+      upsertSwarmConfig({
+        scope: "agent",
+        scopeId: parsed.params.id,
+        key: "HARNESS_PROVIDER",
+        value: parsed.body.harness_provider,
+        description: "Set via PATCH /api/agents/{id}/runtime",
+      });
+      upsertSwarmConfig({
+        scope: "agent",
+        scopeId: parsed.params.id,
+        key: "MODEL_OVERRIDE",
+        value: parsed.body.model,
+        description: parsed.body.allow_custom_model
+          ? "Custom model set via PATCH /api/agents/{id}/runtime"
+          : "Set via PATCH /api/agents/{id}/runtime",
+      });
+      return updated;
+    })();
+    if (!agent) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+    json(res, agentWithCapacity(agent));
+    return true;
+  }
+
   // Bulk credential-status MUST be matched BEFORE single-agent routes — the
   // path "api/agents/credential-status" otherwise looks like an agent id.
   if (listCredentialStatusRoute.match(req.method, pathSegments)) {
@@ -413,6 +550,8 @@ export async function handleAgentsRest(
         status: a.status,
         missing: a.credentialMissing ?? [],
         provider: a.provider ?? null,
+        harnessProvider: a.harnessProvider ?? null,
+        credStatus: a.credStatus ?? null,
         lastCheckedAt: a.lastUpdatedAt,
       }));
     json(res, { agents });
@@ -427,16 +566,57 @@ export async function handleAgentsRest(
       queryParams,
     );
     if (!parsed) return true;
-    const agent = updateAgentCredentialState(
-      parsed.params.id,
-      parsed.body.ready,
-      parsed.body.missing ?? null,
-    );
+    const existing = getAgentById(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+    const agent =
+      parsed.body.ready !== undefined
+        ? (updateAgentCredentialState(
+            parsed.params.id,
+            parsed.body.ready,
+            parsed.body.missing ?? null,
+          ) ?? existing)
+        : existing;
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    json(res, agentWithCapacity(agent));
+    // Phase 055: persist the richer worker-reported snapshot when sent.
+    // We accept `null` to explicitly clear (e.g. on harness change), and
+    // `undefined` to leave the existing row value untouched.
+    let finalAgent = agent;
+    if (parsed.body.cred_status !== undefined) {
+      const nextStatus = parsed.body.cred_status
+        ? {
+            ...parsed.body.cred_status,
+            latestModel:
+              parsed.body.latest_model ??
+              parsed.body.cred_status.latestModel ??
+              agent.credStatus?.latestModel ??
+              null,
+          }
+        : null;
+      finalAgent = updateAgentCredStatus(parsed.params.id, nextStatus) ?? agent;
+    } else if (parsed.body.latest_model) {
+      const current = agent.credStatus ?? {
+        ready: parsed.body.ready ?? true,
+        missing: parsed.body.missing ?? [],
+        satisfiedBy: null,
+        hint: null,
+        liveTest: null,
+        latestModel: null,
+        reportedAt: parsed.body.latest_model.reportedAt,
+        reportKind: "post_task" as const,
+      };
+      finalAgent =
+        updateAgentCredStatus(parsed.params.id, {
+          ...current,
+          latestModel: parsed.body.latest_model,
+        }) ?? agent;
+    }
+    json(res, agentWithCapacity(finalAgent));
     return true;
   }
 
@@ -454,6 +634,8 @@ export async function handleAgentsRest(
       status: agent.status,
       missing: agent.credentialMissing ?? [],
       provider: agent.provider ?? null,
+      harnessProvider: agent.harnessProvider ?? null,
+      credStatus: agent.credStatus ?? null,
       lastCheckedAt: agent.lastUpdatedAt,
     });
     return true;

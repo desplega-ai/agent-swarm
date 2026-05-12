@@ -9,6 +9,10 @@ export interface TaskFilters {
   includeHeartbeat?: boolean;
   limit?: number;
   offset?: number;
+  /** Phase 2 (≥1.76.0): ISO 8601 timestamp; backend filters createdAt >= value. */
+  createdAfter?: string;
+  /** Filter to tasks whose `source` is in this list. Empty/undefined → all. */
+  source?: string[];
 }
 
 export function useTasks(filters?: TaskFilters) {
@@ -19,11 +23,12 @@ export function useTasks(filters?: TaskFilters) {
   });
 }
 
-export function useTask(id: string) {
+export function useTask(id: string, opts?: { refetchInterval?: number | false }) {
   return useQuery({
     queryKey: ["task", id],
     queryFn: () => api.fetchTask(id),
     enabled: !!id,
+    refetchInterval: opts?.refetchInterval,
   });
 }
 
@@ -55,6 +60,14 @@ export function useCreateTask() {
       tags?: string[];
       priority?: number;
       dependsOn?: string[];
+      /** Phase 3 (≥1.76.0): parent task for grouped/parallel sub-tasks. */
+      parentTaskId?: string;
+      /** Phase 3 (≥1.76.0): override the wire `source` ("api"|"mcp"|"slack"). */
+      source?: string;
+      /** Phase 3 (≥1.76.0): identity of the requesting user. */
+      requestedByUserId?: string;
+      /** Phase 3 (≥1.76.0): cross-ingress conversation/thread context key. */
+      contextKey?: string;
     }) => api.createTask(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });

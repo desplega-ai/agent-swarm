@@ -17,15 +17,27 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private readonly apiKey: string | undefined;
 
   constructor(config?: OpenAIEmbeddingConfig) {
-    this.apiKey = config?.apiKey ?? process.env.OPENAI_API_KEY;
-    this.model = config?.model ?? "text-embedding-3-small";
-    this.dimensions = config?.dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
-    this.name = config?.model ? `openai/${config.model}` : DEFAULT_EMBEDDING_MODEL;
+    this.apiKey = config?.apiKey ?? process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY;
+
+    this.model = config?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small";
+
+    this.dimensions =
+      config?.dimensions ??
+      Number(process.env.EMBEDDING_DIMENSIONS) ??
+      DEFAULT_EMBEDDING_DIMENSIONS;
+
+    this.name = config?.model
+      ? `openai/${config.model}`
+      : (process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL);
   }
 
   private getClient(): OpenAI | null {
     if (!this.apiKey) return null;
-    if (!this.client) this.client = new OpenAI({ apiKey: this.apiKey });
+    if (!this.client)
+      this.client = new OpenAI({
+        baseURL: process.env.EMBEDDING_API_BASE_URL, // Optional custom base URL
+        apiKey: this.apiKey,
+      });
     return this.client;
   }
 

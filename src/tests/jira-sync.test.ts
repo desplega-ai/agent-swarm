@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, completeTask, createAgent, getDb, getTaskById, initDb } from "../be/db";
 import { upsertOAuthApp } from "../be/db-queries/oauth";

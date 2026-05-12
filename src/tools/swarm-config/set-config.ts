@@ -1,7 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { maskSecrets, upsertSwarmConfig } from "@/be/db";
-import { isReservedConfigKey, reservedKeyError } from "@/be/swarm-config-guard";
+import {
+  isReservedConfigKey,
+  reservedKeyError,
+  validateConfigValue,
+} from "@/be/swarm-config-guard";
 import { createToolRegistrar } from "@/tools/utils";
 import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
 
@@ -85,6 +89,18 @@ export const registerSetConfigTool = (server: McpServer) => {
               yourAgentId: requestInfo.agentId,
               success: false,
               message,
+            },
+          };
+        }
+
+        const validationError = validateConfigValue(key, value);
+        if (validationError) {
+          return {
+            content: [{ type: "text", text: validationError }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: validationError,
             },
           };
         }

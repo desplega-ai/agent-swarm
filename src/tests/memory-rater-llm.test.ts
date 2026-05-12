@@ -23,11 +23,13 @@ import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import {
   buildRatingsFromLlm,
   buildSummaryWithRatingsPrompt,
+  dedupeRetrievalsForRater,
   fetchRetrievalsForTask,
   isLlmRaterEnabled,
   LLM_RATER_WEIGHT,
   LlmRater,
   postRatings,
+  type RetrievalRow,
   SummaryWithRatingsSchema,
 } from "../be/memory/raters/llm";
 import { getRegisteredRaters, SERVER_RATERS } from "../be/memory/raters/registry";
@@ -206,6 +208,156 @@ describe("buildSummaryWithRatingsPrompt", () => {
     // Truncation cap is 600 chars + ellipsis. Make sure full 5000 isn't echoed.
     expect(out.includes("x".repeat(5000))).toBe(false);
     expect(out).toContain("…");
+  });
+});
+
+describe("dedupeRetrievalsForRater", () => {
+  // Regression: the LLM rater audit (post-PR #450) found scheduled-task self-
+  // similarity inflated alpha posteriors 5x in one rater pass — the Claude
+  // Code Changelog Monitor cron surfaced 5 memories from prior hourly runs
+  // and got each rated +1.0. Dedup keys on `scheduleId` so only memories
+  // from the same scheduled job collapse; distinct one-shot tasks pass
+  // through even when their truncated 80-char names collide.
+
+  test("happy path: 5 cron memories sharing scheduleId + 1 distinct → 2 rows", () => {
+    const cronName = "Task: Claude Code Changelog Monitor — check for new entries";
+    const cronScheduleId = "sched-claude-code-changelog";
+    const rows: RetrievalRow[] = [
+      // Newest cron run first (API returns DESC by retrievedAt).
+      {
+        id: "cron-5",
+        name: cronName,
+        content: "run 5",
+        scheduleId: cronScheduleId,
+        retrievedAt: "2026-05-08T05:00:00Z",
+      },
+      {
+        id: "cron-4",
+        name: cronName,
+        content: "run 4",
+        scheduleId: cronScheduleId,
+        retrievedAt: "2026-05-08T04:00:00Z",
+      },
+      {
+        id: "cron-3",
+        name: cronName,
+        content: "run 3",
+        scheduleId: cronScheduleId,
+        retrievedAt: "2026-05-08T03:00:00Z",
+      },
+      {
+        id: "cron-2",
+        name: cronName,
+        content: "run 2",
+        scheduleId: cronScheduleId,
+        retrievedAt: "2026-05-08T02:00:00Z",
+      },
+      {
+        id: "cron-1",
+        name: cronName,
+        content: "run 1",
+        scheduleId: cronScheduleId,
+        retrievedAt: "2026-05-08T01:00:00Z",
+      },
+      // Different one-shot task — null scheduleId, must pass through.
+      {
+        id: "distinct",
+        name: "Task: Refactor MCP tool list",
+        content: "x",
+        scheduleId: null,
+        retrievedAt: "2026-05-07T12:00:00Z",
+      },
+    ];
+
+    const out = dedupeRetrievalsForRater(rows);
+
+    expect(out).toHaveLength(2);
+    // First-seen wins → freshest cron run is the representative.
+    expect(out.map((r) => r.id)).toEqual(["cron-5", "distinct"]);
+  });
+
+  test("two distinct one-shot tasks sharing the truncated 80-char name prefix → both kept", () => {
+    // Reviewer's flagged false-positive: `Task: ${task.task.slice(0, 80)}`
+    // collapses two distinct tasks whose first 80 chars happen to match. With
+    // scheduleId-keyed dedup, both have `null` scheduleId and pass through.
+    const sharedPrefix = `Task: ${"x".repeat(80)}`;
+    const rows: RetrievalRow[] = [
+      {
+        id: "task-a",
+        name: sharedPrefix,
+        content: `Task: ${"x".repeat(80)} unique-suffix-A\n\nOutput:\n…`,
+        scheduleId: null,
+        retrievedAt: "2026-05-08T05:00:00Z",
+      },
+      {
+        id: "task-b",
+        name: sharedPrefix,
+        content: `Task: ${"x".repeat(80)} unique-suffix-B\n\nOutput:\n…`,
+        scheduleId: null,
+        retrievedAt: "2026-05-08T04:00:00Z",
+      },
+    ];
+
+    const out = dedupeRetrievalsForRater(rows);
+
+    expect(out).toHaveLength(2);
+    expect(out.map((r) => r.id)).toEqual(["task-a", "task-b"]);
+  });
+
+  test("Task: vs Session: with the same prefix → both kept (different memory types)", () => {
+    // Both names share their first 80 chars after the type prefix; both have
+    // null scheduleId (one-shot work). Must pass through.
+    const sharedSuffix = "Refactor MCP tool list to use deferred discovery";
+    const rows: RetrievalRow[] = [
+      {
+        id: "task",
+        name: `Task: ${sharedSuffix}`,
+        content: "task body",
+        source: "task_completion",
+        scheduleId: null,
+        retrievedAt: "2026-05-08T05:00:00Z",
+      },
+      {
+        id: "session",
+        name: `Session: ${sharedSuffix}`,
+        content: "session summary",
+        source: "session_summary",
+        scheduleId: null,
+        retrievedAt: "2026-05-08T04:00:00Z",
+      },
+    ];
+
+    const out = dedupeRetrievalsForRater(rows);
+
+    expect(out).toHaveLength(2);
+    expect(out.map((r) => r.id)).toEqual(["task", "session"]);
+  });
+
+  test("two different scheduled jobs surface in the same set → both representatives kept", () => {
+    const rows: RetrievalRow[] = [
+      { id: "j1-r2", name: "Task: Job One", content: "", scheduleId: "sched-1" },
+      { id: "j1-r1", name: "Task: Job One", content: "", scheduleId: "sched-1" },
+      { id: "j2-r2", name: "Task: Job Two", content: "", scheduleId: "sched-2" },
+      { id: "j2-r1", name: "Task: Job Two", content: "", scheduleId: "sched-2" },
+    ];
+
+    const out = dedupeRetrievalsForRater(rows);
+
+    expect(out).toHaveLength(2);
+    expect(out.map((r) => r.id)).toEqual(["j1-r2", "j2-r2"]);
+  });
+
+  test("rows without scheduleId pass through unchanged (manual / file_index memories)", () => {
+    const rows: RetrievalRow[] = [
+      { id: "m1", name: "Manual note", content: "", source: "manual" },
+      { id: "m2", name: "Manual note", content: "", source: "manual" },
+      { id: "m3", name: "Indexed file", content: "", source: "file_index", scheduleId: null },
+    ];
+    expect(dedupeRetrievalsForRater(rows)).toEqual(rows);
+  });
+
+  test("empty input → empty output", () => {
+    expect(dedupeRetrievalsForRater([])).toEqual([]);
   });
 });
 

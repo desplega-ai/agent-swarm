@@ -532,6 +532,11 @@ async function executeStep(
       retryPolicy,
     );
 
+    // Persist output for observability even on failure (e.g. script nodes keep {exitCode, stdout, stderr})
+    if (result.output !== undefined) {
+      updateWorkflowRunStep(stepId, { output: result.output });
+    }
+
     if (!shouldRetry) {
       throw new Error(result.error || "Step execution failed");
     }
