@@ -39,6 +39,7 @@ const ApiKeysPage = lazy(() => import("@/pages/api-keys/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
 const MemoryPage = lazy(() => import("@/pages/memory/page"));
 const ArtifactPage = lazy(() => import("@/pages/artifacts/[id]/page"));
+const PagesListingPage = lazy(() => import("@/pages/pages/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
 export const router = createBrowserRouter([
@@ -82,6 +83,7 @@ export const router = createBrowserRouter([
       { path: "debug", element: <DebugPage /> },
       { path: "memory", element: <MemoryPage /> },
       { path: "artifacts/:id", element: <ArtifactPage /> },
+      { path: "pages", element: <PagesListingPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

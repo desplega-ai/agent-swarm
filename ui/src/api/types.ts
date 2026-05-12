@@ -1235,3 +1235,30 @@ export interface PageMetadata {
   authMode: PageAuthMode;
   body: string;
 }
+
+/**
+ * Row shape returned by `GET /api/pages` (authed listing endpoint). Server
+ * decorates each row with `app_url` + `api_url`. Unlike `PageMetadata` this
+ * one exposes `agentId` (the listing is bearer-gated, so the creator is
+ * visible) — used by the SPA's `/pages` page for the "My pages only" toggle.
+ */
+export interface PageListItem {
+  id: string;
+  agentId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  contentType: PageContentType;
+  authMode: PageAuthMode;
+  body: string;
+  needsCredentials?: string[];
+  createdAt: string;
+  updatedAt: string;
+  app_url: string;
+  api_url: string;
+}
+
+export interface PagesListResponse {
+  pages: PageListItem[];
+  total: number;
+}

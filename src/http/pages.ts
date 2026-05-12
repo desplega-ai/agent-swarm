@@ -7,6 +7,7 @@ import {
   getPageVersion,
   getPageVersions,
   listAllPages,
+  listPagesByAgent,
   updatePage,
 } from "../be/db";
 import { snapshotPage } from "../pages/version";
@@ -156,6 +157,7 @@ const listPagesRoute = route({
   summary: "List pages",
   tags: ["Pages"],
   query: z.object({
+    agentId: z.string().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(500).optional(),
     offset: z.coerce.number().int().min(0).optional(),
   }),
@@ -341,12 +343,17 @@ export async function handlePages(
 
   // GET /api/pages — listing. MUST come BEFORE getPageRoute because both
   // patterns start with `["api", "pages"]` and the list pattern is shorter.
+  // Optional `agentId` query filter narrows to a single owner — used by the
+  // SPA's "My pages only" toggle. Omitting it returns all pages visible to
+  // the caller (no per-row ACL in v1).
   if (listPagesRoute.match(req.method, pathSegments)) {
     const parsed = await listPagesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const limit = parsed.query.limit ?? 50;
     const offset = parsed.query.offset ?? 0;
-    const pages = listAllPages(limit, offset);
+    const pages = parsed.query.agentId
+      ? listPagesByAgent(parsed.query.agentId, limit, offset)
+      : listAllPages(limit, offset);
     json(res, {
       pages: pages.map(withShareUrls),
       total: pages.length,

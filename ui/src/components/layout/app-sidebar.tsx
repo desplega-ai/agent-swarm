@@ -8,6 +8,7 @@ import {
   Clock,
   FileText,
   GitBranch,
+  Globe,
   Home,
   Key,
   LayoutDashboard,
@@ -70,6 +71,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { title: "Schedules", path: "/schedules", icon: Clock },
       { title: "Workflows", path: "/workflows", icon: Workflow },
+      { title: "Pages", path: "/pages", icon: Globe },
       { title: "Usage", path: "/usage", icon: BarChart3 },
       { title: "Budgets", path: "/budgets", icon: Wallet },
     ],

@@ -30,6 +30,7 @@ import type {
   McpServersResponse,
   MessagesResponse,
   PageMetadata,
+  PagesListResponse,
   PreviewResponse,
   PricingProvider,
   PricingResponse,
@@ -1741,6 +1742,28 @@ class ApiClient {
       credentials: "include",
     });
     if (!res.ok) throw new Error(`launchPage ${id}: ${res.status}`);
+  }
+
+  /**
+   * List DB-backed pages. Bearer-authed (uses the standard `getHeaders()`,
+   * no cookie required). Supplying `agentId` narrows to a single creator —
+   * used by the SPA's "My pages only" toggle. `limit` defaults to 50 server-
+   * side, capped at 500.
+   */
+  async listPages(opts?: {
+    agentId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<PagesListResponse> {
+    const params = new URLSearchParams();
+    if (opts?.agentId) params.set("agentId", opts.agentId);
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts?.offset !== undefined) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/pages${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`listPages: ${res.status}`);
+    return res.json();
   }
 }
 

@@ -4,6 +4,7 @@ import {
   ClipboardList,
   Clock,
   FolderGit2,
+  Globe,
   LayoutDashboard,
   MessageSquare,
   Server,
@@ -32,6 +33,7 @@ const NAV_ITEMS = [
   { label: "Usage", path: "/usage", icon: BarChart3 },
   { label: "Config", path: "/config", icon: Settings },
   { label: "Repos", path: "/repos", icon: FolderGit2 },
+  { label: "Pages", path: "/pages", icon: Globe },
   { label: "Services", path: "/services", icon: Server },
 ];
 
