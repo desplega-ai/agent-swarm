@@ -38,24 +38,31 @@ import type {
 } from "./types";
 
 /**
- * Map a `MODEL_OVERRIDE` string to the env var that satisfies it. Mirrors
- * `resolveModel` above (shortname → anthropic, `provider/model-id` → that
- * provider). Returns `null` when the override is empty (boot-loop should
- * treat it as the permissive case) or the provider can't be inferred.
+ * Map a `MODEL_OVERRIDE` string to the env var(s) that can satisfy it.
+ *
+ * Anthropic shortnames (`sonnet` / `haiku` / `opus`) accept EITHER
+ * `ANTHROPIC_API_KEY` (preferred — talks to Anthropic directly) OR
+ * `OPENROUTER_API_KEY` — in the latter case `resolveModel` swaps to the
+ * OpenRouter mirror of the same model so pi-ai's anthropic-provider env
+ * lookup (which only checks `ANTHROPIC_*`) doesn't fail with "No API key
+ * found for anthropic". Provider-prefixed model IDs only accept that one
+ * provider's key. Returns `null` for the permissive case (no MODEL_OVERRIDE
+ * or bare unprefixed model name).
  */
-function modelToCredKey(modelStr: string | undefined): string | null {
+function modelToCredKeys(modelStr: string | undefined): string[] | null {
   if (!modelStr) return null;
   const lower = modelStr.toLowerCase();
-  // Hard-coded shortnames map straight to anthropic.
+  // Hard-coded shortnames: anthropic-shape but pi-mono can route through
+  // OpenRouter (see `resolveModel`) when only an OR key is available.
   if (lower === "opus" || lower === "sonnet" || lower === "haiku") {
-    return "ANTHROPIC_API_KEY";
+    return ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"];
   }
   if (modelStr.includes("/")) {
     const provider = modelStr.slice(0, modelStr.indexOf("/")).toLowerCase();
-    if (provider === "anthropic") return "ANTHROPIC_API_KEY";
-    if (provider === "openrouter") return "OPENROUTER_API_KEY";
-    if (provider === "openai") return "OPENAI_API_KEY";
-    if (provider === "google") return "GOOGLE_API_KEY";
+    if (provider === "anthropic") return ["ANTHROPIC_API_KEY"];
+    if (provider === "openrouter") return ["OPENROUTER_API_KEY"];
+    if (provider === "openai") return ["OPENAI_API_KEY"];
+    if (provider === "google") return ["GOOGLE_API_KEY"];
   }
   // Bare model name with no provider prefix — adapter falls through to a
   // best-effort resolution against multiple providers, so the boot loop
@@ -83,15 +90,16 @@ export function checkPiMonoCredentials(
     return { ready: true, missing: [], satisfiedBy: "file" };
   }
 
-  const requiredKey = modelToCredKey(env.MODEL_OVERRIDE);
-  if (requiredKey) {
-    if (env[requiredKey]) {
+  const requiredKeys = modelToCredKeys(env.MODEL_OVERRIDE);
+  if (requiredKeys) {
+    if (requiredKeys.some((k) => env[k])) {
       return { ready: true, missing: [], satisfiedBy: "env" };
     }
+    const keyList = requiredKeys.join(" / ");
     return {
       ready: false,
-      missing: [requiredKey, authFile],
-      hint: `MODEL_OVERRIDE=${env.MODEL_OVERRIDE} requires ${requiredKey}; or run \`pi auth login\` to create ${authFile}.`,
+      missing: [...requiredKeys, authFile],
+      hint: `MODEL_OVERRIDE=${env.MODEL_OVERRIDE} requires one of ${keyList}; or run \`pi auth login\` to create ${authFile}.`,
     };
   }
 
@@ -136,18 +144,67 @@ function mcpToolsToDefinitions(
   }));
 }
 
-/** Resolve a model string to a pi-ai Model object */
-function resolveModel(modelStr: string) {
+/**
+ * Anthropic-shortname → OpenRouter-mirror model IDs. Used by `resolveModel`
+ * when the worker only has `OPENROUTER_API_KEY` so pi-ai's anthropic
+ * provider env lookup (`ANTHROPIC_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` only)
+ * doesn't fail with "No API key found for anthropic".
+ *
+ * The mirror IDs match pi-ai's generated OpenRouter model catalog
+ * (`anthropic/claude-{opus,sonnet,haiku}-*`).
+ */
+const ANTHROPIC_SHORTNAME_OPENROUTER_MIRROR: Record<string, string> = {
+  opus: "anthropic/claude-opus-4",
+  sonnet: "anthropic/claude-sonnet-4",
+  haiku: "anthropic/claude-haiku-4.5",
+};
+
+function envHasAnthropicCred(env: Record<string, string | undefined>): boolean {
+  return !!(env.ANTHROPIC_API_KEY || env.ANTHROPIC_OAUTH_TOKEN);
+}
+
+/**
+ * Resolve a model string to a pi-ai Model object.
+ *
+ * When `modelStr` is an anthropic shortname (`sonnet`/`haiku`/`opus`) AND
+ * the env only has `OPENROUTER_API_KEY` (no `ANTHROPIC_API_KEY` /
+ * `ANTHROPIC_OAUTH_TOKEN`), the shortname is rerouted through the
+ * OpenRouter mirror of the same model. This prevents pi-ai's
+ * anthropic-provider env lookup from failing at session-start with
+ * "No API key found for anthropic" — see task 37a4a87a and the chronic
+ * weekly-fire pattern (2026-04-13 → 2026-05-11) tracked in HEARTBEAT.md.
+ */
+export function resolveModel(
+  modelStr: string,
+  env: Record<string, string | undefined> = process.env,
+) {
   if (!modelStr) return undefined;
 
-  // Map common shortnames to provider/model pairs
+  const lower = modelStr.toLowerCase();
+  const isAnthropicShortname = lower === "opus" || lower === "sonnet" || lower === "haiku";
+
+  // Reroute anthropic shortnames through OpenRouter when no anthropic cred
+  // is available. The OpenRouter mirror IDs (`anthropic/claude-sonnet-4`,
+  // etc.) are present in pi-ai's model catalog.
+  if (isAnthropicShortname && !envHasAnthropicCred(env) && env.OPENROUTER_API_KEY) {
+    const orModelId = ANTHROPIC_SHORTNAME_OPENROUTER_MIRROR[lower];
+    if (orModelId) {
+      try {
+        return getModel("openrouter" as "anthropic", orModelId as never);
+      } catch {
+        // Fall through to native anthropic mapping below.
+      }
+    }
+  }
+
+  // Map common shortnames to provider/model pairs (native anthropic path).
   const shortnames: Record<string, [string, string]> = {
     opus: ["anthropic", "claude-opus-4-20250514"],
     sonnet: ["anthropic", "claude-sonnet-4-20250514"],
     haiku: ["anthropic", "claude-haiku-4-5-20251001"],
   };
 
-  const mapping = shortnames[modelStr.toLowerCase()];
+  const mapping = shortnames[lower];
   if (mapping) {
     try {
       return getModel(mapping[0] as "anthropic", mapping[1] as never);
