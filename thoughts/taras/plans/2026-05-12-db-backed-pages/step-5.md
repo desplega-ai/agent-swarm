@@ -2,7 +2,7 @@
 id: step-5
 name: Password mode (`?key=` + Basic auth)
 depends_on: [step-3]
-status: ready
+status: done
 ---
 
 # step-5: Password mode (`?key=` + Basic auth)
@@ -53,13 +53,13 @@ Same flow applies to `/p/:id.json` so the SPA can fetch metadata after Basic aut
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New tests pass: `bun test src/tests/pages-password-mode.test.ts src/tests/pages-password-hash.test.ts`
-- [ ] Lint: `bun run lint`
-- [ ] Typecheck: `bun run tsc:check`
-- [ ] No OpenAPI diff (no new routes; only auth-mode branch added): `bun run docs:openapi && test -z "$(git status --porcelain openapi.json)"`
+- [x] New tests pass: `bun test src/tests/pages-password-mode.test.ts src/tests/pages-password-hash.test.ts`
+- [x] Lint: `bun run lint`
+- [x] Typecheck: `bun run tsc:check`
+- [x] No OpenAPI diff (no new routes; only auth-mode branch added): `bun run docs:openapi && test -z "$(git status --porcelain openapi.json)"`
 
 #### Automated QA:
-- [ ] Full password flow via curl:
+- [x] Full password flow via curl:
   ```bash
   curl -sS -X POST http://localhost:3013/api/pages \
     -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
@@ -70,8 +70,9 @@ Same flow applies to `/p/:id.json` so the SPA can fetch metadata after Basic aut
   curl -sS -i http://localhost:3013/p/<X>?key=swordfish   # → 200 + Set-Cookie
   curl -sS -u x:swordfish http://localhost:3013/p/<X>     # → 200 (Basic auth header path)
   ```
-- [ ] Cookie reuse: capture cookie from `?key=` response, hit `/p/:id` without `?key=` → 200.
-- [ ] Cross-page cookie: take cookie from one password page, hit a DIFFERENT password page → 401 (cookie scoped to id).
+  (Each step covered by an in-process fetch() equivalent in `pages-password-mode.test.ts`.)
+- [x] Cookie reuse: capture cookie from `?key=` response, hit `/p/:id` without `?key=` → 200.
+- [x] Cross-page cookie: take cookie from one password page, hit a DIFFERENT password page → 403 (cookie scoped to id — note: actual status is 403, not 401 as originally suggested, matching authed-mode cross-page semantics from step-4).
 
 #### Manual Verification:
 - [ ] Open `http://localhost:3013/p/:id` for a password page in a fresh Chrome profile → browser shows the native Basic auth dialog → entering correct password loads the page. (Validates the WWW-Authenticate header actually triggers the dialog.)

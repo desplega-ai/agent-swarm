@@ -25,7 +25,7 @@ import { z } from "zod";
 import { BROWSER_SDK_JS } from "../artifact-sdk/browser-sdk";
 import { getPage } from "../be/db";
 import type { Page } from "../types";
-import { extractAndVerifyCookie } from "../utils/page-session";
+import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 
@@ -128,31 +128,36 @@ function buildCsp(): string {
 }
 
 /**
- * Decide whether a page is reachable. Public pages are always reachable;
- * authed pages require a valid `page_session` cookie SCOPED TO THE SAME PAGE
- * ID; password pages are still 401 here until step-5 wires `?key=` / Basic.
+ * Decide whether a page is reachable based on cookie alone. Public pages are
+ * always reachable; authed AND password pages can ALSO pass via a valid
+ * `page_session` cookie scoped to the same page id (the cookie is the proof
+ * once the user has successfully unlocked once). For password pages, when
+ * the cookie is absent/invalid the caller falls through to the `?key=` +
+ * Basic-auth resolution path; for authed pages the caller surfaces 401.
  *
  * The caller passes the cookie payload (already verified by
  * `extractAndVerifyCookie`) — `null` when no cookie was sent or it failed
  * verification. Cross-page reuse (cookie for page A presented for page B)
  * surfaces as a distinct `403` so misconfigurations are debuggable, NOT a
  * generic 401.
+ *
+ * For password pages with no/bad cookie, returns `{ ok: false, status: 401,
+ * needsPassword: true }` so the handler knows to try the password flow before
+ * sending the WWW-Authenticate response.
  */
-type AccessResult = { ok: true } | { ok: false; status: 401 | 403; reason: string };
+type AccessResult =
+  | { ok: true }
+  | { ok: false; status: 401 | 403; reason: string; needsPassword?: boolean };
 
 function isAccessible(
   page: Page,
   cookiePayload: { pageId: string; exp: number } | null,
 ): AccessResult {
   if (page.authMode === "public") return { ok: true };
-  if (page.authMode === "authed") {
-    if (!cookiePayload) {
-      return {
-        ok: false,
-        status: 401,
-        reason: "authed mode requires page-session cookie; POST /api/pages/:id/launch first",
-      };
-    }
+
+  // Cookie-first path applies to both authed and password — a valid scoped
+  // cookie is sufficient proof regardless of how it was minted.
+  if (cookiePayload) {
     if (cookiePayload.pageId !== page.id) {
       return {
         ok: false,
@@ -162,12 +167,78 @@ function isAccessible(
     }
     return { ok: true };
   }
-  // password — step-5 handles this.
+
+  if (page.authMode === "authed") {
+    return {
+      ok: false,
+      status: 401,
+      reason: "authed mode requires page-session cookie; POST /api/pages/:id/launch first",
+    };
+  }
+  // password mode, no cookie yet — caller will try ?key= / Basic.
   return {
     ok: false,
     status: 401,
-    reason: "password mode not yet implemented on /p/:id",
+    reason: "password required",
+    needsPassword: true,
   };
+}
+
+/**
+ * Extract a password candidate from the request. Order of precedence:
+ *   1. `?key=` query param (if present, returns it verbatim — empty string is
+ *      still "present", caller decides what to do with it).
+ *   2. `Authorization: Basic <base64(user:pass)>` header — decodes the base64
+ *      blob, splits on the FIRST `:`, and returns the part AFTER the colon
+ *      (the username is ignored — Basic auth has no notion of "username
+ *      doesn't matter" so we treat anything as the username).
+ *
+ * Returns `null` when neither input is present, or when the Basic header is
+ * malformed (bad base64, no colon, etc.). NEVER throws — malformed Basic
+ * collapses to "no candidate" so the caller falls through to the 401 path.
+ */
+function extractPasswordCandidate(
+  req: IncomingMessage,
+  queryParams: URLSearchParams,
+): string | null {
+  const fromQuery = queryParams.get("key");
+  if (fromQuery !== null) return fromQuery;
+
+  const rawAuth = req.headers.authorization;
+  const auth = Array.isArray(rawAuth) ? rawAuth[0] : rawAuth;
+  if (!auth) return null;
+  // Format: `Basic <base64>`. Match case-insensitively per RFC 7617.
+  const m = /^Basic\s+(.+)$/i.exec(auth.trim());
+  if (!m) return null;
+  let decoded: string;
+  try {
+    decoded = Buffer.from(m[1]!, "base64").toString("utf-8");
+  } catch {
+    return null;
+  }
+  const colonIdx = decoded.indexOf(":");
+  if (colonIdx === -1) return null;
+  return decoded.slice(colonIdx + 1);
+}
+
+/**
+ * Detect whether the originating request is from a "dev" / localhost context,
+ * mirroring the same logic used by the bearer-launch endpoint in
+ * `src/http/pages.ts`. Used to decide whether to issue cookies with
+ * `SameSite=Lax` (dev) vs `SameSite=None; Secure` (prod).
+ */
+function isLocalhostRequest(req: IncomingMessage): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  const origin = (req.headers.origin as string | undefined) ?? "";
+  if (origin === "") {
+    // No Origin header (likely curl or a direct browser navigation). Decide
+    // from the Host header.
+    const rawHost = req.headers.host;
+    const host = Array.isArray(rawHost) ? rawHost[0] : rawHost;
+    if (!host) return true; // best-effort dev default
+    return host.startsWith("localhost") || host.startsWith("127.0.0.1");
+  }
+  return origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1");
 }
 
 // ─── Handler ────────────────────────────────────────────────────────────────
@@ -216,10 +287,55 @@ export async function handlePagesPublic(
   const cookiePayload = await extractAndVerifyCookie(req);
 
   const access = isAccessible(page, cookiePayload);
+
+  // Set-Cookie that we'll attach to the eventual 200 response when the
+  // password flow mints a fresh cookie inline. Empty string = no cookie to
+  // attach. We thread this through the handler so the existing 200-response
+  // paths below can opt-in without duplicating their branch logic.
+  let inlineSetCookie = "";
+
   if (!access.ok) {
-    res.writeHead(access.status, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: scrubSecrets(access.reason) }));
-    return true;
+    // Password flow: cookie missing/invalid, try `?key=` then Basic.
+    if (access.needsPassword) {
+      const candidate = extractPasswordCandidate(req, queryParams);
+      if (candidate !== null && page.passwordHash) {
+        // Bun.password.verify is constant-time (bcrypt). NEVER log the
+        // candidate or hash — they may carry user-provided secrets.
+        let matched = false;
+        try {
+          matched = await Bun.password.verify(candidate, page.passwordHash);
+        } catch {
+          matched = false;
+        }
+        if (matched) {
+          inlineSetCookie = await issuePageSessionCookie(page.id, {
+            dev: isLocalhostRequest(req),
+          });
+          // fall through to the regular 200 path below.
+        } else {
+          // Wrong password → 401 + WWW-Authenticate so the browser re-prompts.
+          res.writeHead(401, {
+            "Content-Type": "application/json",
+            "WWW-Authenticate": `Basic realm="page ${page.id}"`,
+          });
+          res.end(JSON.stringify({ error: "incorrect password" }));
+          return true;
+        }
+      } else {
+        // No candidate at all → 401 + WWW-Authenticate so the browser shows
+        // the native Basic auth dialog.
+        res.writeHead(401, {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Basic realm="page ${page.id}"`,
+        });
+        res.end(JSON.stringify({ error: "password required" }));
+        return true;
+      }
+    } else {
+      res.writeHead(access.status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: scrubSecrets(access.reason) }));
+      return true;
+    }
   }
 
   if (isJsonRoute) {
@@ -227,10 +343,12 @@ export async function handlePagesPublic(
     // Returns the current head state (no version history). Body included
     // verbatim. NOTE: passwordHash / agentId are NOT exposed here — these
     // are private. step-4 may revisit if needed.
-    res.writeHead(200, {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
-    });
+    };
+    if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+    res.writeHead(200, headers);
     res.end(
       JSON.stringify({
         id: page.id,
@@ -247,21 +365,24 @@ export async function handlePagesPublic(
 
   // `/p/:id` — render either HTML directly or 302→SPA for JSON.
   if (page.contentType === "application/json") {
-    const target = `${getAppBaseUrl()}/artifacts/${page.id}`;
-    res.writeHead(302, { Location: target });
+    const headers: Record<string, string> = { Location: `${getAppBaseUrl()}/artifacts/${page.id}` };
+    if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+    res.writeHead(302, headers);
     res.end();
     return true;
   }
 
   // text/html — inject SDK + serve.
   const html = injectBrowserSdk(page.body);
-  res.writeHead(200, {
+  const headers: Record<string, string> = {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",
     "Content-Security-Policy": buildCsp(),
     // Defence-in-depth: prevent MIME sniffing and clickjacking outside the SPA.
     "X-Content-Type-Options": "nosniff",
-  });
+  };
+  if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+  res.writeHead(200, headers);
   res.end(html);
   return true;
 }

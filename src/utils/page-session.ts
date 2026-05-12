@@ -209,3 +209,46 @@ export async function extractAndVerifyCookie(req: {
   if (!token) return null;
   return verifyPageSession(token);
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Cookie issuance helper
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cookie lifetime in seconds. 1 hour. Mirrors `PAGE_SESSION_TTL_SECONDS` in
+ * `src/http/pages.ts` (intentionally duplicated here to keep the helper
+ * standalone; if the value diverges anywhere, that's the bug).
+ */
+const PAGE_SESSION_TTL_SECONDS = 3600;
+
+/**
+ * Mint a signed page-session token + build the `Set-Cookie` header value for
+ * `pageId`. Shared by the bearer-authed launch endpoint (`src/http/pages.ts`)
+ * and the password-flow inline mint (`src/http/pages-public.ts`).
+ *
+ * - `dev=true` → `SameSite=Lax` without `Secure` (works on http://localhost).
+ * - `dev=false` → `SameSite=None; Secure` (cross-site iframe embedding in prod).
+ *
+ * The caller is responsible for setting `Set-Cookie` on the response — this
+ * helper only builds the string. TTL is 1 hour; renewed on every issuance.
+ */
+export async function issuePageSessionCookie(
+  pageId: string,
+  opts: { dev: boolean },
+): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + PAGE_SESSION_TTL_SECONDS;
+  const token = await signPageSession({ pageId, exp });
+  const attrs = [
+    `page_session=${token}`,
+    "HttpOnly",
+    "Path=/",
+    `Max-Age=${PAGE_SESSION_TTL_SECONDS}`,
+  ];
+  if (opts.dev) {
+    attrs.push("SameSite=Lax");
+  } else {
+    attrs.push("SameSite=None");
+    attrs.push("Secure");
+  }
+  return attrs.join("; ");
+}

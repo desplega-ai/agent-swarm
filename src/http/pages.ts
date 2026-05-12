@@ -11,7 +11,7 @@ import {
 } from "../be/db";
 import { snapshotPage } from "../pages/version";
 import { PageAuthModeSchema, PageContentTypeSchema } from "../types";
-import { signPageSession } from "../utils/page-session";
+import { issuePageSessionCookie } from "../utils/page-session";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
@@ -190,34 +190,12 @@ const getPageVersionRoute = route({
   },
 });
 
-/** Cookie lifetime in seconds. 1 hour. Renewed each /launch call. */
-const PAGE_SESSION_TTL_SECONDS = 3600;
-
 /**
- * Build the `Set-Cookie` value for the page-session cookie.
- *
- * Production defaults are paranoid: `HttpOnly` (no JS access), `Secure`
- * (HTTPS only), `SameSite=None` (cross-site embedding in `<iframe>` works).
- * In dev we soften this so localhost works without HTTPS — detected via
- * `NODE_ENV !== 'production'` AND a localhost-origin request.
+ * Cookie issuance moved to `src/utils/page-session.ts::issuePageSessionCookie`
+ * so the password-flow on `/p/:id` (step-5) can mint cookies via the same
+ * helper. `dev=true` softens the cookie for `http://localhost` (no Secure
+ * required; SameSite=Lax). Detected by `isDevRequest()` below.
  */
-function buildSetCookie(value: string, opts: { dev: boolean }): string {
-  const attrs = [
-    `page_session=${value}`,
-    "HttpOnly",
-    "Path=/",
-    `Max-Age=${PAGE_SESSION_TTL_SECONDS}`,
-  ];
-  if (opts.dev) {
-    // Dev: SameSite=Lax + no Secure → works on http://localhost without TLS.
-    attrs.push("SameSite=Lax");
-  } else {
-    // Prod: SameSite=None requires Secure (browser enforced).
-    attrs.push("SameSite=None");
-    attrs.push("Secure");
-  }
-  return attrs.join("; ");
-}
 
 /**
  * Apply CORS headers needed for the cross-origin launch call. The SPA on
@@ -527,9 +505,7 @@ export async function handlePages(
 
     // public + authed both mint a cookie here. No per-page ACL in v1: the
     // bearer is the API_KEY, same trust as the rest of the API.
-    const exp = Math.floor(Date.now() / 1000) + PAGE_SESSION_TTL_SECONDS;
-    const token = await signPageSession({ pageId: page.id, exp });
-    const cookie = buildSetCookie(token, { dev: isDevRequest(req) });
+    const cookie = await issuePageSessionCookie(page.id, { dev: isDevRequest(req) });
 
     applyLaunchCors(req, res);
     res.setHeader("Set-Cookie", cookie);
