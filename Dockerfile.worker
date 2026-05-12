@@ -47,15 +47,14 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pipx + desloppify (Code-Health MCP scanner — DES-366).
-# pipx isolates Python tools into per-tool virtualenvs and adds shims to
-# /root/.local/bin. We install under root so the binary lands in a system
-# path; pass `--global` so all users (worker too) get the shim.
-# `knip` is invoked on-demand via `bunx knip` (no global install required —
-# it's a per-repo dev dep), so we don't install it here.
+# pipx isolates Python tools into per-tool virtualenvs. Setting
+# PIPX_BIN_DIR=/usr/local/bin (an already-on-PATH system dir) lands the
+# `desloppify` shim system-wide, so both root and the worker user can run it
+# without an extra ensurepath step. `knip` is invoked per-repo via `bunx knip`
+# (no global install — it's a dev dep of each target repo).
 ARG DESLOPPIFY_VERSION=0.9.15
 RUN apt-get update && apt-get install -y --no-install-recommends pipx \
     && rm -rf /var/lib/apt/lists/* \
-    && pipx ensurepath --global \
     && PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install --pip-args="--no-cache-dir" "desloppify[full]==${DESLOPPIFY_VERSION}" \
     && desloppify --version
 
