@@ -12,7 +12,7 @@ version: 0.1.0
 # Users override at install time with --set image.tag=...; this is just
 # the default. Doesn't need to track package.json — bump it when the chart
 # is intentionally re-baselined onto a newer app version.
-appVersion: "1.74.4"
+appVersion: "1.78.0"
 home: https://github.com/desplega-ai/agent-swarm
 sources:
   - https://github.com/desplega-ai/agent-swarm
