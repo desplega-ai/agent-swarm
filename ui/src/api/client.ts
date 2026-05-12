@@ -29,6 +29,7 @@ import type {
   McpServer,
   McpServersResponse,
   MessagesResponse,
+  PageMetadata,
   PreviewResponse,
   PricingProvider,
   PricingResponse,
@@ -1681,6 +1682,65 @@ class ApiClient {
     if (!res.ok) throw new Error(`Failed to list credential-missing agents: ${res.status}`);
     const data = (await res.json()) as CredentialMissingAgentsResponse;
     return data.agents;
+  }
+
+  // ─── Pages (DB-backed artifacts, step-6) ──────────────────────────────────
+
+  /**
+   * Resolve the absolute API URL for cookie-bearing page calls. Unlike
+   * `getBaseUrl()` (which returns "" in dev so Vite's proxy can rewrite
+   * `/api/*`), the page-session cookie MUST be set on the API origin
+   * (`http://localhost:3013` in dev), so we always need an absolute URL.
+   * Falls back to the dev API origin when no connection is configured.
+   */
+  private getAbsoluteApiUrl(): string {
+    const config = getConfig();
+    return (config.apiUrl || "http://localhost:3013").replace(/\/+$/, "");
+  }
+
+  /**
+   * Fetch the current head metadata for a page from `GET /p/:id.json`. The
+   * call uses `credentials: 'include'` so that a previously-minted
+   * `page_session` cookie (from `launchPage` or the password flow) travels
+   * cross-origin. The bearer header is harmless for `public` pages and
+   * required by nothing on this route — but we include it for parity with
+   * the rest of the client and to avoid blank-creds edge cases in browser
+   * extensions that hide cookies.
+   *
+   * Throws `Error` with the status code in the message on a non-OK response.
+   * Callers (see `useArtifactPage`) inspect the status string to decide
+   * whether to attempt a `launchPage` retry.
+   */
+  async fetchPageMetadata(id: string): Promise<PageMetadata> {
+    const url = `${this.getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}.json`;
+    const res = await fetch(url, {
+      headers: this.getHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error(`fetchPageMetadata ${id}: ${res.status}`);
+    return res.json();
+  }
+
+  /**
+   * Mint a `page_session` cookie via `POST /api/pages/:id/launch`. Requires
+   * the API bearer (auth lives in the global gate) AND `credentials:
+   * 'include'` so the browser commits the returned `Set-Cookie` header to
+   * the API origin. The endpoint returns 204 on success.
+   *
+   * Server returns 400 (`"use ?key= or Basic auth on /p/:id directly"`) for
+   * password-mode pages — caller should surface a "open in new tab" affordance
+   * when this fires, since password unlock must happen in the iframe load itself.
+   *
+   * Throws `Error` with the status code in the message on a non-OK response.
+   */
+  async launchPage(id: string): Promise<void> {
+    const url = `${this.getAbsoluteApiUrl()}/api/pages/${encodeURIComponent(id)}/launch`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error(`launchPage ${id}: ${res.status}`);
   }
 }
 

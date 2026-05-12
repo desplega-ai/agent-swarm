@@ -2,7 +2,7 @@
 id: step-6
 name: SPA /artifacts/:id + HTML iframe
 depends_on: [step-3]
-status: ready
+status: done
 ---
 
 # step-6: SPA `/artifacts/:id` + HTML iframe rendering
@@ -91,11 +91,11 @@ type PageMetadata = {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd ui && pnpm exec tsc -b` (CI's exact form — NOT `--noEmit`)
-- [ ] `cd ui && pnpm lint`
-- [ ] No regressions in existing server tests: `bun test`
-- [ ] Lint root: `bun run lint`
-- [ ] Typecheck root: `bun run tsc:check`
+- [x] `cd ui && pnpm exec tsc -b` (CI's exact form — NOT `--noEmit`)
+- [x] `cd ui && pnpm lint`
+- [x] No regressions in existing server tests: `bun test`
+- [x] Lint root: `bun run lint`
+- [x] Typecheck root: `bun run tsc:check`
 
 #### Automated QA:
 - [ ] Boot the swarm locally: API on :3013 (`bun run start:http`), SPA on :5274 (`cd ui && pnpm dev`). Pre-create three pages via curl (public HTML, authed HTML, password HTML). Open each `/artifacts/:id` URL in Chrome (headless via qa-use), confirm:

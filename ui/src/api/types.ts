@@ -1215,3 +1215,23 @@ export interface TestConnectionResponse {
   error?: string;
   latency_ms: number;
 }
+
+// ─── Pages (DB-backed artifacts) ──────────────────────────────────────────────
+
+export type PageContentType = "text/html" | "application/json";
+export type PageAuthMode = "public" | "authed" | "password";
+
+/**
+ * Response shape from `GET /p/:id.json` — current head state of a page (no
+ * version history). Mirrors `pages-public.ts` JSON response. `passwordHash`
+ * and `agentId` are intentionally NOT exposed by the server.
+ */
+export interface PageMetadata {
+  id: string;
+  version: number;
+  title: string;
+  description: string | null;
+  contentType: PageContentType;
+  authMode: PageAuthMode;
+  body: string;
+}

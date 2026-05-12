@@ -1,0 +1,56 @@
+# step-6 qa-use seed — DB-backed pages, HTML render scenarios
+#
+# Scaffolding only. Full scenarios (with concrete IDs and assertions) are
+# filled in by step-9 of the db-backed-pages plan (see
+# thoughts/taras/plans/2026-05-12-db-backed-pages/step-9.md). Step-6
+# delivers the SPA route; step-9 wires up the end-to-end qa-use session.
+#
+# To run once filled in:
+#   /qa-use:test-run qa-use/tests/pages-html-render.yaml
+#
+# Pre-conditions (set up by step-9 fixture):
+#   - API server on http://localhost:3013
+#   - SPA on http://localhost:5274
+#   - Three pages created via `POST /api/pages`:
+#       - <public-html-id>   — auth_mode: public,    content_type: text/html
+#       - <authed-html-id>   — auth_mode: authed,    content_type: text/html
+#       - <password-html-id> — auth_mode: password,  content_type: text/html
+#         (password=swordfish)
+
+name: pages-html-render
+description: SPA /artifacts/:id renders HTML pages across all three auth modes.
+
+scenarios:
+  - id: public-html
+    name: Public HTML page renders inside iframe
+    # TODO(step-9): replace <public-html-id> with the seeded id and assert
+    # the iframe body text is visible after load.
+    steps:
+      - navigate: "http://localhost:5274/artifacts/<public-html-id>"
+      - waitFor: "iframe[title]"
+      - screenshot: "public-html"
+
+  - id: authed-html
+    name: Authed HTML page launches cookie, then renders
+    # TODO(step-9): assert DevTools network panel shows
+    # `POST /api/pages/<id>/launch` returning 204 with `Set-Cookie page_session`
+    # BEFORE the iframe load fires.
+    steps:
+      - navigate: "http://localhost:5274/artifacts/<authed-html-id>"
+      - waitFor: "iframe[title]"
+      - screenshot: "authed-html"
+
+  - id: password-html
+    name: Password HTML page unlocks via input form
+    # TODO(step-9): assert the password form is visible before submit, and
+    # that after submit the iframe loads `/p/<id>?key=swordfish` and renders
+    # the body.
+    steps:
+      - navigate: "http://localhost:5274/artifacts/<password-html-id>"
+      - waitFor: "input#page-password"
+      - type:
+          selector: "input#page-password"
+          text: "swordfish"
+      - click: "button[type=submit]"
+      - waitFor: "iframe[title]"
+      - screenshot: "password-html"
