@@ -10,7 +10,11 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
-      code: ${{ steps.check.outputs.code }}
+      lint: ${{ steps.check.outputs.lint }}
+      test: ${{ steps.check.outputs.test }}
+      pi_skills: ${{ steps.check.outputs.pi_skills }}
+      openapi: ${{ steps.check.outputs.openapi }}
+      docker: ${{ steps.check.outputs.docker }}
       ui: ${{ steps.check.outputs.ui }}
     steps:
       - name: Checkout repository
@@ -21,32 +25,59 @@ jobs:
       - name: Fetch base branch
         run: git fetch origin ${{ github.base_ref }}
 
-      - name: Check for code changes
+      - name: Compute per-domain change flags
         id: check
         run: |
+          set -euo pipefail
           CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
-          CODE_CHANGED=$(echo "$CHANGED" | grep -v '^docs-site/' | grep -v '^$' || true)
-          if [ -n "$CODE_CHANGED" ]; then
-            echo "code=true" >> $GITHUB_OUTPUT
-            echo "Code files changed:"
-            echo "$CODE_CHANGED"
-          else
-            echo "code=false" >> $GITHUB_OUTPUT
-            echo "No code files changed (only docs-site/)"
-          fi
-          UI_CHANGED=$(echo "$CHANGED" | grep '^ui/' || true)
-          if [ -n "$UI_CHANGED" ]; then
-            echo "ui=true" >> $GITHUB_OUTPUT
-            echo "ui files changed:"
-            echo "$UI_CHANGED"
-          else
-            echo "ui=false" >> $GITHUB_OUTPUT
-          fi
+          echo "Changed files:"
+          echo "$CHANGED"
+          echo "---"
+
+          # Always re-run everything if the merge-gate workflow itself changed.
+          GATE_CHANGED=$(echo "$CHANGED" | grep -E '^\.github/workflows/merge-gate\.yml$' || true)
+
+          match() {
+            local pattern="$1"
+            if [ -n "$GATE_CHANGED" ]; then
+              echo "true"; return
+            fi
+            if echo "$CHANGED" | grep -E "$pattern" > /dev/null; then
+              echo "true"
+            else
+              echo "false"
+            fi
+          }
+
+          # lint + tsc:check: biome runs on src/, tsc covers src/ (scripts excluded in tsconfig).
+          LINT=$(match '^(src/|package\.json$|bun\.lock|tsconfig\.json$|biome\.json$)')
+
+          # tests: src/ + scripts that tests import + lockfile/tsconfig.
+          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|tsconfig\.json$)')
+
+          # pi-skills freshness: generator inputs + outputs.
+          PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
+
+          # openapi freshness: routes, types, generator, version, generated artifacts.
+          OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
+
+          # docker build test: mirrors docker-and-deploy.yml paths.
+          DOCKER=$(match '^(src/|Dockerfile$|Dockerfile\.worker$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|tsconfig\.json$|scripts/|templates/|plugin/|deploy/)')
+
+          # ui app lint + typecheck.
+          UI=$(match '^ui/')
+
+          for k in LINT TEST PI_SKILLS OPENAPI DOCKER UI; do
+            v=$(eval echo \$$k)
+            key=$(echo "$k" | tr '[:upper:]' '[:lower:]')
+            echo "${key}=${v}" >> $GITHUB_OUTPUT
+            echo "${key}=${v}"
+          done
 
   lint-and-typecheck:
     name: Lint and Type Check
     needs: detect-changes
-    if: needs.detect-changes.outputs.code == 'true'
+    if: needs.detect-changes.outputs.lint == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -73,7 +104,7 @@ jobs:
   test:
     name: Run Tests
     needs: detect-changes
-    if: needs.detect-changes.outputs.code == 'true'
+    if: needs.detect-changes.outputs.test == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -94,7 +125,7 @@ jobs:
   pi-skills-freshness:
     name: Pi-Skills Freshness Check
     needs: detect-changes
-    if: needs.detect-changes.outputs.code == 'true'
+    if: needs.detect-changes.outputs.pi_skills == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -122,7 +153,7 @@ jobs:
   openapi-freshness:
     name: OpenAPI Spec Freshness Check
     needs: detect-changes
-    if: needs.detect-changes.outputs.code == 'true'
+    if: needs.detect-changes.outputs.openapi == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -163,7 +194,7 @@ jobs:
   docker-build:
     name: Docker Build Test
     needs: detect-changes
-    if: needs.detect-changes.outputs.code == 'true'
+    if: needs.detect-changes.outputs.docker == 'true'
     runs-on: ubuntu-latest
 
     strategy:
