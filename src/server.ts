@@ -120,8 +120,7 @@ import {
 
 // Capability-based feature flags
 // Default: all capabilities enabled
-const DEFAULT_CAPABILITIES =
-  "core,task-pool,messaging,profiles,services,scheduling,memory,workflows";
+const DEFAULT_CAPABILITIES = "core,task-pool,profiles,services,scheduling,memory,workflows";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -204,13 +203,15 @@ export function createServer() {
     registerTaskActionTool(server);
   }
 
-  // Messaging capability - channel-based communication
+  // Core messaging tools - always registered (post/read are CORE_TOOLS)
+  registerPostMessageTool(server);
+  registerReadMessagesTool(server);
+
+  // Messaging capability - channel management (CRUD on channels)
   if (hasCapability("messaging")) {
     registerListChannelsTool(server);
     registerCreateChannelTool(server);
     registerDeleteChannelTool(server);
-    registerPostMessageTool(server);
-    registerReadMessagesTool(server);
   }
 
   // Profiles capability - agent profile management
