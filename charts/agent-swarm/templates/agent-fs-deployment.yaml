@@ -51,6 +51,8 @@ spec:
             - secretRef:
                 name: {{ include "agent-swarm.agentFsSecretName" . }}
           env:
+            - name: HOST
+              value: "0.0.0.0"
             - name: PORT
               value: {{ .Values.agentFs.port | quote }}
             - name: S3_BUCKET
