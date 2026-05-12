@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.77.3] - 2026-05-12
+
+### Fixed
+- **Codex adapter rate-limit handling** (b5023b08) — adapter now backs off cleanly on Codex rate-limit errors instead of bubbling them up as task failures.
+
+## [1.77.2] - 2026-05-12
+
+### Added
+- **Worker reports `latest_model` to the API** (175c579d) — `buildLatestModelReport` + `reportLatestModel` (`src/commands/provider-credentials.ts`) post the worker's effective model to `PUT /api/agents/{id}/credential-status` along with provenance (`task` / `agent_config` / `custom` / `adapter_default`). Surfaces in the dashboard so operators can see which model a worker is actually running per task.
+
+## [1.77.1] - 2026-05-12
+
+### Changed
+- **Pretty-printed runner progress for `pi` and `codex` harnesses** (55e3b1ea) — runner now emits compact, human-readable progress lines for tool-call events from non-Claude harnesses instead of raw JSON.
+
+## [1.77.0] - 2026-05-12
+
+### Added
+- **Live env reload from `swarm_config`** (314168b4) — runner re-reads `MODEL_OVERRIDE` and `AGENT_FS_SHARED_ORG_ID` from `swarm_config` on every poll tick and applies them to `process.env` mid-flight. Other env keys (boot identity, credential-pool members, paired-state values, OS-level vars) are intentionally **not** reloadable — see the `RELOADABLE_ENV_KEYS` list in `src/commands/runner.ts` for the rationale per category.
+- **Provider can flip mid-credential-wait** (`src/commands/credential-wait.ts`) — `awaitCredentials` now accepts an optional `getProvider()` callback that is re-read on every tick. An operator flipping `HARNESS_PROVIDER` in `swarm_config` while a worker is parked in `waiting_for_credentials` now actually pivots the predicate, no container restart needed.
+
+### Changed
+- **`Dockerfile.worker` size optimization** (314168b4) — eliminated the multi-GB `chown -R worker:worker /home/worker` layer that was duplicating the entire `$HOME` tree. Root-side installs (`npm install`, `qa-use install-deps`, `playwright install`) now run with `HOME=/root` + `NPM_CONFIG_CACHE=/tmp/npm-cache` + `PLAYWRIGHT_BROWSERS_PATH=/opt/playwright` overrides inline, so caches never land in `/home/worker`. Adds extensive npm `overrides` for transitive bloaters (`chromadb`, `chromadb-default-embed`, `@xenova/transformers`, `tree-sitter-wasms`, `web-tree-sitter`, `cohere-ai`, `voyageai`, `ollama`) — all stubbed via `npm:empty-npm-package@1.0.0`. Bumps `@desplega.ai/qa-use` 2.17.0 → 2.18.0 and `@desplega.ai/agent-fs` 0.5.1 → 0.5.3. Full rationale in [`runbooks/docker-images.md`](./runbooks/docker-images.md).
+- **opencode plugin: vendored `lib/` helpers + Dockerfile COPY** (#460) — opencode's plugin loader runs inside its own bundled Bun runtime which only exposes `@opencode-ai/{plugin,sdk}`. Session-summary helpers (`opencode-auth.ts`, `summarize.ts`) are now vendored under `plugin/opencode-plugins/lib/` and copied into `/home/worker/.config/opencode/plugins/lib/` by `Dockerfile.worker` so the plugin's relative imports resolve.
+
+### Fixed
+- **Session summarization across worker harness providers (claude, pi, opencode, codex)** (#460) — extracts a single shared `internal-ai` abstraction (`src/utils/internal-ai/`) for structured-output LLM calls, with a credential resolver that handles `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → Codex OAuth → `CLAUDE_CODE_OAUTH_TOKEN` precedence. All four worker harnesses now use it for end-of-session summarization:
+  - **claude** (`src/hooks/hook.ts`) — Stop hook now goes through `summarizeSession` from `internal-ai` instead of the OpenRouter-only `runMemoryRater`. Pro/Max OAuth users with no OpenRouter key keep working via the `claude -p --json-schema` fallback. The wrapper now passes `--json-schema` AND appends the schema inline to the user prompt, with a tolerant `stripJsonFences` parser (defense-in-depth) — fixes the earlier silent failure where `JSON.parse("No significant learnings.")` always threw and dropped every summary. `claude-adapter` mirrors `CLAUDE_CODE_OAUTH_TOKEN` to `AGENT_SWARM_CLAUDE_OAUTH_TOKEN` to survive Claude CLI's hook env-stripping.
+  - **pi** (`src/providers/pi-mono-extension.ts`) — migrated off the previous direct-rater path onto the shared wrapper, with explicit DI for testability.
+  - **opencode** (`plugin/opencode-plugins/agent-swarm.ts`) — replaced the dead `claude -p` shellout (which always ran with `sessionFile=undefined` in production) with an SDK-sourced transcript fetched at `session.idle` time, flattened to text + completed tool calls only. Plugin uses a new opencode-specific credential resolver that reads `~/.local/share/opencode/auth.json` (ApiAuth / WellKnownAuth / anthropic OAuth with refresh + persist) plus env vars.
+  - **codex** (`src/providers/codex-adapter.ts`) — codex now buffers its transcript and runs the same shared session-summary call at session end.
+
+### Removed
+- **`--ai-loop` CLI flag** (`src/cli.tsx`) — removed from `worker` and `lead` commands. The legacy AI-based polling mode it gated has been the default for some time; the flag was a no-op carry-over.
+
 ## [1.76.0] - 2026-05-10
 
 ### Added
