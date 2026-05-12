@@ -2,7 +2,7 @@
 id: step-1
 name: Storage spine
 depends_on: []
-status: ready
+status: done
 ---
 
 # step-1: Storage spine
@@ -111,17 +111,17 @@ CREATE INDEX idx_page_versions_pageId ON page_versions(pageId);
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Migrations apply cleanly on a fresh DB: `rm -f /tmp/test-pages.sqlite && DATABASE_PATH=/tmp/test-pages.sqlite bun run start:http` boots without error (Ctrl-C to stop)
-- [ ] Migrations apply cleanly on an existing DB: `bun run start:http` on the dev DB applies 059 + 060 idempotently (the migration runner is forward-only — already applied migrations skip; re-run is a no-op)
-- [ ] Schema test: `bun test src/tests/pages-storage.test.ts`
-- [ ] HTTP test: `bun test src/tests/pages-http.test.ts`
-- [ ] Lint: `bun run lint`
-- [ ] Typecheck: `bun run tsc:check`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] OpenAPI regen produces a diff covering `POST /api/pages` + `GET /api/pages/:id`; commit it: `bun run docs:openapi && git diff --stat openapi.json`
+- [x] Migrations apply cleanly on a fresh DB: `rm -f /tmp/test-pages.sqlite && DATABASE_PATH=/tmp/test-pages.sqlite bun run start:http` boots without error (Ctrl-C to stop)
+- [x] Migrations apply cleanly on an existing DB: `bun run start:http` on the dev DB applies 059 + 060 idempotently (the migration runner is forward-only — already applied migrations skip; re-run is a no-op)
+- [x] Schema test: `bun test src/tests/pages-storage.test.ts`
+- [x] HTTP test: `bun test src/tests/pages-http.test.ts`
+- [x] Lint: `bun run lint`
+- [x] Typecheck: `bun run tsc:check`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] OpenAPI regen produces a diff covering `POST /api/pages` + `GET /api/pages/:id`; commit it: `bun run docs:openapi && git diff --stat openapi.json`
 
 #### Automated QA:
-- [ ] Agent-driven end-to-end via curl: start server (`bun run start:http`), then
+- [x] Agent-driven end-to-end via curl: start server (`bun run start:http`), then
   ```bash
   curl -sS -X POST http://localhost:3013/api/pages \
     -H "Authorization: Bearer ${API_KEY:-123123}" \
@@ -132,7 +132,7 @@ CREATE INDEX idx_page_versions_pageId ON page_versions(pageId);
   curl -sS http://localhost:3013/api/pages/<id> -H "Authorization: Bearer ${API_KEY:-123123}"
   # → full Page row JSON
   ```
-- [ ] Snapshot-before-update: re-POST with same slug (or use a manual UPDATE via test helper), confirm `page_versions` has v1 with PRE-update content.
+- [x] Snapshot-before-update: re-POST with same slug (or use a manual UPDATE via test helper), confirm `page_versions` has v1 with PRE-update content.
 
 #### Manual Verification:
 - [ ] Visually inspect the generated OpenAPI diff to confirm route shape, schemas, and `tags: ['pages']` are sensible.

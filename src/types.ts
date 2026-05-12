@@ -1087,6 +1087,60 @@ export const WorkflowVersionSchema = z.object({
 });
 export type WorkflowVersion = z.infer<typeof WorkflowVersionSchema>;
 
+// ---------------------------------------------------------------------------
+// Pages — DB-backed lightweight artifacts (HTML or JSON spec) stored in
+// SQLite and served at /p/:id. See plan: thoughts/taras/plans/2026-05-12-db-backed-pages/.
+// PageContentTypeSchema + PageAuthModeSchema MUST stay in sync with the SQL
+// CHECK constraints in src/be/migrations/059_pages.sql.
+// ---------------------------------------------------------------------------
+
+export const PageContentTypeSchema = z.enum(["text/html", "application/json"]);
+export type PageContentType = z.infer<typeof PageContentTypeSchema>;
+
+export const PageAuthModeSchema = z.enum(["public", "authed", "password"]);
+export type PageAuthMode = z.infer<typeof PageAuthModeSchema>;
+
+// PageSnapshot captures the mutable content fields frozen per-version in
+// page_versions.snapshot. Omits id / agentId / slug / timestamps (these are
+// invariant across versions for a given page id; the slug is a parent-only
+// identifier).
+export const PageSnapshotSchema = z.object({
+  title: z.string(),
+  description: z.string().optional(),
+  contentType: PageContentTypeSchema,
+  authMode: PageAuthModeSchema,
+  passwordHash: z.string().optional(),
+  body: z.string(),
+  needsCredentials: z.array(z.string()).optional(),
+});
+export type PageSnapshot = z.infer<typeof PageSnapshotSchema>;
+
+export const PageSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  slug: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  contentType: PageContentTypeSchema,
+  authMode: PageAuthModeSchema,
+  passwordHash: z.string().optional(),
+  body: z.string(),
+  needsCredentials: z.array(z.string()).optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Page = z.infer<typeof PageSchema>;
+
+export const PageVersionSchema = z.object({
+  id: z.string(),
+  pageId: z.string(),
+  version: z.number().int().min(1),
+  snapshot: PageSnapshotSchema,
+  changedByAgentId: z.string().optional(),
+  createdAt: z.string(),
+});
+export type PageVersion = z.infer<typeof PageVersionSchema>;
+
 // --- Workflow Run ---
 
 export const WorkflowRunStatusSchema = z.enum([

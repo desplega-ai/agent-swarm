@@ -15,6 +15,7 @@ import "../src/http/heartbeat";
 import "../src/http/inbox-state";
 import "../src/http/integrations";
 import "../src/http/memory";
+import "../src/http/pages";
 import "../src/http/prompt-templates";
 import "../src/http/poll";
 import "../src/http/pricing";
