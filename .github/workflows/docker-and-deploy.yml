@@ -180,7 +180,7 @@ jobs:
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   build-and-push-worker-amd64:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [detect-version-change]
     permissions:
       contents: read
@@ -208,7 +208,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push by digest
+      # Two outputs from one build:
+      # - registry push-by-digest → consumed by merge-worker for the multi-arch :latest
+      #   manifest list in ghcr (what external consumers pull).
+      # - local docker-daemon load as :hetzner → the production worker compose on THIS
+      #   host references :hetzner with `pull_policy: missing`, so Dokploy recreates
+      #   containers directly from the freshly-built local image without pulling 10GB
+      #   from ghcr.
+      - name: Build, push by digest, and load locally as :hetzner
         id: build
         uses: docker/build-push-action@v5
         with:
@@ -216,9 +223,20 @@ jobs:
           file: ./Dockerfile.worker
           platforms: linux/amd64
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker,push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=worker-amd64
-          cache-to: type=gha,scope=worker-amd64,mode=max
+          outputs: |
+            type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker,push-by-digest=true,name-canonical=true,push=true
+            type=docker,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:hetzner
+
+      # Tag :hetzner in the registry as a pointer to the digest we just pushed above.
+      # This is a registry-side metadata operation (one HTTP call, zero layer uploads)
+      # — the layers were already uploaded by push-by-digest=true. The :hetzner tag
+      # exists in ghcr only as a bootstrap fallback for fresh hosts; normal deploys
+      # never pull it because compose uses pull_policy: missing.
+      - name: Tag :hetzner in registry (bootstrap fallback, zero-byte upload)
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:hetzner \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker@${{ steps.build.outputs.digest }}
 
   build-and-push-worker-arm64:
     runs-on: ubuntu-24.04-arm
