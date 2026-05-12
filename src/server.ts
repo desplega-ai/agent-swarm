@@ -121,7 +121,7 @@ import {
 
 // Capability-based feature flags
 // Default: all capabilities enabled
-const DEFAULT_CAPABILITIES = "core,task-pool,profiles,services,scheduling,memory,workflows";
+const DEFAULT_CAPABILITIES = "core,task-pool,profiles,services,scheduling,memory,workflows,pages";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -286,9 +286,9 @@ export function createServer() {
   registerSkillPublishTool(server);
 
   // Pages capability - DB-backed lightweight artifacts (HTML / JSON specs).
-  // NOT yet in DEFAULT_CAPABILITIES — operator must opt in via
-  // `CAPABILITIES=...,pages` until step-9 of the db-backed-pages plan flips
-  // the default. See thoughts/taras/plans/2026-05-12-db-backed-pages/root.md.
+  // Enabled by default (added to DEFAULT_CAPABILITIES in step-9 of the
+  // db-backed-pages plan). Operators can disable via explicit
+  // `CAPABILITIES=...` env without `pages`.
   if (hasCapability("pages")) {
     registerCreatePageTool(server);
   }

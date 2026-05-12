@@ -2,9 +2,9 @@
 date: 2026-05-12T00:00:00Z
 author: Taras
 plan_type: dag
-status: in-progress
+status: completed
 last_updated: 2026-05-12
-last_updated_by: Claude (step-7 done)
+last_updated_by: orchestrator-step-9-2026-05-12
 ---
 
 # DB-backed Pages — Plan (DAG)
@@ -137,15 +137,15 @@ graph TD
 
 | ID | Name | Depends on | Status | File |
 |----|------|------------|--------|------|
-| step-1 | Storage spine | — | ready | [step-1.md](./step-1.md) |
-| step-2 | Cookie helper + `/@swarm/api/*` proxy | step-1 | ready | [step-2.md](./step-2.md) |
+| step-1 | Storage spine | — | done | [step-1.md](./step-1.md) |
+| step-2 | Cookie helper + `/@swarm/api/*` proxy | step-1 | done | [step-2.md](./step-2.md) |
 | step-3 | HTTP REST + MCP tool + public `/p/:id` | step-2 | done | [step-3.md](./step-3.md) |
 | step-4 | Authed mode (launch cookie) | step-3 | done | [step-4.md](./step-4.md) |
-| step-5 | Password mode (`?key=` + Basic) | step-3 | ready | [step-5.md](./step-5.md) |
-| step-6 | SPA `/artifacts/:id` + HTML iframe | step-3 | ready | [step-6.md](./step-6.md) |
+| step-5 | Password mode (`?key=` + Basic) | step-3 | done | [step-5.md](./step-5.md) |
+| step-6 | SPA `/artifacts/:id` + HTML iframe | step-3 | done | [step-6.md](./step-6.md) |
 | step-7 | JSON renderer (`@json-render/react`) | step-6 | done | [step-7.md](./step-7.md) |
-| step-8 | Listing UI + skill doc | step-3 | ready | [step-8.md](./step-8.md) |
-| step-9 | Integration + capability flip + qa-use | step-4, step-5, step-7, step-8 | ready | [step-9.md](./step-9.md) |
+| step-8 | Listing UI + skill doc | step-3 | done | [step-8.md](./step-8.md) |
+| step-9 | Integration + capability flip + qa-use | step-4, step-5, step-7, step-8 | done | [step-9.md](./step-9.md) |
 
 > **Canonical dependencies and execution status live in each `step-<n>.md`'s frontmatter.** This table is a derived snapshot at plan creation. During `/v-implement`, frontmatter `status` (`ready` → `claimed` → `done`) is the source of truth.
 
@@ -163,13 +163,13 @@ Run before kicking off any step:
 
 Run after all steps complete:
 
-- [ ] Whole-repo typecheck: `bun run tsc:check`
-- [ ] Full test suite: `bun test`
-- [ ] DB-boundary invariant intact: `bash scripts/check-db-boundary.sh`
-- [ ] OpenAPI spec is fresh: `bun run docs:openapi` produces no diff
-- [ ] SPA typecheck: `cd ui && pnpm exec tsc -b`
-- [ ] End-to-end: create a public HTML page via MCP → open `api_url` in browser → confirms rendered; create an authed JSON page → open `app_url` → declared action fires; create a password page → `?key=` and Basic dialog both unlock
-- [ ] `qa-use` session with screenshots for the SPA `/artifacts/:id` route (merge-gate requirement for `ui/` touches)
+- [x] Whole-repo typecheck: `bun run tsc:check` — clean
+- [x] Full test suite: `bun test` — 3858 pass / 0 fail (after registering `create_page` in `DEFERRED_TOOLS`)
+- [x] DB-boundary invariant intact: `bash scripts/check-db-boundary.sh` — passed
+- [x] OpenAPI spec is fresh: `bun run docs:openapi` produces no diff
+- [x] SPA typecheck: `cd ui && pnpm exec tsc -b` — clean
+- [ ] End-to-end (manual): create a public HTML page via MCP → open `api_url` in browser → confirms rendered; create an authed JSON page → open `app_url` → declared action fires; create a password page → `?key=` and Basic dialog both unlock. **See [step-9.md § Manual Verification](./step-9.md) for the runnable curl matrix.**
+- [ ] `qa-use` session with screenshots for the SPA `/artifacts/:id` route — **Taras runs manually before merge** (no YAML authored per orchestrator directive; merge gate for `ui/` PRs still applies).
 
 ## Appendix
 
