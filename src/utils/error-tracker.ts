@@ -165,16 +165,70 @@ export function trackErrorFromJson(
   }
 }
 
+const MONTH_NAMES: Record<string, number> = {
+  jan: 0,
+  january: 0,
+  feb: 1,
+  february: 1,
+  mar: 2,
+  march: 2,
+  apr: 3,
+  april: 3,
+  may: 4,
+  jun: 5,
+  june: 5,
+  jul: 6,
+  july: 6,
+  aug: 7,
+  august: 7,
+  sep: 8,
+  sept: 8,
+  september: 8,
+  oct: 9,
+  october: 9,
+  nov: 10,
+  november: 10,
+  dec: 11,
+  december: 11,
+};
+
 /**
  * Parse a rate limit error message to extract a reset time, returning an ISO datetime string.
  * Handles patterns like:
  *   - "resets 3pm (UTC)" / "resets 3:30pm (UTC)"
+ *   - "resets May 14, 5pm (UTC)" / "resets May 14 5pm (UTC)"
  *   - "retry after 60 seconds" / "wait 120 seconds"
  *   - "retry after 2 minutes"
  * Returns undefined if no parseable reset time is found.
  */
 export function parseRateLimitResetTime(errorMessage: string): string | undefined {
-  // Pattern 1: "resets <time> (UTC)" — e.g. "resets 3pm (UTC)", "resets 3:30pm (UTC)"
+  // Pattern 1a: "resets <Month> <day>[,] <time> (UTC)" — e.g. "resets May 14, 5pm (UTC)"
+  const datedMatch = errorMessage.match(
+    /resets?\s+([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(?\s*UTC\s*\)?/i,
+  );
+  if (datedMatch) {
+    const monthIdx = MONTH_NAMES[datedMatch[1]!.toLowerCase()];
+    if (monthIdx !== undefined) {
+      const day = Number.parseInt(datedMatch[2]!, 10);
+      let hours = Number.parseInt(datedMatch[3]!, 10);
+      const minutes = datedMatch[4] ? Number.parseInt(datedMatch[4], 10) : 0;
+      const ampm = datedMatch[5]!.toLowerCase();
+      if (ampm === "pm" && hours !== 12) hours += 12;
+      if (ampm === "am" && hours === 12) hours = 0;
+
+      const now = new Date();
+      let year = now.getUTCFullYear();
+      let resetDate = new Date(Date.UTC(year, monthIdx, day, hours, minutes, 0));
+      // If the parsed date is in the past (date wrapped around year-end), assume next year.
+      if (resetDate.getTime() <= now.getTime()) {
+        year += 1;
+        resetDate = new Date(Date.UTC(year, monthIdx, day, hours, minutes, 0));
+      }
+      return resetDate.toISOString();
+    }
+  }
+
+  // Pattern 1b: "resets <time> (UTC)" — e.g. "resets 3pm (UTC)", "resets 3:30pm (UTC)"
   const resetTimeMatch = errorMessage.match(
     /resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(?\s*UTC\s*\)?/i,
   );

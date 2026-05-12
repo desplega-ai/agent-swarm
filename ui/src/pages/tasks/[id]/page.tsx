@@ -31,7 +31,6 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
@@ -54,6 +53,7 @@ import type {
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { MarkdownView } from "@/components/shared/markdown-view";
 import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -79,7 +79,7 @@ import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
 import { progressBarTone } from "@/lib/percent-progress-tone";
 import { statusTextClass } from "@/lib/status-tone";
-import { cn, formatRelativeTime, formatSmartTime, normalizeNewlines } from "@/lib/utils";
+import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 
 function logDotColor(eventType: string, newValue?: string): string {
   if (eventType === "task_status_change") {
@@ -208,7 +208,7 @@ function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
   if (!structured) {
     return (
       <div className={`text-sm leading-relaxed overflow-auto text-foreground/80 ${maxH}`}>
-        <Streamdown>{normalizeNewlines(raw)}</Streamdown>
+        <MarkdownView text={raw} />
       </div>
     );
   }
@@ -220,7 +220,7 @@ function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
             Summary
           </span>
           <div className="mt-1 text-sm leading-relaxed text-foreground/80">
-            <Streamdown>{normalizeNewlines(structured.summary)}</Streamdown>
+            <MarkdownView text={structured.summary} />
           </div>
         </div>
       )}
@@ -230,7 +230,7 @@ function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
             Output
           </span>
           <div className="mt-1 text-sm leading-relaxed text-foreground/80">
-            <Streamdown>{normalizeNewlines(structured.output)}</Streamdown>
+            <MarkdownView text={structured.output} />
           </div>
         </div>
       )}
@@ -771,7 +771,7 @@ export default function TaskDetailPage() {
           defaultOpen
         >
           <div className="text-sm text-status-error/80 leading-relaxed max-h-64 overflow-auto">
-            <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
+            <MarkdownView text={task.failureReason ?? ""} />
           </div>
         </CollapsibleSection>
       )}
@@ -1012,7 +1012,7 @@ export default function TaskDetailPage() {
                 bgColor="bg-status-error/5"
               >
                 <div className="text-sm text-status-error/80 leading-relaxed max-h-48 overflow-auto">
-                  <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
+                  <MarkdownView text={task.failureReason ?? ""} />
                 </div>
               </CollapsibleSection>
             )}

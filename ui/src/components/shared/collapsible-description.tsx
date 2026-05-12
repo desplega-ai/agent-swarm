@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Streamdown } from "streamdown";
-import { cn, normalizeNewlines } from "@/lib/utils";
+import { MarkdownView } from "@/components/shared/markdown-view";
+import { cn } from "@/lib/utils";
 
 interface CollapsibleDescriptionProps {
   text: string;
@@ -18,7 +18,7 @@ export function CollapsibleDescription({
   if (!isLong) {
     return (
       <div className={cn("text-sm leading-relaxed", textClassName)}>
-        <Streamdown>{normalizeNewlines(text)}</Streamdown>
+        <MarkdownView text={text} />
       </div>
     );
   }
@@ -27,7 +27,7 @@ export function CollapsibleDescription({
     <div className="space-y-1">
       {expanded ? (
         <div className={cn("text-sm leading-relaxed max-h-[60vh] overflow-y-auto", textClassName)}>
-          <Streamdown>{normalizeNewlines(text)}</Streamdown>
+          <MarkdownView text={text} />
         </div>
       ) : (
         <p className={cn("text-sm leading-relaxed line-clamp-1", textClassName)}>
