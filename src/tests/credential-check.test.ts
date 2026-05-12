@@ -192,7 +192,13 @@ describe("checkPiMonoCredentials", () => {
     ).toBe(false);
   });
 
-  test("strict: shortname `sonnet` resolves to anthropic", () => {
+  test("shortname `sonnet` accepts ANTHROPIC_API_KEY *or* OPENROUTER_API_KEY", () => {
+    // Anthropic-shortname models (sonnet/haiku/opus) prefer the native
+    // ANTHROPIC_* credential, but pi-mono-adapter reroutes through the
+    // OpenRouter mirror when only OPENROUTER_API_KEY is available — so the
+    // boot-time cred check must accept either key. See task 37a4a87a and
+    // the chronic pi-mono → "No API key found for anthropic" recurrence
+    // tracked in HEARTBEAT.md (2026-04-13 → 2026-05-11).
     const env = { MODEL_OVERRIDE: "sonnet" };
     expect(
       checkPiMonoCredentials({ ...env, ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
@@ -201,7 +207,22 @@ describe("checkPiMonoCredentials", () => {
     expect(
       checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
         .ready,
-    ).toBe(false);
+    ).toBe(true);
+    // Neither key set → still not ready, and missing includes both options.
+    const empty = checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(empty.ready).toBe(false);
+    expect(empty.missing).toContain("ANTHROPIC_API_KEY");
+    expect(empty.missing).toContain("OPENROUTER_API_KEY");
+  });
+
+  test("haiku and opus shortnames also accept OPENROUTER_API_KEY", () => {
+    for (const model of ["haiku", "opus"]) {
+      const env = { MODEL_OVERRIDE: model };
+      expect(
+        checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+          .ready,
+      ).toBe(true);
+    }
   });
 });
 
