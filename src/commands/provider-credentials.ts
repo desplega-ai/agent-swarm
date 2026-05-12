@@ -2,7 +2,7 @@
  * Provider-agnostic credential check dispatcher (WORKER-ONLY).
  *
  * Lives in `src/commands/` because the predicates value-import worker-harness
- * SDKs (e.g. `@mariozechner/pi-coding-agent` via `pi-mono-adapter.ts`) that
+ * SDKs (e.g. `@earendil-works/pi-coding-agent` via `pi-mono-adapter.ts`) that
  * have module-load side effects. Importing this file from any module
  * reachable from `src/http.ts` would drag those SDKs into the bun-compiled
  * API binary — which is exactly the bug PR #452 hit at `/usr/local/bin/`.

@@ -15,8 +15,8 @@
  * Worker-safe: uses fetch() only, no bun:sqlite import.
  */
 
-import type { ToolCall } from "@mariozechner/pi-ai";
-import { complete, getModel } from "@mariozechner/pi-ai";
+import type { ToolCall } from "@earendil-works/pi-ai";
+import { complete, getModel } from "@earendil-works/pi-ai";
 import type { TSchema } from "typebox";
 import { z } from "zod";
 import { type ResolvedCredential, resolveCredential } from "./credentials.js";

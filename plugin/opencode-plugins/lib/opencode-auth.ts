@@ -6,7 +6,7 @@
  *
  * Lives next to `agent-swarm.ts` because the opencode plugin loader runs the
  * file inside opencode's bundled Bun runtime, which does NOT have the
- * agent-swarm package or `@mariozechner/pi-ai` available. So the credential
+ * agent-swarm package or `@earendil-works/pi-ai` available. So the credential
  * helper is vendored here as a self-contained module — it depends only on
  * `Bun.file` for the auth.json read and on `fetch` for the optional OAuth
  * refresh.

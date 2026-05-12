@@ -6,7 +6,7 @@
  *
  * WHY VENDORED: opencode loads plugins as raw TS inside its own bundled Bun
  * runtime, which exposes only `@opencode-ai/{plugin,sdk}` to plugin files.
- * The agent-swarm package (and its dep `@mariozechner/pi-ai`) is NOT
+ * The agent-swarm package (and its dep `@earendil-works/pi-ai`) is NOT
  * resolvable from inside the plugin sandbox, so the helpers from
  * `src/utils/internal-ai/*` and `src/be/memory/raters/llm.ts` are
  * re-implemented here with the same contracts but minimal surface area.

@@ -8,20 +8,20 @@
 
 import { existsSync, lstatSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { getModel } from "@mariozechner/pi-ai";
+import { getModel } from "@earendil-works/pi-ai";
 import type {
   AgentSessionEvent,
   CreateAgentSessionOptions,
   SessionStats,
   ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
   SessionManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
