@@ -261,8 +261,11 @@ describe("WaitExecutor — event mode end-to-end", () => {
 
     // Skip the 5s poller — fast-forward by directly calling the resume helper
     // with status='timeout' (the poller would do exactly this once expiresAt
-    // passes).
-    await new Promise((r) => setTimeout(r, 1100));
+    // passes). Sleep relative to the *actual* expiresAt so we don't race
+    // when startWorkflowExecution overhead eats the cushion on slow CI.
+    const expiresAtMs = new Date(ws!.expiresAt!).getTime();
+    const sleepMs = Math.max(0, expiresAtMs - Date.now()) + 250;
+    await new Promise((r) => setTimeout(r, sleepMs));
     const due = getDueWaitStates();
     expect(due.find((d) => d.id === ws!.id)).toBeDefined();
 
