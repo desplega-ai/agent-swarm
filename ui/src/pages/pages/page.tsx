@@ -1,6 +1,6 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { Globe } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { Globe, KeyRound, Lock, type LucideIcon } from "lucide-react";
+import { useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePages } from "@/api/hooks/use-pages";
 import type { PageAuthMode, PageListItem } from "@/api/types";
@@ -8,9 +8,7 @@ import { AgentLink } from "@/components/shared/agent-link";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
-import { Switch } from "@/components/ui/switch";
 import { cn, formatSmartTime } from "@/lib/utils";
 
 /**
@@ -25,21 +23,16 @@ const authModeClass: Record<PageAuthMode, string> = {
   password: "border-status-warning/40 bg-status-warning/10 text-status-warning-strong",
 };
 
+const authModeIcon: Record<PageAuthMode, LucideIcon> = {
+  public: Globe,
+  authed: Lock,
+  password: KeyRound,
+};
+
 export default function PagesListingPage() {
   const navigate = useNavigate();
-  const [myOnly, setMyOnly] = useState(false);
-  // v1: "My pages only" is a client-side filter — we'd need the active user's
-  // agentId from a status endpoint to wire it through to the server query, and
-  // that plumbing doesn't exist yet. Local filtering is good enough for the
-  // listing while we land the spine.
   const { data, isLoading } = usePages();
-
-  const rows = useMemo<PageListItem[]>(() => {
-    const all = data?.pages ?? [];
-    // Placeholder: with no current-user agentId available, "My pages only"
-    // currently hides everything. Surfaces the toggle for future wiring.
-    return myOnly ? [] : all;
-  }, [data, myOnly]);
+  const rows = useMemo<PageListItem[]>(() => data?.pages ?? [], [data]);
 
   const columnDefs = useMemo<ColDef<PageListItem>[]>(
     () => [
@@ -53,7 +46,7 @@ export default function PagesListingPage() {
           if (!page) return null;
           return (
             <Link
-              to={`/artifacts/${page.id}`}
+              to={`/pages/${page.id}`}
               className="text-primary hover:underline font-medium"
               onClick={(e) => e.stopPropagation()}
             >
@@ -76,18 +69,32 @@ export default function PagesListingPage() {
         headerName: "Agent",
         width: 160,
         cellRenderer: (params: { value: string }) => (
-          <AgentLink agentId={params.value} onClick={(e) => e.stopPropagation()} />
+          <div
+            className="flex h-full w-full items-center"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <AgentLink agentId={params.value} />
+          </div>
         ),
       },
       {
         field: "authMode",
         headerName: "Auth",
-        width: 110,
-        cellRenderer: (params: { value: PageAuthMode }) => (
-          <Badge variant="outline" size="tag" className={cn(authModeClass[params.value])}>
-            {params.value}
-          </Badge>
-        ),
+        width: 120,
+        cellRenderer: (params: { value: PageAuthMode }) => {
+          const Icon = authModeIcon[params.value];
+          return (
+            <Badge
+              variant="outline"
+              size="tag"
+              className={cn("gap-1", authModeClass[params.value])}
+            >
+              <Icon className="size-3" />
+              {params.value}
+            </Badge>
+          );
+        },
       },
       {
         field: "slug",
@@ -109,7 +116,7 @@ export default function PagesListingPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<PageListItem>) => {
-      if (event.data) navigate(`/artifacts/${event.data.id}`);
+      if (event.data) navigate(`/pages/${event.data.id}`);
     },
     [navigate],
   );
@@ -122,15 +129,6 @@ export default function PagesListingPage() {
         title="Pages"
         description="DB-backed static artifacts created by agents via the create_page MCP tool."
       />
-
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Switch id="my-pages-only" checked={myOnly} onCheckedChange={setMyOnly} />
-          <Label htmlFor="my-pages-only" className="text-sm text-muted-foreground">
-            My pages only
-          </Label>
-        </div>
-      </div>
 
       {isEmpty ? (
         <EmptyState

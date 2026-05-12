@@ -224,7 +224,7 @@ describe("GET /p/:id — password mode (step-5)", () => {
     expect(res.headers.get("set-cookie")).toContain("page_session=");
   });
 
-  test("cross-page cookie reuse → 403 (cookie scoped to page id)", async () => {
+  test("cross-page cookie reuse → 401 + password prompt (cookie is silently ignored for password mode)", async () => {
     const idA = await createPasswordPage("scope-a", "swordfish");
     const idB = await createPasswordPage("scope-b", "swordfish"); // same password, different id
 
@@ -233,13 +233,25 @@ describe("GET /p/:id — password mode (step-5)", () => {
     expect(unlockA.status).toBe(200);
     const cookieForA = extractCookieValue(unlockA.headers.get("set-cookie"));
 
-    // Use cookie from A on page B → 403 (NOT 401, NOT 200).
+    // Use cookie from A on page B → 401 + WWW-Authenticate so the password
+    // flow can recover (user re-enters the password). The cookie is stale
+    // from the user's perspective; surfacing 403 here would trap the user
+    // in a "scoped to different page" state with no way to recover.
     const res = await fetch(`${BASE}/p/${idB}`, {
       headers: { Cookie: `page_session=${cookieForA}` },
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain(`Basic realm="page ${idB}"`);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("different page id");
+    expect(body.error).toBe("password required");
+
+    // …and re-submitting with `?key=<right>` on page B should still work,
+    // even with the stale cookie in flight.
+    const recover = await fetch(`${BASE}/p/${idB}?key=swordfish`, {
+      headers: { Cookie: `page_session=${cookieForA}` },
+    });
+    expect(recover.status).toBe(200);
+    expect(recover.headers.get("set-cookie")).toContain("page_session=");
   });
 
   test("malformed Basic header (no colon) → 401 (no crash)", async () => {

@@ -225,7 +225,7 @@ describe("Pages versioning (PUT /api/pages/:id)", () => {
     expect(typeof json.total).toBe("number");
     for (const p of json.pages) {
       expect(p.api_url).toContain(`/p/${p.id}`);
-      expect(p.app_url).toContain(`/artifacts/${p.id}`);
+      expect(p.app_url).toContain(`/pages/${p.id}`);
     }
   });
 });

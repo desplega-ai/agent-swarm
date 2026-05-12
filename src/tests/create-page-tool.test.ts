@@ -89,7 +89,7 @@ describe("create_page MCP tool", () => {
       `http://test-api:9999/p/${result.structuredContent.id}`,
     );
     expect(result.structuredContent.app_url).toBe(
-      `http://test-app:5274/artifacts/${result.structuredContent.id}`,
+      `http://test-app:5274/pages/${result.structuredContent.id}`,
     );
     expect(result.structuredContent.yourAgentId).toBe(agentId);
 

@@ -106,7 +106,7 @@ describe("GET /p/:id — HTML public path", () => {
     const res = await fetch(`${BASE}/p/${id}`, { redirect: "manual" });
     expect(res.status).toBe(302);
     const loc = res.headers.get("location");
-    expect(loc).toContain(`/artifacts/${id}`);
+    expect(loc).toContain(`/pages/${id}`);
   });
 
   test("/p/:id.json returns page metadata + body as JSON", async () => {

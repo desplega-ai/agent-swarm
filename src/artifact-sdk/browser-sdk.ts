@@ -25,5 +25,9 @@ class SwarmSDK {
   }
 }
 
+// Expose BOTH the class (legacy artifact subsystem convention — agents already
+// do \`new SwarmSDK()\`) AND a ready-to-use singleton on \`window.swarmSdk\` so
+// pages can call \`window.swarmSdk.getSwarm()\` directly without instantiating.
 window.SwarmSDK = SwarmSDK;
+window.swarmSdk = new SwarmSDK();
 `;

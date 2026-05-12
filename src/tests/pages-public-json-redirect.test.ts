@@ -1,7 +1,7 @@
 /**
  * Public `/p/:id` for JSON content. JSON pages do NOT render at the API —
- * the renderer lives in the SPA at `/artifacts/:id` (step-6/7). The API
- * responds with a 302 to `${APP_URL}/artifacts/:id`.
+ * the renderer lives in the SPA at `/pages/:id` (step-6/7). The API
+ * responds with a 302 to `${APP_URL}/pages/:id`.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
@@ -64,7 +64,7 @@ describe("GET /p/:id — JSON page redirect", () => {
     }
   });
 
-  test("JSON content redirects to ${APP_URL}/artifacts/:id", async () => {
+  test("JSON content redirects to ${APP_URL}/pages/:id", async () => {
     const post = await fetch(`${BASE}/api/pages`, {
       method: "POST",
       headers,
@@ -81,6 +81,6 @@ describe("GET /p/:id — JSON page redirect", () => {
 
     const res = await fetch(`${BASE}/p/${id}`, { redirect: "manual" });
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe(`http://localhost:5274/artifacts/${id}`);
+    expect(res.headers.get("location")).toBe(`http://localhost:5274/pages/${id}`);
   });
 });

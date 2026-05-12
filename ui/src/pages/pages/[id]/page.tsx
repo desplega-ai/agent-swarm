@@ -1,7 +1,7 @@
 /**
  * Page renderer for DB-backed pages (the "pages" feature — see
  * `thoughts/taras/plans/2026-05-12-db-backed-pages/`). Mounted at
- * `/artifacts/:id`.
+ * `/pages/:id`.
  *
  * Step-6 scope:
  *   - Fetches `${apiUrl}/p/:id.json` to learn the page's `contentType` and
@@ -25,10 +25,11 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Lock } from "lucide-react";
+import { AlertCircle, Braces, ExternalLink, Lock, Maximize2, Minimize2 } from "lucide-react";
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
+import { usePage } from "@/api/hooks/use-pages";
 import type { PageMetadata } from "@/api/types";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -65,9 +66,12 @@ async function fetchPageMetadataWithLaunchRetry(id: string): Promise<PageMetadat
     return await api.fetchPageMetadata(id);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (!msg.includes(": 401")) throw e;
+    // 401 = no cookie. 403 = cookie scoped to a different page (stale from a
+    // prior page-session). Both are recoverable by launching a fresh cookie
+    // for THIS page id; only blow up on anything else.
+    if (!msg.includes(": 401") && !msg.includes(": 403")) throw e;
   }
-  // 401 → try launch + retry. If launch returns 400, the page is password-mode;
+  // 401/403 → try launch + retry. If launch returns 400, the page is password-mode;
   // synthesize a stub so the password-frame branch renders.
   try {
     await api.launchPage(id);
@@ -201,6 +205,8 @@ function ArtifactPageError({ message }: { message: string }) {
 
 export default function ArtifactPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const fullMode = searchParams.get("mode") === "full";
 
   const { data, error, isLoading } = useQuery({
     queryKey: ["page-metadata", id],
@@ -226,7 +232,15 @@ export default function ArtifactPage() {
 
   let body: React.ReactNode;
   if (data.contentType === "application/json") {
-    body = <JsonPageRenderer body={data.body} />;
+    body = (
+      <div className="rounded-md border border-border bg-background p-6 min-h-[200px]">
+        <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <Braces className="size-3" />
+          <span>JSON-rendered page</span>
+        </div>
+        <JsonPageRenderer body={data.body} />
+      </div>
+    );
   } else {
     switch (data.authMode) {
       case "public":
@@ -241,10 +255,89 @@ export default function ArtifactPage() {
     }
   }
 
+  if (fullMode) {
+    // Maximize: render the page body as a fixed-position overlay on top of
+    // the normal SPA chrome. Slim header row (title left, exit button right)
+    // sits above the body, not overlapping — so iframe / JSON content gets
+    // the full remaining viewport.
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        <div className="flex items-center justify-between gap-3 border-b border-border bg-card px-4 py-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="truncate text-sm font-medium">{data.title}</span>
+            <span className="font-mono text-[10px] text-muted-foreground">{data.authMode}</span>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link to={`/pages/${id}`}>
+              <Minimize2 className="size-3.5" />
+              Exit full
+            </Link>
+          </Button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-auto p-4">{body}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col min-h-0 gap-4">
-      <PageHeader title={data.title} description={data.description ?? undefined} />
+      <PageHeader
+        title={data.title}
+        description={data.description ?? undefined}
+        action={<PageHeaderActions id={id} authMode={data.authMode} />}
+      />
+      <PageSlugLine id={id} />
       {body}
+    </div>
+  );
+}
+
+// ─── Header extras ─────────────────────────────────────────────────────────
+
+/**
+ * Slug line shown right under the title. We pull the slug from the
+ * bearer-authed `/api/pages/:id` lookup (the public `/p/:id.json` doesn't
+ * expose slug — it's a creator-side concept). Renders nothing if the lookup
+ * hasn't loaded yet.
+ */
+function PageSlugLine({ id }: { id: string }) {
+  const { data } = usePage(id);
+  if (!data?.slug) return null;
+  return (
+    <p className="font-mono text-xs text-muted-foreground -mt-2">
+      slug: <span className="text-foreground/70">{data.slug}</span>
+    </p>
+  );
+}
+
+/**
+ * "Open external" link that pops `/p/:id` (the canonical API-served URL) in
+ * a new tab. For password mode, opening the link triggers the browser's
+ * native Basic-auth dialog; for authed mode it 401s unless the page-session
+ * cookie still applies (works fine when the SPA is at the same origin as
+ * the API; in cross-origin dev the cookie may not flow).
+ */
+function PageHeaderActions({ id, authMode }: { id: string; authMode: PageMetadata["authMode"] }) {
+  const config = getConfig();
+  const apiUrl = (config.apiUrl || "http://localhost:3013").replace(/\/+$/, "");
+  const href = `${apiUrl}/p/${encodeURIComponent(id)}`;
+  return (
+    <div className="flex items-center gap-2">
+      <Button asChild variant="outline" size="sm" title="Maximize within the SPA">
+        <Link to={`/pages/${id}?mode=full`}>
+          <Maximize2 className="size-3.5" />
+          Full
+        </Link>
+      </Button>
+      <Button asChild variant="outline" size="sm" title="Open the API-served URL in a new tab">
+        <a href={href} target="_blank" rel="noreferrer">
+          <ExternalLink className="size-3.5" />
+          Open
+          {authMode === "password" ? (
+            <span className="text-muted-foreground">(password required)</span>
+          ) : null}
+        </a>
+      </Button>
     </div>
   );
 }

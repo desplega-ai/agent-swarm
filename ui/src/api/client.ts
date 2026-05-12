@@ -29,6 +29,7 @@ import type {
   McpServer,
   McpServersResponse,
   MessagesResponse,
+  PageListItem,
   PageMetadata,
   PagesListResponse,
   PreviewResponse,
@@ -1750,6 +1751,19 @@ class ApiClient {
    * used by the SPA's "My pages only" toggle. `limit` defaults to 50 server-
    * side, capped at 500.
    */
+  /**
+   * Fetch the canonical Page row from `/api/pages/:id` (bearer-authed) — returns
+   * title/slug/description/agentId/auth + body for any page regardless of authMode.
+   * Used by breadcrumbs + the detail-page sidebar where we want the title without
+   * going through the page-session cookie dance.
+   */
+  async getPage(id: string): Promise<PageListItem & { body: string }> {
+    const url = `${this.getBaseUrl()}/api/pages/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`getPage ${id}: ${res.status}`);
+    return res.json();
+  }
+
   async listPages(opts?: {
     agentId?: string;
     limit?: number;

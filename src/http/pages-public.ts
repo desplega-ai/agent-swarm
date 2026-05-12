@@ -9,7 +9,7 @@
  *   - `auth_mode === 'public'`: ungated. HTML responses inline-inject the
  *     `BROWSER_SDK_JS` constant from `src/artifact-sdk/browser-sdk.ts` (reused
  *     verbatim — no token-injection hook on the client). JSON responses
- *     302-redirect to the SPA `/artifacts/:id` route (the JSON renderer lives
+ *     302-redirect to the SPA `/pages/:id` route (the JSON renderer lives
  *     in the SPA, not the API — step-6/7).
  *   - `auth_mode === 'authed'`: returns 401. step-4 narrows this to also
  *     accept a valid `page_session` cookie.
@@ -77,8 +77,46 @@ const publicPageJsonRoute = route({
  * open in the parent window — avoids the user being trapped inside an
  * iframe by a misbehaving page.
  */
+/**
+ * Default `<head>` injection: `<base>` so links escape the iframe, Tailwind
+ * Play CDN so agent pages can use utility classes out of the box, Space
+ * Grotesk / Space Mono fonts to match the swarm SPA, a small reset that
+ * makes pages theme-aware (dark by default) so an agent who writes zero CSS
+ * still gets a presentable page, and finally the Browser SDK so
+ * `window.swarmSdk` works.
+ *
+ * Agent-provided styles ALWAYS win — the reset uses generic selectors with
+ * low specificity. Tailwind is loaded as an opt-in tool, not an enforced
+ * theme.
+ */
+const PAGE_HEAD_DEFAULTS = `<base target="_blank">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --swarm-bg: #0b0f17;
+    --swarm-card: #121826;
+    --swarm-border: #22304a;
+    --swarm-text: #e6eaf2;
+    --swarm-muted: #7c8aa6;
+    --swarm-primary: #3b82f6;
+  }
+  html, body { background: var(--swarm-bg); color: var(--swarm-text); }
+  body {
+    font-family: "Space Grotesk", system-ui, sans-serif;
+    margin: 0;
+    padding: 24px;
+    line-height: 1.5;
+  }
+  code, pre, kbd, samp { font-family: "Space Mono", ui-monospace, monospace; }
+  a { color: var(--swarm-primary); }
+  ::selection { background: var(--swarm-primary); color: #fff; }
+</style>`;
+
 function injectBrowserSdk(html: string): string {
-  const injection = `<base target="_blank"><script>${BROWSER_SDK_JS}</script>`;
+  const injection = `${PAGE_HEAD_DEFAULTS}<script>${BROWSER_SDK_JS}</script>`;
   // Use the first occurrence of `<head>` (case-insensitive). A page that
   // doesn't have a `<head>` element (raw fragment) still gets the SDK at the
   // front of the document.
@@ -117,13 +155,41 @@ function getAppBaseUrl(): string {
  * allow-forms"`; the CSP is a defence-in-depth layer.
  */
 function buildCsp(): string {
-  const appUrl = getAppBaseUrl();
+  // `frame-ancestors` lists every origin allowed to iframe `/p/:id`. We must
+  // include the SPA origin(s). `APP_URL` may carry a comma-separated list so
+  // portless dev (`https://ui.swarm.localhost`), a Vite port (`http://localhost:5274`),
+  // and a tunnel/staging origin can all coexist. Additionally, in non-production
+  // we always allow `http://localhost:*` and `https://*.localhost` so swapping
+  // between Vite ports / portless dev doesn't require restarting the API.
+  const configured = (process.env.APP_URL ?? "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+  const devFallbacks =
+    process.env.NODE_ENV === "production"
+      ? []
+      : [
+          "http://localhost:5274",
+          "http://localhost:5175",
+          "http://127.0.0.1:5274",
+          "http://127.0.0.1:5175",
+          "https://*.localhost",
+          "http://*.localhost",
+        ];
+  const ancestors = Array.from(new Set([...configured, ...devFallbacks]));
+  // Allow Tailwind Play CDN (`cdn.tailwindcss.com`) for scripts, Google
+  // Fonts (`fonts.googleapis.com` stylesheets + `fonts.gstatic.com` font
+  // files) for the swarm default typography, and same-origin /@swarm/api/*
+  // for the Browser SDK. Inline scripts/styles remain allowed so
+  // agent-emitted styles work.
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data: https:",
     "connect-src 'self'",
-    `frame-ancestors 'self' ${appUrl}`,
+    `frame-ancestors 'self' ${ancestors.join(" ")}`.trim(),
   ].join("; ");
 }
 
@@ -155,17 +221,26 @@ function isAccessible(
 ): AccessResult {
   if (page.authMode === "public") return { ok: true };
 
-  // Cookie-first path applies to both authed and password — a valid scoped
-  // cookie is sufficient proof regardless of how it was minted.
+  // Cookie-first path. A cookie scoped to a DIFFERENT page id is "stale" —
+  // for password mode we silently ignore it and fall through to the password
+  // flow so the user can recover via `?key=` / Basic without manual cookie
+  // clearing. For authed mode we surface 403 (the SPA's launch-retry path
+  // handles recovery; direct browser access to authed pages is rare).
   if (cookiePayload) {
-    if (cookiePayload.pageId !== page.id) {
+    if (cookiePayload.pageId === page.id) return { ok: true };
+    if (page.authMode === "password") {
       return {
         ok: false,
-        status: 403,
-        reason: "page-session cookie scoped to a different page id",
+        status: 401,
+        reason: "password required",
+        needsPassword: true,
       };
     }
-    return { ok: true };
+    return {
+      ok: false,
+      status: 403,
+      reason: "page-session cookie scoped to a different page id",
+    };
   }
 
   if (page.authMode === "authed") {
@@ -229,10 +304,13 @@ function extractPasswordCandidate(
  */
 function isLocalhostRequest(req: IncomingMessage): boolean {
   if (process.env.NODE_ENV === "production") return false;
+  // Only emit `SameSite=Lax` (no Secure) when the request comes from the
+  // SAME http://localhost origin as the API — Lax cookies don't travel on
+  // cross-site fetches, so portless `*.localhost` setups (SPA on https
+  // talking to the API on http) must use `SameSite=None; Secure`. Chrome
+  // treats localhost as a secure origin so Secure is honored on HTTP.
   const origin = (req.headers.origin as string | undefined) ?? "";
   if (origin === "") {
-    // No Origin header (likely curl or a direct browser navigation). Decide
-    // from the Host header.
     const rawHost = req.headers.host;
     const host = Array.isArray(rawHost) ? rawHost[0] : rawHost;
     if (!host) return true; // best-effort dev default
@@ -365,7 +443,7 @@ export async function handlePagesPublic(
 
   // `/p/:id` — render either HTML directly or 302→SPA for JSON.
   if (page.contentType === "application/json") {
-    const headers: Record<string, string> = { Location: `${getAppBaseUrl()}/artifacts/${page.id}` };
+    const headers: Record<string, string> = { Location: `${getAppBaseUrl()}/pages/${page.id}` };
     if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
     res.writeHead(302, headers);
     res.end();

@@ -19,3 +19,18 @@ export function usePages(filters?: PagesFilters) {
     refetchInterval: 5000,
   });
 }
+
+/**
+ * Single-page lookup via the bearer-authed `/api/pages/:id` endpoint —
+ * works for any authMode (returns title/slug/description/etc.). Used by
+ * breadcrumbs + the detail-page sidebar where we want the title without
+ * minting a page-session cookie.
+ */
+export function usePage(id: string | undefined) {
+  return useQuery({
+    queryKey: ["page", id],
+    queryFn: () => api.getPage(id ?? ""),
+    enabled: !!id,
+    staleTime: 30_000,
+  });
+}

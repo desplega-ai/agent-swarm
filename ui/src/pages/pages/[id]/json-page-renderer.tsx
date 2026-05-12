@@ -1,6 +1,6 @@
 /**
  * JsonPageRenderer — renders a page whose body is a `@json-render/core` spec.
- * Mounted from `ui/src/pages/artifacts/[id]/page.tsx` when the page's
+ * Mounted from `ui/src/pages/pages/[id]/page.tsx` when the page's
  * `contentType === "application/json"`.
  *
  * Step-7 scope (db-backed-pages plan):

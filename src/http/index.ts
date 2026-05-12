@@ -112,7 +112,7 @@ const httpServer = createHttpServer(async (req, res) => {
     console.error(`[HTTP] ❌ ${req.method} ${req.url} → Error: ${err.message}`);
   });
 
-  setCorsHeaders(res);
+  setCorsHeaders(req, res);
 
   // ── Core routes (OPTIONS, health, auth, /me, /cancelled-tasks, /ping, /close) ──
   if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, apiKey)) return;

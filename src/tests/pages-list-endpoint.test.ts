@@ -97,7 +97,7 @@ describe("GET /api/pages — listing endpoint", () => {
     expect(body.total).toBe(3);
     // Every row carries share URLs.
     for (const page of body.pages) {
-      expect(page.app_url).toMatch(/\/artifacts\//);
+      expect(page.app_url).toMatch(/\/pages\//);
       expect(page.api_url).toMatch(/\/p\//);
     }
   });

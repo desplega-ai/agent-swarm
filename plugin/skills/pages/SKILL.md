@@ -75,7 +75,7 @@ swarm API.
 
 | URL | Shape | Notes |
 |---|---|---|
-| `app_url` | `${UI_URL}/artifacts/:id` | SPA route. Renders HTML in a sandboxed iframe, JSON via `@json-render/react`. Default share target. |
+| `app_url` | `${UI_URL}/pages/:id` | SPA route. Renders HTML in a sandboxed iframe, JSON via `@json-render/react`. Default share target. |
 | `api_url` | `${API_URL}/p/:id` | Direct API render. HTML inlines and serves; JSON 302-redirects to `app_url`. Useful for no-SPA-required links. |
 
 **Default**: share `app_url`. Only use `api_url` when you specifically need a

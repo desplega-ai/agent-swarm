@@ -189,7 +189,7 @@ const listPageActionsRoute = route({
 });
 
 /**
- * Action-param schemas duplicated from `ui/src/pages/artifacts/[id]/json-page-renderer.tsx`.
+ * Action-param schemas duplicated from `ui/src/pages/pages/[id]/json-page-renderer.tsx`.
  * Kept here (not imported from `ui/`) because the API server must not depend on
  * the SPA build. If you change one side, update the other — there's an
  * end-to-end test in step-7's qa-use scenario that exercises both action paths,
@@ -286,7 +286,7 @@ function getApiBaseUrl(): string {
 
 /**
  * Resolve the SPA / dashboard base URL used to build a page's `app_url` share
- * pointer (→ `/artifacts/:id`). `APP_URL` is the canonical env (matches the
+ * pointer (→ `/pages/:id`). `APP_URL` is the canonical env (matches the
  * request-human-input tool); falls back to the local dev port `5274`.
  */
 function getAppBaseUrl(): string {
@@ -302,7 +302,7 @@ function withShareUrls<T extends { id: string }>(
   return {
     ...page,
     api_url: `${getApiBaseUrl()}/p/${page.id}`,
-    app_url: `${getAppBaseUrl()}/artifacts/${page.id}`,
+    app_url: `${getAppBaseUrl()}/pages/${page.id}`,
   };
 }
 
@@ -319,10 +319,12 @@ function pageEditCounter(pageId: string): number {
 
 function isDevRequest(req: IncomingMessage): boolean {
   if (process.env.NODE_ENV === "production") return false;
-  // Even without NODE_ENV=production, if the origin is non-localhost we still
-  // treat the cookie as cross-site (Secure required) since the browser will
-  // refuse `SameSite=None` without `Secure` over HTTP — except localhost is
-  // an exception in Chrome/Safari.
+  // We want `SameSite=Lax` only when the request itself comes from the same
+  // local-`http://localhost` origin as the API — same-site loads tolerate
+  // Lax without Secure. Anything else (including portless `*.localhost`
+  // setups talking from HTTPS to the HTTP API) must use `SameSite=None;
+  // Secure` so the cookie travels on cross-site fetches; Chrome treats
+  // localhost as a secure origin so the Secure flag is fine on HTTP.
   const origin = (req.headers.origin as string | undefined) ?? "";
   return (
     origin === "" || origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1")
@@ -378,7 +380,7 @@ export async function handlePages(
           id: page.id,
           version: 1,
           api_url: `${getApiBaseUrl()}/p/${page.id}`,
-          app_url: `${getAppBaseUrl()}/artifacts/${page.id}`,
+          app_url: `${getAppBaseUrl()}/pages/${page.id}`,
         },
         201,
       );

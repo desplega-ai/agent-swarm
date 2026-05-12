@@ -240,7 +240,7 @@ export const registerCreatePageTool = (server: McpServer) => {
       }
 
       const apiUrl = `${getApiBaseUrl()}/p/${id}`;
-      const appUrl = `${getAppBaseUrl()}/artifacts/${id}`;
+      const appUrl = `${getAppBaseUrl()}/pages/${id}`;
       const version = pageEditCounter(id);
 
       return {
