@@ -6266,6 +6266,7 @@ type PageRow = {
   needsCredentials: string | null;
   createdAt: string;
   updatedAt: string;
+  view_count: number;
 };
 
 function rowToPage(row: PageRow): Page {
@@ -6282,6 +6283,7 @@ function rowToPage(row: PageRow): Page {
     needsCredentials: row.needsCredentials
       ? (JSON.parse(row.needsCredentials) as string[])
       : undefined,
+    viewCount: typeof row.view_count === "number" ? row.view_count : 0,
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
   };
@@ -6421,6 +6423,19 @@ export function updatePage(
 export function deletePage(id: string): boolean {
   // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
   const result = getDb().run("DELETE FROM pages WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+/**
+ * Bump the `view_count` counter on a page by 1. Called from `pages-public.ts`
+ * on every successful 200 from `GET /p/:id` (HTML inline serve) and
+ * `GET /p/:id.json` (JSON metadata fetch). No-op when the page doesn't
+ * exist — caller already guards on `getPage(id)` before reaching the bump
+ * path, so this only fires for valid ids. Wrapped in try/catch by the
+ * caller so an unexpected DB error never breaks page serving.
+ */
+export function incrementPageViewCount(id: string): boolean {
+  const result = getDb().run("UPDATE pages SET view_count = view_count + 1 WHERE id = ?", [id]);
   return result.changes > 0;
 }
 

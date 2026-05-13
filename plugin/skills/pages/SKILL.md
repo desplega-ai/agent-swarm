@@ -210,6 +210,155 @@ For the full list of fields each endpoint accepts/returns, see
 [**docs.agent-swarm.dev/docs/api-reference**](https://docs.agent-swarm.dev/docs/api-reference).
 The SDK is a thin domain wrapper — anything documented there is reachable.
 
+## Built-in primitives
+
+Every HTML page automatically gets a small set of zero-dep web components
+auto-injected alongside the Browser SDK. Drop them into your page body —
+no `<script>` import, no bundling, no Tailwind required (though Tailwind
+Play CDN is loaded, so utility classes work too).
+
+### `<swarm-diff>` — unified diff renderer
+
+Render a unified diff with a two-column gutter, severity annotations, and a
+deterministic anchor id per hunk (so deep-linking + jump lists work). The
+element reads its payload from its `textContent` as JSON of shape
+`{ hunks: [{ old_start, old_lines, new_start, new_lines, lines, annotations? }] }`.
+
+```html
+<swarm-diff
+  file="src/foo.ts"
+  base-sha="abc123"
+  head-sha="def456">
+{ "hunks": [
+    { "old_start": 10, "old_lines": 3, "new_start": 10, "new_lines": 4,
+      "lines": [
+        { "type": "context", "text": "  const x = 1;" },
+        { "type": "del",     "text": "- console.log(x);" },
+        { "type": "add",     "text": "+ logger.info({ x });" },
+        { "type": "add",     "text": "+ return x;" }
+      ],
+      "annotations": [
+        { "line": 12, "severity": "warn", "text": "Avoid raw console.log" }
+      ]
+    }
+] }
+</swarm-diff>
+```
+
+**Inputs**
+
+| Attribute | Required | Notes |
+|---|---|---|
+| `file` | yes | Path label rendered in the hunk header. Used for the anchor id slug. |
+| `base-sha` | no | Pre-change SHA. Rendered in the header next to `head-sha`. |
+| `head-sha` | no | Post-change SHA. |
+
+**Line shape**
+
+| Field | Values | Notes |
+|---|---|---|
+| `type` | `context` \| `add` \| `del` | Drives row tint (green / red / neutral) and gutter line numbering. |
+| `text` | string | Rendered verbatim (HTML-escaped). |
+
+**Annotation shape** — attaches to a NEW-side line by line number; rendered
+as a margin badge on that row.
+
+| Field | Values | Notes |
+|---|---|---|
+| `line` | integer | New-side line number (falls back to old-side if no add for that line). |
+| `severity` | `error` \| `warn` \| `info` | Drives badge color. |
+| `text` | string | Badge body. |
+
+**Anchor id**
+
+Each hunk gets `id="swarm-diff-<file-slug>-<old_start>"` for deep-linking.
+Use `<swarm-diff-jumps></swarm-diff-jumps>` anywhere in the page body to
+render a tiny "Jump to" navigation of every diff hunk on the page —
+handy when an agent ships a multi-file annotated PR.
+
+**Programmatic form**
+
+If you need to render a diff from a fetch response (rather than inline JSON),
+use `window.swarmUi.renderDiff(rootEl, diffData)`:
+
+```html
+<div id="diff-target"></div>
+<script>
+  const data = await fetch('/some/diff.json').then(r => r.json());
+  window.swarmUi.renderDiff(document.getElementById('diff-target'), data);
+</script>
+```
+
+**Annotated-PR example**
+
+```html
+<!doctype html>
+<html><head><title>PR #1234 — `console.log` cleanup</title></head>
+<body>
+  <h1>PR #1234 — cleanup raw <code>console.log</code> calls</h1>
+  <p>Replaces ad-hoc logging with the project logger.</p>
+
+  <swarm-diff-jumps></swarm-diff-jumps>
+
+  <swarm-diff file="src/foo.ts" base-sha="abc123" head-sha="def456">
+    { "hunks": [
+        { "old_start": 10, "old_lines": 3, "new_start": 10, "new_lines": 4,
+          "lines": [
+            { "type": "context", "text": "  const x = 1;" },
+            { "type": "del",     "text": "- console.log(x);" },
+            { "type": "add",     "text": "+ logger.info({ x });" },
+            { "type": "add",     "text": "+ return x;" }
+          ],
+          "annotations": [
+            { "line": 12, "severity": "warn", "text": "Avoid raw console.log" }
+          ]
+        }
+    ] }
+  </swarm-diff>
+
+  <swarm-diff file="src/bar.ts" base-sha="abc123" head-sha="def456">
+    { "hunks": [
+        { "old_start": 5, "old_lines": 1, "new_start": 5, "new_lines": 1,
+          "lines": [
+            { "type": "del", "text": "- console.error('boom');" },
+            { "type": "add", "text": "+ logger.error('boom');" }
+          ]
+        }
+    ] }
+  </swarm-diff>
+</body></html>
+```
+
+## Print / PDF export
+
+Every HTML page also gets a `@media print` rule baked into the head defaults:
+- Light theme on print (white background, black text, underlined black links).
+- Anything with the `.no-print` class is hidden (annotation badges and the
+  jump list already carry this class — use it on agent-emitted chrome you
+  want suppressed in PDF exports).
+- `.swarm-card` and `<swarm-diff>` get `break-inside: avoid` so they don't
+  split mid-element across pages.
+
+Trigger the export from the SPA's "Export PDF" button on `/pages/:id` — it
+opens the iframe's native print dialog (HTML pages) or the SPA's print
+dialog (JSON pages). The browser's "Print → Save as PDF" handles the actual
+file. No headless Chromium, no server-side rendering — zero infra weight.
+
+> Want a custom print layout? Override the print styles in your page's own
+> `<style>` block — agent CSS always wins over the head defaults.
+
+## View counter
+
+Every successful `200` from `GET /p/:id` (HTML inline) and `GET /p/:id.json`
+(JSON metadata) bumps a `view_count` field on the page. `302` (JSON pages
+redirecting to the SPA), `401`/`403` (auth gate), and `404` do NOT bump.
+The count is exposed on `GET /api/pages` listing (`viewCount` field) and the
+SPA `/pages` index renders it as a small eye-count badge per row.
+
+No per-viewer dedup — this is a coarse popularity signal, not analytics.
+Bumps are best-effort (wrapped in try/catch so a counter write never fails
+the response).
+
 ## JSON Renderer
 
 JSON pages are rendered via [`@json-render/react`](https://json-render.dev)

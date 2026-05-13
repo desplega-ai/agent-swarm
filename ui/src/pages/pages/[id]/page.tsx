@@ -25,8 +25,16 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Braces, ExternalLink, Lock, Maximize2, Minimize2 } from "lucide-react";
-import { useState } from "react";
+import {
+  AlertCircle,
+  Braces,
+  ExternalLink,
+  Lock,
+  Maximize2,
+  Minimize2,
+  Printer,
+} from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -109,11 +117,21 @@ async function fetchPageMetadataWithLaunchRetry(id: string): Promise<PageMetadat
 interface FrameProps {
   id: string;
   title: string;
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 }
 
-function PageIframe({ src, title }: { src: string; title: string }) {
+function PageIframe({
+  src,
+  title,
+  iframeRef,
+}: {
+  src: string;
+  title: string;
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+}) {
   return (
     <iframe
+      ref={iframeRef}
       src={src}
       title={title}
       // `allow-same-origin` is required for the Browser SDK (`window.swarm`)
@@ -127,27 +145,27 @@ function PageIframe({ src, title }: { src: string; title: string }) {
   );
 }
 
-function PublicHtmlFrame({ id, title }: FrameProps) {
+function PublicHtmlFrame({ id, title, iframeRef }: FrameProps) {
   const src = `${getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}`;
-  return <PageIframe src={src} title={title} />;
+  return <PageIframe src={src} title={title} iframeRef={iframeRef} />;
 }
 
-function AuthedHtmlFrame({ id, title }: FrameProps) {
+function AuthedHtmlFrame({ id, title, iframeRef }: FrameProps) {
   // We've already launched once via `fetchPageMetadataWithLaunchRetry`'s
   // 401 → launch → retry path; the cookie is set. Just render the iframe.
   // (If the cookie was rejected by SameSite policy in dev, the iframe's
   // /p/:id request will 401 inside the frame — the user sees the swarm's
   // 401 error JSON, which is the same UX as a server-side denial.)
   const src = `${getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}`;
-  return <PageIframe src={src} title={title} />;
+  return <PageIframe src={src} title={title} iframeRef={iframeRef} />;
 }
 
-function PasswordHtmlFrame({ id, title }: FrameProps) {
+function PasswordHtmlFrame({ id, title, iframeRef }: FrameProps) {
   const [password, setPassword] = useState("");
   const [iframeSrc, setIframeSrc] = useState<string | null>(null);
 
   if (iframeSrc) {
-    return <PageIframe src={iframeSrc} title={title} />;
+    return <PageIframe src={iframeSrc} title={title} iframeRef={iframeRef} />;
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -219,6 +237,12 @@ export default function ArtifactPage() {
   const [searchParams] = useSearchParams();
   const fullMode = searchParams.get("mode") === "full";
   const gate = useFeatureGate("1.79.0");
+  // Iframe ref used by the "Export PDF" button to trigger the iframe's own
+  // `window.print()` — so the agent-authored content prints (not the SPA
+  // chrome). For JSON pages (no iframe) we fall back to `window.print()` on
+  // the SPA itself; JSON pages render their body in the SPA DOM, so this
+  // captures the JSON tree natively.
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const { data, error, isLoading } = useQuery({
     queryKey: ["page-metadata", id],
@@ -232,6 +256,29 @@ export default function ArtifactPage() {
     refetchOnReconnect: false,
     retry: false,
   });
+
+  const isJson = data?.contentType === "application/json";
+
+  const handleExportPdf = useCallback(() => {
+    if (isJson) {
+      // SPA-rendered content prints directly.
+      window.print();
+      return;
+    }
+    const win = iframeRef.current?.contentWindow;
+    if (win) {
+      try {
+        win.focus();
+        win.print();
+      } catch {
+        // Cross-origin or sandbox restriction — fall back to the SPA's
+        // own print dialog so the user still has SOME way to export.
+        window.print();
+      }
+    } else {
+      window.print();
+    }
+  }, [isJson]);
 
   if (!gate.supported) {
     return (
@@ -265,13 +312,13 @@ export default function ArtifactPage() {
   } else {
     switch (data.authMode) {
       case "public":
-        body = <PublicHtmlFrame id={id} title={data.title} />;
+        body = <PublicHtmlFrame id={id} title={data.title} iframeRef={iframeRef} />;
         break;
       case "authed":
-        body = <AuthedHtmlFrame id={id} title={data.title} />;
+        body = <AuthedHtmlFrame id={id} title={data.title} iframeRef={iframeRef} />;
         break;
       case "password":
-        body = <PasswordHtmlFrame id={id} title={data.title} />;
+        body = <PasswordHtmlFrame id={id} title={data.title} iframeRef={iframeRef} />;
         break;
     }
   }
@@ -305,7 +352,9 @@ export default function ArtifactPage() {
       <PageHeader
         title={data.title}
         description={data.description ?? undefined}
-        action={<PageHeaderActions id={id} authMode={data.authMode} />}
+        action={
+          <PageHeaderActions id={id} authMode={data.authMode} onExportPdf={handleExportPdf} />
+        }
       />
       <PageSlugLine id={id} />
       {body}
@@ -338,18 +387,20 @@ function PageSlugLine({ id }: { id: string }) {
  * cookie still applies (works fine when the SPA is at the same origin as
  * the API; in cross-origin dev the cookie may not flow).
  */
-function PageHeaderActions({ id, authMode }: { id: string; authMode: PageMetadata["authMode"] }) {
+function PageHeaderActions({
+  id,
+  authMode,
+  onExportPdf,
+}: {
+  id: string;
+  authMode: PageMetadata["authMode"];
+  onExportPdf: () => void;
+}) {
   const config = getConfig();
   const apiUrl = (config.apiUrl || "http://localhost:3013").replace(/\/+$/, "");
   const href = `${apiUrl}/p/${encodeURIComponent(id)}`;
   return (
     <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm" title="Maximize within the SPA">
-        <Link to={`/pages/${id}?mode=full`}>
-          <Maximize2 className="size-3.5" />
-          Full
-        </Link>
-      </Button>
       <Button asChild variant="outline" size="sm" title="Open the API-served URL in a new tab">
         <a href={href} target="_blank" rel="noreferrer">
           <ExternalLink className="size-3.5" />
@@ -358,6 +409,21 @@ function PageHeaderActions({ id, authMode }: { id: string; authMode: PageMetadat
             <span className="text-muted-foreground">(password required)</span>
           ) : null}
         </a>
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        title="Open the browser print dialog (use Save as PDF)"
+        onClick={onExportPdf}
+      >
+        <Printer className="size-3.5" />
+        Export PDF
+      </Button>
+      <Button asChild variant="outline" size="sm" title="Maximize within the SPA">
+        <Link to={`/pages/${id}?mode=full`}>
+          <Maximize2 className="size-3.5" />
+          Full
+        </Link>
       </Button>
     </div>
   );
