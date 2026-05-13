@@ -1,11 +1,37 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getActiveTaskCount } from "../be/db";
 
-export function setCorsHeaders(res: ServerResponse) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "*");
-  res.setHeader("Access-Control-Expose-Headers", "*");
+export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
+  // Echo the request Origin (rather than emitting `*`) so credentialed fetches
+  // — e.g. the SPA's `credentials: 'include'` calls to `/p/:id.json` and the
+  // page-session cookie endpoints — pass the browser's CORS check. A wildcard
+  // would force the browser to reject any credentialed cross-origin response.
+  const rawOrigin = req.headers.origin;
+  const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    // When credentials are involved the spec disallows wildcards in
+    // Allow-Headers / Allow-Methods / Expose-Headers — they must be
+    // explicit. Echo whatever the preflight asked for (defensive default
+    // covers Authorization + the common app headers).
+    const reqHeaders = req.headers["access-control-request-headers"];
+    const askedHeaders = Array.isArray(reqHeaders) ? reqHeaders.join(", ") : reqHeaders;
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      askedHeaders ?? "Authorization, Content-Type, X-Agent-ID, X-Requested-With",
+    );
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Type, Content-Length, ETag, Location");
+  } else {
+    // No Origin (curl / direct browser nav) — wildcards are fine and avoid
+    // breaking non-browser callers.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Expose-Headers", "*");
+  }
 }
 
 export function parseQueryParams(url: string): URLSearchParams {
@@ -43,6 +69,43 @@ export async function parseBody<T = unknown>(req: IncomingMessage): Promise<T> {
     chunks.push(chunk as Buffer);
   }
   return JSON.parse(Buffer.concat(chunks).toString()) as T;
+}
+
+/**
+ * Sentinel returned by `enforceContentLengthCap` when the request exceeds the
+ * provided byte cap. The caller has already received a `413` response — it
+ * should stop processing the request immediately.
+ */
+export const BODY_TOO_LARGE = Symbol("body-too-large");
+
+/**
+ * Reject the request with `413 Payload Too Large` when its `Content-Length`
+ * header exceeds `maxBytes`. Returns `BODY_TOO_LARGE` after writing the
+ * response (caller short-circuits); otherwise returns `null` and processing
+ * continues.
+ *
+ * This is a cheap pre-flight; downstream `parseBody`/streamed parsers can be
+ * a second defence if a malicious client lies about Content-Length.
+ *
+ * Used by `/api/pages` POST/PUT to bound the per-row body size — page bodies
+ * land in SQLite as a TEXT column and there is no per-instance quota yet.
+ */
+export function enforceContentLengthCap(
+  req: IncomingMessage,
+  res: ServerResponse,
+  maxBytes: number,
+): typeof BODY_TOO_LARGE | null {
+  const raw = req.headers["content-length"];
+  const val = Array.isArray(raw) ? raw[0] : raw;
+  if (!val) return null; // No header — best-effort; parseBody will still buffer.
+  const n = Number(val);
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (n > maxBytes) {
+    res.writeHead(413, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: `Payload too large (max ${maxBytes} bytes)` }));
+    return BODY_TOO_LARGE;
+  }
+  return null;
 }
 
 /** Send JSON response */

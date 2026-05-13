@@ -144,6 +144,9 @@ export const DEFERRED_TOOLS = new Set([
   "resolve-user",
   "manage-user",
 
+  // Pages (1)
+  "create_page",
+
   // Other (3)
   "cancel-task",
   "inject-learning",

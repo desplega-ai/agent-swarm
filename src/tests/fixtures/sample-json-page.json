@@ -1,0 +1,52 @@
+{
+  "root": "root",
+  "elements": {
+    "root": {
+      "type": "Container",
+      "props": { "direction": "column", "gap": "md" },
+      "children": ["heading", "intro", "sdkBtn", "callBtn"]
+    },
+    "heading": {
+      "type": "Heading",
+      "props": { "text": "Sample JSON page", "level": "h1" },
+      "children": []
+    },
+    "intro": {
+      "type": "Text",
+      "props": {
+        "content": "Two buttons below dispatch swarm.sdk and swarm.call actions. Click each to exercise the renderer's action wiring.",
+        "tone": "muted"
+      },
+      "children": []
+    },
+    "sdkBtn": {
+      "type": "Button",
+      "props": { "label": "Create task via SDK" },
+      "children": [],
+      "on": {
+        "press": {
+          "action": "swarm.sdk",
+          "params": {
+            "sdk": "createTask",
+            "args": { "description": "from-json-page" }
+          }
+        }
+      }
+    },
+    "callBtn": {
+      "type": "Button",
+      "props": { "label": "Create channel via raw call", "variant": "secondary" },
+      "children": [],
+      "on": {
+        "press": {
+          "action": "swarm.call",
+          "params": {
+            "method": "POST",
+            "endpoint": "/api/channels",
+            "body": { "name": "from-json-page" }
+          }
+        }
+      }
+    }
+  }
+}

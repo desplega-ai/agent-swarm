@@ -5,6 +5,7 @@ import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
 import { registerCreateChannelTool } from "./tools/create-channel";
+import { registerCreatePageTool } from "./tools/create-page";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 import { registerGetSwarmTool } from "./tools/get-swarm";
@@ -120,7 +121,7 @@ import {
 
 // Capability-based feature flags
 // Default: all capabilities enabled
-const DEFAULT_CAPABILITIES = "core,task-pool,profiles,services,scheduling,memory,workflows";
+const DEFAULT_CAPABILITIES = "core,task-pool,profiles,services,scheduling,memory,workflows,pages";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -283,6 +284,14 @@ export function createServer() {
   registerSkillInstallRemoteTool(server);
   registerSkillSyncRemoteTool(server);
   registerSkillPublishTool(server);
+
+  // Pages capability - DB-backed lightweight artifacts (HTML / JSON specs).
+  // Enabled by default (added to DEFAULT_CAPABILITIES in step-9 of the
+  // db-backed-pages plan). Operators can disable via explicit
+  // `CAPABILITIES=...` env without `pages`.
+  if (hasCapability("pages")) {
+    registerCreatePageTool(server);
+  }
 
   // MCP Servers - always registered
   registerMcpServerCreateTool(server);

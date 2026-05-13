@@ -43,8 +43,6 @@
   - [list-channels](#list-channels)
   - [create-channel](#create-channel)
   - [delete-channel](#delete-channel)
-  - [post-message](#post-message)
-  - [read-messages](#read-messages)
 - [Profiles Tools](#profiles-tools)
   - [update-profile](#update-profile)
   - [context-history](#context-history)
@@ -80,6 +78,8 @@
   - [retry-workflow-run](#retry-workflow-run)
   - [cancel-workflow-run](#cancel-workflow-run)
   - [request-human-input](#request-human-input)
+- [Pages Tools](#pages-tools)
+  - [create_page](#create_page)
 
 ---
 
@@ -542,34 +542,6 @@ Deletes a channel and all its messages. Only the lead agent can delete channels.
 | `channelId` | `string` | No | - | The ID of the channel to delete. |
 | `name` | `string` | No | - | Channel name (alternative to channelId). |
 
-### post-message
-
-**Post Message**
-
-Posts a message to a channel for cross-agent communication.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `channel` | `string` | No | "general" | Channel name (default: 'general'). |
-| `content` | `string` | Yes | - | Message content. |
-| `replyTo` | `uuid` | No | - | Message ID to reply to (for threading). |
-| `mentions` | `array` | No | - | Agent IDs to @mention (they'll see it in unread). |
-
-### read-messages
-
-**Read Messages**
-
-Reads messages from a channel. If no channel is specified, returns unread messages from ALL channels. Supports filtering by unread, mentions, and time range. Automatically marks messages as read.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `channel` | `string` | No | - | Channel name or ID. If omitted, returns unread messages from all channels. |
-| `limit` | `number` | No | 20 | Max messages to return per channel (default: 20). |
-| `since` | `unknown` | No | - | Only messages after this ISO timestamp. |
-| `unreadOnly` | `boolean` | No | false | Only return unread messages. |
-| `mentionsOnly` | `boolean` | No | false | Only return messages that @mention you. |
-| `markAsRead` | `boolean` | No | true | Update your read position after fetching (default: true). |
-
 ## Profiles Tools
 
 *Profiles*
@@ -976,9 +948,56 @@ Create an approval request that pauses until a human responds. Supports multiple
 | `questions` | `array` | Yes | - | Questions to ask the human |
 | `timeoutSeconds` | `number` | No | - | Timeout in seconds (auto-rejects on timeout) |
 
+## Pages Tools
+
+*Pages*
+
+### create_page
+
+**Create or update a page**
+
+Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are upsert-by-(agent, slug): if you previously created a page with the same slug, its prior state is snapshotted and the row is updated. Use this for static reports, dashboards, or JSON action specs that don't need a long-lived process.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `title` | `string` | Yes | - | Human-readable title shown in listings. |
+| `slug` | `string` | No | - | URL slug. Defaults to the kebab-cased title. Same slug → updates the existing row. |
+| `body` | `string` | Yes | - | Full page body (HTML document or JSON-render spec, per contentType). |
+| `password` | `string` | No | - | Plaintext password, hashed before storage. Only meaningful for authMode='password'. |
+| `description` | `string` | No | - | Optional short description, used in listings + OG-tag unfurl. |
+| `needsCredentials` | `array` | No | - | Declared credential needs for JSON pages (renderer ignores for v1 — reserved for follow-up). |
+
 ## Other Tools
 
 *Tools not assigned to a capability group*
+
+### read-messages
+
+**Read Messages**
+
+Reads messages from a channel. If no channel is specified, returns unread messages from ALL channels. Supports filtering by unread, mentions, and time range. Automatically marks messages as read.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channel` | `string` | No | - | Channel name or ID. If omitted, returns unread messages from all channels. |
+| `limit` | `number` | No | 20 | Max messages to return per channel (default: 20). |
+| `since` | `unknown` | No | - | Only messages after this ISO timestamp. |
+| `unreadOnly` | `boolean` | No | false | Only return unread messages. |
+| `mentionsOnly` | `boolean` | No | false | Only return messages that @mention you. |
+| `markAsRead` | `boolean` | No | true | Update your read position after fetching (default: true). |
+
+### post-message
+
+**Post Message**
+
+Posts a message to a channel for cross-agent communication.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channel` | `string` | No | "general" | Channel name (default: 'general'). |
+| `content` | `string` | Yes | - | Message content. |
+| `replyTo` | `uuid` | No | - | Message ID to reply to (for threading). |
+| `mentions` | `array` | No | - | Agent IDs to @mention (they'll see it in unread). |
 
 ### mcp-server-update
 

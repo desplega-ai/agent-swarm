@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { usePage } from "@/api/hooks/use-pages";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 
 const routeLabels: Record<string, string> = {
@@ -26,6 +27,7 @@ const routeLabels: Record<string, string> = {
   integrations: "Integrations",
   keys: "API Keys",
   "api-keys": "API Keys",
+  pages: "Pages",
 };
 
 const INTEGRATION_NAME_BY_ID: Record<string, string> = Object.fromEntries(
@@ -38,13 +40,17 @@ const routeRedirects: Record<string, string> = {
 };
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Pages use 32-char random-hex IDs (`lower(hex(randomblob(16)))`), not UUIDs.
+const HEX32_REGEX = /^[0-9a-f]{32}$/i;
 
 function formatSegment(segment: string, prevSegment?: string): string {
   if (routeLabels[segment]) return routeLabels[segment];
   if (prevSegment === "integrations" && INTEGRATION_NAME_BY_ID[segment]) {
     return INTEGRATION_NAME_BY_ID[segment];
   }
-  if (UUID_REGEX.test(segment)) return `${segment.slice(0, 8)}...`;
+  if (UUID_REGEX.test(segment) || HEX32_REGEX.test(segment)) {
+    return `${segment.slice(0, 8)}...`;
+  }
   return segment;
 }
 
@@ -52,12 +58,23 @@ export function Breadcrumbs() {
   const location = useLocation();
   const segments = location.pathname.split("/").filter(Boolean);
 
+  // When we're on /pages/:id, fetch the page so the breadcrumb shows the
+  // actual title instead of the truncated hex id. Hook runs unconditionally
+  // (passes undefined when not applicable) to keep hook order stable.
+  const pageId =
+    segments[0] === "pages" && segments[1] && HEX32_REGEX.test(segments[1])
+      ? segments[1]
+      : undefined;
+  const { data: pageMeta } = usePage(pageId);
+
   if (segments.length === 0) return null;
 
   const crumbs = segments.map((segment, index) => {
     const defaultPath = `/${segments.slice(0, index + 1).join("/")}`;
     const path = routeRedirects[segment] ?? defaultPath;
-    const label = formatSegment(segment, segments[index - 1]);
+    let label = formatSegment(segment, segments[index - 1]);
+    // Pretty-print the page-detail leaf with the actual title when we have it.
+    if (segment === pageId && pageMeta?.title) label = pageMeta.title;
     const isLast = index === segments.length - 1;
 
     return { path, label, isLast };

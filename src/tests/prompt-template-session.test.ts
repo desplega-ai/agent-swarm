@@ -69,6 +69,7 @@ describe("Session templates — registration", () => {
       "system.agent.system",
       "system.agent.services",
       "system.agent.artifacts",
+      "system.agent.share_urls",
     ];
 
     for (const eventType of systemTemplates) {
@@ -88,10 +89,10 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 17 session/system templates registered", () => {
+  test("total of 18 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    expect(sessionSystem.length).toBe(17);
+    expect(sessionSystem.length).toBe(18);
   });
 });
 

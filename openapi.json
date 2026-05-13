@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.78.1",
+    "version": "1.79.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -3760,6 +3760,547 @@
           },
           "400": {
             "description": "Missing memoryId or X-Agent-ID"
+          }
+        }
+      }
+    },
+    "/@swarm/api/{path}": {
+      "get": {
+        "summary": "Cookie-gated proxy to the swarm API (used by db-backed page iframes)",
+        "tags": [
+          "Pages"
+        ],
+        "responses": {
+          "200": {
+            "description": "Proxied response from the underlying /api/* endpoint"
+          },
+          "401": {
+            "description": "No or invalid page-session cookie"
+          },
+          "404": {
+            "description": "Page referenced by the cookie no longer exists"
+          }
+        }
+      },
+      "post": {
+        "summary": "Cookie-gated proxy to the swarm API (POST)",
+        "tags": [
+          "Pages"
+        ],
+        "responses": {
+          "200": {
+            "description": "Proxied response"
+          },
+          "401": {
+            "description": "No or invalid page-session cookie"
+          }
+        }
+      },
+      "put": {
+        "summary": "Cookie-gated proxy to the swarm API (PUT)",
+        "tags": [
+          "Pages"
+        ],
+        "responses": {
+          "200": {
+            "description": "Proxied response"
+          },
+          "401": {
+            "description": "No or invalid page-session cookie"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Cookie-gated proxy to the swarm API (DELETE)",
+        "tags": [
+          "Pages"
+        ],
+        "responses": {
+          "200": {
+            "description": "Proxied response"
+          },
+          "401": {
+            "description": "No or invalid page-session cookie"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Cookie-gated proxy to the swarm API (PATCH)",
+        "tags": [
+          "Pages"
+        ],
+        "responses": {
+          "200": {
+            "description": "Proxied response"
+          },
+          "401": {
+            "description": "No or invalid page-session cookie"
+          }
+        }
+      }
+    },
+    "/api/pages": {
+      "post": {
+        "summary": "Create a new page",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "contentType": {
+                    "type": "string",
+                    "enum": [
+                      "text/html",
+                      "application/json"
+                    ]
+                  },
+                  "authMode": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "authed",
+                      "password"
+                    ]
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "needsCredentials": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "title",
+                  "contentType",
+                  "authMode",
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Page created"
+          },
+          "400": {
+            "description": "Invalid body"
+          },
+          "409": {
+            "description": "Slug already exists for this agent"
+          }
+        }
+      },
+      "get": {
+        "summary": "List pages",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page list with totals + share-URL pointers"
+          }
+        }
+      }
+    },
+    "/api/pages/{id}": {
+      "get": {
+        "summary": "Get a page by ID",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page row"
+          },
+          "404": {
+            "description": "Page not found"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update an existing page",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "contentType": {
+                    "type": "string",
+                    "enum": [
+                      "text/html",
+                      "application/json"
+                    ]
+                  },
+                  "authMode": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "authed",
+                      "password"
+                    ]
+                  },
+                  "password": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "needsCredentials": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Page updated"
+          },
+          "404": {
+            "description": "Page not found"
+          },
+          "413": {
+            "description": "Payload too large"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a page (and all version history)",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Page deleted"
+          },
+          "404": {
+            "description": "Page not found"
+          }
+        }
+      }
+    },
+    "/api/pages/{id}/launch": {
+      "post": {
+        "summary": "Launch a page session (issues HttpOnly cookie)",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Cookie issued"
+          },
+          "400": {
+            "description": "Launch not supported for this page (e.g. password mode)"
+          },
+          "404": {
+            "description": "Page not found"
+          }
+        }
+      }
+    },
+    "/api/pages/actions": {
+      "get": {
+        "summary": "List JSON-page action allowlist (with param JSON Schemas)",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Action allowlist"
+          }
+        }
+      }
+    },
+    "/api/pages/{id}/versions": {
+      "get": {
+        "summary": "List version snapshots for a page",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version list (newest first)"
+          },
+          "404": {
+            "description": "Page not found"
+          }
+        }
+      }
+    },
+    "/api/pages/{id}/versions/{version}": {
+      "get": {
+        "summary": "Get a single page-version snapshot",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "required": true,
+            "name": "version",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version snapshot"
+          },
+          "404": {
+            "description": "Page or version not found"
+          }
+        }
+      }
+    },
+    "/p/{id}": {
+      "get": {
+        "summary": "Render a page (HTML inline; JSON redirects to SPA)",
+        "tags": [
+          "Pages"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rendered HTML page"
+          },
+          "302": {
+            "description": "Redirect to SPA for JSON content"
+          },
+          "401": {
+            "description": "Page requires an authenticated session"
+          },
+          "403": {
+            "description": "Cookie does not match this page id"
+          },
+          "404": {
+            "description": "Page not found"
+          }
+        }
+      }
+    },
+    "/p/{id}.json": {
+      "get": {
+        "summary": "Page metadata + body as JSON (used by SPA renderer)",
+        "tags": [
+          "Pages"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page JSON"
+          },
+          "401": {
+            "description": "Page requires an authenticated session"
+          },
+          "403": {
+            "description": "Cookie does not match this page id"
+          },
+          "404": {
+            "description": "Page not found"
           }
         }
       }

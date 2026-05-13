@@ -38,6 +38,11 @@ import type {
   McpServerScope,
   McpServerTransport,
   McpServerWithInstallInfo,
+  Page,
+  PageAuthMode,
+  PageContentType,
+  PageSnapshot,
+  PageVersion,
   PricingProvider,
   PricingRow,
   PricingTokenClass,
@@ -6235,6 +6240,240 @@ export function getWorkflowVersion(workflowId: string, version: number): Workflo
     )
     .get(workflowId, version);
   return row ? rowToWorkflowVersion(row) : null;
+}
+
+// ============================================================================
+// Pages CRUD + version history
+// ----------------------------------------------------------------------------
+// DB-backed lightweight artifacts. Mirrors the workflow versioning pattern:
+// parent table `pages` holds the CURRENT state, history table `page_versions`
+// holds pre-update snapshots. snapshotPage() (src/pages/version.ts) MUST be
+// called BEFORE updatePage() so the snapshot freezes pre-update content.
+// ============================================================================
+
+type PageRow = {
+  id: string;
+  agentId: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  contentType: string;
+  authMode: string;
+  passwordHash: string | null;
+  body: string;
+  needsCredentials: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function rowToPage(row: PageRow): Page {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    slug: row.slug,
+    title: row.title,
+    description: row.description ?? undefined,
+    contentType: row.contentType as PageContentType,
+    authMode: row.authMode as PageAuthMode,
+    passwordHash: row.passwordHash ?? undefined,
+    body: row.body,
+    needsCredentials: row.needsCredentials
+      ? (JSON.parse(row.needsCredentials) as string[])
+      : undefined,
+    createdAt: normalizeDateRequired(row.createdAt),
+    updatedAt: normalizeDateRequired(row.updatedAt),
+  };
+}
+
+export function createPage(data: {
+  agentId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  contentType: PageContentType;
+  authMode: PageAuthMode;
+  passwordHash?: string;
+  body: string;
+  needsCredentials?: string[];
+}): Page {
+  const row = getDb()
+    .prepare<
+      PageRow,
+      [string, string, string, string | null, string, string, string | null, string, string | null]
+    >(
+      `INSERT INTO pages (agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      data.agentId,
+      data.slug,
+      data.title,
+      data.description ?? null,
+      data.contentType,
+      data.authMode,
+      data.passwordHash ?? null,
+      data.body,
+      data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
+    );
+  if (!row) throw new Error("Failed to create page");
+  return rowToPage(row);
+}
+
+export function getPage(id: string): Page | null {
+  const row = getDb().prepare<PageRow, [string]>("SELECT * FROM pages WHERE id = ?").get(id);
+  return row ? rowToPage(row) : null;
+}
+
+export function getPageBySlug(agentId: string, slug: string): Page | null {
+  const row = getDb()
+    .prepare<PageRow, [string, string]>("SELECT * FROM pages WHERE agentId = ? AND slug = ?")
+    .get(agentId, slug);
+  return row ? rowToPage(row) : null;
+}
+
+export function listPagesByAgent(agentId: string, limit = 100, offset = 0): Page[] {
+  return getDb()
+    .prepare<PageRow, [string, number, number]>(
+      "SELECT * FROM pages WHERE agentId = ? ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
+    )
+    .all(agentId, limit, offset)
+    .map(rowToPage);
+}
+
+export function listAllPages(limit = 100, offset = 0): Page[] {
+  return getDb()
+    .prepare<PageRow, [number, number]>(
+      "SELECT * FROM pages ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
+    )
+    .all(limit, offset)
+    .map(rowToPage);
+}
+
+/**
+ * Apply a patch to a page. Does NOT snapshot — caller must invoke
+ * `snapshotPage(id, agentId)` BEFORE calling this to preserve pre-update
+ * state (mirrors the workflow update pattern at src/http/workflows.ts:483).
+ *
+ * Always bumps `updatedAt` even if no other field changed (keeps the index
+ * useful for list ordering).
+ */
+export function updatePage(
+  id: string,
+  data: {
+    title?: string;
+    description?: string | null;
+    contentType?: PageContentType;
+    authMode?: PageAuthMode;
+    passwordHash?: string | null;
+    body?: string;
+    needsCredentials?: string[] | null;
+    slug?: string;
+  },
+): Page | null {
+  const updates: string[] = [];
+  const params: (string | number | null)[] = [];
+  if (data.title !== undefined) {
+    updates.push("title = ?");
+    params.push(data.title);
+  }
+  if (data.description !== undefined) {
+    updates.push("description = ?");
+    params.push(data.description ?? null);
+  }
+  if (data.contentType !== undefined) {
+    updates.push("contentType = ?");
+    params.push(data.contentType);
+  }
+  if (data.authMode !== undefined) {
+    updates.push("authMode = ?");
+    params.push(data.authMode);
+  }
+  if (data.passwordHash !== undefined) {
+    updates.push("passwordHash = ?");
+    params.push(data.passwordHash ?? null);
+  }
+  if (data.body !== undefined) {
+    updates.push("body = ?");
+    params.push(data.body);
+  }
+  if (data.needsCredentials !== undefined) {
+    updates.push("needsCredentials = ?");
+    params.push(data.needsCredentials ? JSON.stringify(data.needsCredentials) : null);
+  }
+  if (data.slug !== undefined) {
+    updates.push("slug = ?");
+    params.push(data.slug);
+  }
+  if (updates.length === 0) return getPage(id);
+  updates.push("updatedAt = ?");
+  params.push(new Date().toISOString());
+  params.push(id);
+  const row = getDb()
+    .prepare<PageRow, (string | number | null)[]>(
+      `UPDATE pages SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+  return row ? rowToPage(row) : null;
+}
+
+export function deletePage(id: string): boolean {
+  // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
+  const result = getDb().run("DELETE FROM pages WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+type PageVersionRow = {
+  id: string;
+  pageId: string;
+  version: number;
+  snapshot: string;
+  changedByAgentId: string | null;
+  createdAt: string;
+};
+
+function rowToPageVersion(row: PageVersionRow): PageVersion {
+  return {
+    id: row.id,
+    pageId: row.pageId,
+    version: row.version,
+    snapshot: JSON.parse(row.snapshot) as PageSnapshot,
+    changedByAgentId: row.changedByAgentId ?? undefined,
+    createdAt: normalizeDateRequired(row.createdAt),
+  };
+}
+
+export function createPageVersion(data: {
+  pageId: string;
+  version: number;
+  snapshot: PageSnapshot;
+  changedByAgentId?: string;
+}): PageVersion {
+  const row = getDb()
+    .prepare<PageVersionRow, [string, number, string, string | null]>(
+      `INSERT INTO page_versions (pageId, version, snapshot, changedByAgentId)
+       VALUES (?, ?, ?, ?) RETURNING *`,
+    )
+    .get(data.pageId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null);
+  if (!row) throw new Error("Failed to create page version");
+  return rowToPageVersion(row);
+}
+
+export function getPageVersions(pageId: string): PageVersion[] {
+  return getDb()
+    .prepare<PageVersionRow, [string]>(
+      "SELECT * FROM page_versions WHERE pageId = ? ORDER BY version DESC",
+    )
+    .all(pageId)
+    .map(rowToPageVersion);
+}
+
+export function getPageVersion(pageId: string, version: number): PageVersion | null {
+  const row = getDb()
+    .prepare<PageVersionRow, [string, number]>(
+      "SELECT * FROM page_versions WHERE pageId = ? AND version = ?",
+    )
+    .get(pageId, version);
+  return row ? rowToPageVersion(row) : null;
 }
 
 // ============================================================================

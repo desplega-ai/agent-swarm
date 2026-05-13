@@ -38,6 +38,8 @@ const SkillDetailPage = lazy(() => import("@/pages/skills/[id]/page"));
 const ApiKeysPage = lazy(() => import("@/pages/api-keys/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
 const MemoryPage = lazy(() => import("@/pages/memory/page"));
+const PageDetailPage = lazy(() => import("@/pages/pages/[id]/page"));
+const PagesListingPage = lazy(() => import("@/pages/pages/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
 export const router = createBrowserRouter([
@@ -80,6 +82,8 @@ export const router = createBrowserRouter([
       { path: "keys", element: <ApiKeysPage /> },
       { path: "debug", element: <DebugPage /> },
       { path: "memory", element: <MemoryPage /> },
+      { path: "pages", element: <PagesListingPage /> },
+      { path: "pages/:id", element: <PageDetailPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },
