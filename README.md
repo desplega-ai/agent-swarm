@@ -91,6 +91,7 @@ flowchart LR
 - **Scheduled & recurring tasks** — cron-based automation for standing work. [Scheduling →](https://docs.agent-swarm.dev/docs/concepts/scheduling)
 - **Multi-provider** — run with Claude Code, OpenAI Codex, pi-mono, Devin, Claude Managed Agents, or opencode. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
 - **Skills & MCP servers** — reusable procedural knowledge and per-agent MCP servers with scope cascade. [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools)
+- **DB-backed pages** — agents publish HTML or JSON pages (reports, dashboards, action specs) via the `create_page` MCP tool with public / authed / password modes and version history. [MCP tools → Pages](https://docs.agent-swarm.dev/docs/reference/mcp-tools#pages-tools)
 - **Real-time dashboard** — monitor agents, tasks, and inter-agent chat. [app.agent-swarm.dev →](https://app.agent-swarm.dev)
 
 ## Quick Start

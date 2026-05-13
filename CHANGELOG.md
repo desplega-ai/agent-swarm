@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.79.0] - 2026-05-13
+
+### Added
+- **DB-backed pages — `create_page` MCP tool + `/pages` SPA route** (#472) — agents can now publish HTML or JSON pages that live in SQLite, no long-lived process needed. Adds the `pages` capability (on by default), the `create_page` tool with upsert-by-(agent, slug) semantics and snapshot-on-update versioning, and three new HTTP routes: `POST/GET/PUT/DELETE /api/pages`, `POST /api/pages/:id/launch` (HMAC-signed `page_session` cookie), and public `/p/:id` / `/p/:id.json` serving with three auth modes (`public`, `authed`, `password`). Bodies capped at 5 MiB. HTML pages get `<base target=_blank>`, Space Grotesk + Space Mono fonts, Tailwind Play CDN, swarm-themed CSS variables, and a `window.swarmSdk` singleton injected via `BROWSER_SDK_JS`. JSON pages render through `@json-render/react` with a swarm-specific component catalog (Container/Card/Heading/Text/Button/Metric/Alert) and two action handlers (`swarm.sdk`, `swarm.call`). New `system.agent.share_urls` prompt template documents `MCP_BASE_URL` / `APP_URL` / `SWARM_URL` / `AGENT_FS_LIVE_URL` for share-link generation.
+- **Domain-grouped `window.SwarmSDK`** (#472) — replaces the previous flat 9-method surface with seven explicit domain modules (`tasks`, `agents`, `events`, `memory`, `repos`, `schedules`, `approvalRequests`), each mapping 1:1 to a `/api/*` REST section. Calls route through the cookie-gated `/@swarm/api/*` proxy so no client-side token handling is needed. Mirrored in the SPA at `ui/src/lib/swarm-sdk.ts` for the JSON renderer's `swarm.sdk` action. Removed (not part of curated v1): `postMessage`, `readMessages`, `listServices`, `slackReply`.
+- **`pages` skill (`plugin/skills/pages/`)** (#472) — full agent-facing guide covering page lifecycle, the seven SDK domains with HTTP-path mapping, share-URL patterns, and copy-pasteable signature blocks.
+
+### Changed
+- **UI: Pages surface feature-gated behind API ≥ 1.79.0** (#473) — sidebar entry, command-menu, and `/pages` / `/pages/:id` routes consult a generalized `useFeatureGate` lookup. Older API servers stop seeing the Pages nav entry and get a clean `<UpgradeRequired />` screen on deep links. Hooks-order preserved by moving the gate's early-return after all `useMemo` / `useCallback` declarations.
+
+## [1.78.1] - 2026-05-12
+
+### Fixed
+- **`agent-swarm artifact list` / `artifact stop` handles `{services:[]}` envelope** (#469) — `/api/services` returns `{ services: [...] }`, but both commands cast the JSON as a bare `Array`. `artifact list` crashed loudly with `TypeError: services.filter is not a function`, and `artifact stop` silently no-op'd the registry-unregister (try/catch swallowed it), leaving stale DB rows. Both call sites now extract `body.services ?? []`. New `artifact-commands.test.ts` mocks `globalThis.fetch` and asserts `{services:[…]}`, `{services:[]}`, and `{}` shapes all parse without throwing. Existing `artifact-sdk.test.ts` mocks updated — they were encoding the bug. Follow-up flagged: `artifact stop <name>` runs `pm2 delete artifact-<name>` even for nohup/non-PM2 processes, which fails silently.
+- **Skill approval flow passes `scope` through `skill-update`** (#468) — the harness's skill-update approval handler was dropping the `scope` parameter, so approvals always wrote to agent scope regardless of the requester's intent.
+
+### Changed
+- **`artifacts` skill — rename `skill.md` → `SKILL.md`, add YAML frontmatter** (#469) — Claude Code's skill scanner watches the uppercase filename; the lowercase variant was invisible to the harness. Frontmatter bakes in the actual user phrasings ("create an artifact for X", "host this for me", "make me a tunneled URL", "give me a live link", ...) so the skill surfaces reliably. Every CLI example now uses the correct `agent-swarm artifact <subcommand>` form. New "Auth & URL Pattern" + "Running it as a daemon" sections (nohup + PM2 recipes) plus an explicit callout that `artifact stop` currently only kills PM2-started processes.
+- **Markdown-rendered task views in the dashboard** (cf261b16) — adds `MarkdownView` + `CollapsibleDescription` components; `tasks-table` and `tasks/[id]` pages now render output / failure / description as Markdown. Sharper error tracker — `error-tracker.ts` gets richer context capture (covered by 30 new tests).
+
+## [1.78.0] - 2026-05-12
+
+### Added
+- **Multi-arch Docker image publishing — `linux/amd64` + `linux/arm64`** (#437) — `docker-and-deploy.yml` workflow now publishes both architectures for `ghcr.io/desplega-ai/agent-swarm` and `ghcr.io/desplega-ai/agent-swarm-worker`. Bumps `Dockerfile.worker` accordingly. Same tags (`v<version>`, `latest`, `sha-<commit>`) as before; pulls on Apple Silicon and Linux ARM nodes no longer go through QEMU emulation.
+
+### Changed
+- **`src/x402/` marked alpha / opt-in** (#467) — the x402 payments module remains in-tree but documentation clarifies it is alpha and disabled by default; production deployments should keep it gated.
+- **npm dependency bumps across 3 directories — 13 updates** (#464) — routine `dependabot` group bump for the npm_and_yarn group. No public API impact.
+
+### Fixed
+- **Workflow script nodes mark themselves failed on non-zero exit** (#462) — previously a script-node exec that returned non-zero status would still resolve as `completed`, silently passing failure downstream. The node now propagates the exit code as a workflow-node failure so dependent nodes don't run on a broken upstream.
+- **`pi` provider: anthropic shortnames re-route through OpenRouter when only `OPENROUTER_API_KEY` is set** (#458) — operators running pi-only with OpenRouter credentials no longer get `Provider not configured` errors when a task requests an anthropic shortname (`opus`, `sonnet`, `haiku`). The pi adapter's model resolver now consults the configured credential pool before short-circuiting to anthropic-direct.
+- **CI flake fixes** (4c5b4cb5) — stabilization of intermittently-failing tests; no production behavior change.
+
 ## [1.77.3] - 2026-05-12
 
 ### Fixed
