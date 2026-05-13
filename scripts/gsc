@@ -1,0 +1,628 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+# gsc — Google Search Console CLI
+# A bash wrapper around the Google Search Console REST API
+# =============================================================================
+
+# -- Constants and Configuration ----------------------------------------------
+
+GSC_VERSION="0.1.0"
+API_BASE="https://www.googleapis.com/webmasters/v3"
+INSPECTION_BASE="https://searchconsole.googleapis.com/v1"
+TOKEN_URI="https://oauth2.googleapis.com/token"
+SCOPE="https://www.googleapis.com/auth/webmasters.readonly"
+
+# -- Utility Functions --------------------------------------------------------
+
+die() {
+    printf 'Error: %s\n' "$1" >&2
+    exit 1
+}
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not found. Install it and try again."
+}
+
+check_deps() {
+    require_cmd jq
+    require_cmd openssl
+    require_cmd curl
+    require_cmd awk
+}
+
+# Tab-to-table formatter (replaces `column -t -s $'\t'`).
+# Reads TSV from stdin, aligns columns by max width, outputs two-space-separated.
+tabulate() {
+    awk -F'\t' '
+        { for (i=1; i<=NF; i++) { r[NR,i]=$i; if (length($i)>w[i]) w[i]=length($i) } nc[NR]=NF; if (NF>maxnc) maxnc=NF }
+        END { for (row=1; row<=NR; row++) { line=""; for (i=1; i<=maxnc; i++) { cell = (r[row,i] == "" ? "" : r[row,i]); line = line sprintf("%-*s", w[i]+2, cell) } sub(/ +$/, "", line); print line } }
+    '
+}
+
+base64url() {
+    base64 | tr -d '\n' | tr '+/' '-_' | tr -d '='
+}
+
+urlencode() {
+    printf '%s' "$1" | jq -sRr @uri
+}
+
+days_ago() {
+    local n="$1"
+    if date -d "-${n} days" +%Y-%m-%d 2>/dev/null; then
+        return
+    fi
+    date -v-"${n}"d +%Y-%m-%d # macOS/BSD fallback
+}
+
+# -- Authentication and Token Management --------------------------------------
+
+get_token() {
+    local sa_file="${GSC_SERVICE_ACCOUNT_FILE:-${GOOGLE_APPLICATION_CREDENTIALS:-}}"
+    [[ -z "$sa_file" ]] && die "Neither GSC_SERVICE_ACCOUNT_FILE nor GOOGLE_APPLICATION_CREDENTIALS is set."
+    [[ -f "$sa_file" ]] || die "Service account file not found: $sa_file"
+
+    local sa_email sa_key
+    sa_email=$(jq -r '.client_email' "$sa_file")
+    sa_key=$(jq -r '.private_key' "$sa_file")
+
+    [[ -z "$sa_email" || "$sa_email" == "null" ]] && die "Invalid service account file: missing client_email"
+    [[ -z "$sa_key" || "$sa_key" == "null" ]] && die "Invalid service account file: missing private_key"
+
+    # Cache file based on service account email
+    local cache_hash cache_file
+    cache_hash=$(printf '%s' "$sa_email" | sha256sum | cut -d' ' -f1)
+    cache_file="${TMPDIR:-/tmp}/gsc_token_${cache_hash}"
+
+    # Check cached token
+    if [[ -f "$cache_file" ]]; then
+        local cached_expiry cached_token now
+        cached_expiry=$(sed -n '1p' "$cache_file")
+        cached_token=$(sed -n '2p' "$cache_file")
+        now=$(date +%s)
+        if [[ -n "$cached_expiry" && -n "$cached_token" && "$now" -lt $((cached_expiry - 60)) ]]; then
+            printf '%s' "$cached_token"
+            return
+        fi
+    fi
+
+    # Build JWT
+    local now exp header claims header_b64 claims_b64 signing_input signature jwt
+    now=$(date +%s)
+    exp=$((now + 3600))
+
+    header='{"alg":"RS256","typ":"JWT"}'
+    claims=$(jq -nc \
+        --arg iss "$sa_email" \
+        --arg scope "$SCOPE" \
+        --arg aud "$TOKEN_URI" \
+        --argjson iat "$now" \
+        --argjson exp "$exp" \
+        '{iss: $iss, scope: $scope, aud: $aud, iat: $iat, exp: $exp}')
+
+    header_b64=$(printf '%s' "$header" | base64url)
+    claims_b64=$(printf '%s' "$claims" | base64url)
+    signing_input="${header_b64}.${claims_b64}"
+
+    signature=$(printf '%s' "$signing_input" | \
+        openssl dgst -sha256 -binary -sign <(printf '%s' "$sa_key") | base64url)
+
+    jwt="${signing_input}.${signature}"
+
+    # Exchange JWT for access token (must use form encoding, NOT JSON)
+    local response access_token expires_in
+    response=$(curl -s -X POST "$TOKEN_URI" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}")
+
+    access_token=$(printf '%s' "$response" | jq -r '.access_token // empty')
+    expires_in=$(printf '%s' "$response" | jq -r '.expires_in // empty')
+
+    if [[ -z "$access_token" ]]; then
+        local err_desc
+        err_desc=$(printf '%s' "$response" | jq -r '.error_description // .error // "unknown error"' 2>/dev/null)
+        die "Token exchange failed: $err_desc"
+    fi
+
+    # Cache the token
+    local token_expiry
+    token_expiry=$(($(date +%s) + ${expires_in:-3600}))
+    printf '%s\n%s\n' "$token_expiry" "$access_token" > "$cache_file"
+    chmod 600 "$cache_file"
+
+    printf '%s' "$access_token"
+}
+
+# -- API Request Helpers ------------------------------------------------------
+
+api_get() {
+    local url="$1"
+    local token
+    token=$(get_token) || exit 1
+
+    local response status body
+    response=$(curl -s -w '\n%{http_code}' \
+        -H "Authorization: Bearer $token" \
+        "$url")
+    status=$(printf '%s' "$response" | tail -1)
+    body=$(printf '%s' "$response" | sed '$d')
+
+    if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+        local err_msg
+        err_msg=$(printf '%s' "$body" | jq -r '.error.message // empty' 2>/dev/null)
+        if [[ -n "$err_msg" ]]; then
+            die "API error ($status): $err_msg"
+        else
+            die "API error ($status)"
+        fi
+    fi
+
+    printf '%s' "$body"
+}
+
+api_post() {
+    local url="$1"
+    local json_body="$2"
+    local token
+    token=$(get_token) || exit 1
+
+    local response status body
+    response=$(curl -s -w '\n%{http_code}' \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -d "$json_body" \
+        "$url")
+    status=$(printf '%s' "$response" | tail -1)
+    body=$(printf '%s' "$response" | sed '$d')
+
+    if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+        local err_msg
+        err_msg=$(printf '%s' "$body" | jq -r '.error.message // empty' 2>/dev/null)
+        if [[ -n "$err_msg" ]]; then
+            die "API error ($status): $err_msg"
+        else
+            die "API error ($status)"
+        fi
+    fi
+
+    printf '%s' "$body"
+}
+
+# -- Subcommand: sites --------------------------------------------------------
+
+cmd_sites() {
+    local json_mode=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) json_mode=true; shift ;;
+            *) die "Unknown option for sites: $1" ;;
+        esac
+    done
+
+    local response
+    response=$(api_get "$API_BASE/sites")
+
+    if $json_mode; then
+        printf '%s' "$response" | jq '.'
+        return
+    fi
+
+    local count
+    count=$(printf '%s' "$response" | jq '.siteEntry | length')
+    if [[ "$count" -eq 0 || "$count" == "null" ]]; then
+        printf 'No sites found.\n'
+        return
+    fi
+
+    {
+        printf '%s\t%s\n' "SITE_URL" "PERMISSION_LEVEL"
+        printf '%s' "$response" | jq -r '.siteEntry[] | [.siteUrl, .permissionLevel] | @tsv'
+    } | tabulate
+}
+
+# -- Subcommand: query --------------------------------------------------------
+
+cmd_query() {
+    local site="" from_date="" to_date="" limit=25 json_mode=false
+    local -a dimensions=()
+    local -a filters=()
+    local filter_op="contains"
+
+    # Parse first positional arg as site
+    if [[ $# -gt 0 && ! "$1" =~ ^-- ]]; then
+        site="$1"
+        shift
+    fi
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --from) from_date="$2"; shift 2 ;;
+            --to) to_date="$2"; shift 2 ;;
+            --dimension) dimensions+=("$2"); shift 2 ;;
+            --filter)
+                # Support syntax: DIM=VALUE or DIM:OP=VALUE
+                filters+=("$2"); shift 2 ;;
+            --filter-op) filter_op="$2"; shift 2 ;;
+            --limit) limit="$2"; shift 2 ;;
+            --json) json_mode=true; shift ;;
+            *) die "Unknown option for query: $1" ;;
+        esac
+    done
+
+    [[ -z "$site" ]] && die "Usage: gsc query <site> [options]"
+
+    # Default date range: 28 days ago to 3 days ago
+    [[ -z "$from_date" ]] && from_date=$(days_ago 28)
+    [[ -z "$to_date" ]] && to_date=$(days_ago 3)
+
+    local encoded_site
+    encoded_site=$(urlencode "$site")
+
+    # Build request JSON
+    local request_json
+    request_json=$(jq -nc \
+        --arg startDate "$from_date" \
+        --arg endDate "$to_date" \
+        --argjson rowLimit "$limit" \
+        '{startDate: $startDate, endDate: $endDate, rowLimit: $rowLimit}')
+
+    # Add dimensions if specified
+    if [[ ${#dimensions[@]} -gt 0 ]]; then
+        local dims_json
+        dims_json=$(printf '%s\n' "${dimensions[@]}" | jq -R . | jq -sc .)
+        request_json=$(printf '%s' "$request_json" | jq --argjson dims "$dims_json" '. + {dimensions: $dims}')
+    fi
+
+    # Add filters if specified
+    if [[ ${#filters[@]} -gt 0 ]]; then
+        local filters_json="[]"
+        for f in "${filters[@]}"; do
+            local dim val op
+            # Check for DIM:OP=VALUE syntax
+            if [[ "$f" =~ ^([^:=]+):([^=]+)=(.+)$ ]]; then
+                dim="${BASH_REMATCH[1]}"
+                op="${BASH_REMATCH[2]}"
+                val="${BASH_REMATCH[3]}"
+            elif [[ "$f" =~ ^([^=]+)=(.+)$ ]]; then
+                dim="${BASH_REMATCH[1]}"
+                op="$filter_op"
+                val="${BASH_REMATCH[2]}"
+            else
+                die "Invalid filter format: $f (expected DIM=VALUE or DIM:OP=VALUE)"
+            fi
+            filters_json=$(printf '%s' "$filters_json" | jq \
+                --arg dim "$dim" --arg op "$op" --arg val "$val" \
+                '. + [{dimension: $dim, operator: $op, expression: $val}]')
+        done
+        request_json=$(printf '%s' "$request_json" | jq \
+            --argjson filters "$filters_json" \
+            '. + {dimensionFilterGroups: [{filters: $filters}]}')
+    fi
+
+    local response
+    response=$(api_post "$API_BASE/sites/${encoded_site}/searchAnalytics/query" "$request_json")
+
+    if $json_mode; then
+        printf '%s' "$response" | jq '.'
+        return
+    fi
+
+    local row_count
+    row_count=$(printf '%s' "$response" | jq '.rows | length // 0')
+    if [[ "$row_count" -eq 0 ]]; then
+        printf 'No data found for the specified query.\n'
+        return
+    fi
+
+    # Build header
+    local header=""
+    for dim in "${dimensions[@]}"; do
+        header+="$(printf '%s' "$dim" | tr '[:lower:]' '[:upper:]')\t"
+    done
+    header+="CLICKS\tIMPRESSIONS\tCTR\tPOSITION"
+
+    {
+        printf '%s\n' "$header"
+        printf '%s' "$response" | jq -r --argjson ndims "${#dimensions[@]}" '
+            .rows[] |
+            (if $ndims > 0 then (.keys // [] | map(.) | join("\t")) + "\t" else "" end) +
+            (.clicks | tostring) + "\t" +
+            (.impressions | tostring) + "\t" +
+            ((.ctr * 100 * 100 | round) / 100 | tostring) + "%\t" +
+            ((.position * 10 | round) / 10 | tostring)
+        '
+    } | tabulate
+}
+
+# -- Subcommand: top-queries --------------------------------------------------
+
+cmd_top_queries() {
+    cmd_query "$@" --dimension query
+}
+
+# -- Subcommand: top-pages ----------------------------------------------------
+
+cmd_top_pages() {
+    cmd_query "$@" --dimension page
+}
+
+# -- Subcommand: analytics ----------------------------------------------------
+#
+# `analytics` produces a compact site-performance snapshot: headline KPIs
+# (clicks, impressions, CTR, position) for a window + prior-window delta,
+# top queries, top pages, device split, and country split. Designed for
+# weekly/daily GTM reviews and automated schedule tasks.
+
+cmd_analytics() {
+    local site="" from_date="" to_date="" top=10 json_mode=false compare=true
+
+    if [[ $# -gt 0 && ! "$1" =~ ^-- ]]; then
+        site="$1"
+        shift
+    fi
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --from) from_date="$2"; shift 2 ;;
+            --to) to_date="$2"; shift 2 ;;
+            --top) top="$2"; shift 2 ;;
+            --no-compare) compare=false; shift ;;
+            --json) json_mode=true; shift ;;
+            *) die "Unknown option for analytics: $1" ;;
+        esac
+    done
+
+    [[ -z "$site" ]] && die "Usage: gsc analytics <site> [--from DATE] [--to DATE] [--top N] [--no-compare] [--json]"
+
+    # Default window: last 7 days (ending 3 days ago for data freshness)
+    [[ -z "$from_date" ]] && from_date=$(days_ago 9)
+    [[ -z "$to_date" ]] && to_date=$(days_ago 3)
+
+    # Prior-window bounds (same length, immediately preceding)
+    local from_sec to_sec window_days prior_to_sec prior_from_sec prior_from prior_to
+    from_sec=$(date -d "$from_date" +%s 2>/dev/null || die "Invalid --from date: $from_date")
+    to_sec=$(date -d "$to_date" +%s 2>/dev/null || die "Invalid --to date: $to_date")
+    window_days=$(( (to_sec - from_sec) / 86400 + 1 ))
+    prior_to_sec=$(( from_sec - 86400 ))
+    prior_from_sec=$(( prior_to_sec - (window_days - 1) * 86400 ))
+    prior_from=$(date -d "@$prior_from_sec" +%Y-%m-%d)
+    prior_to=$(date -d "@$prior_to_sec" +%Y-%m-%d)
+
+    local encoded_site
+    encoded_site=$(urlencode "$site")
+
+    # Helper: run aggregate query for a date window. Returns JSON rows.
+    _aggregate_query() {
+        local start="$1" end="$2"
+        local body
+        body=$(jq -nc --arg s "$start" --arg e "$end" '{startDate:$s, endDate:$e, rowLimit:1}')
+        api_post "$API_BASE/sites/${encoded_site}/searchAnalytics/query" "$body"
+    }
+
+    # Helper: query with a single dimension.
+    _dim_query() {
+        local start="$1" end="$2" dim="$3" limit="$4"
+        local body
+        body=$(jq -nc --arg s "$start" --arg e "$end" --arg d "$dim" --argjson l "$limit" \
+            '{startDate:$s, endDate:$e, dimensions:[$d], rowLimit:$l}')
+        api_post "$API_BASE/sites/${encoded_site}/searchAnalytics/query" "$body"
+    }
+
+    local cur_agg prior_agg top_queries top_pages device_split country_split
+    cur_agg=$(_aggregate_query "$from_date" "$to_date")
+    if $compare; then
+        prior_agg=$(_aggregate_query "$prior_from" "$prior_to")
+    else
+        prior_agg='{}'
+    fi
+    top_queries=$(_dim_query "$from_date" "$to_date" "query" "$top")
+    top_pages=$(_dim_query "$from_date" "$to_date" "page" "$top")
+    device_split=$(_dim_query "$from_date" "$to_date" "device" 10)
+    country_split=$(_dim_query "$from_date" "$to_date" "country" 10)
+
+    if $json_mode; then
+        jq -n \
+            --arg site "$site" \
+            --arg from "$from_date" --arg to "$to_date" \
+            --arg priorFrom "$prior_from" --arg priorTo "$prior_to" \
+            --argjson windowDays "$window_days" \
+            --argjson current "$cur_agg" \
+            --argjson prior "$prior_agg" \
+            --argjson topQueries "$top_queries" \
+            --argjson topPages "$top_pages" \
+            --argjson deviceSplit "$device_split" \
+            --argjson countrySplit "$country_split" \
+            '{site:$site, window:{from:$from, to:$to, days:$windowDays}, prior:{from:$priorFrom, to:$priorTo}, current:($current.rows[0] // {}), previous:($prior.rows[0] // {}), topQueries:($topQueries.rows // []), topPages:($topPages.rows // []), deviceSplit:($deviceSplit.rows // []), countrySplit:($countrySplit.rows // [])}'
+        return
+    fi
+
+    # Text report
+    printf '=== GSC Analytics: %s ===\n' "$site"
+    printf 'Window: %s → %s (%d days)\n' "$from_date" "$to_date" "$window_days"
+    if $compare; then
+        printf 'Prior:  %s → %s\n' "$prior_from" "$prior_to"
+    fi
+    printf '\n-- Headline KPIs --\n'
+
+    local hdr_tsv
+    hdr_tsv=$(jq -n \
+        --argjson cur "$cur_agg" \
+        --argjson prev "$prior_agg" \
+        --arg compare "$compare" \
+        '
+        def fmt_n: (. // 0) | tostring;
+        def fmt_pct: (. // 0) * 100 | (.*100|round)/100 | tostring + "%";
+        def fmt_pos: (. // 0) | (.*10|round)/10 | tostring;
+        def delta($now; $then; $fmt):
+            if $compare == "true" and ($then | type) == "number" and $then != 0 then
+                ((($now - $then) / $then) * 100 | (.*10|round)/10) as $pct
+                | "(\(if $pct >= 0 then "+" else "" end)\($pct)%)"
+            else ""
+            end;
+        ($cur.rows[0] // {}) as $c
+        | ($prev.rows[0] // {}) as $p
+        | [
+            "Metric\tCurrent\tΔ vs prior",
+            "Clicks\t\($c.clicks|fmt_n)\t\(delta($c.clicks//0; $p.clicks//0; "n"))",
+            "Impressions\t\($c.impressions|fmt_n)\t\(delta($c.impressions//0; $p.impressions//0; "n"))",
+            "CTR\t\($c.ctr|fmt_pct)\t\(delta($c.ctr//0; $p.ctr//0; "pct"))",
+            "Avg position\t\($c.position|fmt_pos)\t\(delta($c.position//0; $p.position//0; "pos"))"
+          ] | .[]' -r)
+    printf '%s\n' "$hdr_tsv" | tabulate
+
+    printf '\n-- Top %d queries --\n' "$top"
+    {
+        printf 'QUERY\tCLICKS\tIMPR\tCTR\tPOS\n'
+        printf '%s' "$top_queries" | jq -r '.rows // [] | .[] | [.keys[0], (.clicks|tostring), (.impressions|tostring), ((.ctr*10000|round)/100|tostring + "%"), ((.position*10|round)/10|tostring)] | @tsv'
+    } | tabulate
+
+    printf '\n-- Top %d pages --\n' "$top"
+    {
+        printf 'PAGE\tCLICKS\tIMPR\tCTR\tPOS\n'
+        printf '%s' "$top_pages" | jq -r '.rows // [] | .[] | [.keys[0], (.clicks|tostring), (.impressions|tostring), ((.ctr*10000|round)/100|tostring + "%"), ((.position*10|round)/10|tostring)] | @tsv'
+    } | tabulate
+
+    printf '\n-- Device split --\n'
+    {
+        printf 'DEVICE\tCLICKS\tIMPR\tCTR\tPOS\n'
+        printf '%s' "$device_split" | jq -r '.rows // [] | .[] | [.keys[0], (.clicks|tostring), (.impressions|tostring), ((.ctr*10000|round)/100|tostring + "%"), ((.position*10|round)/10|tostring)] | @tsv'
+    } | tabulate
+
+    printf '\n-- Top countries --\n'
+    {
+        printf 'COUNTRY\tCLICKS\tIMPR\tCTR\tPOS\n'
+        printf '%s' "$country_split" | jq -r '.rows // [] | .[] | [.keys[0], (.clicks|tostring), (.impressions|tostring), ((.ctr*10000|round)/100|tostring + "%"), ((.position*10|round)/10|tostring)] | @tsv'
+    } | tabulate
+}
+
+# -- Subcommand: inspect ------------------------------------------------------
+
+cmd_inspect() {
+    local url="" site="" json_mode=false
+
+    # Parse first positional arg as URL
+    if [[ $# -gt 0 && ! "$1" =~ ^-- ]]; then
+        url="$1"
+        shift
+    fi
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --site) site="$2"; shift 2 ;;
+            --json) json_mode=true; shift ;;
+            *) die "Unknown option for inspect: $1" ;;
+        esac
+    done
+
+    [[ -z "$url" ]] && die "Usage: gsc inspect <url> --site <site>"
+    [[ -z "$site" ]] && die "The --site option is required for inspect"
+
+    local request_json
+    request_json=$(jq -nc \
+        --arg inspectionUrl "$url" \
+        --arg siteUrl "$site" \
+        '{inspectionUrl: $inspectionUrl, siteUrl: $siteUrl}')
+
+    local response
+    response=$(api_post "$INSPECTION_BASE/urlInspection/index:inspect" "$request_json")
+
+    if $json_mode; then
+        printf '%s' "$response" | jq '.'
+        return
+    fi
+
+    # Display key fields from inspection result
+    printf '%s' "$response" | jq -r '
+        .inspectionResult.indexStatusResult as $idx |
+        [
+            ["Verdict", ($idx.verdict // "N/A")],
+            ["Coverage State", ($idx.coverageState // "N/A")],
+            ["Robots.txt State", ($idx.robotsTxtState // "N/A")],
+            ["Indexing State", ($idx.indexingState // "N/A")],
+            ["Last Crawl Time", ($idx.lastCrawlTime // "N/A")],
+            ["Page Fetch State", ($idx.pageFetchState // "N/A")],
+            ["Google Canonical", ($idx.googleCanonical // "N/A")],
+            ["Crawled As", ($idx.crawledAs // "N/A")]
+        ] | .[] | .[0] + "\t" + .[1]
+    ' | tabulate
+}
+
+# -- Help and Main Dispatch ---------------------------------------------------
+
+cmd_help() {
+    cat <<'HELP'
+gsc — Google Search Console CLI
+
+Usage:
+  gsc <command> [options]
+
+Commands:
+  sites                         List verified sites
+  query <site> [options]        Query search performance data
+  top-queries <site> [options]  Show top search queries (shortcut for query --dimension query)
+  top-pages <site> [options]    Show top pages (shortcut for query --dimension page)
+  analytics <site> [options]    Site-level snapshot: headline KPIs + WoW delta,
+                                top queries/pages, device/country split
+                                Options: --from, --to, --top N, --no-compare, --json
+  inspect <url> --site <site>   Check URL indexing status
+  help                          Show this help message
+
+Query Options:
+  --from DATE          Start date (default: 28 days ago, format: YYYY-MM-DD)
+  --to DATE            End date (default: 3 days ago, format: YYYY-MM-DD)
+  --dimension DIM      Add dimension (query, page, country, device, date). Repeatable.
+  --filter DIM=VALUE   Filter by dimension value. Repeatable.
+                       Extended syntax: DIM:OP=VALUE (e.g., query:equals=mysite)
+                       Operators: equals, contains, notEquals, notContains,
+                                  includingRegex, excludingRegex
+  --filter-op OP       Default operator for --filter (default: contains)
+  --limit N            Max rows to return (default: 25, max: 25000)
+
+Global Options:
+  --json               Output raw JSON instead of formatted table
+  --version, -v        Show version
+  --help, -h           Show this help message
+
+Environment:
+  GSC_SERVICE_ACCOUNT_FILE       Path to Google service account JSON key file
+  GOOGLE_APPLICATION_CREDENTIALS Fallback if GSC_SERVICE_ACCOUNT_FILE is unset
+
+Examples:
+  gsc sites
+  gsc query sc-domain:example.com
+  gsc query sc-domain:example.com --from 2026-03-01 --to 2026-03-20 --dimension query
+  gsc query sc-domain:example.com --filter query=keyword --limit 50
+  gsc query sc-domain:example.com --filter "query:equals=exact match" --json
+  gsc top-queries sc-domain:example.com --limit 10
+  gsc top-pages sc-domain:example.com
+  gsc inspect https://example.com/page --site sc-domain:example.com
+HELP
+}
+
+main() {
+    check_deps
+
+    if [[ $# -eq 0 ]]; then
+        cmd_help
+        exit 0
+    fi
+
+    local command="$1"
+    shift
+
+    case "$command" in
+        sites)       cmd_sites "$@" ;;
+        query)       cmd_query "$@" ;;
+        top-queries) cmd_top_queries "$@" ;;
+        top-pages)   cmd_top_pages "$@" ;;
+        analytics)   cmd_analytics "$@" ;;
+        inspect)     cmd_inspect "$@" ;;
+        help|--help|-h) cmd_help ;;
+        --version|-v)   printf 'gsc version %s\n' "$GSC_VERSION" ;;
+        *)           die "Unknown command: $command. Run 'gsc help' for usage." ;;
+    esac
+}
+
+main "$@"
