@@ -1237,6 +1237,13 @@ export interface PageMetadata {
 }
 
 /**
+ * Public view-count payload — the page-public JSON path doesn't expose
+ * `viewCount` (it would imply re-rendering every time view_count changes,
+ * which would defeat any caching downstream). Listing and detail endpoints
+ * do expose it.
+ */
+
+/**
  * Row shape returned by `GET /api/pages` (authed listing endpoint). Server
  * decorates each row with `app_url` + `api_url`. Unlike `PageMetadata` this
  * one exposes `agentId` (the listing is bearer-gated, so the creator is
@@ -1252,6 +1259,7 @@ export interface PageListItem {
   authMode: PageAuthMode;
   body: string;
   needsCredentials?: string[];
+  viewCount: number;
   createdAt: string;
   updatedAt: string;
   app_url: string;

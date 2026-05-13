@@ -1,5 +1,5 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { Globe, KeyRound, Lock, type LucideIcon } from "lucide-react";
+import { Eye, Globe, KeyRound, Lock, type LucideIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -110,6 +110,20 @@ export default function PagesListingPage() {
         cellRenderer: (params: { value: string }) => (
           <span className="font-mono text-xs text-muted-foreground">{params.value}</span>
         ),
+      },
+      {
+        field: "viewCount",
+        headerName: "Views",
+        width: 90,
+        cellRenderer: (params: { value: number | undefined }) => {
+          const count = params.value ?? 0;
+          return (
+            <span className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground">
+              <Eye className="size-3" />
+              {count}
+            </span>
+          );
+        },
       },
       {
         field: "updatedAt",

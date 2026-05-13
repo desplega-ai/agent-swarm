@@ -22,8 +22,8 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { BROWSER_SDK_JS } from "../artifact-sdk/browser-sdk";
-import { getPage } from "../be/db";
+import { BROWSER_SDK_JS, SWARM_UI_JS } from "../artifact-sdk/browser-sdk";
+import { getPage, incrementPageViewCount } from "../be/db";
 import type { Page } from "../types";
 import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -113,10 +113,31 @@ const PAGE_HEAD_DEFAULTS = `<base target="_blank">
   code, pre, kbd, samp { font-family: "Space Mono", ui-monospace, monospace; }
   a { color: var(--swarm-primary); }
   ::selection { background: var(--swarm-primary); color: #fff; }
+  @media print {
+    /* Override theme variables so built-in primitives (swarm-diff, swarm-card)
+       that read var(--swarm-card) / var(--swarm-border) etc. inline-styled
+       backgrounds also flip to light. Without this, diff cards stay dark navy
+       on print. */
+    :root {
+      --swarm-bg: #ffffff;
+      --swarm-card: #ffffff;
+      --swarm-border: #cccccc;
+      --swarm-text: #000000;
+      --swarm-muted: #555555;
+    }
+    html, body { background: white !important; color: black !important; }
+    a { color: black !important; text-decoration: underline; }
+    /* Hide any swarm chrome the agent (or built-in primitives) tagged with
+       .no-print. Use this class on annotation badges, jump-list nav, anything
+       that shouldn't appear in the PDF export. */
+    .no-print { display: none !important; }
+    /* Avoid page-break inside cards / diff blocks. */
+    .swarm-card, swarm-diff { break-inside: avoid; }
+  }
 </style>`;
 
 function injectBrowserSdk(html: string): string {
-  const injection = `${PAGE_HEAD_DEFAULTS}<script>${BROWSER_SDK_JS}</script>`;
+  const injection = `${PAGE_HEAD_DEFAULTS}<script>${BROWSER_SDK_JS}</script><script>${SWARM_UI_JS}</script>`;
   // Use the first occurrence of `<head>` (case-insensitive). A page that
   // doesn't have a `<head>` element (raw fragment) still gets the SDK at the
   // front of the document.
@@ -438,6 +459,7 @@ export async function handlePagesPublic(
         body: page.body,
       }),
     );
+    bumpViewCount(page.id);
     return true;
   }
 
@@ -447,6 +469,9 @@ export async function handlePagesPublic(
     if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
     res.writeHead(302, headers);
     res.end();
+    // 302 redirects are intentionally NOT counted — they're a stop-over for
+    // JSON pages, and the SPA's subsequent `/p/:id.json` fetch bumps the
+    // counter via the JSON path above. Counting both would double-count.
     return true;
   }
 
@@ -462,5 +487,21 @@ export async function handlePagesPublic(
   if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
   res.writeHead(200, headers);
   res.end(html);
+  bumpViewCount(page.id);
   return true;
+}
+
+/**
+ * Best-effort view-count bump. Wrapped in try/catch so a counter write never
+ * fails the response — pages are served before the bump runs, and any DB
+ * error is swallowed silently. No dedup by viewer; one bump per successful
+ * 200 (HTML inline or JSON metadata fetch). 302/401/403/404 responses do
+ * NOT bump.
+ */
+function bumpViewCount(pageId: string): void {
+  try {
+    incrementPageViewCount(pageId);
+  } catch {
+    // intentional empty — analytics must never break page serving.
+  }
 }

@@ -1126,6 +1126,7 @@ export const PageSchema = z.object({
   passwordHash: z.string().optional(),
   body: z.string(),
   needsCredentials: z.array(z.string()).optional(),
+  viewCount: z.number().int().min(0).default(0),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
