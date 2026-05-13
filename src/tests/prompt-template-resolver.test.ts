@@ -8,8 +8,6 @@ import {
   upsertPromptTemplate,
 } from "../be/db";
 import { seedDefaultTemplates } from "../be/seed";
-
-const seedDeps = { getPromptTemplates, upsertPromptTemplate, resetPromptTemplateToDefault };
 import {
   clearTemplateDefinitions,
   getAllTemplateDefinitions,
@@ -17,6 +15,8 @@ import {
   registerTemplate,
 } from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
+
+const seedDeps = { getPromptTemplates, upsertPromptTemplate, resetPromptTemplateToDefault };
 
 const TEST_DB_PATH = "./test-prompt-resolver.sqlite";
 

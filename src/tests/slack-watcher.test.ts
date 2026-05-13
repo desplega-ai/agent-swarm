@@ -344,6 +344,14 @@ const mockChatUpdate = mock(() => Promise.resolve({ ok: true }));
 const mockChatPostMessage = mock(() => Promise.resolve({ ok: true, ts: "mock.dm.tree.000001" }));
 const mockSetStatus = mock(() => Promise.resolve({ ok: true }));
 
+// Shape of the first arg passed to assistant.threads.setStatus by the watcher.
+// Mirrors the subset of fields we assert on in these tests.
+interface SlackStatusCall {
+  channel_id?: string;
+  thread_ts?: string;
+  status?: string;
+}
+
 mock.module("../slack/app", () => ({
   getSlackApp: () => ({
     client: {
@@ -766,10 +774,10 @@ describe("DM unification — tree messages in DMs", () => {
     // setAssistantStatus should have been called for the DM channel
     expect(mockSetStatus).toHaveBeenCalled();
     const statusCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
-    expect((statusCall[0] as any).channel_id).toBe("D_DM_STATUS1");
-    expect((statusCall[0] as any).thread_ts).toBe("1616161616.000001");
+    expect((statusCall[0] as SlackStatusCall).channel_id).toBe("D_DM_STATUS1");
+    expect((statusCall[0] as SlackStatusCall).thread_ts).toBe("1616161616.000001");
     // Status text should be set (not empty — task is still in progress)
-    expect((statusCall[0] as any).status).toBeTruthy();
+    expect((statusCall[0] as SlackStatusCall).status).toBeTruthy();
   });
 
   test("assistant status is cleared when DM tree is fully terminal", async () => {
@@ -801,8 +809,8 @@ describe("DM unification — tree messages in DMs", () => {
     // setAssistantStatus should have been called with empty status (clearing indicator)
     expect(mockSetStatus).toHaveBeenCalled();
     const statusCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
-    expect((statusCall[0] as any).channel_id).toBe("D_DM_TERM1");
-    expect((statusCall[0] as any).status).toBe("");
+    expect((statusCall[0] as SlackStatusCall).channel_id).toBe("D_DM_TERM1");
+    expect((statusCall[0] as SlackStatusCall).status).toBe("");
   });
 
   test("non-DM channel trees do NOT trigger assistant status", async () => {
