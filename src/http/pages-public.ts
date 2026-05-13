@@ -114,6 +114,17 @@ const PAGE_HEAD_DEFAULTS = `<base target="_blank">
   a { color: var(--swarm-primary); }
   ::selection { background: var(--swarm-primary); color: #fff; }
   @media print {
+    /* Override theme variables so built-in primitives (swarm-diff, swarm-card)
+       that read var(--swarm-card) / var(--swarm-border) etc. inline-styled
+       backgrounds also flip to light. Without this, diff cards stay dark navy
+       on print. */
+    :root {
+      --swarm-bg: #ffffff;
+      --swarm-card: #ffffff;
+      --swarm-border: #cccccc;
+      --swarm-text: #000000;
+      --swarm-muted: #555555;
+    }
     html, body { background: white !important; color: black !important; }
     a { color: black !important; text-decoration: underline; }
     /* Hide any swarm chrome the agent (or built-in primitives) tagged with

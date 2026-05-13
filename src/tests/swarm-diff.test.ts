@@ -28,19 +28,34 @@ const EXAMPLE_HUNK = {
   ],
 };
 
+type StubInstance = {
+  innerHTML: string;
+  textContent: string;
+  isConnected: boolean;
+  connectedCallback?: () => void;
+  dispatchEvent: (evt: unknown) => boolean;
+};
+
 /**
  * Build a minimal stub window with just enough surface area to load
  * SWARM_UI_JS, register the custom element, and exercise the render path.
- * Returns the captured `<swarm-diff>` element's `innerHTML` after the
- * element's `connectedCallback` fires.
+ *
+ * Returns both the element constructor and a microtask-flush helper so
+ * callers can simulate the real-browser parse-order race
+ * (`connectedCallback` fires → children get appended → microtask drains).
  */
-function renderViaStub(text: string, attrs: Record<string, string>): string {
-  const registry = new Map<string, typeof StubHTMLElement>();
+function makeRig(): {
+  Ctor: new () => StubInstance;
+  setText: (el: StubInstance, attrs: Record<string, string>, text: string) => void;
+  flushMicrotasks: () => Promise<void>;
+} {
+  const registry = new Map<string, new () => StubInstance>();
 
   class StubHTMLElement {
     innerHTML = "";
-    textContent = text;
-    private _attrs: Record<string, string> = attrs;
+    textContent = "";
+    isConnected = true;
+    _attrs: Record<string, string> = {};
     getAttribute(name: string): string | null {
       return this._attrs[name] ?? null;
     }
@@ -54,10 +69,13 @@ function renderViaStub(text: string, attrs: Record<string, string>): string {
     querySelectorAll(_selector: string): unknown[] {
       return [];
     }
+    dispatchEvent(_evt: unknown): boolean {
+      return true;
+    }
   }
 
   const customElements = {
-    define(name: string, ctor: typeof StubHTMLElement) {
+    define(name: string, ctor: new () => StubInstance) {
       registry.set(name, ctor);
     },
     get(name: string) {
@@ -69,35 +87,71 @@ function renderViaStub(text: string, attrs: Record<string, string>): string {
     customElements,
     swarmUi: undefined as { renderDiff?: (rootEl: unknown, data: unknown) => void } | undefined,
     HTMLElement: StubHTMLElement,
+    CustomEvent: class {
+      constructor(
+        public type: string,
+        public init?: { bubbles?: boolean; detail?: unknown },
+      ) {}
+    },
   };
 
-  // Provide `document` stubs the jump-list path uses (we don't exercise it
-  // here, but keep it safe).
+  // Provide `document` stubs the jump-list path uses.
   const doc = {
     querySelectorAll: () => [],
+    addEventListener: () => {},
+    removeEventListener: () => {},
   };
 
   // Evaluate SWARM_UI_JS with our stubs in scope. The IIFE inside the
-  // constant captures `window`, `customElements`, `document`, and
-  // `HTMLElement` — provide each as a free variable.
+  // constant captures `window`, `customElements`, `document`, `HTMLElement`,
+  // `CustomEvent`, and `queueMicrotask` — provide each as a free variable.
   const factory = new Function(
     "window",
     "customElements",
     "document",
     "HTMLElement",
+    "CustomEvent",
+    "queueMicrotask",
     "console",
     `${SWARM_UI_JS}\nreturn window.customElements.get('swarm-diff');`,
   );
-  const Ctor = factory(win, customElements, doc, StubHTMLElement, console) as
-    | typeof StubHTMLElement
-    | undefined;
+  const Ctor = factory(
+    win,
+    customElements,
+    doc,
+    StubHTMLElement,
+    win.CustomEvent,
+    queueMicrotask,
+    console,
+  ) as (new () => StubInstance) | undefined;
   if (!Ctor) throw new Error("custom element did not register");
 
-  const el = new Ctor();
-  // The IIFE assigns class via window.customElements.define; the element
-  // class has prototype connectedCallback. Invoke it manually since we don't
-  // run a real DOM.
+  return {
+    Ctor,
+    setText(el, attrs, text) {
+      (el as unknown as { _attrs: Record<string, string> })._attrs = attrs;
+      el.textContent = text;
+    },
+    async flushMicrotasks() {
+      // Two yields: one drains the connectedCallback microtask, the next one
+      // drains anything queued by the render path itself.
+      await Promise.resolve();
+      await Promise.resolve();
+    },
+  };
+}
+
+/**
+ * Convenience wrapper for the existing "happy path" tests: build the rig,
+ * pre-set textContent + attrs, fire connectedCallback, flush microtasks,
+ * return innerHTML.
+ */
+async function renderViaStub(text: string, attrs: Record<string, string>): Promise<string> {
+  const rig = makeRig();
+  const el = new rig.Ctor();
+  rig.setText(el, attrs, text);
   if (typeof el.connectedCallback === "function") el.connectedCallback();
+  await rig.flushMicrotasks();
   return el.innerHTML;
 }
 
@@ -119,8 +173,8 @@ describe("SWARM_UI_JS", () => {
 });
 
 describe("<swarm-diff> render", () => {
-  test("constructs and renders without throwing on the example input", () => {
-    const html = renderViaStub(JSON.stringify(EXAMPLE_HUNK), {
+  test("constructs and renders without throwing on the example input", async () => {
+    const html = await renderViaStub(JSON.stringify(EXAMPLE_HUNK), {
       file: "src/foo.ts",
       "base-sha": "abc123",
       "head-sha": "def456",
@@ -128,15 +182,15 @@ describe("<swarm-diff> render", () => {
     expect(html.length).toBeGreaterThan(0);
   });
 
-  test("renders one <tr> per line in each hunk", () => {
-    const html = renderViaStub(JSON.stringify(EXAMPLE_HUNK), { file: "src/foo.ts" });
+  test("renders one <tr> per line in each hunk", async () => {
+    const html = await renderViaStub(JSON.stringify(EXAMPLE_HUNK), { file: "src/foo.ts" });
     // 4 lines in the example hunk → 4 <tr> rows.
     const trMatches = html.match(/<tr\b/g) || [];
     expect(trMatches.length).toBe(4);
   });
 
-  test("renders file header and SHA range", () => {
-    const html = renderViaStub(JSON.stringify(EXAMPLE_HUNK), {
+  test("renders file header and SHA range", async () => {
+    const html = await renderViaStub(JSON.stringify(EXAMPLE_HUNK), {
       file: "src/foo.ts",
       "base-sha": "abc123",
       "head-sha": "def456",
@@ -146,26 +200,26 @@ describe("<swarm-diff> render", () => {
     expect(html).toContain("def456");
   });
 
-  test("renders deterministic anchor id per hunk", () => {
-    const html = renderViaStub(JSON.stringify(EXAMPLE_HUNK), { file: "src/foo.ts" });
+  test("renders deterministic anchor id per hunk", async () => {
+    const html = await renderViaStub(JSON.stringify(EXAMPLE_HUNK), { file: "src/foo.ts" });
     expect(html).toContain('id="swarm-diff-src-foo-ts-10"');
   });
 
-  test("renders severity annotation badge on annotated line", () => {
-    const html = renderViaStub(JSON.stringify(EXAMPLE_HUNK), { file: "src/foo.ts" });
+  test("renders severity annotation badge on annotated line", async () => {
+    const html = await renderViaStub(JSON.stringify(EXAMPLE_HUNK), { file: "src/foo.ts" });
     expect(html).toContain("WARN");
     expect(html).toContain("Avoid raw console.log");
   });
 
-  test("handles empty/missing JSON body gracefully (no rows, no throw)", () => {
-    const html = renderViaStub("", { file: "empty.ts" });
+  test("handles empty/missing JSON body gracefully (no rows, no throw)", async () => {
+    const html = await renderViaStub("", { file: "empty.ts" });
     // Should still render an outer container with the file name.
     expect(html).toContain("empty.ts");
     // But no <tr> rows.
     expect(html.match(/<tr\b/g) ?? []).toHaveLength(0);
   });
 
-  test("escapes user-controlled text content to prevent injection", () => {
+  test("escapes user-controlled text content to prevent injection", async () => {
     const xssHunk = {
       hunks: [
         {
@@ -178,9 +232,72 @@ describe("<swarm-diff> render", () => {
         },
       ],
     };
-    const html = renderViaStub(JSON.stringify(xssHunk), { file: "<bad>" });
+    const html = await renderViaStub(JSON.stringify(xssHunk), { file: "<bad>" });
     expect(html).not.toContain("<script>alert(");
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("&lt;bad&gt;");
+  });
+});
+
+describe("<swarm-diff> parse-order regression (Bug #479-1)", () => {
+  // Real browsers fire connectedCallback when the parser sees the opening
+  // tag, BEFORE the JSON text children are parsed. The element MUST defer
+  // its parseHunks/render so it reads textContent AFTER the parser appends
+  // the children. Without the queueMicrotask defer in connectedCallback,
+  // the element renders an empty header and the JSON stays visible as
+  // orphan text — that's the production bug PR #479 shipped initially.
+
+  test("does NOT render synchronously inside connectedCallback (defer required)", () => {
+    const rig = makeRig();
+    const el = new rig.Ctor();
+    // Simulate the real-browser parse order: connectedCallback fires while
+    // textContent is still empty. The element must NOT have rendered yet
+    // — if it does, it's reading textContent too early.
+    rig.setText(el, { file: "src/foo.ts" }, "");
+    if (typeof el.connectedCallback === "function") el.connectedCallback();
+    expect(el.innerHTML).toBe("");
+  });
+
+  test("renders correctly when textContent is appended AFTER connectedCallback but BEFORE microtask drain", async () => {
+    const rig = makeRig();
+    const el = new rig.Ctor();
+    // Parse order: connectedCallback fires with empty textContent, children
+    // get appended, then microtask drains.
+    rig.setText(el, { file: "src/foo.ts" }, "");
+    if (typeof el.connectedCallback === "function") el.connectedCallback();
+    // Parser would now append JSON children. Simulate by setting textContent.
+    el.textContent = JSON.stringify(EXAMPLE_HUNK);
+    await rig.flushMicrotasks();
+    // After the microtask drains, the element must have rendered against
+    // the post-callback textContent.
+    expect(el.innerHTML).toContain("src/foo.ts");
+    expect(el.innerHTML.match(/<tr\b/g) ?? []).toHaveLength(4);
+    expect(el.innerHTML).toContain("WARN");
+  });
+
+  test("re-renders cleanly on reconnection (connectedCallback fires again)", async () => {
+    const rig = makeRig();
+    const el = new rig.Ctor();
+    rig.setText(el, { file: "src/foo.ts" }, JSON.stringify(EXAMPLE_HUNK));
+    if (typeof el.connectedCallback === "function") el.connectedCallback();
+    await rig.flushMicrotasks();
+    const firstRender = el.innerHTML;
+    expect(firstRender).toContain("src/foo.ts");
+    // Re-fire (element was moved or detached + reattached).
+    if (typeof el.connectedCallback === "function") el.connectedCallback();
+    await rig.flushMicrotasks();
+    expect(el.innerHTML).toContain("src/foo.ts");
+    expect(el.innerHTML.match(/<tr\b/g) ?? []).toHaveLength(4);
+  });
+
+  test("aborts render if element disconnected before microtask drains", async () => {
+    const rig = makeRig();
+    const el = new rig.Ctor();
+    rig.setText(el, { file: "src/foo.ts" }, JSON.stringify(EXAMPLE_HUNK));
+    if (typeof el.connectedCallback === "function") el.connectedCallback();
+    // Element gets removed from the DOM before our microtask runs.
+    el.isConnected = false;
+    await rig.flushMicrotasks();
+    expect(el.innerHTML).toBe("");
   });
 });
