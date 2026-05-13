@@ -197,7 +197,11 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
     const exp = Math.floor(Date.now() / 1000) + 3600;
     const good = await signPageSession({ pageId: id, exp });
     const [head, sig] = good.split(".");
-    const tamperedSig = `${sig!.slice(0, -1)}${sig!.slice(-1) === "A" ? "B" : "A"}`;
+    // Flip a decoded HMAC byte rather than a base64url char — flipping the
+    // last char is flaky (see src/tests/page-session.test.ts for why).
+    const sigBytes = Buffer.from(sig!, "base64url");
+    sigBytes[0] ^= 0x01;
+    const tamperedSig = sigBytes.toString("base64url").replace(/=/g, "");
     const bad = `${head}.${tamperedSig}`;
     const res = await fetch(`${BASE}/p/${id}`, {
       headers: { Cookie: `page_session=${bad}` },
