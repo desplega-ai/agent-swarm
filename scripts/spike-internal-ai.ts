@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { complete, getModel } from "@mariozechner/pi-ai";
+import { complete, getModel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { z } from "zod";
 

@@ -89,10 +89,10 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=0.73.0
-RUN sudo npm install -g @mariozechner/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
+ARG PI_CODING_AGENT_VERSION=0.74.0
+RUN sudo npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
     && mkdir -p /home/worker/.pi/agent
-ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@mariozechner/pi-coding-agent
+ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match @openai/codex-sdk in package.json — enforced by

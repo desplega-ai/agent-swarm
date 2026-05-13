@@ -9,7 +9,7 @@
  *   `cred_status` column. This file only reads those rows.
  * - This is critical for the bun-compiled API binary: importing any
  *   provider-adapter code at module level drags worker-harness SDKs (e.g.
- *   `@mariozechner/pi-coding-agent`) into the bundle, which crashes at
+ *   `@earendil-works/pi-coding-agent`) into the bundle, which crashes at
  *   `/usr/local/bin/` on boot. Keep this file adapter-free.
  * - Setup checks beyond credentials are still env- and DB-only (zero
  *   network, zero side effects).
