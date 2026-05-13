@@ -246,76 +246,45 @@ describe("initTelemetry", () => {
     expect(writesB).toEqual([]);
   });
 
-  describe("_resolveCloudMode (URL → is_cloud + mcp_host)", () => {
+  describe("_resolveCloudMode (URL → is_cloud)", () => {
     test("cloud apex host → cloud=true", () => {
-      expect(_resolveCloudMode("https://agent-swarm-mcp.desplega.sh")).toEqual({
-        isCloud: true,
-        mcpHost: "agent-swarm-mcp.desplega.sh",
-      });
-      expect(_resolveCloudMode("https://api.agent-swarm.dev")).toEqual({
-        isCloud: true,
-        mcpHost: "api.agent-swarm.dev",
-      });
-      expect(_resolveCloudMode("https://agent-swarm.dev")).toEqual({
-        isCloud: true,
-        mcpHost: "agent-swarm.dev",
-      });
+      expect(_resolveCloudMode("https://agent-swarm-mcp.desplega.sh")).toEqual({ isCloud: true });
+      expect(_resolveCloudMode("https://api.agent-swarm.dev")).toEqual({ isCloud: true });
+      expect(_resolveCloudMode("https://agent-swarm.dev")).toEqual({ isCloud: true });
       // Future cloud subdomains (suffix match)
-      expect(_resolveCloudMode("https://mcp.agent-swarm.dev/")).toEqual({
-        isCloud: true,
-        mcpHost: "mcp.agent-swarm.dev",
-      });
+      expect(_resolveCloudMode("https://mcp.agent-swarm.dev/")).toEqual({ isCloud: true });
       // Trailing path / port / auth must not change the host classification
       expect(_resolveCloudMode("https://user:tok@api.agent-swarm.dev:443/api/foo?x=1")).toEqual({
         isCloud: true,
-        mcpHost: "api.agent-swarm.dev",
       });
       // Case-insensitive
-      expect(_resolveCloudMode("https://API.Agent-Swarm.DEV")).toEqual({
-        isCloud: true,
-        mcpHost: "api.agent-swarm.dev",
-      });
+      expect(_resolveCloudMode("https://API.Agent-Swarm.DEV")).toEqual({ isCloud: true });
     });
 
-    test("self-hosted hosts → cloud=false (hostname still emitted)", () => {
-      expect(_resolveCloudMode("http://localhost:3013")).toEqual({
-        isCloud: false,
-        mcpHost: "localhost",
-      });
-      expect(_resolveCloudMode("https://my-internal-mcp.example.com")).toEqual({
-        isCloud: false,
-        mcpHost: "my-internal-mcp.example.com",
-      });
+    test("self-hosted hosts → cloud=false", () => {
+      expect(_resolveCloudMode("http://localhost:3013")).toEqual({ isCloud: false });
+      expect(_resolveCloudMode("https://my-internal-mcp.example.com")).toEqual({ isCloud: false });
       // Substring trap — must NOT be treated as cloud
-      expect(_resolveCloudMode("https://agent-swarm.dev.attacker.com")).toEqual({
-        isCloud: false,
-        mcpHost: "agent-swarm.dev.attacker.com",
-      });
+      expect(_resolveCloudMode("https://agent-swarm.dev.attacker.com")).toEqual({ isCloud: false });
       // IPv4 self-host
-      expect(_resolveCloudMode("http://127.0.0.1:3013")).toEqual({
-        isCloud: false,
-        mcpHost: "127.0.0.1",
-      });
+      expect(_resolveCloudMode("http://127.0.0.1:3013")).toEqual({ isCloud: false });
     });
 
     test("bare hostname / unset / weird scheme → safe fallback", () => {
       // Bare hostname (no scheme) — URL constructor throws
-      expect(_resolveCloudMode("agent-swarm-mcp.desplega.sh")).toEqual({
-        isCloud: false,
-        mcpHost: "",
-      });
+      expect(_resolveCloudMode("agent-swarm-mcp.desplega.sh")).toEqual({ isCloud: false });
       // Empty / undefined / null
-      expect(_resolveCloudMode(undefined)).toEqual({ isCloud: false, mcpHost: "" });
-      expect(_resolveCloudMode(null)).toEqual({ isCloud: false, mcpHost: "" });
-      expect(_resolveCloudMode("")).toEqual({ isCloud: false, mcpHost: "" });
+      expect(_resolveCloudMode(undefined)).toEqual({ isCloud: false });
+      expect(_resolveCloudMode(null)).toEqual({ isCloud: false });
+      expect(_resolveCloudMode("")).toEqual({ isCloud: false });
       // Obvious garbage
-      expect(_resolveCloudMode("not a url")).toEqual({ isCloud: false, mcpHost: "" });
+      expect(_resolveCloudMode("not a url")).toEqual({ isCloud: false });
       // Weird scheme with no host component
-      expect(_resolveCloudMode("file:///tmp/foo")).toEqual({ isCloud: false, mcpHost: "" });
+      expect(_resolveCloudMode("file:///tmp/foo")).toEqual({ isCloud: false });
     });
   });
 
-  describe("track() ships is_cloud + mcp_host in properties", () => {
+  describe("track() ships is_cloud in properties", () => {
     const originalFetch = globalThis.fetch;
     let captured: Record<string, unknown> | null = null;
 
@@ -332,7 +301,7 @@ describe("initTelemetry", () => {
       delete process.env.MCP_BASE_URL;
     });
 
-    test("cloud MCP_BASE_URL → properties.is_cloud=true + hostname", async () => {
+    test("cloud MCP_BASE_URL → properties.is_cloud=true", async () => {
       process.env.MCP_BASE_URL = "https://agent-swarm-mcp.desplega.sh";
       await initTelemetry(
         "worker",
@@ -345,12 +314,13 @@ describe("initTelemetry", () => {
 
       const properties = (captured as { properties: Record<string, unknown> }).properties;
       expect(properties.is_cloud).toBe(true);
-      expect(properties.mcp_host).toBe("agent-swarm-mcp.desplega.sh");
-      // Caller's properties preserved alongside the cohort signals.
+      // Hostname must NOT be emitted — telemetry is anonymous.
+      expect(properties.mcp_host).toBeUndefined();
+      // Caller's properties preserved alongside the cohort signal.
       expect(properties.port).toBe(3013);
     });
 
-    test("self-hosted MCP_BASE_URL → properties.is_cloud=false + hostname", async () => {
+    test("self-hosted MCP_BASE_URL → properties.is_cloud=false", async () => {
       process.env.MCP_BASE_URL = "http://localhost:3013";
       await initTelemetry(
         "worker",
@@ -363,10 +333,10 @@ describe("initTelemetry", () => {
 
       const properties = (captured as { properties: Record<string, unknown> }).properties;
       expect(properties.is_cloud).toBe(false);
-      expect(properties.mcp_host).toBe("localhost");
+      expect(properties.mcp_host).toBeUndefined();
     });
 
-    test("missing MCP_BASE_URL → safe fallback (false / empty host)", async () => {
+    test("missing MCP_BASE_URL → safe fallback (false)", async () => {
       delete process.env.MCP_BASE_URL;
       await initTelemetry(
         "api-server",
@@ -379,12 +349,12 @@ describe("initTelemetry", () => {
 
       const properties = (captured as { properties: Record<string, unknown> }).properties;
       expect(properties.is_cloud).toBe(false);
-      expect(properties.mcp_host).toBe("");
+      expect(properties.mcp_host).toBeUndefined();
     });
 
-    test("caller properties cannot override is_cloud / mcp_host", async () => {
+    test("caller properties cannot override is_cloud", async () => {
       // Defense-in-depth: even if a caller passes through user-supplied
-      // values, the cohort signals shipped on every event must come from
+      // values, the cohort signal shipped on every event must come from
       // initTelemetry — not from arbitrary call sites.
       process.env.MCP_BASE_URL = "https://agent-swarm-mcp.desplega.sh";
       await initTelemetry(
@@ -395,13 +365,12 @@ describe("initTelemetry", () => {
 
       track({
         event: "test.event",
-        properties: { is_cloud: false, mcp_host: "spoofed.example.com" },
+        properties: { is_cloud: false },
       });
       await new Promise((r) => setTimeout(r, 0));
 
       const properties = (captured as { properties: Record<string, unknown> }).properties;
       expect(properties.is_cloud).toBe(true);
-      expect(properties.mcp_host).toBe("agent-swarm-mcp.desplega.sh");
     });
   });
 });

@@ -15,7 +15,6 @@ const TIMEOUT_MS = 5_000;
 let installationId: string | null = null;
 let source = "unknown";
 let cachedIsCloud = false;
-let cachedMcpHost = "";
 
 function isEnabled(): boolean {
   return process.env.ANONYMIZED_TELEMETRY !== "false";
@@ -39,27 +38,30 @@ function isCloudHostname(hostname: string): boolean {
 }
 
 /**
- * Parse `MCP_BASE_URL` (or any candidate URL) into the cloud flag + bare
- * hostname we ship on every telemetry event. URL parsing — not substring
- * match — so we never confuse an attacker-controlled `agent-swarm.dev.bad`
- * for cloud. On any parse failure returns a safe `{ false, "" }` so callers
- * never need to defend against this throwing.
+ * Parse `MCP_BASE_URL` (or any candidate URL) into the cloud flag we ship on
+ * every telemetry event. URL parsing — not substring match — so we never
+ * confuse an attacker-controlled `agent-swarm.dev.bad` for cloud. On any
+ * parse failure returns a safe `false` so callers never need to defend
+ * against this throwing.
+ *
+ * The hostname itself is intentionally NOT emitted — telemetry is anonymous,
+ * and leaking the deployment host would defeat that. Only the boolean
+ * cloud-cohort flag ships.
  *
  * Exported for tests; not part of the public API.
  */
 export function _resolveCloudMode(mcpBaseUrl: string | undefined | null): {
   isCloud: boolean;
-  mcpHost: string;
 } {
-  if (!mcpBaseUrl) return { isCloud: false, mcpHost: "" };
+  if (!mcpBaseUrl) return { isCloud: false };
   let hostname: string;
   try {
     hostname = new URL(mcpBaseUrl).hostname;
   } catch {
-    return { isCloud: false, mcpHost: "" };
+    return { isCloud: false };
   }
-  if (!hostname) return { isCloud: false, mcpHost: "" };
-  return { isCloud: isCloudHostname(hostname), mcpHost: hostname };
+  if (!hostname) return { isCloud: false };
+  return { isCloud: isCloudHostname(hostname) };
 }
 
 interface InitTelemetryOptions {
@@ -94,8 +96,7 @@ export async function initTelemetry(
 
   const resolved = _resolveCloudMode(process.env.MCP_BASE_URL);
   cachedIsCloud = resolved.isCloud;
-  cachedMcpHost = resolved.mcpHost;
-  console.log(`telemetry: cloud=${cachedIsCloud} host=${cachedMcpHost || "(none)"}`);
+  console.log(`telemetry: cloud=${cachedIsCloud}`);
 
   try {
     const existing = await getConfig("telemetry_installation_id");
@@ -161,12 +162,13 @@ export function track(options: TrackOptions): void {
       actor_anonymous_id: installationId,
       properties: {
         ...(options.properties ?? {}),
-        // Cloud-cohort signals derived from MCP_BASE_URL at init time.
+        // Cloud-cohort signal derived from MCP_BASE_URL at init time.
         // Placed at the top level of `properties_json` so ClickHouse can
         // GROUP BY without descending into nested objects. Spread LAST so
         // caller-supplied keys can never spoof the cohort classification.
+        // The hostname is intentionally NOT included — telemetry must stay
+        // anonymous, and the boolean is sufficient to split cloud vs self-host.
         is_cloud: cachedIsCloud,
-        mcp_host: cachedMcpHost,
       },
       metadata: {
         transport: "https",
@@ -196,7 +198,6 @@ export function _resetTelemetryStateForTests(): void {
   installationId = null;
   source = "unknown";
   cachedIsCloud = false;
-  cachedMcpHost = "";
 }
 
 /** Test-only: read the resolved install ID. */
