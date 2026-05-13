@@ -148,9 +148,14 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
   const targetUrl = `${baseUrl}${rewrittenPath}${queryPart}`;
 
   const apiKey = process.env.API_KEY ?? "";
+  // `X-Page-Id` is the trust anchor for page-scoped KV: only the page-proxy
+  // ever sets it (any external `X-Page-Id` header is dropped because we don't
+  // forward the original headers). The KV handler treats this as the highest-
+  // priority namespace source so a page can't escape `task:page:<own>`.
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
     "X-Agent-ID": page.agentId,
+    "X-Page-Id": page.id,
   };
 
   // Forward content-type / accept verbatim for non-GET so JSON bodies work.

@@ -16,6 +16,7 @@
     "heartbeat",
     "inbox-state",
     "integrations",
+    "kv",
     "mcp-oauth",
     "mcp-servers",
     "memory",

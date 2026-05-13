@@ -14,6 +14,9 @@
 //   - repos            list, get, create, update, delete
 //   - schedules        list, get, create, update, delete, run
 //   - approvalRequests list, get, create, respond
+//   - kv               get, set, del, incr, list  (namespace is forced server-
+//                      side to the page's own `task:page:<id>` — no namespace
+//                      argument is exposed)
 //
 // Full HTTP API reference: https://docs.agent-swarm.dev/docs/api-reference
 export const BROWSER_SDK_JS = `
@@ -102,6 +105,22 @@ class SwarmSDK {
       get: (id) => call('GET', '/approval-requests/' + enc(id)),
       create: (body) => call('POST', '/approval-requests', body),
       respond: (id, body) => call('POST', '/approval-requests/' + enc(id) + '/respond', body),
+    };
+
+    // KV store. The namespace is FORCED by the page-proxy to \`task:page:<id>\`
+    // (it injects X-Page-Id which the kv handler treats as highest priority).
+    // No namespace argument is exposed — pages cannot read/write any other
+    // namespace via this SDK.
+    this.kv = {
+      get: (key) => call('GET', '/kv/' + enc(key)),
+      set: (key, value, opts) => call('PUT', '/kv/' + enc(key), {
+        value,
+        valueType: opts && opts.valueType,
+        expiresInSec: opts && opts.expiresInSec,
+      }),
+      del: (key) => call('DELETE', '/kv/' + enc(key)),
+      incr: (key, by) => call('POST', '/kv/' + enc(key) + '/incr', { by: by == null ? 1 : by }),
+      list: (opts) => call('GET', '/kv' + qs(opts)),
     };
   }
 }

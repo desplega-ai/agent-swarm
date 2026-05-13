@@ -31,6 +31,7 @@ import { handleEvents } from "./events";
 import { handleHeartbeat } from "./heartbeat";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
+import { handleKv } from "./kv";
 import { handleMcp } from "./mcp";
 import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
@@ -142,6 +143,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleWorkflowEvents(req, res, pathSegments, queryParams),
     () => handleApprovalRequests(req, res, pathSegments, queryParams),
     () => handleConfig(req, res, pathSegments, queryParams),
+    () => handleKv(req, res, pathSegments, queryParams),
     () => handleIntegrations(req, res, pathSegments),
     () => handlePromptTemplates(req, res, pathSegments, queryParams),
     () => handleDbQuery(req, res, pathSegments, queryParams),

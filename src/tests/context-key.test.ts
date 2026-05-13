@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  agentContextKey,
   agentmailContextKey,
   buildJiraContextKey,
   githubContextKey,
   gitlabContextKey,
   linearContextKey,
+  pageContextKey,
   parseContextKey,
   scheduleContextKey,
   slackContextKey,
@@ -48,6 +50,21 @@ describe("context-key builders", () => {
 
   test("workflowContextKey builds expected format", () => {
     expect(workflowContextKey({ workflowRunId: "run-uuid" })).toBe("task:workflow:run-uuid");
+  });
+
+  test("agentContextKey builds expected format", () => {
+    expect(agentContextKey({ agentId: "agent-uuid" })).toBe("task:agent:agent-uuid");
+  });
+
+  test("pageContextKey builds expected format", () => {
+    expect(pageContextKey({ pageId: "page-uuid" })).toBe("task:page:page-uuid");
+  });
+
+  test("agentContextKey and pageContextKey reject empty / colon-bearing inputs", () => {
+    expect(() => agentContextKey({ agentId: "" })).toThrow(/non-empty/);
+    expect(() => agentContextKey({ agentId: "a:b" })).toThrow(/must not contain/);
+    expect(() => pageContextKey({ pageId: "" })).toThrow(/non-empty/);
+    expect(() => pageContextKey({ pageId: "p:q" })).toThrow(/must not contain/);
   });
 });
 

@@ -1480,3 +1480,55 @@ export const BudgetRefusedTriggerSchema = z.object({
   resetAt: z.string(), // ISO 8601, next UTC midnight
 });
 export type BudgetRefusedTrigger = z.infer<typeof BudgetRefusedTriggerSchema>;
+
+// ─── KV store ────────────────────────────────────────────────────────────────
+
+/**
+ * `value_type` of a KV entry.
+ *
+ *  - `'json'`    — `value` is JSON-encoded; default.
+ *  - `'string'`  — `value` is the raw UTF-8 string verbatim.
+ *  - `'integer'` — `value` is the decimal-string form of a JS-safe integer.
+ *                  Required by INCR; mixing with 'json'/'string' returns 409.
+ */
+export const KvValueTypeSchema = z.enum(["json", "string", "integer"]);
+export type KvValueType = z.infer<typeof KvValueTypeSchema>;
+
+/** Shared regex for both namespace and key — keeps colons/slashes welcome for
+ * sub-namespacing inside a single key. Matches the `contextKey` schema in
+ * `src/tasks/context-key.ts`; we don't enforce it parses as a known family.
+ *
+ * `%` is accepted because path-segment params arrive percent-encoded on the
+ * REST surface (e.g. `:` → `%3A` after `encodeURIComponent`); the kv handler
+ * decodes the segment before persisting, and the decoded form is itself a
+ * subset of this regex (no `%` chars in legal contextKeys).
+ */
+export const KV_NAME_REGEX = /^[a-zA-Z0-9._:/%-]{1,512}$/;
+
+export const KvNamespaceSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(KV_NAME_REGEX, "namespace must match [a-zA-Z0-9._:/%-]{1,512}");
+
+export const KvKeySchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(KV_NAME_REGEX, "key must match [a-zA-Z0-9._:/%-]{1,512}");
+
+/**
+ * A single KV row, as returned by the API. `value` is decoded per
+ * `valueType`: `'json'` returns the parsed JS value, `'string'` returns the
+ * raw string, `'integer'` returns a number.
+ */
+export const KvEntrySchema = z.object({
+  namespace: z.string(),
+  key: z.string(),
+  value: z.unknown(),
+  valueType: KvValueTypeSchema,
+  expiresAt: z.number().int().nullable(),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+});
+export type KvEntry = z.infer<typeof KvEntrySchema>;

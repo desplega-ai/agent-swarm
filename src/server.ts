@@ -13,6 +13,14 @@ import { registerGetTaskDetailsTool } from "./tools/get-task-details";
 import { registerGetTasksTool } from "./tools/get-tasks";
 import { registerInjectLearningTool } from "./tools/inject-learning";
 import { registerJoinSwarmTool } from "./tools/join-swarm";
+// KV capability
+import {
+  registerKvDeleteTool,
+  registerKvGetTool,
+  registerKvIncrTool,
+  registerKvListTool,
+  registerKvSetTool,
+} from "./tools/kv";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
 import { registerListServicesTool } from "./tools/list-services";
@@ -121,7 +129,8 @@ import {
 
 // Capability-based feature flags
 // Default: all capabilities enabled
-const DEFAULT_CAPABILITIES = "core,task-pool,profiles,services,scheduling,memory,workflows,pages";
+const DEFAULT_CAPABILITIES =
+  "core,task-pool,profiles,services,scheduling,memory,workflows,pages,kv";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -291,6 +300,16 @@ export function createServer() {
   // `CAPABILITIES=...` env without `pages`.
   if (hasCapability("pages")) {
     registerCreatePageTool(server);
+  }
+
+  // KV capability — namespaced Redis-like key/value (see src/be/migrations/061_kv_store.sql).
+  // Enabled by default; opt out via `CAPABILITIES=...` without `kv`.
+  if (hasCapability("kv")) {
+    registerKvGetTool(server);
+    registerKvSetTool(server);
+    registerKvDeleteTool(server);
+    registerKvIncrTool(server);
+    registerKvListTool(server);
   }
 
   // MCP Servers - always registered

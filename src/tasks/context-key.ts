@@ -6,6 +6,11 @@
  * a task belongs to. We persist the key on `agent_tasks.contextKey` so that a
  * single indexed lookup can return all sibling tasks for a given entity.
  *
+ * The same vocabulary is reused by the KV store (`kv_entries.namespace`) so a
+ * caller can read/write state scoped to the entity that triggered the call
+ * (Slack thread, PR, Linear issue, agent, page, ...) without inventing a
+ * separate namespace scheme.
+ *
  * Key schema:
  *   task:slack:{channelId}:{threadTs}
  *   task:agentmail:{threadId}
@@ -15,6 +20,8 @@
  *   task:trackers:jira:{issueIdentifier}          (e.g. PROJ-123 — case preserved)
  *   task:schedule:{scheduleId}
  *   task:workflow:{workflowRunId}
+ *   task:agent:{agentId}                          (KV-only: per-agent scratchpad)
+ *   task:page:{pageId}                            (KV-only: per-page state, proxy-enforced)
  *
  * Rules:
  *   - Fixed prefix tokens (`task`, family, sub-family, kind) are always lowercase.
@@ -155,6 +162,27 @@ export function scheduleContextKey(input: { scheduleId: string }): string {
 export function workflowContextKey(input: { workflowRunId: string }): string {
   const workflowRunId = assertSafePart(input.workflowRunId, "workflowRunId");
   return ["task", "workflow", workflowRunId].join(SEPARATOR);
+}
+
+/**
+ * Per-agent KV scratchpad namespace. Not used as a task `contextKey` (tasks
+ * always derive their context from an ingress entity), but reused here so the
+ * KV layer can resolve "the caller has no task header, just an agent id" into
+ * a stable namespace string with the same shape as everything else.
+ */
+export function agentContextKey(input: { agentId: string }): string {
+  const agentId = assertSafePart(input.agentId, "agentId");
+  return ["task", "agent", agentId].join(SEPARATOR);
+}
+
+/**
+ * Per-page KV namespace. Enforced at the page-proxy boundary
+ * (src/http/page-proxy.ts) — pages can never write outside their own
+ * `task:page:<id>` namespace regardless of what the request body or URL says.
+ */
+export function pageContextKey(input: { pageId: string }): string {
+  const pageId = assertSafePart(input.pageId, "pageId");
+  return ["task", "page", pageId].join(SEPARATOR);
 }
 
 /**

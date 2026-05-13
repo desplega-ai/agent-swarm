@@ -3332,6 +3332,564 @@
         }
       }
     },
+    "/api/kv/{key}": {
+      "get": {
+        "summary": "Get a KV entry by key (namespace resolved from request headers)",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "KV entry"
+          },
+          "400": {
+            "description": "Validation error or unresolvable namespace"
+          },
+          "404": {
+            "description": "KV entry not found or expired"
+          }
+        }
+      },
+      "put": {
+        "summary": "Upsert a KV entry by key (namespace resolved from request headers)",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {},
+                  "valueType": {
+                    "type": "string",
+                    "enum": [
+                      "json",
+                      "string",
+                      "integer"
+                    ]
+                  },
+                  "expiresInSec": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "KV entry stored"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Caller may not write this namespace"
+          },
+          "409": {
+            "description": "INCR collision: existing value_type is not 'integer'"
+          },
+          "413": {
+            "description": "Body exceeds 2 MiB"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a KV entry by key (namespace resolved from request headers)",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "KV entry deleted"
+          },
+          "400": {
+            "description": "Validation error or unresolvable namespace"
+          },
+          "403": {
+            "description": "Caller may not write this namespace"
+          },
+          "404": {
+            "description": "KV entry not found"
+          }
+        }
+      }
+    },
+    "/api/kv/{key}/incr": {
+      "post": {
+        "summary": "Atomically increment an integer KV entry (header-resolved namespace)",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "by": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "KV entry stored"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Caller may not write this namespace"
+          },
+          "409": {
+            "description": "INCR collision: existing value_type is not 'integer'"
+          },
+          "413": {
+            "description": "Body exceeds 2 MiB"
+          }
+        }
+      }
+    },
+    "/api/kv": {
+      "get": {
+        "summary": "List KV entries in the header-resolved namespace",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "prefix",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "KV entries in the resolved namespace"
+          },
+          "400": {
+            "description": "Validation error or unresolvable namespace"
+          }
+        }
+      }
+    },
+    "/api/kv/_/{namespace}/{key}": {
+      "get": {
+        "summary": "Get a KV entry by explicit namespace + key",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "KV entry"
+          },
+          "400": {
+            "description": "Validation error or unresolvable namespace"
+          },
+          "404": {
+            "description": "KV entry not found or expired"
+          }
+        }
+      },
+      "put": {
+        "summary": "Upsert a KV entry by explicit namespace + key",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {},
+                  "valueType": {
+                    "type": "string",
+                    "enum": [
+                      "json",
+                      "string",
+                      "integer"
+                    ]
+                  },
+                  "expiresInSec": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "KV entry stored"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Caller may not write this namespace"
+          },
+          "409": {
+            "description": "INCR collision: existing value_type is not 'integer'"
+          },
+          "413": {
+            "description": "Body exceeds 2 MiB"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a KV entry by explicit namespace + key",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "KV entry deleted"
+          },
+          "403": {
+            "description": "Caller may not write this namespace"
+          },
+          "404": {
+            "description": "KV entry not found"
+          }
+        }
+      }
+    },
+    "/api/kv/_/{namespace}/{key}/incr": {
+      "post": {
+        "summary": "Atomically increment an integer KV entry (explicit namespace)",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "by": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "KV entry stored"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Caller may not write this namespace"
+          },
+          "409": {
+            "description": "INCR collision: existing value_type is not 'integer'"
+          },
+          "413": {
+            "description": "Body exceeds 2 MiB"
+          }
+        }
+      }
+    },
+    "/api/kv/_/{namespace}": {
+      "get": {
+        "summary": "List KV entries in an explicit namespace",
+        "tags": [
+          "KV"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._:/%-]{1,512}$"
+            },
+            "required": true,
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "prefix",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "KV entries in the resolved namespace"
+          },
+          "400": {
+            "description": "Validation error or unresolvable namespace"
+          }
+        }
+      }
+    },
     "/api/memory/index": {
       "post": {
         "summary": "Ingest content into memory system (async embedding)",

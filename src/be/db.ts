@@ -34,6 +34,8 @@ import type {
   InboxMessage,
   InboxMessageStatus,
   InputValue,
+  KvEntry,
+  KvValueType,
   McpServer,
   McpServerScope,
   McpServerTransport,
@@ -9677,4 +9679,296 @@ export function hasFirstCompletedTask(): boolean {
     )
     .get();
   return row !== null;
+}
+
+// ============================================================================
+// KV store (kv_entries)
+// ============================================================================
+//
+// Namespaced key/value with lazy expire-on-read TTL. See:
+//   - src/be/migrations/061_kv_store.sql (schema)
+//   - src/http/kv.ts                     (REST surface + namespace resolution)
+//   - src/tools/kv/*                     (MCP surface)
+//
+// Conventions:
+//   - All sizing / regex validation happens at the HTTP / MCP boundary so the
+//     helpers below can assume well-formed inputs.
+//   - `value` is stored verbatim in TEXT; helpers decode based on value_type.
+//   - "now" is `unixepoch('subsec') * 1000` (unix-ms), consistent with the
+//     migration's DEFAULTs — using JS `Date.now()` for the few helpers that
+//     need to mention an explicit timestamp keeps the math identical at ms
+//     resolution.
+
+interface KvRow {
+  namespace: string;
+  key: string;
+  value: string;
+  value_type: KvValueType;
+  expires_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+function decodeKvRow(row: KvRow): KvEntry {
+  let value: unknown;
+  if (row.value_type === "json") {
+    try {
+      value = JSON.parse(row.value);
+    } catch {
+      // Stored JSON is corrupt — surface as raw string rather than throwing
+      // on read; the row is still recoverable by the caller.
+      value = row.value;
+    }
+  } else if (row.value_type === "integer") {
+    value = Number(row.value);
+  } else {
+    value = row.value;
+  }
+  return {
+    namespace: row.namespace,
+    key: row.key,
+    value,
+    valueType: row.value_type,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function encodeKvValue(value: unknown, valueType: KvValueType): string {
+  if (valueType === "json") {
+    return JSON.stringify(value);
+  }
+  if (valueType === "integer") {
+    if (typeof value === "number") {
+      if (!Number.isInteger(value) || !Number.isSafeInteger(value)) {
+        throw new Error("integer value must be a JS-safe integer");
+      }
+      return String(value);
+    }
+    if (typeof value === "string" && /^-?\d+$/.test(value)) {
+      return value;
+    }
+    throw new Error("integer value must be a JS-safe integer");
+  }
+  // 'string'
+  if (typeof value !== "string") {
+    throw new Error("string value must be a string");
+  }
+  return value;
+}
+
+/**
+ * Get a single KV entry. Returns null if missing OR expired; expired rows are
+ * deleted inline (single-row DELETE WHERE) so the row count stays bounded over
+ * time without a background sweeper.
+ */
+export function getKv(namespace: string, key: string): KvEntry | null {
+  const row = getDb()
+    .prepare<KvRow, [string, string]>(
+      `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
+         FROM kv_entries WHERE namespace = ? AND key = ?`,
+    )
+    .get(namespace, key);
+  if (!row) return null;
+  if (row.expires_at !== null && row.expires_at <= Date.now()) {
+    getDb()
+      .prepare<unknown, [string, string]>(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`)
+      .run(namespace, key);
+    return null;
+  }
+  return decodeKvRow(row);
+}
+
+/**
+ * Upsert a KV entry. Caller passes the decoded value + valueType; we encode
+ * before storing. `expiresAt` is unix-ms (NULL means no expiry).
+ *
+ * If the key already exists with a different `valueType` we still overwrite —
+ * INCR is the only collision-sensitive op and it does its own check.
+ */
+export function upsertKv(input: {
+  namespace: string;
+  key: string;
+  value: unknown;
+  valueType: KvValueType;
+  expiresAt?: number | null;
+}): KvEntry {
+  const encoded = encodeKvValue(input.value, input.valueType);
+  const expiresAt = input.expiresAt ?? null;
+  const now = Date.now();
+  const row = getDb()
+    .prepare<KvRow, [string, string, string, KvValueType, number | null, number, number]>(
+      `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(namespace, key) DO UPDATE SET
+         value = excluded.value,
+         value_type = excluded.value_type,
+         expires_at = excluded.expires_at,
+         updated_at = excluded.updated_at
+       RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
+    )
+    .get(input.namespace, input.key, encoded, input.valueType, expiresAt, now, now);
+  if (!row) throw new Error("Failed to upsert kv entry");
+  return decodeKvRow(row);
+}
+
+/**
+ * Delete a KV entry. Returns true if a row was removed, false if nothing
+ * existed. Does not differentiate expired-but-not-yet-swept from never-existed.
+ */
+export function deleteKv(namespace: string, key: string): boolean {
+  const result = getDb()
+    .prepare<unknown, [string, string]>(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`)
+    .run(namespace, key);
+  return result.changes > 0;
+}
+
+export class KvTypeCollisionError extends Error {
+  readonly existingType: KvValueType;
+  constructor(existingType: KvValueType) {
+    super(`Cannot INCR a key with value_type '${existingType}'`);
+    this.name = "KvTypeCollisionError";
+    this.existingType = existingType;
+  }
+}
+
+/**
+ * Atomically increment an integer KV entry. Creates the entry (set to `by`)
+ * if it doesn't exist or has expired. Throws `KvTypeCollisionError` if the
+ * existing row's `value_type` is not 'integer' — the HTTP layer maps that to
+ * 409.
+ */
+export function incrKv(namespace: string, key: string, by: number): KvEntry {
+  if (!Number.isInteger(by) || !Number.isSafeInteger(by)) {
+    throw new Error("INCR `by` must be a JS-safe integer");
+  }
+  const database = getDb();
+  return database.transaction((): KvEntry => {
+    const existing = database
+      .prepare<KvRow, [string, string]>(
+        `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
+           FROM kv_entries WHERE namespace = ? AND key = ?`,
+      )
+      .get(namespace, key);
+
+    const now = Date.now();
+    const expired =
+      existing?.expires_at !== null &&
+      existing !== null &&
+      existing.expires_at !== null &&
+      existing.expires_at <= now;
+
+    if (!existing || expired) {
+      // Insert (or replace if expired). `upsertKv` re-enters the prepared
+      // statement cache cheaply; inlining keeps this in one transaction.
+      const row = database
+        .prepare<KvRow, [string, string, string, number | null, number, number]>(
+          `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
+             VALUES (?, ?, ?, 'integer', ?, ?, ?)
+           ON CONFLICT(namespace, key) DO UPDATE SET
+             value = excluded.value,
+             value_type = excluded.value_type,
+             expires_at = excluded.expires_at,
+             updated_at = excluded.updated_at
+           RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
+        )
+        .get(namespace, key, String(by), null, now, now);
+      if (!row) throw new Error("Failed to insert kv entry on INCR");
+      return decodeKvRow(row);
+    }
+
+    if (existing.value_type !== "integer") {
+      throw new KvTypeCollisionError(existing.value_type);
+    }
+
+    const current = Number(existing.value);
+    if (!Number.isSafeInteger(current)) {
+      throw new Error("Stored integer KV value is not a JS-safe integer");
+    }
+    const next = current + by;
+    if (!Number.isSafeInteger(next)) {
+      throw new Error("INCR would overflow JS-safe integer range");
+    }
+
+    const row = database
+      .prepare<KvRow, [string, number, string, string]>(
+        `UPDATE kv_entries SET value = ?, updated_at = ?
+           WHERE namespace = ? AND key = ?
+         RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
+      )
+      .get(String(next), now, namespace, key);
+    if (!row) throw new Error("Failed to update kv entry on INCR");
+    return decodeKvRow(row);
+  })();
+}
+
+/**
+ * List entries in a namespace, optionally filtered by prefix. Expired rows
+ * are filtered out by the SELECT (no inline DELETE — listing should be a
+ * stable cursor; sweeping happens on point-reads instead).
+ *
+ * `limit` is capped by the caller (HTTP enforces ≤1000); helper does no extra
+ * bounds-check beyond what SQL accepts.
+ */
+export function listKv(
+  namespace: string,
+  opts: { prefix?: string; limit: number; offset: number },
+): KvEntry[] {
+  const now = Date.now();
+  if (opts.prefix !== undefined && opts.prefix.length > 0) {
+    // LIKE-escape `\` `%` `_` so a user-supplied prefix can't run wildcards.
+    const escaped = opts.prefix.replace(/[\\%_]/g, "\\$&");
+    const rows = getDb()
+      .prepare<KvRow, [string, number, string, number, number]>(
+        `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
+           FROM kv_entries
+          WHERE namespace = ?
+            AND (expires_at IS NULL OR expires_at > ?)
+            AND key LIKE ? ESCAPE '\\'
+          ORDER BY key
+          LIMIT ? OFFSET ?`,
+      )
+      .all(namespace, now, `${escaped}%`, opts.limit, opts.offset);
+    return rows.map(decodeKvRow);
+  }
+  const rows = getDb()
+    .prepare<KvRow, [string, number, number, number]>(
+      `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
+         FROM kv_entries
+        WHERE namespace = ?
+          AND (expires_at IS NULL OR expires_at > ?)
+        ORDER BY key
+        LIMIT ? OFFSET ?`,
+    )
+    .all(namespace, now, opts.limit, opts.offset);
+  return rows.map(decodeKvRow);
+}
+
+/**
+ * Count entries in a namespace (optionally with a prefix filter). Expired
+ * rows are excluded — same predicate as `listKv`.
+ */
+export function countKv(namespace: string, opts: { prefix?: string }): number {
+  const now = Date.now();
+  if (opts.prefix !== undefined && opts.prefix.length > 0) {
+    const escaped = opts.prefix.replace(/[\\%_]/g, "\\$&");
+    const row = getDb()
+      .prepare<{ n: number }, [string, number, string]>(
+        `SELECT COUNT(*) AS n FROM kv_entries
+          WHERE namespace = ?
+            AND (expires_at IS NULL OR expires_at > ?)
+            AND key LIKE ? ESCAPE '\\'`,
+      )
+      .get(namespace, now, `${escaped}%`);
+    return row?.n ?? 0;
+  }
+  const row = getDb()
+    .prepare<{ n: number }, [string, number]>(
+      `SELECT COUNT(*) AS n FROM kv_entries
+        WHERE namespace = ?
+          AND (expires_at IS NULL OR expires_at > ?)`,
+    )
+    .get(namespace, now);
+  return row?.n ?? 0;
 }
