@@ -76,6 +76,11 @@ ENV BUN_INSTALL="/home/worker/.bun"
 ENV COREPACK_HOME=/home/worker/.corepack
 RUN mkdir -p /home/worker/.corepack
 
+# Pre-create XDG dirs as worker so that later root-level steps writing into
+# /home/worker (HOME is still set to /home/worker under USER root) don't leave
+# /home/worker/.local root-owned and break worker-side mkdir into .local/share.
+RUN mkdir -p /home/worker/.local/bin /home/worker/.local/share /home/worker/.local/state
+
 # Install Bun for worker user (need to set HOME explicitly in RUN)
 RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/worker/.bun/bin:$PATH"
