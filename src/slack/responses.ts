@@ -14,6 +14,33 @@ import {
 // Re-export for backward compatibility
 export { markdownToSlack } from "./blocks";
 
+/**
+ * Result of a Slack `chat.update` helper call.
+ *
+ * - `"ok"`         — update succeeded.
+ * - `"not_found"`  — Slack returned `message_not_found` (or the channel was
+ *   gone). The caller should clear stale state and post a new message.
+ * - `"failed"`     — any other error (network, rate limit, etc.). The caller
+ *   should leave state alone and retry on the next tick.
+ */
+export type SlackUpdateResult = "ok" | "not_found" | "failed";
+
+/**
+ * Map a thrown error from the Slack web client to our `SlackUpdateResult`
+ * sentinel. The Slack SDK surfaces the API error code on `error.data.error`.
+ */
+function classifySlackError(error: unknown): SlackUpdateResult {
+  const errorCode = (error as { data?: { error?: string } } | undefined)?.data?.error;
+  if (
+    errorCode === "message_not_found" ||
+    errorCode === "channel_not_found" ||
+    errorCode === "thread_not_found"
+  ) {
+    return "not_found";
+  }
+  return "failed";
+}
+
 const isDev = process.env.ENV === "development";
 
 /**
@@ -128,17 +155,20 @@ export async function sendProgressUpdate(
 
 /**
  * Update an existing progress message in-place via chat.update.
+ *
+ * Returns a `SlackUpdateResult` so the watcher can distinguish a missing
+ * message (recovery: repost) from a transient failure (recovery: retry).
  */
 export async function updateProgressInPlace(
   task: AgentTask,
   progress: string,
   messageTs: string,
-): Promise<boolean> {
+): Promise<SlackUpdateResult> {
   const app = getSlackApp();
-  if (!app || !task.slackChannelId || !task.agentId) return false;
+  if (!app || !task.slackChannelId || !task.agentId) return "failed";
 
   const agent = getAgentById(task.agentId);
-  if (!agent) return false;
+  if (!agent) return "failed";
 
   const blocks = buildProgressBlocks({ agentName: agent.name, taskId: task.id, progress });
 
@@ -150,10 +180,17 @@ export async function updateProgressInPlace(
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });
-    return true;
+    return "ok";
   } catch (error) {
-    console.error(`[Slack] Failed to update progress in-place:`, error);
-    return false;
+    const result = classifySlackError(error);
+    if (result === "not_found") {
+      console.warn(
+        `[Slack] chat.update message_not_found for task ${task.id} ts=${messageTs} — will repost`,
+      );
+    } else {
+      console.error(`[Slack] Failed to update progress in-place:`, error);
+    }
+    return result;
   }
 }
 
@@ -223,9 +260,9 @@ export async function updateTreeMessage(
   messageTs: string,
   blocks: unknown[],
   fallbackText: string,
-): Promise<boolean> {
+): Promise<SlackUpdateResult> {
   const app = getSlackApp();
-  if (!app) return false;
+  if (!app) return "failed";
 
   try {
     await app.client.chat.update({
@@ -235,10 +272,17 @@ export async function updateTreeMessage(
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });
-    return true;
+    return "ok";
   } catch (error) {
-    console.error(`[Slack] Failed to update tree message:`, error);
-    return false;
+    const result = classifySlackError(error);
+    if (result === "not_found") {
+      console.warn(
+        `[Slack] chat.update message_not_found for tree ts=${messageTs} channel=${channelId} — will repost`,
+      );
+    } else {
+      console.error(`[Slack] Failed to update tree message:`, error);
+    }
+    return result;
   }
 }
 

@@ -140,6 +140,12 @@ export const AgentTaskSchema = z.object({
   slackUserId: z.string().optional(),
   slackReplySent: z.boolean().default(false),
 
+  // Persisted Slack message timestamps for the watcher. Allows progress
+  // updates to keep editing the original Slack message across server
+  // restarts (see migration 063 / RCA 2026-05-13).
+  slackProgressMessageTs: z.string().optional(),
+  slackTreeRootMessageTs: z.string().optional(),
+
   // VCS metadata (GitHub / GitLab — provider-agnostic)
   vcsProvider: z.enum(["github", "gitlab"]).optional(),
   vcsRepo: z.string().optional(),

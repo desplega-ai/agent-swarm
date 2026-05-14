@@ -4,6 +4,7 @@ import {
   getCompletedSlackTasks,
   getInProgressSlackTasks,
   getTaskById,
+  setSlackMessageTracking,
 } from "../be/db";
 import type { AgentTask } from "../types";
 import { getSlackApp } from "./app";
@@ -74,6 +75,19 @@ export function registerTreeMessage(
 
   // Also register in legacy flat map so existing watcher processing still works
   taskMessages.set(taskId, { channelId, threadTs, messageTs });
+
+  // Write-through to DB so the watcher can rebind to this message after a
+  // server restart. Both columns get the same ts because for tree messages
+  // the per-task progress message *is* the tree root message — they live in
+  // both `taskMessages` and `treeMessages`.
+  try {
+    setSlackMessageTracking(taskId, {
+      slackProgressMessageTs: messageTs,
+      slackTreeRootMessageTs: messageTs,
+    });
+  } catch (error) {
+    console.error(`[Slack] Failed to persist message tracking for task ${taskId}:`, error);
+  }
 
   console.log(`[Slack] Registered task ${taskId.slice(0, 8)} in tree message ${messageTs}`);
 }
@@ -294,13 +308,39 @@ export async function processTreeMessages(): Promise<void> {
       : `Tasks in progress: ${rootNames}`;
 
     // Update the Slack message
-    const success = await updateTreeMessage(tree.channelId, messageTs, blocks, fallbackText);
+    const result = await updateTreeMessage(tree.channelId, messageTs, blocks, fallbackText);
+    const success = result === "ok";
     if (success) {
       lastRenderedTree.set(messageTs, serialized);
       treeLastUpdateTime.set(messageTs, now);
       console.log(
         `[Slack] Updated tree message ${messageTs} (${nodes.length} root(s), terminal=${fullyTerminal})`,
       );
+    } else if (result === "not_found") {
+      // Persisted ts no longer exists in Slack (channel rotated, message
+      // deleted, …). Clear the stale tracking + DB columns and drop the tree
+      // entry so the next tick reposts a fresh initial tree message instead
+      // of spinning on a doomed chat.update.
+      const taskIds = Array.from(tree.rootTaskIds);
+      for (const taskId of taskIds) {
+        taskToTree.delete(taskId);
+        taskMessages.delete(taskId);
+        try {
+          setSlackMessageTracking(taskId, {
+            slackProgressMessageTs: null,
+            slackTreeRootMessageTs: null,
+          });
+        } catch (error) {
+          console.error(`[Slack] Failed to clear stale message tracking for ${taskId}:`, error);
+        }
+      }
+      treeMessages.delete(messageTs);
+      lastRenderedTree.delete(messageTs);
+      treeLastUpdateTime.delete(messageTs);
+      console.warn(
+        `[Slack] Dropped stale tree ${messageTs} (${taskIds.length} task(s)); will repost on next tick`,
+      );
+      continue;
     }
 
     // DM channels: set assistant status in parallel for typing indicator UX
@@ -425,6 +465,54 @@ export function startTaskWatcher(intervalMs = 3000): void {
   }
   console.log(`[Slack] Initialized with ${existingCompleted.length} existing completed tasks`);
 
+  // Rehydrate in-memory Slack-message tracking from the DB so progress updates
+  // for tasks still `in_progress` keep editing the original Slack message
+  // instead of posting a brand-new one after a server restart (see migration
+  // 063 / RCA 2026-05-13).
+  let hydratedTrees = 0;
+  let hydratedFlat = 0;
+  for (const task of getInProgressSlackTasks()) {
+    if (!task.slackChannelId || !task.slackThreadTs) continue;
+
+    const treeTs = task.slackTreeRootMessageTs;
+    const progressTs = task.slackProgressMessageTs;
+
+    if (treeTs) {
+      let tree = treeMessages.get(treeTs);
+      if (!tree) {
+        tree = {
+          channelId: task.slackChannelId,
+          threadTs: task.slackThreadTs,
+          messageTs: treeTs,
+          rootTaskIds: new Set(),
+        };
+        treeMessages.set(treeTs, tree);
+      }
+      tree.rootTaskIds.add(task.id);
+      taskToTree.set(task.id, treeTs);
+      taskMessages.set(task.id, {
+        channelId: task.slackChannelId,
+        threadTs: task.slackThreadTs,
+        messageTs: treeTs,
+      });
+      if (task.progress) sentProgress.set(task.id, task.progress);
+      hydratedTrees++;
+    } else if (progressTs) {
+      taskMessages.set(task.id, {
+        channelId: task.slackChannelId,
+        threadTs: task.slackThreadTs,
+        messageTs: progressTs,
+      });
+      if (task.progress) sentProgress.set(task.id, task.progress);
+      hydratedFlat++;
+    }
+  }
+  if (hydratedTrees > 0 || hydratedFlat > 0) {
+    console.log(
+      `[Slack] Hydrated ${hydratedTrees} tree task(s) and ${hydratedFlat} flat task(s) from DB`,
+    );
+  }
+
   watcherInterval = setInterval(async () => {
     // Prevent overlapping processing cycles
     if (isProcessing || !getSlackApp()) return;
@@ -503,8 +591,22 @@ export function startTaskWatcher(intervalMs = 3000): void {
           sentProgress.set(task.id, "__in_progress__");
           lastSendTime.set(progressKey, now);
           try {
-            await updateProgressInPlace(task, "Starting...", tracked.messageTs);
-            console.log(`[Slack] Updated to in-progress for task ${task.id.slice(0, 8)}`);
+            const result = await updateProgressInPlace(task, "Starting...", tracked.messageTs);
+            if (result === "not_found") {
+              // Persisted ts is stale — drop tracking so the next pass reposts.
+              taskMessages.delete(task.id);
+              sentProgress.delete(task.id);
+              try {
+                setSlackMessageTracking(task.id, {
+                  slackProgressMessageTs: null,
+                  slackTreeRootMessageTs: null,
+                });
+              } catch (error) {
+                console.error(`[Slack] Failed to clear stale tracking:`, error);
+              }
+            } else {
+              console.log(`[Slack] Updated to in-progress for task ${task.id.slice(0, 8)}`);
+            }
           } catch (error) {
             sentProgress.delete(task.id);
             lastSendTime.delete(progressKey);
@@ -523,22 +625,50 @@ export function startTaskWatcher(intervalMs = 3000): void {
           sentProgress.set(task.id, task.progress);
           lastSendTime.set(progressKey, now);
           try {
+            let postedTs: string | undefined;
             if (tracked) {
               // Update the existing message in-place via chat.update
-              await updateProgressInPlace(task, task.progress, tracked.messageTs);
-              console.log(`[Slack] Updated progress in-place for task ${task.id.slice(0, 8)}`);
+              const result = await updateProgressInPlace(task, task.progress, tracked.messageTs);
+              if (result === "ok") {
+                console.log(`[Slack] Updated progress in-place for task ${task.id.slice(0, 8)}`);
+              } else if (result === "not_found") {
+                // The original message is gone. Clear stale tracking and
+                // repost a fresh progress message + persist the new ts.
+                console.warn(
+                  `[Slack] Persisted progress ts ${tracked.messageTs} is gone — reposting for task ${task.id.slice(0, 8)}`,
+                );
+                taskMessages.delete(task.id);
+                postedTs = await sendProgressUpdate(task, task.progress);
+                if (postedTs && task.slackChannelId && task.slackThreadTs) {
+                  taskMessages.set(task.id, {
+                    channelId: task.slackChannelId,
+                    threadTs: task.slackThreadTs,
+                    messageTs: postedTs,
+                  });
+                }
+              }
             } else {
               // No tracked message (e.g., multi-task assignment or server restart)
               // Post a new progress message and track its ts
-              const messageTs = await sendProgressUpdate(task, task.progress);
-              if (messageTs && task.slackChannelId && task.slackThreadTs) {
+              postedTs = await sendProgressUpdate(task, task.progress);
+              if (postedTs && task.slackChannelId && task.slackThreadTs) {
                 taskMessages.set(task.id, {
                   channelId: task.slackChannelId,
                   threadTs: task.slackThreadTs,
-                  messageTs,
+                  messageTs: postedTs,
                 });
               }
               console.log(`[Slack] Sent initial progress for task ${task.id.slice(0, 8)}`);
+            }
+
+            // Persist the new ts so the next restart can rebind to it.
+            // (overwrites any stale value on a `not_found` recovery)
+            if (postedTs) {
+              try {
+                setSlackMessageTracking(task.id, { slackProgressMessageTs: postedTs });
+              } catch (error) {
+                console.error(`[Slack] Failed to persist progress message ts:`, error);
+              }
             }
           } catch (error) {
             // If send fails, clear markers so we can retry
