@@ -75,6 +75,14 @@ ENV BUN_INSTALL="/home/worker/.bun"
 ENV COREPACK_HOME=/home/worker/.corepack
 RUN mkdir -p /home/worker/.corepack
 
+# Pre-create XDG dirs as worker BEFORE any subsequent USER root steps run with
+# ENV HOME=/home/worker active. Otherwise root-running tools (archil mount, etc.)
+# silently create /home/worker/.local + /home/worker/.local/state as root:root,
+# which causes Bun's MCP subprocess (running as worker) to fail:
+#   EACCES: permission denied, mkdir '/home/worker/.local/share'
+# The runtime chown in docker-entrypoint.sh is the belt; this is the suspenders.
+RUN mkdir -p /home/worker/.local/bin /home/worker/.local/share /home/worker/.local/state
+
 # Install Bun for worker user (need to set HOME explicitly in RUN)
 RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/worker/.bun/bin:$PATH"

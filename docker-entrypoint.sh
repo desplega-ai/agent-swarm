@@ -941,6 +941,16 @@ fi
 
 echo ""
 
+# Reclaim /home/worker/.local for worker before dropping privileges.
+# This entrypoint runs as root with ENV HOME=/home/worker (Dockerfile.worker:71),
+# so any root-level tool that writes XDG state (archil mount, curl-piped installers,
+# etc.) creates /home/worker/.local + /home/worker/.local/state as root:root.
+# When the worker-side Bun MCP subprocess later tries mkdir /home/worker/.local/share
+# it hits EACCES and the agent-task spawn fails — see task 19a56b2a / Slack
+# C0A4J7GB0UD/1778740280.290199. Build-time mkdir in Dockerfile.worker handles the
+# happy path; this runtime chown catches anything new that root created since.
+chown -R worker:worker /home/worker/.local 2>/dev/null || true
+
 # Run the agent using compiled binary
 echo "Starting $ROLE..."
 exec gosu worker /usr/local/bin/agent-swarm "$ROLE" "$@"
