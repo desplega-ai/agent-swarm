@@ -941,6 +941,11 @@ fi
 
 echo ""
 
+# Reclaim /home/worker/.local for worker before dropping privileges.
+# This entrypoint runs as root with HOME=/home/worker, so anything root wrote
+# into .local would otherwise block worker-side mkdir into .local/share.
+chown -R worker:worker /home/worker/.local 2>/dev/null || true
+
 # Run the agent using compiled binary
 echo "Starting $ROLE..."
 exec gosu worker /usr/local/bin/agent-swarm "$ROLE" "$@"
