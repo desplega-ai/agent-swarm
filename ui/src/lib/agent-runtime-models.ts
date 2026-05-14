@@ -68,6 +68,7 @@ const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", ...ANTHROPIC_META },
   ],
   codex: [
+    { id: "gpt-5.5", label: "GPT-5.5", ...OPENAI_META },
     { id: "gpt-5.4", label: "GPT-5.4", ...OPENAI_META },
     { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", ...OPENAI_META },
     { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", ...OPENAI_META },
@@ -212,6 +213,39 @@ export function findKnownModel(model: string | null | undefined): ModelOption | 
       providerId: meta.iconKey,
       requiredKey: meta.requiredKey,
     };
+  }
+  // Reverse-label fallback. Some adapters report a human label (e.g.
+  // pi-mono historically reported `"DeepSeek: DeepSeek V4 Flash"`) instead
+  // of a slug. Match against snapshot `name` directly, and against the
+  // suffix after the first `": "` (handles the `${vendor}: ${name}` form).
+  const byLabel = findByLabel(model);
+  if (byLabel) return byLabel;
+  return null;
+}
+
+function findByLabel(raw: string): ModelOption | null {
+  const candidates = new Set<string>();
+  candidates.add(raw);
+  const colonIdx = raw.indexOf(": ");
+  if (colonIdx >= 0) candidates.add(raw.slice(colonIdx + 2));
+  const lowered = [...candidates].map((c) => c.toLowerCase().trim());
+  for (const providerId of SNAPSHOT_ORDER) {
+    const meta = SNAPSHOT_META[providerId];
+    const cache = CACHE[providerId];
+    for (const cached of Object.values(cache.models)) {
+      const name = (cached.name ?? "").toLowerCase().trim();
+      if (!name) continue;
+      if (!lowered.includes(name)) continue;
+      return {
+        id: `${providerId}/${cached.id}`,
+        label: cached.name ?? cached.id,
+        provider: meta.label,
+        providerId: meta.iconKey,
+        requiredKey: meta.requiredKey,
+        cost: cached.cost,
+        contextWindow: cached.limit?.context,
+      };
+    }
   }
   return null;
 }

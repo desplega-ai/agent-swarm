@@ -293,6 +293,18 @@ class PiMonoSession implements ProviderSession {
     this.completionPromise = this.runSession();
   }
 
+  /**
+   * Canonical model slug for downstream reporting (latestModel, raw_log envelopes).
+   * Composes `${provider}/${id}` from the resolved pi-ai model so the UI snapshot
+   * lookup matches (e.g. `openrouter/deepseek/deepseek-v4-flash`). Falls back to
+   * the configured model string if the session didn't resolve one.
+   */
+  private reportedModel(): string {
+    const m = this.agentSession.model;
+    if (m) return `${m.provider}/${m.id}`;
+    return this.config.model;
+  }
+
   private emit(event: ProviderEvent): void {
     // Scrub secrets from raw_log / raw_stderr content before egress (log file
     // write, listener dispatch, downstream session-logs push + pretty-print).
@@ -329,7 +341,7 @@ class PiMonoSession implements ProviderSession {
                 .trim()
             : String(msg.content || "").trim();
           if (text && text !== this.lastEmittedMessage) {
-            const model = this.agentSession.model?.name ?? this.config.model;
+            const model = this.reportedModel();
             this.emit({
               type: "raw_log",
               content: JSON.stringify({
@@ -358,7 +370,7 @@ class PiMonoSession implements ProviderSession {
         break;
       }
       case "tool_execution_start": {
-        const model = this.agentSession.model?.name ?? this.config.model;
+        const model = this.reportedModel();
         this.emit({
           type: "raw_log",
           content: JSON.stringify({
@@ -491,7 +503,7 @@ class PiMonoSession implements ProviderSession {
       cacheWriteTokens: stats.tokens.cacheWrite,
       durationMs: 0, // Not directly available from SessionStats
       numTurns: stats.userMessages + stats.assistantMessages,
-      model: this.agentSession.model?.name ?? this.config.model,
+      model: this.reportedModel(),
       isError: false,
       provider: "pi",
     };
