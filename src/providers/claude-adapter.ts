@@ -1,4 +1,5 @@
-import { unlink, writeFile } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { computeContextUsed, getContextWindowSize } from "../utils/context-window";
 import { validateClaudeCredentials } from "../utils/credentials";
@@ -58,6 +59,74 @@ async function cleanupTaskFile(pid: number): Promise<void> {
   } catch {
     // File might already be deleted or never created
   }
+}
+
+/**
+ * Parse `CLAUDE_BINARY` into argv prefix tokens.
+ *
+ * Accepts a single binary name (`"claude"`, `"shannon"`), an absolute path,
+ * or a whitespace-separated command string (`"bunx @dexh/shannon"`,
+ * `"npx -y @dexh/shannon"`). Trim + split on `/\s+/`. No shell parsing, no
+ * quote handling — keep it tiny and predictable. Empty / missing → `["claude"]`.
+ *
+ * Exported for unit testing.
+ */
+export function parseClaudeBinary(raw: string | undefined): string[] {
+  const trimmed = (raw ?? "claude").trim();
+  if (trimmed === "") return ["claude"];
+  return trimmed.split(/\s+/);
+}
+
+/**
+ * Pre-seed `~/.claude.json` so the per-project trust-dialog ("Quick safety
+ * check: Is this a project you trust?") doesn't block on first run.
+ *
+ * Mirrors the onboarding-skip hack in `Dockerfile.worker` (which writes
+ * `hasCompletedOnboarding` and `bypassPermissionsModeAccepted`). When the
+ * resolved binary contains "shannon", claude runs inside tmux and shannon
+ * does NOT auto-accept the dialog, so the pane hangs forever. Writing
+ * `projects[cwd].hasTrustDialogAccepted = true` (and `hasCompletedProjectOnboarding`)
+ * tells claude-code the cwd is pre-trusted.
+ *
+ * Idempotent (no-op when already true), read-merge-write (never clobbers
+ * other keys), graceful on missing / malformed file.
+ *
+ * Exported for unit testing.
+ */
+export async function preseedClaudeTrustDialog(
+  cwd: string,
+  // Prefer `$HOME` over `homedir()` so callers in tests / sandboxed envs that
+  // override HOME get the override. Bun's `os.homedir()` caches the real
+  // passwd entry at process boot and ignores HOME mutations.
+  homeDir: string = process.env.HOME ?? homedir(),
+): Promise<void> {
+  const claudeJsonPath = join(homeDir, ".claude.json");
+  let data: Record<string, unknown> = {};
+  try {
+    const raw = await readFile(claudeJsonPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      data = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // missing or malformed — start from {}
+  }
+
+  const projects = (data.projects ?? {}) as Record<string, Record<string, unknown>>;
+  const existing = projects[cwd] ?? {};
+  if (existing.hasTrustDialogAccepted === true) {
+    // Already trusted — no-op, no write.
+    return;
+  }
+
+  projects[cwd] = {
+    ...existing,
+    hasTrustDialogAccepted: true,
+    hasCompletedProjectOnboarding: true,
+  };
+  data.projects = projects;
+
+  await writeFile(claudeJsonPath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 /**
@@ -178,7 +247,7 @@ class ClaudeSession implements ProviderSession {
     taskFilePath: string,
     taskFilePid: number,
     private sessionMcpConfig: string | null = null,
-    private claudeBinary: string = "claude",
+    private claudeBinaryArgv: readonly string[] = ["claude"],
   ) {
     this.taskFilePid = taskFilePid;
     this.contextWindowSize = getContextWindowSize(model);
@@ -217,7 +286,7 @@ class ClaudeSession implements ProviderSession {
 
   private buildCommand(): string[] {
     const cmd = [
-      this.claudeBinary,
+      ...this.claudeBinaryArgv,
       "--model",
       this.model,
       "--verbose",
@@ -518,7 +587,7 @@ class ClaudeSession implements ProviderSession {
           taskFilePath,
           this.taskFilePid,
           null,
-          this.claudeBinary,
+          this.claudeBinaryArgv,
         );
 
         // Forward events from retry to our listeners
@@ -548,20 +617,40 @@ export class ClaudeAdapter implements ProviderAdapter {
     const credType = validateClaudeCredentials(config.env || process.env);
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
 
-    // Resolve the binary that gets argv[0]. The same flags (`-p`, `--model`,
-    // `--output-format stream-json`, etc.) work across alternates; only the
-    // executable name changes. Setting `CLAUDE_BINARY=shannon` swaps in
-    // dexhorthy/shannon, which drives `claude` interactively in tmux to stay on
-    // the subscription credit pool after the 2026-06-15 programmatic-credit
-    // split. See `runbooks/harness-providers.md` § "Alt-binary: shannon".
-    const claudeBinary = process.env.CLAUDE_BINARY || "claude";
+    // Resolve the argv prefix. Same flags (`-p`, `--model`, ...) work across
+    // alternates; only argv[0..n] changes. `CLAUDE_BINARY` accepts a single
+    // binary (`"shannon"`, `"/usr/local/bin/shannon"`) or a whitespace-separated
+    // command string (`"bunx @dexh/shannon"`, `"npx -y @dexh/shannon"`).
+    // Setting it to anything containing `shannon` opts into the dexhorthy/shannon
+    // variant, which drives `claude` interactively in tmux to stay on the
+    // subscription credit pool after the 2026-06-15 programmatic-credit split.
+    // See `docs-site/.../shannon-experimental.mdx` for the user-facing guide
+    // and `runbooks/harness-providers.md` for engineering notes.
+    const claudeBinaryRaw = (process.env.CLAUDE_BINARY ?? "claude").trim();
+    const claudeBinaryArgv = parseClaudeBinary(claudeBinaryRaw);
+    const isShannon = claudeBinaryRaw.toLowerCase().includes("shannon");
 
     // Fail fast: shannon shells out to tmux. If it's missing, surface a
     // clear error here rather than letting the spawn fail opaquely.
-    if (claudeBinary.toLowerCase().includes("shannon") && !Bun.which("tmux")) {
+    if (isShannon && !Bun.which("tmux")) {
       throw new Error(
         "CLAUDE_BINARY=shannon requires 'tmux' on PATH (install via apt/brew). See runbooks/harness-providers.md.",
       );
+    }
+
+    // Shannon drives `claude` in tmux — claude's per-project trust dialog
+    // (first-run "Is this a project you trust?") hangs the pane because shannon
+    // doesn't auto-accept it. Pre-seed `~/.claude.json` so the dialog never
+    // prompts. Idempotent; no-op when already trusted. Engineering rationale:
+    // `runbooks/harness-providers.md` § "Trust-dialog pre-seed".
+    if (isShannon) {
+      try {
+        await preseedClaudeTrustDialog(config.cwd);
+      } catch (err) {
+        console.warn(
+          `\x1b[33m[claude]\x1b[0m Failed to pre-seed trust dialog for ${config.cwd}: ${err}`,
+        );
+      }
     }
 
     const taskFilePid = process.pid;
@@ -597,7 +686,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       taskFilePath,
       taskFilePid,
       sessionMcpConfig,
-      claudeBinary,
+      claudeBinaryArgv,
     );
   }
 
