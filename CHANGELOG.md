@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Shannon-variant `CLAUDE_BINARY` is now first-class** (#482) — the existing-but-undocumented `CLAUDE_BINARY` env var is formalized as the opt-in for [`@dexh/shannon`](https://github.com/dexhorthy/shannon), which drives `claude` interactively in `tmux` to keep swarm runs on the Max/Pro subscription credit pool after Anthropic's 2026-06-15 programmatic-credit split. Accepts a single binary (`shannon`), an absolute path, or a whitespace-separated command string (`bunx @dexh/shannon`, `npx -y @dexh/shannon`); whitespace-split into argv tokens before the swarm appends the usual claude flags. New `parseClaudeBinary` and `resolveClaudeBinary` helpers in `src/providers/claude-adapter.ts`. Reloadable via `swarm_config` overlay (precedence: repo > agent > global > env > `claude`) so operators can flip a worker via `set-config CLAUDE_BINARY=...` without a container restart. Fail-fast `Bun.which("tmux")` check when the resolved binary contains `shannon`. Pre-seeds `~/.claude.json` (`projects[cwd].hasTrustDialogAccepted = true`) at session-create so the first-run trust dialog doesn't hang the tmux pane. New user-facing guide at [`/docs/guides/shannon-experimental`](/docs/guides/shannon-experimental); engineering notes in `runbooks/harness-providers.md`.
+- **`tmux` apt-installed in `Dockerfile.worker`** (#482) — ships in the worker image by default so `CLAUDE_BINARY="bunx @dexh/shannon"` works out of the box. Single apt list addition, same `RUN` block — no new layer.
+
+### Fixed
+- **`Dockerfile.worker` pre-creates `/home/worker/.local/{bin,share,state}` as `worker`** (#483) — entrypoint also `chown -R`s `/home/worker/.local` to `worker:worker` right before `exec gosu worker`. Fixes `EACCES: permission denied, mkdir '/home/worker/.local/share'` when the Bun MCP subprocess spawns inside reviewer/codex/Bun workers, caused by root-owned `.local` directories left behind by root-level steps that obey XDG (notably `archil mount`) while `ENV HOME=/home/worker` is still active under `USER root`.
+- **`pi-mono` adapter model handling** (`2650a54c`) — fixes model resolution in `src/providers/pi-mono-adapter.ts`.
+
 ## [1.79.1] - 2026-05-13
 
 ### Added
