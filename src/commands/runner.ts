@@ -1892,6 +1892,10 @@ async function spawnProviderProcess(
   let lastContextPostTime = 0;
   const CONTEXT_THROTTLE_MS = 30_000;
 
+  // Phase 10: accumulate per-turn output tokens across the session so progress
+  // snapshots carry a real `cumulativeOutputTokens` (was 0 until completion).
+  let cumulativeProgressOutputTokens = 0;
+
   session.onEvent((event) => {
     switch (event.type) {
       case "session_init":
@@ -2016,6 +2020,17 @@ async function spawnProviderProcess(
         const now2 = Date.now();
         if (now2 - lastContextPostTime >= CONTEXT_THROTTLE_MS) {
           lastContextPostTime = now2;
+          // Phase 10: track cumulative output tokens on the worker side and
+          // forward them on every progress snapshot. Previously these were
+          // 0 until the `completion` snapshot at session end, so the
+          // dashboard's "tokens consumed" line was a flat zero throughout.
+          cumulativeProgressOutputTokens += event.outputTokens ?? 0;
+          // For inputs we don't get a per-turn delta on the `context_usage`
+          // event (the unified formula bakes it into contextUsedTokens), so
+          // we report the latest contextUsedTokens as the running input proxy.
+          // The DB column is `cumulativeInputTokens` but the semantic on
+          // progress rows is "running used-tokens" — both inputs and outputs
+          // contribute, exact decomposition lives on the cost row.
           fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
             method: "POST",
             headers: {
@@ -2029,6 +2044,9 @@ async function spawnProviderProcess(
               contextUsedTokens: event.contextUsedTokens,
               contextTotalTokens: event.contextTotalTokens,
               contextPercent: event.contextPercent,
+              cumulativeInputTokens: event.contextUsedTokens,
+              cumulativeOutputTokens: cumulativeProgressOutputTokens,
+              contextFormula: event.contextFormula,
             }),
           }).catch(() => {});
         }
