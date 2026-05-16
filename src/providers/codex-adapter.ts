@@ -523,6 +523,11 @@ class CodexSession implements ProviderSession {
     const inputTokens = usage?.input_tokens ?? 0;
     const cachedInputTokens = usage?.cached_input_tokens ?? 0;
     const outputTokens = usage?.output_tokens ?? 0;
+    // Phase 6: Codex SDK surfaces `reasoning_output_tokens` separately from
+    // `output_tokens` for reasoning models (gpt-5.3-codex, gpt-5.4 thinking).
+    // Pre-fix this number was read into `lastUsage` but never reached
+    // `CostData`, so reasoning-heavy sessions silently under-billed.
+    const reasoningOutputTokens = usage?.reasoning_output_tokens ?? 0;
     return {
       // Runner overrides with its own session id.
       sessionId: "",
@@ -540,9 +545,12 @@ class CodexSession implements ProviderSession {
       ),
       inputTokens,
       outputTokens,
+      reasoningOutputTokens,
       cacheReadTokens: cachedInputTokens,
-      // Codex does not distinguish cache writes in its Usage payload.
-      cacheWriteTokens: 0,
+      // Phase 6: undefined (NOT 0). Codex SDK can't honestly report cache
+      // writes; leaving it undefined preserves that distinction in the DB
+      // instead of mixing genuine zeros with "unknown".
+      cacheWriteTokens: undefined,
       durationMs: Date.now() - this.startedAt,
       numTurns: this.numTurns,
       model: this.resolvedModel,
