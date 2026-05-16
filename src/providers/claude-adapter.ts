@@ -465,6 +465,10 @@ class ClaudeSession implements ProviderSession {
         this._sessionId = json.session_id;
         this.emit({ type: "session_init", sessionId: json.session_id, provider: "claude" });
         if (json.model) {
+          // Phase 4: the CLI's `init.model` reflects the actual model after any
+          // backoff/fallback. Update `this.model` so subsequent CostData rows
+          // (and the pricing lookup the API runs) use the right rate.
+          this.model = json.model;
           this.contextWindowSize = getContextWindowSize(json.model);
         }
       }
@@ -487,6 +491,10 @@ class ClaudeSession implements ProviderSession {
               output_tokens?: number;
               cache_read_input_tokens?: number;
               cache_creation_input_tokens?: number;
+              // Phase 4: claude extended-thinking flows surface this — the
+              // CLI emits `thinking_input_tokens` when the model produced
+              // thinking content during the turn.
+              thinking_input_tokens?: number;
             }
           | undefined;
 
@@ -499,8 +507,12 @@ class ClaudeSession implements ProviderSession {
           outputTokens: usage?.output_tokens ?? 0,
           cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
           cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+          // Phase 4: surface thinking tokens; previously dropped on the floor.
+          thinkingTokens: usage?.thinking_input_tokens ?? 0,
           durationMs: json.duration_ms || 0,
-          numTurns: json.num_turns || 1,
+          // Phase 4: honest null when the CLI omits num_turns instead of a
+          // faked `1` (would have under-counted in dashboards).
+          numTurns: json.num_turns ?? null,
           model: this.model,
           isError: json.is_error || false,
           provider: "claude",
