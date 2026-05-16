@@ -788,6 +788,11 @@ class DevinSession implements ProviderSession {
       numTurns: this.pollCount,
       model: "devin",
       isError,
+      // Phase 3 — tag CostData so the API recompute path engages. Devin's
+      // pricing is ACU-based (one row under `provider='devin', model='*',
+      // token_class='acu'`); the harness USD value above is already correct,
+      // but tagging the row exposes its source to the UI badge.
+      provider: "devin",
     };
   }
 }

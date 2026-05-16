@@ -187,6 +187,8 @@ function emptyCost(config: ProviderSessionConfig, model: string): CostData {
     numTurns: 0,
     model,
     isError: false,
+    // Phase 3 — tag every emitted CostData so the API's recompute path engages.
+    provider: "claude-managed",
   };
 }
 

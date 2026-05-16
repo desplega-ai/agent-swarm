@@ -345,6 +345,8 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
       expect(resultEvent.cost.totalCostUsd).toBeGreaterThanOrEqual(0);
       expect(Number.isFinite(resultEvent.cost.totalCostUsd)).toBe(true);
       expect(resultEvent.output).toBe("Hello from managed agent");
+      // Phase 3 — provider tag is required so the API recompute path engages.
+      expect(resultEvent.cost.provider).toBe("claude-managed");
     }
 
     // ProviderResult.
