@@ -53,6 +53,7 @@ import type {
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { CostSourceBadge } from "@/components/shared/cost-source-badge";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
@@ -259,10 +260,15 @@ function TaskCostSection({
     const inputTokens = costs.reduce((sum, c) => sum + c.inputTokens, 0);
     const outputTokens = costs.reduce((sum, c) => sum + c.outputTokens, 0);
     const cacheReadTokens = costs.reduce((sum, c) => sum + c.cacheReadTokens, 0);
-    const cacheWriteTokens = costs.reduce((sum, c) => sum + c.cacheWriteTokens, 0);
+    const cacheWriteTokens = costs.reduce((sum, c) => sum + (c.cacheWriteTokens ?? 0), 0);
     const totalDurationMs = costs.reduce((sum, c) => sum + c.durationMs, 0);
-    const totalTurns = costs.reduce((sum, c) => sum + c.numTurns, 0);
+    const totalTurns = costs.reduce((sum, c) => sum + (c.numTurns ?? 0), 0);
     const models = [...new Set(costs.map((c) => c.model))];
+    // Phase 12b — collapse the per-row costSource into a single badge for
+    // the aggregate. If every row agrees, show that. If they differ, show
+    // 'harness' (the weakest claim) so we don't over-state precision.
+    const sources = new Set(costs.map((c) => c.costSource));
+    const aggregateCostSource = sources.size === 1 ? Array.from(sources)[0] : ("harness" as const);
     return {
       totalCost,
       inputTokens,
@@ -273,6 +279,7 @@ function TaskCostSection({
       totalTurns,
       models,
       sessions: costs.length,
+      costSource: aggregateCostSource,
     };
   }, [costs]);
 
@@ -297,8 +304,9 @@ function TaskCostSection({
     <DetailPageSection title="Session Cost">
       <div className="space-y-1">
         <MetaRow icon={DollarSign} label="Cost">
-          <span className="text-xs font-semibold">
+          <span className="text-xs font-semibold inline-flex items-center gap-1.5">
             {formatCost(stats.totalCost, { precision: 4 })}
+            <CostSourceBadge source={stats.costSource} />
           </span>
         </MetaRow>
         {isDevin ? (
@@ -433,8 +441,18 @@ function TaskContextSection({
           </span>
         </div>
         <MetaRow icon={Cpu} label="Used">
-          <span className="text-xs font-mono">
+          <span className="text-xs font-mono inline-flex items-center gap-1.5">
             {formatTokens(usedTokens)} / {formatTokens(totalTokens)}
+            {latestSnapshot?.contextFormula && latestSnapshot.contextFormula !== "unknown" && (
+              <Badge
+                variant="outline"
+                size="tag"
+                className="text-muted-foreground"
+                title={`Computed via formula: ${latestSnapshot.contextFormula}`}
+              >
+                {latestSnapshot.contextFormula}
+              </Badge>
+            )}
           </span>
         </MetaRow>
         {summary.peakContextPercent != null && (
