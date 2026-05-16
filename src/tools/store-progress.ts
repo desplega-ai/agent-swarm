@@ -3,7 +3,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import {
   completeTask,
-  createSessionCost,
   createTaskExtended,
   failTask,
   getAgentById,
@@ -24,32 +23,12 @@ import { AgentTaskSchema } from "@/types";
 import "./templates";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
-// Schema for optional cost data that agents can self-report.
-// In practice the harness adapter (claude/codex/opencode/etc.) is the
-// authoritative source of cost data — it gets written via
-// POST /api/session-costs from the runner. Agents calling store-progress
-// rarely know the real numbers and have been observed echoing the example
-// values from this schema (e.g. model="opus" on a gpt-5-nano run). The
-// handler below silently drops payloads where every numeric field is zero.
-const CostDataSchema = z
-  .object({
-    totalCostUsd: z.number().min(0).describe("Total cost in USD"),
-    inputTokens: z.number().int().min(0).optional().describe("Input tokens used"),
-    outputTokens: z.number().int().min(0).optional().describe("Output tokens used"),
-    cacheReadTokens: z.number().int().min(0).optional().describe("Cache read tokens"),
-    cacheWriteTokens: z.number().int().min(0).optional().describe("Cache write tokens"),
-    durationMs: z.number().int().min(0).optional().describe("Duration in milliseconds"),
-    numTurns: z.number().int().min(1).optional().describe("Number of turns/iterations"),
-    model: z
-      .string()
-      .optional()
-      .describe(
-        "Model identifier reported by the agent (only set if the agent has the real ID; do NOT echo the schema example).",
-      ),
-  })
-  .describe(
-    "Optional self-reported cost data. The harness adapter writes the authoritative cost record automatically — only pass this if you have real, non-zero numbers from a model that doesn't surface usage to the harness.",
-  );
+// Phase 11: the `cost` / `costData` field was removed from this tool's input
+// schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the
+// sole writers of `session_costs` rows via `POST /api/session-costs`. Agents
+// calling `store-progress` rarely knew the real numbers and historically
+// echoed the schema example, producing noise rows keyed `mcp-<taskId>-<ts>`
+// that double-counted alongside the harness's authoritative entry.
 
 export const registerStoreProgressTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -72,9 +51,10 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .string()
           .optional()
           .describe("The reason for failure (used when failing)."),
-        costData: CostDataSchema.optional().describe(
-          "Optional cost data for tracking session costs. When provided, a session cost record will be created linked to this task.",
-        ),
+        // Phase 11: `costData` removed. The harness adapter is the sole
+        // writer of `session_costs` (see POST /api/session-costs in the
+        // runner). If a payload still includes the field, Zod's
+        // `unknownKeys` default drops it silently.
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -89,7 +69,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ),
       }),
     },
-    async ({ taskId, progress, status, output, failureReason, costData }, requestInfo, _meta) => {
+    async ({ taskId, progress, status, output, failureReason }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return {
           content: [
@@ -254,35 +234,11 @@ export const registerStoreProgressTool = (server: McpServer) => {
           }
         }
 
-        // Store cost data only if the agent provided non-trivial numbers.
-        // Agents observed copying the schema example (e.g. model="opus"
-        // on a gpt-5-nano run) with all-zero token/cost fields, producing
-        // duplicate noise rows in session_costs alongside the harness's
-        // authoritative entry. Drop those silently.
-        const hasRealCost =
-          costData &&
-          (costData.totalCostUsd > 0 ||
-            (costData.inputTokens ?? 0) > 0 ||
-            (costData.outputTokens ?? 0) > 0 ||
-            (costData.cacheReadTokens ?? 0) > 0 ||
-            (costData.cacheWriteTokens ?? 0) > 0);
-
-        if (hasRealCost && requestInfo.agentId) {
-          createSessionCost({
-            sessionId: `mcp-${taskId}-${Date.now()}`, // Generate unique session ID for MCP-based tasks
-            taskId,
-            agentId: requestInfo.agentId,
-            totalCostUsd: costData.totalCostUsd,
-            inputTokens: costData.inputTokens ?? 0,
-            outputTokens: costData.outputTokens ?? 0,
-            cacheReadTokens: costData.cacheReadTokens ?? 0,
-            cacheWriteTokens: costData.cacheWriteTokens ?? 0,
-            durationMs: costData.durationMs ?? 0,
-            numTurns: costData.numTurns ?? 1,
-            model: costData.model ?? "unknown",
-            isError: status === "failed",
-          });
-        }
+        // Phase 11: removed the per-call `session_costs` insert. The harness
+        // adapter is the sole writer of cost rows now (via the runner's
+        // `POST /api/session-costs`); store-progress historically wrote a
+        // duplicate row keyed `mcp-<taskId>-<ts>` whenever an agent
+        // hallucinated a `costData` payload.
 
         return {
           success: true,
