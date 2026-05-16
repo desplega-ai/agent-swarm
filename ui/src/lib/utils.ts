@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { formatCost } from "./cost-format";
 
 /**
  * Merge Tailwind CSS classes with clsx
@@ -133,15 +134,13 @@ export function formatCompactNumber(num: number): string {
 }
 
 /**
- * Format a currency value (max 3 digits display)
+ * Phase 12a — `formatCurrency` is now a thin wrapper around the shared
+ * `formatCost` utility with `precision: 'compact'`. Prefer the new
+ * `formatCost` directly when writing new code (or pick a different
+ * precision preset); this export stays for legacy callers.
  */
 export function formatCurrency(amount: number): string {
-  if (amount >= 1_000_000) return `$${(amount / 1_000_000).toFixed(1)}M`;
-  if (amount >= 1000) return `$${(amount / 1000).toFixed(1)}K`;
-  if (amount >= 100) return `$${Math.round(amount)}`;
-  if (amount >= 10) return `$${amount.toFixed(1)}`;
-  if (amount >= 1) return `$${amount.toFixed(2)}`;
-  return `$${amount.toFixed(3)}`;
+  return formatCost(amount, { precision: "compact" });
 }
 
 /**

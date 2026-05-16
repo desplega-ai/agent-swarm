@@ -75,6 +75,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
 import { progressBarTone } from "@/lib/percent-progress-tone";
@@ -296,7 +297,9 @@ function TaskCostSection({
     <DetailPageSection title="Session Cost">
       <div className="space-y-1">
         <MetaRow icon={DollarSign} label="Cost">
-          <span className="text-xs font-semibold">${stats.totalCost.toFixed(4)}</span>
+          <span className="text-xs font-semibold">
+            {formatCost(stats.totalCost, { precision: 4 })}
+          </span>
         </MetaRow>
         {isDevin ? (
           <MetaRow icon={Zap} label="ACUs">

@@ -6,6 +6,7 @@ import type { AgentStatus } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { formatCost } from "@/lib/cost-format";
 
 // Tabular fallback for the dashboard agent canvas (Phase 5).
 //
@@ -28,10 +29,7 @@ interface RowVm {
   cost24h: number;
 }
 
-function formatCost(value: number): string {
-  if (value <= 0) return "$0.00";
-  return `$${value.toFixed(value < 1 ? 4 : 2)}`;
-}
+// Phase 12a — use the shared `formatCost` utility (auto precision).
 
 export function AgentTable({ rows, className }: AgentTableProps) {
   const navigate = useNavigate();

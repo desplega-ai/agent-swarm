@@ -256,12 +256,14 @@ function UnsupportedApiNotice({
   );
 }
 
+// Phase 12a — call the shared `formatCost` utility and adapt its return type
+// (this component's call sites expect `null` for missing values rather than
+// the shared utility's placeholder string).
+import { formatCost as sharedFormatCost } from "@/lib/cost-format";
+
 function formatCost(value: number | undefined): string | null {
   if (value === undefined || value === null) return null;
-  if (value === 0) return "$0";
-  if (value < 0.01) return `$${value.toFixed(4)}`;
-  if (value < 1) return `$${value.toFixed(3)}`;
-  return `$${value.toFixed(2)}`;
+  return sharedFormatCost(value);
 }
 
 function formatContext(tokens: number | undefined): string | null {
