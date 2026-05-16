@@ -119,6 +119,7 @@ class OpencodeSession implements ProviderSession {
   // leaving agent_tasks.provider/.model NULL. Buffer + flush on first attach.
   private pendingEvents: ProviderEvent[] = [];
   private completionResolve!: (result: ProviderResult) => void;
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: reserved for future error-propagation paths; symmetric with completionResolve.
   private completionReject!: (err: Error) => void;
   private completionPromise: Promise<ProviderResult>;
   private server: { url: string; close(): void };

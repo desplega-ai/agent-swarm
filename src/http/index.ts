@@ -250,6 +250,17 @@ try {
   throw err;
 }
 
+// Phase 2 of the cost-tracking plan: project the vendored models.dev snapshot
+// into pricing rows at boot. Lazy `getDb()` would also work, but doing it
+// here surfaces the count in the boot log and makes the API ready to recompute
+// USD before the first POST /api/session-costs lands.
+try {
+  const { seedPricingFromModelsDev } = await import("../be/seed-pricing");
+  seedPricingFromModelsDev();
+} catch (err) {
+  console.error("[startup] Failed to seed pricing rows:", err);
+}
+
 // business-use initialization (no-op if envs not set)
 initialize();
 

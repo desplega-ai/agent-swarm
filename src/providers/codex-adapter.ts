@@ -66,12 +66,12 @@ import {
   type WebSearchItem,
 } from "@openai/codex-sdk";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
-import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
   computeContextUsedUnified,
 } from "../utils/context-window";
+import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md";
 import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from "./codex-models";
