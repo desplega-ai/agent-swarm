@@ -67,6 +67,11 @@ import {
 } from "@openai/codex-sdk";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
+import {
+  CONTEXT_FORMULA,
+  clampContextPercent,
+  computeContextUsedUnified,
+} from "../utils/context-window";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md";
 import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from "./codex-models";
@@ -768,36 +773,34 @@ class CodexSession implements ProviderSession {
       case "turn.completed": {
         this.lastUsage = event.usage;
         if (event.usage) {
-          // The Codex SDK reports `input_tokens` as the SUM of every prompt
-          // sent to the model across the entire turn (one `codex exec` call
-          // can fan out to dozens of model invocations as MCP tools roundtrip
-          // back and forth). For chatty turns this number routinely exceeds
-          // the model's context window, even though no single model call did.
+          // Phase 9: switch from the codex-specific "peak proxy" formula
+          // (`uncached_input + output`) to the unified
+          // `input + cache_read + cache_create + output` so cross-provider
+          // percent comparisons are meaningful.
           //
-          // For peak-context reporting we want a proxy for "the largest
-          // single-call prompt". We approximate it as the uncached portion
-          // (cached tokens are reused across calls so they count once toward
-          // the actual peak), plus the output. This isn't perfect — the SDK
-          // would have to expose per-call stats for that — but it's far more
-          // representative than `(input + output) / window` which clamps to
-          // 1.0 the moment a turn makes any meaningful tool history.
-          const uncachedInput = Math.max(
-            0,
-            event.usage.input_tokens - event.usage.cached_input_tokens,
-          );
-          const peakProxy = uncachedInput + event.usage.output_tokens;
-          // `contextPercent` is on a 0-100 scale across all providers — claude
-          // emits `(used / total) * 100`, pi-mono passes through `usage.percent`
-          // which is already 0-100. The dashboard at
-          // ui/src/pages/tasks/[id]/page.tsx renders it via `.toFixed(0)`
-          // expecting an integer percent, so a 0-1 fraction would render as
-          // "0%" instead of e.g. "40%".
+          // Note: Codex's `input_tokens` already includes cached_input_tokens
+          // (it's the TOTAL across the turn — see the longer comment that
+          // used to live here, preserved in git history). We therefore pass
+          // `cacheReadTokens: 0` to avoid double-counting the cached portion.
+          // The trade-off the old comment flagged is still real — a chatty
+          // turn can over-report because `input_tokens` is the SUM across
+          // every model call in the turn — but having the SAME formula
+          // everywhere wins over the local optimum. Clamp catches the
+          // chatty-turn overshoot at 100%. Old rows tagged 'peak-proxy'
+          // remain in `task_context_snapshots`; the UI surfaces both.
+          const contextUsed = computeContextUsedUnified({
+            inputTokens: event.usage.input_tokens,
+            cacheReadTokens: 0,
+            cacheCreateTokens: 0,
+            outputTokens: event.usage.output_tokens,
+          });
           this.emit({
             type: "context_usage",
-            contextUsedTokens: peakProxy,
+            contextUsedTokens: contextUsed,
             contextTotalTokens: this.contextWindow,
-            contextPercent: Math.min(100, (peakProxy / this.contextWindow) * 100),
+            contextPercent: clampContextPercent(contextUsed, this.contextWindow) ?? 0,
             outputTokens: event.usage.output_tokens,
+            contextFormula: CONTEXT_FORMULA,
           });
         }
         break;

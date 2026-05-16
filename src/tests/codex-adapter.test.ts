@@ -191,16 +191,16 @@ describe("CodexSession event mapping", () => {
       expect(messages[0].content).toBe("Hello from codex");
     }
 
-    // context_usage event fired with the *uncached + output* peak proxy
-    // (input=100, cached=25, output=50 → uncached=75 → peak=125)
-    // contextPercent is on a 0-100 scale (claude/pi convention).
+    // Phase 9: unified `input + output` formula (Codex `input_tokens` already
+    // includes cached input, so we don't add cache_read separately).
+    // input=100 + output=50 → contextUsed=150.
     const contextUsage = emitted.find((e) => e.type === "context_usage");
     expect(contextUsage).toBeDefined();
     if (contextUsage && contextUsage.type === "context_usage") {
-      expect(contextUsage.contextUsedTokens).toBe(125);
+      expect(contextUsage.contextUsedTokens).toBe(150);
       expect(contextUsage.contextTotalTokens).toBe(200_000);
-      // 125 / 200_000 × 100 = 0.0625
-      expect(contextUsage.contextPercent).toBeCloseTo((125 / 200_000) * 100, 6);
+      expect(contextUsage.contextPercent).toBeCloseTo((150 / 200_000) * 100, 6);
+      expect(contextUsage.contextFormula).toBe("input-cache-output");
     }
 
     // result event is final and non-error, with cost computed from token counts
@@ -225,14 +225,15 @@ describe("CodexSession event mapping", () => {
     expect(result.sessionId).toBe("thread-abc");
   });
 
-  test("chatty turn: peakContextPercent uses uncached + output, not raw input_tokens", async () => {
-    // Reproduces the verify-plan finding: a chatty turn where the SDK reports
-    // input_tokens far in excess of the model's context window because the
-    // total represents the SUM of every prompt across all model invocations
-    // in the turn (with cache reuses billed at every roundtrip). Without the
-    // peak-proxy fix this would clamp `contextPercent` to 1.0 even though no
-    // single model call hit the limit. Use realistic numbers from the actual
-    // E2E lead transcript captured during verification.
+  test("Phase 9: chatty turn clamps contextPercent to 100% under the unified formula", async () => {
+    // Phase 9 deliberately swapped Codex's per-adapter peak-proxy formula
+    // (`(input - cached) + output`) for the unified `input + output` formula
+    // shared with every other provider. The trade-off: a chatty Codex turn
+    // — where `input_tokens` is the SUM across every model call in the turn
+    // — over-reports compared to the peak-proxy variant. The clamp at 100%
+    // keeps the gauge sensible; downstream consumers reading the new
+    // `contextFormula='input-cache-output'` tag know it's apples-to-apples
+    // across providers. Numbers below are from the verify-plan transcript.
     const agentMsg: AgentMessageItem = {
       id: "msg-1",
       type: "agent_message",
@@ -262,12 +263,12 @@ describe("CodexSession event mapping", () => {
     const contextUsage = emitted.find((e) => e.type === "context_usage");
     expect(contextUsage).toBeDefined();
     if (contextUsage && contextUsage.type === "context_usage") {
-      // peak proxy = (357142 - 278912) + 2156 = 78230 + 2156 = 80386
-      expect(contextUsage.contextUsedTokens).toBe(80386);
+      // Phase 9 unified: input + output = 357142 + 2156 = 359298 (above 200k).
+      expect(contextUsage.contextUsedTokens).toBe(359298);
       expect(contextUsage.contextTotalTokens).toBe(200_000);
-      // 80386 / 200000 × 100 = 40.193 — on the 0-100 scale, NOT clamped to 100
-      expect(contextUsage.contextPercent).toBeCloseTo(40.193, 2);
-      expect(contextUsage.contextPercent).toBeLessThan(100);
+      // Above 100% raw → clamped to exactly 100.
+      expect(contextUsage.contextPercent).toBe(100);
+      expect(contextUsage.contextFormula).toBe("input-cache-output");
     }
 
     // Cost still uses the full input_tokens — billing semantics are

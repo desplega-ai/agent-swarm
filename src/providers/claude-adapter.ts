@@ -1,7 +1,12 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { computeContextUsed, getContextWindowSize } from "../utils/context-window";
+import {
+  CONTEXT_FORMULA,
+  clampContextPercent,
+  computeContextUsedUnified,
+  getContextWindowSize,
+} from "../utils/context-window";
 import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
@@ -551,18 +556,26 @@ class ClaudeSession implements ProviderSession {
           }
         }
 
-        // Context usage extraction from assistant message usage
+        // Context usage extraction from assistant message usage.
+        // Phase 9: unified `input + cache + output` formula across every
+        // provider so cross-provider percent comparisons are meaningful.
         if (json.message.usage) {
           const usage = json.message.usage;
-          const contextUsed = computeContextUsed(usage);
+          const contextUsed = computeContextUsedUnified({
+            inputTokens: usage.input_tokens,
+            cacheReadTokens: usage.cache_read_input_tokens,
+            cacheCreateTokens: usage.cache_creation_input_tokens,
+            outputTokens: usage.output_tokens,
+          });
           const contextTotal = this.contextWindowSize;
 
           this.emit({
             type: "context_usage",
             contextUsedTokens: contextUsed,
             contextTotalTokens: contextTotal,
-            contextPercent: contextTotal > 0 ? (contextUsed / contextTotal) * 100 : 0,
+            contextPercent: clampContextPercent(contextUsed, contextTotal) ?? 0,
             outputTokens: usage.output_tokens ?? 0,
+            contextFormula: CONTEXT_FORMULA,
           });
         }
       }
