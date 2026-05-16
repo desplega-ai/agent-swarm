@@ -103,6 +103,12 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Wraps `@openai/codex-sdk` `Codex` / `Thread`; `thread.runStreamed()` yields `ThreadEvent` async iterator | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
 
+### Cost & context tracking
+
+Every adapter emits one `CostData` row per CLI invocation and one or more `context_usage` events per session. The dollar value is recomputed server-side against the seeded `pricing` table (Phase 2 of the cost-tracking plan); the resulting `costSource` enum is surfaced in the UI. The unified `input + cache + output` context formula (Phase 9) replaces every adapter's previous per-provider arithmetic so cross-provider percent comparisons make sense.
+
+Full story: [Cost & context computation](./cost-and-context-computation).
+
 All four are wired together by the factory at [`src/providers/index.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/index.ts):
 
 ```ts

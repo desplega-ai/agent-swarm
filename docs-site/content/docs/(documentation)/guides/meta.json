@@ -6,6 +6,7 @@
     "secrets-encryption",
     "harness-configuration",
     "harness-providers",
+    "cost-and-context-computation",
     "shannon-experimental",
     "worker-credential-recovery",
     "provider-auth",
