@@ -1,5 +1,5 @@
 [test]
 coverage = false
-maxConcurrency = 4
+maxConcurrency = 1
 retry = 3
 preload = ["./src/tests/preload.ts"]
