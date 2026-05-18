@@ -242,6 +242,15 @@ class OpencodeSession implements ProviderSession {
       case "message.updated": {
         const msg = ev.properties.info;
         if (!isAssistantMessage(msg) || msg.sessionID !== this._sessionId) break;
+        // Phase 9 fix: opencode fires `message.updated` repeatedly during a single
+        // assistant turn (streaming text deltas, tool transitions, etc.) and only
+        // populates `tokens`/`cost` on the FINAL update once `time.completed` is
+        // set. Accumulating on every event would either no-op (zero tokens) or —
+        // if opencode ever back-fills intermediate snapshots — multi-count. Gate
+        // the accumulator AND the context emit on the finalized signal so both
+        // paths see the same canonical "this turn is done" moment.
+        const messageFinalized = msg.time?.completed != null;
+        if (!messageFinalized) break;
         // Accumulate cost from each completed assistant message ("step")
         this.totalCostUsd += msg.cost;
         this.inputTokens += msg.tokens?.input ?? 0;
@@ -252,8 +261,12 @@ class OpencodeSession implements ProviderSession {
         if (!this.model && msg.modelID) this.model = msg.modelID;
 
         // Emit context_usage so the runner can POST /api/tasks/:id/context
-        // (drives the dashboard's context-usage progress bar) and the
-        // dashboard's activity timeline shows per-turn progress.
+        // (drives the dashboard's context-usage progress bar). The runner-side
+        // throttle (CONTEXT_THROTTLE_MS = 30s) means the FIRST emit wins for any
+        // short task — so this MUST carry real numbers, not the zero-tokens
+        // placeholder opencode sends on intermediate streaming updates. The
+        // `time.completed` gate above (in the accumulator block) guarantees we
+        // only land here for finalized messages.
         const turnInput = msg.tokens?.input ?? 0;
         const turnOutput = msg.tokens?.output ?? 0;
         const turnCacheRead = msg.tokens?.cache?.read ?? 0;
@@ -263,7 +276,7 @@ class OpencodeSession implements ProviderSession {
         // output and slightly mis-counted vs every other adapter).
         const contextUsed = turnInput + turnCacheRead + turnCacheWrite + turnOutput;
         const contextTotal = getContextWindowSize(this.model || msg.modelID || "default");
-        if (contextTotal > 0) {
+        if (contextTotal > 0 && contextUsed > 0) {
           this.emit({
             type: "context_usage",
             contextUsedTokens: contextUsed,
