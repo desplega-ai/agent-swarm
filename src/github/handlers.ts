@@ -1,4 +1,5 @@
-import { failTask, findTaskByVcs, getAllAgents, resolveUser } from "../be/db";
+import { failTask, findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
+import { findUserByExternalId } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { githubContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -139,6 +140,47 @@ function findLeadAgent() {
   return agents.find((a) => a.isLead) ?? null;
 }
 
+// ── Identity resolution ──
+
+const UNMAPPED_NAMESPACE = "integration:unmapped:github";
+const UNMAPPED_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+/**
+ * Resolve a GitHub webhook sender to a `users.id`.
+ *
+ * Per Q17.A: GitHub never exposes email reliably via webhook or App-installation
+ * token, so there is NO email auto-link cascade. The only paths are:
+ *   1. Fast path — `findUserByExternalId('github', sender.login)`.
+ *   2. Miss — record an unmapped tracker entry (kv) for operator triage on
+ *      the People → Unmapped tab.
+ *
+ * Returns `undefined` when no mapping exists — callers pass that straight to
+ * `requestedByUserId`.
+ */
+function resolveGitHubSender(
+  login: string,
+  sampleEventType: string,
+  sampleContext: string,
+): string | undefined {
+  const existing = findUserByExternalId("github", login);
+  if (existing) return existing.id;
+
+  // No mapping → unmapped tracker.
+  upsertKv({
+    namespace: UNMAPPED_NAMESPACE,
+    key: `${login}:meta`,
+    value: {
+      lastSeenAt: new Date().toISOString(),
+      sampleEventType,
+      sampleContext: sampleContext.slice(0, 100),
+    },
+    valueType: "json",
+    expiresAt: Date.now() + UNMAPPED_TTL_MS,
+  });
+  incrKv(UNMAPPED_NAMESPACE, `${login}:count`, 1);
+  return undefined;
+}
+
 /**
  * Handle pull_request events (opened, edited)
  */
@@ -156,7 +198,11 @@ export async function handlePullRequest(
   } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
+  const requestedByUserId = resolveGitHubSender(
+    sender.login,
+    "pull_request",
+    `PR #${pr.number}: ${pr.title}`,
+  );
 
   // Handle assigned action - bot was assigned to PR
   if (action === "assigned") {
@@ -514,7 +560,11 @@ export async function handleIssue(
   const { action, issue, repository, sender, installation, assignee } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
+  const requestedByUserId = resolveGitHubSender(
+    sender.login,
+    "issues",
+    `Issue #${issue.number}: ${issue.title}`,
+  );
 
   // Handle assigned action - bot was assigned to issue
   if (action === "assigned") {
@@ -748,8 +798,13 @@ export async function handleComment(
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, comment, repository, sender, issue, pull_request, installation } = event;
 
-  // Resolve canonical user from GitHub sender
-  const _requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
+  // Resolve canonical user from GitHub sender (currently unused, but the
+  // unmapped-tracker side effect is still useful for operator triage).
+  const _requestedByUserId = resolveGitHubSender(
+    sender.login,
+    "issue_comment",
+    comment.body.slice(0, 100),
+  );
 
   // Only handle created action
   if (action !== "created") {
@@ -856,8 +911,13 @@ export async function handlePullRequestReview(
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, review, pull_request: pr, repository, sender, installation } = event;
 
-  // Resolve canonical user from GitHub sender
-  const _requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
+  // Resolve canonical user from GitHub sender (currently unused, but the
+  // unmapped-tracker side effect is still useful for operator triage).
+  const _requestedByUserId = resolveGitHubSender(
+    sender.login,
+    "pull_request_review",
+    `Review on PR #${pr.number}: ${review.state}`,
+  );
 
   // Only handle submitted reviews (the most important action)
   // Edited reviews are less common and dismissed is handled by the state
