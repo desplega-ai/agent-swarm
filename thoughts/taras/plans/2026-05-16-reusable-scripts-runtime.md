@@ -6,8 +6,9 @@ branch: main
 repository: agent-swarm
 topic: "Reusable scripts runtime (code-mode for agent-swarm) — v1 foundation"
 tags: [plan, scripts, code-mode, runtime, sandbox, embeddings, workflow-node]
-status: in-progress
+status: completed
 last_updated: 2026-05-18
+last_updated_by: Codex implementing orchestrator
 ---
 
 # Reusable Scripts Runtime — Implementation Plan
@@ -829,17 +830,17 @@ Tests: `bun test src/tests/scripts-*.test.ts`. Sandbox + timeout + abort + stdin
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] MCP docs regenerated: `bun run docs:mcp` (regenerates `MCP.md`); commit the diff alongside this phase
-- [ ] MCP tool registration test passes: `bun test src/tests/mcp-tools.test.ts -t "script_"` verifies all 5 tools appear in the MCP listing with correct schemas
-- [ ] HTTP→MCP integration test passes: `bun test src/tests/scripts-mcp-e2e.test.ts` exercises `script_upsert → script_search → script_run → script_delete` end-to-end against the in-process server
-- [ ] **Type bundler regenerates clean**: `bun run build:script-types` produces no diff after running it again (idempotent); commit the generated `src/scripts-runtime/types/swarm-sdk.d.ts` + `stdlib.d.ts`
-- [ ] **SDK allowlist is enforced**: `bun test src/tests/sdk-allowlist.test.ts` verifies (a) every tool in `SDK_ALLOWLIST` exists in the live MCP registry (no dangling names), (b) calling a non-allowlisted tool name through the runtime proxy throws with the expected diagnostic, (c) the bundled `swarm-sdk.d.ts` exposes only allowlisted tools
-- [ ] **Typed SDK roundtrip**: a fixture script `import { SwarmSdk } from 'swarm-sdk'; export default async (args, ctx) => ctx.swarm.memory_search({ query: 'foo' });` passes `script_upsert` typecheck, runs successfully, and returns a typed result. Modifying it to `ctx.swarm.memory_search({ query: 123 })` (wrong arg type) fails typecheck on upsert.
+- [x] Lint passes: `bun run lint`
+- [x] Type check passes: `bun run tsc:check`
+- [x] MCP docs regenerated: `bun run docs:mcp` (regenerates `MCP.md`); commit the diff alongside this phase
+- [x] MCP tool registration test passes: `bun test src/tests/mcp-tools.test.ts -t "script_"` verifies all 5 tools appear in the MCP listing with correct schemas
+- [x] HTTP→MCP integration test passes: `bun test src/tests/scripts-mcp-e2e.test.ts` exercises `script_upsert → script_search → script_run → script_delete` end-to-end against the in-process server
+- [x] **Type bundler regenerates clean**: `bun run build:script-types` produces no diff after running it again (idempotent); commit the generated `src/scripts-runtime/types/swarm-sdk.d.ts` + `stdlib.d.ts`
+- [x] **SDK allowlist is enforced**: `bun test src/tests/sdk-allowlist.test.ts` verifies (a) every tool in `SDK_ALLOWLIST` exists in the live MCP registry (no dangling names), (b) calling a non-allowlisted tool name through the runtime proxy throws with the expected diagnostic, (c) the bundled `swarm-sdk.d.ts` exposes only allowlisted tools
+- [x] **Typed SDK roundtrip**: a fixture script `import { SwarmSdk } from 'swarm-sdk'; export default async (args, ctx) => ctx.swarm.memory_search({ query: 'foo' });` passes `script_upsert` typecheck, runs successfully, and returns a typed result. Modifying it to `ctx.swarm.memory_search({ query: 123 })` (wrong arg type) fails typecheck on upsert.
 
 #### Automated QA:
-- [ ] Stdio MCP smoke: a script under `scripts/scripts-mcp-stdio-smoke.ts` opens a stdio MCP client, lists tools, asserts the 5 new tools are present with the documented descriptions. Run via `bun run scripts/scripts-mcp-stdio-smoke.ts`.
+- [x] Stdio MCP smoke: a script under `scripts/scripts-mcp-stdio-smoke.ts` opens a stdio MCP client, lists tools, asserts the 5 new tools are present with the documented descriptions. Run via `bun run scripts/scripts-mcp-stdio-smoke.ts`.
 
 #### Manual Verification:
 - [ ] In a real Claude Code session against a local swarm worker, observe the agent can call `script_search` from the MCP tool surface (visible in tool-call logs)
@@ -897,20 +898,20 @@ CREATE TABLE script_embeddings (
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint + type check pass
-- [ ] Migration applies cleanly on fresh + existing DB
-- [ ] Unit tests pass: `bun test src/tests/scripts-embeddings.test.ts`:
-  - [ ] Embed on explicit upsert (`isScratch=0`): new row has `script_embeddings` entry
-  - [ ] **No embed on scratch upsert (`isScratch=1`)**: row exists, `script_embeddings` row is absent — covered by an explicit assertion
-  - [ ] Re-embed on body change (different `contentHash`) for explicit rows
-  - [ ] Re-embed when description changes but body unchanged for explicit rows
-  - [ ] No re-embed when nothing tracked changes
-  - [ ] `scripts reembed` CLI backfills scratches that were later promoted (`isScratch` flipped from 1 → 0)
-  - [ ] Search returns semantically similar scripts above name-substring-only matches (use 3 known-similar fixture scripts)
-  - [ ] Hybrid ranking: exact name match outranks weaker semantic match for `query == name`
+- [x] Lint + type check pass
+- [x] Migration applies cleanly on fresh + existing DB
+- [x] Unit tests pass: `bun test src/tests/scripts-embeddings.test.ts`:
+  - [x] Embed on explicit upsert (`isScratch=0`): new row has `script_embeddings` entry
+  - [x] **No embed on scratch upsert (`isScratch=1`)**: row exists, `script_embeddings` row is absent — covered by an explicit assertion
+  - [x] Re-embed on body change (different `contentHash`) for explicit rows
+  - [x] Re-embed when description changes but body unchanged for explicit rows
+  - [x] No re-embed when nothing tracked changes
+  - [x] `scripts reembed` CLI backfills scratches that were later promoted (`isScratch` flipped from 1 → 0)
+  - [x] Search returns semantically similar scripts above name-substring-only matches (use 3 known-similar fixture scripts)
+  - [x] Hybrid ranking: exact name match outranks weaker semantic match for `query == name`
 
 #### Automated QA:
-- [ ] `bun test src/tests/scripts-embeddings.test.ts -t "semantic recall"` seeds 10 fixture scripts with deliberately overlapping intents, runs 5 natural-language queries, asserts top-3 recall matches the expected ranking. Threshold: 4/5 queries hit expected top-1.
+- [x] `bun test src/tests/scripts-embeddings.test.ts -t "semantic recall"` seeds 10 fixture scripts with deliberately overlapping intents, runs 5 natural-language queries, asserts top-3 recall matches the expected ranking. Threshold: 4/5 queries hit expected top-1.
 
 #### Manual Verification:
 - [ ] Manually upsert ~5 real-looking scripts, run `script_search` with vague queries, eyeball the results — are they sensible? Adjust the 0.7/0.3 hybrid weight if needed.
@@ -952,17 +953,17 @@ Register `swarm-script` as a new workflow executor (distinct from existing inlin
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint + type check pass
-- [ ] Unit tests pass: `bun test src/tests/workflow-swarm-script.test.ts`:
-  - [ ] A workflow with one `swarm-script` node resolves by name + runs + returns result
-  - [ ] `pinHash` correctly resolves to a historic `script_versions` row
-  - [ ] `inputs` mapping from a predecessor node correctly populates `args`
-  - [ ] `fsMode: 'workspace-rw'` is rejected at config validation with a clear error message; `fsMode: 'none'` runs server-side
-  - [ ] Failure in the script surfaces as a workflow-node failure (matches existing `script` node failure shape)
-- [ ] E2E test passes: `bun test src/tests/workflow-e2e.test.ts -t "swarm-script"` — full workflow run with the engine
+- [x] Lint + type check pass
+- [x] Unit tests pass: `bun test src/tests/workflow-swarm-script.test.ts`:
+  - [x] A workflow with one `swarm-script` node resolves by name + runs + returns result
+  - [x] `pinHash` correctly resolves to a historic `script_versions` row
+  - [x] `inputs` mapping from a predecessor node correctly populates `args`
+  - [x] `fsMode: 'workspace-rw'` is rejected at config validation with a clear error message; `fsMode: 'none'` runs server-side
+  - [x] Failure in the script surfaces as a workflow-node failure (matches existing `script` node failure shape)
+- [x] E2E test passes: `bun test src/tests/workflow-e2e.test.ts -t "swarm-script"` — full workflow run with the engine
 
 #### Automated QA:
-- [ ] `bun test src/tests/workflow-e2e.test.ts -t "swarm-script + agent-task interleave"` runs a 3-node workflow `swarm-script → agent-task → swarm-script` end-to-end against a stub agent provider, asserts all three nodes complete and outputs chain correctly
+- [x] `bun test src/tests/workflow-e2e.test.ts -t "swarm-script + agent-task interleave"` runs a 3-node workflow `swarm-script → agent-task → swarm-script` end-to-end against a stub agent provider, asserts all three nodes complete and outputs chain correctly
 
 #### Manual Verification:
 - [ ] Open the workflow UI (`ui/`, port 5274), confirm `swarm-script` shows up as a node type in the palette; create a workflow with one `swarm-script` node referencing a real script; run it from the UI; eyeball the output

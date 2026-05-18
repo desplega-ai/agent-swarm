@@ -68,6 +68,11 @@ import {
   registerRunScheduleNowTool,
   registerUpdateScheduleTool,
 } from "./tools/schedules";
+import { registerScriptDeleteTool } from "./tools/script-delete";
+import { registerScriptQueryTypesTool } from "./tools/script-query-types";
+import { registerScriptRunTool } from "./tools/script-run";
+import { registerScriptSearchTool } from "./tools/script-search";
+import { registerScriptUpsertTool } from "./tools/script-upsert";
 import { registerSendTaskTool } from "./tools/send-task";
 // Skills capability
 import {
@@ -201,6 +206,13 @@ export function createServer() {
   registerSetPromptTemplateTool(server);
   registerDeletePromptTemplateTool(server);
   registerPreviewPromptTemplateTool(server);
+
+  // Reusable script catalog tools - always registered (HTTP MCP only in v1).
+  registerScriptSearchTool(server);
+  registerScriptRunTool(server);
+  registerScriptUpsertTool(server);
+  registerScriptDeleteTool(server);
+  registerScriptQueryTypesTool(server);
 
   // Slack integration tools (always registered, will no-op if Slack not configured)
   registerSlackReplyTool(server);

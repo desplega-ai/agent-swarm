@@ -10716,7 +10716,7 @@
                             },
                             "type": {
                               "type": "string",
-                              "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                              "description": "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'"
                             },
                             "label": {
                               "type": "string",
@@ -10725,7 +10725,7 @@
                             "config": {
                               "type": "object",
                               "additionalProperties": {},
-                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                             },
                             "next": {
                               "anyOf": [
@@ -11054,7 +11054,7 @@
                             },
                             "type": {
                               "type": "string",
-                              "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                              "description": "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'"
                             },
                             "label": {
                               "type": "string",
@@ -11063,7 +11063,7 @@
                             "config": {
                               "type": "object",
                               "additionalProperties": {},
-                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                             },
                             "next": {
                               "anyOf": [
@@ -11372,7 +11372,7 @@
                           "properties": {
                             "type": {
                               "type": "string",
-                              "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                              "description": "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'"
                             },
                             "label": {
                               "type": "string",
@@ -11381,7 +11381,7 @@
                             "config": {
                               "type": "object",
                               "additionalProperties": {},
-                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                             },
                             "next": {
                               "anyOf": [
@@ -11527,7 +11527,7 @@
                         },
                         "type": {
                           "type": "string",
-                          "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                          "description": "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'"
                         },
                         "label": {
                           "type": "string",
@@ -11536,7 +11536,7 @@
                         "config": {
                           "type": "object",
                           "additionalProperties": {},
-                          "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                          "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                         },
                         "next": {
                           "anyOf": [
@@ -11762,7 +11762,7 @@
                 "properties": {
                   "type": {
                     "type": "string",
-                    "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                    "description": "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'"
                   },
                   "label": {
                     "type": "string",
@@ -11771,7 +11771,7 @@
                   "config": {
                     "type": "object",
                     "additionalProperties": {},
-                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                   },
                   "next": {
                     "anyOf": [

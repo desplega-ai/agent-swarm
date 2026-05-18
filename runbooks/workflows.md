@@ -34,6 +34,37 @@ Schema goes in `config.outputSchema` (not node-level). The agent produces JSON m
 - `model`
 - `parentTaskId`
 
+## Script node types
+
+There are two script-oriented workflow nodes:
+
+- `script` runs inline `bash`, `ts`, or `python` source embedded directly in the workflow definition.
+- `swarm-script` runs a TypeScript script from the reusable swarm catalog (`scripts` table). Use this when the logic should be shared across agents or reused by multiple workflows.
+
+### `swarm-script` config
+
+- `scriptName` (required): catalog script name.
+- `scope`: optional `agent` or `global`. If omitted, workflow execution tries the workflow creator's agent scope first, then global.
+- `pinHash`: optional script content hash. When set, execution uses the matching `script_versions` row instead of the latest live source.
+- `args`: optional JSON object passed to the script as its first argument. Values support normal workflow interpolation.
+- `fsMode`: optional, defaults to `none`. `workspace-rw` is reserved for v2 worker-side execution and fails in v1 with a clear workflow-node error.
+
+Agent-scoped lookup uses the workflow's `createdByAgentId`. If a workflow has no creator, `trigger.agentId` is accepted as a fallback; otherwise only global scripts can be resolved.
+
+Example:
+
+```yaml
+- id: parse
+  type: swarm-script
+  inputs: { issue: "trigger.linearIssue" }
+  config:
+    scriptName: parse-linear-issue
+    args: { issue: "{{issue}}" }
+    pinHash: "b7a0..."
+```
+
+Downstream nodes read the executor output from the node ID. The script's return value is under `result`, so an `inputs` mapping usually points at `parse.result.someField`.
+
 ## Trigger schema
 
 `triggerSchema` is an optional JSON Schema attached to a workflow that validates the `triggerData` payload for every trigger path — manual `/trigger`, webhooks, schedules, and MCP `trigger-workflow`. When set, mismatched payloads are rejected before the workflow starts (no run is created, no nodes execute). When unset (the default), any payload is accepted.

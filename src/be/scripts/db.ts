@@ -1,5 +1,6 @@
 import type { ScriptFsMode, ScriptRecord, ScriptScope, ScriptVersionRecord } from "../../types";
 import { computeContentHash, getDb } from "../db";
+import { embedScript } from "./embeddings";
 
 type ScriptRow = Omit<ScriptRecord, "isScratch" | "typeChecked"> & {
   isScratch: number;
@@ -168,11 +169,20 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
   return txn();
 }
 
-export function upsertScriptByName(args: ScriptWriteArgs): UpsertScriptResult {
+/**
+ * Scratch saves skip embedding; they become searchable only after explicit promotion via upsert
+ * OR after a `scripts reembed` pass. Explicit upserts embed synchronously so search is
+ * immediately consistent for authored/promoted scripts.
+ */
+export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertScriptResult> {
   const existing = getScript(args);
   if (!existing) {
+    const script = insertScript(args);
+    if (!script.isScratch) {
+      await embedScript(script);
+    }
     return {
-      script: insertScript(args),
+      script,
       isNew: true,
       contentDeduped: false,
     };
@@ -183,23 +193,43 @@ export function upsertScriptByName(args: ScriptWriteArgs): UpsertScriptResult {
     const fsMode = args.fsMode ?? existing.fsMode;
     const isScratch = args.isScratch ?? existing.isScratch;
     const typeChecked = args.typeChecked ?? existing.typeChecked;
+    const trackedMetadataChanged =
+      args.description !== existing.description ||
+      args.intent !== existing.intent ||
+      args.signatureJson !== existing.signatureJson;
+    const promotedFromScratch = existing.isScratch && !isScratch;
     if (
       fsMode !== existing.fsMode ||
       isScratch !== existing.isScratch ||
-      typeChecked !== existing.typeChecked
+      typeChecked !== existing.typeChecked ||
+      trackedMetadataChanged
     ) {
       const row = getDb()
-        .prepare<ScriptRow, [number, number, string, string, string]>(
+        .prepare<ScriptRow, [string, string, string, number, number, string, string, string]>(
           `UPDATE scripts
-          SET isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?
+          SET description = ?, intent = ?, signatureJson = ?,
+            isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?
           WHERE id = ?
           RETURNING *`,
         )
-        .get(isScratch ? 1 : 0, typeChecked ? 1 : 0, fsMode, new Date().toISOString(), existing.id);
+        .get(
+          args.description,
+          args.intent,
+          args.signatureJson,
+          isScratch ? 1 : 0,
+          typeChecked ? 1 : 0,
+          fsMode,
+          new Date().toISOString(),
+          existing.id,
+        );
 
       if (!row) throw new Error("Failed to update script metadata");
+      const script = rowToScript(row);
+      if (!script.isScratch && (trackedMetadataChanged || promotedFromScratch)) {
+        await embedScript(script);
+      }
       return {
-        script: rowToScript(row),
+        script,
         isNew: false,
         contentDeduped: true,
       };
@@ -261,8 +291,13 @@ export function upsertScriptByName(args: ScriptWriteArgs): UpsertScriptResult {
     return rowToScript(row);
   });
 
+  const script = txn();
+  if (!script.isScratch) {
+    await embedScript(script);
+  }
+
   return {
-    script: txn(),
+    script,
     isNew: false,
     contentDeduped: false,
   };

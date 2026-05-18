@@ -1,6 +1,6 @@
 import { scrubObject } from "../utils/secret-scrubber";
 import { Redacted } from "./redacted";
-import { isSdkToolAllowed } from "./sdk-allowlist";
+import { isSdkToolAllowed, mcpToolNameForSdkMethod } from "./sdk-allowlist";
 import type { SwarmConfig } from "./swarm-config";
 
 async function callTool(name: string, args: unknown, config: SwarmConfig): Promise<unknown> {
@@ -10,8 +10,9 @@ async function callTool(name: string, args: unknown, config: SwarmConfig): Promi
     );
   }
 
+  const mcpToolName = mcpToolNameForSdkMethod(name);
   const baseUrl = Redacted.value(config.mcpBaseUrl).replace(/\/$/, "");
-  const res = await fetch(`${baseUrl}/api/mcp/tools/${name}/call`, {
+  const res = await fetch(`${baseUrl}/api/mcp/tools/${mcpToolName}/call`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
@@ -31,13 +32,12 @@ async function callTool(name: string, args: unknown, config: SwarmConfig): Promi
 export function createSwarmSdk(
   config: SwarmConfig,
 ): Record<string, (args?: unknown) => Promise<unknown>> {
-  return new Proxy(
-    {},
-    {
-      get(_target, prop) {
-        if (typeof prop !== "string") return undefined;
-        return (args?: unknown) => callTool(prop, args, config);
-      },
+  const target: Record<string, unknown> = {};
+  return new Proxy(target, {
+    get(target, prop) {
+      if (typeof prop !== "string") return undefined;
+      if (prop in target) return target[prop];
+      return (args?: unknown) => callTool(prop, args, config);
     },
-  ) as Record<string, (args?: unknown) => Promise<unknown>>;
+  }) as Record<string, (args?: unknown) => Promise<unknown>>;
 }

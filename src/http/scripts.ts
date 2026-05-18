@@ -2,7 +2,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById } from "../be/db";
 import { createEvent } from "../be/events";
-import { deleteScript, getScript, listScripts, upsertScriptByName } from "../be/scripts/db";
+import { deleteScript, getScript, upsertScriptByName } from "../be/scripts/db";
+import { searchScripts } from "../be/scripts/embeddings";
 import { SCRIPT_SDK_TYPES, SCRIPT_STDLIB_TYPES, typecheckScript } from "../be/scripts/typecheck";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { runScript } from "../scripts-runtime/loader";
@@ -165,15 +166,6 @@ function scratchSlug(intent: string, source: string): string {
   return `scratch-${base || "inline-script"}-${hash}`;
 }
 
-function searchableRecords(agentId: string, scope?: ScriptScope): ScriptRecord[] {
-  if (scope === "global") return listScripts({ scope: "global" });
-  if (scope === "agent") return listScripts({ scope: "agent", scopeId: agentId });
-  return [
-    ...listScripts({ scope: "agent", scopeId: agentId }),
-    ...listScripts({ scope: "global" }),
-  ];
-}
-
 function emitGlobalUpsertEvent(args: {
   agentId: string;
   script: ScriptRecord;
@@ -225,7 +217,7 @@ export async function handleScripts(
       parsed.body.scope === "global"
         ? getScript({ name: parsed.body.name, scope: "agent", scopeId: agent.id })
         : null;
-    const result = upsertScriptByName({
+    const result = await upsertScriptByName({
       name: parsed.body.name,
       scope: parsed.body.scope,
       scopeId: parsed.body.scope === "agent" ? agent.id : null,
@@ -289,7 +281,7 @@ export async function handleScripts(
     let autoSaved: { slug: string; reason: string } | undefined;
     if (parsed.body.source && !output.error && output.exitCode === 0) {
       const slug = scratchSlug(parsed.body.intent, parsed.body.source);
-      upsertScriptByName({
+      await upsertScriptByName({
         name: slug,
         scope: "agent",
         scopeId: agent.id,
@@ -328,24 +320,21 @@ export async function handleScripts(
     const agent = requireAgent(res, agentId);
     if (!agent) return true;
 
-    const query = parsed.body.query.toLowerCase();
-    const matches = searchableRecords(agent.id, parsed.body.scope)
-      .filter((script) => {
-        if (!query) return true;
-        return [script.name, script.description, script.intent]
-          .join("\n")
-          .toLowerCase()
-          .includes(query);
-      })
-      .slice(0, parsed.body.limit)
-      .map((script) => ({
+    const matches = await searchScripts({
+      query: parsed.body.query,
+      scope: parsed.body.scope,
+      scopeId: agent.id,
+      limit: parsed.body.limit,
+    });
+
+    json(res, {
+      results: matches.map(({ script, score }) => ({
         name: script.name,
         signature: JSON.parse(script.signatureJson),
         description: script.description,
-        score: query && script.name.toLowerCase().includes(query) ? 1 : 0.5,
-      }));
-
-    json(res, { results: matches });
+        score,
+      })),
+    });
     return true;
   }
 

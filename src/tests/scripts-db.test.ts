@@ -9,8 +9,20 @@ import {
   listScripts,
   upsertScriptByName,
 } from "../be/scripts/db";
+import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 
 const TEST_DB_PATH = "./test-scripts-db.sqlite";
+
+const noOpEmbeddingProvider = {
+  name: "test/noop-script-embedding",
+  dimensions: 1,
+  async embed() {
+    return null;
+  },
+  async embedBatch(texts: string[]) {
+    return texts.map(() => null);
+  },
+};
 
 const signatureJson = JSON.stringify({
   args: { type: "object", properties: { value: { type: "number" } } },
@@ -33,9 +45,11 @@ describe("scripts DB helpers", () => {
   beforeAll(async () => {
     await clearDb();
     initDb(TEST_DB_PATH);
+    setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
   });
 
   afterAll(async () => {
+    setScriptEmbeddingProviderForTests(null);
     closeDb();
     await clearDb();
   });
@@ -71,8 +85,8 @@ describe("scripts DB helpers", () => {
     expect(version?.changeReason).toBe("Initial creation");
   });
 
-  test("upsertScriptByName deduplicates matching content without bumping version", () => {
-    const first = upsertScriptByName({
+  test("upsertScriptByName deduplicates matching content without bumping version", async () => {
+    const first = await upsertScriptByName({
       name: "same",
       scope: "global",
       source: source(2),
@@ -82,11 +96,11 @@ describe("scripts DB helpers", () => {
       agentId: "lead-1",
     });
 
-    const second = upsertScriptByName({
+    const second = await upsertScriptByName({
       name: "same",
       scope: "global",
       source: source(2),
-      description: "Changed metadata should be ignored on content dedup",
+      description: "Changed metadata should update without version bump",
       intent: "Changed intent",
       signatureJson,
       agentId: "lead-1",
@@ -97,7 +111,7 @@ describe("scripts DB helpers", () => {
     expect(second.contentDeduped).toBe(true);
     expect(second.script.id).toBe(first.script.id);
     expect(second.script.version).toBe(1);
-    expect(second.script.description).toBe("First description");
+    expect(second.script.description).toBe("Changed metadata should update without version bump");
     expect(
       getDb()
         .prepare<{ count: number }, [string]>(
@@ -107,8 +121,8 @@ describe("scripts DB helpers", () => {
     ).toBe(1);
   });
 
-  test("upsertScriptByName bumps version and writes history on source change", () => {
-    const first = upsertScriptByName({
+  test("upsertScriptByName bumps version and writes history on source change", async () => {
+    const first = await upsertScriptByName({
       name: "mutating",
       scope: "agent",
       scopeId: "agent-1",
@@ -119,7 +133,7 @@ describe("scripts DB helpers", () => {
       agentId: "agent-1",
     });
 
-    const second = upsertScriptByName({
+    const second = await upsertScriptByName({
       name: "mutating",
       scope: "agent",
       scopeId: "agent-1",
@@ -233,8 +247,8 @@ describe("scripts DB helpers", () => {
     ).toEqual(["explicit", "scratch"]);
   });
 
-  test("deleteScript cascades script_versions", () => {
-    const result = upsertScriptByName({
+  test("deleteScript cascades script_versions", async () => {
+    const result = await upsertScriptByName({
       name: "delete-me",
       scope: "global",
       source: source(2),
@@ -242,7 +256,7 @@ describe("scripts DB helpers", () => {
       intent: "Cascade check",
       signatureJson,
     });
-    upsertScriptByName({
+    await upsertScriptByName({
       name: "delete-me",
       scope: "global",
       source: source(4),
@@ -263,8 +277,8 @@ describe("scripts DB helpers", () => {
     ).toBe(0);
   });
 
-  test("full lifecycle: upsert, dedup, version bump, history, delete", () => {
-    const created = upsertScriptByName({
+  test("full lifecycle: upsert, dedup, version bump, history, delete", async () => {
+    const created = await upsertScriptByName({
       name: "lifecycle",
       scope: "agent",
       scopeId: "agent-1",
@@ -274,7 +288,7 @@ describe("scripts DB helpers", () => {
       signatureJson,
       agentId: "agent-1",
     });
-    const deduped = upsertScriptByName({
+    const deduped = await upsertScriptByName({
       name: "lifecycle",
       scope: "agent",
       scopeId: "agent-1",
@@ -284,7 +298,7 @@ describe("scripts DB helpers", () => {
       signatureJson,
       agentId: "agent-1",
     });
-    const updated = upsertScriptByName({
+    const updated = await upsertScriptByName({
       name: "lifecycle",
       scope: "agent",
       scopeId: "agent-1",

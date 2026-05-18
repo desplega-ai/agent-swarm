@@ -13,11 +13,10 @@ export type RuntimeCtx = {
 };
 
 export function buildCtx({ swarmConfig }: { swarmConfig: SwarmConfig }): RuntimeCtx {
+  const swarm = createSwarmSdk(swarmConfig) as Record<string, unknown> & { config: SwarmConfig };
+  swarm.config = swarmConfig;
   return {
-    swarm: {
-      config: swarmConfig,
-      ...createSwarmSdk(swarmConfig),
-    },
+    swarm,
     stdlib,
     logger: console,
   };

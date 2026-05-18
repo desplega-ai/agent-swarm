@@ -706,7 +706,7 @@ describe("ValidateExecutor", () => {
 // ─── Registry Wiring ─────────────────────────────────────────
 
 describe("createExecutorRegistry", () => {
-  test("registers all 10 executors (7 instant + 3 async)", () => {
+  test("registers all 11 executors (8 instant + 3 async)", () => {
     const registry = createExecutorRegistry(mockDeps);
     const types = registry.types();
 
@@ -715,12 +715,13 @@ describe("createExecutorRegistry", () => {
     expect(types).toContain("notify");
     expect(types).toContain("raw-llm");
     expect(types).toContain("script");
+    expect(types).toContain("swarm-script");
     expect(types).toContain("vcs");
     expect(types).toContain("validate");
     expect(types).toContain("agent-task");
     expect(types).toContain("human-in-the-loop");
     expect(types).toContain("wait");
-    expect(types).toHaveLength(10);
+    expect(types).toHaveLength(11);
   });
 
   test("instant executors have mode instant, async executors have mode async", () => {
@@ -731,6 +732,7 @@ describe("createExecutorRegistry", () => {
       "notify",
       "raw-llm",
       "script",
+      "swarm-script",
       "vcs",
       "validate",
     ];

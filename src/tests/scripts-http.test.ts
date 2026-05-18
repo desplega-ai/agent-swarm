@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import { getScript, listScripts } from "../be/scripts/db";
+import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleCore } from "../http/core";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -11,6 +12,27 @@ import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-scripts-http.sqlite";
 const API_KEY = "test-scripts-http-key-1234567890";
+
+function fakeEmbedding(text: string): Float32Array {
+  const lower = text.toLowerCase();
+  return new Float32Array([
+    lower.includes("lookup") ? 1 : 0,
+    lower.includes("multiply") ? 1 : 0,
+    lower.includes("linear") ? 1 : 0,
+    lower.includes("github") ? 1 : 0,
+  ]);
+}
+
+const fakeEmbeddingProvider = {
+  name: "test/fake-script-embedding",
+  dimensions: 4,
+  async embed(text: string) {
+    return fakeEmbedding(text);
+  },
+  async embedBatch(texts: string[]) {
+    return Promise.all(texts.map(fakeEmbedding));
+  },
+};
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -37,6 +59,7 @@ beforeAll(async () => {
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
+  setScriptEmbeddingProviderForTests(fakeEmbeddingProvider);
 
   const worker = createAgent({ name: "scripts-worker", isLead: false, status: "idle" });
   const lead = createAgent({ name: "scripts-lead", isLead: true, status: "idle" });
@@ -46,6 +69,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   closeDb();
+  setScriptEmbeddingProviderForTests(null);
   await removeDbFiles(TEST_DB_PATH);
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];
