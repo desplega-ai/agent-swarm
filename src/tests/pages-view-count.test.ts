@@ -54,6 +54,7 @@ describe("Pages — view_count counter", () => {
   const headers = { "Content-Type": "application/json", "X-Agent-ID": agentId };
 
   beforeAll(async () => {
+    process.env.PAGE_SESSION_SECRET = "test-view-count-secret";
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
