@@ -2,7 +2,12 @@ import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
 import { ensureToken } from "../oauth/ensure-token";
 import { workflowEventBus } from "../workflows/event-bus";
 import { getLinearClient, resetLinearClient } from "./client";
-import { endAgentSession, postAgentSessionAction, taskSessionMap } from "./sync";
+import {
+  endAgentSession,
+  postAgentSessionAction,
+  postAgentSessionThought,
+  taskSessionMap,
+} from "./sync";
 
 let subscribed = false;
 
@@ -56,9 +61,10 @@ async function handleTaskProgress(data: unknown): Promise<void> {
   const sessionId = taskSessionMap.get(taskId);
   if (!sessionId) return;
 
-  // Use 'action' activity type — Linear renders it as a structured tool invocation card
-  postAgentSessionAction(sessionId, progress).catch((err) => {
-    console.error(`[Linear Outbound] Failed to post progress action for task ${taskId}:`, err);
+  // Use 'thought' activity type — `action` requires both `action` AND `parameter` per Linear spec,
+  // and `thought` is the semantically correct type for free-form status updates.
+  postAgentSessionThought(sessionId, progress).catch((err) => {
+    console.error(`[Linear Outbound] Failed to post progress thought for task ${taskId}:`, err);
   });
 }
 
