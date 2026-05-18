@@ -6,7 +6,8 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignoreUnknown": false
+    "ignoreUnknown": false,
+    "ignore": ["scripts/*.bundle.js"]
   },
   "formatter": {
     "enabled": true,
