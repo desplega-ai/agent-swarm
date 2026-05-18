@@ -196,7 +196,7 @@ describe("Linear Outbound Sync", () => {
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
   });
 
-  test("task.progress posts a thought activity (not action) when sessionId is mapped", async () => {
+  test("task.progress posts an action activity with both action AND parameter when sessionId is mapped", async () => {
     const taskId = "outbound-task-progress";
     taskSessionMap.set(taskId, "linear-session-123");
 
@@ -207,15 +207,36 @@ describe("Linear Outbound Sync", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    // Must use thought, not action — `action` activities require both `action` AND `parameter`
-    // per Linear's agentActivityCreate spec; calling postAgentSessionAction with only a single
-    // string sends an invalid payload that Linear silently rejects.
-    expect(mockPostAgentSessionThought).toHaveBeenCalledTimes(1);
-    expect(mockPostAgentSessionAction).not.toHaveBeenCalled();
+    // Posts as `action` so the update renders as a structured card in Linear's AgentSession
+    // panel. Linear's spec requires BOTH `action` AND `parameter` for action-type activities;
+    // the original bug was calling postAgentSessionAction with only a single string (parameter
+    // undefined), which Linear silently rejected.
+    expect(mockPostAgentSessionAction).toHaveBeenCalledTimes(1);
+    expect(mockPostAgentSessionThought).not.toHaveBeenCalled();
 
-    const args = mockPostAgentSessionThought.mock.calls[0] as unknown[];
+    const args = mockPostAgentSessionAction.mock.calls[0] as unknown[];
     expect(args[0]).toBe("linear-session-123");
-    expect(args[1]).toBe("📋 Reviewing task details");
+    // Both action label and parameter must be present and non-empty
+    expect(typeof args[1]).toBe("string");
+    expect((args[1] as string).length).toBeGreaterThan(0);
+    expect(typeof args[2]).toBe("string");
+    expect((args[2] as string).length).toBeGreaterThan(0);
+    // Parameter carries the actual progress text
+    expect(args[2] as string).toBe("📋 Reviewing task details");
+  });
+
+  test("task.progress slices long progress strings into the parameter (cap at 2000)", async () => {
+    const taskId = "outbound-task-progress-long";
+    taskSessionMap.set(taskId, "linear-session-long");
+
+    const longProgress = "x".repeat(5000);
+    workflowEventBus.emit("task.progress", { taskId, progress: longProgress });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(mockPostAgentSessionAction).toHaveBeenCalledTimes(1);
+    const args = mockPostAgentSessionAction.mock.calls[0] as unknown[];
+    expect((args[2] as string).length).toBe(2000);
   });
 
   test("task.progress is a no-op when no sessionId is mapped for the task", async () => {

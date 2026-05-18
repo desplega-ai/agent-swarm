@@ -2,12 +2,7 @@ import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
 import { ensureToken } from "../oauth/ensure-token";
 import { workflowEventBus } from "../workflows/event-bus";
 import { getLinearClient, resetLinearClient } from "./client";
-import {
-  endAgentSession,
-  postAgentSessionAction,
-  postAgentSessionThought,
-  taskSessionMap,
-} from "./sync";
+import { endAgentSession, postAgentSessionAction, taskSessionMap } from "./sync";
 
 let subscribed = false;
 
@@ -54,6 +49,10 @@ async function handleTaskCreated(data: unknown): Promise<void> {
   );
 }
 
+// Cap parameter length to avoid oversized Linear GraphQL payloads. Linear renders this in the
+// AgentSession panel; 2000 chars is plenty for a progress update.
+const PROGRESS_PARAMETER_MAX = 2000;
+
 async function handleTaskProgress(data: unknown): Promise<void> {
   const { taskId, progress } = data as { taskId: string; progress?: string };
   if (!taskId || !progress) return;
@@ -61,10 +60,12 @@ async function handleTaskProgress(data: unknown): Promise<void> {
   const sessionId = taskSessionMap.get(taskId);
   if (!sessionId) return;
 
-  // Use 'thought' activity type — `action` requires both `action` AND `parameter` per Linear spec,
-  // and `thought` is the semantically correct type for free-form status updates.
-  postAgentSessionThought(sessionId, progress).catch((err) => {
-    console.error(`[Linear Outbound] Failed to post progress thought for task ${taskId}:`, err);
+  // Post as `action` activity (renders as a structured card in Linear's AgentSession panel).
+  // Per Linear's agentActivityCreate spec, `action` requires BOTH `action` AND `parameter`;
+  // the original bug here was passing `progress` as `action` with `parameter` undefined.
+  const parameter = progress.slice(0, PROGRESS_PARAMETER_MAX);
+  postAgentSessionAction(sessionId, "Progress update", parameter).catch((err) => {
+    console.error(`[Linear Outbound] Failed to post progress action for task ${taskId}:`, err);
   });
 }
 
