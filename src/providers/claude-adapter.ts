@@ -541,8 +541,29 @@ class ClaudeSession implements ProviderSession {
       // Tool use from assistant messages — emit tool_start for auto-progress
       if (json.type === "assistant" && json.message) {
         const message = json.message as {
-          content?: Array<{ type: string; name?: string; id?: string; input?: unknown }>;
+          content?: Array<{
+            type: string;
+            name?: string;
+            id?: string;
+            input?: unknown;
+            text?: string;
+          }>;
         };
+
+        // Emit a `message` event BEFORE any tool_start events for this turn.
+        // The runner uses this as an "assistant turn boundary" to implicit-close
+        // any worker.tool spans left open by the previous turn (the Claude CLI
+        // doesn't emit per-tool completion events for harness-side tools like
+        // Bash/Read/Edit, so without this boundary their spans would stay open
+        // until session shutdown and report inflated duration_ms).
+        const text = Array.isArray(message.content)
+          ? message.content
+              .filter((b) => b.type === "text" && typeof b.text === "string")
+              .map((b) => b.text as string)
+              .join("")
+          : "";
+        this.emit({ type: "message", role: "assistant", content: text });
+
         if (message.content) {
           for (const block of message.content) {
             if (block.type === "tool_use" && block.name) {
