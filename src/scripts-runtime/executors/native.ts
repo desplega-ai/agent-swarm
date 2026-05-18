@@ -78,9 +78,13 @@ function harnessCommand(harnessPath: string, input: ExecutorInput): string[] {
     return ["bun", "run", harnessPath];
   }
 
+  // Bun's Linux runtime reserves several GB of virtual address space at startup.
+  // A lower RLIMIT_AS kills the harness before user code runs, so keep vmem as
+  // a coarse guard and rely on the tighter CPU/proc/fd/file/output caps for v1.
+  const virtualMemoryMb = Math.max(input.resources.memoryMb, 4096);
   const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   const ulimits = [
-    `ulimit -v ${Math.floor(input.resources.memoryMb * 1024)} 2>/dev/null || true`,
+    `ulimit -v ${Math.floor(virtualMemoryMb * 1024)} 2>/dev/null || true`,
     `ulimit -t ${input.resources.cpuTimeSec} 2>/dev/null || true`,
     `ulimit -u ${input.resources.maxProcs} 2>/dev/null || true`,
     `ulimit -f ${Math.floor(input.resources.maxFileBytes / 1024)} 2>/dev/null || true`,
