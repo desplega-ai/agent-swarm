@@ -108,7 +108,7 @@ function resolvePluginPath(): string {
   return join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
 }
 
-class OpencodeSession implements ProviderSession {
+export class OpencodeSession implements ProviderSession {
   private _sessionId: string;
   private listeners: Array<(event: ProviderEvent) => void> = [];
   // Buffer for events emitted before any listener is attached.

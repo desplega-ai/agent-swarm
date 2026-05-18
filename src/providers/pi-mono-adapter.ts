@@ -264,7 +264,7 @@ function cleanupAgentsMdSymlink(cwd: string): void {
   }
 }
 
-class PiMonoSession implements ProviderSession {
+export class PiMonoSession implements ProviderSession {
   private listeners: Array<(event: ProviderEvent) => void> = [];
   private eventQueue: ProviderEvent[] = [];
   private _sessionId: string | undefined;

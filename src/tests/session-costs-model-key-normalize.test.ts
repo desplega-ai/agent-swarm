@@ -114,6 +114,24 @@ describe("normalizeModelKey()", () => {
     );
   });
 
+  test("strips pi routing prefix `openrouter/` for deepseek (Phase 3 fix regression)", () => {
+    // The exact case from today's E2E (2026-05-18): pi-mono emits
+    // `openrouter/deepseek/deepseek-v4-flash`, the pricing seed keys the row
+    // under bare `deepseek/deepseek-v4-flash`. Drift collapsed before this
+    // assertion exists; keep it as an explicit regression guard.
+    expect(normalizeModelKey("pi", "openrouter/deepseek/deepseek-v4-flash")).toBe(
+      "deepseek/deepseek-v4-flash",
+    );
+  });
+
+  test("strips opencode routing prefix `openrouter/` for deepseek (Phase 3 fix regression)", () => {
+    // Same model, different harness — opencode-adapter wraps the underlying
+    // model id under the same `openrouter/` proxy prefix.
+    expect(normalizeModelKey("opencode", "openrouter/deepseek/deepseek-v4-flash")).toBe(
+      "deepseek/deepseek-v4-flash",
+    );
+  });
+
   test("is a no-op for canonical claude ids", () => {
     expect(normalizeModelKey("claude", "claude-opus-4-7")).toBe("claude-opus-4-7");
   });
