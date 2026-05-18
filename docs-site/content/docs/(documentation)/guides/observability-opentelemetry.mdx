@@ -14,14 +14,14 @@ The same wiring works with SigNoz Cloud, self-hosted SigNoz, Jaeger through an O
 Create or copy an ingestion key from SigNoz Cloud, then set these variables for the API and every worker:
 
 ```bash title=".env"
-OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.eu2.signoz.cloud/v1/traces
+OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.eu2.signoz.cloud
 OTEL_EXPORTER_OTLP_HEADERS=signoz-ingestion-key=your-ingestion-key
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_SERVICE_NAME=agent-swarm
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,env=production,service.namespace=agent-swarm
 ```
 
-Use the region-specific endpoint from your SigNoz Cloud account. For the EU2 region, the traces endpoint is `https://ingest.eu2.signoz.cloud/v1/traces`.
+Use the region-specific endpoint from your SigNoz Cloud account. For the EU2 region, use `https://ingest.eu2.signoz.cloud` as the base endpoint — the SDK appends `/v1/traces` automatically per the OTLP HTTP spec.
 
 <Callout type="warn">
 Do not commit ingestion keys. `OTEL_EXPORTER_OTLP_HEADERS` is treated as a secret by Agent Swarm's scrubber, but it is still an active credential and should live in your secret manager or deployment environment.
@@ -32,7 +32,7 @@ Do not commit ingestion keys. `OTEL_EXPORTER_OTLP_HEADERS` is treated as a secre
 `docker-compose.local.yml` passes the OpenTelemetry variables through to the API, lead, Pi worker, and Codex worker services.
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.eu2.signoz.cloud/v1/traces"
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.eu2.signoz.cloud"
 export OTEL_EXPORTER_OTLP_HEADERS="signoz-ingestion-key=your-ingestion-key"
 export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
 export OTEL_SERVICE_NAME="agent-swarm"
@@ -65,6 +65,18 @@ environment:
 ```
 
 Use a single `OTEL_SERVICE_NAME=agent-swarm` if you want one service with role tags. Use separate service names such as `agent-swarm-api` and `agent-swarm-worker` only if you prefer separate service cards in your observability backend.
+
+### Filtering poll noise
+
+Worker long-polls run continuously and account for the majority of span volume in a steady-state deployment. To keep your observability backend focused on real work, Agent Swarm skips the `worker.poll` (worker side) and `/api/poll` `http.server` (API side) spans by default.
+
+To opt in — useful when debugging queue or claim behavior — set on every API and worker process:
+
+```bash
+OTEL_TRACE_POLL=1
+```
+
+Truthy values: `1`, `true`, `yes`, `on` (case-insensitive). Anything else (including unset/empty) keeps poll spans off. Expect span volume to roughly double when this is enabled.
 
 ## How It Works
 
@@ -371,7 +383,7 @@ If `OTEL_EXPORTER_OTLP_ENDPOINT` is empty, tracing is intentionally disabled.
 
 For SigNoz Cloud, make sure:
 
-- `OTEL_EXPORTER_OTLP_ENDPOINT` ends in `/v1/traces`
+- `OTEL_EXPORTER_OTLP_ENDPOINT` is the base URL (no `/v1/traces` suffix — the SDK appends it)
 - `OTEL_EXPORTER_OTLP_HEADERS` is exactly `signoz-ingestion-key=<key>`
 - `OTEL_EXPORTER_OTLP_PROTOCOL` is `http/protobuf`
 - the key belongs to the same SigNoz region as the ingest endpoint
