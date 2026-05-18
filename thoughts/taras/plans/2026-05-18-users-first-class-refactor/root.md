@@ -142,28 +142,28 @@ Run after all 9 steps complete (final wave gate before opening the PR):
 
 ### Code health gates (CI mirror — `runbooks/ci.md`)
 
-- [ ] `bun install --frozen-lockfile` clean
-- [ ] `bun run lint` (read-only — NOT `lint:fix`) passes
-- [ ] `bun run tsc:check` passes
-- [ ] `bun test` passes (whole suite)
-- [ ] `bash scripts/check-db-boundary.sh` passes (confirms no worker-side imports of `src/be/users.ts`)
-- [ ] `bash scripts/check-api-key-boundary.sh` passes (confirms `fingerprintApiKey` uses `getApiKey()`)
-- [ ] `cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b` passes
+- [x] `bun install --frozen-lockfile` clean
+- [x] `bun run lint` (read-only — NOT `lint:fix`) passes
+- [x] `bun run tsc:check` passes
+- [x] `bun test` passes (whole suite) — 4125 pass, 0 fail (verify-plan 2026-05-19)
+- [x] `bash scripts/check-db-boundary.sh` passes (confirms no worker-side imports of `src/be/users.ts`)
+- [x] `bash scripts/check-api-key-boundary.sh` passes (confirms `fingerprintApiKey` uses `getApiKey()`)
+- [x] `cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b` passes
 
 ### Drift checks (regenerate + commit)
 
-- [ ] `bun run docs:openapi` — committed `openapi.json` + `docs-site/content/docs/api-reference/**` (step-8 adds endpoints)
-- [ ] `bun run build:pi-skills` — committed `plugin/pi-skills/user-management/SKILL.md` (step-7 edits source MD)
+- [x] `bun run docs:openapi` — committed `openapi.json` + `docs-site/content/docs/api-reference/**` (step-8 adds endpoints) — re-ran on verify-plan, no diff
+- [x] `bun run build:pi-skills` — committed `plugin/pi-skills/user-management/SKILL.md` (step-7 edits source MD) — re-ran on verify-plan, no diff
 
 ### Cross-cutting greps (must each return ZERO hits outside `src/be/migrations/064_users_first_class.sql` and `src/be/migrations/031_user_registry.sql`)
 
-- [ ] `grep -RIn 'users\.slackUserId' src/ ui/ scripts/ plugin/ docs-site/ MCP.md` → 0 hits
-- [ ] `grep -RIn 'users\.linearUserId' src/ ui/ scripts/ plugin/ docs-site/ MCP.md` → 0 hits
-- [ ] `grep -RIn 'users\.githubUsername' src/ ui/ scripts/ plugin/ docs-site/ MCP.md` → 0 hits
-- [ ] `grep -RIn 'users\.gitlabUsername' src/ ui/ scripts/ plugin/ docs-site/ MCP.md` → 0 hits
-- [ ] `grep -RIn 'resolveUser\s*(' src/ ui/ scripts/ plugin/` → 0 hits (function deleted in step-1)
-- [ ] `grep -RIn 'userEmailCache' src/` → 0 hits (Slack in-memory Map retired in step-2)
-- [ ] No reference to dropped columns in any test fixture / seed / doc
+- [x] `grep -RIn 'users\.slackUserId' src/ ui/ scripts/ plugin/ docs-site/ MCP.md` → 0 hits
+- [x] `grep -RIn 'users\.linearUserId' src/ ui/ scripts/ plugin/ docs-site/ MCP.md` → 0 hits
+- [x] `grep -RIn 'users\.githubUsername' src/ ui/ scripts/ plugin/ docs-site/ MCP.md` → 0 hits
+- [x] `grep -RIn 'users\.gitlabUsername' src/ ui/ scripts/ plugin/ docs-site/ MCP.md` → 0 hits
+- [x] `grep -RIn 'resolveUser\s*(' src/ ui/ scripts/ plugin/` → 0 hits (function deleted in step-1)
+- [x] `grep -RIn 'userEmailCache' src/` → 0 hits (Slack in-memory Map retired in step-2)
+- [x] No reference to dropped columns in any test fixture / seed / doc
 
 ### Existing-DB migration check
 
