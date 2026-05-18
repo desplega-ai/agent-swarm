@@ -8,12 +8,14 @@
  * - Detects bot mentions
  */
 
-import { failTask, findTaskByVcs, getAllAgents, resolveUser } from "../be/db";
+import { failTask, findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
+import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { gitlabContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { GITLAB_BOT_NAME } from "./auth";
 import { addGitLabNoteReaction, addGitLabReaction } from "./reactions";
+import type { GitLabUser } from "./types";
 // Side-effect import: registers all GitLab event templates in the in-memory registry
 import "./templates";
 import type { IssueEvent, MergeRequestEvent, NoteEvent, PipelineEvent } from "./types";
@@ -53,6 +55,62 @@ function findLeadAgent() {
   );
 }
 
+// ── Identity resolution ──
+
+const UNMAPPED_NAMESPACE = "integration:unmapped:gitlab";
+const UNMAPPED_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const GITLAB_WEBHOOK_ACTOR = { kind: "system", id: "webhook:gitlab" } as const;
+
+/**
+ * Resolve a GitLab webhook sender to a `users.id`.
+ *
+ * Cascade (Q17):
+ *   1. Fast path — `findUserByExternalId('gitlab', user.username)`.
+ *   2. If missing AND `user.email` is a real non-empty string (some GitLab
+ *      installations send `email: ""` instead of omitting the field — Q17.E
+ *      manual spot-check), run `findOrCreateUserByEmail` + `linkIdentity`.
+ *   3. Otherwise record an unmapped tracker entry (kv) for operator triage.
+ *
+ * Returns `undefined` when no mapping could be established — callers pass
+ * that straight to `requestedByUserId`.
+ */
+function resolveGitLabSender(
+  user: GitLabUser,
+  sampleEventType: string,
+  sampleContext: string,
+): string | undefined {
+  const existing = findUserByExternalId("gitlab", user.username);
+  if (existing) return existing.id;
+
+  // Inline-email cascade — only run when email is a real non-empty string.
+  // Some GitLab installations emit `email: ""` instead of omitting the field.
+  const inlineEmail = typeof user.email === "string" ? user.email.trim() : "";
+  if (inlineEmail !== "") {
+    const { user: linked } = findOrCreateUserByEmail(
+      inlineEmail,
+      { name: user.name },
+      GITLAB_WEBHOOK_ACTOR,
+    );
+    linkIdentity(linked.id, "gitlab", user.username, GITLAB_WEBHOOK_ACTOR);
+    return linked.id;
+  }
+
+  // No mapping + no inline email → unmapped tracker.
+  upsertKv({
+    namespace: UNMAPPED_NAMESPACE,
+    key: `${user.username}:meta`,
+    value: {
+      lastSeenAt: new Date().toISOString(),
+      sampleEventType,
+      sampleContext: sampleContext.slice(0, 100),
+    },
+    valueType: "json",
+    expiresAt: Date.now() + UNMAPPED_TTL_MS,
+  });
+  incrKv(UNMAPPED_NAMESPACE, `${user.username}:count`, 1);
+  return undefined;
+}
+
 // ── Event Handlers ──
 
 export async function handleMergeRequest(
@@ -63,7 +121,11 @@ export async function handleMergeRequest(
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender
-  const requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
+  const requestedByUserId = resolveGitLabSender(
+    user,
+    "merge_request",
+    `MR !${mr.iid}: ${mr.title}`,
+  );
 
   console.log(`[GitLab] MR #${mr.iid} ${action} by ${user.username} in ${repo}`);
 
@@ -163,7 +225,11 @@ export async function handleIssue(
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender
-  const requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
+  const requestedByUserId = resolveGitLabSender(
+    user,
+    "issue",
+    `Issue #${issue.iid}: ${issue.title}`,
+  );
 
   console.log(`[GitLab] Issue #${issue.iid} ${action} by ${user.username} in ${repo}`);
 
@@ -246,8 +312,10 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   const { user, project, object_attributes: note } = event;
   const repo = project.path_with_namespace;
 
-  // Resolve canonical user from GitLab sender
-  const _requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
+  // Resolve canonical user from GitLab sender — currently dead-coded
+  // (underscore prefix). Rewired for parity with live sites; if a future
+  // change uses the value, the resolution path is already correct.
+  const _requestedByUserId = resolveGitLabSender(user, "note", note.note);
 
   // Only handle comments with bot mentions
   if (!detectMention(note.note)) {

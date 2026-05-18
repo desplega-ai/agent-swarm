@@ -1,13 +1,18 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
   createAgent,
   createTaskExtended,
+  createUser,
+  deleteKv,
   findTaskByVcs,
+  getDb,
+  getKv,
   getTaskById,
   initDb,
 } from "../be/db";
+import { findUserByExternalId, linkIdentity } from "../be/users";
 import { GITLAB_BOT_NAME } from "../gitlab/auth";
 import { handleIssue, handleMergeRequest, handleNote, handlePipeline } from "../gitlab/handlers";
 import type { IssueEvent, MergeRequestEvent, NoteEvent, PipelineEvent } from "../gitlab/types";
@@ -687,5 +692,292 @@ describe("handlePipeline", () => {
 
     const result = await handlePipeline(event);
     expect(result.created).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// Identity resolution (step-4)
+// ═══════════════════════════════════════════════════════
+
+const UNMAPPED_NS = "integration:unmapped:gitlab";
+
+function clearUnmapped(username: string) {
+  deleteKv(UNMAPPED_NS, `${username}:meta`);
+  deleteKv(UNMAPPED_NS, `${username}:count`);
+}
+
+function getUnmappedCount(username: string): number {
+  const row = getKv(UNMAPPED_NS, `${username}:count`);
+  if (!row) return 0;
+  if (row.valueType !== "integer") throw new Error("unexpected valueType");
+  return row.value as number;
+}
+
+function getUnmappedMeta(username: string): Record<string, unknown> | null {
+  const row = getKv(UNMAPPED_NS, `${username}:meta`);
+  if (!row) return null;
+  return row.value as Record<string, unknown>;
+}
+
+function countExternalIds(): number {
+  return (
+    getDb().prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM user_external_ids").get()?.c ?? 0
+  );
+}
+
+describe("identity resolution — MR handler", () => {
+  beforeEach(() => {
+    clearUnmapped("knownuser");
+    clearUnmapped("inlineuser");
+    clearUnmapped("ghostuser");
+    clearUnmapped("emptyemail");
+  });
+
+  test("known GitLab user → requestedByUserId populated, no unmapped entry", async () => {
+    const known = createUser({ name: "Known User" });
+    linkIdentity(known.id, "gitlab", "knownuser", { kind: "system", id: "test" });
+
+    const event = makeMREvent({
+      user: { id: 11, name: "Known User", username: "knownuser", avatar_url: "" },
+      object_attributes: {
+        id: 901,
+        iid: 901,
+        title: "Known MR",
+        description: `@${GITLAB_BOT_NAME} review`,
+        state: "opened",
+        action: "open",
+        source_branch: "feat-known",
+        target_branch: "main",
+        url: "https://gitlab.com/group/project/-/merge_requests/901",
+        last_commit: null,
+        author_id: 11,
+      },
+    });
+
+    const result = await handleMergeRequest(event);
+    expect(result.created).toBe(true);
+
+    const task = getTaskById(result.taskId!);
+    expect(task?.requestedByUserId).toBe(known.id);
+
+    expect(getUnmappedMeta("knownuser")).toBeNull();
+    expect(getUnmappedCount("knownuser")).toBe(0);
+  });
+
+  test("unknown user WITH inline email → auto-create user + link identity, no unmapped entry", async () => {
+    const beforeExt = countExternalIds();
+    expect(findUserByExternalId("gitlab", "inlineuser")).toBeNull();
+
+    const event = makeMREvent({
+      user: {
+        id: 12,
+        name: "Inline User",
+        username: "inlineuser",
+        avatar_url: "",
+        email: "inline@example.com",
+      },
+      object_attributes: {
+        id: 902,
+        iid: 902,
+        title: "Inline-email MR",
+        description: `@${GITLAB_BOT_NAME} please`,
+        state: "opened",
+        action: "open",
+        source_branch: "feat-inline",
+        target_branch: "main",
+        url: "https://gitlab.com/group/project/-/merge_requests/902",
+        last_commit: null,
+        author_id: 12,
+      },
+    });
+
+    const result = await handleMergeRequest(event);
+    expect(result.created).toBe(true);
+
+    const user = findUserByExternalId("gitlab", "inlineuser");
+    expect(user).not.toBeNull();
+    expect(user?.email).toBe("inline@example.com");
+    expect(user?.name).toBe("Inline User");
+
+    const task = getTaskById(result.taskId!);
+    expect(task?.requestedByUserId).toBe(user!.id);
+
+    // user_external_ids gained exactly one row for this auto-link.
+    expect(countExternalIds()).toBe(beforeExt + 1);
+
+    // No unmapped entry written.
+    expect(getUnmappedMeta("inlineuser")).toBeNull();
+    expect(getUnmappedCount("inlineuser")).toBe(0);
+  });
+
+  test("unknown user WITHOUT email → unmapped kv rows, requestedByUserId undefined", async () => {
+    const event = makeMREvent({
+      user: { id: 13, name: "Ghost", username: "ghostuser", avatar_url: "" },
+      object_attributes: {
+        id: 903,
+        iid: 903,
+        title: "Ghost MR",
+        description: `@${GITLAB_BOT_NAME} ping`,
+        state: "opened",
+        action: "open",
+        source_branch: "feat-ghost",
+        target_branch: "main",
+        url: "https://gitlab.com/group/project/-/merge_requests/903",
+        last_commit: null,
+        author_id: 13,
+      },
+    });
+
+    const result = await handleMergeRequest(event);
+    expect(result.created).toBe(true);
+
+    const task = getTaskById(result.taskId!);
+    expect(task?.requestedByUserId).toBeFalsy();
+
+    const meta = getUnmappedMeta("ghostuser");
+    expect(meta).not.toBeNull();
+    expect(meta?.sampleEventType).toBe("merge_request");
+    expect(typeof meta?.lastSeenAt).toBe("string");
+    expect((meta?.sampleContext as string).startsWith("MR !903:")).toBe(true);
+
+    expect(getUnmappedCount("ghostuser")).toBe(1);
+  });
+
+  test("repeat unmapped events bump count to 2", async () => {
+    for (let i = 0; i < 2; i++) {
+      const event = makeMREvent({
+        user: { id: 13, name: "Ghost", username: "ghostuser", avatar_url: "" },
+        object_attributes: {
+          id: 910 + i,
+          iid: 910 + i,
+          title: `Ghost MR ${i}`,
+          description: `@${GITLAB_BOT_NAME} ping`,
+          state: "opened",
+          action: "open",
+          source_branch: `feat-g-${i}`,
+          target_branch: "main",
+          url: `https://gitlab.com/group/project/-/merge_requests/${910 + i}`,
+          last_commit: null,
+          author_id: 13,
+        },
+      });
+      await handleMergeRequest(event);
+    }
+
+    expect(getUnmappedCount("ghostuser")).toBe(2);
+  });
+
+  test("empty-string email falls through to unmapped (Q17 manual-verify guard)", async () => {
+    const event = makeMREvent({
+      user: {
+        id: 14,
+        name: "Empty Email",
+        username: "emptyemail",
+        avatar_url: "",
+        email: "",
+      },
+      object_attributes: {
+        id: 920,
+        iid: 920,
+        title: "Empty email MR",
+        description: `@${GITLAB_BOT_NAME} review`,
+        state: "opened",
+        action: "open",
+        source_branch: "feat-empty",
+        target_branch: "main",
+        url: "https://gitlab.com/group/project/-/merge_requests/920",
+        last_commit: null,
+        author_id: 14,
+      },
+    });
+
+    const result = await handleMergeRequest(event);
+    expect(result.created).toBe(true);
+
+    // No auto-link should have occurred — no `user_external_ids` row for 'emptyemail'.
+    expect(findUserByExternalId("gitlab", "emptyemail")).toBeNull();
+
+    // Unmapped kv rows should be present.
+    expect(getUnmappedMeta("emptyemail")).not.toBeNull();
+    expect(getUnmappedCount("emptyemail")).toBe(1);
+  });
+});
+
+describe("identity resolution — Issue handler", () => {
+  beforeEach(() => {
+    clearUnmapped("issueghost");
+  });
+
+  test("unknown user WITHOUT email → unmapped entry tagged 'issue'", async () => {
+    const event = makeIssueEvent({
+      user: { id: 21, name: "Issue Ghost", username: "issueghost", avatar_url: "" },
+      object_attributes: {
+        id: 950,
+        iid: 950,
+        title: "Ghost issue",
+        description: `@${GITLAB_BOT_NAME} fix`,
+        state: "opened",
+        action: "open",
+        url: "https://gitlab.com/group/project/-/issues/950",
+        author_id: 21,
+      },
+    });
+
+    const result = await handleIssue(event);
+    expect(result.created).toBe(true);
+
+    const task = getTaskById(result.taskId!);
+    expect(task?.requestedByUserId).toBeFalsy();
+
+    const meta = getUnmappedMeta("issueghost");
+    expect(meta).not.toBeNull();
+    expect(meta?.sampleEventType).toBe("issue");
+    expect((meta?.sampleContext as string).startsWith("Issue #950:")).toBe(true);
+    expect(getUnmappedCount("issueghost")).toBe(1);
+  });
+});
+
+describe("identity resolution — Note handler", () => {
+  beforeEach(() => {
+    clearUnmapped("noteghost");
+  });
+
+  test("unknown user WITHOUT email → unmapped entry tagged 'note'", async () => {
+    const noteBody = `@${GITLAB_BOT_NAME} can you look at this comment that is somewhat longer than usual to verify the slice(0,100) truncation downstream`;
+    const event = makeNoteEvent({
+      user: { id: 31, name: "Note Ghost", username: "noteghost", avatar_url: "" },
+      object_attributes: {
+        id: 960,
+        note: noteBody,
+        noteable_type: "MergeRequest",
+        noteable_id: 100,
+        url: "https://gitlab.com/group/project/-/merge_requests/1#note_960",
+        author_id: 31,
+        type: null,
+      },
+      merge_request: {
+        id: 100,
+        iid: 960,
+        title: "Note Ghost MR",
+        description: "",
+        state: "opened",
+        action: "open",
+        source_branch: "feat-noteghost",
+        target_branch: "main",
+        url: "https://gitlab.com/group/project/-/merge_requests/960",
+        last_commit: null,
+        author_id: 31,
+      },
+    });
+
+    const result = await handleNote(event);
+    expect(result.created).toBe(true);
+
+    const meta = getUnmappedMeta("noteghost");
+    expect(meta).not.toBeNull();
+    expect(meta?.sampleEventType).toBe("note");
+    expect((meta?.sampleContext as string).length).toBeLessThanOrEqual(100);
+    expect((meta?.sampleContext as string).startsWith(`@${GITLAB_BOT_NAME}`)).toBe(true);
+    expect(getUnmappedCount("noteghost")).toBe(1);
   });
 });
