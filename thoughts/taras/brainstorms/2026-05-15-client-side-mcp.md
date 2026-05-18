@@ -11,6 +11,8 @@ last_updated_by: Taras
 
 # Client-side MCP for the swarm — Brainstorm
 
+> **2026-05-18 update — schema lands via [[2026-05-18-humans-as-first-class-users]].** The People-page brainstorm now co-lands the migration this MCP plan needs: `user_external_ids`, `users.metadata`, `users.dailyBudgetUsd`, `users.status`, `user_tokens`, `user_identity_events` (with eventType union of both brainstorms' needs, plus `status_changed`). DB helpers go into `src/be/users.ts` (`mintToken`, `revokeToken`, `resolveUserByToken`, `recordIdentityEvent`, etc.) — also from that brainstorm. When this MCP plan lands, **its migration is zero new tables, its DB helpers are reused, and its operator UI is additive** (the token-mint dialog and token-list row attach to the People page). The same brainstorm also resolves Open Question #3 here (email-alias support → keep `users.emailAliases` JSON, no `user_emails` table). See [[2026-05-18-humans-as-first-class-users]] §Q8–Q16 for the schema/policy commitments, and the Synthesis section for Core Requirements that supersede #1 here.
+
 ## Context
 
 Taras wants to expose a **client-side MCP server** that end-users of the swarm can connect to (from Claude Code, Cursor, Goose, etc.) — analogous to the MCP that the swarm owner uses today, but with end-user-appropriate scopes.

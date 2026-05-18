@@ -2,6 +2,7 @@
 import { Spinner, TextInput } from "@inkjs/ui";
 import { Box, Text, useApp } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getApiKey } from "../utils/api-key.ts";
 import {
   createDefaultMcpJson,
   createDefaultSettingsLocal,
@@ -47,7 +48,7 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
   const { exit } = useApp();
   const [state, setState] = useState<SetupState>({
     step: restore ? "restoring" : "check_dirs",
-    token: yes ? process.env.API_KEY || "" : "",
+    token: yes ? getApiKey() : "",
     agentId: yes ? process.env.AGENT_ID || "" : "",
     existingToken: "",
     existingAgentId: "",
@@ -258,14 +259,15 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
 
       // In non-interactive mode (yes=true), skip prompts and go directly to updating
       if (yes) {
-        const token = process.env.API_KEY;
+        const token = getApiKey();
         const agentId = process.env.AGENT_ID;
 
         if (!token) {
           setState((s) => ({
             ...s,
             step: "error",
-            error: "API_KEY environment variable is required in non-interactive mode (-y/--yes)",
+            error:
+              "AGENT_SWARM_API_KEY (or legacy API_KEY) environment variable is required in non-interactive mode (-y/--yes)",
           }));
           return;
         }

@@ -10,6 +10,7 @@ import {
   type RetrievalRow,
 } from "../be/memory/raters/llm";
 import type { Agent } from "../types";
+import { getApiKey } from "../utils/api-key";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
@@ -150,7 +151,7 @@ async function fetchTaskDetails(
   taskId: string,
 ): Promise<{ id: string; task: string; progress?: string } | null> {
   const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
-  const apiKey = process.env.API_KEY || "";
+  const apiKey = getApiKey();
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
@@ -301,7 +302,7 @@ export async function runStopHookSessionSummary(
     const { taskContext, taskId } = await resolveStopHookTaskContext(env);
 
     const apiUrl = env.MCP_BASE_URL || `http://localhost:${env.PORT || "3013"}`;
-    const apiKey = env.API_KEY || "";
+    const apiKey = getApiKey(env);
 
     // Memory-rater v1.5 step-4: piggyback per-memory ratings on the
     // existing summary call when MEMORY_RATERS includes `llm`.
@@ -1152,7 +1153,7 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
           try {
             const apiUrl =
               process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
-            const apiKey = process.env.API_KEY || "";
+            const apiKey = getApiKey();
             const fileContent = await Bun.file(editedPath).text();
             const isShared = editedPath.startsWith("/workspace/shared/");
             const fileName = editedPath.split("/").pop() ?? "unnamed";

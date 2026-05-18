@@ -6,14 +6,16 @@
  *
  * Cookie payload: `{pageId, exp}` where `exp` is a unix seconds timestamp.
  * Wire shape: `${base64url(JSON.stringify(payload))}.${base64url(HMAC-SHA256(payload, secret))}`.
- * Secret resolution: `process.env.PAGE_SESSION_SECRET || process.env.API_KEY`
- * — the API_KEY fallback keeps existing dev setups working without forcing a
- * new env var. Verification is constant-time via `crypto.timingSafeEqual` so
- * we don't leak bits via signature-comparison timing.
+ * Secret resolution: `process.env.PAGE_SESSION_SECRET || getApiKey()`
+ * — the swarm API-key fallback keeps existing dev setups working without
+ * forcing a new env var. Verification is constant-time via
+ * `crypto.timingSafeEqual` so we don't leak bits via signature-comparison
+ * timing.
  *
  * Both functions are async because `crypto.subtle.sign` is async.
  */
 import { timingSafeEqual } from "node:crypto";
+import { getApiKey } from "./api-key";
 
 export interface PageSessionPayload {
   pageId: string;
@@ -43,12 +45,12 @@ function base64urlDecode(input: string): Uint8Array {
 
 /** Resolve the HMAC secret. */
 function getSecret(): string {
-  const secret = process.env.PAGE_SESSION_SECRET || process.env.API_KEY;
+  const secret = process.env.PAGE_SESSION_SECRET || getApiKey();
   if (!secret) {
     // Fail-closed: better to refuse to issue cookies than to mint with an
     // empty key (any attacker who learns the implementation can forge).
     throw new Error(
-      "page-session: neither PAGE_SESSION_SECRET nor API_KEY is set; refusing to sign/verify",
+      "page-session: neither PAGE_SESSION_SECRET nor swarm API key is set; refusing to sign/verify",
     );
   }
   return secret;

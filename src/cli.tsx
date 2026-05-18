@@ -9,6 +9,7 @@ import { runLead } from "./commands/lead.ts";
 import { Onboard } from "./commands/onboard.tsx";
 import { Setup as Connect } from "./commands/setup.tsx";
 import { runWorker } from "./commands/worker.ts";
+import { getApiKey, setApiKey } from "./utils/api-key.ts";
 
 // Get CLI name from bin field (assumes single key)
 const binName = Object.keys(pkg.bin)[0];
@@ -43,7 +44,7 @@ interface ParsedArgs {
 function parseArgs(args: string[]): ParsedArgs {
   const command = args[0] && !args[0].startsWith("-") ? args[0] : undefined;
   let port = process.env.PORT || "3013";
-  let key = process.env.API_KEY || "";
+  let key = getApiKey();
   let msg = "";
   let headless = false;
   let dryRun = false;
@@ -151,7 +152,7 @@ const COMMAND_HELP: Record<
   connect: {
     usage: `${binName} connect [options]`,
     description:
-      "Connect this project to an existing swarm.\nCreates .mcp.json and .claude/settings.local.json with server URL and API key.\nAuto-reads API_KEY from .env if present.",
+      "Connect this project to an existing swarm.\nCreates .mcp.json and .claude/settings.local.json with server URL and API key.\nAuto-reads AGENT_SWARM_API_KEY (or legacy API_KEY) from .env if present.",
     options: [
       "  --dry-run              Show what would be changed without writing",
       "  --restore              Restore files from .bak backups",
@@ -254,7 +255,7 @@ const COMMAND_HELP: Record<
       "Authenticate Codex via ChatGPT OAuth (browser or manual paste).\nPrompts interactively for the target API URL and a best-effort masked API key, then stores credentials in the swarm API config store for deployed workers.",
     options: [
       "  --api-url <url>    Swarm API URL (default: MCP_BASE_URL or http://localhost:3013)",
-      "  --api-key <key>    Swarm API key (default: API_KEY or 123123)",
+      "  --api-key <key>    Swarm API key (default: AGENT_SWARM_API_KEY or API_KEY, falling back to 123123)",
       "  -h, --help         Show this help",
     ].join("\n"),
     examples: [
@@ -269,7 +270,7 @@ const COMMAND_HELP: Record<
       "Bootstrap Anthropic Managed Agents for the swarm: create the cloud environment, upload plugin/commands/*.md skills, create the managed agent, and persist the resulting IDs to swarm_config so deployed workers restore them at boot. Prompts interactively for ANTHROPIC_API_KEY when not set in env. Idempotent — re-run with --force to recreate.",
     options: [
       "  --api-url <url>    Swarm API URL (default: MCP_BASE_URL or http://localhost:3013)",
-      "  --api-key <key>    Swarm API key (default: API_KEY or 123123)",
+      "  --api-key <key>    Swarm API key (default: AGENT_SWARM_API_KEY or API_KEY, falling back to 123123)",
       "  --force            Recreate Anthropic-side resources even if already configured",
       "  -h, --help         Show this help",
     ].join("\n"),
@@ -324,7 +325,7 @@ function McpServer({ port, apiKey, dbPath }: { port: string; apiKey: string; dbP
 
   useEffect(() => {
     process.env.PORT = port;
-    process.env.API_KEY = apiKey;
+    setApiKey(apiKey);
     if (dbPath) {
       process.env.DATABASE_PATH = dbPath;
     }

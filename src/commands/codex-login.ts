@@ -14,6 +14,7 @@ import { emitKeypressEvents } from "node:readline";
 
 import { loginCodexOAuth } from "../providers/codex-oauth/flow.js";
 import { storeCodexOAuth } from "../providers/codex-oauth/storage.js";
+import { getApiKey } from "../utils/api-key";
 
 type PromptTextFn = (label: string, defaultValue: string) => Promise<string>;
 type PromptSecretFn = (label: string, defaultValue: string, helpText?: string) => Promise<string>;
@@ -146,7 +147,8 @@ export async function resolveCodexLoginConfig(
   const promptSecret = deps.promptSecret ?? promptHiddenInput;
   const isInteractive = deps.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
   const defaultApiUrl = env.MCP_BASE_URL || "http://localhost:3013";
-  const defaultApiKey = env.API_KEY || "123123";
+  const envApiKey = getApiKey(env);
+  const defaultApiKey = envApiKey || "123123";
 
   let apiUrl = parsed.apiUrl ?? defaultApiUrl;
   let apiKey = parsed.apiKey ?? defaultApiKey;
@@ -156,8 +158,8 @@ export async function resolveCodexLoginConfig(
   }
 
   if (!parsed.apiKey && isInteractive) {
-    const apiKeyHelp = env.API_KEY
-      ? "Press Enter to use API_KEY from the environment"
+    const apiKeyHelp = envApiKey
+      ? "Press Enter to use AGENT_SWARM_API_KEY/API_KEY from the environment"
       : "Press Enter to use the default local API key";
     apiKey =
       (await promptSecret("Swarm API key", defaultApiKey, apiKeyHelp)).trim() || defaultApiKey;

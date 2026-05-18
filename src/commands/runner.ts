@@ -31,6 +31,7 @@ import {
 } from "../providers/index.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import type { ProviderName, RepoGuidelines } from "../types.ts";
+import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
@@ -2772,7 +2773,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const swarmUrl = process.env.SWARM_URL || "localhost";
-  const apiKey = process.env.API_KEY || "";
+  const apiKey = getApiKey();
 
   // Resolve the boot harness provider from swarm_config (repo > agent > global,
   // overlaid on top of `process.env`). This is what selects the adapter for
@@ -2798,8 +2799,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let adapter = createProviderAdapter(bootProvider);
 
   // Configure HTTP-based template resolution (workers resolve via API, not local DB)
-  if (process.env.API_KEY) {
-    configureHttpResolver(apiUrl, process.env.API_KEY);
+  if (apiKey) {
+    configureHttpResolver(apiUrl, apiKey);
   }
 
   // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false).
@@ -2810,7 +2811,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // skips telemetry instead of minting a fresh `install_<hex>` ID per
   // restart, which floods prod metrics with phantom installs.
   {
-    const telemetryApiKey = process.env.API_KEY;
+    const telemetryApiKey = apiKey || undefined;
     await initTelemetry(
       "worker",
       async (key) => {

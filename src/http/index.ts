@@ -17,6 +17,7 @@ import { initLinear } from "../linear";
 import { initOtel, startSpan, withRemoteContext } from "../otel";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
+import { getApiKey } from "../utils/api-key";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
@@ -69,7 +70,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 const port = parseInt(process.env.PORT || process.argv[2] || "3013", 10);
-const apiKey = process.env.API_KEY || "";
+const apiKey = getApiKey();
 
 // Use globalThis to persist state across hot reloads
 const globalState = globalThis as typeof globalThis & {

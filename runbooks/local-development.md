@@ -16,7 +16,7 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 
 | Var | Default | Notes |
 |---|---|---|
-| `API_KEY` | `123123` | Auth header `Authorization: Bearer …` |
+| `AGENT_SWARM_API_KEY` (preferred) / `API_KEY` (legacy) | `123123` | Auth header `Authorization: Bearer …`. `AGENT_SWARM_API_KEY` wins when both are set — prefer it when exporting in your shell profile so the CLI works from any cwd without colliding with other tools' `API_KEY`. |
 | `MCP_BASE_URL` | `http://localhost:3013` | Public URL the workers/UI hit |
 | `APP_URL` | `http://localhost:5274` | Dashboard URL |
 | `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE` | unset | Set `=true` to disable each integration |
@@ -28,7 +28,7 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 
 `HARNESS_PROVIDER=devin` requires `DEVIN_API_KEY` (prefix `cog_*`) and `DEVIN_ORG_ID` (prefix `org-*`). Optional: `DEVIN_POLL_INTERVAL_MS` (default 15000), `DEVIN_ACU_COST_USD` (default 2.25), `DEVIN_MAX_ACU_LIMIT` (per-session ACU cap, sent to Devin API and shown in UI budget bar), `DEVIN_API_BASE_URL` (override for testing). Repos are configured via the task's `vcsRepo` field — no env var needed. See `.env.docker-devin.example` for a full template.
 
-`API_KEY` and `SECRETS_ENCRYPTION_KEY` are reserved — they cannot be stored in `swarm_config`.
+`AGENT_SWARM_API_KEY` / `API_KEY` and `SECRETS_ENCRYPTION_KEY` are reserved — they cannot be stored in `swarm_config`.
 
 ## Tracker integrations (Linear & Jira)
 

@@ -101,6 +101,9 @@ jobs:
       - name: Check worker/API DB boundary
         run: bash scripts/check-db-boundary.sh
 
+      - name: Check API_KEY env-access boundary
+        run: bash scripts/check-api-key-boundary.sh
+
   test:
     name: Run Tests
     needs: detect-changes

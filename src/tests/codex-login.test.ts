@@ -70,7 +70,7 @@ describe("resolveCodexLoginConfig", () => {
     expect(promptSecret).toHaveBeenCalledWith(
       "Swarm API key",
       "env-secret",
-      "Press Enter to use API_KEY from the environment",
+      "Press Enter to use AGENT_SWARM_API_KEY/API_KEY from the environment",
     );
   });
 

@@ -3,6 +3,7 @@ import { Select } from "@inkjs/ui";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
+import { getApiKey } from "../utils/api-key.ts";
 import { getAgentSummary, getPresetById, PRESETS } from "./onboard/presets.ts";
 import { CoreCredentialsStep } from "./onboard/steps/core-credentials.tsx";
 import { CustomTemplatesStep } from "./onboard/steps/custom-templates.tsx";
@@ -140,7 +141,7 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
     }
 
     const credentialType = anthropicKey ? "api_key" : "oauth";
-    const apiKey = process.env.API_KEY || crypto.randomBytes(16).toString("hex");
+    const apiKey = getApiKey() || crypto.randomBytes(16).toString("hex");
 
     const agentIds: Record<string, string> = {};
     for (const svc of selectedPreset.services) {

@@ -33,6 +33,7 @@ import type { BetaEnvironment } from "@anthropic-ai/sdk/resources/beta/environme
 import type { SkillCreateResponse } from "@anthropic-ai/sdk/resources/beta/skills";
 import { toFile } from "@anthropic-ai/sdk/uploads";
 
+import { getApiKey } from "../utils/api-key";
 import { promptHiddenInput } from "./codex-login.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -397,7 +398,7 @@ export async function resolveClaudeManagedSetupConfig(
   const isInteractive = deps.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
   const apiUrl = parsed.apiUrl ?? env.MCP_BASE_URL ?? "http://localhost:3013";
-  const apiKey = parsed.apiKey ?? env.API_KEY ?? "123123";
+  const apiKey = parsed.apiKey ?? (getApiKey(env) || "123123");
 
   let anthropicApiKey = env.ANTHROPIC_API_KEY ?? "";
   if (!anthropicApiKey && isInteractive) {

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { createArtifactServer } from "../artifact-sdk";
+import { getApiKey } from "../utils/api-key";
 
 interface ArtifactArgs {
   additionalArgs: string[];
@@ -137,7 +138,7 @@ async function artifactServe(args: ArtifactArgs) {
 }
 
 async function artifactList() {
-  const apiKey = process.env.API_KEY || "";
+  const apiKey = getApiKey();
   const mcpBaseUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const agentId = process.env.AGENT_ID || "";
 
@@ -195,7 +196,7 @@ async function artifactStop(args: ArtifactArgs) {
     process.exit(1);
   }
 
-  const apiKey = process.env.API_KEY || "";
+  const apiKey = getApiKey();
   const mcpBaseUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const agentId = process.env.AGENT_ID || "";
 

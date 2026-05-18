@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getPage } from "../be/db";
+import { getApiKey } from "../utils/api-key";
 import { extractAndVerifyCookie } from "../utils/page-session";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -147,7 +148,7 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
   const baseUrl = `http://127.0.0.1:${port}`;
   const targetUrl = `${baseUrl}${rewrittenPath}${queryPart}`;
 
-  const apiKey = process.env.API_KEY ?? "";
+  const apiKey = getApiKey();
   // `X-Page-Id` is the trust anchor for page-scoped KV: only the page-proxy
   // ever sets it (any external `X-Page-Id` header is dropped because we don't
   // forward the original headers). The KV handler treats this as the highest-
