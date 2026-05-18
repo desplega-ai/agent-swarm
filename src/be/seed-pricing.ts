@@ -222,6 +222,14 @@ function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] {
     for (const row of projectCostBlock("opencode", id, model.cost)) {
       rows.push(row);
     }
+    // pi-mono also routes via OpenRouter when only OPENROUTER_API_KEY is set
+    // (see src/providers/pi-mono-adapter.ts). Without this projection, pi runs
+    // against non-anthropic models (e.g. deepseek/deepseek-v4-flash) fall
+    // through to costSource='unpriced' even though the model is in the
+    // models.dev snapshot.
+    for (const row of projectCostBlock("pi", id, model.cost)) {
+      rows.push(row);
+    }
     // Gemini specifically: also project under the 'gemini' provider so
     // internal-ai callers that tag with provider='gemini' find a hit.
     if (id.startsWith("google/")) {
