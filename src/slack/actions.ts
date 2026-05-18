@@ -1,8 +1,9 @@
 import type { App } from "@slack/bolt";
-import { cancelTask, getAgentById, getLeadAgent, getTaskById, resolveUser } from "../be/db";
+import { cancelTask, getAgentById, getLeadAgent, getTaskById } from "../be/db";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
+import { resolveSlackUserId } from "./enrich";
 
 export function registerActionHandlers(app: App): void {
   // "View Full Logs" — URL button, just ack (Slack opens the link automatically)
@@ -67,7 +68,12 @@ export function registerActionHandlers(app: App): void {
     if (!originalTask || !originalTask.slackChannelId) return;
 
     const lead = getLeadAgent();
-    const requestedByUserId = resolveUser({ slackUserId: body.user.id })?.id;
+    // Resolve via the shared cascade. Sample context = the modal callback ID
+    // so operators can see *which* modal-submit triggered an unmapped entry.
+    const requestedByUserId = await resolveSlackUserId(client, body.user.id, {
+      sampleEventType: "view_submission",
+      sampleContext: view.callback_id || "follow_up_submit",
+    });
     const followUpTask = createTaskWithSiblingAwareness(followUpText, {
       agentId: lead?.id,
       source: "slack",

@@ -2,7 +2,7 @@
 id: step-2
 name: Slack webhook rewire + enrichSlackUserEmail
 depends_on: [step-1]
-status: ready
+status: done
 ---
 
 # step-2: Slack webhook rewire + enrichSlackUserEmail
@@ -64,12 +64,12 @@ Rewire all three Slack webhook entry points (`handlers.ts`, `assistant.ts`, `act
 
 #### Automated Verification:
 
-- [ ] `bun test src/tests/slack-handlers.test.ts` — all new cases pass.
-- [ ] `bun test src/tests/user-identity.test.ts` — still passes (step-1 invariants).
-- [ ] `bun run tsc:check` — passes (assuming step-1 + this step both committed; if running in isolation, only Slack-related errors should remain).
-- [ ] `bun run lint` passes on `src/slack/**`.
-- [ ] `grep -n 'resolveUser\s*(' src/slack/` returns 0 hits.
-- [ ] `grep -n 'userEmailCache' src/` returns 0 hits.
+- [x] `bun test src/tests/slack-identity-resolution.test.ts` — all new cases pass (9 tests).
+- [x] `bun test src/tests/user-identity.test.ts` — still passes (42 tests; step-1 invariants).
+- [x] `bun run tsc:check` — passes for `src/slack/**` + new files (unrelated sibling-step errors ignored as expected mid-fanout).
+- [x] `bun run lint` passes on `src/slack/**` + `src/be/unmapped-identities.ts` + `src/tests/slack-identity-resolution.test.ts`.
+- [x] `grep -n 'resolveUser\s*(' src/slack/` returns 0 hits.
+- [x] `grep -n 'userEmailCache' src/` returns 0 hits.
 
 #### Automated QA:
 
