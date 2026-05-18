@@ -2,8 +2,8 @@
 date: 2026-05-18T00:00:00-00:00
 author: Taras
 plan_type: dag
-status: in-progress
-last_updated: 2026-05-18
+status: completed
+last_updated: 2026-05-19
 last_updated_by: Taras
 ---
 
