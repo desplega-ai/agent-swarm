@@ -18,6 +18,9 @@ import type {
   CredentialMissingAgentsResponse,
   DashboardCostResponse,
   EventDefinition,
+  IdentitiesResponse,
+  IdentityEvent,
+  IdentityEventsResponse,
   InboxItemState,
   InboxItemStatus,
   InboxItemType,
@@ -39,6 +42,7 @@ import type {
   PricingTokenClass,
   PromptTemplate,
   PromptTemplateHistory,
+  ResolveUnmappedInput,
   ScheduledTask,
   ScheduledTasksResponse,
   ServicesResponse,
@@ -61,9 +65,14 @@ import type {
   TaskTemplateKind,
   TaskTemplatesResponse,
   TaskWithLogs,
+  UnmappedIdentity,
+  UnmappedResponse,
+  UpdateUserInput,
   UpsertPromptTemplateInput,
   UsageSummaryResponse,
   User,
+  UserIdentity,
+  UserResponse,
   UsersResponse,
   Workflow,
   WorkflowRun,
@@ -1561,14 +1570,28 @@ class ApiClient {
     return res.json();
   }
 
-  // ─── Users (Phase 2 ≥1.76.0) ─────────────────────────────────────────────
+  // ─── Users (Phase 2 ≥1.76.0; Phase 064 step-8 ≥1.80.0) ──────────────────
 
-  async listUsers(): Promise<User[]> {
-    const url = `${this.getBaseUrl()}/api/users`;
+  async listUsers(opts?: { recentEvents?: number }): Promise<User[]> {
+    const qs = new URLSearchParams();
+    if (opts?.recentEvents !== undefined) qs.set("recentEvents", String(opts.recentEvents));
+    const q = qs.toString();
+    const url = `${this.getBaseUrl()}/api/users${q ? `?${q}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to list users: ${res.status}`);
     const data = (await res.json()) as UsersResponse;
     return data.users;
+  }
+
+  async getUser(id: string, opts?: { recentEvents?: number }): Promise<User> {
+    const qs = new URLSearchParams();
+    if (opts?.recentEvents !== undefined) qs.set("recentEvents", String(opts.recentEvents));
+    const q = qs.toString();
+    const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(id)}${q ? `?${q}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch user: ${res.status}`);
+    const body = (await res.json()) as UserResponse;
+    return body.user;
   }
 
   async createUser(data: CreateUserInput): Promise<User> {
@@ -1582,8 +1605,117 @@ class ApiClient {
       const err = await res.json().catch(() => ({ error: "Failed to create user" }));
       throw new Error(err.error || `Failed to create user: ${res.status}`);
     }
-    const body = (await res.json()) as { user: User };
+    const body = (await res.json()) as UserResponse;
     return body.user;
+  }
+
+  async updateUser(id: string, data: UpdateUserInput): Promise<User> {
+    const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(id)}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to update user" }));
+      throw new Error(err.error || `Failed to update user: ${res.status}`);
+    }
+    const body = (await res.json()) as UserResponse;
+    return body.user;
+  }
+
+  async addUserIdentity(id: string, ident: UserIdentity): Promise<UserIdentity[]> {
+    const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(id)}/identities`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(ident),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to link identity" }));
+      throw new Error(err.error || `Failed to link identity: ${res.status}`);
+    }
+    const body = (await res.json()) as IdentitiesResponse;
+    return body.identities;
+  }
+
+  async removeUserIdentity(id: string, kind: string, externalId: string): Promise<UserIdentity[]> {
+    const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(id)}/identities/${encodeURIComponent(
+      kind,
+    )}/${encodeURIComponent(externalId)}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to unlink identity" }));
+      throw new Error(err.error || `Failed to unlink identity: ${res.status}`);
+    }
+    const body = (await res.json()) as IdentitiesResponse;
+    return body.identities;
+  }
+
+  async listUserEvents(
+    id: string,
+    opts?: { limit?: number; before?: string },
+  ): Promise<IdentityEvent[]> {
+    const qs = new URLSearchParams();
+    if (opts?.limit !== undefined) qs.set("limit", String(opts.limit));
+    if (opts?.before) qs.set("before", opts.before);
+    const q = qs.toString();
+    const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(id)}/events${q ? `?${q}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch user events: ${res.status}`);
+    const body = (await res.json()) as IdentityEventsResponse;
+    return body.events;
+  }
+
+  async mergeUsers(targetId: string, sourceUserId: string): Promise<User> {
+    const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(targetId)}/merge`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ sourceUserId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to merge users" }));
+      throw new Error(err.error || `Failed to merge users: ${res.status}`);
+    }
+    const body = (await res.json()) as UserResponse;
+    return body.user;
+  }
+
+  async listUnmapped(opts?: { kind?: string; limit?: number }): Promise<UnmappedIdentity[]> {
+    const qs = new URLSearchParams();
+    if (opts?.kind) qs.set("kind", opts.kind);
+    if (opts?.limit !== undefined) qs.set("limit", String(opts.limit));
+    const q = qs.toString();
+    const url = `${this.getBaseUrl()}/api/users/unmapped${q ? `?${q}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch unmapped identities: ${res.status}`);
+    const body = (await res.json()) as UnmappedResponse;
+    return body.unmapped;
+  }
+
+  async resolveUnmapped(
+    kind: string,
+    externalId: string,
+    body: ResolveUnmappedInput,
+  ): Promise<User> {
+    const url = `${this.getBaseUrl()}/api/users/unmapped/${encodeURIComponent(
+      kind,
+    )}/${encodeURIComponent(externalId)}/resolve`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to resolve unmapped" }));
+      throw new Error(err.error || `Failed to resolve unmapped: ${res.status}`);
+    }
+    const data = (await res.json()) as UserResponse;
+    return data.user;
   }
 
   // ─── Sessions (Phase 4 ≥1.76.0) ───────────────────────────────────────────
