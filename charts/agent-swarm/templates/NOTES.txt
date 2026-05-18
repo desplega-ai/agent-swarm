@@ -1,0 +1,31 @@
+agent-swarm {{ .Chart.AppVersion }} is installed (chart {{ .Chart.Version }}).
+
+Pools deployed:
+{{- range $name, $pool := .Values.pools }}
+  - {{ $name }} (replicas: {{ $pool.replicas }}, role: {{ default "worker" $pool.role }}, template: {{ $pool.templateId }})
+{{- end }}
+
+API service:
+  http://{{ include "agent-swarm.fullname" . }}-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }}
+
+To exec into the API pod:
+  kubectl -n {{ .Release.Namespace }} exec -it {{ include "agent-swarm.fullname" . }}-api-0 -- sh
+
+To list registered agents:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "agent-swarm.fullname" . }}-api {{ .Values.api.port }}:{{ .Values.api.port }}
+  curl -H "Authorization: Bearer $API_KEY" http://localhost:{{ .Values.api.port }}/api/agents
+
+{{- if not .Values.agentFs.enabled }}
+
+Note: agent-fs is disabled. Agents will operate with local-only filesystem
+on their personal PVCs and won't share files across the swarm. Enable
+agent-fs (or mount a ReadWriteMany volume via sharedVolume.existingClaim)
+if you need cross-agent file sharing.
+{{- end }}
+
+{{- if not .Values.litestream.enabled }}
+
+Note: litestream WAL replication is disabled. Back up
+{{ include "agent-swarm.fullname" . }}-api-0:/app/data/agent-swarm-db.sqlite
+out-of-band, or enable litestream for continuous replication to S3.
+{{- end }}

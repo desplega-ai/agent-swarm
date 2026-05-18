@@ -1,0 +1,173 @@
+{{/*
+Render-time validation of pool roles:
+  - At most one pool may have role=lead
+  - The lead pool, if defined, must have replicas=1
+The API enforces a single lead at runtime via join-swarm; catching it here
+gives a clearer error than a CrashLoop.
+*/}}
+{{- $leadPools := list }}
+{{- range $name, $pool := .Values.pools }}
+  {{- if eq (default "worker" $pool.role) "lead" }}
+    {{- $leadPools = append $leadPools $name }}
+    {{- if ne (int $pool.replicas) 1 }}
+      {{- fail (printf "pools.%s: role=lead requires replicas=1, got %d" $name (int $pool.replicas)) }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- if gt (len $leadPools) 1 }}
+  {{- fail (printf "only one pool may have role=lead, got %d: %v" (len $leadPools) $leadPools) }}
+{{- end }}
+{{- range $poolName, $pool := .Values.pools }}
+{{- $role := default "worker" $pool.role }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "agent-swarm.fullname" $ }}-{{ $poolName }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "agent-swarm.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $role }}
+    agent-swarm.dev/pool: {{ $poolName }}
+spec:
+  serviceName: {{ include "agent-swarm.fullname" $ }}-{{ $poolName }}
+  replicas: {{ $pool.replicas }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ $.Values.poolDefaults.updateStrategy.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "agent-swarm.selectorLabels" $ | nindent 6 }}
+      agent-swarm.dev/pool: {{ $poolName }}
+  template:
+    metadata:
+      annotations:
+        {{- if not $.Values.auth.existingSecret }}
+        checksum/auth: {{ include (print $.Template.BasePath "/secret-auth.yaml") $ | sha256sum }}
+        {{- end }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+        {{- with $.Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "agent-swarm.labels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $role }}
+        agent-swarm.dev/pool: {{ $poolName }}
+    spec:
+      serviceAccountName: {{ include "agent-swarm.serviceAccountName" $ }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $.Values.poolDefaults.terminationGracePeriodSeconds }}
+      initContainers:
+        {{- include "agent-swarm.waitForApi" $ | nindent 8 }}
+      containers:
+        - name: {{ $role }}
+          image: {{ include "agent-swarm.workerImage" $ | quote }}
+          imagePullPolicy: {{ $.Values.workerImage.pullPolicy }}
+          {{- with $.Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # AGENT_ID is persisted on the personal PVC. New ordinals (scale-up)
+              # mint a UUID on first boot and self-register via join-swarm.
+              ID_FILE="/workspace/personal/.agent-id"
+              if [ -s "$ID_FILE" ]; then
+                AGENT_ID=$(cat "$ID_FILE")
+                echo "Loaded AGENT_ID from $ID_FILE"
+              else
+                AGENT_ID=$(cat /proc/sys/kernel/random/uuid)
+                echo "$AGENT_ID" > "$ID_FILE"
+                echo "Generated new AGENT_ID"
+              fi
+              export AGENT_ID
+              export AGENT_NAME="${AGENT_NAME:-$(hostname)}"
+              echo "{{ $poolName }} identity: AGENT_ID=$AGENT_ID AGENT_NAME=$AGENT_NAME role={{ $role }}"
+              exec /docker-entrypoint.sh
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: {{ include "agent-swarm.fullname" $ }}-config
+            - secretRef:
+                name: {{ include "agent-swarm.authSecretName" $ }}
+          env:
+            - name: AGENT_ROLE
+              value: {{ $role | quote }}
+            - name: TEMPLATE_ID
+              value: {{ $pool.templateId | quote }}
+            {{- if $pool.maxConcurrentTasks }}
+            - name: MAX_CONCURRENT_TASKS
+              value: {{ $pool.maxConcurrentTasks | quote }}
+            {{- end }}
+            {{- if $pool.modelOverride }}
+            - name: MODEL_OVERRIDE
+              value: {{ $pool.modelOverride | quote }}
+            {{- end }}
+            - name: HARNESS_PROVIDER
+              value: {{ default $.Values.poolDefaults.harnessProvider $pool.harnessProvider | quote }}
+            {{- if $pool.devinMaxAcuLimit }}
+            - name: DEVIN_MAX_ACU_LIMIT
+              value: {{ $pool.devinMaxAcuLimit | quote }}
+            {{- end }}
+            {{- if $pool.systemPromptConfigMap }}
+            - name: SYSTEM_PROMPT_FILE
+              value: /etc/agent-swarm/system-prompt.md
+            {{- end }}
+            {{- include "agent-swarm.poolEnv" $ | nindent 12 }}
+          resources:
+            {{- toYaml $pool.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "agent-swarm.poolVolumeMounts" $ | nindent 12 }}
+            {{- if $pool.systemPromptConfigMap }}
+            - name: system-prompt
+              mountPath: /etc/agent-swarm
+              readOnly: true
+            {{- end }}
+          # Pool pods are pure outbound pollers (no HTTP listener). Probe
+          # the agent process directly; harness CLIs only spawn per task.
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "agent-swarm"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["pgrep", "-f", "agent-swarm"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 30"]
+      volumes:
+        {{- include "agent-swarm.poolVolumes" (dict "root" $ "pool" $pool) | nindent 8 }}
+        {{- if $pool.systemPromptConfigMap }}
+        - name: system-prompt
+          configMap:
+            name: {{ $pool.systemPromptConfigMap }}
+        {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: personal
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- $sc := default $.Values.poolDefaults.storage.storageClassName ($pool.storage).storageClassName }}
+        {{- if $sc }}
+        storageClassName: {{ $sc }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ default $.Values.poolDefaults.storage.personalSize ($pool.storage).personalSize }}
+{{- end }}

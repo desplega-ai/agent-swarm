@@ -39,27 +39,20 @@ function createTestServer(): Server {
 }
 
 async function startTestServer(): Promise<Server> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const candidate = 20_000 + Math.floor(Math.random() * 20_000);
-    const candidateServer = createTestServer();
-    try {
-      await new Promise<void>((resolve, reject) => {
-        candidateServer.once("error", reject);
-        candidateServer.listen(candidate, () => {
-          BASE = `http://localhost:${candidate}`;
-          resolve();
-        });
-      });
-      return candidateServer;
-    } catch (err) {
-      lastError = err;
-      candidateServer.close();
-    }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Failed to start pages view-count test server");
+  const candidateServer = createTestServer();
+  await new Promise<void>((resolve, reject) => {
+    candidateServer.once("error", reject);
+    candidateServer.listen(0, () => {
+      const addr = candidateServer.address();
+      if (!addr || typeof addr === "string") {
+        reject(new Error("Failed to resolve pages view-count test server port"));
+        return;
+      }
+      BASE = `http://localhost:${addr.port}`;
+      resolve();
+    });
+  });
+  return candidateServer;
 }
 
 async function getViewCount(id: string, agentId: string): Promise<number> {
@@ -79,7 +72,7 @@ describe("Pages — view_count counter", () => {
 
   beforeAll(async () => {
     originalPageSessionSecret = process.env.PAGE_SESSION_SECRET;
-    process.env.PAGE_SESSION_SECRET = "test-pages-view-count-secret";
+    process.env.PAGE_SESSION_SECRET = "test-view-count-secret";
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -90,7 +83,9 @@ describe("Pages — view_count counter", () => {
   });
 
   afterAll(async () => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (server) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
     closeDb();
     if (originalPageSessionSecret === undefined) {
       delete process.env.PAGE_SESSION_SECRET;

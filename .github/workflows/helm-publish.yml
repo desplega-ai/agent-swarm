@@ -1,0 +1,102 @@
+name: Helm Chart
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "charts/**"
+      - ".github/workflows/helm-publish.yml"
+  pull_request:
+    paths:
+      - "charts/**"
+      - ".github/workflows/helm-publish.yml"
+      - "package.json"
+  workflow_dispatch:
+
+concurrency:
+  group: helm-publish-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+  CHART_PATH: charts/agent-swarm
+
+jobs:
+  lint-and-render:
+    name: Lint + render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        with:
+          version: v4.1.4
+
+      - name: Helm lint
+        run: helm lint ${{ env.CHART_PATH }}
+
+      - name: Render — defaults
+        run: |
+          helm template release ${{ env.CHART_PATH }} \
+            --set auth.apiKey=ci-render \
+            > /dev/null
+
+      - name: Render — agent-fs + litestream + ingress
+        run: |
+          helm template release ${{ env.CHART_PATH }} \
+            --set auth.apiKey=ci-render \
+            --set agentFs.enabled=true \
+            --set agentFs.bucket=ci-bucket \
+            --set agentFs.s3.accessKeyId=ci \
+            --set agentFs.s3.secretAccessKey=ci \
+            --set litestream.enabled=true \
+            --set litestream.bucket=ci-backup \
+            --set litestream.endpoint=https://s3.amazonaws.com \
+            --set litestream.region=us-east-1 \
+            --set litestream.s3.accessKeyId=ci \
+            --set litestream.s3.secretAccessKey=ci \
+            --set ingress.enabled=true \
+            --set ingress.className=nginx \
+            --set ingress.host=swarm.example.com \
+            > /dev/null
+
+  publish:
+    name: Publish to GHCR
+    needs: lint-and-render
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+
+      - name: Set up Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        with:
+          version: v4.1.4
+
+      - name: Detect chart version change
+        id: detect
+        run: |
+          NEW=$(yq '.version' ${{ env.CHART_PATH }}/Chart.yaml)
+          OLD=$(git show HEAD~1:${{ env.CHART_PATH }}/Chart.yaml 2>/dev/null | yq '.version' 2>/dev/null || echo "")
+          echo "new=$NEW" >> $GITHUB_OUTPUT
+          [ "$NEW" != "$OLD" ] && [ -n "$NEW" ] && echo "changed=true" >> $GITHUB_OUTPUT || echo "changed=false" >> $GITHUB_OUTPUT
+          echo "::notice::Chart version: old=$OLD new=$NEW"
+
+      - name: Log in to GHCR
+        if: steps.detect.outputs.changed == 'true'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Package + push
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          helm package ${{ env.CHART_PATH }} -d /tmp
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          helm push /tmp/agent-swarm-${{ steps.detect.outputs.new }}.tgz oci://${{ env.REGISTRY }}/${OWNER}/charts
+          echo "::notice::Published agent-swarm-${{ steps.detect.outputs.new }} to oci://${{ env.REGISTRY }}/${OWNER}/charts/agent-swarm"
