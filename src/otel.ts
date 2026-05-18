@@ -48,6 +48,11 @@ export function isOtelEnabled(): boolean {
   return enabled;
 }
 
+export function isPollTracingEnabled(): boolean {
+  const v = (process.env.OTEL_TRACE_POLL ?? "").toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
 export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): Promise<void> {
   if (!enabled || initialized) return;
   initialized = true;

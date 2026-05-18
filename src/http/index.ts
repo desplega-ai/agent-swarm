@@ -14,7 +14,7 @@ import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
 import { initJira } from "../jira";
 import { initLinear } from "../linear";
-import { initOtel, startSpan, withRemoteContext } from "../otel";
+import { initOtel, isPollTracingEnabled, startSpan, withRemoteContext } from "../otel";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
 import { getApiKey } from "../utils/api-key";
@@ -118,33 +118,39 @@ const httpServer = createHttpServer(async (req, res) => {
   });
 
   await withRemoteContext(req.headers as Record<string, unknown>, async () => {
-    const span = startSpan("http.server", {
-      "http.request.method": req.method ?? "",
-      "url.path": req.url?.split("?")[0] ?? "",
-      "agent.id": req.headers["x-agent-id"] as string | undefined,
-      "agentswarm.component": "api",
-    });
+    const reqPath = req.url?.split("?")[0] ?? "";
+    const skipSpan = reqPath === "/api/poll" && !isPollTracingEnabled();
+    const span = skipSpan
+      ? null
+      : startSpan("http.server", {
+          "http.request.method": req.method ?? "",
+          "url.path": reqPath,
+          "agent.id": req.headers["x-agent-id"] as string | undefined,
+          "agentswarm.component": "api",
+        });
 
-    res.on("finish", () => {
-      if (spanEnded) return;
-      spanEnded = true;
-      span.setAttributes({
-        "http.response.status_code": statusCode,
-        "agentswarm.http.duration_ms": Math.round((performance.now() - startTime) * 10) / 10,
+    if (span) {
+      res.on("finish", () => {
+        if (spanEnded) return;
+        spanEnded = true;
+        span.setAttributes({
+          "http.response.status_code": statusCode,
+          "agentswarm.http.duration_ms": Math.round((performance.now() - startTime) * 10) / 10,
+        });
+        if (statusCode >= 500) {
+          span.setStatus({ code: 2, message: `HTTP ${statusCode}` });
+        }
+        span.end();
       });
-      if (statusCode >= 500) {
-        span.setStatus({ code: 2, message: `HTTP ${statusCode}` });
-      }
-      span.end();
-    });
 
-    res.on("error", (err) => {
-      if (spanEnded) return;
-      spanEnded = true;
-      span.recordException(err);
-      span.setStatus({ code: 2, message: err.message });
-      span.end();
-    });
+      res.on("error", (err) => {
+        if (spanEnded) return;
+        spanEnded = true;
+        span.recordException(err);
+        span.setStatus({ code: 2, message: err.message });
+        span.end();
+      });
+    }
 
     setCorsHeaders(req, res);
 
@@ -208,8 +214,10 @@ const httpServer = createHttpServer(async (req, res) => {
       res.writeHead(404);
       res.end("Not Found");
     } catch (err) {
-      span.recordException(err);
-      span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
+      if (span) {
+        span.recordException(err);
+        span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
+      }
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[HTTP] ❌ ${req.method} ${req.url} → ${message}`);
       if (!res.headersSent) {
