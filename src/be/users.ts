@@ -147,6 +147,112 @@ export function getUserIdentities(userId: string): Array<{ kind: string; externa
     .all(userId);
 }
 
+/**
+ * Identity-event row shape — what the People page timeline consumes. Mirrors
+ * the columns on `user_identity_events`; `beforeJson`/`afterJson` are decoded
+ * here so callers don't repeat the parse.
+ */
+export type IdentityEvent = {
+  id: string;
+  userId: string;
+  eventType: string;
+  actor: string;
+  before: unknown | null;
+  after: unknown | null;
+  createdAt: string;
+};
+
+type IdentityEventRow = {
+  id: string;
+  userId: string;
+  eventType: string;
+  actor: string;
+  beforeJson: string | null;
+  afterJson: string | null;
+  createdAt: string;
+};
+
+function rowToEvent(row: IdentityEventRow): IdentityEvent {
+  return {
+    id: row.id,
+    userId: row.userId,
+    eventType: row.eventType,
+    actor: row.actor,
+    before: row.beforeJson == null ? null : (JSON.parse(row.beforeJson) as unknown),
+    after: row.afterJson == null ? null : (JSON.parse(row.afterJson) as unknown),
+    createdAt: row.createdAt,
+  };
+}
+
+/**
+ * Paginated event timeline for a user. `limit` is hard-capped at 200; `before`
+ * is a cursor on `createdAt` (ISO string) so the caller can keep paging by
+ * passing back the last event's `createdAt`.
+ */
+export function listUserEvents(
+  userId: string,
+  opts: { limit?: number; before?: string } = {},
+): IdentityEvent[] {
+  const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+  const before = opts.before;
+  const db = getDb();
+  if (before) {
+    return db
+      .prepare<IdentityEventRow, [string, string, number]>(
+        `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
+           FROM user_identity_events
+          WHERE userId = ? AND createdAt < ?
+          ORDER BY createdAt DESC, rowid DESC
+          LIMIT ?`,
+      )
+      .all(userId, before, limit)
+      .map(rowToEvent);
+  }
+  return db
+    .prepare<IdentityEventRow, [string, number]>(
+      `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
+         FROM user_identity_events
+        WHERE userId = ?
+        ORDER BY createdAt DESC, rowid DESC
+        LIMIT ?`,
+    )
+    .all(userId, limit)
+    .map(rowToEvent);
+}
+
+/**
+ * Token row shape returned to operators — `tokenHash` is never exposed,
+ * `tokenPreview` is the last 4 chars of the plaintext.
+ */
+export type UserTokenSummary = {
+  id: string;
+  userId: string;
+  label: string | null;
+  tokenPreview: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+};
+
+type UserTokenRow = UserTokenSummary;
+
+/**
+ * List a user's MCP tokens (without the hash). Used to render the People
+ * page token panel — the mint/revoke endpoints + UI dialog ship with the
+ * MCP-token plan, this helper lands here so step-8's `GET /users` response
+ * can include token summaries.
+ */
+export function listUserTokens(userId: string): UserTokenSummary[] {
+  return getDb()
+    .prepare<UserTokenRow, string>(
+      `SELECT id, userId, label, tokenPreview, createdAt, lastUsedAt, revokedAt
+         FROM user_tokens
+        WHERE userId = ?
+        ORDER BY createdAt DESC`,
+    )
+    .all(userId);
+}
+
 // ---------------------------------------------------------------------------
 // Event audit
 // ---------------------------------------------------------------------------
