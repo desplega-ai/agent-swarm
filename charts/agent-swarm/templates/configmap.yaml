@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-swarm.labels" . | nindent 4 }}
+data:
+  MCP_BASE_URL: "http://{{ include "agent-swarm.fullname" . }}-api:{{ .Values.api.port }}"
+  {{- if .Values.config.appUrl }}
+  APP_URL: {{ .Values.config.appUrl | quote }}
+  {{- end }}
+  {{- if .Values.config.slackAllowedEmailDomains }}
+  SLACK_ALLOWED_EMAIL_DOMAINS: {{ .Values.config.slackAllowedEmailDomains | quote }}
+  {{- end }}
+  {{- if .Values.config.slackAllowedUserIds }}
+  SLACK_ALLOWED_USER_IDS: {{ .Values.config.slackAllowedUserIds | quote }}
+  {{- end }}
+  {{- if .Values.config.githubBotName }}
+  GITHUB_BOT_NAME: {{ .Values.config.githubBotName | quote }}
+  {{- end }}
+  {{- if .Values.config.githubEmail }}
+  GITHUB_EMAIL: {{ .Values.config.githubEmail | quote }}
+  {{- end }}
+  {{- if .Values.config.githubName }}
+  GITHUB_NAME: {{ .Values.config.githubName | quote }}
+  {{- end }}
+  {{- range $k, $v := .Values.config.extraEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

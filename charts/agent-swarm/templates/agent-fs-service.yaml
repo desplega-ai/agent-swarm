@@ -1,0 +1,20 @@
+{{- if .Values.agentFs.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-agent-fs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-fs
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.agentFs.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "agent-swarm.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-fs
+{{- end }}

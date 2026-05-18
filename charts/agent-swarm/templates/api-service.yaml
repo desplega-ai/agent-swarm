@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.api.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "agent-swarm.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api

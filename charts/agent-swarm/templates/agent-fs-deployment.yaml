@@ -1,0 +1,69 @@
+{{- if .Values.agentFs.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-agent-fs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-fs
+spec:
+  replicas: 1
+  # ReadWriteOnce PVC + replicas: 1 → Recreate avoids the rolling-update
+  # deadlock where the new pod can't claim the PVC the old pod still holds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "agent-swarm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent-fs
+  template:
+    metadata:
+      labels:
+        {{- include "agent-swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: agent-fs
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "agent-swarm.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent-fs
+          image: "{{ .Values.agentFs.image.registry }}/{{ .Values.agentFs.image.repository }}:{{ .Values.agentFs.image.tag }}"
+          imagePullPolicy: {{ .Values.agentFs.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.agentFs.port }}
+          envFrom:
+            - secretRef:
+                name: {{ include "agent-swarm.agentFsSecretName" . }}
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: {{ .Values.agentFs.port | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.agentFs.bucket | quote }}
+          resources:
+            {{- toYaml .Values.agentFs.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "agent-swarm.fullname" . }}-agent-fs
+{{- end }}

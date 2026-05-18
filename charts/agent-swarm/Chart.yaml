@@ -1,0 +1,39 @@
+apiVersion: v2
+name: agent-swarm
+description: Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants
+type: application
+# Required Kubernetes version. networking.k8s.io/v1 Ingress and modern
+# StatefulSet semantics assume 1.25+.
+kubeVersion: ">=1.25.0-0"
+# Chart version — bumped when the chart itself changes. Independent of appVersion.
+version: 0.1.0
+# Application version — default image tag the chart deploys. Set to any
+# published agent-swarm version (see ghcr.io/desplega-ai/agent-swarm).
+# Users override at install time with --set image.tag=...; this is just
+# the default. Doesn't need to track package.json — bump it when the chart
+# is intentionally re-baselined onto a newer app version.
+appVersion: "1.78.0"
+home: https://github.com/desplega-ai/agent-swarm
+sources:
+  - https://github.com/desplega-ai/agent-swarm
+keywords:
+  - agents
+  - ai
+  - claude
+  - codex
+  - llm
+  - orchestration
+  - mcp
+maintainers:
+  - name: desplega.sh
+    email: contact@desplega.sh
+    url: https://github.com/desplega-ai
+icon: https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/assets/logo.png
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/links: |
+    - name: Source
+      url: https://github.com/desplega-ai/agent-swarm
+    - name: Documentation
+      url: https://github.com/desplega-ai/agent-swarm/blob/main/DEPLOYMENT.md
+  artifacthub.io/category: ai-machine-learning
