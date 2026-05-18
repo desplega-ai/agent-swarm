@@ -1,0 +1,292 @@
+# -- Override the chart name fragment used to build resource names.
+nameOverride: ""
+# -- Override the full release name used to build resource names.
+fullnameOverride: ""
+
+# -- Pod-level annotations to add to every pod the chart manages.
+podAnnotations: {}
+
+# -- Pod-level securityContext applied to every pod the chart manages.
+podSecurityContext: {}
+
+# -- Container-level securityContext applied to every container the chart manages.
+securityContext: {}
+
+# -- Image pull secrets used by every pod the chart manages.
+imagePullSecrets: []
+
+# Image — server (the API + scheduler).
+image:
+  registry: ghcr.io
+  repository: desplega-ai/agent-swarm
+  pullPolicy: IfNotPresent
+  # -- Server image tag. Defaults to .Chart.AppVersion when unset.
+  tag: ""
+
+# Image — worker (used by every pool pod, including the lead).
+workerImage:
+  registry: ghcr.io
+  repository: desplega-ai/agent-swarm-worker
+  pullPolicy: IfNotPresent
+  # -- Worker image tag. Defaults to .Chart.AppVersion when unset.
+  tag: ""
+
+# ServiceAccount for every pod managed by this chart.
+# Annotations are useful for cloud workload identity (GKE Workload Identity,
+# IRSA, AKS Pod Identity) — set them via `serviceAccount.annotations`.
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Authentication and credentials.
+#
+# Two paths:
+#
+#   1. Inline keys → the chart creates a Secret from these values. Suitable
+#      for development / quickstart. NEVER check inline keys into source
+#      control for production deployments.
+#
+#   2. existingSecret: <name> → operator pre-creates a Secret in the same
+#      namespace, the chart references it via envFrom. Compatible with
+#      External Secrets Operator, Vault, SOPS, sealed-secrets, etc.
+#
+# When existingSecret is set, all inline values are ignored. The pre-existing
+# Secret must contain (as keys) the env vars the swarm consumes.
+#
+# Required (or render-time fail):
+#   API_KEY                       — bearer token used between API and pool pods
+# Optional, depending on configuration:
+#   CLAUDE_CODE_OAUTH_TOKEN       — for the claude harness provider
+#   ANTHROPIC_API_KEY             — for the pi or claude-managed provider
+#   OPENAI_API_KEY                — for the codex provider
+#   OPENROUTER_API_KEY            — for any provider via OpenRouter
+#   GITHUB_TOKEN                  — for git operations inside agents
+#   GITHUB_WEBHOOK_SECRET         — for the GitHub App integration
+#   SLACK_BOT_TOKEN               — for the Slack integration
+#   SLACK_APP_TOKEN               — for the Slack integration (Socket Mode)
+#   SLACK_SIGNING_SECRET          — for the Slack integration
+#   SECRETS_ENCRYPTION_KEY        — base64 32-byte key for at-rest encryption
+auth:
+  apiKey: ""
+  claudeCodeOauthToken: ""
+  anthropicApiKey: ""
+  openaiApiKey: ""
+  openrouterApiKey: ""
+  githubToken: ""
+  githubWebhookSecret: ""
+  slackBotToken: ""
+  slackAppToken: ""
+  slackSigningSecret: ""
+  secretsEncryptionKey: ""
+  # -- Pre-existing Secret to source credentials from. When set, the
+  # inline values above are ignored.
+  existingSecret: ""
+
+# Application-level config exposed as plain env vars (NOT secrets).
+config:
+  # -- Optional: comma-separated email domains allowed to interact with the
+  # Slack bot. Empty means everyone allowed.
+  slackAllowedEmailDomains: ""
+  # -- Optional: comma-separated Slack user IDs always allowed.
+  slackAllowedUserIds: ""
+  # -- Display name for the GitHub bot user (used by the GitHub App integration).
+  githubBotName: ""
+  # -- Git author email used by agents for commits.
+  githubEmail: ""
+  # -- Git author name used by agents for commits.
+  githubName: ""
+  # -- Public dashboard URL referenced in Slack message links. Leave blank
+  # to omit dashboard links from Slack notifications.
+  appUrl: ""
+  # -- Free-form additional env vars layered on top of the chart defaults.
+  # Useful for less-common knobs (TEMPLATE_REGISTRY_URL, SCHEDULER_INTERVAL_MS, etc.).
+  extraEnv: {}
+
+# API — single-replica StatefulSet running the SQLite-backed control plane.
+# replicas is fixed at 1 (SQLite single-writer); the chart fails to render
+# if you set anything else.
+api:
+  replicas: 1
+  port: 3013
+  resources: {}
+  storage:
+    size: 10Gi
+    # -- StorageClass used for the API PVC. Empty = cluster default.
+    storageClassName: ""
+  terminationGracePeriodSeconds: 60
+  healthCheck:
+    path: /health
+    startup:
+      initialDelaySeconds: 5
+      periodSeconds: 2
+      failureThreshold: 30
+    liveness:
+      initialDelaySeconds: 40
+      periodSeconds: 30
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+
+# API service — exposed inside the cluster for pool pods to reach.
+service:
+  type: ClusterIP
+
+# Defaults shared by every pool. A pool may override `resources`, `storage`,
+# `harnessProvider`, `modelOverride`, etc.
+poolDefaults:
+  storage:
+    # -- Default size for each pool pod's personal PVC. Override per pool
+    # via `pools.<name>.storage.personalSize` if you need different sizing.
+    personalSize: 20Gi
+    # -- StorageClass for the personal PVC. Empty = cluster default.
+    # Override per pool via `pools.<name>.storage.storageClassName`.
+    storageClassName: ""
+  # -- emptyDir size limits for the in-pod /workspace/shared and /logs
+  # mounts. Override per pool via `pools.<name>.emptyDir.*` if a specific
+  # pool needs more (e.g. coder pools that clone large repos).
+  emptyDir:
+    sharedSizeLimit: 1Gi
+    logsSizeLimit: 1Gi
+  # -- Default harness provider for new pools. Override per-pool via
+  # `pools.<name>.harnessProvider`. One of: claude, codex, opencode, pi,
+  # claude-managed, devin.
+  harnessProvider: claude
+  # -- Continue on errors inside the harness. Maps to YOLO env var.
+  yolo: true
+  terminationGracePeriodSeconds: 120
+  # -- Pod replacement strategy during rolling updates. Pool pods are
+  # interchangeable (any worker can pick up a paused task on resume) so
+  # rolling several at once is safe.
+  updateStrategy:
+    maxUnavailable: 50%
+
+# Pools.
+#
+# Each entry creates a StatefulSet whose name matches the map key. Each pod
+# generates and persists a UUID on its personal PVC on first boot; identity
+# is stable across restarts and travels with the PVC.
+#
+# Special role: `role: lead` marks the pool as the swarm coordinator. Exactly
+# one pool may have `role: lead`, and it must have `replicas: 1`. The chart
+# enforces both at render time.
+#
+# The default values include a single lead and a single coder pool — enough
+# to run a minimal swarm. Override entirely in your own values.yaml for real
+# deployments.
+pools:
+  lead:
+    replicas: 1
+    role: lead
+    templateId: official/lead
+    maxConcurrentTasks: 5
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+  coder:
+    replicas: 1
+    templateId: official/coder
+    maxConcurrentTasks: 3
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+
+# Ingress for the API. Disabled by default — most consumers run the swarm
+# cluster-internal and don't expose the API publicly.
+ingress:
+  enabled: false
+  # -- IngressClass name. Common values: nginx, traefik, alb, gce.
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+
+# agent-fs — optional persistent shared filesystem service.
+#
+# When disabled (default) agents fall back to local-only filesystem
+# operations on their personal PVC. The upstream session prompt
+# auto-detects this and adapts.
+#
+# When enabled the chart deploys the agent-fs service alongside the swarm.
+# agent-fs needs an S3-compatible bucket; provide credentials via the
+# inline auth fields below or via `agentFs.s3.existingSecret`.
+agentFs:
+  enabled: false
+  image:
+    registry: ghcr.io
+    repository: desplega-ai/agent-fs
+    pullPolicy: IfNotPresent
+    tag: 0.5.4
+  port: 7433
+  # -- Bucket name for agent-fs's object storage backend.
+  bucket: ""
+  resources: {}
+  storage:
+    size: 10Gi
+    storageClassName: ""
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    tls: []
+  # S3-compatible credentials. Either inline or pre-existing Secret.
+  s3:
+    accessKeyId: ""
+    secretAccessKey: ""
+    endpoint: ""
+    region: ""
+    # -- Pre-existing Secret with keys S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY,
+    # (optional) S3_ENDPOINT, S3_REGION. When set, inline values are ignored.
+    existingSecret: ""
+
+# Shared workspace volume — alternative to agent-fs.
+#
+# Mounts a single ReadWriteMany PVC at /workspace/shared on every pool pod.
+# Provides cross-agent file sharing without running agent-fs, but lacks
+# search, comments, conflict handling, and prompt awareness — agents won't
+# automatically know to use the shared mount unless you configure them to.
+#
+# Requires storage that supports ReadWriteMany: NFS, EFS, Azure Files,
+# Filestore, or any CSI driver advertising the access mode.
+sharedVolume:
+  # -- Name of a pre-existing PVC bound to a ReadWriteMany volume. Mounted
+  # at /workspace/shared on every pool pod when set. Leave blank to use a
+  # per-pod emptyDir (default — no cross-pod sharing).
+  existingClaim: ""
+
+# Litestream — optional continuous SQLite WAL replication to S3.
+#
+# When enabled, runs a litestream sidecar in the API pod that streams the
+# WAL to an S3-compatible bucket. Restoration is documented in
+# https://litestream.io/guides/restore/.
+#
+# Requires an S3-compatible bucket; provide credentials via the inline
+# auth fields below or via `litestream.s3.existingSecret`.
+litestream:
+  enabled: false
+  image:
+    repository: litestream/litestream
+    pullPolicy: IfNotPresent
+    tag: 0.3.13
+  bucket: ""
+  path: agent-swarm
+  endpoint: ""
+  region: ""
+  snapshotIntervalSeconds: 3600
+  retentionHours: 720
+  metricsPort: 9090
+  resources: {}
+  s3:
+    accessKeyId: ""
+    secretAccessKey: ""
+    # -- Pre-existing Secret with keys LITESTREAM_ACCESS_KEY_ID and
+    # LITESTREAM_SECRET_ACCESS_KEY. When set, inline values are ignored.
+    existingSecret: ""
+

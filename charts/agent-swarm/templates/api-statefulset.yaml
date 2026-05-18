@@ -1,0 +1,135 @@
+{{/*
+SQLite is single-writer; running more than one API pod corrupts the DB.
+Catch the misconfig at render time so it never reaches the cluster.
+*/}}
+{{- if ne (int .Values.api.replicas) 1 }}
+  {{- fail (printf "api.replicas must be 1 (SQLite single-writer constraint), got %d" (int .Values.api.replicas)) }}
+{{- end }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  serviceName: {{ include "agent-swarm.fullname" . }}-api
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "agent-swarm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      annotations:
+        {{- if not .Values.auth.existingSecret }}
+        checksum/auth: {{ include (print $.Template.BasePath "/secret-auth.yaml") . | sha256sum }}
+        {{- end }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "agent-swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: {{ include "agent-swarm.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds }}
+      containers:
+        - name: api
+          image: {{ include "agent-swarm.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "agent-swarm.fullname" . }}-config
+            - secretRef:
+                name: {{ include "agent-swarm.authSecretName" . }}
+          env:
+            - name: PORT
+              value: {{ .Values.api.port | quote }}
+            - name: DATABASE_PATH
+              value: /app/data/agent-swarm-db.sqlite
+            {{- if .Values.agentFs.enabled }}
+            - name: AGENT_FS_API_URL
+              value: "http://{{ include "agent-swarm.fullname" . }}-agent-fs:{{ .Values.agentFs.port }}"
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.api.healthCheck.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.api.healthCheck.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.api.healthCheck.startup.periodSeconds }}
+            failureThreshold: {{ .Values.api.healthCheck.startup.failureThreshold }}
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.api.healthCheck.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.api.healthCheck.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.api.healthCheck.liveness.periodSeconds }}
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.api.healthCheck.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.api.healthCheck.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.api.healthCheck.readiness.periodSeconds }}
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - name: api-data
+              mountPath: /app/data
+        {{- if .Values.litestream.enabled }}
+        - name: litestream
+          image: "{{ .Values.litestream.image.repository }}:{{ .Values.litestream.image.tag }}"
+          imagePullPolicy: {{ .Values.litestream.image.pullPolicy }}
+          args: ["replicate", "-config", "/etc/litestream.yml"]
+          envFrom:
+            - secretRef:
+                name: {{ include "agent-swarm.litestreamSecretName" . }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.litestream.metricsPort }}
+          resources:
+            {{- toYaml .Values.litestream.resources | nindent 12 }}
+          volumeMounts:
+            - name: api-data
+              mountPath: /app/data
+            - name: litestream-config
+              mountPath: /etc/litestream.yml
+              subPath: litestream.yml
+      volumes:
+        - name: litestream-config
+          configMap:
+            name: {{ include "agent-swarm.fullname" . }}-litestream
+        {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: api-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.api.storage.storageClassName }}
+        storageClassName: {{ .Values.api.storage.storageClassName }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.api.storage.size }}

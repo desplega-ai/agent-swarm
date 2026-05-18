@@ -1,0 +1,29 @@
+{{- if .Values.litestream.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-litestream
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: litestream
+data:
+  litestream.yml: |
+    dbs:
+      - path: /app/data/agent-swarm-db.sqlite
+        replicas:
+          - type: s3
+            bucket: {{ .Values.litestream.bucket | quote }}
+            path: {{ .Values.litestream.path | quote }}
+            {{- if .Values.litestream.endpoint }}
+            endpoint: {{ .Values.litestream.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.litestream.region }}
+            region: {{ .Values.litestream.region | quote }}
+            {{- end }}
+            access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+            secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+            snapshot-interval: {{ .Values.litestream.snapshotIntervalSeconds }}s
+            retention: {{ .Values.litestream.retentionHours }}h
+    addr: ":{{ .Values.litestream.metricsPort }}"
+{{- end }}

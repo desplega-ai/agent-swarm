@@ -1,0 +1,13 @@
+.DS_Store
+.git/
+.gitignore
+.bumpversion.cfg
+.tox/
+.vscode/
+.idea/
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+README.md.tpl

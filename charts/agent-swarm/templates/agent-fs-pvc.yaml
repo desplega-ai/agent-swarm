@@ -1,0 +1,23 @@
+{{- if .Values.agentFs.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-agent-fs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-fs
+  annotations:
+    # Keep the PVC across helm uninstall — agent-fs holds searchable shared
+    # state that operators usually want to preserve. Delete it manually
+    # alongside uninstall if you want a clean tear-down.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.agentFs.storage.storageClassName }}
+  storageClassName: {{ .Values.agentFs.storage.storageClassName }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.agentFs.storage.size }}
+{{- end }}
