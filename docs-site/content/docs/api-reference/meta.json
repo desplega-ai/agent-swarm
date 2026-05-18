@@ -1,5 +1,5 @@
 {
-  "title": "API Reference v1.77.3",
+  "title": "API Reference v1.79.4",
   "description": "REST API reference for Agent Swarm",
   "root": true,
   "pages": [
@@ -16,9 +16,11 @@
     "heartbeat",
     "inbox-state",
     "integrations",
+    "kv",
     "mcp-oauth",
     "mcp-servers",
     "memory",
+    "pages",
     "poll",
     "pricing",
     "prompttemplates",

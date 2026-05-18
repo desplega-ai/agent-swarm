@@ -443,6 +443,36 @@ describe("parseRateLimitResetTime", () => {
     expect(parsed.getUTCHours()).toBe(0);
   });
 
+  test("parses 'resets May 14, 5pm (UTC)' with date prefix", () => {
+    const result = parseRateLimitResetTime("You've hit your limit · resets May 14, 5pm (UTC)");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!);
+    expect(parsed.getUTCMonth()).toBe(4); // May = index 4
+    expect(parsed.getUTCDate()).toBe(14);
+    expect(parsed.getUTCHours()).toBe(17);
+    expect(parsed.getUTCMinutes()).toBe(0);
+  });
+
+  test("parses dated reset without comma", () => {
+    const result = parseRateLimitResetTime("resets Jan 3 9:30am (UTC)");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!);
+    expect(parsed.getUTCMonth()).toBe(0);
+    expect(parsed.getUTCDate()).toBe(3);
+    expect(parsed.getUTCHours()).toBe(9);
+    expect(parsed.getUTCMinutes()).toBe(30);
+  });
+
+  test("dated reset in the past rolls to next year", () => {
+    const now = new Date();
+    // Pick a month/day in the past relative to "now"
+    const pastMonth = now.getUTCMonth() === 0 ? "December" : "January";
+    const result = parseRateLimitResetTime(`resets ${pastMonth} 1, 12pm (UTC)`);
+    expect(result).toBeDefined();
+    const parsed = new Date(result!);
+    expect(parsed.getTime()).toBeGreaterThan(now.getTime());
+  });
+
   test("parses 'retry after N seconds'", () => {
     const before = Date.now();
     const result = parseRateLimitResetTime("Rate limited. retry after 60 seconds");

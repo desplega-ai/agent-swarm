@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { useApiKeyCosts, useApiKeyStatuses, useSetApiKeyName } from "@/api/hooks/use-api-keys";
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
+import { HarnessIcon } from "@/components/shared/harness-icon";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,38 +57,36 @@ function KeyStatusBadge({ status }: { status: ApiKeyStatusType }) {
   );
 }
 
+type KeyTypeMeta = { label: string; icon: "anthropic" | "openai" | "openrouter" | null };
+
+const KEY_TYPE_META: Record<string, KeyTypeMeta> = {
+  ANTHROPIC_API_KEY: { label: "Anthropic API Key", icon: "anthropic" },
+  CLAUDE_CODE_OAUTH_TOKEN: { label: "Claude OAuth", icon: "anthropic" },
+  OPENROUTER_API_KEY: { label: "OpenRouter API Key", icon: "openrouter" },
+  OPENAI_API_KEY: { label: "OpenAI API Key", icon: "openai" },
+  CODEX_OAUTH: { label: "Codex OAuth", icon: "openai" },
+};
+
+function getKeyTypeMeta(keyType: string): KeyTypeMeta {
+  return KEY_TYPE_META[keyType] ?? { label: keyType, icon: null };
+}
+
 function formatKeyType(keyType: string): string {
-  if (keyType === "ANTHROPIC_API_KEY") return "Anthropic";
-  if (keyType === "CLAUDE_CODE_OAUTH_TOKEN") return "OAuth";
-  if (keyType === "OPENROUTER_API_KEY") return "OpenRouter";
-  if (keyType === "OPENAI_API_KEY") return "OpenAI";
-  if (keyType === "CODEX_OAUTH") return "codex-oauth";
-  return keyType;
+  return getKeyTypeMeta(keyType).label;
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
   claude: "Claude",
-  pi: "pi-mono",
+  "claude-managed": "Claude (managed)",
+  pi: "Pi-Mono",
   codex: "Codex",
+  devin: "Devin",
+  opencode: "Opencode",
 };
 
 function formatProvider(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;
 }
-
-/**
- * Provider tone hints. Mapped to existing semantic tokens by closest hue:
- * - claude (amber) → `status-active-strong` (exact light/dark match)
- * - pi (violet) → `action-agent-task` (light shifts amber-600 → -500; dark
- *   stays violet-400 — single-stop light shift accepted per Phase 4 audit
- *   decision §7 "no `-strong` action tokens")
- * - codex (emerald) → `status-success-strong` (exact light/dark match)
- */
-const PROVIDER_BADGE_TONE: Record<string, string> = {
-  claude: "text-status-active-strong",
-  pi: "text-action-agent-task",
-  codex: "text-status-success-strong",
-};
 
 function formatExpiry(until: string | null): string {
   if (!until) return "-";
@@ -208,24 +208,27 @@ export default function ApiKeysPage() {
       {
         field: "provider",
         headerName: "Provider",
-        width: 110,
+        width: 140,
         cellRenderer: (params: { value: string }) => (
-          <Badge variant="outline" size="tag">
-            <span className={cn("font-mono", PROVIDER_BADGE_TONE[params.value])}>
-              {formatProvider(params.value)}
-            </span>
-          </Badge>
+          <span className="inline-flex items-center gap-1.5 text-foreground">
+            <HarnessIcon harness={params.value} />
+            <span>{formatProvider(params.value)}</span>
+          </span>
         ),
       },
       {
         field: "keyType",
         headerName: "Type",
-        width: 140,
-        cellRenderer: (params: { value: string }) => (
-          <Badge variant="outline" size="tag" className="font-mono">
-            {formatKeyType(params.value)}
-          </Badge>
-        ),
+        width: 180,
+        cellRenderer: (params: { value: string }) => {
+          const meta = getKeyTypeMeta(params.value);
+          return (
+            <span className="inline-flex items-center gap-1.5 text-foreground">
+              <ProviderIcon provider={meta.icon} className="h-3.5 w-3.5" />
+              <span>{meta.label}</span>
+            </span>
+          );
+        },
       },
       {
         field: "keySuffix",

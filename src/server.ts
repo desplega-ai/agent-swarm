@@ -5,6 +5,7 @@ import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
 import { registerCreateChannelTool } from "./tools/create-channel";
+import { registerCreatePageTool } from "./tools/create-page";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 import { registerGetSwarmTool } from "./tools/get-swarm";
@@ -12,6 +13,14 @@ import { registerGetTaskDetailsTool } from "./tools/get-task-details";
 import { registerGetTasksTool } from "./tools/get-tasks";
 import { registerInjectLearningTool } from "./tools/inject-learning";
 import { registerJoinSwarmTool } from "./tools/join-swarm";
+// KV capability
+import {
+  registerKvDeleteTool,
+  registerKvGetTool,
+  registerKvIncrTool,
+  registerKvListTool,
+  registerKvSetTool,
+} from "./tools/kv";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
 import { registerListServicesTool } from "./tools/list-services";
@@ -121,7 +130,7 @@ import {
 // Capability-based feature flags
 // Default: all capabilities enabled
 const DEFAULT_CAPABILITIES =
-  "core,task-pool,messaging,profiles,services,scheduling,memory,workflows";
+  "core,task-pool,profiles,services,scheduling,memory,workflows,pages,kv";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -204,13 +213,15 @@ export function createServer() {
     registerTaskActionTool(server);
   }
 
-  // Messaging capability - channel-based communication
+  // Core messaging tools - always registered (post/read are CORE_TOOLS)
+  registerPostMessageTool(server);
+  registerReadMessagesTool(server);
+
+  // Messaging capability - channel management (CRUD on channels)
   if (hasCapability("messaging")) {
     registerListChannelsTool(server);
     registerCreateChannelTool(server);
     registerDeleteChannelTool(server);
-    registerPostMessageTool(server);
-    registerReadMessagesTool(server);
   }
 
   // Profiles capability - agent profile management
@@ -282,6 +293,24 @@ export function createServer() {
   registerSkillInstallRemoteTool(server);
   registerSkillSyncRemoteTool(server);
   registerSkillPublishTool(server);
+
+  // Pages capability - DB-backed lightweight artifacts (HTML / JSON specs).
+  // Enabled by default (added to DEFAULT_CAPABILITIES in step-9 of the
+  // db-backed-pages plan). Operators can disable via explicit
+  // `CAPABILITIES=...` env without `pages`.
+  if (hasCapability("pages")) {
+    registerCreatePageTool(server);
+  }
+
+  // KV capability — namespaced Redis-like key/value (see src/be/migrations/061_kv_store.sql).
+  // Enabled by default; opt out via `CAPABILITIES=...` without `kv`.
+  if (hasCapability("kv")) {
+    registerKvGetTool(server);
+    registerKvSetTool(server);
+    registerKvDeleteTool(server);
+    registerKvIncrTool(server);
+    registerKvListTool(server);
+  }
 
   // MCP Servers - always registered
   registerMcpServerCreateTool(server);

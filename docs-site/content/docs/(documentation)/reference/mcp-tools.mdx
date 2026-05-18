@@ -455,6 +455,82 @@ Create an approval request that pauses until a human responds. Supports multiple
 
 Approval requests are accessible via the dashboard at `/approval-requests/{id}`. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses.
 
+## Pages Tools
+
+DB-backed pages let agents publish static reports, dashboards, and JSON action specs that don't need a long-lived process. Requires the `pages` capability on the agent.
+
+### create_page
+
+Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are upsert-by-(agent, slug): if you previously created a page with the same slug, its prior state is snapshotted into the version history and the row is updated.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `title` | string | Yes | Human-readable title shown in listings |
+| `body` | string | Yes | Full page body (HTML document or JSON-render spec, per `contentType`) |
+| `contentType` | enum | Yes | `text/html` (renders at `/p/:id`) or `application/json` (rendered by the SPA) |
+| `slug` | string | No | URL slug. Defaults to kebab-cased title. Same slug → updates the existing row |
+| `authMode` | enum | No | `public` (default), `authed` (page-session cookie), or `password` (requires key) |
+| `password` | string | No | Plaintext password, hashed before storage. Only meaningful for `authMode='password'` |
+| `description` | string | No | Optional short description, used in listings + OG-tag unfurl |
+| `needsCredentials` | array | No | Declared credential needs for JSON pages (reserved for follow-up) |
+
+Returns the page id, an `app_url` (`${APP_URL}/pages/:id` — opens in the SPA), and an `api_url` (`${MCP_BASE_URL}/p/:id` — direct HTML render or JSON 302→SPA). Append `?mode=full` to the app URL for a maximized chrome-light view. The returned `version` is a monotonic edit counter (`MAX(page_versions.version) + 1`).
+
+## KV Tools
+
+A Redis-like, namespaced key/value store. Calls auto-resolve namespace from your current context (Slack thread / PR / Linear issue / agent scratchpad / page). 2 MiB value cap, opt-in TTL.
+
+### kv-get
+
+Read a key. Returns the entry or `null` if missing/expired. Namespace defaults to your current context.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | Yes | Key to read |
+| `namespace` | string | No | Override the auto-resolved namespace |
+
+### kv-set
+
+Write a key. Upserts atomically. 2 MiB body cap.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | Yes | Key to write |
+| `value` | unknown | Yes | Value. Stored as JSON by default; pass `valueType: 'string'` or `'integer'` to skip JSON wrapping |
+| `valueType` | enum | No | `json` (default), `string`, or `integer` |
+| `expiresInSec` | number | No | Optional TTL in seconds. Omit for no expiry |
+| `namespace` | string | No | Override the auto-resolved namespace |
+
+### kv-delete
+
+Remove a key. Returns whether a row was actually deleted.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | Yes | Key to delete |
+| `namespace` | string | No | Override the auto-resolved namespace |
+
+### kv-incr
+
+Atomically increment an integer entry. Creates the entry (set to `by`) if missing or expired. Fails if the existing `value_type` is not `integer`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | Yes | Key to increment |
+| `by` | number | No | Increment (or decrement when negative). Default: 1 |
+| `namespace` | string | No | Override the auto-resolved namespace |
+
+### kv-list
+
+List entries in the resolved namespace, optionally filtered by key prefix. Expired entries are filtered out.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefix` | string | No | Key prefix to filter on |
+| `limit` | number | No | Max entries (default 100, max 1000) |
+| `offset` | number | No | Pagination offset |
+| `namespace` | string | No | Override the auto-resolved namespace |
+
 ## Skill Tools
 
 Manage reusable procedural knowledge (skills) that agents can create, share, and install.
@@ -517,6 +593,7 @@ Update a skill's content or settings. Re-parses frontmatter if content changes.
 | `skillId` | string | No | Skill ID to update |
 | `content` | string | No | New SKILL.md content |
 | `isEnabled` | boolean | No | Toggle enabled/disabled |
+| `scope` | `agent \| swarm` | No | Promote/demote the skill's scope. Only leads can promote to `swarm` (the skill-approval flow). |
 
 ### skill-publish
 

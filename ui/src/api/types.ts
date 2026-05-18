@@ -1215,3 +1215,58 @@ export interface TestConnectionResponse {
   error?: string;
   latency_ms: number;
 }
+
+// ─── Pages (DB-backed artifacts) ──────────────────────────────────────────────
+
+export type PageContentType = "text/html" | "application/json";
+export type PageAuthMode = "public" | "authed" | "password";
+
+/**
+ * Response shape from `GET /p/:id.json` — current head state of a page (no
+ * version history). Mirrors `pages-public.ts` JSON response. `passwordHash`
+ * and `agentId` are intentionally NOT exposed by the server.
+ */
+export interface PageMetadata {
+  id: string;
+  version: number;
+  title: string;
+  description: string | null;
+  contentType: PageContentType;
+  authMode: PageAuthMode;
+  body: string;
+}
+
+/**
+ * Public view-count payload — the page-public JSON path doesn't expose
+ * `viewCount` (it would imply re-rendering every time view_count changes,
+ * which would defeat any caching downstream). Listing and detail endpoints
+ * do expose it.
+ */
+
+/**
+ * Row shape returned by `GET /api/pages` (authed listing endpoint). Server
+ * decorates each row with `app_url` + `api_url`. Unlike `PageMetadata` this
+ * one exposes `agentId` (the listing is bearer-gated, so the creator is
+ * visible) — used by the SPA's `/pages` page for the "My pages only" toggle.
+ */
+export interface PageListItem {
+  id: string;
+  agentId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  contentType: PageContentType;
+  authMode: PageAuthMode;
+  body: string;
+  needsCredentials?: string[];
+  viewCount: number;
+  createdAt: string;
+  updatedAt: string;
+  app_url: string;
+  api_url: string;
+}
+
+export interface PagesListResponse {
+  pages: PageListItem[];
+  total: number;
+}

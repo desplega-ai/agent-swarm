@@ -261,10 +261,10 @@ describe("WaitExecutor — event mode end-to-end", () => {
 
     // Skip the 5s poller — fast-forward by directly calling the resume helper
     // with status='timeout' (the poller would do exactly this once expiresAt
-    // passes).
-    await new Promise((r) => setTimeout(r, 1100));
-    const due = getDueWaitStates();
-    expect(due.find((d) => d.id === ws!.id)).toBeDefined();
+    // passes). Poll getDueWaitStates() instead of sleeping a fixed amount:
+    // SQLite's strftime('now') and JS Date.now() can drift by a few ms on
+    // loaded CI, and setTimeout cushions need to be generous to compensate.
+    await waitFor(() => getDueWaitStates().some((d) => d.id === ws!.id), 5000);
 
     await resumeWaitState(ws!.id, "timeout", undefined, registry);
 

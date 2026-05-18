@@ -1,0 +1,107 @@
+---
+title: Shannon (experimental)
+description: Opt-in alternate `claude` binary that keeps swarm runs on the Max/Pro subscription credit pool after Anthropic's 2026-06-15 programmatic-credit split
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+<Callout type="warn">
+  **Experimental.** Shannon is third-party software ([github.com/dexhorthy/shannon](https://github.com/dexhorthy/shannon)). The swarm only exposes it as an env-based alternate to the `claude` binary inside the existing claude harness — no new provider, no Dockerfile bake-in (yet). API and behavior may change without notice.
+</Callout>
+
+## Motivation
+
+Starting **2026-06-15**, `claude -p` and the Claude Agent SDK / GitHub Actions surfaces draw from a **dedicated programmatic-credit pool** rather than the Max/Pro subscription quota ([@ClaudeDevs announcement, 2026-05-13](https://x.com/ClaudeDevs/status/2054610152817619388)). Interactive `claude` sessions stay on the subscription pool.
+
+[`@dexh/shannon`](https://github.com/dexhorthy/shannon) is a CLI wrapper that drives `claude` in an interactive `tmux` pane and tails its JSONL transcript. From the swarm's perspective it behaves exactly like `claude -p` — same flags, same output format — but the underlying claude process is interactive, so it bills the subscription pool. Routing the harness through shannon keeps swarm runs on the subscription pool for users who pay for one.
+
+## How to opt in
+
+Set one env var on the worker:
+
+```bash
+# Recommended — no install, just bunx-driven on demand.
+CLAUDE_BINARY="bunx @dexh/shannon"
+
+# Or a version pin
+CLAUDE_BINARY="bunx @dexh/shannon@1.2.3"
+
+# Or globally installed (faster cold-start, requires `bun add -g @dexh/shannon`)
+CLAUDE_BINARY=shannon
+```
+
+The default (`CLAUDE_BINARY` unset) is `claude`, unchanged for everyone else.
+
+The value is **whitespace-split** into argv tokens — no shell parsing, no quoting. `"bunx @dexh/shannon"` becomes `["bunx", "@dexh/shannon"]`, then the swarm appends the usual claude flags (`-p`, `--model`, `--output-format stream-json`, etc.) after. `npx -y @dexh/shannon` works the same way for npm users.
+
+Set it where you set your other worker env (`/workspace/start-up.sh`, `docker-compose`, k8s manifest, agent profile via `set-config`, etc.). The runner picks it up on the next session spawn.
+
+## Reloadable via swarm_config
+
+`CLAUDE_BINARY` participates in the same overlay-then-fallback pattern as `HARNESS_PROVIDER`. The runner fetches `swarm_config` once per task spawn via `/api/config/resolved` and overlays it onto `process.env` before constructing the session, so an operator can flip a worker between `claude` and `shannon` (or back) **without a container restart**.
+
+Precedence (highest first):
+1. `swarm_config` `CLAUDE_BINARY` (scope: repo > agent > global)
+2. `process.env.CLAUDE_BINARY` (container env)
+3. `"claude"` (final default)
+
+Set it from your dashboard, the MCP `set-config` tool, or `PUT /api/config`:
+
+```bash
+# Global default — every worker picks it up on the next task spawn (~10s).
+curl -X PUT "$MCP_BASE_URL/api/config" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":"global","key":"CLAUDE_BINARY","value":"bunx @dexh/shannon"}'
+
+# Or scoped to a single agent / a specific repo:
+# scope="agent" + scopeId=<agentId>  →  only that worker picks it up
+# scope="repo"  + scopeId=<repoFullName>  →  only tasks for that repo
+```
+
+In-flight task sessions stay on the binary they spawned with; new spawns pick up the change.
+
+## Requirements
+
+- **`tmux` on `PATH`.** Shannon shells out to tmux. The swarm fail-fasts at session-create with `CLAUDE_BINARY=shannon requires 'tmux' on PATH (install via apt/brew). See runbooks/harness-providers.md.` if it's missing. `Dockerfile.worker` apt-installs tmux by default.
+- **`claude` on `PATH`.** Shannon drives the real `claude` CLI — make sure it's installed and on PATH. Shannon's own startup surfaces a clear error if it isn't, so the swarm doesn't double-check.
+- **Auth: unchanged.** Same `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or `ANTHROPIC_API_KEY` as the default flow. Shannon inherits the env, claude reads it.
+
+## Trust-dialog handling
+
+On first run in a fresh cwd, `claude` (and therefore shannon-driven `claude`) prompts:
+
+```
+Quick safety check: Is this a project you created or one you trust?
+❯ 1. Yes, I trust this folder
+  2. No, exit
+```
+
+Shannon does **not** auto-accept this, so the tmux pane hangs. To prevent that, the swarm **pre-seeds** `$HOME/.claude.json` at session-create time when `CLAUDE_BINARY` contains `"shannon"`:
+
+```json
+{
+  "projects": {
+    "/abs/cwd/for/the/task": {
+      "hasTrustDialogAccepted": true,
+      "hasCompletedProjectOnboarding": true
+    }
+  }
+}
+```
+
+Pattern parallels the existing onboarding-skip hack in `Dockerfile.worker` (`hasCompletedOnboarding` / `bypassPermissionsModeAccepted`). The pre-seed is **idempotent** (no-op when the cwd is already trusted) and **read-merge-write** (it never clobbers other keys or other projects' entries). Implemented as `preseedClaudeTrustDialog` in [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).
+
+## Known limitations
+
+- **`bunx` cold-start.** First invocation in a fresh container pays ~1–2 s to fetch shannon. Subsequent runs in the same container hit bun's cache and are instant. For containerized workers that recycle frequently, a global install (`bun add -g @dexh/shannon` + `CLAUDE_BINARY=shannon`) trades disk for speed.
+- **`tmux` dependency at runtime.** Shannon needs tmux; the swarm doesn't install it for you. On a Debian/Ubuntu worker: `apt install tmux`.
+- **Third-party software.** Shannon lives at [github.com/dexhorthy/shannon](https://github.com/dexhorthy/shannon). Issues with shannon itself should go upstream.
+- **Interactive-mode only.** Shannon drives `claude` interactively. Some claude-cli flags that only make sense in `-p` mode (e.g. session-resume semantics tied to `claude -p --resume`) may behave differently. We don't currently emit any flags that exercise this difference.
+- **No Dockerfile bake-in yet.** The swarm Dockerfiles do not install shannon or tmux. By design — the env-string form (`CLAUDE_BINARY="bunx @dexh/shannon"`) is the supported delivery mechanism. A Dockerfile recipe may land in a future PR.
+
+## Why not a new `HARNESS_PROVIDER`?
+
+Shannon is a drop-in replacement for the `claude` binary inside the existing `claude` harness — same flags, same event stream, same MCP plumbing, same Stop-hook behavior. Adding a `claude-shannon` provider would double the maintenance surface (factory dispatch, docker-entrypoint branch, OAuth handoff) for no functional gain. Keeping it as an env-based variant means every code path that works for `claude` also works for shannon, automatically.
+
+See also: [`runbooks/harness-providers.md`](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/harness-providers.md) — engineering reference for the binary-resolution + trust-preseed wiring.

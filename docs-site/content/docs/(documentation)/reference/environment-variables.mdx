@@ -68,7 +68,7 @@ Which credentials you need depends on your selected harness provider:
 |----------|----------|---------|-------------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Yes* | — | OAuth token for Claude CLI. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support) |
 | `ANTHROPIC_API_KEY` | Alt* | — | Alternative to `CLAUDE_CODE_OAUTH_TOKEN`. Also supports comma-separated values |
-| `CLAUDE_BINARY` | No | `claude` | Path to Claude CLI binary (if not in `$PATH`) |
+| `CLAUDE_BINARY` | No | `claude` | Argv prefix for the Claude CLI. Accepts a single binary name (`claude`, `shannon`), an absolute path, or a whitespace-separated command string (`bunx @dexh/shannon`, `npx -y @dexh/shannon`). Setting it to anything containing `shannon` opts into the [Shannon (experimental)](/docs/guides/shannon-experimental) variant — fail-fasts at session-create if `tmux` is missing, pre-seeds `~/.claude.json` to skip the trust dialog. Reloadable via `swarm_config` (precedence: repo > agent > global > env > `claude`) so you can flip a worker via `set-config CLAUDE_BINARY=...` without a container restart. |
 | `ENABLE_PROMPT_CACHING_1H` | No | `1` | Enables Anthropic's 1-hour prompt cache for every Claude Code session spawned by the worker. Default-on since `v1.69.1`; set to `0` (env or `swarm_config`) to opt out. Injected by `ClaudeAdapter` into the spawned `claude` process env. |
 
 \* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.

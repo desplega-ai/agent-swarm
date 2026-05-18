@@ -16,6 +16,12 @@ export const registerSkillUpdateTool = (server: McpServer) => {
         skillId: z.string().optional().describe("Skill ID to update"),
         content: z.string().optional().describe("New SKILL.md content (re-parses frontmatter)"),
         isEnabled: z.boolean().optional().describe("Toggle enabled/disabled"),
+        scope: z
+          .enum(["agent", "swarm"])
+          .optional()
+          .describe(
+            "Scope: agent (personal) or swarm (shared). Only leads can promote a skill to swarm scope (used by the skill-approval flow).",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -89,6 +95,26 @@ export const registerSkillUpdateTool = (server: McpServer) => {
 
         if (args.isEnabled !== undefined) {
           updates.isEnabled = args.isEnabled;
+        }
+
+        if (args.scope !== undefined && args.scope !== existing.scope) {
+          // Promoting to swarm scope is the skill-approval path — only leads may do it.
+          if (args.scope === "swarm" && !agent?.isLead) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: 'Only lead agents can promote a skill to "swarm" scope. Use "skill-publish" to request approval.',
+                },
+              ],
+              structuredContent: {
+                yourAgentId: requestInfo.agentId,
+                success: false,
+                message: "Only lead agents can promote a skill to swarm scope.",
+              },
+            };
+          }
+          updates.scope = args.scope;
         }
 
         const skill = updateSkill(args.skillId, updates);

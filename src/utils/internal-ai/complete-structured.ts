@@ -15,8 +15,8 @@
  * Worker-safe: uses fetch() only, no bun:sqlite import.
  */
 
-import type { ToolCall } from "@mariozechner/pi-ai";
-import { complete, getModel } from "@mariozechner/pi-ai";
+import type { ToolCall } from "@earendil-works/pi-ai";
+import { complete, getModel } from "@earendil-works/pi-ai";
 import type { TSchema } from "typebox";
 import { z } from "zod";
 import { type ResolvedCredential, resolveCredential } from "./credentials.js";
@@ -84,14 +84,11 @@ async function defaultSpawnClaudeCli(
   signal?: AbortSignal,
   jsonSchema?: object,
 ): Promise<string> {
-  const cmd = [
-    process.env.CLAUDE_BINARY ?? "claude",
-    "-p",
-    "--model",
-    model,
-    "--output-format",
-    "json",
-  ];
+  // CLAUDE_BINARY may be a single binary ("claude", "shannon") or a
+  // whitespace-separated command string ("bunx @dexh/shannon"). See
+  // parseClaudeBinary in src/providers/claude-adapter.ts.
+  const claudeBinaryArgv = (process.env.CLAUDE_BINARY ?? "claude").trim().split(/\s+/);
+  const cmd = [...claudeBinaryArgv, "-p", "--model", model, "--output-format", "json"];
   if (jsonSchema) {
     cmd.push("--json-schema", JSON.stringify(jsonSchema));
   }

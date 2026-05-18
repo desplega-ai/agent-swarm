@@ -3,6 +3,7 @@ import { computeContextUsed, getContextWindowSize } from "../utils/context-windo
 
 describe("getContextWindowSize", () => {
   test("returns 1M for opus models", () => {
+    expect(getContextWindowSize("claude-opus-4-7")).toBe(1_000_000);
     expect(getContextWindowSize("claude-opus-4-6")).toBe(1_000_000);
     expect(getContextWindowSize("opus")).toBe(1_000_000);
   });

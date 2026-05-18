@@ -15,9 +15,9 @@
  * Worker-safe: uses fetch() only, no bun:sqlite import.
  */
 
-import type { OAuthCredentials } from "@mariozechner/pi-ai";
-import { getEnvApiKey } from "@mariozechner/pi-ai";
-import { getOAuthApiKey } from "@mariozechner/pi-ai/oauth";
+import type { OAuthCredentials } from "@earendil-works/pi-ai";
+import { getEnvApiKey } from "@earendil-works/pi-ai";
+import { getOAuthApiKey } from "@earendil-works/pi-ai/oauth";
 import { getValidCodexOAuth, persistCodexOAuth } from "../../providers/codex-oauth/storage.js";
 import { type CredentialKind, DEFAULT_MODEL, resolveModelString } from "./models.js";
 

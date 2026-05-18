@@ -31,10 +31,14 @@ import { handleEvents } from "./events";
 import { handleHeartbeat } from "./heartbeat";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
+import { handleKv } from "./kv";
 import { handleMcp } from "./mcp";
 import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
 import { handleMemory } from "./memory";
+import { handlePageProxy } from "./page-proxy";
+import { handlePages } from "./pages";
+import { handlePagesPublic } from "./pages-public";
 import { handlePoll } from "./poll";
 import { handlePricing } from "./pricing";
 import { handlePromptTemplates } from "./prompt-templates";
@@ -109,7 +113,7 @@ const httpServer = createHttpServer(async (req, res) => {
     console.error(`[HTTP] ❌ ${req.method} ${req.url} → Error: ${err.message}`);
   });
 
-  setCorsHeaders(res);
+  setCorsHeaders(req, res);
 
   // ── Core routes (OPTIONS, health, auth, /me, /cancelled-tasks, /ping, /close) ──
   if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, apiKey)) return;
@@ -139,6 +143,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleWorkflowEvents(req, res, pathSegments, queryParams),
     () => handleApprovalRequests(req, res, pathSegments, queryParams),
     () => handleConfig(req, res, pathSegments, queryParams),
+    () => handleKv(req, res, pathSegments, queryParams),
     () => handleIntegrations(req, res, pathSegments),
     () => handlePromptTemplates(req, res, pathSegments, queryParams),
     () => handleDbQuery(req, res, pathSegments, queryParams),
@@ -147,6 +152,9 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleMcpServers(req, res, pathSegments, queryParams),
     () => handleMcpOAuth(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
+    () => handlePagesPublic(req, res, pathSegments, queryParams),
+    () => handlePageProxy(req, res),
+    () => handlePages(req, res, pathSegments, queryParams, myAgentId),
     () => handleApiKeys(req, res, pathSegments, queryParams),
     () => handleHeartbeat(req, res, pathSegments),
     () => handleEvents(req, res, pathSegments, queryParams, myAgentId),

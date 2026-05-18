@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     sudo \
     nodejs \
     gh \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitLab CLI (glab) for GitLab integration
@@ -75,6 +76,11 @@ ENV BUN_INSTALL="/home/worker/.bun"
 ENV COREPACK_HOME=/home/worker/.corepack
 RUN mkdir -p /home/worker/.corepack
 
+# Pre-create XDG dirs as worker so that later root-level steps writing into
+# /home/worker (HOME is still set to /home/worker under USER root) don't leave
+# /home/worker/.local root-owned and break worker-side mkdir into .local/share.
+RUN mkdir -p /home/worker/.local/bin /home/worker/.local/share /home/worker/.local/state
+
 # Install Bun for worker user (need to set HOME explicitly in RUN)
 RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/worker/.bun/bin:$PATH"
@@ -89,10 +95,10 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=0.73.0
-RUN sudo npm install -g @mariozechner/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
+ARG PI_CODING_AGENT_VERSION=0.74.0
+RUN sudo npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
     && mkdir -p /home/worker/.pi/agent
-ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@mariozechner/pi-coding-agent
+ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match @openai/codex-sdk in package.json — enforced by
@@ -195,7 +201,7 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
     "@desplega.ai/wts": "0.2.3",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/qa-use": "2.18.0",
-    "@desplega.ai/agent-fs": "0.5.3"
+    "@desplega.ai/agent-fs": "0.5.4"
   },
   "overrides": {
     "@huggingface/hub": "2.11.0",

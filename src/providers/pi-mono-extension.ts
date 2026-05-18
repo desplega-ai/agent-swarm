@@ -6,7 +6,7 @@
  * with full behavioral parity.
  */
 
-import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";

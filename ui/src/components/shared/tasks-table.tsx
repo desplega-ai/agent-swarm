@@ -31,9 +31,10 @@ import {
 import type { ComponentType, ReactNode, SVGProps } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AgentTask, AgentTaskStatus } from "@/api/types";
+import type { AgentTask } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { DataGrid } from "@/components/shared/data-grid";
+import { MarkdownView } from "@/components/shared/markdown-view";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -119,6 +120,47 @@ function SourcePill({ value }: { value: string | undefined }) {
 
 // ─── Cell renderers ──────────────────────────────────────────────────────────
 
+// Override the default tooltip "tip" surface (bg-foreground/text-background) with
+// the standard popover surface so markdown — and especially Streamdown's inline
+// code + fenced code blocks — render against theme-aware tokens instead of
+// fighting the dark tip background.
+// Fixed width (not max-width): the underlying TooltipContent is `w-fit`, so
+// `max-w-xl` collapses when the body's intrinsic width is auto (Monaco's
+// `width: 100%` resolves to 0 in that case).
+const MARKDOWN_TOOLTIP_CLASS =
+  "w-[36rem] break-words text-left !bg-popover !text-popover-foreground border border-border shadow-md p-3";
+
+function TooltipMarkdown({ text }: { text: string }) {
+  return (
+    <div className="max-h-96 overflow-y-auto text-sm leading-relaxed">
+      <MarkdownView text={text} />
+    </div>
+  );
+}
+
+function StatusCell({ task }: { task: AgentTask }) {
+  const tooltip =
+    task.status === "failed"
+      ? task.failureReason
+      : task.status === "completed"
+        ? task.output
+        : task.progress;
+
+  const badge = <StatusBadge status={task.status} />;
+  if (!tooltip) return badge;
+
+  return (
+    <Tooltip delayDuration={400}>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">{badge}</span>
+      </TooltipTrigger>
+      <TooltipContent side="right" align="start" className={MARKDOWN_TOOLTIP_CLASS}>
+        <TooltipMarkdown text={tooltip} />
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function DescriptionCell({ value }: { value: string | undefined }) {
   const text = value ?? "";
   if (!text) return DASH;
@@ -127,12 +169,8 @@ function DescriptionCell({ value }: { value: string | undefined }) {
       <TooltipTrigger asChild>
         <span className="block truncate">{text}</span>
       </TooltipTrigger>
-      <TooltipContent
-        side="bottom"
-        align="start"
-        className="max-w-xl whitespace-pre-wrap break-words text-left"
-      >
-        {text}
+      <TooltipContent side="right" align="start" className={MARKDOWN_TOOLTIP_CLASS}>
+        <TooltipMarkdown text={text} />
       </TooltipContent>
     </Tooltip>
   );
@@ -422,7 +460,7 @@ export function TasksTable({
         headerName: "Status",
         width: 130,
         ...fixed,
-        cellRenderer: (p: { value: AgentTaskStatus }) => <StatusBadge status={p.value} />,
+        cellRenderer: (p: { data?: AgentTask }) => (p.data ? <StatusCell task={p.data} /> : null),
       },
       {
         _id: "source",

@@ -154,12 +154,15 @@ async function artifactList() {
       process.exit(1);
     }
 
-    const services = (await res.json()) as Array<{
-      name: string;
-      agentId: string;
-      status: string;
-      metadata?: { type?: string; artifactName?: string; port?: number; publicUrl?: string };
-    }>;
+    const body = (await res.json()) as {
+      services?: Array<{
+        name: string;
+        agentId: string;
+        status: string;
+        metadata?: { type?: string; artifactName?: string; port?: number; publicUrl?: string };
+      }>;
+    };
+    const services = body.services ?? [];
 
     const artifacts = services.filter((s) => s.metadata?.type === "artifact");
 
@@ -214,11 +217,14 @@ async function artifactStop(args: ArtifactArgs) {
     });
 
     if (res.ok) {
-      const services = (await res.json()) as Array<{
-        id: string;
-        name: string;
-        metadata?: { type?: string; artifactName?: string };
-      }>;
+      const body = (await res.json()) as {
+        services?: Array<{
+          id: string;
+          name: string;
+          metadata?: { type?: string; artifactName?: string };
+        }>;
+      };
+      const services = body.services ?? [];
       const service = services.find(
         (s) => s.metadata?.type === "artifact" && s.metadata?.artifactName === name,
       );

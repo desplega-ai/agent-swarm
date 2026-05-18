@@ -8,6 +8,7 @@ import {
   Clock,
   FileText,
   GitBranch,
+  Globe,
   Home,
   Key,
   LayoutDashboard,
@@ -70,6 +71,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { title: "Schedules", path: "/schedules", icon: Clock },
       { title: "Workflows", path: "/workflows", icon: Workflow },
+      { title: "Pages", path: "/pages", icon: Globe, gate: { minVersion: "1.79.0" } },
       { title: "Usage", path: "/usage", icon: BarChart3 },
       { title: "Budgets", path: "/budgets", icon: Wallet },
     ],
@@ -96,8 +98,14 @@ const navGroups: { label: string; items: NavItem[] }[] = [
 export function AppSidebar() {
   const location = useLocation();
   const { data: status } = useStatusContext();
-  // Phase 4 ≥1.76.0: feature gate for Sessions (and any future v1.76+ entry).
-  const sessionsGate = useFeatureGate("1.76.0");
+  // Feature-gate lookups for nav items whose backing routes need a min API
+  // version. Add a new entry here when introducing another gated surface.
+  const gates: Record<string, ReturnType<typeof useFeatureGate>> = {
+    "1.76.0": useFeatureGate("1.76.0"), // Sessions
+    "1.79.0": useFeatureGate("1.79.0"), // Pages
+  };
+  const isGated = (item: NavItem) =>
+    !!item.gate && gates[item.gate.minVersion]?.supported === false;
   // 404 from /status (older API) → hide the Home nav item.
   const homeAvailable = status !== null;
   const identityName = status?.identity.name ?? "Agent Swarm";
@@ -153,7 +161,7 @@ export function AppSidebar() {
                           item.path === "/"
                             ? location.pathname === "/"
                             : location.pathname.startsWith(item.path);
-                        const gated = item.gate?.minVersion === "1.76.0" && !sessionsGate.supported;
+                        const gated = isGated(item);
                         if (gated) return null;
                         return (
                           <SidebarMenuItem key={item.path}>
@@ -180,7 +188,7 @@ export function AppSidebar() {
                         item.path === "/"
                           ? location.pathname === "/"
                           : location.pathname.startsWith(item.path);
-                      const gated = item.gate?.minVersion === "1.76.0" && !sessionsGate.supported;
+                      const gated = isGated(item);
                       if (gated) return null;
                       return (
                         <SidebarMenuItem key={item.path}>

@@ -297,6 +297,20 @@ agent-fs comment add docs/spec.md --body "Needs clarification on auth flow"
 agent-fs comment list docs/spec.md
 \`\`\`
 
+### Sharing agent-fs files with humans
+
+To give a human a direct link to a file, build the URL from the live host
+(env-var driven, never hardcode):
+
+\`\`\`
+\${AGENT_FS_LIVE_URL}/file/~/<org_id>/<drive_id>/<file_path>
+\`\`\`
+
+\`AGENT_FS_LIVE_URL\` defaults to \`https://live.agent-fs.dev\` if not set.
+\`<org_id>\` and \`<drive_id>\` come from the file's \`agent-fs stat <path> --json\`
+output (or the agent-fs CLI returns them on write). Use the **shared** drive
+id for files humans should review.
+
 Key conventions:
 - **Personal drive**: thoughts/{type}/YYYY-MM-DD-topic.md (plans, research, brainstorms)
 - **Shared drive**: thoughts/{{agentId}}/{type}/YYYY-MM-DD-topic.md (same structure, namespaced by your ID)
@@ -442,6 +456,41 @@ registerTemplate({
 Agents can serve interactive web content (HTML pages, dashboards, approval flows) via public URLs using localtunnel.
 Use the \`/artifacts\` skill for detailed instructions, examples, and API reference.
 Artifact content should be stored in \`/workspace/personal/artifacts/\` (persisted across sessions).
+
+For lightweight static reports / dashboards (HTML or JSON), prefer the
+\`create_page\` MCP tool (\`pages\` skill) — it stores in SQLite and serves at
+\`/p/:id\` without a PM2 process or tunnel.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.share_urls",
+  header: "",
+  defaultBody: `
+### Share URLs (read from env, never hardcode)
+
+When you emit a link meant for a human or another agent — a page, artifact,
+agent-fs file, or any external URL — read the host from env. Hardcoded hosts
+break across deployments.
+
+| Env var | Purpose | Prod example |
+|---|---|---|
+| \`MCP_BASE_URL\` | API origin. Use for \`/p/:id\` direct page links and any \`/api/*\` curl examples. | \`https://api.example-swarm.dev\` |
+| \`APP_URL\` | SPA origin. Default share target for pages: \`\${APP_URL}/pages/:id\`. Append \`?mode=full\` for a maximized view (slim header + body fills viewport). | \`https://app.example-swarm.dev\` |
+| \`SWARM_URL\` | Bare host (no scheme). Use in copy / Slack messages that need just the domain. | \`app.example-swarm.dev\` |
+| \`AGENT_FS_LIVE_URL\` | agent-fs live origin. Share files via \`\${AGENT_FS_LIVE_URL}/file/~/<org_id>/<drive_id>/<file_path>\`. Defaults to \`https://live.agent-fs.dev\` if unset. | \`https://live.agent-fs.dev\` |
+
+**Page share patterns** (most common):
+- Default: \`\${APP_URL}/pages/:id\` — opens the SPA with chrome.
+- Full / standalone: \`\${APP_URL}/pages/:id?mode=full\` — hides sidebar/header; slim row with title + Exit-Full.
+- Direct API (no SPA): \`\${MCP_BASE_URL}/p/:id\` — HTML inlines; JSON 302→SPA.
+
+**agent-fs share pattern**: \`\${AGENT_FS_LIVE_URL}/file/~/<org_id>/<drive_id>/<file_path>\`.
+
+If a required env var is missing, **surface that to the user** — never fall
+back to a localhost value or invent a host when shipping a share link.
 `,
   variables: [],
   category: "system",
@@ -493,6 +542,7 @@ registerTemplate({
 {{@template[system.agent.context_mode]}}
 
 {{@template[system.agent.system]}}
+{{@template[system.agent.share_urls]}}
 {{@template[system.agent.code_quality]}}`,
   variables: [
     { name: "role", description: "The agent's role" },
@@ -513,6 +563,7 @@ registerTemplate({
 {{@template[system.agent.context_mode]}}
 
 {{@template[system.agent.system]}}
+{{@template[system.agent.share_urls]}}
 {{@template[system.agent.code_quality]}}`,
   variables: [
     { name: "role", description: "The agent's role" },

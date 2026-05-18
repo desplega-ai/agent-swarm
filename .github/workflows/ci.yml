@@ -4,8 +4,14 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - "docs-site/**"
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock*"
+      - "tsconfig.json"
+      - "biome.json"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 jobs:

@@ -64,47 +64,47 @@ describe("BROWSER_SDK_JS", () => {
     expect(BROWSER_SDK_JS).toContain("class SwarmSDK");
   });
 
-  test("contains all expected API methods", () => {
-    const expectedMethods = [
-      "createTask",
-      "getTasks",
-      "getTaskDetails",
-      "storeProgress",
-      "postMessage",
-      "readMessages",
-      "getSwarm",
-      "listServices",
-      "slackReply",
+  test("exposes the seven canonical domains", () => {
+    const expectedDomains = [
+      "this.tasks",
+      "this.agents",
+      "this.events",
+      "this.memory",
+      "this.repos",
+      "this.schedules",
+      "this.approvalRequests",
     ];
-    for (const method of expectedMethods) {
-      expect(BROWSER_SDK_JS).toContain(method);
+    for (const domain of expectedDomains) {
+      expect(BROWSER_SDK_JS).toContain(domain);
     }
   });
 
-  test("assigns SwarmSDK to window", () => {
-    expect(BROWSER_SDK_JS).toContain("window.SwarmSDK = SwarmSDK");
+  test("removed domains are NOT exposed (messages, services, slack)", () => {
+    const removed = ["this.messages", "this.services", "this.slack", "postMessage", "readMessages"];
+    for (const r of removed) {
+      expect(BROWSER_SDK_JS).not.toContain(r);
+    }
   });
 
-  test("uses correct proxy API paths", () => {
-    expect(BROWSER_SDK_JS).toContain("/@swarm/api/tasks");
-    expect(BROWSER_SDK_JS).toContain("/@swarm/api/agents");
-    expect(BROWSER_SDK_JS).toContain("/@swarm/api/messages");
-    expect(BROWSER_SDK_JS).toContain("/@swarm/api/services");
-    expect(BROWSER_SDK_JS).toContain("/@swarm/api/slack/reply");
+  test("assigns SwarmSDK class + swarmSdk singleton to window", () => {
+    expect(BROWSER_SDK_JS).toContain("window.SwarmSDK = SwarmSDK");
+    expect(BROWSER_SDK_JS).toContain("window.swarmSdk = new SwarmSDK()");
+  });
+
+  test("routes calls through the /@swarm/api/* proxy", () => {
+    expect(BROWSER_SDK_JS).toContain("const base = '/@swarm/api'");
+    // Sentinel endpoints — one per domain.
+    expect(BROWSER_SDK_JS).toContain("'/tasks'");
+    expect(BROWSER_SDK_JS).toContain("'/agents'");
+    expect(BROWSER_SDK_JS).toContain("'/events'");
+    expect(BROWSER_SDK_JS).toContain("'/memory/search'");
+    expect(BROWSER_SDK_JS).toContain("'/repos'");
+    expect(BROWSER_SDK_JS).toContain("'/schedules'");
+    expect(BROWSER_SDK_JS).toContain("'/approval-requests'");
   });
 
   test("fetches config on construction", () => {
     expect(BROWSER_SDK_JS).toContain("fetch('/@swarm/config')");
-  });
-
-  test("has _post helper with JSON content-type", () => {
-    expect(BROWSER_SDK_JS).toContain("_post(url, body)");
-    expect(BROWSER_SDK_JS).toContain("'Content-Type': 'application/json'");
-    expect(BROWSER_SDK_JS).toContain("JSON.stringify(body)");
-  });
-
-  test("has _get helper", () => {
-    expect(BROWSER_SDK_JS).toContain("_get(url)");
   });
 });
 
@@ -536,27 +536,29 @@ describe("artifact CLI command", () => {
           const url = new URL(req.url);
           if (url.pathname === "/api/services") {
             return new Response(
-              JSON.stringify([
-                {
-                  id: "svc-1",
-                  name: "artifact-dashboard",
-                  agentId: "agent-123",
-                  status: "healthy",
-                  metadata: {
-                    type: "artifact",
-                    artifactName: "dashboard",
-                    port: 3001,
-                    publicUrl: "https://test.lt.example.com",
+              JSON.stringify({
+                services: [
+                  {
+                    id: "svc-1",
+                    name: "artifact-dashboard",
+                    agentId: "agent-123",
+                    status: "healthy",
+                    metadata: {
+                      type: "artifact",
+                      artifactName: "dashboard",
+                      port: 3001,
+                      publicUrl: "https://test.lt.example.com",
+                    },
                   },
-                },
-                {
-                  id: "svc-2",
-                  name: "some-other-service",
-                  agentId: "agent-456",
-                  status: "healthy",
-                  metadata: { type: "web" },
-                },
-              ]),
+                  {
+                    id: "svc-2",
+                    name: "some-other-service",
+                    agentId: "agent-456",
+                    status: "healthy",
+                    metadata: { type: "web" },
+                  },
+                ],
+              }),
             );
           }
           return new Response("Not found", { status: 404 });
@@ -593,7 +595,7 @@ describe("artifact CLI command", () => {
       const mockPort = await getAvailablePort();
       const mockServer = Bun.serve({
         port: mockPort,
-        fetch: () => new Response(JSON.stringify([])),
+        fetch: () => new Response(JSON.stringify({ services: [] })),
       });
 
       const origEnv = { ...process.env };
@@ -626,22 +628,24 @@ describe("artifact CLI command", () => {
         port: mockPort,
         fetch: () =>
           new Response(
-            JSON.stringify([
-              {
-                id: "s1",
-                name: "web-server",
-                agentId: "a1",
-                status: "healthy",
-                metadata: { type: "web" },
-              },
-              {
-                id: "s2",
-                name: "api-server",
-                agentId: "a2",
-                status: "healthy",
-                metadata: {},
-              },
-            ]),
+            JSON.stringify({
+              services: [
+                {
+                  id: "s1",
+                  name: "web-server",
+                  agentId: "a1",
+                  status: "healthy",
+                  metadata: { type: "web" },
+                },
+                {
+                  id: "s2",
+                  name: "api-server",
+                  agentId: "a2",
+                  status: "healthy",
+                  metadata: {},
+                },
+              ],
+            }),
           ),
       });
 
@@ -682,13 +686,15 @@ describe("artifact CLI command", () => {
           const url = new URL(req.url);
           if (req.method === "GET" && url.pathname === "/api/services") {
             return new Response(
-              JSON.stringify([
-                {
-                  id: "svc-to-delete",
-                  name: "artifact-my-report",
-                  metadata: { type: "artifact", artifactName: "my-report" },
-                },
-              ]),
+              JSON.stringify({
+                services: [
+                  {
+                    id: "svc-to-delete",
+                    name: "artifact-my-report",
+                    metadata: { type: "artifact", artifactName: "my-report" },
+                  },
+                ],
+              }),
             );
           }
           if (req.method === "DELETE" && url.pathname.startsWith("/api/services/")) {

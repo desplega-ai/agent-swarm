@@ -4,6 +4,7 @@ import {
   ClipboardList,
   Clock,
   FolderGit2,
+  Globe,
   LayoutDashboard,
   MessageSquare,
   Server,
@@ -12,6 +13,7 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useTasks } from "@/api/hooks/use-tasks";
 import {
   CommandDialog,
@@ -23,7 +25,14 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 
-const NAV_ITEMS = [
+interface NavItem {
+  label: string;
+  path: string;
+  icon: typeof Bot;
+  gate?: { minVersion: string };
+}
+
+const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
   { label: "Agents", path: "/agents", icon: Bot },
   { label: "Tasks", path: "/tasks", icon: ClipboardList },
@@ -32,6 +41,7 @@ const NAV_ITEMS = [
   { label: "Usage", path: "/usage", icon: BarChart3 },
   { label: "Config", path: "/config", icon: Settings },
   { label: "Repos", path: "/repos", icon: FolderGit2 },
+  { label: "Pages", path: "/pages", icon: Globe, gate: { minVersion: "1.79.0" } },
   { label: "Services", path: "/services", icon: Server },
 ];
 
@@ -42,6 +52,15 @@ export function CommandMenu() {
   const { data: agents } = useAgents();
   const { data: tasksData } = useTasks();
   const tasks = tasksData?.tasks;
+
+  // Feature-gate lookups for nav items whose backing routes need a min API
+  // version. Hide an item only when the gate explicitly reports unsupported
+  // — leaves it visible while the version probe is in flight so the menu
+  // doesn't flash open with missing items.
+  const gates: Record<string, boolean> = {
+    "1.79.0": useFeatureGate("1.79.0").supported, // Pages
+  };
+  const visibleNav = NAV_ITEMS.filter((i) => !i.gate || gates[i.gate.minVersion] !== false);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -66,7 +85,7 @@ export function CommandMenu() {
         <CommandEmpty>No results found.</CommandEmpty>
 
         <CommandGroup heading="Navigation">
-          {NAV_ITEMS.map((item) => (
+          {visibleNav.map((item) => (
             <CommandItem key={item.path} onSelect={() => handleSelect(item.path)}>
               <item.icon className="h-4 w-4" />
               <span>{item.label}</span>

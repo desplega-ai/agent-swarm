@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Shannon-variant `CLAUDE_BINARY` is now first-class** (#482) — the existing-but-undocumented `CLAUDE_BINARY` env var is formalized as the opt-in for [`@dexh/shannon`](https://github.com/dexhorthy/shannon), which drives `claude` interactively in `tmux` to keep swarm runs on the Max/Pro subscription credit pool after Anthropic's 2026-06-15 programmatic-credit split. Accepts a single binary (`shannon`), an absolute path, or a whitespace-separated command string (`bunx @dexh/shannon`, `npx -y @dexh/shannon`); whitespace-split into argv tokens before the swarm appends the usual claude flags. New `parseClaudeBinary` and `resolveClaudeBinary` helpers in `src/providers/claude-adapter.ts`. Reloadable via `swarm_config` overlay (precedence: repo > agent > global > env > `claude`) so operators can flip a worker via `set-config CLAUDE_BINARY=...` without a container restart. Fail-fast `Bun.which("tmux")` check when the resolved binary contains `shannon`. Pre-seeds `~/.claude.json` (`projects[cwd].hasTrustDialogAccepted = true`) at session-create so the first-run trust dialog doesn't hang the tmux pane. New user-facing guide at [`/docs/guides/shannon-experimental`](/docs/guides/shannon-experimental); engineering notes in `runbooks/harness-providers.md`.
+- **`tmux` apt-installed in `Dockerfile.worker`** (#482) — ships in the worker image by default so `CLAUDE_BINARY="bunx @dexh/shannon"` works out of the box. Single apt list addition, same `RUN` block — no new layer.
+
+### Fixed
+- **`Dockerfile.worker` pre-creates `/home/worker/.local/{bin,share,state}` as `worker`** (#483) — entrypoint also `chown -R`s `/home/worker/.local` to `worker:worker` right before `exec gosu worker`. Fixes `EACCES: permission denied, mkdir '/home/worker/.local/share'` when the Bun MCP subprocess spawns inside reviewer/codex/Bun workers, caused by root-owned `.local` directories left behind by root-level steps that obey XDG (notably `archil mount`) while `ENV HOME=/home/worker` is still active under `USER root`.
+- **`pi-mono` adapter model handling** (`2650a54c`) — fixes model resolution in `src/providers/pi-mono-adapter.ts`.
+
+## [1.79.1] - 2026-05-13
+
+### Added
+- **KV store + Pages SDK + `kv-storage` skill** (#478) — Redis-like, namespaced key/value store auto-scoped to the agent's current context (Slack thread / PR / Linear issue / agent scratchpad / page). New `kv` capability and five MCP tools (`kv-get`, `kv-set`, `kv-delete`, `kv-incr`, `kv-list`) plus public `/api/kv` HTTP routes for the Pages SDK. 2 MiB body cap, opt-in TTL via `expiresInSec`, atomic upserts/increments. Adds migration `061_kv_store.sql`. The `kv-storage` SKILL.md documents context auto-resolution rules and includes the "do NOT use for secrets / embedded knowledge / files" guardrail.
+- **Pages: diff helper + PDF export + view counter** (#479) — page versions now support diff retrieval, a built-in PDF export endpoint, and a monotonic view counter (migration `062_pages_view_count.sql`). Counter surfaces in the dashboard pages listing.
+- **Telemetry: `is_cloud` emitted on every event** (#476) — the telemetry initializer attaches an `is_cloud` flag derived from the runtime environment to every event so downstream pipelines can filter cloud vs self-hosted traffic without joining to a separate dimension.
+
+### Changed
+- **Pages public renderer CSP: allowlist `jsdelivr.net` + `unpkg.com` for `script-src`** (#480) — published HTML pages can now load CDN-hosted libraries from the two most common JS CDNs without inline-script workarounds. CSP otherwise unchanged.
+- **`pi-coding-agent` migrated to `@earendil-works` scope @ 0.74.0** (#459) — `Dockerfile.worker`, provider credential plumbing, and the `harness-providers` docs page were updated to the new package name. Existing installs on the old scope continue to work; new builds pull from `@earendil-works/pi-coding-agent`.
+
+## [1.79.0] - 2026-05-13
+
+### Added
+- **DB-backed pages — `create_page` MCP tool + `/pages` SPA route** (#472) — agents can now publish HTML or JSON pages that live in SQLite, no long-lived process needed. Adds the `pages` capability (on by default), the `create_page` tool with upsert-by-(agent, slug) semantics and snapshot-on-update versioning, and three new HTTP routes: `POST/GET/PUT/DELETE /api/pages`, `POST /api/pages/:id/launch` (HMAC-signed `page_session` cookie), and public `/p/:id` / `/p/:id.json` serving with three auth modes (`public`, `authed`, `password`). Bodies capped at 5 MiB. HTML pages get `<base target=_blank>`, Space Grotesk + Space Mono fonts, Tailwind Play CDN, swarm-themed CSS variables, and a `window.swarmSdk` singleton injected via `BROWSER_SDK_JS`. JSON pages render through `@json-render/react` with a swarm-specific component catalog (Container/Card/Heading/Text/Button/Metric/Alert) and two action handlers (`swarm.sdk`, `swarm.call`). New `system.agent.share_urls` prompt template documents `MCP_BASE_URL` / `APP_URL` / `SWARM_URL` / `AGENT_FS_LIVE_URL` for share-link generation.
+- **Domain-grouped `window.SwarmSDK`** (#472) — replaces the previous flat 9-method surface with seven explicit domain modules (`tasks`, `agents`, `events`, `memory`, `repos`, `schedules`, `approvalRequests`), each mapping 1:1 to a `/api/*` REST section. Calls route through the cookie-gated `/@swarm/api/*` proxy so no client-side token handling is needed. Mirrored in the SPA at `ui/src/lib/swarm-sdk.ts` for the JSON renderer's `swarm.sdk` action. Removed (not part of curated v1): `postMessage`, `readMessages`, `listServices`, `slackReply`.
+- **`pages` skill (`plugin/skills/pages/`)** (#472) — full agent-facing guide covering page lifecycle, the seven SDK domains with HTTP-path mapping, share-URL patterns, and copy-pasteable signature blocks.
+
+### Changed
+- **UI: Pages surface feature-gated behind API ≥ 1.79.0** (#473) — sidebar entry, command-menu, and `/pages` / `/pages/:id` routes consult a generalized `useFeatureGate` lookup. Older API servers stop seeing the Pages nav entry and get a clean `<UpgradeRequired />` screen on deep links. Hooks-order preserved by moving the gate's early-return after all `useMemo` / `useCallback` declarations.
+
+## [1.78.1] - 2026-05-12
+
+### Fixed
+- **`agent-swarm artifact list` / `artifact stop` handles `{services:[]}` envelope** (#469) — `/api/services` returns `{ services: [...] }`, but both commands cast the JSON as a bare `Array`. `artifact list` crashed loudly with `TypeError: services.filter is not a function`, and `artifact stop` silently no-op'd the registry-unregister (try/catch swallowed it), leaving stale DB rows. Both call sites now extract `body.services ?? []`. New `artifact-commands.test.ts` mocks `globalThis.fetch` and asserts `{services:[…]}`, `{services:[]}`, and `{}` shapes all parse without throwing. Existing `artifact-sdk.test.ts` mocks updated — they were encoding the bug. Follow-up flagged: `artifact stop <name>` runs `pm2 delete artifact-<name>` even for nohup/non-PM2 processes, which fails silently.
+- **Skill approval flow passes `scope` through `skill-update`** (#468) — the harness's skill-update approval handler was dropping the `scope` parameter, so approvals always wrote to agent scope regardless of the requester's intent.
+
+### Changed
+- **`artifacts` skill — rename `skill.md` → `SKILL.md`, add YAML frontmatter** (#469) — Claude Code's skill scanner watches the uppercase filename; the lowercase variant was invisible to the harness. Frontmatter bakes in the actual user phrasings ("create an artifact for X", "host this for me", "make me a tunneled URL", "give me a live link", ...) so the skill surfaces reliably. Every CLI example now uses the correct `agent-swarm artifact <subcommand>` form. New "Auth & URL Pattern" + "Running it as a daemon" sections (nohup + PM2 recipes) plus an explicit callout that `artifact stop` currently only kills PM2-started processes.
+- **Markdown-rendered task views in the dashboard** (cf261b16) — adds `MarkdownView` + `CollapsibleDescription` components; `tasks-table` and `tasks/[id]` pages now render output / failure / description as Markdown. Sharper error tracker — `error-tracker.ts` gets richer context capture (covered by 30 new tests).
+
+## [1.78.0] - 2026-05-12
+
+### Added
+- **Multi-arch Docker image publishing — `linux/amd64` + `linux/arm64`** (#437) — `docker-and-deploy.yml` workflow now publishes both architectures for `ghcr.io/desplega-ai/agent-swarm` and `ghcr.io/desplega-ai/agent-swarm-worker`. Bumps `Dockerfile.worker` accordingly. Same tags (`v<version>`, `latest`, `sha-<commit>`) as before; pulls on Apple Silicon and Linux ARM nodes no longer go through QEMU emulation.
+
+### Changed
+- **`src/x402/` marked alpha / opt-in** (#467) — the x402 payments module remains in-tree but documentation clarifies it is alpha and disabled by default; production deployments should keep it gated.
+- **npm dependency bumps across 3 directories — 13 updates** (#464) — routine `dependabot` group bump for the npm_and_yarn group. No public API impact.
+
+### Fixed
+- **Workflow script nodes mark themselves failed on non-zero exit** (#462) — previously a script-node exec that returned non-zero status would still resolve as `completed`, silently passing failure downstream. The node now propagates the exit code as a workflow-node failure so dependent nodes don't run on a broken upstream.
+- **`pi` provider: anthropic shortnames re-route through OpenRouter when only `OPENROUTER_API_KEY` is set** (#458) — operators running pi-only with OpenRouter credentials no longer get `Provider not configured` errors when a task requests an anthropic shortname (`opus`, `sonnet`, `haiku`). The pi adapter's model resolver now consults the configured credential pool before short-circuiting to anthropic-direct.
+- **CI flake fixes** (4c5b4cb5) — stabilization of intermittently-failing tests; no production behavior change.
+
 ## [1.77.3] - 2026-05-12
 
 ### Fixed

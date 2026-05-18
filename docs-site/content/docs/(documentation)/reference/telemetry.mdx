@@ -26,6 +26,7 @@ Every event also includes:
 - The source component (`api-server` or `worker`)
 - The environment (`production` or `development`)
 - A schema version number
+- `is_cloud` — boolean flag indicating whether the event originated from a cloud-hosted swarm or a self-hosted install. Lets the backend partition cloud vs self-hosted traffic without joining to another dimension.
 
 ## How it's anonymized
 

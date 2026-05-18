@@ -29,6 +29,9 @@ import type {
   McpServer,
   McpServersResponse,
   MessagesResponse,
+  PageListItem,
+  PageMetadata,
+  PagesListResponse,
   PreviewResponse,
   PricingProvider,
   PricingResponse,
@@ -1681,6 +1684,119 @@ class ApiClient {
     if (!res.ok) throw new Error(`Failed to list credential-missing agents: ${res.status}`);
     const data = (await res.json()) as CredentialMissingAgentsResponse;
     return data.agents;
+  }
+
+  // ─── Pages (DB-backed artifacts, step-6) ──────────────────────────────────
+
+  /**
+   * Resolve the absolute API URL for cookie-bearing page calls. Unlike
+   * `getBaseUrl()` (which returns "" in dev so Vite's proxy can rewrite
+   * `/api/*`), the page-session cookie MUST be set on the API origin
+   * (`http://localhost:3013` in dev), so we always need an absolute URL.
+   * Falls back to the dev API origin when no connection is configured.
+   */
+  private getAbsoluteApiUrl(): string {
+    const config = getConfig();
+    return (config.apiUrl || "http://localhost:3013").replace(/\/+$/, "");
+  }
+
+  /**
+   * Fetch the current head metadata for a page from `GET /p/:id.json`. The
+   * call uses `credentials: 'include'` so that a previously-minted
+   * `page_session` cookie (from `launchPage` or the password flow) travels
+   * cross-origin. The bearer header is harmless for `public` pages and
+   * required by nothing on this route — but we include it for parity with
+   * the rest of the client and to avoid blank-creds edge cases in browser
+   * extensions that hide cookies.
+   *
+   * Throws `Error` with the status code in the message on a non-OK response.
+   * Callers (see `useArtifactPage`) inspect the status string to decide
+   * whether to attempt a `launchPage` retry.
+   */
+  async fetchPageMetadata(id: string): Promise<PageMetadata> {
+    const url = `${this.getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}.json`;
+    const res = await fetch(url, {
+      headers: this.getHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      // Read the body so callers can branch on the server's hint without
+      // doing a second round-trip (e.g. password pages return 401 with
+      // body `{error: "password required"}`; the retry path uses that to
+      // short-circuit instead of calling /launch which always 400s for
+      // password mode).
+      let bodyText = "";
+      try {
+        bodyText = await res.text();
+      } catch {
+        /* ignore */
+      }
+      const err = new Error(`fetchPageMetadata ${id}: ${res.status}`) as Error & {
+        status?: number;
+        bodyText?: string;
+      };
+      err.status = res.status;
+      err.bodyText = bodyText;
+      throw err;
+    }
+    return res.json();
+  }
+
+  /**
+   * Mint a `page_session` cookie via `POST /api/pages/:id/launch`. Requires
+   * the API bearer (auth lives in the global gate) AND `credentials:
+   * 'include'` so the browser commits the returned `Set-Cookie` header to
+   * the API origin. The endpoint returns 204 on success.
+   *
+   * Server returns 400 (`"use ?key= or Basic auth on /p/:id directly"`) for
+   * password-mode pages — caller should surface a "open in new tab" affordance
+   * when this fires, since password unlock must happen in the iframe load itself.
+   *
+   * Throws `Error` with the status code in the message on a non-OK response.
+   */
+  async launchPage(id: string): Promise<void> {
+    const url = `${this.getAbsoluteApiUrl()}/api/pages/${encodeURIComponent(id)}/launch`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error(`launchPage ${id}: ${res.status}`);
+  }
+
+  /**
+   * List DB-backed pages. Bearer-authed (uses the standard `getHeaders()`,
+   * no cookie required). Supplying `agentId` narrows to a single creator —
+   * used by the SPA's "My pages only" toggle. `limit` defaults to 50 server-
+   * side, capped at 500.
+   */
+  /**
+   * Fetch the canonical Page row from `/api/pages/:id` (bearer-authed) — returns
+   * title/slug/description/agentId/auth + body for any page regardless of authMode.
+   * Used by breadcrumbs + the detail-page sidebar where we want the title without
+   * going through the page-session cookie dance.
+   */
+  async getPage(id: string): Promise<PageListItem & { body: string }> {
+    const url = `${this.getBaseUrl()}/api/pages/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`getPage ${id}: ${res.status}`);
+    return res.json();
+  }
+
+  async listPages(opts?: {
+    agentId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<PagesListResponse> {
+    const params = new URLSearchParams();
+    if (opts?.agentId) params.set("agentId", opts.agentId);
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts?.offset !== undefined) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/pages${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`listPages: ${res.status}`);
+    return res.json();
   }
 }
 
