@@ -325,6 +325,18 @@ When a session is spawned, the runner splits the credential value by commas and 
 |----------|---------|-------------|
 | `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. See [Telemetry](/docs/reference/telemetry) for details |
 
+## OpenTelemetry
+
+OpenTelemetry traces are disabled unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set. See [Observability with OpenTelemetry](/docs/guides/observability-opentelemetry) for SigNoz setup, emitted spans, and query examples.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | OTLP HTTP traces endpoint. For SigNoz Cloud, use your region's `/v1/traces` ingest URL |
+| `OTEL_EXPORTER_OTLP_HEADERS` | none | OTLP exporter headers, for example `signoz-ingestion-key=<key>`. Treated as sensitive by the secret scrubber |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | SDK default | Export protocol. Use `http/protobuf` for SigNoz Cloud |
+| `OTEL_SERVICE_NAME` | `agent-swarm-api` or `agent-swarm-worker` outside local compose | OpenTelemetry `service.name`. Set to `agent-swarm` everywhere to keep one service and split by `agentswarm.service.role` |
+| `OTEL_RESOURCE_ATTRIBUTES` | derived from `NODE_ENV` | Comma-separated resource attributes such as `deployment.environment=local,env=local,service.namespace=agent-swarm` |
+
 ## Business-Use Instrumentation
 
 Optional integration with [`@desplega.ai/business-use`](https://github.com/desplega-ai/business-use) for tracking system invariants across the distributed API + worker architecture.

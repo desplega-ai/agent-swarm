@@ -1,0 +1,409 @@
+---
+title: Observability with OpenTelemetry
+description: Send Agent Swarm traces to SigNoz or any OTLP-compatible backend, filter local runs, and inspect API, worker, MCP, and tool execution spans.
+---
+
+Agent Swarm can emit OpenTelemetry traces from the API server and worker runners. Tracing is disabled by default and turns on when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+
+The same wiring works with SigNoz Cloud, self-hosted SigNoz, Jaeger through an OTLP collector, Honeycomb, Grafana Tempo, and other OTLP-compatible backends.
+
+## Setup
+
+### SigNoz Cloud
+
+Create or copy an ingestion key from SigNoz Cloud, then set these variables for the API and every worker:
+
+```bash title=".env"
+OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.eu2.signoz.cloud/v1/traces
+OTEL_EXPORTER_OTLP_HEADERS=signoz-ingestion-key=your-ingestion-key
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_SERVICE_NAME=agent-swarm
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,env=production,service.namespace=agent-swarm
+```
+
+Use the region-specific endpoint from your SigNoz Cloud account. For the EU2 region, the traces endpoint is `https://ingest.eu2.signoz.cloud/v1/traces`.
+
+<Callout type="warn">
+Do not commit ingestion keys. `OTEL_EXPORTER_OTLP_HEADERS` is treated as a secret by Agent Swarm's scrubber, but it is still an active credential and should live in your secret manager or deployment environment.
+</Callout>
+
+### Local Docker Compose
+
+`docker-compose.local.yml` passes the OpenTelemetry variables through to the API, lead, Pi worker, and Codex worker services.
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.eu2.signoz.cloud/v1/traces"
+export OTEL_EXPORTER_OTLP_HEADERS="signoz-ingestion-key=your-ingestion-key"
+export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
+export OTEL_SERVICE_NAME="agent-swarm"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=local,env=local,service.namespace=agent-swarm"
+
+docker compose -f docker-compose.local.yml up --build
+```
+
+The important local filter tags are:
+
+| Attribute | Value | Purpose |
+|-----------|-------|---------|
+| `service.name` | `agent-swarm` | Keeps API and workers under one SigNoz service. |
+| `deployment.environment` | `local` | Standard OpenTelemetry environment label. |
+| `env` | `local` | Short convenience label for filtering local/dev traffic. |
+| `service.namespace` | `agent-swarm` | Groups Agent Swarm spans together in mixed backends. |
+| `agentswarm.service.role` | `api`, `lead`, or `worker` | Distinguishes API, lead runner, and worker runner spans while keeping one service. |
+
+### Production Docker Compose
+
+For production, add the same variables to the API service and every worker service in your compose file:
+
+```yaml title="docker-compose.yml"
+environment:
+  - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT}
+  - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
+  - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+  - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-agent-swarm}
+  - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=production,env=production,service.namespace=agent-swarm}
+```
+
+Use a single `OTEL_SERVICE_NAME=agent-swarm` if you want one service with role tags. Use separate service names such as `agent-swarm-api` and `agent-swarm-worker` only if you prefer separate service cards in your observability backend.
+
+## How It Works
+
+At startup, the API server and workers call `initOtel()`. If `OTEL_EXPORTER_OTLP_ENDPOINT` is absent, all tracing functions are no-ops. If it is present, Agent Swarm starts the OpenTelemetry Node SDK with an OTLP HTTP trace exporter.
+
+The API and workers share trace context over HTTP headers. When a worker calls the API or an MCP tool triggers server-side work, Agent Swarm injects and extracts OpenTelemetry propagation headers so related spans can appear in the same trace where the execution path supports it.
+
+Agent Swarm sets resource attributes once per process:
+
+| Attribute | Source |
+|-----------|--------|
+| `service.name` | `OTEL_SERVICE_NAME`, falling back to role-specific defaults |
+| `service.version` | `package.json` version |
+| `service.namespace` | `OTEL_RESOURCE_ATTRIBUTES` or `agent-swarm` |
+| `service.instance.id` | `AGENT_ID` or a generated UUID |
+| `deployment.environment` | `OTEL_RESOURCE_ATTRIBUTES`, `NODE_ENV`, or `development` |
+| `env` | `OTEL_RESOURCE_ATTRIBUTES.env` or `deployment.environment` |
+| `agentswarm.service.role` | Runtime role: `api`, `lead`, or `worker` |
+
+Sensitive exception messages, status messages, tool previews, and OTLP auth headers are scrubbed before they leave the process.
+
+## Traces Emitted
+
+### API HTTP Requests
+
+Every API request is wrapped in an `http.server` span.
+
+Common attributes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `http.request.method` | HTTP method |
+| `url.path` | Request path |
+| `responseStatusCode` | HTTP response status |
+| `agentswarm.component` | `api` |
+| `agentswarm.http.duration_ms` | Server-side request duration |
+
+Useful for:
+
+- API latency and error-rate dashboards
+- task creation, polling, and completion request inspection
+- checking whether workers are reaching the API
+
+### MCP Tool Calls
+
+Server-side MCP tool handlers emit `mcp.tool` spans.
+
+Common attributes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `mcp.tool.name` | Registered MCP tool name |
+| `mcp.tool.result_content_count` | Number of returned content items |
+| `mcp.tool.is_error` | Whether the MCP result is an error |
+| `agentswarm.task.id` | Source task ID when available |
+| `agentswarm.tool.args_preview` | Scrubbed, truncated argument preview |
+| `agentswarm.tool.result_preview` | Scrubbed, truncated result preview |
+
+Useful for:
+
+- finding slow or failing MCP tools
+- confirming tool calls are attached to a task
+- comparing tool usage across agents and harnesses
+
+### Worker Polling
+
+Worker poll loops emit `worker.poll` spans.
+
+Common attributes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `agentswarm.poll.result` | `empty`, `task_assigned`, `task_offered`, `pool_tasks_available`, or another trigger type |
+| `agentswarm.worker.poll_timeout_ms` | Long-poll timeout |
+| `agentswarm.worker.poll_interval_ms` | Worker poll interval |
+
+Useful for:
+
+- seeing whether workers are idle or receiving tasks
+- debugging queue and claim behavior
+- spotting excessive polling or API contention
+
+### Worker Sessions
+
+Worker task execution emits `worker.session.create` and `worker.session` spans.
+
+Common attributes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `agentswarm.task.id` | Logical task ID |
+| `agentswarm.task.real_id` | Real task ID after pool-task claim resolution |
+| `agentswarm.agent.role` | Agent role from the registered agent |
+| `agentswarm.harness_provider` | `claude`, `pi`, `codex`, `opencode`, or another provider |
+| `agentswarm.provider.session_id` | Provider session ID when available |
+| `agentswarm.session.cwd` | Session working directory |
+| `agentswarm.session.vcs_repo` | VCS repo attached to the session when set |
+| `agentswarm.session.duration_ms` | Session duration |
+| `agentswarm.session.exit_code` | Runner exit code |
+| `agentswarm.session.outcome` | `ok` or `error` |
+| `gen_ai.request.model` | Requested model |
+| `gen_ai.response.model` | Model reported by the provider, when cost data exists |
+| `gen_ai.usage.input_tokens` | Input token count, when available |
+| `gen_ai.usage.output_tokens` | Output token count, when available |
+| `agentswarm.cost.total_usd` | Provider-reported or computed session cost |
+
+Useful for:
+
+- full task execution timelines
+- model and provider comparisons
+- task cost and token usage inspection
+- finding sessions that failed before calling `store-progress`
+
+### Worker Tool Executions
+
+Worker-side provider events emit `worker.tool` or `worker.mcp.tool` spans.
+
+Common attributes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `agentswarm.tool.name` | Raw tool name reported by the harness |
+| `agentswarm.tool.normalized_name` | Normalized tool name |
+| `agentswarm.tool.kind` | `mcp`, shell/tool, or provider-specific kind |
+| `agentswarm.tool.call_id` | Provider tool-call ID when available |
+| `mcp.tool.name` | MCP tool name when the worker calls an MCP tool |
+| `agentswarm.tool.duration_ms` | Tool duration |
+| `agentswarm.tool.args_preview` | Scrubbed, truncated args |
+| `agentswarm.tool.result_preview` | Scrubbed, truncated result |
+| `agentswarm.tool.missing_start` | Result arrived without a matching start event |
+| `agentswarm.tool.unclosed` | Session ended before a tool-end event |
+
+Useful for:
+
+- shell command latency
+- MCP usage inside full worker traces
+- detecting tools that never completed
+- finding repeated tool loops or unusually expensive tool phases
+
+### Provider, Progress, Context, and Compaction Events
+
+Provider stream events are attached to active spans as attributes or events where possible.
+
+Common attributes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `agentswarm.provider.name` | Provider name |
+| `agentswarm.provider.event_name` | Provider custom event name |
+| `agentswarm.provider.event_data_preview` | Scrubbed, truncated provider data |
+| `gen_ai.message.role` | Message role |
+| `gen_ai.message.content_preview` | Scrubbed, truncated message content |
+| `agentswarm.progress.message` | Scrubbed, truncated progress text |
+| `agentswarm.context.used_tokens` | Context tokens used |
+| `agentswarm.context.total_tokens` | Total context window |
+| `agentswarm.context.percent` | Context usage percent |
+| `agentswarm.compaction.trigger` | Compaction trigger |
+| `agentswarm.compaction.pre_tokens` | Tokens before compaction |
+
+## Metrics
+
+Agent Swarm currently emits traces, not standalone OTLP metrics. In SigNoz, create useful operational metrics from trace aggregations:
+
+| Metric | Query shape |
+|--------|-------------|
+| API request rate | `rate(count())` over `name = 'http.server'`, grouped by `url.path` |
+| API p95 latency | `p95(durationNano)` over `name = 'http.server'`, grouped by `url.path` |
+| API errors | `count()` where `hasError = true` or `responseStatusCode >= 500` |
+| Worker task throughput | `count()` over `name = 'worker.session'`, grouped by `agentswarm.service.role` and `agentswarm.harness_provider` |
+| Worker session p95 duration | `p95(durationNano)` over `name = 'worker.session'` |
+| Tool call volume | `count()` over `name IN ('worker.tool', 'worker.mcp.tool', 'mcp.tool')`, grouped by `agentswarm.tool.name` or `mcp.tool.name` |
+| Slow tools | `p95(durationNano)` over tool spans, grouped by tool name |
+| Cost by model | `sum(agentswarm.cost.total_usd)` over session spans, grouped by `gen_ai.response.model` |
+| Token usage by model | `sum(gen_ai.usage.input_tokens)` and `sum(gen_ai.usage.output_tokens)`, grouped by model |
+| Poll behavior | `count()` over `worker.poll`, grouped by `agentswarm.poll.result` |
+
+## Useful SigNoz Queries
+
+Use these in SigNoz Traces Explorer or as dashboard widget filters.
+
+### All Local Agent Swarm Traffic
+
+```text
+service.name = 'agent-swarm' AND env = 'local'
+```
+
+### Production Traffic Only
+
+```text
+service.name = 'agent-swarm' AND deployment.environment = 'production'
+```
+
+### A Complete Task Execution
+
+```text
+service.name = 'agent-swarm' AND agentswarm.task.id = '<task-id>'
+```
+
+Start here when debugging a concrete task. You should see session spans, tool spans, and any server-side MCP spans that carried the task ID.
+
+### Worker Sessions for One Harness
+
+```text
+service.name = 'agent-swarm'
+AND name = 'worker.session'
+AND agentswarm.harness_provider = 'pi'
+```
+
+Replace `pi` with `claude`, `codex`, `opencode`, or another provider.
+
+### Slow Worker Tools
+
+```text
+service.name = 'agent-swarm'
+AND name IN ('worker.tool', 'worker.mcp.tool')
+AND durationNano > 5000000000
+```
+
+`durationNano > 5000000000` means slower than five seconds.
+
+### MCP Tool Calls for a Task
+
+```text
+service.name = 'agent-swarm'
+AND agentswarm.task.id = '<task-id>'
+AND (name = 'mcp.tool' OR name = 'worker.mcp.tool')
+```
+
+### Failed or Error-Spans
+
+```text
+service.name = 'agent-swarm' AND hasError = true
+```
+
+For HTTP 5xx responses:
+
+```text
+service.name = 'agent-swarm'
+AND name = 'http.server'
+AND responseStatusCode >= 500
+```
+
+### Unclosed Tool Calls
+
+```text
+service.name = 'agent-swarm'
+AND agentswarm.tool.unclosed = true
+```
+
+This is useful when a provider exits without emitting matching tool-end events.
+
+### Sessions with Cost Data
+
+```text
+service.name = 'agent-swarm'
+AND name = 'worker.session'
+AND agentswarm.cost.total_usd > 0
+```
+
+### Context Pressure
+
+```text
+service.name = 'agent-swarm'
+AND agentswarm.context.percent >= 80
+```
+
+## Dashboard Ideas
+
+Start with these panels:
+
+| Panel | Signal |
+|-------|--------|
+| API request rate by route | Trace count over `http.server`, grouped by `url.path` |
+| API p95 latency by route | `p95(durationNano)` over `http.server`, grouped by `url.path` |
+| Worker sessions by harness | Trace count over `worker.session`, grouped by `agentswarm.harness_provider` |
+| Worker session duration | `p95(durationNano)` over `worker.session`, grouped by harness |
+| Tool calls by name | Trace count over tool spans, grouped by `agentswarm.tool.name` |
+| Slowest tools | `p95(durationNano)` over tool spans |
+| Cost by model | `sum(agentswarm.cost.total_usd)`, grouped by `gen_ai.response.model` |
+| Poll outcomes | Trace count over `worker.poll`, grouped by `agentswarm.poll.result` |
+| Errors by span name | Trace count where `hasError = true`, grouped by `name` |
+
+## Troubleshooting
+
+### No traces appear
+
+Check that every process has the exporter endpoint:
+
+```bash
+docker compose exec api env | grep OTEL
+docker compose exec lead env | grep OTEL
+docker compose exec worker-1 env | grep OTEL
+```
+
+Then confirm the API is logging OTel startup:
+
+```bash
+docker compose logs api | grep OTel
+```
+
+If `OTEL_EXPORTER_OTLP_ENDPOINT` is empty, tracing is intentionally disabled.
+
+### SigNoz returns authentication errors
+
+For SigNoz Cloud, make sure:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` ends in `/v1/traces`
+- `OTEL_EXPORTER_OTLP_HEADERS` is exactly `signoz-ingestion-key=<key>`
+- `OTEL_EXPORTER_OTLP_PROTOCOL` is `http/protobuf`
+- the key belongs to the same SigNoz region as the ingest endpoint
+
+### Local and production traces are mixed
+
+Set explicit resource attributes in every environment:
+
+```bash
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=local,env=local,service.namespace=agent-swarm
+```
+
+For production:
+
+```bash
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,env=production,service.namespace=agent-swarm
+```
+
+Then filter with `env` or `deployment.environment`.
+
+### API and workers show as separate services
+
+Set the same `OTEL_SERVICE_NAME` everywhere:
+
+```bash
+OTEL_SERVICE_NAME=agent-swarm
+```
+
+Use `agentswarm.service.role` to split API, lead, and worker views without fragmenting the service.
+
+## Related
+
+- [Deployment Guide](/docs/guides/deployment) - production Docker Compose setup
+- [Environment Variables](/docs/reference/environment-variables) - OpenTelemetry environment variable reference
+- [Telemetry](/docs/reference/telemetry) - anonymized product telemetry, separate from your OpenTelemetry traces
