@@ -2,7 +2,7 @@
 id: step-6
 name: AgentMail webhook rewire
 depends_on: [step-1]
-status: ready
+status: done
 ---
 
 # step-6: AgentMail webhook rewire
@@ -46,9 +46,9 @@ AgentMail is the simplest webhook rewire — email IS the primary identifier (th
 
 #### Automated Verification:
 
-- [ ] `bun test src/tests/agentmail-handlers.test.ts` — all cases pass.
-- [ ] `bun run lint` passes on `src/agentmail/**`.
-- [ ] `grep -n 'resolveUser\s*(' src/agentmail/` returns 0 hits.
+- [x] `bun test src/tests/agentmail-handlers.test.ts` — all cases pass.
+- [x] `bun run lint` passes on `src/agentmail/**`.
+- [x] `grep -n 'resolveUser\s*(' src/agentmail/` returns 0 hits.
 
 #### Automated QA:
 

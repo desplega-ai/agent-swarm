@@ -3,8 +3,8 @@ import {
   getAgentById,
   getAgentMailInboxMapping,
   getAllAgents,
-  resolveUser,
 } from "../be/db";
+import { findOrCreateUserByEmail } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { createIngressBuffer } from "../tasks/additive-ingress";
 import { agentmailContextKey } from "../tasks/context-key";
@@ -71,6 +71,16 @@ function extractEmailFromField(from: string): string | undefined {
   if (angleMatch?.[1]) return angleMatch[1].toLowerCase();
   const bareMatch = from.match(/[\w.+-]+@[\w.-]+\.\w+/);
   return bareMatch?.[0]?.toLowerCase();
+}
+
+/**
+ * Extract display name from a from_ field like "Taras Yarema <t@desplega.ai>".
+ * Returns undefined if no display-name portion is present (bare address).
+ */
+function extractNameFromField(from: string): string | undefined {
+  const angleMatch = from.match(/^\s*"?([^"<]+?)"?\s*<[^>]+@[^>]+>\s*$/);
+  const name = angleMatch?.[1]?.trim();
+  return name && name.length > 0 ? name : undefined;
 }
 
 /**
@@ -159,9 +169,21 @@ export async function handleMessageReceived(
   const subject = message.subject || "(no subject)";
   const body = message.text || message.html || "";
 
-  // Resolve canonical user from sender email
+  // Resolve canonical user from sender email — per Q17.F, email is the
+  // primary identifier for inbound email events, so always auto-create when
+  // missing. findOrCreateUserByEmail emits identity_added (new row) or
+  // auto_merge (existing row matched via primary email or emailAliases).
   const senderEmail = extractEmailFromField(from);
-  const requestedByUserId = senderEmail ? resolveUser({ email: senderEmail })?.id : undefined;
+  const senderName = extractNameFromField(from);
+  let requestedByUserId: string | undefined;
+  if (senderEmail) {
+    const { user } = findOrCreateUserByEmail(
+      senderEmail,
+      { name: senderName ?? undefined },
+      { kind: "system", id: "webhook:agentmail" },
+    );
+    requestedByUserId = user.id;
+  }
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
 
   // Emit workflow trigger event
