@@ -426,6 +426,15 @@ export interface ServicesResponse {
   services: Service[];
 }
 
+/**
+ * Phase 2 + Phase 12b: tells the UI where `totalCostUsd` came from so we can
+ * render a badge. See `SessionCostSourceSchema` in `src/types.ts`.
+ *  - 'harness'        — value reported by the harness as-is.
+ *  - 'pricing-table'  — value recomputed by the API from `pricing` rows.
+ *  - 'unpriced'       — recompute attempted but no matching pricing rows.
+ */
+export type SessionCostSource = "harness" | "pricing-table" | "unpriced";
+
 export interface SessionCost {
   id: string;
   sessionId: string;
@@ -435,11 +444,18 @@ export interface SessionCost {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
-  cacheWriteTokens: number;
+  // Migration 063 nullable — adapters that can't honestly report this
+  // (e.g. Codex SDK) leave it null instead of mixing fake-0 with real-0.
+  cacheWriteTokens: number | null;
+  reasoningOutputTokens: number;
+  thinkingTokens: number;
   durationMs: number;
-  numTurns: number;
+  // Migration 063 nullable — adapters that don't surface numTurns.
+  numTurns: number | null;
   model: string;
   isError: boolean;
+  // Phase 12b: surfaced on each row for the UI badge.
+  costSource: SessionCostSource;
   createdAt: string;
 }
 
@@ -966,6 +982,20 @@ export interface AgentMcpServersResponse {
 // Context Usage
 export type ContextSnapshotEventType = "progress" | "compaction" | "completion";
 
+/**
+ * Phase 12b — adapter-supplied tag describing which formula produced
+ * `contextUsedTokens`. Lets the UI render the right label next to a
+ * percent gauge and avoid apples-to-oranges comparisons across providers.
+ */
+export type ContextFormula =
+  | "input-cache-output"
+  | "input-cache-no-output"
+  | "input-output-no-cache"
+  | "peak-proxy"
+  | "pi-delegated"
+  | "harness-reported"
+  | "unknown";
+
 export interface ContextSnapshot {
   id: string;
   taskId: string;
@@ -975,17 +1005,22 @@ export interface ContextSnapshot {
   contextTotalTokens?: number;
   contextPercent?: number;
   eventType: ContextSnapshotEventType;
-  compactTrigger?: "auto" | "manual";
+  // Migration 063 added 'auto-inferred' (e.g. claude-managed when the SDK
+  // doesn't expose pre-compact counts and we use a proxy).
+  compactTrigger?: "auto" | "manual" | "auto-inferred";
   preCompactTokens?: number;
   cumulativeInputTokens: number;
   cumulativeOutputTokens: number;
+  // Phase 12b — surface to the UI.
+  contextFormula?: ContextFormula;
   createdAt: string;
 }
 
 export interface ContextSummary {
   compactionCount: number;
   peakContextPercent: number | null;
-  totalContextTokensUsed: number | null;
+  // Migration 063: renamed from totalContextTokensUsed; monotonic max across snapshots.
+  peakContextTokens: number | null;
   contextWindowSize: number | null;
   snapshotCount: number;
 }

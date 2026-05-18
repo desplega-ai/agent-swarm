@@ -10,8 +10,9 @@ import {
   YAxis,
 } from "recharts";
 import type { SessionCost, UsageSummaryDailyRow, UsageSummaryTotals } from "@/api/types";
+import { formatCost } from "@/lib/cost-format";
 import { rechartsTooltipStyle } from "@/lib/recharts-tooltip-style";
-import { formatCompactNumber, formatCurrency, formatDuration } from "@/lib/utils";
+import { formatCompactNumber, formatDuration } from "@/lib/utils";
 
 function StatCard({
   label,
@@ -130,11 +131,11 @@ export function UsageSummary(props: UsageSummaryProps) {
     <div className="space-y-4">
       {/* Stats Strip */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard label="Total Cost" value={formatCurrency(stats.totalCost)} icon={DollarSign} />
+        <StatCard label="Total Cost" value={formatCost(stats.totalCost)} icon={DollarSign} />
         <StatCard label="Tokens" value={formatCompactNumber(stats.totalTokens)} icon={Coins} />
         <StatCard label="Sessions" value={String(stats.sessions)} icon={Activity} />
         <StatCard label="Total Time" value={formatDuration(stats.totalDuration)} icon={Clock} />
-        <StatCard label="Avg/Session" value={formatCurrency(stats.avgCost)} icon={TrendingUp} />
+        <StatCard label="Avg/Session" value={formatCost(stats.avgCost)} icon={TrendingUp} />
       </div>
 
       {/* Daily Cost Chart */}
@@ -155,7 +156,7 @@ export function UsageSummary(props: UsageSummaryProps) {
             />
             <Tooltip
               contentStyle={rechartsTooltipStyle}
-              formatter={(value) => [`$${Number(value).toFixed(3)}`, "Cost"]}
+              formatter={(value) => [formatCost(Number(value), { precision: 3 }), "Cost"]}
             />
             <Line
               type="monotone"

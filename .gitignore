@@ -15,6 +15,10 @@
 logs
 work
 
+# Ephemeral local QA scratchpad (per-provider env files, fixtures, logs).
+# Anything reusable belongs under scripts/ or src/tests/.
+tmp/
+
 # dependencies (bun install)
 node_modules
 

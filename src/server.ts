@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
 import { initDb } from "./be/db";
+import { seedPricingFromModelsDev } from "./be/seed-pricing";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
@@ -147,6 +148,11 @@ export function createServer() {
   // Initialize database with WAL mode
   // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
   initDb(process.env.DATABASE_PATH);
+  // Phase 2: project the vendored models.dev snapshot into the pricing table.
+  // Idempotent (INSERT OR IGNORE keyed on PK with effective_from=0); safe to
+  // call on every boot. See src/be/seed-pricing.ts for the projection logic
+  // and the manual-override constants for runtime-fee / ACU pricing.
+  seedPricingFromModelsDev();
 
   const server = new McpServer(
     {

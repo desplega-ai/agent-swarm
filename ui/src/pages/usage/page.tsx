@@ -12,8 +12,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatCost } from "@/lib/cost-format";
 import { rechartsTooltipStyle } from "@/lib/recharts-tooltip-style";
-import { formatCompactNumber, formatCurrency } from "@/lib/utils";
+import { formatCompactNumber } from "@/lib/utils";
 
 type DateRange = "7d" | "30d" | "90d" | "all";
 
@@ -147,7 +148,7 @@ export default function UsagePage() {
                 />
                 <Tooltip
                   contentStyle={rechartsTooltipStyle}
-                  formatter={(value) => [`$${Number(value).toFixed(3)}`, "Cost"]}
+                  formatter={(value) => [formatCost(Number(value), { precision: 3 }), "Cost"]}
                 />
                 <Bar
                   dataKey="cost"
@@ -172,12 +173,12 @@ export default function UsagePage() {
                   {agentData.map((agent) => (
                     <tr key={agent.agentId} className="border-b border-border/50">
                       <td className="py-2 font-medium">{agent.name}</td>
-                      <td className="py-2 text-right font-mono">{formatCurrency(agent.cost)}</td>
+                      <td className="py-2 text-right font-mono">{formatCost(agent.cost)}</td>
                       <td className="py-2 text-right font-mono">{agent.sessions}</td>
                       <td className="py-2 text-right font-mono">
                         {formatCompactNumber(agent.tokens)}
                       </td>
-                      <td className="py-2 text-right font-mono">{formatCurrency(agent.avgCost)}</td>
+                      <td className="py-2 text-right font-mono">{formatCost(agent.avgCost)}</td>
                     </tr>
                   ))}
                 </tbody>

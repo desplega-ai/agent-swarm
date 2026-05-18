@@ -167,8 +167,10 @@ export function createSwarmEventHandler(
 
   const progressContextUsage = (event: {
     contextUsedTokens: number;
-    contextTotalTokens: number;
-    contextPercent: number;
+    // Migration 063: nullable for adapters that can't resolve a window.
+    contextTotalTokens: number | null;
+    contextPercent: number | null;
+    contextFormula?: string;
   }): void => {
     if (opts.taskId && shouldRun("context-progress", CONTEXT_THROTTLE_MS)) {
       fireAndForget(`${opts.apiUrl}/api/tasks/${encodeURIComponent(opts.taskId)}/context`, {
@@ -178,8 +180,9 @@ export function createSwarmEventHandler(
           eventType: "progress",
           sessionId: sessionId ?? `${opts.sessionIdFallbackPrefix ?? "session"}-${opts.taskId}`,
           contextUsedTokens: event.contextUsedTokens,
-          contextTotalTokens: event.contextTotalTokens,
-          contextPercent: event.contextPercent,
+          contextTotalTokens: event.contextTotalTokens ?? undefined,
+          contextPercent: event.contextPercent ?? undefined,
+          contextFormula: event.contextFormula,
         }),
       });
     }
@@ -239,6 +242,7 @@ export function createSwarmEventHandler(
             contextUsedTokens: event.contextUsedTokens,
             contextTotalTokens: event.contextTotalTokens,
             contextPercent: event.contextPercent,
+            contextFormula: event.contextFormula,
           });
           break;
         }

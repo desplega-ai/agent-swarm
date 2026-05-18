@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { Bot, CheckCircle2, Clock, DollarSign, Heart, Loader2, XCircle, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
+import { formatCost } from "@/lib/cost-format";
 import { cn } from "@/lib/utils";
 
 interface StatItemProps {
@@ -70,10 +71,9 @@ interface StatsBarProps {
   costMtd?: number;
 }
 
-function formatCostCompact(usd: number): string {
-  if (usd < 0.01) return "$0";
-  return `$${usd.toFixed(2)}`;
-}
+// Phase 12a — use the shared utility instead of an inline formatter.
+// `compact` precision matches the dashboard convention; sub-cent rendering
+// (`<$0.01`) is also handled there.
 
 export function StatsBar({ agents, tasks, healthy, costToday, costMtd }: StatsBarProps) {
   return (
@@ -116,10 +116,15 @@ export function StatsBar({ agents, tasks, healthy, costToday, costMtd }: StatsBa
       <StatItem
         icon={DollarSign}
         label="Today"
-        value={formatCostCompact(costToday ?? 0)}
+        value={formatCost(costToday, { precision: "compact" })}
         to="/usage"
       />
-      <StatItem icon={DollarSign} label="MTD" value={formatCostCompact(costMtd ?? 0)} to="/usage" />
+      <StatItem
+        icon={DollarSign}
+        label="MTD"
+        value={formatCost(costMtd, { precision: "compact" })}
+        to="/usage"
+      />
       <StatItem
         icon={Heart}
         label="Health"

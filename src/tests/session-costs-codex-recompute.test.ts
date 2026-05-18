@@ -98,7 +98,7 @@ interface CreatedCostResponse {
   cost: {
     id: string;
     totalCostUsd: number;
-    costSource: "harness" | "pricing-table";
+    costSource: "harness" | "pricing-table" | "unpriced";
     model: string;
   };
 }
@@ -153,15 +153,9 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
     expect(body.cost.totalCostUsd).toBeCloseTo(6.64, 5);
   });
 
-  test("provider=codex but a token class is missing → falls back to worker value, costSource='harness'", async () => {
-    // Only seed input + cached_input. Missing output forces fallback.
-    insertPricingRow({
-      provider: "codex",
-      model: "codex-test-synth",
-      tokenClass: "input",
-      effectiveFrom: 1,
-      pricePerMillionUsd: 2.0,
-    });
+  test("provider=codex but input/output rows missing → 'unpriced', worker value preserved", async () => {
+    // Only seed cached_input. Missing input + output blocks recompute and
+    // Phase 2 tags the row 'unpriced' (no rates means we can't trust harness USD either).
     insertPricingRow({
       provider: "codex",
       model: "codex-test-synth",
@@ -186,13 +180,16 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as CreatedCostResponse;
-    expect(body.cost.costSource).toBe("harness");
-    // Worker value preserved verbatim.
+    // Phase 2: provider tagged but no input/output rows ⇒ 'unpriced'.
+    expect(body.cost.costSource).toBe("unpriced");
+    // Worker value preserved verbatim — we don't fabricate one.
     expect(body.cost.totalCostUsd).toBe(1.23);
   });
 
-  test("provider=claude records harness USD as-is regardless of DB pricing rows", async () => {
-    // Even if there are codex pricing rows, claude must NOT be touched.
+  test("provider=claude with no pricing rows for the model → 'unpriced' (Phase 2)", async () => {
+    // Phase 2 extended the recompute path from codex-only to every provider.
+    // With no pricing rows seeded for ('claude', 'sonnet-4'), the row is
+    // tagged 'unpriced' rather than 'harness' — the UI surfaces it as a yellow badge.
     const res = await authedFetch(`/api/session-costs`, {
       method: "POST",
       body: JSON.stringify({
@@ -209,20 +206,35 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as CreatedCostResponse;
-    expect(body.cost.costSource).toBe("harness");
+    expect(body.cost.costSource).toBe("unpriced");
     expect(body.cost.totalCostUsd).toBe(7.77);
   });
 
-  test("provider=pi records harness USD as-is regardless of DB pricing rows", async () => {
+  test("provider=pi with seeded pricing rows → recomputes (Phase 2)", async () => {
+    // Phase 2 widens recompute beyond codex. Seed pi rows so we get a hit.
+    insertPricingRow({
+      provider: "pi",
+      model: "pi-test",
+      tokenClass: "input",
+      effectiveFrom: 1,
+      pricePerMillionUsd: 0.5,
+    });
+    insertPricingRow({
+      provider: "pi",
+      model: "pi-test",
+      tokenClass: "output",
+      effectiveFrom: 1,
+      pricePerMillionUsd: 3.0,
+    });
     const res = await authedFetch(`/api/session-costs`, {
       method: "POST",
       body: JSON.stringify({
         sessionId: "pi-passthrough-1",
         agentId: testAgent.id,
-        totalCostUsd: 0.42,
-        inputTokens: 10,
-        outputTokens: 5,
-        model: "openrouter/google/gemini-3-flash-preview",
+        totalCostUsd: 0.42, // expected to be overwritten
+        inputTokens: 1_000_000, // 1M input
+        outputTokens: 1_000_000, // 1M output
+        model: "pi-test",
         provider: "pi",
         durationMs: 1_000,
         numTurns: 1,
@@ -230,8 +242,9 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as CreatedCostResponse;
-    expect(body.cost.costSource).toBe("harness");
-    expect(body.cost.totalCostUsd).toBe(0.42);
+    expect(body.cost.costSource).toBe("pricing-table");
+    // 1M @ 0.5 + 1M @ 3.0 = $3.50
+    expect(body.cost.totalCostUsd).toBeCloseTo(3.5, 5);
   });
 
   test("provider field omitted → no recompute, costSource='harness' (back-compat)", async () => {

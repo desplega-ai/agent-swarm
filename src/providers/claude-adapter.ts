@@ -1,7 +1,12 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { computeContextUsed, getContextWindowSize } from "../utils/context-window";
+import {
+  CONTEXT_FORMULA,
+  clampContextPercent,
+  computeContextUsedUnified,
+  getContextWindowSize,
+} from "../utils/context-window";
 import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
@@ -465,6 +470,10 @@ class ClaudeSession implements ProviderSession {
         this._sessionId = json.session_id;
         this.emit({ type: "session_init", sessionId: json.session_id, provider: "claude" });
         if (json.model) {
+          // Phase 4: the CLI's `init.model` reflects the actual model after any
+          // backoff/fallback. Update `this.model` so subsequent CostData rows
+          // (and the pricing lookup the API runs) use the right rate.
+          this.model = json.model;
           this.contextWindowSize = getContextWindowSize(json.model);
         }
       }
@@ -487,6 +496,10 @@ class ClaudeSession implements ProviderSession {
               output_tokens?: number;
               cache_read_input_tokens?: number;
               cache_creation_input_tokens?: number;
+              // Phase 4: claude extended-thinking flows surface this — the
+              // CLI emits `thinking_input_tokens` when the model produced
+              // thinking content during the turn.
+              thinking_input_tokens?: number;
             }
           | undefined;
 
@@ -499,8 +512,12 @@ class ClaudeSession implements ProviderSession {
           outputTokens: usage?.output_tokens ?? 0,
           cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
           cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+          // Phase 4: surface thinking tokens; previously dropped on the floor.
+          thinkingTokens: usage?.thinking_input_tokens ?? 0,
           durationMs: json.duration_ms || 0,
-          numTurns: json.num_turns || 1,
+          // Phase 4: honest null when the CLI omits num_turns instead of a
+          // faked `1` (would have under-counted in dashboards).
+          numTurns: json.num_turns ?? null,
           model: this.model,
           isError: json.is_error || false,
           provider: "claude",
@@ -539,18 +556,26 @@ class ClaudeSession implements ProviderSession {
           }
         }
 
-        // Context usage extraction from assistant message usage
+        // Context usage extraction from assistant message usage.
+        // Phase 9: unified `input + cache + output` formula across every
+        // provider so cross-provider percent comparisons are meaningful.
         if (json.message.usage) {
           const usage = json.message.usage;
-          const contextUsed = computeContextUsed(usage);
+          const contextUsed = computeContextUsedUnified({
+            inputTokens: usage.input_tokens,
+            cacheReadTokens: usage.cache_read_input_tokens,
+            cacheCreateTokens: usage.cache_creation_input_tokens,
+            outputTokens: usage.output_tokens,
+          });
           const contextTotal = this.contextWindowSize;
 
           this.emit({
             type: "context_usage",
             contextUsedTokens: contextUsed,
             contextTotalTokens: contextTotal,
-            contextPercent: contextTotal > 0 ? (contextUsed / contextTotal) * 100 : 0,
+            contextPercent: clampContextPercent(contextUsed, contextTotal) ?? 0,
             outputTokens: usage.output_tokens ?? 0,
+            contextFormula: CONTEXT_FORMULA,
           });
         }
       }

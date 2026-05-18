@@ -598,6 +598,8 @@ describe("CostData mapping", () => {
       expect(resultEvent.cost.model).toBe("devin");
       expect(resultEvent.cost.inputTokens).toBe(0);
       expect(resultEvent.cost.outputTokens).toBe(0);
+      // Phase 3 — provider tag is required so the API recompute path engages.
+      expect(resultEvent.cost.provider).toBe("devin");
     }
   });
 

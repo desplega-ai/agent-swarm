@@ -6,7 +6,7 @@ import {
   getContextSummaryByTaskId,
   getTaskById,
 } from "../be/db";
-import { ContextSnapshotEventTypeSchema } from "../types";
+import { ContextFormulaSchema, ContextSnapshotEventTypeSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -25,10 +25,13 @@ const postContext = route({
     contextUsedTokens: z.number().int().min(0).optional(),
     contextTotalTokens: z.number().int().min(0).optional(),
     contextPercent: z.number().min(0).max(100).optional(),
-    compactTrigger: z.enum(["auto", "manual"]).optional(),
+    compactTrigger: z.enum(["auto", "manual", "auto-inferred"]).optional(),
     preCompactTokens: z.number().int().min(0).optional(),
     cumulativeInputTokens: z.number().int().min(0).optional(),
     cumulativeOutputTokens: z.number().int().min(0).optional(),
+    // Migration 063: adapters tag the formula they used so cross-provider
+    // comparisons can tell apples from oranges.
+    contextFormula: ContextFormulaSchema.optional(),
   }),
   responses: {
     200: { description: "Snapshot recorded" },
@@ -91,6 +94,7 @@ export async function handleContext(
       preCompactTokens: parsed.body.preCompactTokens,
       cumulativeInputTokens: parsed.body.cumulativeInputTokens,
       cumulativeOutputTokens: parsed.body.cumulativeOutputTokens,
+      contextFormula: parsed.body.contextFormula,
     });
 
     json(res, { ok: true, snapshotId: snapshot.id });

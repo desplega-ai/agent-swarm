@@ -7,18 +7,30 @@ export interface CostData {
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;
+  /**
+   * Migration 063: undefined means "the harness can't report this" (e.g. the
+   * Codex SDK has no cache-write field). Zero is reserved for "really zero".
+   */
   cacheWriteTokens?: number;
+  /** Migration 063: codex reasoning_output_tokens (and similar) for reasoning models. */
+  reasoningOutputTokens?: number;
+  /** Migration 063: claude extended-thinking tokens from CLI's `usage.thinking_input_tokens`. */
+  thinkingTokens?: number;
   durationMs: number;
-  numTurns: number;
+  /**
+   * Migration 063: nullable — some adapters (claude when `num_turns` is absent)
+   * can't honestly report a turn count; null is preferred over a faked 1.
+   */
+  numTurns: number | null;
   model: string;
   isError: boolean;
   /**
-   * Phase 6: tells the API which recompute path to use on
-   * `POST /api/session-costs`. Codex triggers the pricing-table recompute
-   * (when DB pricing rows exist for all three token classes); Claude / pi
-   * always trust the harness-reported `totalCostUsd` as-is.
+   * Phase 6 (extended migration 063): tells the API which recompute path to
+   * use on `POST /api/session-costs`. After Phase 2 the recompute path runs
+   * for every provider with seeded pricing rows, so every adapter should
+   * populate this field.
    */
-  provider?: "claude" | "codex" | "pi" | "opencode";
+  provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin";
 }
 
 import type { ProviderName } from "../types";
@@ -43,14 +55,25 @@ export type ProviderEvent =
   | {
       type: "context_usage";
       contextUsedTokens: number;
-      contextTotalTokens: number;
-      contextPercent: number;
-      outputTokens: number;
+      // Migration 063: nullable so adapters (e.g. devin without a context API)
+      // can emit a snapshot that records cumulative tokens without faking a window.
+      contextTotalTokens: number | null;
+      // Migration 063: null if contextTotalTokens is missing (no divide-by-zero).
+      contextPercent: number | null;
+      // Migration 063: null when the adapter can't honestly report output tokens.
+      outputTokens: number | null;
+      /**
+       * Migration 063 — the formula the adapter used to compute
+       * contextUsedTokens. See `ContextFormulaSchema` in `src/types.ts` for the
+       * canonical value list. Adapters should always populate this going
+       * forward; it powers cross-provider apples-to-apples comparison.
+       */
+      contextFormula?: string;
     }
   | {
       type: "compaction";
       preCompactTokens: number;
-      compactTrigger: "auto" | "manual";
+      compactTrigger: "auto" | "manual" | "auto-inferred";
       contextTotalTokens: number;
     };
 

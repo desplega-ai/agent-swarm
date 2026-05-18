@@ -59,8 +59,15 @@ import type {
 import type { SkillCreateResponse as Skill } from "@anthropic-ai/sdk/resources/beta/skills";
 
 import { checkToolLoop } from "../hooks/tool-loop-detection";
+import {
+  CONTEXT_FORMULA,
+  clampContextPercent,
+  computeContextUsedUnified,
+  getContextWindowSize,
+} from "../utils/context-window";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { computeClaudeManagedCostUsd } from "./claude-managed-models";
+import { getRuntimeFeePerHour } from "./claude-managed-pricing";
 import { createClaudeManagedSwarmEventHandler } from "./claude-managed-swarm-events";
 import type {
   CostData,
@@ -113,13 +120,10 @@ const REQUIRED_ENV_VARS = [
   "MANAGED_ENVIRONMENT_ID",
 ] as const;
 
-/**
- * Default context window for managed Claude sessions when we don't have a
- * model-specific override. Sized to match Sonnet 4.x (1M extended-context
- * variant). The Phase 4 pricing-table commit will replace this with a
- * per-model lookup.
- */
-const DEFAULT_CONTEXT_TOTAL_TOKENS = 1_000_000;
+// Phase 5: removed the hardcoded `DEFAULT_CONTEXT_TOTAL_TOKENS = 1_000_000`.
+// The adapter now calls `getContextWindowSize(this.model)` from
+// `src/utils/context-window.ts`, which resolves shortnames + dated full ids
+// so haiku-4-5 sessions don't pretend to have a 1M window.
 
 /**
  * Compose the per-session user-message content blocks. Returns two blocks:
@@ -187,6 +191,8 @@ function emptyCost(config: ProviderSessionConfig, model: string): CostData {
     numTurns: 0,
     model,
     isError: false,
+    // Phase 3 — tag every emitted CostData so the API's recompute path engages.
+    provider: "claude-managed",
   };
 }
 
@@ -374,6 +380,11 @@ class ClaudeManagedSession implements ProviderSession {
    * 2. Anthropic's $0.08/session-hour runtime fee — billed continuously by
    *    Anthropic regardless of model usage, so we add it here to surface in
    *    the swarm's per-session cost UI.
+   *
+   * Phase 5: the harness-local USD is still computed here, but the server-side
+   * recompute path (`POST /api/session-costs` after Phase 2) will reprice the
+   * row against the seeded pricing-table values and tag `costSource='pricing-table'`.
+   * The runtime fee comes from the same table now (`token_class='runtime_hour'`).
    */
   private snapshotCost(isError: boolean): CostData {
     const durationMs = Date.now() - this.startedAt;
@@ -384,9 +395,11 @@ class ClaudeManagedSession implements ProviderSession {
       this.cost.cacheReadTokens ?? 0,
       this.cost.cacheWriteTokens ?? 0,
     );
-    // $0.08 / session-hour. Sandbox runtime is billed by wallclock, so we
-    // amortize linearly across the session's `durationMs`.
-    const runtimeFeeUsd = (durationMs / 3_600_000) * 0.08;
+    // Phase 5: read the runtime fee from the pricing table when available so
+    // we have one source of truth. Falls back to the historical $0.08/hr
+    // constant if the row hasn't been seeded yet (e.g. on a fresh DB before
+    // seed-pricing.ts ran).
+    const runtimeFeeUsd = (durationMs / 3_600_000) * getRuntimeFeePerHour();
     return {
       ...this.cost,
       durationMs,
@@ -506,12 +519,15 @@ class ClaudeManagedSession implements ProviderSession {
         // this event. Emit a `compaction` ProviderEvent with the values we
         // *do* know; consumers that need richer data can subscribe to
         // `raw_log` for the original payload.
+        // Phase 5 — pre-compact tokens are an inferred proxy (running input
+        // total); flag the compactTrigger as 'auto-inferred' so downstream
+        // dashboards can distinguish a real trigger value from our guess.
         const _cc = event as BetaManagedAgentsAgentThreadContextCompactedEvent;
         this.emit({
           type: "compaction",
           preCompactTokens: this.cost.inputTokens ?? 0,
-          compactTrigger: "auto",
-          contextTotalTokens: DEFAULT_CONTEXT_TOTAL_TOKENS,
+          compactTrigger: "auto-inferred",
+          contextTotalTokens: getContextWindowSize(this.cost.model),
         });
         return { terminal: false, isError: false };
       }
@@ -524,16 +540,26 @@ class ClaudeManagedSession implements ProviderSession {
           (this.cost.cacheReadTokens ?? 0) + usage.cache_read_input_tokens;
         this.cost.cacheWriteTokens =
           (this.cost.cacheWriteTokens ?? 0) + usage.cache_creation_input_tokens;
-        this.cost.numTurns += 1;
+        this.cost.numTurns = (this.cost.numTurns ?? 0) + 1;
 
-        const used = (this.cost.inputTokens ?? 0) + (this.cost.outputTokens ?? 0);
-        const total = DEFAULT_CONTEXT_TOTAL_TOKENS;
+        // Phase 5 + Phase 9: unified `input + cache + output` formula AND a
+        // per-model window via `getContextWindowSize`. Previously this used
+        // a hardcoded 1M window and ignored cache — fine for sonnet/opus,
+        // wrong for haiku and any future smaller-window model.
+        const used = computeContextUsedUnified({
+          inputTokens: this.cost.inputTokens,
+          cacheReadTokens: this.cost.cacheReadTokens,
+          cacheCreateTokens: this.cost.cacheWriteTokens,
+          outputTokens: this.cost.outputTokens,
+        });
+        const total = getContextWindowSize(this.cost.model);
         this.emit({
           type: "context_usage",
           contextUsedTokens: used,
           contextTotalTokens: total,
-          contextPercent: Math.min(100, (used / total) * 100),
+          contextPercent: clampContextPercent(used, total),
           outputTokens: this.cost.outputTokens ?? 0,
+          contextFormula: CONTEXT_FORMULA,
         });
         return { terminal: false, isError: false };
       }

@@ -55,12 +55,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatCost } from "@/lib/cost-format";
 import { cn, formatSmartTime, formatUTCTime } from "@/lib/utils";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+// Phase 12a — defer to the shared `formatCost`. `fractionDigits` maps to
+// the numeric precision preset.
 function formatUsd(value: number, fractionDigits = 2): string {
-  return `$${value.toFixed(fractionDigits)}`;
+  return formatCost(value, { precision: fractionDigits });
 }
 
 function todayISO(): string {
@@ -681,7 +684,9 @@ export default function BudgetsPage() {
         headerName: "$ / 1M tokens",
         width: 140,
         cellRenderer: (params: ICellRendererParams<PricingRow>) => (
-          <span className="font-mono text-xs">${(params.value ?? 0).toFixed(6)}</span>
+          <span className="font-mono text-xs">
+            {formatCost(params.value, { precision: "precise" })}
+          </span>
         ),
       },
       {

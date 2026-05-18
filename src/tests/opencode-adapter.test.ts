@@ -225,7 +225,9 @@ describe("OpencodeSession — cost aggregation", () => {
             reasoning: 0,
             cache: { read: i * 2, write: i },
           },
-          time: { created: Date.now() },
+          // Phase 9 fix: accumulator gates on `time.completed` so simulated steps
+          // must look like finalized opencode messages.
+          time: { created: Date.now(), completed: Date.now() + 1 },
           parentID: "",
           modelID: "claude-opus",
           providerID: "anthropic",
@@ -314,6 +316,149 @@ describe("OpencodeSession — raw_log persistence", () => {
         expect(() => JSON.parse(rl.content)).not.toThrow();
       }
     }
+  });
+});
+
+// ── Phase 9: context_usage emission ───────────────────────────────────────────
+
+describe("OpencodeSession — context_usage emission (phase 9 fix)", () => {
+  beforeEach(() => {
+    mock.restore();
+  });
+
+  /** Build a `message.updated` event with optional finalize flag. */
+  function makeMessageUpdated(
+    overrides: {
+      sessionID?: string;
+      completed?: boolean;
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+      cost?: number;
+      modelID?: string;
+    } = {},
+  ): OpencodeEvent {
+    const now = Date.now();
+    return {
+      type: "message.updated",
+      properties: {
+        info: {
+          id: `msg-${now}`,
+          sessionID: overrides.sessionID ?? "sess-abc-123",
+          role: "assistant",
+          cost: overrides.cost ?? 0.001,
+          tokens: {
+            input: overrides.input ?? 0,
+            output: overrides.output ?? 0,
+            reasoning: 0,
+            cache: {
+              read: overrides.cacheRead ?? 0,
+              write: overrides.cacheWrite ?? 0,
+            },
+          },
+          time: overrides.completed ? { created: now, completed: now + 1 } : { created: now },
+          parentID: "",
+          modelID: overrides.modelID ?? "claude-sonnet-4-5",
+          providerID: "anthropic",
+          mode: "live",
+          path: { cwd: "/", root: "/" },
+        } as never,
+      },
+    };
+  }
+
+  test("finalized message with real tokens → emits context_usage matching the cost row", async () => {
+    // Mirrors the E2E evidence: opencode reports `in=12, cache.read=99970,
+    // cache.write=104606, out=288` on the FINAL message.updated for the turn.
+    const events: OpencodeEvent[] = [
+      makeMessageUpdated({
+        completed: true,
+        input: 12,
+        output: 288,
+        cacheRead: 99970,
+        cacheWrite: 104606,
+      }),
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+
+    const { emitted, result } = await driveSession(events);
+
+    const contextEvents = emitted.filter((e) => e.type === "context_usage");
+    expect(contextEvents.length).toBe(1);
+    const ctx = contextEvents[0];
+    if (ctx?.type === "context_usage") {
+      // Unified formula: input + cache_read + cache_write + output
+      expect(ctx.contextUsedTokens).toBe(12 + 99970 + 104606 + 288);
+      expect(ctx.contextFormula).toBe("input-cache-output");
+      expect(ctx.outputTokens).toBe(288);
+      expect(ctx.contextTotalTokens).toBeGreaterThan(0);
+      expect(ctx.contextPercent).toBeGreaterThan(0);
+    }
+    // The cost row stays consistent — same tokens, single turn.
+    expect(result.cost?.inputTokens).toBe(12);
+    expect(result.cost?.cacheReadTokens).toBe(99970);
+    expect(result.cost?.cacheWriteTokens).toBe(104606);
+    expect(result.cost?.outputTokens).toBe(288);
+    expect(result.cost?.numTurns).toBe(1);
+  });
+
+  test("non-finalized message.updated (tokens all zero) → NO context_usage emission", async () => {
+    // Simulates opencode's intermediate streaming updates that arrive before
+    // the model returns usage counts. Pre-fix, these emitted a 0-token snapshot
+    // that the runner-side throttle pinned for the rest of the session.
+    const events: OpencodeEvent[] = [
+      makeMessageUpdated({ completed: false }),
+      makeMessageUpdated({ completed: false }),
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+
+    const { emitted, result } = await driveSession(events);
+
+    const contextEvents = emitted.filter((e) => e.type === "context_usage");
+    expect(contextEvents.length).toBe(0);
+    // Cost accumulator also skipped non-finalized updates.
+    expect(result.cost?.numTurns).toBe(0);
+    expect(result.cost?.totalCostUsd).toBe(0);
+  });
+
+  test("mix of streaming-zero updates then finalized update → exactly one context_usage from the final", async () => {
+    // The realistic opencode event stream: many intermediate zero-token updates
+    // followed by a single finalized update. Only the finalized one should
+    // produce a context_usage row.
+    const events: OpencodeEvent[] = [
+      makeMessageUpdated({ completed: false }),
+      makeMessageUpdated({ completed: false }),
+      makeMessageUpdated({
+        completed: true,
+        input: 50,
+        output: 200,
+        cacheRead: 1000,
+        cacheWrite: 500,
+      }),
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+
+    const { emitted, result } = await driveSession(events);
+
+    const contextEvents = emitted.filter((e) => e.type === "context_usage");
+    expect(contextEvents.length).toBe(1);
+    if (contextEvents[0]?.type === "context_usage") {
+      expect(contextEvents[0].contextUsedTokens).toBe(50 + 1000 + 500 + 200);
+    }
+    expect(result.cost?.numTurns).toBe(1);
+    expect(result.cost?.inputTokens).toBe(50);
+  });
+
+  test("finalized message with all-zero tokens → still no emission (guards against pathological zero turns)", async () => {
+    const events: OpencodeEvent[] = [
+      makeMessageUpdated({ completed: true }), // all zero tokens
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+
+    const { emitted } = await driveSession(events);
+    const contextEvents = emitted.filter((e) => e.type === "context_usage");
+    expect(contextEvents.length).toBe(0);
   });
 });
 

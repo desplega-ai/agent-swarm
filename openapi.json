@@ -2147,7 +2147,8 @@
                     "type": "string",
                     "enum": [
                       "auto",
-                      "manual"
+                      "manual",
+                      "auto-inferred"
                     ]
                   },
                   "preCompactTokens": {
@@ -2161,6 +2162,18 @@
                   "cumulativeOutputTokens": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "contextFormula": {
+                    "type": "string",
+                    "enum": [
+                      "input-cache-output",
+                      "input-cache-no-output",
+                      "input-output-no-cache",
+                      "peak-proxy",
+                      "pi-delegated",
+                      "harness-reported",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": [
@@ -5393,8 +5406,12 @@
                             "type": "string",
                             "enum": [
                               "claude",
+                              "claude-managed",
                               "codex",
-                              "pi"
+                              "pi",
+                              "opencode",
+                              "devin",
+                              "gemini"
                             ]
                           },
                           "model": {
@@ -5405,7 +5422,10 @@
                             "enum": [
                               "input",
                               "cached_input",
-                              "output"
+                              "output",
+                              "cache_write",
+                              "runtime_hour",
+                              "acu"
                             ]
                           },
                           "effectiveFrom": {
@@ -5462,8 +5482,12 @@
               "type": "string",
               "enum": [
                 "claude",
+                "claude-managed",
                 "codex",
-                "pi"
+                "pi",
+                "opencode",
+                "devin",
+                "gemini"
               ]
             },
             "required": true,
@@ -5485,7 +5509,10 @@
               "enum": [
                 "input",
                 "cached_input",
-                "output"
+                "output",
+                "cache_write",
+                "runtime_hour",
+                "acu"
               ]
             },
             "required": true,
@@ -5515,8 +5542,12 @@
               "type": "string",
               "enum": [
                 "claude",
+                "claude-managed",
                 "codex",
-                "pi"
+                "pi",
+                "opencode",
+                "devin",
+                "gemini"
               ]
             },
             "required": true,
@@ -5538,7 +5569,10 @@
               "enum": [
                 "input",
                 "cached_input",
-                "output"
+                "output",
+                "cache_write",
+                "runtime_hour",
+                "acu"
               ]
             },
             "required": true,
@@ -5580,8 +5614,12 @@
                       "type": "string",
                       "enum": [
                         "claude",
+                        "claude-managed",
                         "codex",
-                        "pi"
+                        "pi",
+                        "opencode",
+                        "devin",
+                        "gemini"
                       ]
                     },
                     "model": {
@@ -5592,7 +5630,10 @@
                       "enum": [
                         "input",
                         "cached_input",
-                        "output"
+                        "output",
+                        "cache_write",
+                        "runtime_hour",
+                        "acu"
                       ]
                     },
                     "effectiveFrom": {
@@ -5649,8 +5690,12 @@
               "type": "string",
               "enum": [
                 "claude",
+                "claude-managed",
                 "codex",
-                "pi"
+                "pi",
+                "opencode",
+                "devin",
+                "gemini"
               ]
             },
             "required": true,
@@ -5672,7 +5717,10 @@
               "enum": [
                 "input",
                 "cached_input",
-                "output"
+                "output",
+                "cache_write",
+                "runtime_hour",
+                "acu"
               ]
             },
             "required": true,
@@ -5692,8 +5740,12 @@
                       "type": "string",
                       "enum": [
                         "claude",
+                        "claude-managed",
                         "codex",
-                        "pi"
+                        "pi",
+                        "opencode",
+                        "devin",
+                        "gemini"
                       ]
                     },
                     "model": {
@@ -5704,7 +5756,10 @@
                       "enum": [
                         "input",
                         "cached_input",
-                        "output"
+                        "output",
+                        "cache_write",
+                        "runtime_hour",
+                        "acu"
                       ]
                     },
                     "effectiveFrom": {
@@ -5758,8 +5813,12 @@
               "type": "string",
               "enum": [
                 "claude",
+                "claude-managed",
                 "codex",
-                "pi"
+                "pi",
+                "opencode",
+                "devin",
+                "gemini"
               ]
             },
             "required": true,
@@ -5781,7 +5840,10 @@
               "enum": [
                 "input",
                 "cached_input",
-                "output"
+                "output",
+                "cache_write",
+                "runtime_hour",
+                "acu"
               ]
             },
             "required": true,
@@ -6951,13 +7013,27 @@
                     "type": "integer"
                   },
                   "cacheWriteTokens": {
-                    "type": "integer"
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "reasoningOutputTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "thinkingTokens": {
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "durationMs": {
                     "type": "integer"
                   },
                   "numTurns": {
-                    "type": "integer"
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   },
                   "model": {
                     "type": "string"
@@ -6969,9 +7045,12 @@
                     "type": "string",
                     "enum": [
                       "claude",
+                      "claude-managed",
                       "codex",
                       "pi",
-                      "opencode"
+                      "opencode",
+                      "devin",
+                      "gemini"
                     ]
                   },
                   "createdAt": {

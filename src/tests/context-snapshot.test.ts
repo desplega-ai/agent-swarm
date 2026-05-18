@@ -82,7 +82,7 @@ describe("Context Snapshots", () => {
 
     // The summary should preserve the last known context usage, not null/0
     const summary = getContextSummaryByTaskId(taskId);
-    expect(summary.totalContextTokensUsed).toBe(80000);
+    expect(summary.peakContextTokens).toBe(80000);
     expect(summary.contextWindowSize).toBe(200000);
     expect(summary.peakContextPercent).toBe(40);
   });
@@ -113,7 +113,7 @@ describe("Context Snapshots", () => {
     });
 
     const summary = getContextSummaryByTaskId(task2.id);
-    expect(summary.totalContextTokensUsed).toBe(60000);
+    expect(summary.peakContextTokens).toBe(60000);
     expect(summary.contextWindowSize).toBe(200000);
   });
 

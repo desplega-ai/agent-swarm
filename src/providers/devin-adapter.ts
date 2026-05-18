@@ -279,6 +279,12 @@ class DevinSession implements ProviderSession {
     if (this.settled || this.aborted) return;
     this.pollCount += 1;
 
+    // Phase 8: Devin's session API does NOT report per-poll context-window
+    // info (the model is fully managed by Devin). We deliberately don't emit
+    // a synthetic `context_usage` event here — faking one with `contextUsedTokens=0`
+    // would be misleading. `peakContextTokens` stays null for devin tasks,
+    // which the UI surfaces as "not available" rather than "0".
+
     let response: DevinSessionResponse;
     try {
       response = await getSession(this.orgId, this.devinApiKey, this._sessionId!);
@@ -788,6 +794,11 @@ class DevinSession implements ProviderSession {
       numTurns: this.pollCount,
       model: "devin",
       isError,
+      // Phase 3 — tag CostData so the API recompute path engages. Devin's
+      // pricing is ACU-based (one row under `provider='devin', model='*',
+      // token_class='acu'`); the harness USD value above is already correct,
+      // but tagging the row exposes its source to the UI badge.
+      provider: "devin",
     };
   }
 }

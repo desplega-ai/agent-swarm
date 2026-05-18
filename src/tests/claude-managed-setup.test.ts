@@ -88,13 +88,22 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
     const agentCallArgs = agentsCreate.mock.calls[0]?.[0] as {
       name: string;
       model: string;
-      tools: Array<{ type: string }>;
+      tools: Array<{
+        type: string;
+        default_config?: { permission_policy?: { type: string } };
+      }>;
       skills: Array<{ type: string; skill_id: string }>;
       mcp_servers: Array<{ name: string; type: string; url: string }>;
     };
     expect(agentCallArgs.name).toBe("swarm-worker");
     expect(agentCallArgs.model).toBe("claude-sonnet-4-6");
     expect(agentCallArgs.tools[0]?.type).toBe("agent_toolset_20260401");
+    // Headless workers can't approve interactively — both toolsets must be
+    // configured with `always_allow` so the sandbox executes tool calls
+    // without parking them in `awaiting approval`.
+    for (const tool of agentCallArgs.tools) {
+      expect(tool.default_config?.permission_policy?.type).toBe("always_allow");
+    }
     expect(agentCallArgs.skills.map((s) => s.skill_id)).toEqual([
       "skill_work-on-task",
       "skill_create-pr",

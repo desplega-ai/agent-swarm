@@ -264,7 +264,7 @@ function cleanupAgentsMdSymlink(cwd: string): void {
   }
 }
 
-class PiMonoSession implements ProviderSession {
+export class PiMonoSession implements ProviderSession {
   private listeners: Array<(event: ProviderEvent) => void> = [];
   private eventQueue: ProviderEvent[] = [];
   private _sessionId: string | undefined;
@@ -275,6 +275,14 @@ class PiMonoSession implements ProviderSession {
   private logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
   /** Track last emitted message text to avoid duplicates across turns */
   private lastEmittedMessage = "";
+  /** Phase 7: wallclock start so we can populate `durationMs` on the cost row. */
+  private sessionStartedAt: number = Date.now();
+  /**
+   * Phase 7: previous output-token total — used to derive per-turn delta for
+   * `context_usage.outputTokens` since pi-ai's `getContextUsage()` doesn't
+   * surface it directly.
+   */
+  private prevOutputTokens = 0;
 
   constructor(agentSession: AgentSession, config: ProviderSessionConfig, createdSymlink: boolean) {
     this.agentSession = agentSession;
@@ -282,6 +290,7 @@ class PiMonoSession implements ProviderSession {
     this.createdSymlink = createdSymlink;
     this.logFileHandle = Bun.file(config.logFile).writer();
     this._sessionId = agentSession.sessionId;
+    this.sessionStartedAt = Date.now();
 
     // Emit session_init immediately
     this.emit({ type: "session_init", sessionId: this._sessionId, provider: "pi" });
@@ -356,15 +365,24 @@ class PiMonoSession implements ProviderSession {
             this.lastEmittedMessage = text;
           }
         }
-        // Emit context_usage for dashboard tracking
+        // Emit context_usage for dashboard tracking.
+        // Phase 7: derive `outputTokens` from `SessionStats` delta (pi-ai's
+        // `getContextUsage()` doesn't expose per-turn output tokens, but the
+        // session-stats counter is monotonic so a delta is correct).
         const usage = this.agentSession.getContextUsage();
         if (usage && usage.tokens != null) {
+          const stats = this.agentSession.getSessionStats();
+          const currOutput = stats?.tokens?.output ?? 0;
+          const outputDelta = Math.max(0, currOutput - this.prevOutputTokens);
+          this.prevOutputTokens = currOutput;
           this.emit({
             type: "context_usage",
             contextUsedTokens: usage.tokens,
             contextTotalTokens: usage.contextWindow,
             contextPercent: usage.percent ?? 0,
-            outputTokens: 0,
+            outputTokens: outputDelta,
+            // Phase 9: pi-ai owns the formula — we just relay its number.
+            contextFormula: "pi-delegated",
           });
         }
         break;
@@ -501,7 +519,9 @@ class PiMonoSession implements ProviderSession {
       outputTokens: stats.tokens.output,
       cacheReadTokens: stats.tokens.cacheRead,
       cacheWriteTokens: stats.tokens.cacheWrite,
-      durationMs: 0, // Not directly available from SessionStats
+      // Phase 7: real wallclock duration; pi-ai SessionStats doesn't carry
+      // one so we track it on this adapter instance.
+      durationMs: Date.now() - this.sessionStartedAt,
       numTurns: stats.userMessages + stats.assistantMessages,
       model: this.reportedModel(),
       isError: false,

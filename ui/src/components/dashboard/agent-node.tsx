@@ -3,6 +3,7 @@ import { Crown } from "lucide-react";
 import type { Agent } from "@/api/types";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { Badge } from "@/components/ui/badge";
+import { formatCost } from "@/lib/cost-format";
 import { cn } from "@/lib/utils";
 
 // Custom react-flow node for the dashboard agent canvas (Phase 5).
@@ -34,13 +35,9 @@ const STATUS_BORDER_CLASS: Record<string, string> = {
   waiting_for_credentials: "border-status-warning/50",
 };
 
-function formatCost(cost: number): string {
-  if (cost <= 0) return "$0";
-  if (cost < 0.01) return "<$0.01";
-  if (cost < 1) return `$${cost.toFixed(2)}`;
-  if (cost < 100) return `$${cost.toFixed(2)}`;
-  return `$${Math.round(cost)}`;
-}
+// Phase 12a — use the shared `formatCost` from `@/lib/cost-format`. The
+// dashboard wants `auto` precision (sub-cent placeholder, 4dp under $1,
+// 2dp above).
 
 export function AgentNode({ data }: NodeProps) {
   const d = data as unknown as AgentNodeData;
@@ -92,7 +89,7 @@ export function AgentNode({ data }: NodeProps) {
         <span title={`${taskCount24h} tasks in last 24h`}>
           <span className="font-mono text-foreground">{taskCount24h}</span> tasks
         </span>
-        <span title={`$${cost24h.toFixed(4)} in last 24h`}>
+        <span title={`${formatCost(cost24h, { precision: 4 })} in last 24h`}>
           <span className="font-mono text-foreground">{formatCost(cost24h)}</span> · 24h
         </span>
       </div>

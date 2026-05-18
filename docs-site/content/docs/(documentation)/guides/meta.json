@@ -7,6 +7,7 @@
     "harness-configuration",
     "harness-providers",
     "observability-opentelemetry",
+    "cost-and-context-computation",
     "shannon-experimental",
     "worker-credential-recovery",
     "provider-auth",

@@ -1,0 +1,100 @@
+---
+title: Cost & context computation
+description: How cost and context-window numbers are computed across harness providers, and how to read the costSource / contextFormula badges in the UI.
+---
+
+The swarm tracks two related but separate numbers for every model run:
+
+1. **Cost (USD).** Each adapter writes one `session_costs` row per CLI invocation. The API may recompute it from the seeded pricing table.
+2. **Context-window usage.** Each adapter emits `context_usage` events; the API persists snapshots and updates aggregate columns on `agent_tasks`.
+
+This page is the single source of truth for how both numbers are produced.
+
+## How cost is computed
+
+Cost flows through three layers, each annotated with the path's `costSource` enum value (the dashboard renders this as a small badge next to every cost).
+
+### 1. Adapter (worker-local)
+
+Every adapter emits a `CostData` event with `totalCostUsd`, token breakdowns (`inputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`, `reasoningOutputTokens`, `thinkingTokens`), and a `provider` tag. The dollar value comes from whatever the harness reports — Claude's stream-json carries it directly; Codex doesn't, so the adapter computes locally via `computeCodexCostUsd` (`src/providers/codex-models.ts`); pi-ai self-reports `stats.cost`; etc.
+
+The adapter writes via `POST /api/session-costs` with the `provider` field set.
+
+### 2. API recompute
+
+When the API receives a `POST /api/session-costs` with a `provider` tag, it does a synchronous lookup against the `pricing` table for `(provider, model, token_class)` at the row's `createdAt`. Three outcomes:
+
+| Outcome                                                                       | `costSource`     |
+|-------------------------------------------------------------------------------|-------------------|
+| Both `input` and `output` rates land — recompute the USD and overwrite the row | `'pricing-table'` |
+| No `provider` tag supplied at all (legacy callers)                            | `'harness'`       |
+| Tag supplied but the model has no pricing rows                                | `'unpriced'`      |
+
+Cached-input and cache-write classes are billed at their own rates when present; uncached input is `max(0, input - cached)` for the codex-style "input includes cached" semantic.
+
+### 3. UI badge
+
+The task-detail and task-detail-sheet views render the `costSource` next to every cost via `<CostSourceBadge>`. Mixed sources within a task aggregate render as `HARNESS` (the weakest claim).
+
+## How the pricing table is seeded
+
+The `pricing` table is seeded at server boot from the vendored models.dev snapshot at `ui/src/lib/modelsdev-cache.json` plus a small set of manual overrides for items models.dev doesn't carry.
+
+- **Projection rules** live in `src/be/seed-pricing.ts`:
+  - Anthropic models → rows under both `provider='claude'` AND `provider='claude-managed'`. Shortnames (`opus`/`sonnet`/`haiku`) also land under the current default full id.
+  - OpenAI models → `provider='codex'`.
+  - OpenRouter models → `provider='opencode'`; `google/*` models also land under `provider='gemini'`.
+- **Manual overrides** (claude-managed `runtime_hour` at $0.08/hr, devin `acu` at $2.25): `MANUAL_PRICING_OVERRIDES` in the same file. Each entry carries its source URL and a `verified` date.
+- **Refresh procedure**: run `bun run scripts/refresh-modelsdev-pricing.ts` to fetch the latest snapshot, see a diff summary, and write the new file. Commit it alongside the PR.
+
+Operator reference: [`src/providers/pricing-sources.md`](../../../../../src/providers/pricing-sources.md).
+
+## How context-window usage is computed
+
+### The unified formula
+
+After Phase 9, every adapter uses one formula:
+
+```
+contextUsedTokens = inputTokens + cacheReadTokens + cacheCreateTokens + outputTokens
+```
+
+Helpers: `computeContextUsedUnified` and `clampContextPercent` in `src/utils/context-window.ts`. The emitted event carries `contextFormula: 'input-cache-output'`.
+
+Pi-mono is the exception: pi-ai owns the formula and we just relay its numbers. Those snapshots are tagged `contextFormula: 'pi-delegated'`. Devin's API doesn't report context info at all; we omit the event rather than fake zeros.
+
+### Per-model window resolution
+
+`getContextWindowSize(model)` resolves:
+- Shortnames (`opus`/`sonnet`/`haiku`)
+- Family-versioned ids (`claude-sonnet-4-6`)
+- Dated full ids (`claude-sonnet-4-6-20251004`) — by stripping the 8-digit date suffix and retrying
+
+Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wildly wrong for opus/sonnet 4.x.
+
+### peakContextTokens and contextWindowSize
+
+`agent_tasks.peakContextTokens` (renamed from `totalContextTokensUsed` in migration 063) is a monotonic max across all snapshots for the task — never regresses when a later snapshot reports a smaller value. This mirrors Claude Code's status-line "peak context" idea.
+
+`agent_tasks.contextWindowSize` is set on the FIRST snapshot that carries one, not gated on `eventType='completion'`. Subsequent snapshots leave it alone.
+
+## Per-provider notes
+
+- **claude / claude-managed**: token rates from models.dev. claude-managed also has a per-session-hour runtime fee (`token_class='runtime_hour'`); the worker computes a preview locally via `claude-managed-pricing.ts`, and the API's recompute path overrides with the canonical value.
+- **codex**: `input_tokens` from the SDK is the SUM across every model call in a turn (cached + uncached). The unified formula uses it as-is, accepting that chatty turns can over-report (the percent clamps at 100%). Old rows tagged `peak-proxy` predate this change. Cache writes are NULL (the SDK doesn't surface them).
+- **pi-mono**: cost passes through verbatim from pi-ai's `stats.cost`. Context snapshots tag `contextFormula: 'pi-delegated'`. `durationMs` is now real wallclock (was hardcoded 0). Per-turn `outputTokens` are derived from session-stats delta.
+- **opencode**: passthrough through OpenRouter. The unified formula applies; `contextPercent` is clamped to [0, 100].
+- **devin**: ACU-based pricing (`token_class='acu'`, $2.25 per ACU). No per-token cost. No context events (the API doesn't report context info) — `peakContextTokens` remains `null` for devin tasks.
+
+## Gotchas & known limitations
+
+- **Internal-ai Gemini calls are not yet costed.** `src/utils/internal-ai/models.ts:19-25` routes through OpenRouter for summarization/rating but doesn't yet emit `session_costs` rows. The pricing table now has `gemini` rows ready; instrumentation is a follow-up.
+- **Codex `input_tokens` is a turn-sum, not a peak.** Chatty turns over-report by design after Phase 9 (the clamp at 100% keeps the gauge sensible). Old `peak-proxy`-tagged rows in `task_context_snapshots` are correct for their formula but not directly comparable to new `input-cache-output`-tagged rows.
+- **Model-id key mismatch.** Some adapters use harness-prefixed ids (`openai-codex/gpt-5.4-mini`); pricing-table seeds use the stripped form (`gpt-5.4-mini`). Pick one convention if you're adding a new mapping.
+- **Timestamp convention split.** `session_costs.createdAt` and `task_context_snapshots.createdAt` are TEXT ISO 8601; `pricing.effective_from` / `budgets.createdAt` are INTEGER epoch-ms. Documented in `046_budgets_and_pricing.sql:17-22`; not a near-term cleanup.
+
+## Related docs
+
+- [Harness providers](./harness-providers) — provider-specific quirks
+- [`src/providers/pricing-sources.md`](../../../../../src/providers/pricing-sources.md) — operator workflow
+- [`BUSINESS_USE.md`](../../../../../BUSINESS_USE.md) — flow diagrams for `task` / `agent` / `api` events

@@ -2,7 +2,7 @@
 date: 2026-05-15T00:00:00Z
 topic: "Context & Cost Tracking Fixes"
 author: Taras
-status: draft
+status: completed
 tags: [plan, providers, cost, context-window, pricing]
 based_on: thoughts/taras/research/2026-05-15-context-cost-tracking-gaps.md
 ---

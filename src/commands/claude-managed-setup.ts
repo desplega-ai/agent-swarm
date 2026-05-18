@@ -553,12 +553,28 @@ export async function runClaudeManagedSetupFlow(
     system: mcpServer
       ? "You are an agent-swarm worker. Per-task instructions arrive in the next user message. Use the agent-swarm MCP server for swarm operations."
       : "You are an agent-swarm worker. Per-task instructions arrive in the next user message. (No MCP tools available in this configuration.)",
+    // Headless workers can't satisfy interactive approval prompts — the
+    // Anthropic console parks tool calls in `awaiting approval` and the
+    // session stalls. Apply `always_allow` to both toolsets so the sandbox
+    // executes tool calls (incl. swarm MCP `store-progress`) without HITL.
     tools: mcpServer
       ? [
-          { type: "agent_toolset_20260401" },
-          { type: "mcp_toolset", mcp_server_name: mcpServer.name },
+          {
+            type: "agent_toolset_20260401",
+            default_config: { permission_policy: { type: "always_allow" } },
+          },
+          {
+            type: "mcp_toolset",
+            mcp_server_name: mcpServer.name,
+            default_config: { permission_policy: { type: "always_allow" } },
+          },
         ]
-      : [{ type: "agent_toolset_20260401" }],
+      : [
+          {
+            type: "agent_toolset_20260401",
+            default_config: { permission_policy: { type: "always_allow" } },
+          },
+        ],
     skills: skillsParam,
     ...(mcpServer ? { mcp_servers: [mcpServer] } : {}),
   };

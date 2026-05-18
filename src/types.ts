@@ -192,7 +192,10 @@ export const AgentTaskSchema = z.object({
   // Context usage aggregates
   compactionCount: z.number().int().min(0).optional(),
   peakContextPercent: z.number().min(0).max(100).optional(),
-  totalContextTokensUsed: z.number().int().min(0).optional(),
+  // Migration 063: renamed from totalContextTokensUsed. Semantic is now a
+  // monotonic max across the task's snapshots — "high water mark" rather than
+  // "latest known".
+  peakContextTokens: z.number().int().min(0).optional(),
   contextWindowSize: z.number().int().min(0).optional(),
 
   // Credential tracking
@@ -574,7 +577,9 @@ export const SessionLogSchema = z.object({
 export type SessionLog = z.infer<typeof SessionLogSchema>;
 
 // Session Cost Types (aggregated cost data per session)
-export const SessionCostSourceSchema = z.enum(["harness", "pricing-table"]);
+// Migration 063 widened the set to include 'unpriced' for cases where the API
+// recompute path couldn't find pricing rows for the (provider, model, token_class).
+export const SessionCostSourceSchema = z.enum(["harness", "pricing-table", "unpriced"]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
 export const SessionCostSchema = z.object({
@@ -587,13 +592,22 @@ export const SessionCostSchema = z.object({
   outputTokens: z.number().int().min(0).default(0),
   cacheReadTokens: z.number().int().min(0).default(0),
   cacheWriteTokens: z.number().int().min(0).default(0),
+  // Migration 063: reasoning_output_tokens from codex turn.completed events.
+  reasoningOutputTokens: z.number().int().min(0).default(0),
+  // Migration 063: thinking_input_tokens from claude extended-thinking flows.
+  thinkingTokens: z.number().int().min(0).default(0),
   durationMs: z.number().int().min(0),
-  numTurns: z.number().int().min(1),
+  // numTurns is nullable — some adapters (e.g. Claude when num_turns is absent)
+  // can't honestly report a turn count. We prefer null over a faked 1.
+  numTurns: z.number().int().min(1).nullable(),
   model: z.string(),
   isError: z.boolean().default(false),
-  // Phase 6: where the recorded totalCostUsd came from. New rows write the
-  // actual source ('pricing-table' when the API recomputed Codex USD from DB
-  // pricing rows, 'harness' otherwise). Defaults to 'harness' for back-compat.
+  // Phase 6 (extended by migration 063): where the recorded totalCostUsd came from.
+  //   'harness'        — value reported by the harness as-is.
+  //   'pricing-table'  — value recomputed by the API from `pricing` rows.
+  //   'unpriced'       — the API tried to recompute but the (provider, model)
+  //                      had no matching pricing rows; totalCostUsd is whatever
+  //                      the worker submitted (often 0).
   costSource: SessionCostSourceSchema.default("harness"),
   createdAt: z.iso.datetime(),
 });
@@ -1381,6 +1395,21 @@ export type McpServerWithInstallInfo = z.infer<typeof McpServerWithInstallInfoSc
 export const ContextSnapshotEventTypeSchema = z.enum(["progress", "compaction", "completion"]);
 export type ContextSnapshotEventType = z.infer<typeof ContextSnapshotEventTypeSchema>;
 
+// Migration 063: the formula the emitting adapter used to compute
+// contextUsedTokens. Lets downstream consumers (UI badges, cross-provider
+// comparisons) reason about whether two numbers are commensurable. Values
+// match the inline doc in `src/be/migrations/063_cost_context_schema_relax.sql`.
+export const ContextFormulaSchema = z.enum([
+  "input-cache-output", // unified formula (post-Phase 9)
+  "input-cache-no-output", // pre-unification claude formula
+  "input-output-no-cache", // pre-unification claude-managed formula
+  "peak-proxy", // pre-unification codex formula
+  "pi-delegated", // numbers come from the pi-ai SDK
+  "harness-reported", // numbers come from a harness API (devin)
+  "unknown", // pre-migration backfill or adapter didn't tag
+]);
+export type ContextFormula = z.infer<typeof ContextFormulaSchema>;
+
 export const ContextSnapshotSchema = z.object({
   id: z.uuid(),
   taskId: z.uuid(),
@@ -1396,12 +1425,17 @@ export const ContextSnapshotSchema = z.object({
   eventType: ContextSnapshotEventTypeSchema,
 
   // Compaction-specific (null for non-compaction)
-  compactTrigger: z.enum(["auto", "manual"]).optional(),
+  compactTrigger: z.enum(["auto", "manual", "auto-inferred"]).optional(),
   preCompactTokens: z.number().int().min(0).optional(),
 
   // Cumulative counters at this point
   cumulativeInputTokens: z.number().int().min(0).default(0),
   cumulativeOutputTokens: z.number().int().min(0).default(0),
+
+  // Migration 063 — adapter stamps the formula it used to compute
+  // contextUsedTokens. Optional so old rows / new providers without a tag
+  // don't break, but every adapter should populate this going forward.
+  contextFormula: ContextFormulaSchema.optional(),
 
   createdAt: z.iso.datetime(),
 });
@@ -1430,10 +1464,29 @@ export const BudgetSchema = z.object({
 });
 export type Budget = z.infer<typeof BudgetSchema>;
 
-export const PricingProviderSchema = z.enum(["claude", "codex", "pi"]);
+// Migration 063 widened both enums and dropped the SQL CHECKs to match.
+// New providers can land without an accompanying schema migration; Zod is now
+// the single source of truth for what's a valid (provider, token_class) row.
+export const PricingProviderSchema = z.enum([
+  "claude",
+  "claude-managed",
+  "codex",
+  "pi",
+  "opencode",
+  "devin",
+  "gemini",
+]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 
-export const PricingTokenClassSchema = z.enum(["input", "cached_input", "output"]);
+export const PricingTokenClassSchema = z.enum([
+  "input",
+  "cached_input",
+  "output",
+  // Migration 063 additions:
+  "cache_write", // claude / claude-managed cache creation
+  "runtime_hour", // claude-managed runtime fee per hour
+  "acu", // devin Agent Compute Unit
+]);
 export type PricingTokenClass = z.infer<typeof PricingTokenClassSchema>;
 
 export const PricingRowSchema = z.object({

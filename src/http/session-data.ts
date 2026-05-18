@@ -13,6 +13,7 @@ import {
   getSessionLogsByTaskId,
   getTaskById,
 } from "../be/db";
+import { normalizeModelKey } from "../be/pricing-normalize";
 import type { SessionCost, SessionCostSource } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -65,17 +66,24 @@ const createSessionCostRoute = route({
     inputTokens: z.number().int().optional(),
     outputTokens: z.number().int().optional(),
     cacheReadTokens: z.number().int().optional(),
-    cacheWriteTokens: z.number().int().optional(),
+    // Migration 063: nullable — adapters that can't honestly report cache writes
+    // (e.g. Codex SDK) prefer null over a faked 0.
+    cacheWriteTokens: z.number().int().nullable().optional(),
+    // Migration 063: new token classes previously dropped on the floor.
+    reasoningOutputTokens: z.number().int().nonnegative().optional(),
+    thinkingTokens: z.number().int().nonnegative().optional(),
     durationMs: z.number().int().optional(),
-    numTurns: z.number().int().optional(),
+    // Migration 063: nullable for adapters that can't honestly report numTurns.
+    numTurns: z.number().int().nullable().optional(),
     model: z.string().optional(),
     isError: z.boolean().optional(),
     /**
-     * Phase 6: when present, drives the codex pricing-table recompute path.
-     * Other providers ('claude' / 'pi' / 'opencode') always trust harness-reported USD.
-     * Optional / undefined keeps back-compat for existing callers.
+     * Phase 6 (extended migration 063): drives the API recompute path. After
+     * Phase 2 every provider with seeded pricing rows participates.
      */
-    provider: z.enum(["claude", "codex", "pi", "opencode"]).optional(),
+    provider: z
+      .enum(["claude", "claude-managed", "codex", "pi", "opencode", "devin", "gemini"])
+      .optional(),
     /**
      * Phase 6: epoch-ms timestamp used as the "active price at time T" lookup
      * basis. Defaults to `Date.now()` when omitted. Including it lets
@@ -185,35 +193,75 @@ export async function handleSessionData(
     try {
       const inputTokens = parsed.body.inputTokens ?? 0;
       const cachedInputTokens = parsed.body.cacheReadTokens ?? 0;
+      const cacheWriteTokens = parsed.body.cacheWriteTokens ?? 0;
       const outputTokens = parsed.body.outputTokens ?? 0;
-      const model = parsed.body.model || "opus";
+      // Phase 2: don't paper over a missing model with a fake default — that
+      // poisoned the pricing-table lookup against the wrong rate. Only the
+      // back-compat case (no provider tag) keeps "opus" so old callers don't
+      // explode.
+      const model = parsed.body.model || (parsed.body.provider ? "" : "opus");
 
-      // Phase 6: Codex USD recompute. When the worker reports `provider='codex'`
-      // and DB pricing rows exist for ALL three token classes at the lookup
-      // time, recompute `totalCostUsd` from tokens × DB prices and tag the
-      // row as 'pricing-table'. If any class has no row, fall back to the
-      // worker-reported value with `costSource='harness'` (back-compat for
-      // unseeded models). Claude / pi / opencode paths always use 'harness'.
+      // Phase 2: widen the recompute branch beyond codex. For any provider
+      // with a known model and seeded pricing rows, recompute `totalCostUsd`
+      // from tokens × DB prices and tag the row 'pricing-table'. When the
+      // (provider, model) pair has no pricing rows at all, tag 'unpriced' so
+      // the UI can flag it. When the provider isn't set, fall through with
+      // 'harness' (back-compat for older callers).
       let totalCostUsd = parsed.body.totalCostUsd;
       let costSource: SessionCostSource = "harness";
 
-      if (parsed.body.provider === "codex") {
+      if (parsed.body.provider && model) {
         const lookupTime = parsed.body.createdAt ?? Date.now();
-        const inputRow = getActivePricingRow("codex", model, "input", lookupTime);
-        const cachedRow = getActivePricingRow("codex", model, "cached_input", lookupTime);
-        const outputRow = getActivePricingRow("codex", model, "output", lookupTime);
+        // Phase 2 fix — different harnesses prepend routing prefixes
+        // (`openrouter/`, `github-copilot/`, …) to the same underlying model
+        // id. The pricing seed stores canonical (un-prefixed) keys, so we
+        // strip the prefix here before lookup. The original adapter-emitted
+        // string is still persisted to `session_costs.model` for debugging.
+        const lookupModel = normalizeModelKey(parsed.body.provider, model);
+        const inputRow = getActivePricingRow(
+          parsed.body.provider,
+          lookupModel,
+          "input",
+          lookupTime,
+        );
+        const cachedRow = getActivePricingRow(
+          parsed.body.provider,
+          lookupModel,
+          "cached_input",
+          lookupTime,
+        );
+        const outputRow = getActivePricingRow(
+          parsed.body.provider,
+          lookupModel,
+          "output",
+          lookupTime,
+        );
+        const cacheWriteRow = getActivePricingRow(
+          parsed.body.provider,
+          lookupModel,
+          "cache_write",
+          lookupTime,
+        );
 
-        if (inputRow && cachedRow && outputRow) {
-          // Mirror the existing computeCodexCostUsd logic: subtract cached
-          // tokens from input before billing the uncached portion at the full
-          // rate (Codex SDK reports input_tokens as TOTAL across the turn).
+        if (inputRow && outputRow) {
+          // Mirror the legacy codex semantic: uncached input is billed at the
+          // full rate, cached input at the discounted rate. Cache writes are
+          // billed separately when the provider's pricing table carries that
+          // class (anthropic) and the adapter reports a non-zero value.
           const uncachedInputTokens = Math.max(0, inputTokens - cachedInputTokens);
+          const cachedRate = cachedRow?.pricePerMillionUsd ?? 0;
+          const cacheWriteRate = cacheWriteRow?.pricePerMillionUsd ?? 0;
           totalCostUsd =
             (uncachedInputTokens * inputRow.pricePerMillionUsd +
-              cachedInputTokens * cachedRow.pricePerMillionUsd +
+              cachedInputTokens * cachedRate +
+              cacheWriteTokens * cacheWriteRate +
               outputTokens * outputRow.pricePerMillionUsd) /
             1_000_000;
           costSource = "pricing-table";
+        } else {
+          // Provider was tagged but we have no pricing rows for it; flag the
+          // row so the UI can show an "unpriced" badge instead of pretending.
+          costSource = "unpriced";
         }
       }
 
@@ -226,8 +274,11 @@ export async function handleSessionData(
         outputTokens,
         cacheReadTokens: cachedInputTokens,
         cacheWriteTokens: parsed.body.cacheWriteTokens ?? 0,
+        reasoningOutputTokens: parsed.body.reasoningOutputTokens ?? 0,
+        thinkingTokens: parsed.body.thinkingTokens ?? 0,
         durationMs: parsed.body.durationMs ?? 0,
-        numTurns: parsed.body.numTurns ?? 1,
+        // Migration 063: pass null through honestly instead of faking a 1.
+        numTurns: parsed.body.numTurns ?? null,
         model,
         isError: parsed.body.isError ?? false,
         costSource,

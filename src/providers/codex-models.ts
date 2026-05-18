@@ -127,11 +127,21 @@ export const CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = {
 };
 
 /**
+ * Phase 6 — one-warning-per-process tracking so unknown models log once
+ * instead of spamming the worker log on every turn.
+ */
+const _warnedUnknownCodexModels = new Set<string>();
+
+/**
  * Compute USD cost from a Codex `Usage` payload. The Codex SDK reports
  * `input_tokens` as the TOTAL input fed to the model across the turn (cached
  * + uncached), so we subtract `cached_input_tokens` before billing the
- * uncached portion at the full rate. Returns 0 for unknown models so we never
- * inflate cost on a typo.
+ * uncached portion at the full rate.
+ *
+ * Phase 6: returns 0 for unknown models AND logs a one-time warning, so an
+ * operator running `MODEL_OVERRIDE=gpt-future-2027` notices that the worker
+ * is silently dropping cost. The server-side recompute path (Phase 2) tags
+ * such rows `costSource='unpriced'`, which surfaces as a yellow UI badge.
  */
 export function computeCodexCostUsd(
   model: string,
@@ -140,7 +150,16 @@ export function computeCodexCostUsd(
   outputTokens: number,
 ): number {
   const pricing = CODEX_MODEL_PRICING[model as CodexModel];
-  if (!pricing) return 0;
+  if (!pricing) {
+    if (!_warnedUnknownCodexModels.has(model)) {
+      _warnedUnknownCodexModels.add(model);
+      console.warn(
+        `[codex] unpriced model ${JSON.stringify(model)} — adapter cost will report $0; ` +
+          "server-side recompute will tag costSource='unpriced' if the pricing table has no rows.",
+      );
+    }
+    return 0;
+  }
   const uncachedInput = Math.max(0, inputTokens - cachedInputTokens);
   const inputCost = (uncachedInput / 1_000_000) * pricing.inputPerMillion;
   const cachedCost = (cachedInputTokens / 1_000_000) * pricing.cachedInputPerMillion;

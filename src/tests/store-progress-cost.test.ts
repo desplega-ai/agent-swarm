@@ -24,7 +24,12 @@ type TestCostData = {
   model?: string;
 };
 
-describe("store-progress with cost data", () => {
+// Phase 11 NOTE: the `store-progress` MCP tool no longer accepts a `costData`
+// field — adapters are the sole writers of `session_costs`. These tests now
+// exercise the lower-level `createSessionCost` API directly, which the runner
+// still calls via `POST /api/session-costs`. They verify the DB write path
+// hasn't regressed, NOT the tool's input schema.
+describe("createSessionCost direct API (was: store-progress with cost data)", () => {
   let agentId: string;
   let taskId: string;
 

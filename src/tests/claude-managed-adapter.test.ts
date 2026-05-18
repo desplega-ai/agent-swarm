@@ -319,11 +319,14 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
     }
 
     // context_usage emitted on span.model_request_end.
+    // Phase 5 / Phase 9 unified formula = input + cache_read + cache_write + output.
     const ctx = emitted.find((e) => e.type === "context_usage");
     expect(ctx).toBeDefined();
     if (ctx && ctx.type === "context_usage") {
-      expect(ctx.contextUsedTokens).toBe(150); // 100 input + 50 output
+      expect(ctx.contextUsedTokens).toBe(165); // 100 + 10 + 5 + 50
       expect(ctx.outputTokens).toBe(50);
+      // Phase 9: every snapshot carries the formula tag.
+      expect(ctx.contextFormula).toBe("input-cache-output");
     }
 
     // result emitted with accumulated cost. Phase 3 leaves totalCostUsd at 0
@@ -345,6 +348,8 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
       expect(resultEvent.cost.totalCostUsd).toBeGreaterThanOrEqual(0);
       expect(Number.isFinite(resultEvent.cost.totalCostUsd)).toBe(true);
       expect(resultEvent.output).toBe("Hello from managed agent");
+      // Phase 3 — provider tag is required so the API recompute path engages.
+      expect(resultEvent.cost.provider).toBe("claude-managed");
     }
 
     // ProviderResult.
@@ -644,17 +649,24 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
     process.env.ANTHROPIC_API_KEY = "sk-test";
     process.env.MANAGED_AGENT_ID = "agent_x";
     process.env.MANAGED_ENVIRONMENT_ID = "env_x";
+    // Defensive: vault env vars may leak in from the host .env (Bun auto-loads
+    // it); each vault-related test sets exactly what it asserts on.
+    delete process.env.MANAGED_GITHUB_TOKEN;
+    delete process.env.MANAGED_GITHUB_VAULT_ID;
+    delete process.env.MANAGED_MCP_VAULT_ID;
   });
 
   afterAll(() => {
     rmSync(tmpLogDir, { recursive: true, force: true });
     delete process.env.MANAGED_GITHUB_TOKEN;
     delete process.env.MANAGED_GITHUB_VAULT_ID;
+    delete process.env.MANAGED_MCP_VAULT_ID;
   });
 
   afterEach(() => {
     delete process.env.MANAGED_GITHUB_TOKEN;
     delete process.env.MANAGED_GITHUB_VAULT_ID;
+    delete process.env.MANAGED_MCP_VAULT_ID;
   });
 
   test("normalizeRepoUrl: passes through https URLs and expands owner/repo shorthand", () => {
@@ -1266,9 +1278,11 @@ describe("ClaudeManagedAdapter (Phase 6) — full happy-path integration", () =>
     const ctxUsage = emitted.find((e) => e.type === "context_usage");
     expect(ctxUsage?.type).toBe("context_usage");
     if (ctxUsage?.type === "context_usage") {
-      // 1M input + 200k output = 1.2M used; output = 200k.
-      expect(ctxUsage.contextUsedTokens).toBe(1_200_000);
+      // Phase 5 / Phase 9 unified: input + cache_read + cache_write + output.
+      // 1M + 50k + 25k + 200k = 1,275,000.
+      expect(ctxUsage.contextUsedTokens).toBe(1_275_000);
       expect(ctxUsage.outputTokens).toBe(200_000);
+      expect(ctxUsage.contextFormula).toBe("input-cache-output");
     }
 
     // The terminal `result` ProviderEvent — the contract Phase 4 hardened —

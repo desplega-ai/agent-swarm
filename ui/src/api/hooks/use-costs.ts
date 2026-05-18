@@ -28,7 +28,7 @@ function aggregateUsage(costs: SessionCost[]): UsageStats {
     inputTokens: costs.reduce((sum, c) => sum + c.inputTokens, 0),
     outputTokens: costs.reduce((sum, c) => sum + c.outputTokens, 0),
     cacheReadTokens: costs.reduce((sum, c) => sum + c.cacheReadTokens, 0),
-    cacheWriteTokens: costs.reduce((sum, c) => sum + c.cacheWriteTokens, 0),
+    cacheWriteTokens: costs.reduce((sum, c) => sum + (c.cacheWriteTokens ?? 0), 0),
     sessionCount: costs.length,
     totalDurationMs: costs.reduce((sum, c) => sum + c.durationMs, 0),
     avgCostPerSession:
@@ -53,7 +53,7 @@ export function useMonthlyUsageStats() {
       inputTokens: monthlyCosts.reduce((sum, c) => sum + c.inputTokens, 0),
       outputTokens: monthlyCosts.reduce((sum, c) => sum + c.outputTokens, 0),
       cacheReadTokens: monthlyCosts.reduce((sum, c) => sum + c.cacheReadTokens, 0),
-      cacheWriteTokens: monthlyCosts.reduce((sum, c) => sum + c.cacheWriteTokens, 0),
+      cacheWriteTokens: monthlyCosts.reduce((sum, c) => sum + (c.cacheWriteTokens ?? 0), 0),
       sessionCount: monthlyCosts.length,
       totalDurationMs: monthlyCosts.reduce((sum, c) => sum + c.durationMs, 0),
       avgCostPerSession:

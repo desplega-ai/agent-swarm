@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatPanel } from "@/components/ui/stat-panel";
+import { formatCost } from "@/lib/cost-format";
 import { cn, formatSmartTime } from "@/lib/utils";
 
 const statusConfig: Record<ApiKeyStatusType, { label: string; dot: string; text: string }> = {
@@ -295,7 +296,7 @@ export default function ApiKeysPage() {
         },
         cellRenderer: (params: { value: number }) => (
           <span className="font-mono text-xs">
-            {params.value > 0 ? `$${params.value.toFixed(4)}` : "-"}
+            {params.value > 0 ? formatCost(params.value, { precision: 4 }) : "-"}
           </span>
         ),
       },
@@ -337,7 +338,7 @@ export default function ApiKeysPage() {
           colorValue
         />
         <StatPanel icon={BarChart3} label="Total Usage" value={stats.totalUsage.toLocaleString()} />
-        <StatPanel icon={DollarSign} label="Total Cost" value={`$${stats.totalCost.toFixed(2)}`} />
+        <StatPanel icon={DollarSign} label="Total Cost" value={formatCost(stats.totalCost)} />
       </div>
 
       {/* Filters */}

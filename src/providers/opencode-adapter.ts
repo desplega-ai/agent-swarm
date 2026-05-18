@@ -12,7 +12,11 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessage, Config, Event as OpencodeEvent } from "@opencode-ai/sdk";
 import { createOpencode } from "@opencode-ai/sdk";
-import { getContextWindowSize } from "../utils/context-window";
+import {
+  CONTEXT_FORMULA,
+  clampContextPercent,
+  getContextWindowSize,
+} from "../utils/context-window";
 import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -104,7 +108,7 @@ function resolvePluginPath(): string {
   return join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
 }
 
-class OpencodeSession implements ProviderSession {
+export class OpencodeSession implements ProviderSession {
   private _sessionId: string;
   private listeners: Array<(event: ProviderEvent) => void> = [];
   // Buffer for events emitted before any listener is attached.
@@ -115,6 +119,7 @@ class OpencodeSession implements ProviderSession {
   // leaving agent_tasks.provider/.model NULL. Buffer + flush on first attach.
   private pendingEvents: ProviderEvent[] = [];
   private completionResolve!: (result: ProviderResult) => void;
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: reserved for future error-propagation paths; symmetric with completionResolve.
   private completionReject!: (err: Error) => void;
   private completionPromise: Promise<ProviderResult>;
   private server: { url: string; close(): void };
@@ -237,6 +242,15 @@ class OpencodeSession implements ProviderSession {
       case "message.updated": {
         const msg = ev.properties.info;
         if (!isAssistantMessage(msg) || msg.sessionID !== this._sessionId) break;
+        // Phase 9 fix: opencode fires `message.updated` repeatedly during a single
+        // assistant turn (streaming text deltas, tool transitions, etc.) and only
+        // populates `tokens`/`cost` on the FINAL update once `time.completed` is
+        // set. Accumulating on every event would either no-op (zero tokens) or —
+        // if opencode ever back-fills intermediate snapshots — multi-count. Gate
+        // the accumulator AND the context emit on the finalized signal so both
+        // paths see the same canonical "this turn is done" moment.
+        const messageFinalized = msg.time?.completed != null;
+        if (!messageFinalized) break;
         // Accumulate cost from each completed assistant message ("step")
         this.totalCostUsd += msg.cost;
         this.inputTokens += msg.tokens?.input ?? 0;
@@ -247,21 +261,31 @@ class OpencodeSession implements ProviderSession {
         if (!this.model && msg.modelID) this.model = msg.modelID;
 
         // Emit context_usage so the runner can POST /api/tasks/:id/context
-        // (drives the dashboard's context-usage progress bar) and the
-        // dashboard's activity timeline shows per-turn progress.
+        // (drives the dashboard's context-usage progress bar). The runner-side
+        // throttle (CONTEXT_THROTTLE_MS = 30s) means the FIRST emit wins for any
+        // short task — so this MUST carry real numbers, not the zero-tokens
+        // placeholder opencode sends on intermediate streaming updates. The
+        // `time.completed` gate above (in the accumulator block) guarantees we
+        // only land here for finalized messages.
         const turnInput = msg.tokens?.input ?? 0;
         const turnOutput = msg.tokens?.output ?? 0;
         const turnCacheRead = msg.tokens?.cache?.read ?? 0;
         const turnCacheWrite = msg.tokens?.cache?.write ?? 0;
-        const contextUsed = turnInput + turnCacheRead + turnCacheWrite;
+        // Phase 8 + Phase 9: unified `input + cache + output` formula instead
+        // of the previous `input + cache_read + cache_write` (which omitted
+        // output and slightly mis-counted vs every other adapter).
+        const contextUsed = turnInput + turnCacheRead + turnCacheWrite + turnOutput;
         const contextTotal = getContextWindowSize(this.model || msg.modelID || "default");
-        if (contextTotal > 0) {
+        if (contextTotal > 0 && contextUsed > 0) {
           this.emit({
             type: "context_usage",
             contextUsedTokens: contextUsed,
             contextTotalTokens: contextTotal,
-            contextPercent: (contextUsed / contextTotal) * 100,
+            // Phase 8: clamp so a turn that briefly overshoots (e.g. due to
+            // a stale total) doesn't render as a 130% gauge in the UI.
+            contextPercent: clampContextPercent(contextUsed, contextTotal) ?? 0,
             outputTokens: turnOutput,
+            contextFormula: CONTEXT_FORMULA,
           });
         }
         break;
