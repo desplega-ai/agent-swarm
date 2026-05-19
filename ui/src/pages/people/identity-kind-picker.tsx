@@ -151,22 +151,23 @@ export function IdentityKindPicker({
             />
             <CommandList>
               <CommandEmpty>Type any kind and press enter.</CommandEmpty>
-              {search.trim() && !isPresetKind(search.trim().toLowerCase()) && (
-                <CommandGroup heading="Custom">
-                  <CommandItem
-                    value={`custom:${search.trim()}`}
-                    onSelect={() => pick(search.trim().toLowerCase())}
-                  >
-                    <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        value === search.trim().toLowerCase() ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    Use "<span className="font-mono">{search.trim().toLowerCase()}</span>"
-                  </CommandItem>
-                </CommandGroup>
-              )}
+              {(() => {
+                const normalized = search.trim().toLowerCase();
+                if (!normalized || isPresetKind(normalized)) return null;
+                return (
+                  <CommandGroup heading="Custom">
+                    <CommandItem value={`custom:${normalized}`} onSelect={() => pick(normalized)}>
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          value === normalized ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      Use "<span className="font-mono">{normalized}</span>"
+                    </CommandItem>
+                  </CommandGroup>
+                );
+              })()}
               <CommandGroup heading="Presets">
                 {PRESET_KINDS.map((k) => (
                   <CommandItem key={k} value={k} onSelect={() => pick(k)}>

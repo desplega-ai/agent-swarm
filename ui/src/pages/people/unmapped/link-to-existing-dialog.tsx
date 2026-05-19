@@ -100,6 +100,7 @@ export function LinkToExistingDialog({
                 onChange={setUserId}
                 placeholder="Pick a user…"
                 searchPlaceholder="Search by name or email…"
+                triggerClassName="w-full"
               />
             </div>
           </div>

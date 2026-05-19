@@ -137,8 +137,8 @@ export function MergeModal({
         onOpenChange(o);
       }}
     >
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden">
+        <DialogHeader className="px-6 pt-6 pb-3 shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <GitMerge className="h-4 w-4" />
             Merge users
@@ -150,7 +150,7 @@ export function MergeModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5 pt-1">
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-3 space-y-5">
           {/* Step 1 — Source */}
           <Step
             number={1}
@@ -292,7 +292,7 @@ export function MergeModal({
           )}
         </div>
 
-        <DialogFooter className="pt-2">
+        <DialogFooter className="px-6 py-4 border-t border-border bg-background shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
