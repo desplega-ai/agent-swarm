@@ -27,18 +27,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatRelative } from "@/lib/relative-time";
+import { CustomKindWarning, IdentityKindPicker, isPresetKind } from "./identity-kind-picker";
 import { getIntegrationLabel, IntegrationIcon } from "./integration-icons";
-
-const KIND_OPTIONS = ["slack", "linear", "github", "gitlab", "jira", "agentmail", "custom"];
 
 type RowKind = "identity" | "alias";
 
@@ -553,6 +545,13 @@ function AddIdentityDialog({
   onSubmit: () => void;
   pending: boolean;
 }) {
+  // Mirror the New-User dialog and Pass 2 identity-row pattern: the kind is
+  // chosen via `IdentityKindPicker` (preset chips + "Other…" creatable) so
+  // operators can link arbitrary custom kinds without needing a code change.
+  // The shared component also emits the inline warning copy when a non-preset
+  // kind is selected — we surface it under the picker so the operator knows
+  // the identity won't show up in the Unmapped triage queue.
+  const showCustomWarning = !!draftKind && !isPresetKind(draftKind);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -561,25 +560,19 @@ function AddIdentityDialog({
         </DialogHeader>
         <div className="space-y-3 py-2">
           <div className="space-y-1.5">
-            <Label>Provider</Label>
-            <Select value={draftKind} onValueChange={setDraftKind}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {KIND_OPTIONS.map((k) => (
-                  <SelectItem key={k} value={k}>
-                    <div className="flex items-center gap-2">
-                      <IntegrationIcon kind={k} className="h-4 w-4 text-foreground/80" />
-                      <span>{getIntegrationLabel(k)}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Provider
+            </Label>
+            <IdentityKindPicker value={draftKind} onChange={setDraftKind} size="default" />
+            {showCustomWarning && <CustomKindWarning className="pt-1" />}
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="ident-external-id">External ID</Label>
+            <Label
+              htmlFor="ident-external-id"
+              className="text-[10px] uppercase tracking-wider text-muted-foreground"
+            >
+              External ID
+            </Label>
             <Input
               id="ident-external-id"
               value={draftId}
@@ -600,7 +593,7 @@ function AddIdentityDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={onSubmit} disabled={!draftId.trim() || pending}>
+          <Button onClick={onSubmit} disabled={!draftKind || !draftId.trim() || pending}>
             {pending ? "Linking…" : "Link identity"}
           </Button>
         </DialogFooter>
