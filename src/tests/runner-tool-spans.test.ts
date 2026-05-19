@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type ActiveToolSpanEntry, implicitCloseNonMcpToolSpans } from "../commands/runner";
+import { type ActiveToolSpanEntry, implicitCloseActiveToolSpans } from "../commands/runner";
 import type { Attributes, AttributeValue, SwarmSpan } from "../otel";
 
 /**
@@ -41,17 +41,17 @@ function makeSpan(): RecordingSpan {
   return span;
 }
 
-function entry(span: SwarmSpan, opts: { startedAt: number; isMcp: boolean }): ActiveToolSpanEntry {
-  return { span, startedAt: opts.startedAt, isMcp: opts.isMcp };
+function entry(span: SwarmSpan, opts: { startedAt: number }): ActiveToolSpanEntry {
+  return { span, startedAt: opts.startedAt };
 }
 
-describe("implicitCloseNonMcpToolSpans", () => {
+describe("implicitCloseActiveToolSpans", () => {
   test("closes worker.tool spans with implicit_close=true and accurate duration_ms", () => {
     const span = makeSpan();
     const map = new Map<string, ActiveToolSpanEntry>();
-    map.set("call-1", entry(span, { startedAt: 1_000, isMcp: false }));
+    map.set("call-1", entry(span, { startedAt: 1_000 }));
 
-    const closed = implicitCloseNonMcpToolSpans(map, 1_750);
+    const closed = implicitCloseActiveToolSpans(map, 1_750);
 
     expect(closed).toBe(1);
     expect(span.ended).toBe(true);
@@ -62,41 +62,43 @@ describe("implicitCloseNonMcpToolSpans", () => {
     expect(map.has("call-1")).toBe(false);
   });
 
-  test("ignores MCP spans — they keep their own explicit tool_end path", () => {
+  test("closes MCP spans at the assistant-message boundary too", () => {
     const mcpSpan = makeSpan();
     const harnessSpan = makeSpan();
     const map = new Map<string, ActiveToolSpanEntry>();
-    map.set("mcp-1", entry(mcpSpan, { startedAt: 1_000, isMcp: true }));
-    map.set("call-1", entry(harnessSpan, { startedAt: 1_000, isMcp: false }));
+    map.set("mcp-1", entry(mcpSpan, { startedAt: 1_000 }));
+    map.set("call-1", entry(harnessSpan, { startedAt: 1_000 }));
 
-    const closed = implicitCloseNonMcpToolSpans(map, 2_000);
+    const closed = implicitCloseActiveToolSpans(map, 2_000);
 
-    expect(closed).toBe(1);
+    expect(closed).toBe(2);
     expect(harnessSpan.ended).toBe(true);
     expect(harnessSpan.attrs["agentswarm.tool.implicit_close"]).toBe(true);
-    expect(mcpSpan.ended).toBe(false);
-    expect(mcpSpan.attrs["agentswarm.tool.implicit_close"]).toBeUndefined();
-    expect(map.has("mcp-1")).toBe(true);
-    expect(map.has("call-1")).toBe(false);
+    expect(mcpSpan.ended).toBe(true);
+    expect(mcpSpan.attrs["agentswarm.tool.implicit_close"]).toBe(true);
+    expect(mcpSpan.attrs["agentswarm.tool.duration_ms"]).toBe(1_000);
+    expect(mcpSpan.attrs["agentswarm.tool.call_id"]).toBe("mcp-1");
+    expect(mcpSpan.status?.code).toBe(1);
+    expect(map.size).toBe(0);
   });
 
   test("no-op on an empty map (and returns 0)", () => {
     const map = new Map<string, ActiveToolSpanEntry>();
-    const closed = implicitCloseNonMcpToolSpans(map, Date.now());
+    const closed = implicitCloseActiveToolSpans(map, Date.now());
     expect(closed).toBe(0);
     expect(map.size).toBe(0);
   });
 
-  test("closes multiple parallel non-MCP spans from the same turn", () => {
+  test("closes multiple parallel spans (mix of harness and MCP) from the same turn", () => {
     const a = makeSpan();
     const b = makeSpan();
     const c = makeSpan();
     const map = new Map<string, ActiveToolSpanEntry>();
-    map.set("a", entry(a, { startedAt: 100, isMcp: false }));
-    map.set("b", entry(b, { startedAt: 200, isMcp: false }));
-    map.set("c", entry(c, { startedAt: 300, isMcp: false }));
+    map.set("a", entry(a, { startedAt: 100 }));
+    map.set("b", entry(b, { startedAt: 200 }));
+    map.set("c", entry(c, { startedAt: 300 }));
 
-    const closed = implicitCloseNonMcpToolSpans(map, 1_000);
+    const closed = implicitCloseActiveToolSpans(map, 1_000);
 
     expect(closed).toBe(3);
     expect(a.attrs["agentswarm.tool.duration_ms"]).toBe(900);
@@ -112,10 +114,10 @@ describe("implicitCloseNonMcpToolSpans", () => {
   test("called twice after a single turn → second call is a no-op", () => {
     const span = makeSpan();
     const map = new Map<string, ActiveToolSpanEntry>();
-    map.set("call-1", entry(span, { startedAt: 1_000, isMcp: false }));
+    map.set("call-1", entry(span, { startedAt: 1_000 }));
 
-    expect(implicitCloseNonMcpToolSpans(map, 1_500)).toBe(1);
-    expect(implicitCloseNonMcpToolSpans(map, 2_000)).toBe(0);
+    expect(implicitCloseActiveToolSpans(map, 1_500)).toBe(1);
+    expect(implicitCloseActiveToolSpans(map, 2_000)).toBe(0);
     // The span should not be ended twice or get a second duration overwrite.
     expect(span.attrs["agentswarm.tool.duration_ms"]).toBe(500);
   });
@@ -124,7 +126,7 @@ describe("implicitCloseNonMcpToolSpans", () => {
 describe("end-to-end boundary semantics (helper integration)", () => {
   // Simulates the runner's event-handler contract:
   //   - tool_start adds an entry to the active-tool-spans map
-  //   - assistant-message boundary calls `implicitCloseNonMcpToolSpans`
+  //   - assistant-message boundary calls `implicitCloseActiveToolSpans`
   //   - explicit tool_end closes the entry directly (no implicit_close attr)
   //   - session shutdown calls a `closeActiveToolSpans` analog as a safety net
   // We don't pull in the runner module directly (it imports the entire
@@ -134,10 +136,10 @@ describe("end-to-end boundary semantics (helper integration)", () => {
   function startToolSpan(
     map: Map<string, ActiveToolSpanEntry>,
     toolCallId: string,
-    opts: { isMcp: boolean; startedAt: number },
+    opts: { startedAt: number },
   ): RecordingSpan {
     const span = makeSpan();
-    map.set(toolCallId, { span, startedAt: opts.startedAt, isMcp: opts.isMcp });
+    map.set(toolCallId, { span, startedAt: opts.startedAt });
     return span;
   }
 
@@ -180,9 +182,9 @@ describe("end-to-end boundary semantics (helper integration)", () => {
 
   test("tool_start → assistant boundary → span closes with implicit_close=true", () => {
     const map = new Map<string, ActiveToolSpanEntry>();
-    const span = startToolSpan(map, "call-1", { isMcp: false, startedAt: 1_000 });
+    const span = startToolSpan(map, "call-1", { startedAt: 1_000 });
 
-    implicitCloseNonMcpToolSpans(map, 1_500);
+    implicitCloseActiveToolSpans(map, 1_500);
 
     expect(span.ended).toBe(true);
     expect(span.attrs["agentswarm.tool.implicit_close"]).toBe(true);
@@ -193,7 +195,7 @@ describe("end-to-end boundary semantics (helper integration)", () => {
 
   test("tool_start → tool_end → span closes WITHOUT implicit_close", () => {
     const map = new Map<string, ActiveToolSpanEntry>();
-    const span = startToolSpan(map, "call-1", { isMcp: false, startedAt: 1_000 });
+    const span = startToolSpan(map, "call-1", { startedAt: 1_000 });
 
     endToolSpan(map, "call-1", 1_200);
 
@@ -203,38 +205,56 @@ describe("end-to-end boundary semantics (helper integration)", () => {
     expect(map.size).toBe(0);
   });
 
-  test("MCP tool spans are unaffected by the assistant-message boundary", () => {
+  test("MCP tool spans are also closed by the assistant-message boundary", () => {
     const map = new Map<string, ActiveToolSpanEntry>();
-    const mcp = startToolSpan(map, "mcp-1", { isMcp: true, startedAt: 1_000 });
+    const mcp = startToolSpan(map, "mcp-1", { startedAt: 1_000 });
 
-    implicitCloseNonMcpToolSpans(map, 2_000);
+    implicitCloseActiveToolSpans(map, 2_000);
 
-    // Still open after the boundary — only an explicit tool_end can close it.
-    expect(mcp.ended).toBe(false);
-    expect(mcp.attrs["agentswarm.tool.implicit_close"]).toBeUndefined();
-    expect(map.has("mcp-1")).toBe(true);
-
-    endToolSpan(map, "mcp-1", 2_500);
     expect(mcp.ended).toBe(true);
-    expect(mcp.attrs["agentswarm.tool.duration_ms"]).toBe(1_500);
-    expect(mcp.attrs["agentswarm.tool.implicit_close"]).toBeUndefined();
+    expect(mcp.attrs["agentswarm.tool.implicit_close"]).toBe(true);
+    expect(mcp.attrs["agentswarm.tool.duration_ms"]).toBe(1_000);
+    expect(map.size).toBe(0);
+  });
+
+  test("mixed harness + MCP tool_starts → both kinds closed with implicit_close=true at boundary", () => {
+    // Simulates a turn where the model invokes both a harness tool (Bash) and
+    // an MCP tool (e.g. mcp__agent-swarm__store-progress), and the next
+    // assistant message arrives without any `tool_end` events from the
+    // adapter (Claude SDK behavior).
+    const map = new Map<string, ActiveToolSpanEntry>();
+    const harness = startToolSpan(map, "bash-1", { startedAt: 1_000 });
+    const mcp = startToolSpan(map, "mcp-1", { startedAt: 1_050 });
+
+    const closed = implicitCloseActiveToolSpans(map, 2_500);
+
+    expect(closed).toBe(2);
+    expect(harness.ended).toBe(true);
+    expect(mcp.ended).toBe(true);
+    expect(harness.attrs["agentswarm.tool.implicit_close"]).toBe(true);
+    expect(mcp.attrs["agentswarm.tool.implicit_close"]).toBe(true);
+    expect(harness.attrs["agentswarm.tool.duration_ms"]).toBe(1_500);
+    expect(mcp.attrs["agentswarm.tool.duration_ms"]).toBe(1_450);
+    expect(harness.attrs["agentswarm.tool.unclosed"]).toBeUndefined();
+    expect(mcp.attrs["agentswarm.tool.unclosed"]).toBeUndefined();
+    expect(map.size).toBe(0);
   });
 
   test("after boundary closes all spans, shutdown safety net closes 0", () => {
     const map = new Map<string, ActiveToolSpanEntry>();
-    startToolSpan(map, "call-1", { isMcp: false, startedAt: 1_000 });
-    startToolSpan(map, "call-2", { isMcp: false, startedAt: 1_100 });
+    startToolSpan(map, "call-1", { startedAt: 1_000 });
+    startToolSpan(map, "call-2", { startedAt: 1_100 });
 
-    implicitCloseNonMcpToolSpans(map, 1_800);
+    implicitCloseActiveToolSpans(map, 1_800);
     expect(map.size).toBe(0);
 
     const { closed } = shutdownSafetyNet(map, 2_000);
     expect(closed).toBe(0);
   });
 
-  test("if session crashes before any boundary fires, safety net flags `unclosed`", () => {
+  test("if session ends before any boundary fires, safety net flags `unclosed`", () => {
     const map = new Map<string, ActiveToolSpanEntry>();
-    const span = startToolSpan(map, "call-1", { isMcp: false, startedAt: 1_000 });
+    const span = startToolSpan(map, "call-1", { startedAt: 1_000 });
 
     // No boundary, straight to shutdown.
     const { closed } = shutdownSafetyNet(map, 5_000);

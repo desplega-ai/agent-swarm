@@ -1924,32 +1924,32 @@ function providerEventAttributes(event: ProviderEvent): Attributes {
 
 /**
  * Entry shape for the `activeToolSpans` map maintained by `runWithSession`.
- * Exported for unit tests that exercise `implicitCloseNonMcpToolSpans`.
+ * Exported for unit tests that exercise `implicitCloseActiveToolSpans`.
  */
 export type ActiveToolSpanEntry = {
   span: SwarmSpan;
   startedAt: number;
-  isMcp: boolean;
 };
 
 /**
- * Closes any still-open non-MCP (`worker.tool`) spans in `activeToolSpans` at
- * the assistant-message boundary, tagging them with
+ * Closes any still-open tool spans (both `worker.tool` and `worker.mcp.tool`)
+ * in `activeToolSpans` at the assistant-message boundary, tagging them with
  * `agentswarm.tool.implicit_close=true` and removing them from the map.
  *
- * MCP spans (`worker.mcp.tool`) are intentionally left alone — they have their
- * own explicit `tool_end` path. Spans closed here are still successful (code 1,
- * OK); the boundary is just a signal that the prior tool turn is done.
+ * The Claude SDK adapter doesn't emit per-tool completion events for any
+ * tool kind, MCP or harness-side — so the assistant-message boundary serves
+ * as an implicit `tool_end` for everything. Spans closed here are still
+ * successful (code 1, OK); the boundary is just a signal that the prior
+ * tool turn is done.
  *
  * Returns the number of spans closed (handy for tests / metrics).
  */
-export function implicitCloseNonMcpToolSpans(
+export function implicitCloseActiveToolSpans(
   activeToolSpans: Map<string, ActiveToolSpanEntry>,
   now: number = Date.now(),
 ): number {
   let closed = 0;
   for (const [toolCallId, active] of activeToolSpans) {
-    if (active.isMcp) continue;
     active.span.setAttributes({
       "agentswarm.tool.duration_ms": now - active.startedAt,
       "agentswarm.tool.implicit_close": true,
@@ -2132,11 +2132,6 @@ async function spawnProviderProcess(
     {
       span: SwarmSpan;
       startedAt: number;
-      // Whether this span is for an MCP tool (`worker.mcp.tool`). Used to decide
-      // whether the assistant_message boundary should implicit-close it. MCP
-      // tools have their own explicit tool_end path and must NOT be touched by
-      // the boundary close.
-      isMcp: boolean;
     }
   >();
   const sessionSpan = startSpan("worker.session", {
@@ -2207,15 +2202,14 @@ async function spawnProviderProcess(
           });
           break;
         case "message": {
-          // Assistant-message boundary acts as an implicit tool_end for any
-          // still-open non-MCP tool spans. The Claude CLI doesn't emit
-          // per-tool completion events for harness-side tools (Bash/Read/Edit/
-          // etc.), so without this their spans would only close at session
-          // shutdown via `closeActiveToolSpans` and report wall-clock duration
-          // from tool_start to session end. MCP tools have their own explicit
-          // `tool_end` path and are intentionally skipped here.
+          // Assistant-message boundary acts as an implicit tool_end for ALL
+          // still-open tool spans (both `worker.tool` and `worker.mcp.tool`).
+          // The Claude SDK adapter doesn't emit per-tool completion events for
+          // any tool kind, so without this their spans would only close at
+          // session shutdown via `closeActiveToolSpans` and report wall-clock
+          // duration from tool_start to session end.
           if (event.role === "assistant") {
-            implicitCloseNonMcpToolSpans(activeToolSpans);
+            implicitCloseActiveToolSpans(activeToolSpans);
           }
           break;
         }
@@ -2239,7 +2233,6 @@ async function spawnProviderProcess(
           activeToolSpans.set(event.toolCallId, {
             span: toolSpan,
             startedAt: Date.now(),
-            isMcp: tool.kind === "mcp",
           });
 
           // Auto-progress: report tool activity as task progress (throttled)

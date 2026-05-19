@@ -207,29 +207,27 @@ Common attributes:
 | `agentswarm.tool.args_preview` | Scrubbed, truncated args |
 | `agentswarm.tool.result_preview` | Scrubbed, truncated result |
 | `agentswarm.tool.missing_start` | Result arrived without a matching start event |
-| `agentswarm.tool.implicit_close` | Non-MCP span closed at the assistant-message boundary (Claude harness doesn't emit per-tool completion events for Bash/Read/Edit/etc.) |
-| `agentswarm.tool.unclosed` | Session crashed before any tool-end or assistant-message boundary fired — should be rare |
+| `agentswarm.tool.implicit_close` | Span closed at the assistant-message boundary because the adapter didn't emit a per-tool completion event. Applies to BOTH `worker.tool` and `worker.mcp.tool` under the Claude harness. |
+| `agentswarm.tool.unclosed` | Session ended before any `tool_end` or assistant-message boundary fired — should be very rare |
 
 #### How tool spans close
 
-The closure path differs by tool kind because the Claude CLI's JSONL stream
-doesn't expose per-tool completion events for harness-side tools:
+Under the Claude SDK adapter, neither harness-side tools (Bash/Read/Edit/etc.)
+nor MCP tools receive per-tool completion events in the JSONL stream. Both
+kinds therefore close on the same path:
 
-- **`worker.mcp.tool` (MCP tools)** — close on the provider's explicit
-  `tool_end` event. `duration_ms` is the true tool execution time. No
-  `implicit_close` attribute.
-- **`worker.tool` (harness-side tools: Bash, Read, Edit, Glob, Skill, etc.)** —
-  close at the next assistant-message boundary, tagged
-  `agentswarm.tool.implicit_close=true`. `duration_ms` is wall-clock from
-  `tool_start` until the next assistant turn, which includes tool execution
-  plus the round-trip back to the model. Still real-ish; covers the typical
-  case. (Other adapters that DO emit `tool_end` for harness tools — e.g.
-  Claude Managed Agents, Codex, opencode — close their spans the same way as
-  MCP, without the `implicit_close` tag.)
-- **`agentswarm.tool.unclosed=true`** — safety net for spans that never saw
-  either a `tool_end` or an assistant-message boundary (e.g. the session
-  crashed mid-tool). Should be rare; treat its presence as a signal worth
-  investigating.
+- **`worker.tool` and `worker.mcp.tool` (Claude harness)** — close at the next
+  assistant-message boundary, tagged `agentswarm.tool.implicit_close=true`.
+  `duration_ms` is wall-clock from `tool_start` until the next assistant turn,
+  which includes tool execution plus the model round-trip after the tool
+  result returned. Slight overcount, but real-ish; covers the typical case.
+- **Other adapters that DO emit explicit `tool_end`** (e.g. Claude Managed
+  Agents, Codex, opencode) — close on the `tool_end` event with
+  `duration_ms` set to true execution time. No `implicit_close` attribute.
+- **`agentswarm.tool.unclosed=true`** — safety net for spans where the
+  session ended before *any* assistant-message boundary arrived (e.g. the
+  session crashed mid-tool). Should be very rare; treat its presence as a
+  signal worth investigating.
 
 Useful for:
 
@@ -350,8 +348,9 @@ AND agentswarm.tool.unclosed = true
 
 This should be a rare safety-net signal: the session ended (or crashed)
 before either an explicit `tool_end` or the assistant-message boundary fired.
-For the typical Claude-harness flow, harness-side tool spans close on the
-boundary with `agentswarm.tool.implicit_close=true`, not `unclosed=true`.
+For the typical Claude-harness flow, both `worker.tool` and `worker.mcp.tool`
+spans close on the boundary with `agentswarm.tool.implicit_close=true`,
+not `unclosed=true`.
 
 ### Implicit-Closed Tool Calls
 
@@ -360,11 +359,14 @@ service.name = 'agent-swarm'
 AND agentswarm.tool.implicit_close = true
 ```
 
-These are the expected closure path for `worker.tool` spans (Bash/Read/Edit/
-etc.) under the regular Claude adapter. `duration_ms` is wall-clock from
-`tool_start` to the next assistant message, so it slightly overcounts the
-actual tool execution time. MCP tool spans and adapter-emitted explicit
-`tool_end` spans (Codex, opencode, Claude Managed Agents) won't have this tag.
+This is the expected closure path under the Claude adapter for BOTH
+`worker.tool` spans (Bash/Read/Edit/etc.) AND `worker.mcp.tool` spans —
+the adapter doesn't emit per-tool completion events for either kind, so
+the runner closes them at the next assistant-message boundary. `duration_ms`
+is wall-clock from `tool_start` to the next assistant message, which slightly
+overcounts the actual tool execution time (it includes the model round-trip
+after the tool result returned). Adapter-emitted explicit `tool_end` spans
+(Codex, opencode, Claude Managed Agents) won't have this tag.
 
 ### Sessions with Cost Data
 
