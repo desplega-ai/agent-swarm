@@ -1,3 +1,4 @@
+import { UserPlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useResolveUnmapped } from "@/api/hooks/use-users";
@@ -6,13 +7,23 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getIntegrationLabel, IntegrationIcon } from "../integration-icons";
 
+/**
+ * Resolve an unmapped identity by creating a brand-new user. The identity's
+ * kind + externalId are pre-bound by the row that triggered the dialog (the
+ * webhook source decided them) — operators just supply name + email.
+ *
+ * No kind picker here on purpose: the dialog represents a one-way binding
+ * from the existing unmapped row to a fresh user record.
+ */
 export function ResolveCreateDialog({
   target,
   onOpenChange,
@@ -66,15 +77,27 @@ export function ResolveCreateDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create user from unmapped identity</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus className="h-4 w-4" />
+            Create user from unmapped identity
+          </DialogTitle>
+          <DialogDescription>
+            A new user will be created and this platform identity linked to it on save.
+          </DialogDescription>
         </DialogHeader>
         {target && (
           <div className="space-y-3 py-2">
-            <div className="rounded-md border border-border bg-muted/30 p-2.5 text-xs">
-              <div className="text-[10px] uppercase text-muted-foreground mb-1">Will be linked</div>
-              <div className="font-mono">
-                {target.kind} · {target.externalId}
+            <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+              <IntegrationIcon kind={target.kind} className="h-5 w-5 text-foreground/80" />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-medium">{getIntegrationLabel(target.kind)}</div>
+                <div className="font-mono text-xs text-muted-foreground truncate">
+                  {target.externalId}
+                </div>
               </div>
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
+                Will link
+              </span>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="resolve-name">Name</Label>
@@ -94,6 +117,7 @@ export function ResolveCreateDialog({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="ada@example.com"
+                className="font-mono"
               />
             </div>
           </div>
