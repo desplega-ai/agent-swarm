@@ -2,6 +2,7 @@
 .encryption-key
 
 .claude/scheduled_tasks.lock
+.claude/worktrees/
 .roam
 
 # MCP

@@ -8,7 +8,7 @@ export const SCRIPT_SEARCH_DESCRIPTION =
 
 export const registerScriptSearchTool = (server: McpServer) => {
   createToolRegistrar(server)(
-    "script_search",
+    "script-search",
     {
       title: "Script Search",
       description: SCRIPT_SEARCH_DESCRIPTION,

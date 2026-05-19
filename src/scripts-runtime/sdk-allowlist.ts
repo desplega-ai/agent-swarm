@@ -12,8 +12,8 @@ export const SDK_TOOL_NAME_MAP = {
   kv_list: "kv-list",
   repo_list: "get-repos",
   schedule_list: "list-schedules",
-  script_search: "script_search",
-  script_run: "script_run",
+  script_search: "script-search",
+  script_run: "script-run",
 } as const;
 
 export const SDK_ALLOWLIST = Object.keys(SDK_TOOL_NAME_MAP) as Array<

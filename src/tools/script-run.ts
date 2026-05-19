@@ -14,7 +14,7 @@ export const SCRIPT_RUN_DESCRIPTION =
 
 export const registerScriptRunTool = (server: McpServer) => {
   createToolRegistrar(server)(
-    "script_run",
+    "script-run",
     {
       title: "Script Run",
       description: SCRIPT_RUN_DESCRIPTION,

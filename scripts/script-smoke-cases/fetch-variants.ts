@@ -37,7 +37,7 @@ export default async (_args: unknown, ctx: ScriptContext) => {
   const fetchRuntime = ctx.stdlib.fetch as (
     input: string | URL | Request,
     options?: RuntimeFetchOptions,
-  ) => Promise<unknown>;
+  ) => Promise<Response>;
   let retryAttempts = 0;
 
   const server = Bun.serve({
@@ -75,12 +75,15 @@ export default async (_args: unknown, ctx: ScriptContext) => {
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
   try {
-    const json = (await fetchRuntime(`${baseUrl}/json`, { retries: 1, timeoutMs: 1000 })) as {
+    const jsonResponse = await fetchRuntime(`${baseUrl}/json`, { retries: 1, timeoutMs: 1000 });
+    const json = (await jsonResponse.json()) as {
       ok?: boolean;
       variant?: string;
     };
-    const text = await fetchRuntime(`${baseUrl}/text`, { retries: 1, timeoutMs: 1000 });
-    const retry = (await fetchRuntime(`${baseUrl}/retry`, { retries: 3, timeoutMs: 1000 })) as {
+    const textResponse = await fetchRuntime(`${baseUrl}/text`, { retries: 1, timeoutMs: 1000 });
+    const text = await textResponse.text();
+    const retryResponse = await fetchRuntime(`${baseUrl}/retry`, { retries: 3, timeoutMs: 1000 });
+    const retry = (await retryResponse.json()) as {
       ok?: boolean;
       attempts?: number;
     };

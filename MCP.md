@@ -29,11 +29,11 @@
   - [set-prompt-template](#set-prompt-template)
   - [delete-prompt-template](#delete-prompt-template)
   - [preview-prompt-template](#preview-prompt-template)
-  - [script_search](#script_search)
-  - [script_run](#script_run)
-  - [script_upsert](#script_upsert)
-  - [script_delete](#script_delete)
-  - [script_query_types](#script_query_types)
+  - [script-search](#script-search)
+  - [script-run](#script-run)
+  - [script-upsert](#script-upsert)
+  - [script-delete](#script-delete)
+  - [script-query-types](#script-query-types)
   - [slack-reply](#slack-reply)
   - [slack-read](#slack-read)
   - [slack-post](#slack-post)
@@ -397,7 +397,7 @@ Dry-run render a prompt template with provided variables. Optionally supply a cu
 | `body` | `string` | No | - | Custom body to preview instead of the default. |
 | `variables` | `object` | No | - | Variables to interpolate into the template. |
 
-### script_search
+### script-search
 
 **Script Search**
 
@@ -406,7 +406,7 @@ Dry-run render a prompt template with provided variables. Optionally supply a cu
 | `query` | `string` | No | "" | Search query for reusable scripts. |
 | `limit` | `number` | No | 10 | Maximum results. |
 
-### script_run
+### script-run
 
 **Script Run**
 
@@ -416,7 +416,7 @@ Dry-run render a prompt template with provided variables. Optionally supply a cu
 | `args` | `unknown` | No | - | JSON-serializable script arguments. |
 | `intent` | `string` | No | "" | Why this script is being run. |
 
-### script_upsert
+### script-upsert
 
 **Script Upsert**
 
@@ -426,13 +426,13 @@ Dry-run render a prompt template with provided variables. Optionally supply a cu
 | `description` | `string` | No | "" | Human-readable script description. |
 | `intent` | `string` | No | "" | Why this script exists. |
 
-### script_delete
+### script-delete
 
 **Script Delete**
 
 *No parameters*
 
-### script_query_types
+### script-query-types
 
 **Script Query Types**
 
@@ -1380,4 +1380,3 @@ Delete an MCP server definition. Only the owning agent or lead can delete.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | ID of the MCP server to delete |
-

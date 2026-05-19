@@ -23,7 +23,7 @@ async function removeDbFiles(path: string): Promise<void> {
   }
 }
 
-describe("script_ MCP tools", () => {
+describe("script MCP tools", () => {
   let tools: Record<string, RegisteredTool>;
   let savedDatabasePath: string | undefined;
 
@@ -43,18 +43,18 @@ describe("script_ MCP tools", () => {
     await removeDbFiles(TEST_DB_PATH);
   });
 
-  test("registers all script_ tools with schemas and documented descriptions", () => {
+  test("registers all script tools with schemas and documented descriptions", () => {
     const expected = {
-      script_search:
+      "script-search":
         "Semantic search over swarm-shared TypeScript scripts (catalog persisted in the agent-swarm DB; callable from agents and workflows). For ephemeral throwaway TS on your local machine, use code-mode instead.",
-      script_run:
+      "script-run":
         "Run a named swarm-shared script (callable across agents and from workflow `swarm-script` nodes), OR inline source (auto-saved as scratch to the catalog). Use for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`.",
-      script_upsert:
+      "script-upsert":
         "Persist a TypeScript script to the swarm catalog under your agent scope (or global if you're a lead). Other agents and workflow nodes will be able to find and run it. For local-only scripts, use code-mode `save`.",
-      script_delete:
+      "script-delete":
         "Remove a swarm-shared script from the catalog. Versions table preserves history.",
-      script_query_types:
-        "Fetch the signature + the auto-generated `swarm-sdk.d.ts` (derived from the live MCP tool registry) + the `stdlib.d.ts` blobs — for IDE-style introspection before authoring or running a script. The same types are used by `script_upsert`'s typecheck pass, so they are authoritative.",
+      "script-query-types":
+        "Fetch the signature + the auto-generated `swarm-sdk.d.ts` (derived from the live MCP tool registry) + the `stdlib.d.ts` blobs — for IDE-style introspection before authoring or running a script. The same types are used by `script-upsert`'s typecheck pass, so they are authoritative.",
     };
 
     for (const [name, description] of Object.entries(expected)) {

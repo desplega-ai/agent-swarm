@@ -151,6 +151,31 @@ describe("toolCallToProgress", () => {
     expect(result).toBe("💬 Posting to Slack");
   });
 
+  test("agent-swarm:script-search has pretty label", () => {
+    const result = toolCallToProgress("mcp__agent-swarm__script-search", {});
+    expect(result).toBe("📜 Searching scripts");
+  });
+
+  test("agent-swarm:script-run has pretty label", () => {
+    const result = toolCallToProgress("mcp__agent-swarm__script-run", {});
+    expect(result).toBe("📜 Running script");
+  });
+
+  test("agent-swarm:script-upsert has pretty label", () => {
+    const result = toolCallToProgress("mcp__agent-swarm__script-upsert", {});
+    expect(result).toBe("📜 Saving script");
+  });
+
+  test("agent-swarm:script-delete has pretty label", () => {
+    const result = toolCallToProgress("mcp__agent-swarm__script-delete", {});
+    expect(result).toBe("📜 Deleting script");
+  });
+
+  test("agent-swarm:script-query-types has pretty label", () => {
+    const result = toolCallToProgress("mcp__agent-swarm__script-query-types", {});
+    expect(result).toBe("📜 Reading script types");
+  });
+
   // --- Agent-swarm MCP tool NOT in lookup (humanized fallback) ---
 
   test("unknown agent-swarm tool gets humanized fallback", () => {
@@ -189,6 +214,11 @@ describe("toolCallToProgress", () => {
   test("bare agent-swarm db-query has pretty label", () => {
     const result = toolCallToProgress("db-query", {});
     expect(result).toBe("🗃️ Querying database");
+  });
+
+  test("bare agent-swarm script-run has pretty label", () => {
+    const result = toolCallToProgress("script-run", {});
+    expect(result).toBe("📜 Running script");
   });
 
   test("codex MCP args with agent-swarm server use pretty labels", () => {

@@ -8,6 +8,7 @@ import {
   getDb,
   getScheduledTaskById,
   getScheduledTaskByName,
+  getScheduledTasks,
   updateScheduledTask,
 } from "../be/db";
 import { calculateNextRun } from "../scheduler/scheduler";
@@ -61,6 +62,29 @@ const runScheduleNow = route({
     200: { description: "Schedule run triggered" },
     400: { description: "Schedule is disabled" },
     404: { description: "Schedule not found" },
+  },
+});
+
+const listSchedules = route({
+  method: "get",
+  path: "/api/schedules",
+  pattern: ["api", "schedules"],
+  summary: "List schedules",
+  tags: ["Schedules"],
+  query: z.object({
+    enabled: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === "true")),
+    name: z.string().optional(),
+    scheduleType: z.enum(["recurring", "one_time"]).optional(),
+    hideCompleted: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === "true")),
+  }),
+  responses: {
+    200: { description: "List of schedules" },
   },
 });
 
@@ -129,6 +153,19 @@ export async function handleSchedules(
   queryParams: URLSearchParams,
   _myAgentId: string | undefined,
 ): Promise<boolean> {
+  if (listSchedules.match(req.method, pathSegments)) {
+    const parsed = await listSchedules.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const schedules = getScheduledTasks({
+      enabled: parsed.query.enabled,
+      name: parsed.query.name,
+      scheduleType: parsed.query.scheduleType,
+      hideCompleted: parsed.query.hideCompleted,
+    });
+    json(res, { schedules, count: schedules.length });
+    return true;
+  }
+
   if (createSchedule.match(req.method, pathSegments)) {
     const parsed = await createSchedule.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;

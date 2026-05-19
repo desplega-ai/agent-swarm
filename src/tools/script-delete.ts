@@ -13,7 +13,7 @@ export const SCRIPT_DELETE_DESCRIPTION =
 
 export const registerScriptDeleteTool = (server: McpServer) => {
   createToolRegistrar(server)(
-    "script_delete",
+    "script-delete",
     {
       title: "Script Delete",
       description: SCRIPT_DELETE_DESCRIPTION,

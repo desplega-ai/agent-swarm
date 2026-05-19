@@ -37,16 +37,69 @@ describe("runScript", () => {
     expect(output.exitCode).toBe(0);
   });
 
-  test("ctx.stdlib.fetch returns parsed JSON", async () => {
+  test("ctx.stdlib.fetch returns a Response and fetchJson returns parsed JSON", async () => {
     const output = await runScript({
       agentId: "agent-1",
       args: { url: 'data:application/json,{"ok":true}' },
       resources,
-      source: "export default async (args, ctx) => ctx.stdlib.fetch(args.url);",
+      source: `
+        export default async (args, ctx) => {
+          const response = await ctx.stdlib.fetch(args.url);
+          const parsed = await ctx.stdlib.fetchJson(args.url);
+          return { status: response.status, parsed };
+        };
+      `,
     });
 
     expect(output.error).toBeUndefined();
-    expect(output.result).toEqual({ ok: true });
+    expect(output.result).toEqual({ status: 200, parsed: { ok: true } });
+  });
+
+  test("ctx.swarm bridge round-trips kv_set then kv_get", async () => {
+    const entries = new Map<string, unknown>();
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        expect(req.headers.get("authorization")).toBe("Bearer runtime-test-secret-1234567890");
+        expect(req.headers.get("x-agent-id")).toBe("agent-1");
+
+        const url = new URL(req.url);
+        if (req.method === "PUT" && url.pathname.startsWith("/api/kv/")) {
+          const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
+          const body = (await req.json()) as { value: unknown };
+          entries.set(key, body.value);
+          return Response.json({ key, value: body.value });
+        }
+        if (req.method === "GET" && url.pathname.startsWith("/api/kv/")) {
+          const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
+          return Response.json({ key, value: entries.get(key) ?? null });
+        }
+        return Response.json({ error: "not found" }, { status: 404 });
+      },
+    });
+
+    try {
+      const output = await runScript({
+        agentId: "agent-1",
+        mcpBaseUrl: `http://127.0.0.1:${server.port}`,
+        resources,
+        source: `
+          export default async (_args, ctx) => {
+            await ctx.swarm.kv_set({ key: "bridge-smoke", value: { ok: true } });
+            return await ctx.swarm.kv_get({ key: "bridge-smoke" });
+          };
+        `,
+      });
+
+      expect(output.error).toBeUndefined();
+      expect(output.result).toEqual({
+        success: true,
+        status: 200,
+        data: { key: "bridge-smoke", value: { ok: true } },
+      });
+    } finally {
+      server.stop(true);
+    }
   });
 
   test("bare stdlib imports resolve through runtime shims", async () => {

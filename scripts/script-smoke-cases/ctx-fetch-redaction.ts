@@ -21,10 +21,14 @@
 
 export default async (_args: unknown, ctx: any) => {
   const { Redacted } = ctx.stdlib;
-  const health = await ctx.stdlib.fetch(`${Redacted.value(ctx.swarm.config.mcpBaseUrl)}/health`, {
-    retries: 1,
-    timeoutMs: 5000,
-  });
+  const healthResponse = await ctx.stdlib.fetch(
+    `${Redacted.value(ctx.swarm.config.mcpBaseUrl)}/health`,
+    {
+      retries: 1,
+      timeoutMs: 5000,
+    },
+  );
+  const health = await healthResponse.json();
 
   console.log("stdout-wrapped-api-key", String(ctx.swarm.config.apiKey));
 

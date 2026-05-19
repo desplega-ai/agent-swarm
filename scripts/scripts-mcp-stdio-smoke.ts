@@ -8,11 +8,11 @@ import { SCRIPT_SEARCH_DESCRIPTION } from "../src/tools/script-search";
 import { SCRIPT_UPSERT_DESCRIPTION } from "../src/tools/script-upsert";
 
 const expected = new Map([
-  ["script_search", SCRIPT_SEARCH_DESCRIPTION],
-  ["script_run", SCRIPT_RUN_DESCRIPTION],
-  ["script_upsert", SCRIPT_UPSERT_DESCRIPTION],
-  ["script_delete", SCRIPT_DELETE_DESCRIPTION],
-  ["script_query_types", SCRIPT_QUERY_TYPES_DESCRIPTION],
+  ["script-search", SCRIPT_SEARCH_DESCRIPTION],
+  ["script-run", SCRIPT_RUN_DESCRIPTION],
+  ["script-upsert", SCRIPT_UPSERT_DESCRIPTION],
+  ["script-delete", SCRIPT_DELETE_DESCRIPTION],
+  ["script-query-types", SCRIPT_QUERY_TYPES_DESCRIPTION],
 ]);
 
 const dbPath = `/tmp/agent-swarm-mcp-stdio-smoke-${process.pid}.sqlite`;

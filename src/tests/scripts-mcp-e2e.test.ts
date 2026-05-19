@@ -70,10 +70,10 @@ function buildToolServer() {
   const registered = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
     ._registeredTools;
   return {
-    search: registered.script_search!,
-    run: registered.script_run!,
-    upsert: registered.script_upsert!,
-    del: registered.script_delete!,
+    search: registered["script-search"]!,
+    run: registered["script-run"]!,
+    upsert: registered["script-upsert"]!,
+    del: registered["script-delete"]!,
   };
 }
 
@@ -182,7 +182,7 @@ beforeEach(() => {
 });
 
 describe("script_ MCP HTTP proxy tools", () => {
-  test("exercise script_upsert -> script_search -> script_run -> script_delete", async () => {
+  test("exercise script-upsert -> script-search -> script-run -> script-delete", async () => {
     const tools = buildToolServer();
     const source = `export default async (args: { value: number }) => ({ result: args.value * 7 });`;
 

@@ -29,7 +29,11 @@ type SmokeCase = {
   meta: CaseMeta;
 };
 
-const apiKey = process.env.AGENT_SWARM_API_KEY || process.env.API_KEY || "123123";
+const apiKey =
+  process.env.SCRIPT_SMOKE_API_KEY ||
+  (process.env.SWARM_BASE_URL
+    ? process.env.AGENT_SWARM_API_KEY || process.env.API_KEY || "123123"
+    : "scripts-smoke-api-key-1234567890");
 const port = process.env.PORT || "3013";
 const baseUrl = (process.env.SWARM_BASE_URL || `http://127.0.0.1:${port}`).replace(/\/+$/, "");
 const agentId = process.env.SCRIPT_SMOKE_AGENT_ID || "scripts-rich-smoke-agent";

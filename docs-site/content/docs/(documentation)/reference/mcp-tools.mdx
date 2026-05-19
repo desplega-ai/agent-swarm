@@ -707,9 +707,9 @@ Delete an MCP server definition. Only the owning agent or lead can delete.
 
 Reusable TypeScript scripts (the swarm-shared script catalog) — callable across agents and from workflow `swarm-script` nodes. The runtime evaluates user-supplied TS in a sandboxed `Bun.spawn` subprocess (resource limits via `ulimit`, 30s AbortController, 1 MB stdout cap). Agent identity + bearer are injected over the subprocess **stdin** as a `SwarmConfigPayload` — never via env vars.
 
-Use `script_run` for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`.
+Use `script-run` for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`.
 
-### script_search
+### script-search
 
 Search the swarm-shared scripts catalog.
 
@@ -718,7 +718,7 @@ Search the swarm-shared scripts catalog.
 | `query` | string | No | Search query (default: empty) |
 | `limit` | number | No | Max results (default: 10) |
 
-### script_run
+### script-run
 
 Run a named reusable script, OR inline TypeScript source (auto-saved as scratch to the catalog).
 
@@ -731,7 +731,7 @@ Run a named reusable script, OR inline TypeScript source (auto-saved as scratch 
 | `scope` | string | No | Optional scope for named script resolution |
 | `fsMode` | string | No | Filesystem mode (`none` only in v1) |
 
-### script_upsert
+### script-upsert
 
 Create or update a named script. Source must export a default function. Runs `tsc --noEmit` against the generated `.d.ts` and rejects on diagnostics.
 
@@ -741,13 +741,13 @@ Create or update a named script. Source must export a default function. Runs `ts
 | `description` | string | No | Human-readable script description |
 | `intent` | string | No | Why this script exists |
 
-### script_delete
+### script-delete
 
 Delete a named script from the catalog.
 
-### script_query_types
+### script-query-types
 
-Return the generated `.d.ts` SDK surface (derived from the MCP tool registry via `scripts/bundle-script-types.ts`). Useful for type-checking scripts locally before `script_upsert`.
+Return the generated `.d.ts` SDK surface (derived from the MCP tool registry via `scripts/bundle-script-types.ts`). Useful for type-checking scripts locally before `script-upsert`.
 
 ## Debug Tools
 

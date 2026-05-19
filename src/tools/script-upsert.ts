@@ -14,7 +14,7 @@ export const SCRIPT_UPSERT_DESCRIPTION =
 
 export const registerScriptUpsertTool = (server: McpServer) => {
   createToolRegistrar(server)(
-    "script_upsert",
+    "script-upsert",
     {
       title: "Script Upsert",
       description: SCRIPT_UPSERT_DESCRIPTION,

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.80.0",
+    "version": "1.80.1",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -4175,6 +4175,36 @@
             "description": "Memory not found"
           }
         }
+      },
+      "get": {
+        "summary": "Get a single memory by ID",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory details"
+          },
+          "404": {
+            "description": "Memory not found"
+          }
+        }
       }
     },
     "/api/memory/rate": {
@@ -6696,6 +6726,68 @@
           },
           "409": {
             "description": "Duplicate name"
+          }
+        }
+      },
+      "get": {
+        "summary": "List schedules",
+        "tags": [
+          "Schedules"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "enabled",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "name",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "recurring",
+                "one_time"
+              ]
+            },
+            "required": false,
+            "name": "scheduleType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "hideCompleted",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of schedules"
           }
         }
       }

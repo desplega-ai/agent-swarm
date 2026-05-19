@@ -65,18 +65,15 @@ declare module "swarm-sdk" {
   }
 
   export interface ScriptStdlib {
-    fetch(input: string | URL | Request, init?: RequestInit): Promise<unknown>;
+    fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
+    fetchJson(input: string | URL | Request, init?: RequestInit): Promise<unknown>;
     grep(pattern: string, files?: string | string[]): Promise<string>;
     glob(pattern: string): Promise<string[]>;
     table(rows: Array<Record<string, unknown>>): string;
     Redacted: RedactedStatic;
   }
 
-  export interface ScriptLogger {
-    log(...args: unknown[]): void;
-    warn(...args: unknown[]): void;
-    error(...args: unknown[]): void;
-  }
+  export interface ScriptLogger extends Console {}
 
   export interface ScriptContext {
     swarm: SwarmSdk & { config: SwarmConfig };

@@ -124,6 +124,20 @@ const deleteMemoryById = route({
   },
 });
 
+const getMemoryById = route({
+  method: "get",
+  path: "/api/memory/{id}",
+  pattern: ["api", "memory", null],
+  summary: "Get a single memory by ID",
+  tags: ["Memory"],
+  auth: { apiKey: true, agentId: true },
+  params: z.object({ id: z.string().uuid() }),
+  responses: {
+    200: { description: "Memory details" },
+    404: { description: "Memory not found" },
+  },
+});
+
 // Memory rater v1.5 — worker-facing rating endpoints. Plan:
 // thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-3.md
 //
@@ -615,6 +629,20 @@ export async function handleMemory(
     const { memoryId } = parsed.query;
     const edges = listEdgesForAgent(myAgentId, memoryId);
     json(res, { edges });
+    return true;
+  }
+
+  if (getMemoryById.match(req.method, pathSegments)) {
+    const parsed = await getMemoryById.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
+
+    const memory = getMemoryStore().get(parsed.params.id);
+    if (!memory) {
+      jsonError(res, "Memory not found", 404);
+      return true;
+    }
+
+    json(res, { memory });
     return true;
   }
 

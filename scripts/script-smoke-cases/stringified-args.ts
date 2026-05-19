@@ -7,14 +7,14 @@
   "expect": {
     "exitCode": 0,
     "result": {
-      "receivedType": "string",
-      "raw": "{\"kind\":\"direct-string\",\"nested\":{\"count\":2}}",
-      "parsed": {
+      "receivedType": "object",
+      "raw": {
         "kind": "direct-string",
         "nested": {
           "count": 2
         }
-      }
+      },
+      "parsed": null
     }
   }
 }

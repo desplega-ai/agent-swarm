@@ -9,11 +9,11 @@ import {
 } from "./script-common";
 
 export const SCRIPT_QUERY_TYPES_DESCRIPTION =
-  "Fetch the signature + the auto-generated `swarm-sdk.d.ts` (derived from the live MCP tool registry) + the `stdlib.d.ts` blobs — for IDE-style introspection before authoring or running a script. The same types are used by `script_upsert`'s typecheck pass, so they are authoritative.";
+  "Fetch the signature + the auto-generated `swarm-sdk.d.ts` (derived from the live MCP tool registry) + the `stdlib.d.ts` blobs — for IDE-style introspection before authoring or running a script. The same types are used by `script-upsert`'s typecheck pass, so they are authoritative.";
 
 export const registerScriptQueryTypesTool = (server: McpServer) => {
   createToolRegistrar(server)(
-    "script_query_types",
+    "script-query-types",
     {
       title: "Script Query Types",
       description: SCRIPT_QUERY_TYPES_DESCRIPTION,

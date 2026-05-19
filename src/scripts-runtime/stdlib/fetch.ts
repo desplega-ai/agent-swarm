@@ -6,7 +6,7 @@ export type RuntimeFetchOptions = RequestInit & {
 export async function runtimeFetch(
   input: string | URL | Request,
   options: RuntimeFetchOptions = {},
-): Promise<unknown> {
+): Promise<Response> {
   const { retries = 3, timeoutMs = 30_000, signal, ...init } = options;
   let lastError: unknown;
 
@@ -22,9 +22,7 @@ export async function runtimeFetch(
         lastError = new Error(`fetch failed with ${res.status}`);
         continue;
       }
-      const contentType = res.headers.get("content-type") ?? "";
-      if (contentType.includes("application/json")) return await res.json();
-      return await res.text();
+      return res;
     } catch (error) {
       lastError = error;
       if (attempt === retries - 1) break;
@@ -35,4 +33,14 @@ export async function runtimeFetch(
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+export async function runtimeFetchJson(
+  input: string | URL | Request,
+  options: RuntimeFetchOptions = {},
+): Promise<unknown> {
+  const res = await runtimeFetch(input, options);
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) return await res.json();
+  return await res.text();
 }

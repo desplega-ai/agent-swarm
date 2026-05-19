@@ -591,6 +591,247 @@ const InputSchema = z.object({
 - Update `MCP.md`, `docs-site/.../mcp-tools.mdx` (resolve-user section), and `plugin/commands/user-management.md` to the new shape.
 - Old field names (`slackUserId`, etc.) MUST NOT remain in the Zod — workers calling the old shape should error out at runtime, not silently degrade. This is the safer break-and-migrate semantics.
 
+### Q19: Email-alias add/remove event types — and TS-level type enforcement
+
+**Decision (event types):** Add **`email_added` / `email_removed`** to the eventType set. Dedicated events for the dedicated semantic; keeps the per-user timeline cleanly readable ("added email X to user Y" rather than "identity diff in afterJson.emailAliases").
+
+**Decision (enforcement layer):** **Both layers, in lockstep** — SQL CHECK in the migration AND a Zod enum / TS type in `src/types.ts`. Same pattern this codebase already applies to `AgentTaskSourceSchema` (per CLAUDE.md migration rules: "Keep `AgentTaskSourceSchema` in `src/types.ts` in sync with SQL CHECK constraints").
+
+```ts
+// src/types.ts — single source of truth at the API boundary
+export const IdentityEventTypeSchema = z.enum([
+  'auto_merge',
+  'manual_merge',
+  'identity_added',
+  'identity_removed',
+  'email_added',         // Q19
+  'email_removed',       // Q19
+  'token_minted',
+  'token_revoked',
+  'budget_changed',
+  'status_changed',
+]);
+export type IdentityEventType = z.infer<typeof IdentityEventTypeSchema>;
+```
+
+```sql
+-- src/be/migrations/NNN_users_first_class.sql — mirrored CHECK
+CREATE TABLE user_identity_events (
+  ...
+  eventType TEXT NOT NULL CHECK (eventType IN (
+    'auto_merge', 'manual_merge',
+    'identity_added', 'identity_removed',
+    'email_added', 'email_removed',     -- Q19
+    'token_minted', 'token_revoked',
+    'budget_changed', 'status_changed'
+  )),
+  ...
+);
+```
+
+**Why both:**
+
+- **SQL CHECK** — database-level guarantee. Protects against raw SQL, future tooling, anyone calling `db.run(...)` directly. Forward-only migration guarantees on-disk consistency.
+- **Zod enum / TS type** — application-level enforcement. Compile-time errors when calling `recordIdentityEvent('typo_event_name', ...)`. Autocomplete in IDEs. Runtime validation at the API boundary (POST /users/:id/events shape, etc.).
+- Drift between them is a documented risk (`AgentTaskSourceSchema` exists precisely to guard against this) — but the convention is to add to BOTH in the same PR, and the migration rule in CLAUDE.md catches PRs that don't.
+
+**Defer to a future PR (not v1):** a **discriminated union** that mandates `beforeJson` / `afterJson` shapes per event type. E.g. `token_minted` always has `afterJson.tokenId` and never carries identity diffs. This is a stronger contract but overkill for v1 — start with the enum, escalate only if event-shape bugs appear.
+
+**Insights:**
+
+- The `recordIdentityEvent` signature in `src/be/users.ts` becomes typed:
+  ```ts
+  export function recordIdentityEvent(
+    userId: string,
+    eventType: IdentityEventType,   // Zod-derived literal union
+    actor: IdentityActor,
+    before: UserRow | null,
+    after: UserRow | null
+  ): void;
+  ```
+- Adding a new event type later means: append to the Zod enum, generate a new migration with an updated CHECK, ship the code that emits it. Three steps, all visible at PR review.
+- The "Email add/remove via UI" path (operator typing into the People page) now emits a specific event. The `manage-user` MCP tool's email-alias edits should emit the same.
+
+### Q20: Token-mint UX in the People page
+
+**Decisions:**
+
+**A. Pre-bundled MCP client snippets in the mint dialog:**
+
+- **Claude Desktop** — JSON fragment for `claude_desktop_config.json` `mcpServers` entry. Includes the bearer-token header.
+- **Claude Code (CLI)** — `claude mcp add` CLI snippet or JSON fragment for `~/.claude.json`. The primary harness this swarm targets.
+- **Generic curl test** — `curl -H 'Authorization: Bearer aswt_…' <mcp-base-url>/mcp/user` for debugging and any client not pre-templated.
+
+Cursor explicitly **not bundled** in v1. Users can adapt the Claude Desktop JSON; can add later if asked.
+
+**B. Post-mint token-list display: GitHub-PAT-style "last 4 chars + label."**
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Tokens                                                  [+ Mint new] │
+├──────────────────────────────────────────────────────────────────────┤
+│ aswt_…aX3f  ·  "MacBook (Claude Desktop)"  ·  used 4h ago  ·  Revoke │
+│ aswt_…m7Tk  ·  "Cursor on laptop"          ·  used —       ·  Revoke │
+│ aswt_…b2Qn  ·  "curl test"                 ·  used 2d ago  ·  Revoke │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+- Last 4 chars come from the plaintext (NOT stored — derived from the kept-only-at-mint plaintext and stored in `user_tokens.tokenPreview TEXT NOT NULL` or similar). This requires a small migration tweak.
+- Label is operator-set at mint time, free text (≤ 80 chars).
+- `lastUsedAt` is updated fire-and-forget by the bearer-token middleware (per MCP brainstorm Q on Token format).
+- Revoke is a single click; emits `token_revoked` audit event.
+
+**C. Migration tweak required:**
+
+- Add `user_tokens.tokenPreview TEXT NOT NULL` to the migration spec (stores the last-4 chars of the plaintext at mint time, e.g. `'aX3f'`). The full plaintext is never stored — only its hash and a 4-char suffix preview. The suffix preview alone has negligible attack value: 36^4 ≈ 1.7M permutations is brute-force-cheap against a known shape, but it's a SUFFIX not a prefix, so it can't be used to enumerate token namespaces.
+
+**Insights:**
+
+- "Last 4" matches GitHub PAT and most major secret-management UIs — operators already have the muscle memory.
+- Label is the primary disambiguator; the last-4 preview is the assistive fallback when labels are missing or generic ("token" / "test").
+- The mint dialog should also emit a `token_minted` event with the label captured in `afterJson` so the audit trail shows what was minted, not just that something was.
+
+### Q21: Empirical Linear payload findings — Q19/Q2 resolves + a pre-existing bug surfaces
+
+**Method:** Sampled real Linear webhook payloads against the dev API on 2026-05-18 (two events captured: `AgentSessionEvent.created` and `AgentSessionEvent.prompted` for issue DES-20).
+
+**Finding A: The current Linear handler is silently broken.**
+
+- `src/linear/sync.ts:379, 691` reads `event.actor` — but **`AgentSessionEvent` payloads have no top-level `actor` field**.
+- Real payload shapes:
+  - `action: "created"` → human prompter is at `event.agentSession.creator.{id, name, email, url}` and the trigger comment is at `event.agentSession.comment.{id, body, userId, issueId}`.
+  - `action: "prompted"` → human prompter is at `event.agentActivity.user.{id, name, email, url}` and the prompt comment metadata at `event.agentActivity.{sourceCommentId, content.body}`.
+- Consequence: `actorLinearId`, `actorEmail`, `actorName` are all empty strings today; `resolveUser({})` always returns `null`; `requestedByUserId` is **always `undefined`** on Linear-originated tasks.
+- This is a **pre-existing bug**, not just a refactor concern. The new pipeline (using the correct nested paths) fixes it as a side effect.
+
+**Refactor extraction logic — concrete code shape:**
+
+```ts
+// AgentSessionEvent.created
+const session = event.agentSession as Record<string, unknown> | undefined;
+const creator = session?.creator as Record<string, unknown> | undefined;
+const linearUserId = creator ? String(creator.id ?? "") : "";
+const email = creator ? String(creator.email ?? "") : "";
+const name = creator ? String(creator.name ?? "") : "";
+
+// AgentSessionEvent.prompted
+const activity = event.agentActivity as Record<string, unknown> | undefined;
+const promptUser = activity?.user as Record<string, unknown> | undefined;
+const linearUserId = promptUser ? String(promptUser.id ?? "") : "";
+const email = promptUser ? String(promptUser.email ?? "") : "";
+const name = promptUser ? String(promptUser.name ?? "") : "";
+```
+
+Then the new cascade:
+
+```ts
+let userId = findUserByExternalId('linear', linearUserId)?.id;
+if (!userId && email) {
+  const { user } = findOrCreateUserByEmail(email, { name }, { kind: 'system', id: 'webhook:linear' });
+  linkIdentity(user.id, 'linear', linearUserId, { kind: 'system', id: 'webhook:linear' });
+  userId = user.id;
+}
+// fall through to unmapped record on miss
+```
+
+**Finding B: Q19 / Q2 (Linear system-actor noise) dissolves under current app config.**
+
+- The Linear app is configured **agent-session-events-only**. The only event types delivered are `AgentSessionEvent.created` and `AgentSessionEvent.prompted`.
+- Both event types are **triggered by a human** (the human writes `@devagentswarm hi there!` or sends a follow-up prompt). They always carry a populated `agentSession.creator` / `agentActivity.user` with `id` + `email` + `name`.
+- System-driven Linear events (auto-archive, cycle rollover, SLA transitions) are **NOT** subscribed and never reach this webhook endpoint.
+- **Result:** under the current configuration, there is no system-actor case to handle. The "Open Question" in the Synthesis can be closed.
+- **Caveat (forward-looking):** if the Linear app config is ever widened to subscribe to issue/comment/cycle events, the system-actor case returns. The plan should note this in the Linear-rewire phase as a future-watch.
+
+**Finding C (corrected per Taras 2026-05-18): The Linear `appUserId` represents the swarm itself, not a user.**
+
+- `event.appUserId` (e.g. `48a91e15-…` for `devagentswarm`) is the Linear-side identity of the **swarm — operationally, the lead agent**, NOT a human user.
+- This means the brainstorm's Q1 invariant holds even here: the `users` table is for HUMANS. Bots / agents are a separate concern.
+- **Do NOT seed a `users` row for the app-user.** That would conflate humans (observers/configurators per Q1) with agents (workers per Q1) — exactly the boundary the brainstorm wants to keep clean.
+- Where the `appUserId` belongs: associated with the **lead agent** somewhere — probably the existing agent registration / Linear integration config, NOT the `users` table. The plan needs to identify the right home (e.g. `tracker_integration_config` table, or a column on the lead agent's row, or `kv_entries` under `integration:linear:bot-app-user-id`).
+- **What this means for webhook handlers:** when an inbound event's actor IS the bot itself (e.g. the bot's own comment triggers another event — feedback loop), the handler should detect `actor.id === appUserId` and **skip auto-link entirely** — no `users` row, no unmapped entry. It's the swarm hearing itself.
+
+**Plan-time deliverables:**
+
+- Store the Linear `appUserId` in a swarm-config location (NOT `users`). Probably alongside the OAuth tokens / integration metadata.
+- Webhook handler logic: `if (creator.id === storedAppUserId) return /* skip — this is the swarm itself */;`
+- Operator UI: surface "Linear app-user" as a swarm/integration property, not as a person.
+
+**Knock-on effect:** the bot's `appUserId` should NOT trigger an unmapped entry. The Q14 unmapped-tracker logic must check `actor.id !== bot.appUserId` before recording.
+
+**Finding D: Both AgentSessionEvent shapes also carry a comment reference.**
+
+- `agentSession.comment.userId` (on `created`) and `agentActivity.sourceCommentId` (on `prompted`) reference the comment that triggered the agent session. The brainstorm doesn't currently use these for identity — and shouldn't, since the same identity is in `creator`/`user` — but it's worth noting that comment metadata is reliably attached. Could matter for future per-task conversation threading (MCP brainstorm v2 territory).
+
+**Insights:**
+
+- The new dev pipeline test loop is now: trigger Linear event → tail `/tmp/linear-webhooks.jsonl` → verify the extraction shape works against the real payload. Use this loop in plan Phase 3 (webhook rewires) to catch any other webhook event-type wrinkles before merge.
+
+### Q22: Forward-watch — Linear lifecycle events we DON'T currently observe
+
+**Surfaced by Taras 2026-05-18:** under the current `agent-session-events-only` Linear app config, the swarm receives `AgentSessionEvent.created` and `AgentSessionEvent.prompted` only. This means **many user actions on Linear that should plausibly affect swarm task state are invisible to us.**
+
+**Specifically NOT observed today:**
+
+| User action in Linear | What event Linear would send | What we'd want to do |
+|---|---|---|
+| Cancel / dismiss an agent session | Likely `AgentSessionEvent` with `action: "dismissed"` or `updated` (with `dismissedAt` set). Sample not captured this session. | Cancel the corresponding swarm task. Update `requestedByUserId` audit. |
+| Unassign bot from an issue | `Issue` `update` event with assignee diff — NOT subscribed | Cancel / pause the running task. |
+| Add a special label (e.g. `swarm:cancel`, `swarm:priority-high`) | `Issue.update` with label diff — NOT subscribed | Route label → task-action mapping. |
+| Comment on issue without @-mentioning bot | NO `AgentSessionEvent`; only `Issue.comment.create` — NOT subscribed | Maybe contextually inject into task; maybe ignore. Depends on UX intent. |
+| Issue closed / state transition | `Issue.update` with state diff — NOT subscribed | Possibly cancel or complete the swarm task. |
+| Issue deleted | `Issue.remove` — currently routed in `webhook.ts:60-62` but only fires if subscribed | Hard-cancel the task. |
+
+**Decision for this brainstorm:** **OUT OF SCOPE.** Reasoning:
+
+- This brainstorm is about **identity mapping** (mapping Linear user IDs to canonical `users` rows). Widening the Linear event subscription is a different lever — it changes *what events we receive*, not *how we map identities once we have them*.
+- If we widen subscriptions later, the identity-mapping primitives in `src/be/users.ts` (Q10) apply unchanged. New event-type handlers just call the same `findUserByExternalId` / `findOrCreateUserByEmail` / `linkIdentity` primitives.
+- Solving lifecycle-routing here would dramatically expand the plan's scope (cancellation semantics, label→action mapping, conflict resolution when bot is unassigned mid-task) — each its own can of worms.
+
+**Forward-watch deliverables (NOT part of this plan):**
+
+- A **separate follow-up brainstorm** to cover: Linear app config widening + lifecycle event routing + label→task-action mapping. Tentatively `2026-XX-XX-linear-lifecycle-events.md` whenever this becomes a priority.
+- Plan-time note in the Linear-rewire phase: "The new identity-mapping code is event-type-agnostic. When new event subscriptions are added in a future PR, the actor-extraction shape per event-type changes, but the `src/be/users.ts` calls do not."
+
+**Honest gap acknowledgement:**
+
+- A user who cancels a Linear agent session today probably expects the swarm task to stop. It doesn't. That's a real product bug — pre-existing, independent of this refactor. Worth filing as a Linear issue (meta-recursion) for the follow-up brainstorm to address.
+
+### Q22.1: Linear agent-interaction docs review (2026-05-18)
+
+**Source:** <https://linear.app/developers/agent-interaction>. Folded back here so the future lifecycle brainstorm doesn't have to re-research.
+
+**Confirmed: `AgentSessionEvent` has only two actions, ever.**
+
+> "There will be two types of actions in the `AgentSessionEvent` category, denoted by the action field of the payload:" — `created` (new session — user mention or issue delegation) and `prompted` (follow-up `prompt`-type activity from user).
+
+No `dismissed`, `cancelled`, `completed`, `updated` actions exist. Our captured sample of 6 events (3× created, 3× prompted) matches this exhaustively.
+
+**Confirmed: session lifecycle is agent→Linear, not Linear→agent.**
+
+> "Agent sessions can have one of 6 states: `pending`, `active`, `error`, `awaitingInput`, `complete`, `stale`. … You don't need to manage agent session state manually. **Linear tracks session lifecycle automatically based on the last emitted activity.**"
+
+State transitions are derived from the agent's emitted `AgentActivity` (5 types: `thought`, `elicitation`, `action`, `response`, `error` — plus user-generated `prompt`). **There is no inbound webhook signaling "user cancelled the session."** The closest signal is "session goes `stale`" — but that's a *derived* state visible in the next webhook payload's `agentSession.status`, not a separate event.
+
+**Confirmed: subscribing to `Issue` events is a separate category.**
+
+> "AgentSessionEvent webhooks only send events to your specific agent."
+
+To learn about unassignment, labels, or status changes, the OAuth app must additionally subscribe to `Issue` events (a different webhook category entirely). This is what the future lifecycle brainstorm will need to evaluate.
+
+**Confirmed: strict timing — bookmark for the follow-up brainstorm.**
+
+> "You must return a response from your webhook receiver within 5 seconds."
+> "If you receive a `created` event, you are expected to send an activity or update your external URL within 10 seconds to avoid the session being marked as unresponsive."
+
+The existing handler returns 200 immediately and processes async (`processWebhookEvent(...)`.catch) — this satisfies the 5s rule. The 10s rule depends on how fast the lead agent picks up a Linear-originated task and emits its first activity. **Plan-relevant: the auto-link refactor in Phase 3 must NOT add synchronous overhead to the webhook response path** — the kv enrichment / `findOrCreateUserByEmail` / `linkIdentity` calls all happen in the async branch, not before the 200 return. Already the case in `webhook.ts:103` (`return { status: 200, body: { status: "accepted" } };` returns before `processWebhookEvent` awaits anything). Plan check: confirm the refactored extraction code stays in the async branch.
+
+**Forward-watch payload for the lifecycle brainstorm:**
+
+- To handle "user cancelled session" the swarm has two options:
+  - (a) Subscribe to `Issue` events; when an issue is unassigned from the bot OR labeled `swarm:cancel`, derive cancellation intent. Pre-Linear-issue webhook category.
+  - (b) Poll Linear GraphQL for `agentSession.status` on running tasks and react to `stale` / `complete` transitions. Heavier but lifecycle-agnostic.
+  - (c) (Possibly future) Linear introduces inbound webhooks for session dismissal. Currently not in docs.
+
 
 
 ### Key Decisions
@@ -615,13 +856,16 @@ const InputSchema = z.object({
 18. **Unmapped record = two kv rows per externalId** (Q17.D). `<externalId>:meta` JSON + `<externalId>:count` integer. Both 30-day TTL. Atomic INCR via existing `incrKv`.
 19. **Slack in-memory cache is replaced by kv-backed enrichment** (Q17.E). Existing `userEmailCache` Map at `src/slack/handlers.ts:38` retired; new helper `enrichSlackUserEmail(slackUserId)` reads/writes `kv_entries` namespace `integration:user-enrichment:slack`.
 20. **`getUserIdentities(userId)` added to the `src/be/users.ts` surface** (Q17.G). Required by GET `/users` / GET `/users/:id` for People-page response composition.
+21. **`resolve-user` MCP tool ships with new shape `{kind?, externalId?, email?}`** + Zod refine (Q18). Mechanical worker-side migration in the same PR. `name` field dropped (no caller uses it). Old field names error out at runtime, not silently degrade.
+22. **`email_added` / `email_removed` events added** (Q19) — distinct from `identity_added`/`identity_removed` for cleaner operator timelines. Enforced in BOTH SQL CHECK and `IdentityEventTypeSchema` Zod enum in `src/types.ts` — lockstep enforcement per CLAUDE.md migration rules.
+23. **Token UX in People page** (Q20) — mint dialog bundles snippets for Claude Desktop, Claude Code (CLI), and a generic curl test. Cursor explicitly deferred. Post-mint list shows GitHub-PAT-style "last 4 chars + label + lastUsedAt + revoke." Adds `user_tokens.tokenPreview TEXT NOT NULL` (4-char suffix) to the migration.
+24. **Linear `AgentSessionEvent` actor extraction is currently broken** (Q21.A) — `src/linear/sync.ts` reads `event.actor` which doesn't exist on `AgentSessionEvent` payloads. Refactor MUST switch to `event.agentSession.creator` (for `created`) and `event.agentActivity.user` (for `prompted`). Pre-existing bug; fixes as a side effect.
+25. **Q19 / Q2 Linear system-actor noise dissolves under current app config** (Q21.B) — Linear is subscribed to **agent-session-events-only**; both event types are always human-prompted. No system-actor case in v1. Plan notes a forward-watch for if event subscriptions widen later.
+26. **Linear `appUserId` is the swarm / lead agent, NOT a `users` row** (Q21.C corrected) — `event.appUserId` represents the bot identity Linear assigned the app at install time. Per Q1, the `users` table is for humans only; bot identity lives elsewhere (probably alongside OAuth tokens or in integration config). Webhook handlers MUST skip auto-link when `actor.id === appUserId` (it's the swarm hearing itself). The unmapped tracker MUST also exclude this case.
 
 ### Open Questions
 
-- **Token UX copy** — MCP-brainstorm-side, but the People page will host the mint dialog. JSON snippet shapes for Claude Desktop / Cursor / etc. — plan-time concern.
-- **`identity_added` overload for email aliases** (Q12) — Adding an email alias via the UI currently has no dedicated event type. Either reuse `identity_added` with the diff visible in `afterJson.emailAliases`, or add `email_added`/`email_removed`. Defer to plan-time / first-real-use.
-- **Linear system-actor events** (Q17.B) — Linear webhooks for system-driven transitions may have no `actor.id` and no `actor.email`. After refactor they become unmapped noise. Plan-time decision: (a) hard-skip system-actor events, or (b) let operator dismiss. Verify against real Linear webhook payloads before merge.
-- **`resolve-user` MCP tool input shape** (Q17.A / research §1b) — keep current input shape `{slackUserId, linearUserId, githubUsername, gitlabUsername, email, name}` as a compat shim (workers may have hard-coded it), or rev to `{kind, externalId, email, name}`. Compat shim is the safer call but adds dead-end naming. Defer to plan-time.
+(All resolved. The brainstorm is plan-ready.)
 
 ### Constraints Identified
 
@@ -675,6 +919,14 @@ const InputSchema = z.object({
 13. **`getUserIdentities(userId): Array<{kind, externalId}>`** in `src/be/users.ts` (Q17.G) — called by GET `/users` and GET `/users/:id` HTTP handlers when composing People-page response shape.
 14. **Test fixture rewire** — `src/tests/user-identity.test.ts` is the primary test surface; research §1f enumerates every change. Adds: `findUserByEmail` covers both `email` and `emailAliases`, `linkIdentity` PK collision raises, `deleteUser` cascades to `user_external_ids`, webhook auto-link round-trip, existing-DB migration backfill assertion.
 15. **Docs split** — `MCP.md` and `docs-site/.../mcp-tools.mdx` are hand-written (no `bun run docs:mcp` script found — research §1h "Honest gaps"); `plugin/pi-skills/user-management/SKILL.md` is regenerated via `bun run build:pi-skills` from `plugin/commands/user-management.md`. Plan must hand-edit the first two and regen the third.
+16. **`resolve-user` worker-caller grep + rewrite** (Q18) — same PR must inventory every `resolve-user` MCP-tool caller in `src/` and `plugin/commands/` and update from `{slackUserId: X}` / `{githubUsername: X}` / etc. to `{kind: "slack", externalId: X}`.
+17. **`IdentityEventTypeSchema` Zod enum in `src/types.ts`** (Q19) — mirrored in lockstep with the SQL CHECK constraint on `user_identity_events.eventType`. Includes `email_added` / `email_removed`. Same migration-discipline as `AgentTaskSourceSchema`.
+18. **`user_tokens.tokenPreview TEXT NOT NULL`** added to migration (Q20). Stores the last-4 chars of plaintext at mint time. Full plaintext never persisted.
+19. **Token-mint dialog content** (Q20) — pre-bundled JSON / CLI snippets for Claude Desktop, Claude Code (CLI), and a generic curl test. UI sub-component should be data-driven so future clients (Cursor, etc.) can be added without rework.
+20. **Linear actor-extraction fix** (Q21.A) — `src/linear/sync.ts` rewires `event.actor` reads to `event.agentSession.creator` (created) / `event.agentActivity.user` (prompted). This is **required**, not optional — without it the auto-link path never fires for Linear and `requestedByUserId` stays undefined as it does today.
+21. **Store Linear `appUserId` in integration config, NOT `users`** (Q21.C corrected) — bot identity belongs with the OAuth-token / tracker-integration metadata (existing table TBD by plan) or in `kv_entries` under a namespace like `integration:linear:bot-app-user-id`. Webhook handlers MUST guard: `if (creator.id === storedAppUserId) return;` — the swarm should not auto-link itself.
+22. **Unmapped-tracker bot guard** — Q14 unmapped-recording logic MUST exclude `actor.id === bot.appUserId`. The bot's own actions should never appear in the Unmapped triage queue.
+23. **Plan Phase 3 dev-pipeline loop** (Q21 Insights) — Linear webhook rewire uses the live dev API + `/tmp/linear-webhooks.jsonl` capture loop to verify extraction shapes against real Linear payloads before merge. Pattern is reusable for Slack/GitLab/AgentMail verification too.
 
 ## Next Steps
 

@@ -414,6 +414,12 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "list-services": "🔌 Listing services",
   "unregister-service": "🔌 Unregistering service",
   "update-service-status": "🔌 Updating service status",
+  // Reusable scripts
+  "script-search": "📜 Searching scripts",
+  "script-run": "📜 Running script",
+  "script-upsert": "📜 Saving script",
+  "script-delete": "📜 Deleting script",
+  "script-query-types": "📜 Reading script types",
 };
 
 /** Convert kebab-case to sentence case: "get-task-details" → "Get task details" */
@@ -489,13 +495,11 @@ export function toolCallToProgress(toolName: string, args: unknown): string | nu
       }
 
       // Pi-mono exposes tools from the built-in swarm MCP endpoint as bare
-      // names ("store-progress", "send-task", ...), not as mcp__ names.
+      // names ("store-progress", "send-task", "script-run", ...), not as mcp__ names.
       // Treat those names as agent-swarm tools so activity stays readable.
-      if (toolName.includes("-")) {
-        const label = SWARM_TOOL_LABELS[toolName];
-        if (label === null) return null;
-        if (label) return label;
-      }
+      const label = SWARM_TOOL_LABELS[toolName];
+      if (label === null) return null;
+      if (label) return label;
 
       return `🔧 ${toolName}`;
     }

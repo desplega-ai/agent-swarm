@@ -29,14 +29,14 @@
         "data": {
           "exitCode": 0,
           "result": {
-            "receivedType": "string",
-            "raw": "{\"kind\":\"nested-string\",\"nested\":{\"count\":3}}",
-            "parsed": {
+            "receivedType": "object",
+            "raw": {
               "kind": "nested-string",
               "nested": {
                 "count": 3
               }
-            }
+            },
+            "parsed": null
           }
         }
       }
