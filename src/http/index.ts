@@ -46,6 +46,7 @@ import { handlePricing } from "./pricing";
 import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { handleSchedules } from "./schedules";
+import { handleScripts } from "./scripts";
 import { handleSessionData } from "./session-data";
 import { handleSessions } from "./sessions";
 import { handleSkills } from "./skills";
@@ -187,6 +188,7 @@ const httpServer = createHttpServer(async (req, res) => {
       () => handleDbQuery(req, res, pathSegments, queryParams),
       () => handleRepos(req, res, pathSegments, queryParams),
       () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
+      () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
       () => handleMcpServers(req, res, pathSegments, queryParams),
       () => handleMcpOAuth(req, res, pathSegments, queryParams),
       () => handleMemory(req, res, pathSegments, myAgentId),

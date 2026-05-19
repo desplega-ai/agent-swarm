@@ -6,8 +6,9 @@ branch: main
 repository: agent-swarm
 topic: "Reusable scripts runtime (code-mode for agent-swarm) — v1 foundation"
 tags: [plan, scripts, code-mode, runtime, sandbox, embeddings, workflow-node]
-status: draft
+status: completed
 last_updated: 2026-05-18
+last_updated_by: Codex implementing orchestrator
 ---
 
 # Reusable Scripts Runtime — Implementation Plan
@@ -211,18 +212,18 @@ CREATE INDEX idx_script_versions_hash ON script_versions(contentHash);
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] DB boundary check passes: `bash scripts/check-db-boundary.sh` (`src/be/scripts/db.ts` is API-only — fine; runtime not added to allowlist yet — that comes in Phase 2)
-- [ ] Fresh DB sanity: `rm agent-swarm-db.sqlite && bun run start:http` boots without error and creates both tables (verify with `sqlite3 agent-swarm-db.sqlite '.schema scripts script_versions'`)
-- [ ] Existing DB sanity: bring up an existing DB (e.g. via `cp agent-swarm-db.sqlite agent-swarm-db.sqlite.bak` then re-apply) — `start:http` boots without error
-- [ ] Unit tests pass: `bun test src/tests/scripts-db.test.ts` (cover: insert, content-hash dedup, version bump on body change, history rows written, scope uniqueness, cascade delete)
+- [x] Lint passes: `bun run lint`
+- [x] Type check passes: `bun run tsc:check`
+- [x] DB boundary check passes: `bash scripts/check-db-boundary.sh` (`src/be/scripts/db.ts` is API-only — fine; runtime not added to allowlist yet — that comes in Phase 2)
+- [x] Fresh DB sanity: `rm agent-swarm-db.sqlite && bun run start:http` boots without error and creates both tables (verify with `sqlite3 agent-swarm-db.sqlite '.schema scripts script_versions'`)
+- [x] Existing DB sanity: bring up an existing DB (e.g. via `cp agent-swarm-db.sqlite agent-swarm-db.sqlite.bak` then re-apply) — `start:http` boots without error
+- [x] Unit tests pass: `bun test src/tests/scripts-db.test.ts` (cover: insert, content-hash dedup, version bump on body change, history rows written, scope uniqueness, cascade delete)
 
 #### Automated QA:
-- [ ] CLI walkthrough: `bun test src/tests/scripts-db.test.ts -t "full lifecycle"` exercises upsert → upsert-same-content (no version bump) → upsert-different-content (version bumps, history row written) → delete (cascade)
+- [x] CLI walkthrough: `bun test src/tests/scripts-db.test.ts -t "full lifecycle"` exercises upsert → upsert-same-content (no version bump) → upsert-different-content (version bumps, history row written) → delete (cascade)
 
 #### Manual Verification:
-- [ ] Schema review: open `src/be/migrations/064_scripts.sql`, confirm `idx_scripts_name_scope` is a UNIQUE INDEX (not an inline UNIQUE constraint) wrapping `scopeId` in `COALESCE(scopeId, '')` so global scripts (scopeId IS NULL) are deduped correctly
+- [x] Schema review: open `src/be/migrations/064_scripts.sql`, confirm `idx_scripts_name_scope` is a UNIQUE INDEX (not an inline UNIQUE constraint) wrapping `scopeId` in `COALESCE(scopeId, '')` so global scripts (scopeId IS NULL) are deduped correctly
 
 **Implementation Note**: After this phase, pause for manual confirmation. If commit-per-phase was requested, commit `feat(scripts): storage layer + script_versions audit history`.
 
@@ -602,34 +603,34 @@ Wired in `loader.ts` between source-validation and tmpfile-write. Pre-flight fai
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] DB boundary check passes: `bash scripts/check-db-boundary.sh` (after adding `src/scripts-runtime/` to the worker-safe list, verifies no `src/be/db` or `bun:sqlite` imports leak in)
-- [ ] API-key boundary check passes: `bash scripts/check-api-key-boundary.sh` (after adding `src/scripts-runtime/` to its allowlist, verifies no raw `process.env.AGENT_SWARM_API_KEY` / `process.env.API_KEY` reads in the runtime — must use `getApiKey()`)
-- [ ] Unit tests pass: `bun test src/tests/scripts-runtime.test.ts` covering:
-  - [ ] Trivial transform script returns expected result (`(args) => args.x + 1`)
-  - [ ] Script with `ctx.stdlib.fetch` to a mocked endpoint returns parsed JSON
-  - [ ] Script timing out is killed within timeoutMs + 500ms slack, returns `{ truncated, error: 'timeout' }`
-  - [ ] Script exceeding 1 MB stdout has `truncated: true` set
-  - [ ] AbortSignal aborts a running script within 500ms of `.abort()`
-  - [ ] **Env hygiene:** subprocess `process.env` keys are exactly `{ PATH, HOME, LANG, LC_ALL, TMPDIR, SWARM_SCRIPT_TMPDIR, SWARM_SCRIPT_ARGS_FILE, SWARM_SCRIPT_SOURCE_FILE, SWARM_SCRIPT_RESULT_FILE }` — assert via `Object.keys(process.env)` inside a test script. Specifically, `process.env.AGENT_SWARM_API_KEY === undefined` AND `process.env.API_KEY === undefined`.
-- [ ] `Redacted` unit tests pass: `bun test src/tests/redacted.test.ts` covering:
-  - [ ] `Redacted.make(value).toString() === '<redacted>'`
-  - [ ] `JSON.stringify({ secret: Redacted.make('hunter2') }) === '{"secret":"<redacted>"}'`
-  - [ ] `util.inspect(Redacted.make('hunter2'))` contains `<redacted>` (not the raw value)
-  - [ ] `Redacted.value(r)` round-trips the original value
-  - [ ] `Redacted.meta(r)` returns the stored `{ type, isSecret }`
-  - [ ] `Redacted.value()` on an unregistered object throws
-- [ ] `SwarmConfig` unit tests pass: `bun test src/tests/swarm-config.test.ts` covering: hydration from a fixture payload, typed getters return `Redacted<string>` with correct meta, `config.get('user-key')` returns the user-set value, missing user key returns `undefined`.
-- [ ] Import allowlist tests pass: `bun test src/tests/scripts-import-allowlist.test.ts` covering: allowed imports pass (relative `./helper`, `swarm-sdk`, `stdlib`); rejected imports fail with diagnostic (`node:fs`, `child_process`, `bun:sqlite`, `import('fs')` dynamic).
-- [ ] **Executor interface conformance test passes**: `bun test src/tests/script-executor-conformance.test.ts` — runs the same test suite against `NativeScriptExecutor` AND a `FakeScriptExecutor` (in-process, no-subprocess implementation used for unit testing). Suite covers: happy-path run, timeout, OOM (only native — fake skips), stdout cap + `truncated.stdout=true`, abort via signal, `fsMode: 'workspace-rw'` returns `error: 'executor_error'`, config payload is delivered (script can `Redacted.value(ctx.swarm.config.apiKey)` and return a hash of it). The same test file is the **conformance contract** for future v2 adapters — adding `E2BScriptExecutor` requires extending this test, not refactoring it.
-- [ ] **`getScriptExecutor()` honors `SCRIPT_EXECUTOR` env**: `bun test src/tests/script-executor-registry.test.ts` — `SCRIPT_EXECUTOR=native` returns NativeScriptExecutor; unset returns native (default); unknown value throws with a clear "Available: native" diagnostic.
+- [x] Lint passes: `bun run lint`
+- [x] Type check passes: `bun run tsc:check`
+- [x] DB boundary check passes: `bash scripts/check-db-boundary.sh` (after adding `src/scripts-runtime/` to the worker-safe list, verifies no `src/be/db` or `bun:sqlite` imports leak in)
+- [x] API-key boundary check passes: `bash scripts/check-api-key-boundary.sh` (after adding `src/scripts-runtime/` to its allowlist, verifies no raw `process.env.AGENT_SWARM_API_KEY` / `process.env.API_KEY` reads in the runtime — must use `getApiKey()`)
+- [x] Unit tests pass: `bun test src/tests/scripts-runtime.test.ts` covering:
+  - [x] Trivial transform script returns expected result (`(args) => args.x + 1`)
+  - [x] Script with `ctx.stdlib.fetch` to a mocked endpoint returns parsed JSON
+  - [x] Script timing out is killed within timeoutMs + 500ms slack, returns `{ truncated, error: 'timeout' }`
+  - [x] Script exceeding 1 MB stdout has `truncated: true` set
+  - [x] AbortSignal aborts a running script within 500ms of `.abort()`
+  - [x] **Env hygiene:** subprocess `process.env` keys are exactly `{ PATH, HOME, LANG, LC_ALL, TMPDIR, SWARM_SCRIPT_TMPDIR, SWARM_SCRIPT_ARGS_FILE, SWARM_SCRIPT_SOURCE_FILE, SWARM_SCRIPT_RESULT_FILE }` — assert via `Object.keys(process.env)` inside a test script. Specifically, `process.env.AGENT_SWARM_API_KEY === undefined` AND `process.env.API_KEY === undefined`.
+- [x] `Redacted` unit tests pass: `bun test src/tests/redacted.test.ts` covering:
+  - [x] `Redacted.make(value).toString() === '<redacted>'`
+  - [x] `JSON.stringify({ secret: Redacted.make('hunter2') }) === '{"secret":"<redacted>"}'`
+  - [x] `util.inspect(Redacted.make('hunter2'))` contains `<redacted>` (not the raw value)
+  - [x] `Redacted.value(r)` round-trips the original value
+  - [x] `Redacted.meta(r)` returns the stored `{ type, isSecret }`
+  - [x] `Redacted.value()` on an unregistered object throws
+- [x] `SwarmConfig` unit tests pass: `bun test src/tests/swarm-config.test.ts` covering: hydration from a fixture payload, typed getters return `Redacted<string>` with correct meta, `config.get('user-key')` returns the user-set value, missing user key returns `undefined`.
+- [x] Import allowlist tests pass: `bun test src/tests/scripts-import-allowlist.test.ts` covering: allowed imports pass (relative `./helper`, `swarm-sdk`, `stdlib`); rejected imports fail with diagnostic (`node:fs`, `child_process`, `bun:sqlite`, `import('fs')` dynamic).
+- [x] **Executor interface conformance test passes**: `bun test src/tests/script-executor-conformance.test.ts` — runs the same test suite against `NativeScriptExecutor` AND a `FakeScriptExecutor` (in-process, no-subprocess implementation used for unit testing). Suite covers: happy-path run, timeout, OOM (only native — fake skips), stdout cap + `truncated.stdout=true`, abort via signal, `fsMode: 'workspace-rw'` returns `error: 'executor_error'`, config payload is delivered (script can `Redacted.value(ctx.swarm.config.apiKey)` and return a hash of it). The same test file is the **conformance contract** for future v2 adapters — adding `E2BScriptExecutor` requires extending this test, not refactoring it.
+- [x] **`getScriptExecutor()` honors `SCRIPT_EXECUTOR` env**: `bun test src/tests/script-executor-registry.test.ts` — `SCRIPT_EXECUTOR=native` returns NativeScriptExecutor; unset returns native (default); unknown value throws with a clear "Available: native" diagnostic.
 
 #### Automated QA:
-- [ ] `bun test src/tests/scripts-runtime-secret-egress.test.ts`: runs a script that returns `{ leaked: Redacted.value(ctx.swarm.config.apiKey) }` — confirms the host's `scrubObject` (Phase 3 §4) scrubs the leaked string in the response. Also runs a script that returns `{ wrapped: ctx.swarm.config.apiKey }` (without unwrapping) — confirms the result file contains `"<redacted>"` (because `JSON.stringify` of a `Redacted<T>` emits `<redacted>`). Documented in `src/scripts-runtime/loader.ts` header: "Defense-in-depth: env-stripping prevents `process.env.AGENT_SWARM_API_KEY` access; `Redacted` prevents accidental log/JSON leaks; egress `scrubObject` catches values that were unwrapped and returned. A malicious script can still call `Redacted.value()` and exfiltrate via a fetch — v2 hardening tracks attribution per call."
+- [x] `bun test src/tests/scripts-runtime-secret-egress.test.ts`: runs a script that returns `{ leaked: Redacted.value(ctx.swarm.config.apiKey) }` — confirms the host's `scrubObject` (Phase 3 §4) scrubs the leaked string in the response. Also runs a script that returns `{ wrapped: ctx.swarm.config.apiKey }` (without unwrapping) — confirms the result file contains `"<redacted>"` (because `JSON.stringify` of a `Redacted<T>` emits `<redacted>`). Documented in `src/scripts-runtime/loader.ts` header: "Defense-in-depth: env-stripping prevents `process.env.AGENT_SWARM_API_KEY` access; `Redacted` prevents accidental log/JSON leaks; egress `scrubObject` catches values that were unwrapped and returned. A malicious script can still call `Redacted.value()` and exfiltrate via a fetch — v2 hardening tracks attribution per call."
 
 #### Manual Verification:
-- [ ] Inspect a sample stack trace from a thrown script — confirm line numbers in error messages map back to the user's source file at `${tmpdir}/user-script.ts` (the tmpfile path will appear in the trace; tmpdir doesn't need to be redacted). If line numbers are off, the tmpfile + dynamic-import eval mechanism is broken — file as a blocker, not a v2 cleanup.
+- [x] Inspect a sample stack trace from a thrown script — confirm line numbers in error messages map back to the user's source file at `${tmpdir}/user-script.ts` (the tmpfile path will appear in the trace; tmpdir doesn't need to be redacted). If line numbers are off, the tmpfile + dynamic-import eval mechanism is broken — file as a blocker, not a v2 cleanup.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Phase 2 is the highest-risk phase — make sure the timeout + abort paths work reliably before layering HTTP on top. If commit-per-phase was requested, commit `feat(scripts): runtime sandbox + ctx + stdlib`.
 
@@ -714,32 +715,32 @@ Walks the tree once (single pass; no `JSON.stringify`/`JSON.parse` double round-
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] OpenAPI freshness: `bun run docs:openapi` produces no diff after running it again (idempotent)
-- [ ] OpenAPI committed: `openapi.json` shows the 5 new operationIds (`scripts_upsert`, `scripts_run`, `scripts_search`, `scripts_delete`, `scripts_types`)
-- [ ] HTTP smoke tests pass: `bun test src/tests/scripts-http.test.ts`:
-  - [ ] `upsert` round-trips body, sets `version: 1` on first write, `version: 2` on body change
-  - [ ] `upsert` with source that has TS errors returns 400 + `{ error: 'typecheck_failed', diagnostics: [...] }`; row is NOT written
-  - [ ] `upsert` with `script_run`-style inline source that uses `ctx.swarm.<unknown_tool>` fails typecheck
-  - [ ] `run` with inline `source` that has TS errors STILL runs (no typecheck) — assert via a fixture with a deliberate type error
-  - [ ] Promotion path: upserting an existing `isScratch=1` row that fails typecheck returns 400 and does NOT clear the scratch flag
-  - [ ] `upsert` with `scope: 'global'` from a non-lead returns 403
-  - [ ] `upsert` with `scope: 'global'` from a lead returns 200 AND writes an `events` row with `type='script.global_upsert'` (assert via direct DB query)
-  - [ ] `upsert` that promotes an existing `scope='agent'` row to `scope='global'` writes an `events` row with `isPromotion=true`
-  - [ ] `run` with `name` reads from DB, executes, returns result
-  - [ ] `run` with `source` (inline) auto-saves a scratch row on success
-  - [ ] `run` with `source` that throws does NOT auto-save
-  - [ ] `delete` returns `{ deleted: true }` and removes the row + cascades versions
-  - [ ] `search` returns substring matches by name (embeddings come in Phase 5)
-  - [ ] `types` returns the expected stdlib + SDK type blob
+- [x] Lint passes: `bun run lint`
+- [x] Type check passes: `bun run tsc:check`
+- [x] OpenAPI freshness: `bun run docs:openapi` produces no diff after running it again (idempotent)
+- [x] OpenAPI committed: `openapi.json` shows the 5 new operationIds (`scripts_upsert`, `scripts_run`, `scripts_search`, `scripts_delete`, `scripts_types`)
+- [x] HTTP smoke tests pass: `bun test src/tests/scripts-http.test.ts`:
+  - [x] `upsert` round-trips body, sets `version: 1` on first write, `version: 2` on body change
+  - [x] `upsert` with source that has TS errors returns 400 + `{ error: 'typecheck_failed', diagnostics: [...] }`; row is NOT written
+  - [x] `upsert` with `script_run`-style inline source that uses `ctx.swarm.<unknown_tool>` fails typecheck
+  - [x] `run` with inline `source` that has TS errors STILL runs (no typecheck) — assert via a fixture with a deliberate type error
+  - [x] Promotion path: upserting an existing `isScratch=1` row that fails typecheck returns 400 and does NOT clear the scratch flag
+  - [x] `upsert` with `scope: 'global'` from a non-lead returns 403
+  - [x] `upsert` with `scope: 'global'` from a lead returns 200 AND writes an `events` row with `type='script.global_upsert'` (assert via direct DB query)
+  - [x] `upsert` that promotes an existing `scope='agent'` row to `scope='global'` writes an `events` row with `isPromotion=true`
+  - [x] `run` with `name` reads from DB, executes, returns result
+  - [x] `run` with `source` (inline) auto-saves a scratch row on success
+  - [x] `run` with `source` that throws does NOT auto-save
+  - [x] `delete` returns `{ deleted: true }` and removes the row + cascades versions
+  - [x] `search` returns substring matches by name (embeddings come in Phase 5)
+  - [x] `types` returns the expected stdlib + SDK type blob
 
 #### Automated QA:
-- [ ] Curl walkthrough script `scripts/scripts-api-smoke.sh` (new): start `bun run start:http`, then upsert / search / run / delete the same script and assert each shell exit code is 0. Run via `bash scripts/scripts-api-smoke.sh`.
+- [x] Curl walkthrough script `scripts/scripts-api-smoke.sh` (new): start `bun run start:http`, then upsert / search / run / delete the same script and assert each shell exit code is 0. Run via `bash scripts/scripts-api-smoke.sh`.
 
 #### Manual Verification:
-- [ ] Open `openapi.json`, eyeball the 5 new operations are present with correct request/response schemas
-- [ ] Confirm `docs-site/content/docs/api-reference/**` regenerates without unexpected churn
+- [x] Open `openapi.json`, eyeball the 5 new operations are present with correct request/response schemas
+- [x] Confirm `docs-site/content/docs/api-reference/**` regenerates without unexpected churn
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit: `feat(scripts): HTTP API + OpenAPI regen`.
 
@@ -829,17 +830,17 @@ Tests: `bun test src/tests/scripts-*.test.ts`. Sandbox + timeout + abort + stdin
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] MCP docs regenerated: `bun run docs:mcp` (regenerates `MCP.md`); commit the diff alongside this phase
-- [ ] MCP tool registration test passes: `bun test src/tests/mcp-tools.test.ts -t "script_"` verifies all 5 tools appear in the MCP listing with correct schemas
-- [ ] HTTP→MCP integration test passes: `bun test src/tests/scripts-mcp-e2e.test.ts` exercises `script_upsert → script_search → script_run → script_delete` end-to-end against the in-process server
-- [ ] **Type bundler regenerates clean**: `bun run build:script-types` produces no diff after running it again (idempotent); commit the generated `src/scripts-runtime/types/swarm-sdk.d.ts` + `stdlib.d.ts`
-- [ ] **SDK allowlist is enforced**: `bun test src/tests/sdk-allowlist.test.ts` verifies (a) every tool in `SDK_ALLOWLIST` exists in the live MCP registry (no dangling names), (b) calling a non-allowlisted tool name through the runtime proxy throws with the expected diagnostic, (c) the bundled `swarm-sdk.d.ts` exposes only allowlisted tools
-- [ ] **Typed SDK roundtrip**: a fixture script `import { SwarmSdk } from 'swarm-sdk'; export default async (args, ctx) => ctx.swarm.memory_search({ query: 'foo' });` passes `script_upsert` typecheck, runs successfully, and returns a typed result. Modifying it to `ctx.swarm.memory_search({ query: 123 })` (wrong arg type) fails typecheck on upsert.
+- [x] Lint passes: `bun run lint`
+- [x] Type check passes: `bun run tsc:check`
+- [x] MCP docs regenerated: `bun run docs:mcp` (regenerates `MCP.md`); commit the diff alongside this phase
+- [x] MCP tool registration test passes: `bun test src/tests/mcp-tools.test.ts -t "script_"` verifies all 5 tools appear in the MCP listing with correct schemas
+- [x] HTTP→MCP integration test passes: `bun test src/tests/scripts-mcp-e2e.test.ts` exercises `script_upsert → script_search → script_run → script_delete` end-to-end against the in-process server
+- [x] **Type bundler regenerates clean**: `bun run build:script-types` produces no diff after running it again (idempotent); commit the generated `src/scripts-runtime/types/swarm-sdk.d.ts` + `stdlib.d.ts`
+- [x] **SDK allowlist is enforced**: `bun test src/tests/sdk-allowlist.test.ts` verifies (a) every tool in `SDK_ALLOWLIST` exists in the live MCP registry (no dangling names), (b) calling a non-allowlisted tool name through the runtime proxy throws with the expected diagnostic, (c) the bundled `swarm-sdk.d.ts` exposes only allowlisted tools
+- [x] **Typed SDK roundtrip**: a fixture script `import { SwarmSdk } from 'swarm-sdk'; export default async (args, ctx) => ctx.swarm.memory_search({ query: 'foo' });` passes `script_upsert` typecheck, runs successfully, and returns a typed result. Modifying it to `ctx.swarm.memory_search({ query: 123 })` (wrong arg type) fails typecheck on upsert.
 
 #### Automated QA:
-- [ ] Stdio MCP smoke: a script under `scripts/scripts-mcp-stdio-smoke.ts` opens a stdio MCP client, lists tools, asserts the 5 new tools are present with the documented descriptions. Run via `bun run scripts/scripts-mcp-stdio-smoke.ts`.
+- [x] Stdio MCP smoke: a script under `scripts/scripts-mcp-stdio-smoke.ts` opens a stdio MCP client, lists tools, asserts the 5 new tools are present with the documented descriptions. Run via `bun run scripts/scripts-mcp-stdio-smoke.ts`.
 
 #### Manual Verification:
 - [ ] In a real Claude Code session against a local swarm worker, observe the agent can call `script_search` from the MCP tool surface (visible in tool-call logs)
@@ -897,20 +898,20 @@ CREATE TABLE script_embeddings (
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint + type check pass
-- [ ] Migration applies cleanly on fresh + existing DB
-- [ ] Unit tests pass: `bun test src/tests/scripts-embeddings.test.ts`:
-  - [ ] Embed on explicit upsert (`isScratch=0`): new row has `script_embeddings` entry
-  - [ ] **No embed on scratch upsert (`isScratch=1`)**: row exists, `script_embeddings` row is absent — covered by an explicit assertion
-  - [ ] Re-embed on body change (different `contentHash`) for explicit rows
-  - [ ] Re-embed when description changes but body unchanged for explicit rows
-  - [ ] No re-embed when nothing tracked changes
-  - [ ] `scripts reembed` CLI backfills scratches that were later promoted (`isScratch` flipped from 1 → 0)
-  - [ ] Search returns semantically similar scripts above name-substring-only matches (use 3 known-similar fixture scripts)
-  - [ ] Hybrid ranking: exact name match outranks weaker semantic match for `query == name`
+- [x] Lint + type check pass
+- [x] Migration applies cleanly on fresh + existing DB
+- [x] Unit tests pass: `bun test src/tests/scripts-embeddings.test.ts`:
+  - [x] Embed on explicit upsert (`isScratch=0`): new row has `script_embeddings` entry
+  - [x] **No embed on scratch upsert (`isScratch=1`)**: row exists, `script_embeddings` row is absent — covered by an explicit assertion
+  - [x] Re-embed on body change (different `contentHash`) for explicit rows
+  - [x] Re-embed when description changes but body unchanged for explicit rows
+  - [x] No re-embed when nothing tracked changes
+  - [x] `scripts reembed` CLI backfills scratches that were later promoted (`isScratch` flipped from 1 → 0)
+  - [x] Search returns semantically similar scripts above name-substring-only matches (use 3 known-similar fixture scripts)
+  - [x] Hybrid ranking: exact name match outranks weaker semantic match for `query == name`
 
 #### Automated QA:
-- [ ] `bun test src/tests/scripts-embeddings.test.ts -t "semantic recall"` seeds 10 fixture scripts with deliberately overlapping intents, runs 5 natural-language queries, asserts top-3 recall matches the expected ranking. Threshold: 4/5 queries hit expected top-1.
+- [x] `bun test src/tests/scripts-embeddings.test.ts -t "semantic recall"` seeds 10 fixture scripts with deliberately overlapping intents, runs 5 natural-language queries, asserts top-3 recall matches the expected ranking. Threshold: 4/5 queries hit expected top-1.
 
 #### Manual Verification:
 - [ ] Manually upsert ~5 real-looking scripts, run `script_search` with vague queries, eyeball the results — are they sensible? Adjust the 0.7/0.3 hybrid weight if needed.
@@ -952,17 +953,17 @@ Register `swarm-script` as a new workflow executor (distinct from existing inlin
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint + type check pass
-- [ ] Unit tests pass: `bun test src/tests/workflow-swarm-script.test.ts`:
-  - [ ] A workflow with one `swarm-script` node resolves by name + runs + returns result
-  - [ ] `pinHash` correctly resolves to a historic `script_versions` row
-  - [ ] `inputs` mapping from a predecessor node correctly populates `args`
-  - [ ] `fsMode: 'workspace-rw'` is rejected at config validation with a clear error message; `fsMode: 'none'` runs server-side
-  - [ ] Failure in the script surfaces as a workflow-node failure (matches existing `script` node failure shape)
-- [ ] E2E test passes: `bun test src/tests/workflow-e2e.test.ts -t "swarm-script"` — full workflow run with the engine
+- [x] Lint + type check pass
+- [x] Unit tests pass: `bun test src/tests/workflow-swarm-script.test.ts`:
+  - [x] A workflow with one `swarm-script` node resolves by name + runs + returns result
+  - [x] `pinHash` correctly resolves to a historic `script_versions` row
+  - [x] `inputs` mapping from a predecessor node correctly populates `args`
+  - [x] `fsMode: 'workspace-rw'` is rejected at config validation with a clear error message; `fsMode: 'none'` runs server-side
+  - [x] Failure in the script surfaces as a workflow-node failure (matches existing `script` node failure shape)
+- [x] E2E test passes: `bun test src/tests/workflow-e2e.test.ts -t "swarm-script"` — full workflow run with the engine
 
 #### Automated QA:
-- [ ] `bun test src/tests/workflow-e2e.test.ts -t "swarm-script + agent-task interleave"` runs a 3-node workflow `swarm-script → agent-task → swarm-script` end-to-end against a stub agent provider, asserts all three nodes complete and outputs chain correctly
+- [x] `bun test src/tests/workflow-e2e.test.ts -t "swarm-script + agent-task interleave"` runs a 3-node workflow `swarm-script → agent-task → swarm-script` end-to-end against a stub agent provider, asserts all three nodes complete and outputs chain correctly
 
 #### Manual Verification:
 - [ ] Open the workflow UI (`ui/`, port 5274), confirm `swarm-script` shows up as a node type in the palette; create a workflow with one `swarm-script` node referencing a real script; run it from the UI; eyeball the output

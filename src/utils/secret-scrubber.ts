@@ -227,6 +227,27 @@ export function scrubSecrets(text: string | null | undefined): string {
   return out;
 }
 
+export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return scrubSecrets(value) as T;
+  if (typeof value !== "object") return value;
+
+  if (seen.has(value)) {
+    return "[Circular]" as T;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => scrubObject(item, seen)) as T;
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = scrubObject(child, seen);
+  }
+  return out as T;
+}
+
 /**
  * Force the env-value cache to rebuild on the next scrub call. Callers should
  * invoke this whenever the swarm_config is reloaded (`/internal/reload-config`

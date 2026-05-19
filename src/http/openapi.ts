@@ -64,6 +64,7 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
     registry.registerPath({
       method: routeDef.method,
       path: routeDef.path,
+      operationId: routeDef.operationId,
       summary: routeDef.summary,
       description: routeDef.description,
       tags: routeDef.tags,

@@ -20,6 +20,7 @@ export interface RouteDef<
   path: string; // OpenAPI-style: "/api/tasks/{id}"
   pattern: readonly (string | null)[]; // matchRoute-style: ["api", "tasks", null]
   exact?: boolean; // default true
+  operationId?: string;
   summary: string;
   description?: string;
   tags: string[];

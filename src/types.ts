@@ -660,6 +660,8 @@ export const EventNameSchema = z.enum([
   "system.boot",
   "system.migration",
   "system.error",
+  // Script catalog events
+  "script.global_upsert",
 ]);
 
 export const SwarmEventSchema = z.object({
@@ -876,18 +878,30 @@ export const StepValidationConfigSchema = z.object({
 });
 export type StepValidationConfig = z.infer<typeof StepValidationConfigSchema>;
 
+export const SwarmScriptNodeConfigSchema = z.object({
+  scriptName: z.string().min(1),
+  scope: z.enum(["global", "agent"]).optional(),
+  pinHash: z.string().min(1).optional(),
+  args: z.record(z.string(), z.unknown()).optional(),
+  fsMode: z.enum(["none", "workspace-rw"]).optional(),
+});
+export type SwarmScriptNodeConfig = z.infer<typeof SwarmScriptNodeConfigSchema>;
+
 // --- Workflow Node (nodes-with-next) ---
 
 export const WorkflowNodeSchema = z.object({
   id: z.string().describe("Unique node identifier, used in 'next' and 'inputs' mappings"),
   type: z
     .string()
-    .describe("Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"),
+    .describe(
+      "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'",
+    ),
   label: z.string().optional().describe("Human-readable label for UI display"),
   config: z
     .record(z.string(), z.unknown())
     .describe(
       "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. " +
+        "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. " +
         "Values support {{interpolation}} from the node's inputs context. " +
         "NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, " +
         "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
@@ -1286,6 +1300,51 @@ export const PromptTemplateHistorySchema = z.object({
   changeReason: z.string().nullable(),
 });
 export type PromptTemplateHistory = z.infer<typeof PromptTemplateHistorySchema>;
+
+// ============================================================================
+// Script Types
+// ============================================================================
+
+export const ScriptScopeSchema = z.enum(["global", "agent"]);
+export type ScriptScope = z.infer<typeof ScriptScopeSchema>;
+
+export const ScriptFsModeSchema = z.enum(["none", "workspace-rw"]);
+export type ScriptFsMode = z.infer<typeof ScriptFsModeSchema>;
+
+export const ScriptRecordSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  scope: ScriptScopeSchema,
+  scopeId: z.string().nullable(),
+  source: z.string(),
+  description: z.string(),
+  intent: z.string(),
+  signatureJson: z.string(),
+  contentHash: z.string(),
+  version: z.number(),
+  isScratch: z.boolean(),
+  typeChecked: z.boolean(),
+  fsMode: ScriptFsModeSchema,
+  createdByAgentId: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ScriptRecord = z.infer<typeof ScriptRecordSchema>;
+
+export const ScriptVersionRecordSchema = z.object({
+  id: z.string(),
+  scriptId: z.string(),
+  version: z.number(),
+  source: z.string(),
+  description: z.string(),
+  intent: z.string(),
+  signatureJson: z.string(),
+  contentHash: z.string(),
+  changedByAgentId: z.string().nullable(),
+  changedAt: z.string(),
+  changeReason: z.string().nullable(),
+});
+export type ScriptVersionRecord = z.infer<typeof ScriptVersionRecordSchema>;
 
 // ============================================================================
 // Skill Types

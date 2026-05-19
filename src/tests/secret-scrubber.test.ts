@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { refreshSecretScrubberCache, scrubSecrets } from "../utils/secret-scrubber";
+import { refreshSecretScrubberCache, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
 // Snapshot/restore process.env between tests so env-derived cache entries
 // don't leak across cases.
@@ -264,5 +264,39 @@ describe("scrubSecrets — does not over-scrub", () => {
     // Instead, assert a shorter placeholder is NOT scrubbed.
     const out = scrubSecrets("example: ghp_TOKEN and glpat-xyz (both too short)");
     expect(out).toBe("example: ghp_TOKEN and glpat-xyz (both too short)");
+  });
+});
+
+describe("scrubObject", () => {
+  test("scrubs nested object and array string leaves", () => {
+    process.env.NESTED_TOKEN = "nested-secret-value-1234567890";
+    refreshSecretScrubberCache();
+
+    const out = scrubObject({
+      keep: 1,
+      nested: {
+        secret: "nested-secret-value-1234567890",
+        list: ["safe", "nested-secret-value-1234567890"],
+      },
+      nullish: null,
+      bool: true,
+    });
+
+    expect(out).toEqual({
+      keep: 1,
+      nested: {
+        secret: "[REDACTED:NESTED_TOKEN]",
+        list: ["safe", "[REDACTED:NESTED_TOKEN]"],
+      },
+      nullish: null,
+      bool: true,
+    });
+  });
+
+  test("handles circular references without recursing forever", () => {
+    const value: Record<string, unknown> = { a: "ok" };
+    value.self = value;
+
+    expect(scrubObject(value)).toEqual({ a: "ok", self: "[Circular]" });
   });
 });

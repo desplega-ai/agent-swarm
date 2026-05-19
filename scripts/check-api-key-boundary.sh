@@ -9,7 +9,8 @@
 # `~/.config/agent-swarm/config.json` lookup) without hunting through 30+
 # call sites.
 #
-# Forbidden patterns (in src/, excluding the helper and tests):
+# Forbidden patterns (in src/, excluding the helper and tests; this includes
+# worker-side runtime code under src/scripts-runtime/):
 #   - process.env.API_KEY
 #   - process.env.AGENT_SWARM_API_KEY
 #

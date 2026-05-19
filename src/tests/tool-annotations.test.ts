@@ -323,9 +323,9 @@ describe("Tool Annotations & Classification", () => {
   test("registered tool count matches expected total", () => {
     const count = Object.keys(tools).length;
     // We expect all tools to be registered when all capabilities are enabled (default)
-    // Includes 11 skill tools and 7 MCP server tools
+    // Includes 11 skill tools, 7 MCP server tools, and reusable script tools
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(95);
+    expect(count).toBeLessThanOrEqual(100);
   });
 
   test("core tools are fewer than deferred tools", () => {
