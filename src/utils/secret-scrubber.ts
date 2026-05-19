@@ -150,7 +150,7 @@ function snapshotEnv(): string {
   return parts.join("|");
 }
 
-function isSensitiveKey(key: string): boolean {
+export function isSensitiveKey(key: string): boolean {
   if (NON_SECRET_EXCEPTIONS.has(key)) return false;
   if (SENSITIVE_KEY_EXACT.has(key)) return true;
   for (const suffix of SENSITIVE_KEY_SUFFIXES) {

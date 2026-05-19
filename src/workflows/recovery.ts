@@ -14,6 +14,7 @@ import { checkpointStep } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
+import { getSecretInputKeys } from "./input";
 import { finalizeOrWait, resumeWaitState } from "./resume";
 
 /**
@@ -78,7 +79,16 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
           finishedAt: new Date().toISOString(),
         });
       } else {
-        await walkGraph(workflow.definition, runId, ctx, readyNodes, registry, workflow.id);
+        const secretKeys = getSecretInputKeys(workflow.input);
+        await walkGraph(
+          workflow.definition,
+          runId,
+          ctx,
+          readyNodes,
+          registry,
+          workflow.id,
+          secretKeys,
+        );
       }
       recovered++;
     } catch (err) {
@@ -112,7 +122,16 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         updateWorkflowRun(stuck.runId, { status: "running" });
 
         const successors = getSuccessors(workflow.definition, stuck.nodeId, "default");
-        await walkGraph(workflow.definition, stuck.runId, ctx, successors, registry, workflow.id);
+        const secretKeys = getSecretInputKeys(workflow.input);
+        await walkGraph(
+          workflow.definition,
+          stuck.runId,
+          ctx,
+          successors,
+          registry,
+          workflow.id,
+          secretKeys,
+        );
       } else {
         // Task failed or cancelled — mark run failed
         const reason =
@@ -191,7 +210,16 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
       const successors = getSuccessors(workflow.definition, stuck.nodeId, nextPort);
 
       if (successors.length > 0) {
-        await walkGraph(workflow.definition, stuck.runId, ctx, successors, registry, workflow.id);
+        const secretKeys = getSecretInputKeys(workflow.input);
+        await walkGraph(
+          workflow.definition,
+          stuck.runId,
+          ctx,
+          successors,
+          registry,
+          workflow.id,
+          secretKeys,
+        );
       } else {
         finalizeOrWait(stuck.runId);
       }

@@ -16,7 +16,7 @@ import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
-import { resolveInputs } from "./input";
+import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
@@ -97,7 +97,8 @@ export async function startWorkflowExecution(
   }
 
   const entryNodes = findEntryNodes(workflow.definition);
-  await walkGraph(workflow.definition, runId, ctx, entryNodes, registry, workflow.id);
+  const secretKeys = getSecretInputKeys(workflow.input);
+  await walkGraph(workflow.definition, runId, ctx, entryNodes, registry, workflow.id, secretKeys);
   return runId;
 }
 
@@ -125,6 +126,7 @@ export async function walkGraph(
   startNodes: WorkflowNode[],
   registry: ExecutorRegistry,
   workflowId?: string,
+  secretKeys: Set<string> = new Set(),
 ): Promise<void> {
   let nodeExecutionCount = 0;
   const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
@@ -232,7 +234,7 @@ export async function walkGraph(
     // Execute all pending nodes in parallel
     const results = await Promise.all(
       pendingNodes.map((node) =>
-        executeStep(def, runId, ctx, node, registry, workflowId).catch(
+        executeStep(def, runId, ctx, node, registry, workflowId, secretKeys).catch(
           (_err): StepResult => ({
             outcome: "failed",
             successors: [],
@@ -382,6 +384,7 @@ async function executeStep(
   node: WorkflowNode,
   registry: ExecutorRegistry,
   workflowId?: string,
+  secretKeys: Set<string> = new Set(),
 ): Promise<StepResult> {
   // Use iteration-aware idempotency key to support loops.
   // Count existing steps for this node to determine the current iteration.
@@ -407,13 +410,18 @@ async function executeStep(
   }
 
   // 2. Create step
+  // Redact resolved secret values from the persisted input so credentials
+  // stored in `ctx.input` (resolved via `secret.*` or sensitive `${ENV}`
+  // references) don't leak through `get-workflow-run` or any other reader of
+  // the `workflow_run_steps` table. The live `ctx` is untouched — executors
+  // still see real values.
   const stepId = crypto.randomUUID();
   createWorkflowRunStep({
     id: stepId,
     runId,
     nodeId: node.id,
     nodeType: node.type,
-    input: ctx,
+    input: redactSecretsForStorage(ctx, secretKeys),
   });
 
   // Set idempotency key

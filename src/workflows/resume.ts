@@ -20,6 +20,7 @@ import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
 import { computeNextPort } from "./executors/wait";
+import { getSecretInputKeys } from "./input";
 import { matchesFilter } from "./wait-filter";
 
 interface TaskEvent {
@@ -137,7 +138,16 @@ async function resumeFromTaskCompletion(
   const successors = getSuccessors(workflow.definition, step.nodeId);
 
   if (successors.length > 0) {
-    await walkGraph(workflow.definition, run.id, ctx, successors, registry, workflow.id);
+    const secretKeys = getSecretInputKeys(workflow.input);
+    await walkGraph(
+      workflow.definition,
+      run.id,
+      ctx,
+      successors,
+      registry,
+      workflow.id,
+      secretKeys,
+    );
   } else {
     finalizeOrWait(run.id);
   }
@@ -201,7 +211,16 @@ async function handleTaskFailure(
   const successors = getSuccessors(workflow.definition, step.nodeId);
 
   if (successors.length > 0) {
-    await walkGraph(workflow.definition, run.id, ctx, successors, registry, workflow.id);
+    const secretKeys = getSecretInputKeys(workflow.input);
+    await walkGraph(
+      workflow.definition,
+      run.id,
+      ctx,
+      successors,
+      registry,
+      workflow.id,
+      secretKeys,
+    );
   } else {
     finalizeOrWait(run.id);
   }
@@ -254,7 +273,8 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const nodesToRun = readyNodes.some((n) => n.id === failedNode.id)
     ? readyNodes
     : [failedNode, ...readyNodes];
-  await walkGraph(workflow.definition, runId, ctx, nodesToRun, registry, workflow.id);
+  const secretKeys = getSecretInputKeys(workflow.input);
+  await walkGraph(workflow.definition, runId, ctx, nodesToRun, registry, workflow.id, secretKeys);
 }
 
 /**
@@ -343,7 +363,16 @@ async function resumeFromApprovalResolution(
   const successors = getSuccessors(workflow.definition, step.nodeId, nextPort);
 
   if (successors.length > 0) {
-    await walkGraph(workflow.definition, run.id, ctx, successors, registry, workflow.id);
+    const secretKeys = getSecretInputKeys(workflow.input);
+    await walkGraph(
+      workflow.definition,
+      run.id,
+      ctx,
+      successors,
+      registry,
+      workflow.id,
+      secretKeys,
+    );
   } else {
     finalizeOrWait(run.id);
   }
@@ -423,7 +452,16 @@ export async function resumeWaitState(
 
   const successors = getSuccessors(workflow.definition, step.nodeId, nextPort);
   if (successors.length > 0) {
-    await walkGraph(workflow.definition, run.id, ctx, successors, registry, workflow.id);
+    const secretKeys = getSecretInputKeys(workflow.input);
+    await walkGraph(
+      workflow.definition,
+      run.id,
+      ctx,
+      successors,
+      registry,
+      workflow.id,
+      secretKeys,
+    );
   } else {
     finalizeOrWait(run.id);
   }
