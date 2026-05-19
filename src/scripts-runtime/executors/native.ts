@@ -69,6 +69,25 @@ async function writeBareImportShim(tmpdir: string, name: string, targetUrl: URL)
 }
 
 async function writeBareImportShims(tmpdir: string): Promise<void> {
+  const runtimeDir = process.env.SCRIPT_RUNTIME_DIR;
+  if (runtimeDir) {
+    // Compiled binary mode: use pre-built bundles on real filesystem.
+    // import.meta.url resolves to /$bunfs/ which spawned subprocesses can't access.
+    const shims: [string, string][] = [
+      ["stdlib", `${runtimeDir}/stdlib.bundle.js`],
+      ["swarm-sdk", `${runtimeDir}/swarm-sdk.bundle.js`],
+    ];
+    for (const [name, bundlePath] of shims) {
+      const dir = `${tmpdir}/node_modules/${name}`;
+      await Bun.$`mkdir -p ${dir}`;
+      await Bun.write(`${dir}/package.json`, JSON.stringify({ type: "module", main: "index.js" }));
+      await Bun.write(
+        `${dir}/index.js`,
+        `export * from ${JSON.stringify(`file://${bundlePath}`)};\n`,
+      );
+    }
+    return;
+  }
   await writeBareImportShim(tmpdir, "stdlib", new URL("../stdlib/index.ts", import.meta.url));
   await writeBareImportShim(tmpdir, "swarm-sdk", new URL("../swarm-sdk.ts", import.meta.url));
 }
@@ -113,7 +132,11 @@ export class NativeScriptExecutor implements ScriptExecutor {
     const argsFile = `${tmpdir}/args.json`;
     const sourceFile = `${tmpdir}/source.ts`;
     const resultFile = `${tmpdir}/result.json`;
-    const harnessPath = new URL("../eval-harness.ts", import.meta.url).pathname;
+    // In compiled binary mode, import.meta.url points into /$bunfs/ which spawned
+    // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
+    const harnessPath = process.env.SCRIPT_RUNTIME_DIR
+      ? `${process.env.SCRIPT_RUNTIME_DIR}/eval-harness.bundle.js`
+      : new URL("../eval-harness.ts", import.meta.url).pathname;
     const controller = new AbortController();
     let timedOut = false;
     let killed = input.signal?.aborted ?? false;

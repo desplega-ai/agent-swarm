@@ -14,6 +14,27 @@ RUN bun install --frozen-lockfile
 COPY src/ ./src/
 COPY tsconfig.json ./
 
+# Pre-bundle script runtime files into self-contained JS bundles.
+# The compiled API binary cannot share its /$bunfs/ virtual filesystem with
+# spawned subprocesses — bun run /$bunfs/eval-harness.ts fails in the harness
+# subprocess. Pre-building to real .js files on disk fixes this.
+RUN mkdir -p scripts-runtime && \
+    bun build ./src/scripts-runtime/eval-harness.ts \
+      --target bun --no-splitting \
+      --outfile ./scripts-runtime/eval-harness.bundle.js && \
+    bun build ./src/scripts-runtime/stdlib/index.ts \
+      --target bun --no-splitting \
+      --outfile ./scripts-runtime/stdlib.bundle.js && \
+    bun build ./src/scripts-runtime/swarm-sdk.ts \
+      --target bun --no-splitting \
+      --outfile ./scripts-runtime/swarm-sdk.bundle.js
+
+# Copy TypeScript lib .d.ts files for script typecheck in compiled binary mode.
+# The compiled binary embeds .js modules in /$bunfs/ but not .d.ts files, so
+# the TypeScript compiler can't load the default lib (Error, Number, etc.) without
+# these real-filesystem copies.
+RUN mkdir -p typescript-lib && cp node_modules/typescript/lib/lib.*.d.ts typescript-lib/
+
 # Compile HTTP server to standalone binary
 RUN bun build ./src/http.ts --compile --outfile ./agent-swarm-api
 
@@ -54,6 +75,14 @@ COPY src/be/migrations/*.sql /app/migrations/
 # for this build (sqlite-vec-linux-x64 or sqlite-vec-linux-arm64).
 COPY --from=builder /build/node_modules/sqlite-vec-linux-*/vec0.so /app/extensions/vec0.so
 
+# Copy script runtime bundles — needed by the harness subprocess.
+# The compiled binary can't share its /$bunfs/ virtual filesystem with spawned
+# bun processes, so these are pre-built real-filesystem .js files.
+COPY --from=builder /build/scripts-runtime/ /app/scripts-runtime/
+
+# Copy TypeScript lib .d.ts files for script typecheck in compiled binary mode.
+COPY --from=builder /build/typescript-lib/ /app/typescript-lib/
+
 # Install archil CLI for FUSE/R2-backed disk mounts
 RUN curl https://s3.amazonaws.com/archil-client/install | sh
 
@@ -65,6 +94,8 @@ ENV PORT=3013
 ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite
 ENV MIGRATIONS_DIR=/app/migrations
 ENV SQLITE_VEC_EXTENSION_PATH=/app/extensions/vec0.so
+ENV SCRIPT_RUNTIME_DIR=/app/scripts-runtime
+ENV TS_LIB_DIR=/app/typescript-lib
 
 VOLUME /app/data
 

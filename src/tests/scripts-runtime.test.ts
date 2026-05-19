@@ -148,4 +148,33 @@ describe("runScript", () => {
     expect(output.error).toBe("executor_error");
     expect(output.stderr).toContain("workspace-rw");
   });
+
+  test("SCRIPT_RUNTIME_DIR bundle path works (compiled binary mode regression)", async () => {
+    // Simulate compiled binary mode: pre-build bundles to a temp dir and set
+    // SCRIPT_RUNTIME_DIR so the executor uses them instead of import.meta.url paths.
+    const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
+    await Bun.$`mkdir -p ${tmpdir}`;
+    try {
+      const runtimeSrc = new URL("../scripts-runtime", import.meta.url).pathname;
+      await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
+      await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
+      await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();
+
+      process.env.SCRIPT_RUNTIME_DIR = tmpdir;
+
+      const output = await runScript({
+        agentId: "agent-1",
+        args: { x: 42 },
+        resources,
+        source: "export default async (args) => args.x * 2;",
+      });
+
+      expect(output.error).toBeUndefined();
+      expect(output.result).toBe(84);
+      expect(output.exitCode).toBe(0);
+    } finally {
+      delete process.env.SCRIPT_RUNTIME_DIR;
+      await Bun.$`rm -rf ${tmpdir}`;
+    }
+  });
 });

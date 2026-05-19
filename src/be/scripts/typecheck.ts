@@ -136,6 +136,14 @@ function createCompilerHost(
       return ts.resolveModuleName(moduleName, containingFile, options, host).resolvedModule;
     });
 
+  // In compiled binary mode, TypeScript's lib .d.ts files live alongside
+  // typescript.js in /$bunfs/ — but .d.ts files are not embedded in the binary.
+  // Redirect lib lookups to TS_LIB_DIR where the Dockerfile copies real copies.
+  const tsLibDir = process.env.TS_LIB_DIR;
+  if (tsLibDir) {
+    host.getDefaultLibLocation = () => tsLibDir;
+  }
+
   return host;
 }
 
