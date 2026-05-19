@@ -177,4 +177,60 @@ describe("runScript", () => {
       await Bun.$`rm -rf ${tmpdir}`;
     }
   });
+
+  test("args arrives as a parsed object, not a JSON string", async () => {
+    // Regression: eval-harness must deliver a parsed object to user code even
+    // when the caller serializes args as a JSON string (double-serialization).
+    // Before the fix, property access like args.foo would always be undefined.
+    const output = await runScript({
+      agentId: "agent-1",
+      args: { foo: "bar" },
+      resources,
+      source: `
+        export default async (args) => {
+          if (typeof args !== "object" || args === null) throw new Error("args is not an object: " + typeof args);
+          if (args.foo !== "bar") throw new Error("args.foo expected 'bar', got: " + args.foo);
+          return { ok: true, foo: args.foo };
+        };
+      `,
+    });
+
+    expect(output.error).toBeUndefined();
+    expect(output.result).toEqual({ ok: true, foo: "bar" });
+    expect(output.exitCode).toBe(0);
+  });
+
+  test("args parsed correctly in compiled binary mode (SCRIPT_RUNTIME_DIR)", async () => {
+    // Same regression exercised through the compiled-binary (SCRIPT_RUNTIME_DIR) code path.
+    const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
+    await Bun.$`mkdir -p ${tmpdir}`;
+    try {
+      const runtimeSrc = new URL("../scripts-runtime", import.meta.url).pathname;
+      await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
+      await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
+      await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();
+
+      process.env.SCRIPT_RUNTIME_DIR = tmpdir;
+
+      const output = await runScript({
+        agentId: "agent-1",
+        args: { foo: "bar" },
+        resources,
+        source: `
+          export default async (args) => {
+            if (typeof args !== "object" || args === null) throw new Error("args is not an object: " + typeof args);
+            if (args.foo !== "bar") throw new Error("args.foo expected 'bar', got: " + args.foo);
+            return { ok: true, foo: args.foo };
+          };
+        `,
+      });
+
+      expect(output.error).toBeUndefined();
+      expect(output.result).toEqual({ ok: true, foo: "bar" });
+      expect(output.exitCode).toBe(0);
+    } finally {
+      delete process.env.SCRIPT_RUNTIME_DIR;
+      await Bun.$`rm -rf ${tmpdir}`;
+    }
+  });
 });

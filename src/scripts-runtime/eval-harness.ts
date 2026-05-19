@@ -17,7 +17,9 @@ try {
 
   const payload = JSON.parse(stdin) as SwarmConfigPayload;
   const swarmConfig = new SwarmConfig(payload);
-  const args = JSON.parse(await Bun.file(requiredEnv("SWARM_SCRIPT_ARGS_FILE")).text());
+  const rawArgs = JSON.parse(await Bun.file(requiredEnv("SWARM_SCRIPT_ARGS_FILE")).text());
+  // Accept both shapes: callers may pass an already-serialized JSON string.
+  const parsedArgs = typeof rawArgs === "string" ? JSON.parse(rawArgs) : rawArgs;
   const ctx = buildCtx({ swarmConfig });
 
   const sourceText = await Bun.file(requiredEnv("SWARM_SCRIPT_SOURCE_FILE")).text();
@@ -29,7 +31,7 @@ try {
     throw new Error("Swarm script must export a default function");
   }
 
-  const result = await mod.default(args, ctx);
+  const result = await mod.default(parsedArgs, ctx);
   await Bun.write(requiredEnv("SWARM_SCRIPT_RESULT_FILE"), JSON.stringify(result ?? null));
 } catch (error) {
   console.error(error instanceof Error ? error.stack || error.message : String(error));
