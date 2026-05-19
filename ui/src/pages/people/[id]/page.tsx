@@ -1,9 +1,9 @@
-import { ArrowLeft, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, ChevronDown, Plus, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { useUpdateUser, useUser, useUserEvents } from "@/api/hooks/use-users";
-import type { IdentityEvent, User } from "@/api/types";
+import { useUpdateUser, useUser } from "@/api/hooks/use-users";
+import type { User } from "@/api/types";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,14 +33,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -48,7 +40,8 @@ import { formatRelative } from "@/lib/relative-time";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { IdentitiesTable } from "../identities-table";
 import { getIntegrationLabel, IntegrationIcon } from "../integration-icons";
-import { BudgetBadge, EventIcon, UserStatusPill } from "../user-status";
+import { BudgetBadge, UserStatusPill } from "../user-status";
+import { EventsTable } from "./events-table";
 
 const STATUS_OPTIONS: Array<User["status"]> = ["invited", "active", "suspended"];
 const ROLE_PRESETS: Array<{ value: string; label: string }> = [
@@ -76,6 +69,13 @@ const TZ_DATALIST = [
   "Australia/Sydney",
   "UTC",
 ];
+
+/** Active tab values surfaced in `?tab=`. Unknown values fall back to "profile". */
+type TabValue = "profile" | "identities" | "events";
+const TAB_VALUES = new Set<TabValue>(["profile", "identities", "events"]);
+function coerceTab(raw: string | null): TabValue {
+  return raw && (TAB_VALUES as Set<string>).has(raw) ? (raw as TabValue) : "profile";
+}
 
 interface ProfileDraft {
   name: string;
@@ -282,7 +282,8 @@ function ProfileCard({ user }: { user: User }) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4">
-          {/* LEFT COLUMN */}
+          {/* LEFT COLUMN — identity, role, aliases. Notes moved to the
+              full-width row below so its textarea can actually breathe. */}
           <div className="space-y-4">
             <Field label="Name" htmlFor="f-name" required>
               <Input
@@ -369,23 +370,9 @@ function ProfileCard({ user }: { user: User }) {
                 </div>
               </div>
             </Field>
-
-            <Field
-              label="Notes"
-              htmlFor="f-notes"
-              helper="Free-form operator notes. Not shown to the user."
-            >
-              <Textarea
-                id="f-notes"
-                value={draft.notes}
-                onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
-                placeholder="On parental leave through June. Reach out via Slack DM, not email."
-                className="min-h-[88px] text-sm"
-              />
-            </Field>
           </div>
 
-          {/* RIGHT COLUMN */}
+          {/* RIGHT COLUMN — operational settings (status / budget / channel / tz). */}
           <div className="space-y-4">
             <Field label="Status" htmlFor="f-status">
               <Select
@@ -485,6 +472,23 @@ function ProfileCard({ user }: { user: User }) {
           </div>
         </div>
 
+        {/* Full-width Notes row — pulled out of the left column so the
+            textarea is wide enough to be useful. Min height covers ~5 lines;
+            the textarea grows on user-resize and content overflow. */}
+        <Field
+          label="Notes"
+          htmlFor="f-notes"
+          helper="Free-form operator notes. Not shown to the user."
+        >
+          <Textarea
+            id="f-notes"
+            value={draft.notes}
+            onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+            placeholder="On parental leave through June. Reach out via Slack DM, not email."
+            className="min-h-[120px] text-sm resize-y"
+          />
+        </Field>
+
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/40">
           {error && <span className="text-xs text-status-error-strong mr-auto">{error}</span>}
           <Button variant="outline" size="sm" onClick={reset} disabled={!hasChanges}>
@@ -528,235 +532,33 @@ function Field({
   );
 }
 
-/* ── Events table ─────────────────────────────────────────────────────────── */
-
-function formatActor(actor: string): { short: string; full: string } {
-  if (actor.startsWith("op:")) {
-    return { short: "Operator", full: actor };
-  }
-  if (actor.startsWith("system:")) {
-    const tail = actor.slice("system:".length);
-    return { short: tail || "System", full: actor };
-  }
-  if (actor.startsWith("user:")) {
-    return { short: "User", full: actor };
-  }
-  return { short: actor.length > 18 ? `${actor.slice(0, 16)}…` : actor, full: actor };
-}
-
-/**
- * Compact one-line diff describing what changed. Tries hard to pick a
- * humane representation per event type. Falls back to "Updated" when shape
- * is unrecognized — the expanded row still shows the full JSON.
- */
-function describeEvent(e: IdentityEvent): React.ReactNode {
-  const before = e.before as Record<string, unknown> | null;
-  const after = e.after as Record<string, unknown> | null;
-
-  if (e.eventType === "identity_added" && after && "kind" in after) {
-    return (
-      <>
-        <span className="text-status-success-strong">+ identity</span>{" "}
-        <span className="font-mono text-xs">
-          {String(after.kind)}/{String(after.externalId)}
-        </span>
-      </>
-    );
-  }
-  if (e.eventType === "identity_removed" && before && "kind" in before) {
-    return (
-      <>
-        <span className="text-status-error-strong">− identity</span>{" "}
-        <span className="font-mono text-xs">
-          {String(before.kind)}/{String(before.externalId)}
-        </span>
-      </>
-    );
-  }
-  if (e.eventType === "email_added" && after && "email" in after) {
-    return (
-      <>
-        <span className="text-status-success-strong">+ alias</span>{" "}
-        <span className="font-mono text-xs">{String(after.email)}</span>
-      </>
-    );
-  }
-  if (e.eventType === "email_removed" && before && "email" in before) {
-    return (
-      <>
-        <span className="text-status-error-strong">− alias</span>{" "}
-        <span className="font-mono text-xs">{String(before.email)}</span>
-      </>
-    );
-  }
-  if (e.eventType === "budget_changed") {
-    const b = before && "dailyBudgetUsd" in before ? before.dailyBudgetUsd : null;
-    const a = after && "dailyBudgetUsd" in after ? after.dailyBudgetUsd : null;
-    return (
-      <span className="font-mono text-xs">
-        budget: {b == null ? "∞" : `$${Number(b).toFixed(2)}`} →{" "}
-        {a == null ? "∞" : `$${Number(a).toFixed(2)}`}
-      </span>
-    );
-  }
-  if (e.eventType === "status_changed") {
-    return (
-      <span className="font-mono text-xs">
-        status: {String(before?.status ?? "?")} → {String(after?.status ?? "?")}
-      </span>
-    );
-  }
-  if (e.eventType === "profile_changed") {
-    // Use the single field that differs.
-    const beforeKeys = before ? Object.keys(before) : [];
-    const afterKeys = after ? Object.keys(after) : [];
-    const field = beforeKeys[0] ?? afterKeys[0];
-    if (field) {
-      const b = before?.[field];
-      const a = after?.[field];
-      return (
-        <span className="font-mono text-xs">
-          {field}: <span className="text-muted-foreground">{stringifyShort(b)}</span> →{" "}
-          <span>{stringifyShort(a)}</span>
-        </span>
-      );
-    }
-  }
-  if (e.eventType === "manual_merge" || e.eventType === "auto_merge") {
-    return <span className="text-xs text-muted-foreground">Merged into this user</span>;
-  }
-  return <span className="text-xs text-muted-foreground">Updated</span>;
-}
-
-function stringifyShort(v: unknown): string {
-  if (v == null) return "—";
-  if (typeof v === "string") return v.length > 28 ? `${v.slice(0, 26)}…` : v;
-  try {
-    const s = JSON.stringify(v);
-    return s.length > 28 ? `${s.slice(0, 26)}…` : s;
-  } catch {
-    return String(v);
-  }
-}
-
-function EventsTable({ userId }: { userId: string }) {
-  const { data: events, isLoading } = useUserEvents(userId, { limit: 100 });
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-
-  if (isLoading) return <p className="text-sm text-muted-foreground py-6">Loading events…</p>;
-  if (!events || events.length === 0)
-    return (
-      <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-        No identity events yet — every mutation to this user lands here.
-      </div>
-    );
-
-  function toggle(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  return (
-    <div className="rounded-md border border-border bg-card">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-[120px]">Time</TableHead>
-            <TableHead className="w-[180px]">Event</TableHead>
-            <TableHead className="w-[140px]">Actor</TableHead>
-            <TableHead>Change</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {events.map((e) => {
-            const isOpen = expanded.has(e.id);
-            const actor = formatActor(e.actor);
-            return (
-              <Fragment key={e.id}>
-                <TableRow
-                  className="cursor-pointer"
-                  onClick={() => toggle(e.id)}
-                  data-state={isOpen ? "selected" : undefined}
-                >
-                  <TableCell>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="text-xs text-muted-foreground">
-                          {formatRelative(e.createdAt)}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent className="font-mono text-[10px]">
-                        {e.createdAt}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      {isOpen ? (
-                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                      )}
-                      <EventIcon eventType={e.eventType} />
-                      <span className="text-sm capitalize">{e.eventType.replaceAll("_", " ")}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="text-xs text-foreground/80">{actor.short}</span>
-                      </TooltipTrigger>
-                      <TooltipContent className="font-mono text-[10px]">
-                        {actor.full}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell>{describeEvent(e)}</TableCell>
-                </TableRow>
-                {isOpen && (
-                  <TableRow className="bg-muted/30 hover:bg-muted/30">
-                    <TableCell colSpan={4} className="p-0">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3">
-                        <div>
-                          <div className="text-[10px] uppercase text-muted-foreground mb-1">
-                            Before
-                          </div>
-                          <pre className="font-mono text-[10px] leading-relaxed bg-background p-2 rounded border border-border/40 overflow-auto max-h-48">
-                            {e.before === null ? "—" : JSON.stringify(e.before, null, 2)}
-                          </pre>
-                        </div>
-                        <div>
-                          <div className="text-[10px] uppercase text-muted-foreground mb-1">
-                            After
-                          </div>
-                          <pre className="font-mono text-[10px] leading-relaxed bg-background p-2 rounded border border-border/40 overflow-auto max-h-48">
-                            {e.after === null ? "—" : JSON.stringify(e.after, null, 2)}
-                          </pre>
-                        </div>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </Fragment>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
-
 /* ── Page ─────────────────────────────────────────────────────────────────── */
 
 export default function PersonDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: user, isLoading, error } = useUser(id);
-  const [tab, setTab] = useState("profile");
+
+  // Tabs are URL-driven (`?tab=profile|identities|events`) so deep-linking,
+  // refresh, and shared screenshots all land on the right tab. Mirrors the
+  // `?q=` pattern from the People list page (`replace: true` so back-button
+  // pops out to `/people`, not through every tab switch).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = coerceTab(searchParams.get("tab"));
+  const setTab = useCallback(
+    (next: string) => {
+      setSearchParams(
+        (current) => {
+          const out = new URLSearchParams(current);
+          if (next === "profile") out.delete("tab");
+          else out.set("tab", next);
+          return out;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const identitiesCount = useMemo(() => user?.identities?.length ?? 0, [user]);
   const aliasesCount = useMemo(() => user?.emailAliases?.length ?? 0, [user]);
