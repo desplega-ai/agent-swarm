@@ -1,5 +1,5 @@
 import type { ColDef } from "ag-grid-community";
-import { Copy, LinkIcon, Search, UserPlus } from "lucide-react";
+import { Check, ChevronsUpDown, Copy, Filter, LinkIcon, Search, UserPlus } from "lucide-react";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useResolveUnmapped, useUnmapped } from "@/api/hooks/use-users";
@@ -8,10 +8,20 @@ import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { IdentityBadge } from "../identity-badges";
+import { IntegrationIcon } from "../integration-icons";
 import { LinkToExistingDialog } from "./link-to-existing-dialog";
 import { ResolveCreateDialog } from "./resolve-create-dialog";
 
@@ -59,6 +69,7 @@ function unmappedMatches(row: UnmappedIdentity, query: string): boolean {
 
 export function UnmappedTab() {
   const [kind, setKind] = useState<KindFilter>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
   const { data, isLoading } = useUnmapped({ kind: kind === "all" ? undefined : kind });
   const resolve = useResolveUnmapped();
 
@@ -222,11 +233,13 @@ export function UnmappedTab() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
-      {/* Toolbar: search on the left, kind-filter chips on the right. Both
-          stay outside the scrollable region so they remain visible while the
-          table scrolls internally. */}
-      <div className="flex flex-wrap items-center gap-3 shrink-0">
-        <div className="relative flex-1 max-w-md min-w-[200px]">
+      {/* Toolbar: search left (flex-1), kind-filter dropdown right. Single
+          row — the filter is a Popover+Command combobox so it scales as we
+          add new identity kinds (mirrors the user-picker pattern from
+          merge-modal.tsx). Toolbar stays outside the scrollable region so it
+          remains visible while the table scrolls internally. */}
+      <div className="flex items-center gap-2 shrink-0">
+        <div className="relative flex-1 min-w-0">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             value={query}
@@ -242,19 +255,65 @@ export function UnmappedTab() {
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 ml-auto">
-          <span className="text-xs text-muted-foreground mr-1">Filter:</span>
-          {KIND_FILTERS.map((k) => (
+        <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+          <PopoverTrigger asChild>
             <Button
-              key={k}
+              variant="outline"
               size="sm"
-              variant={kind === k ? "default" : "outline"}
-              onClick={() => setKind(k)}
+              role="combobox"
+              aria-expanded={filterOpen}
+              className="h-9 w-[180px] justify-between font-normal"
             >
-              {KIND_LABEL[k]}
+              <span className="flex items-center gap-1.5 min-w-0">
+                {kind === "all" ? (
+                  <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                ) : (
+                  <IntegrationIcon
+                    kind={kind}
+                    className="h-3.5 w-3.5 text-foreground/70 shrink-0"
+                  />
+                )}
+                <span className="text-muted-foreground shrink-0">Filter:</span>
+                <span className="truncate text-foreground">{KIND_LABEL[kind]}</span>
+              </span>
+              <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
             </Button>
-          ))}
-        </div>
+          </PopoverTrigger>
+          <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="end">
+            <Command>
+              <CommandInput placeholder="Search kinds…" />
+              <CommandList>
+                <CommandEmpty>No kinds found.</CommandEmpty>
+                <CommandGroup>
+                  {KIND_FILTERS.map((k) => (
+                    <CommandItem
+                      key={k}
+                      value={KIND_LABEL[k]}
+                      onSelect={() => {
+                        setKind(k);
+                        setFilterOpen(false);
+                      }}
+                      className="gap-2"
+                    >
+                      <Check
+                        className={cn("h-4 w-4 shrink-0", kind === k ? "opacity-100" : "opacity-0")}
+                      />
+                      {k === "all" ? (
+                        <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      ) : (
+                        <IntegrationIcon
+                          kind={k}
+                          className="h-3.5 w-3.5 text-foreground/70 shrink-0"
+                        />
+                      )}
+                      <span>{KIND_LABEL[k]}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
       </div>
 
       {showEmpty ? (

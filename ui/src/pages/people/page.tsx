@@ -99,7 +99,7 @@ function PeopleTable({
         minWidth: 220,
         cellRenderer: (params: { data: User | undefined }) => {
           if (!params.data) return null;
-          return <IdentityBadgeList identities={params.data.identities} />;
+          return <IdentityBadgeList identities={params.data.identities} maxVisible={3} />;
         },
       },
       {
@@ -230,12 +230,14 @@ export default function PeoplePage() {
         }}
         className="flex flex-col flex-1 min-h-0"
       >
-        {/* Toolbar: People-tab search on the LEFT, tabs on the RIGHT in the
-            same row. Search only renders while the People tab is active —
-            the Unmapped tab owns its own search input. */}
+        {/* Toolbar: People-tab search on the LEFT, tabs pinned to the FAR
+            RIGHT via `ml-auto`. Search only renders while the People tab is
+            active — the Unmapped tab owns its own search input. `ml-auto` on
+            the tabs container guarantees right-alignment regardless of
+            whether the search input is present or what width it takes. */}
         <div className="flex items-center gap-3 shrink-0">
-          {tab === "people" ? (
-            <div className="relative flex-1 max-w-md">
+          {tab === "people" && (
+            <div className="relative flex-1 max-w-md min-w-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 value={query}
@@ -249,11 +251,9 @@ export default function PeoplePage() {
                 </div>
               )}
             </div>
-          ) : (
-            <div className="flex-1" />
           )}
 
-          <TabsList className="shrink-0">
+          <TabsList className="shrink-0 ml-auto">
             <TabsTrigger value="people">
               <Users className="h-3.5 w-3.5 mr-1.5" />
               People ({users?.length ?? 0})
