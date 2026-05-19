@@ -13,7 +13,7 @@ last_updated_by: Taras
 
 Land the full "humans-as-first-class-users" initiative as a **single bundled PR**. Normalize identity into `user_external_ids`, drop the four deprecated identity columns (`slackUserId` / `linearUserId` / `githubUsername` / `gitlabUsername`), introduce `src/be/users.ts` as the canonical API-server-side identity surface, rewire all 7 webhook handlers + MCP tools + HTTP API + types + UI to use it, and ship an operator People page with Unmapped tab.
 
-- **Motivation**: Daniel↔fuvidani identity-mapping footgun (brainstorm Triggering feedback). Pre-existing Linear bug — `src/linear/sync.ts` reads non-existent `event.actor` field, so Linear-originated tasks always have `requestedByUserId = undefined` (Q21.A). Tech-debt cleanup that also unblocks the MCP-token brainstorm (zero new tables on top).
+- **Motivation**: Alex↔alexdev identity-mapping footgun (brainstorm Triggering feedback) — two different people with similar-looking handles getting silently merged. Pre-existing Linear bug — `src/linear/sync.ts` reads non-existent `event.actor` field, so Linear-originated tasks always have `requestedByUserId = undefined` (Q21.A). Tech-debt cleanup that also unblocks the MCP-token brainstorm (zero new tables on top).
 - **Related**:
   - Brainstorm: `thoughts/taras/brainstorms/2026-05-18-humans-as-first-class-users.md` — §Key Decisions / Constraints / Core Requirements / Next Steps + Q17 research-folded findings are canonical.
   - Research: `thoughts/taras/research/2026-05-18-user-identity-refactor.md` — exhaustive call-site inventory (§1), `resolveUser` call-graph (§2), email-availability matrix (§3), Plan-time deliverables checklist.

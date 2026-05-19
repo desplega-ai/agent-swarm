@@ -60,7 +60,7 @@ Rewrite the two user-related MCP tools (`resolve-user`, `manage-user`) to the ne
 - `{slackUserId: "U_X"}` → `{kind: "slack", externalId: "U_X"}`
 - `{githubUsername: "alice"}` → `{kind: "github", externalId: "alice"}`
 - `{email: "x@y.com"}` → unchanged (email survives Q18).
-- `{name: "Daniel"}` → dropped; no replacement. Caller must provide kind+externalId or email.
+- `{name: "Alex"}` → dropped; no replacement. Caller must provide kind+externalId or email.
 
 #### 4. Docs — hand-edited
 

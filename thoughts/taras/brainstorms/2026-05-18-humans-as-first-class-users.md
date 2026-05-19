@@ -16,7 +16,7 @@ related: [[2026-05-15-client-side-mcp]]
 
 > **Related brainstorm — same UI surface:** The "People page" discussed here and the "Users page" in [[2026-05-15-client-side-mcp]] are **the same UI surface**. The MCP brainstorm has already specced the schema (`user_tokens`, `user_identity_events`, `users.dailyBudgetUsd`, `users.status`) and operator endpoints (`GET/POST/PATCH /users`, `POST /users/:id/mcp-tokens`, etc.) that this brainstorm needs as scaffolding. Goal: when the MCP plan lands, its migration is **zero new tables** (already there from this work), its DB helpers are **reused** (already there), and its operator UI is **additive** (token-mint dialog + token-list row) on an existing People page.
 
-**Triggering feedback:** Someone reported that the bot can't connect "Daniel (dashboard)" to "fuvidani (GitHub)" or "daniel (Linear)" to a GitHub handle. The feedback is partially accurate.
+**Triggering feedback:** Someone reported that the bot can't connect "Alex (dashboard)" to "alexdev (GitHub)" or "alex (Linear)" to a GitHub handle. The feedback is partially accurate.
 
 **What exists today** (verified via codebase investigation):
 
@@ -74,7 +74,7 @@ related: [[2026-05-15-client-side-mcp]]
 - Auto-linking becomes the **critical feature** — the operator's experience hinges on it being smart enough that they rarely manually wire identities.
 - v1 deliverables collapse to: (a) People page (CRUD), (b) auto-linking heuristics, (c) per-user controls surfaced.
 
-### Q4: Auto-merge by email — what should happen when Linear webhook with `email=daniel@acme.com` arrives and an existing row has same email but no `linearUserId`?
+### Q4: Auto-merge by email — what should happen when Linear webhook with `email=alex@acme.com` arrives and an existing row has same email but no `linearUserId`?
 
 **Answer:** **Auto-merge by email.** Atomically set the linearUserId on the existing row. No human confirmation needed.
 
@@ -226,7 +226,7 @@ ALTER TABLE users DROP COLUMN gitlabUsername;
 
 **Why:**
 
-- Q4 (auto-merge by email) intentionally skips human confirmation. That's a silent merge — and silent merges are exactly the kind of footgun where, six weeks later, someone asks "why is Daniel's GitHub now pointing at Sandra's row?" and there's no answer.
+- Q4 (auto-merge by email) intentionally skips human confirmation. That's a silent merge — and silent merges are exactly the kind of footgun where, six weeks later, someone asks "why is Alex's GitHub now pointing at Sandra's row?" and there's no answer.
 - The audit table from Q8 is cheap to write to. Skipping it on day one to "ship faster" is a false economy — the moment we need to debug a bad auto-link, we'd want this data and won't have it.
 - Identity-events should be the **only** path that ever mutates `user_external_ids` or core identity columns. If you can't observe it in `user_identity_events`, it didn't happen — a strong invariant that prevents drift.
 
@@ -331,7 +331,7 @@ type IdentityActor = { kind: 'system' | 'operator' | 'user'; id: string };
 **Argue-for (why ship it):**
 
 - The column is in the migration (Q8). Once it exists in the DB, the edit field + "Unlimited" badge in the UI is **trivial incremental work** — a number input and a conditional badge. Maybe 30 lines of TSX.
-- Operators get visibility into who has caps and who doesn't, even before enforcement lands. That visibility is itself useful — "huh, I never set a cap for Daniel" is a question that should be answerable today.
+- Operators get visibility into who has caps and who doesn't, even before enforcement lands. That visibility is itself useful — "huh, I never set a cap for Alex" is a question that should be answerable today.
 - The MCP brainstorm's enforcement wiring (Core Requirement #10) can land later without UI rework — it'll just start respecting a value the operator has already been setting.
 - Avoids the "decorative-then-functional" awkwardness later, where the UI suddenly grows a field tied to behaviour that didn't exist before. Better to have it visible from day one.
 - Setting the budget emits a `budget_changed` event (Q9). That's free audit value.
@@ -936,7 +936,7 @@ In rough dependency order — landing these unblocks the rest of both initiative
 
 1. **The unified migration** (Core Requirement #1) — `src/be/migrations/NNN_users_first_class.sql`. Single PR. Tested against a fresh DB and an existing DB. Includes the backfill into `user_external_ids`.
 2. **`src/be/users.ts`** (Core Requirement #2) — pure DB functions with unit tests. No HTTP changes yet, no webhook changes yet. This is the API surface everyone else will depend on.
-3. **Webhook auto-link refactor** (Core Requirement #3) — switch `src/github/handlers.ts`, `src/linear/sync.ts`, `src/slack/handlers.ts` to use `src/be/users.ts`. This is where auto-merge by email and identity-event emission actually start happening. **Highest user-visible value of the three** because it fixes the original Daniel↔fuvidani footgun even before the UI exists.
+3. **Webhook auto-link refactor** (Core Requirement #3) — switch `src/github/handlers.ts`, `src/linear/sync.ts`, `src/slack/handlers.ts` to use `src/be/users.ts`. This is where auto-merge by email and identity-event emission actually start happening. **Highest user-visible value of the three** because it fixes the original Alex↔alexdev footgun even before the UI exists.
 4. **Stub People page in `ui/`** — read-only list of users with their identity badges. No editing yet. Confirms the schema + read endpoint work end-to-end. Operator can already audit existing state.
 
 These four together would land the entire schema, give the auto-link improvement immediately, and prove the People-page shape with a low-risk read-only first cut. Everything else — the edit/mint/merge surfaces, the timeline view, the token endpoints — becomes additive.
