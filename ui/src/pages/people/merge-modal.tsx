@@ -406,7 +406,11 @@ function UserPicker({
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
         <Command>
           <CommandInput placeholder="Search by name or email…" />
-          <CommandList>
+          {/* Bound the list — UserRow renders two lines so the default
+              max-h fits ~5 entries; cap at 260px so the popover never
+              outgrows the dialog viewport, and keep overflow-y-auto so
+              the scrollbar is reachable when the directory grows. */}
+          <CommandList className="max-h-[260px] overflow-y-auto">
             <CommandEmpty>No users found.</CommandEmpty>
             <CommandGroup>
               {users
