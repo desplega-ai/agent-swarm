@@ -349,16 +349,11 @@ export async function handleWorkflows(
       return true;
     }
 
-    const signature =
-      (req.headers["x-hub-signature-256"] as string | undefined) ??
-      (req.headers["x-signature"] as string | undefined);
-
     try {
       const result = await handleWebhookTrigger(
         workflowId,
         rawBody, // Raw body string — used for HMAC verification + passed as triggerData
-        signature,
-        signature,
+        req.headers, // Full header bag — signature header resolved per trigger config
         getExecutorRegistry(),
       );
       json(res, result, 201);
