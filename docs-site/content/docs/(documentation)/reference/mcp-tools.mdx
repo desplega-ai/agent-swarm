@@ -829,7 +829,7 @@ Create, update, delete, or list user profiles in the user registry. Lead-only. I
 | `email` | string | No | Primary email address |
 | `role` | string | No | Role (e.g., "founder", "engineer") |
 | `notes` | string | No | Free-form notes |
-| `identities` | array\<{kind, externalId}\> | No | Declarative list of platform identities. On `create` every entry is linked; on `update` the diff is applied. |
+| `identities` | array\<\{kind, externalId}\> | No | Declarative list of platform identities. On `create` every entry is linked; on `update` the diff is applied. |
 | `emailAliases` | array\<string\> | No | Additional email addresses. Diff vs current emits `email_added` / `email_removed` events on update. |
 | `preferredChannel` | string | No | Preferred contact channel |
 | `timezone` | string | No | Timezone (e.g., America/New_York) |
