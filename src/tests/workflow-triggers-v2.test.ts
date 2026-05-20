@@ -388,6 +388,73 @@ describe("handleWebhookTrigger — hmacSecret references", () => {
   });
 });
 
+// ─── Trigger payload JSON parsing ───────────────────────────
+
+describe("handleWebhookTrigger — triggerData JSON parsing", () => {
+  function signRaw(secret: string, body: string): string {
+    return crypto.createHmac("sha256", secret).update(body).digest("hex");
+  }
+
+  test("JSON body is parsed and run.triggerData is a deep-equal object", async () => {
+    const workflow = makeWorkflow({ triggers: [{ type: "webhook" }] });
+    const payload = {
+      message: { from: "+34000111222", text: "hi" },
+      conversation: { id: "conv-abc-123" },
+    };
+    const body = JSON.stringify(payload);
+
+    const result = await handleWebhookTrigger(workflow.id, body, {}, registry);
+
+    const run = getWorkflowRun(result.runId);
+    expect(run).not.toBeNull();
+    expect(run!.triggerData).toEqual(payload);
+    // Deep paths must be reachable (this is what `{{trigger.message.from}}` needs).
+    expect((run!.triggerData as { message: { from: string } }).message.from).toBe("+34000111222");
+  });
+
+  test("signed JSON body: HMAC verified against raw bytes, triggerData parsed to object", async () => {
+    const secret = "kapso-deep-secret";
+    const workflow = makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret, hmacHeader: "X-Webhook-Signature" }],
+    });
+    // Use whitespace + unsorted keys so any re-serialization would change the bytes.
+    const body = '{ "message": {"from":"+1","text":"hi"},  "id":"x" }';
+    const sig = signRaw(secret, body);
+
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-webhook-signature": sig },
+      registry,
+    );
+
+    const run = getWorkflowRun(result.runId);
+    expect(run).not.toBeNull();
+    expect(run!.triggerData).toEqual({ message: { from: "+1", text: "hi" }, id: "x" });
+  });
+
+  test("non-JSON body falls back to the raw string and does not throw", async () => {
+    const workflow = makeWorkflow({ triggers: [{ type: "webhook" }] });
+    const body = "this is not json at all";
+
+    const result = await handleWebhookTrigger(workflow.id, body, {}, registry);
+
+    const run = getWorkflowRun(result.runId);
+    expect(run).not.toBeNull();
+    expect(run!.triggerData).toBe(body);
+  });
+
+  test("empty body produces a run without throwing", async () => {
+    const workflow = makeWorkflow({ triggers: [{ type: "webhook" }] });
+
+    const result = await handleWebhookTrigger(workflow.id, "", {}, registry);
+
+    expect(result.runId).toBeDefined();
+    const run = getWorkflowRun(result.runId);
+    expect(run).not.toBeNull();
+  });
+});
+
 // ─── Manual Trigger ─────────────────────────────────────────
 
 describe("manual trigger (startWorkflowExecution)", () => {

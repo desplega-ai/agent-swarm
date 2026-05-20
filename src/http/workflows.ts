@@ -341,18 +341,10 @@ export async function handleWorkflows(
     }
     const rawBody = Buffer.concat(chunks).toString();
 
-    // Validate JSON before processing (but pass raw string for HMAC)
-    try {
-      if (rawBody) JSON.parse(rawBody);
-    } catch {
-      jsonError(res, "Invalid JSON body", 400);
-      return true;
-    }
-
     try {
       const result = await handleWebhookTrigger(
         workflowId,
-        rawBody, // Raw body string — used for HMAC verification + passed as triggerData
+        rawBody, // Raw body string — HMAC is verified against raw bytes; JSON parsing happens inside
         req.headers, // Full header bag — signature header resolved per trigger config
         getExecutorRegistry(),
       );

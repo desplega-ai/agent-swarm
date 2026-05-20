@@ -61,8 +61,12 @@ function resolveHmacSecret(raw: string): string {
  *
  * 1. Loads the workflow and finds a webhook trigger in `triggers[]`
  * 2. If `hmacSecret` is set, resolves the signature header + secret and
- *    verifies the HMAC-SHA256 signature
- * 3. Starts the workflow execution with the webhook payload
+ *    verifies the HMAC-SHA256 signature against the raw body bytes
+ * 3. Parses the raw body as JSON (falling back to the raw string when the
+ *    body is non-JSON) so downstream `{{trigger.deep.path}}` interpolation
+ *    can traverse the object — matches the shape produced by the
+ *    `trigger-workflow` MCP tool.
+ * 4. Starts the workflow execution with the parsed payload
  */
 export async function handleWebhookTrigger(
   workflowId: string,
@@ -83,6 +87,8 @@ export async function handleWebhookTrigger(
   const webhookTrigger = workflow.triggers.find((t: TriggerConfig) => t.type === "webhook");
 
   // If the workflow has a webhook trigger with an hmacSecret, verify the signature
+  // against the RAW body bytes — re-serializing would change whitespace / key order
+  // and break the HMAC.
   if (webhookTrigger && webhookTrigger.type === "webhook" && webhookTrigger.hmacSecret) {
     const hmacHeader = webhookTrigger.hmacHeader || DEFAULT_HMAC_HEADER;
     const signature = resolveSignature(headers, hmacHeader);
@@ -102,8 +108,28 @@ export async function handleWebhookTrigger(
     }
   }
 
-  const runId = await startWorkflowExecution(workflow, payload, registry);
+  // Parse the raw body so downstream nodes can interpolate deep paths
+  // (e.g. `{{trigger.message.from}}`). A non-JSON body falls back to the raw
+  // string so non-JSON webhooks don't break.
+  const triggerData = parseTriggerPayload(payload);
+
+  const runId = await startWorkflowExecution(workflow, triggerData, registry);
   return { runId };
+}
+
+/**
+ * If `payload` is a JSON string, parse and return the resulting value;
+ * otherwise return it as-is. Empty / non-JSON strings fall back to the raw
+ * value so non-JSON webhooks (text/plain, form-encoded, etc.) still produce
+ * a usable workflow run.
+ */
+function parseTriggerPayload(payload: unknown): unknown {
+  if (typeof payload !== "string" || payload.length === 0) return payload;
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return payload;
+  }
 }
 
 /**
