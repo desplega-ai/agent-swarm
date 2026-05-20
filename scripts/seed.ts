@@ -1342,7 +1342,7 @@ function seedContextSnapshots(
 
   const updateTaskStmt = db.prepare(`
     UPDATE agent_tasks
-    SET compactionCount = ?, peakContextPercent = ?, totalContextTokensUsed = ?, contextWindowSize = ?
+    SET compactionCount = ?, peakContextPercent = ?, peakContextTokens = ?, contextWindowSize = ?
     WHERE id = ?
   `);
 

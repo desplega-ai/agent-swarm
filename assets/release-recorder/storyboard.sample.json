@@ -1,0 +1,27 @@
+{
+  "version": "1.80.0",
+  "summary": "Agent Swarm v1.80 — rate-limit resilience, workflow fixes, script sandboxing",
+  "beats": [
+    {
+      "title": "Create & track a task",
+      "prNumber": 504,
+      "prUrl": "https://github.com/desplega-ai/agent-swarm/pull/504",
+      "demo_script_id": "create-task",
+      "vo_line": "With agent swarm, spinning up a task is instant. Watch Forge pick it up and start working in real time."
+    },
+    {
+      "title": "Workflow run with structured output",
+      "prNumber": 501,
+      "prUrl": "https://github.com/desplega-ai/agent-swarm/pull/501",
+      "demo_script_id": "workflow-run",
+      "vo_line": "Workflows chain agent tasks into repeatable pipelines. Each node's output feeds the next — no glue code."
+    },
+    {
+      "title": "Scheduled automation",
+      "prNumber": null,
+      "prUrl": null,
+      "demo_script_id": "schedule",
+      "vo_line": "Schedules run your agents on a cron expression. Set it once, let it run every morning."
+    }
+  ]
+}
