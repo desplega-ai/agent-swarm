@@ -11,11 +11,17 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchInterval: 5000,
+      refetchIntervalInBackground: true,
       staleTime: 2000,
       retry: 2,
     },
   },
 });
+
+// Expose for demo recording (agent-browser eval can call window.__queryClient.invalidateQueries)
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__queryClient = queryClient;
+}
 
 function ConfigProvider({ children }: { children: ReactNode }) {
   const value = useConfigProvider();
