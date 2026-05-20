@@ -6,6 +6,38 @@ import {
   trackErrorFromJson,
 } from "../utils/error-tracker";
 
+describe("SessionErrorTracker — getRateLimitResetAt", () => {
+  test("returns undefined when no rate_limit_event was processed", () => {
+    const tracker = new SessionErrorTracker();
+    expect(tracker.getRateLimitResetAt()).toBeUndefined();
+  });
+
+  test("returns ISO string after a rejected rate_limit_event", () => {
+    const tracker = new SessionErrorTracker();
+    const futureResetsAtSec = Math.floor(Date.now() / 1000) + 3600;
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "rejected", resetsAt: futureResetsAtSec },
+    });
+    const result = tracker.getRateLimitResetAt();
+    expect(result).toBeDefined();
+    expect(() => new Date(result!).toISOString()).not.toThrow();
+  });
+
+  test("returns undefined after only allowed/allowed_warning events", () => {
+    const tracker = new SessionErrorTracker();
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", resetsAt: 1779202200 },
+    });
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed_warning", resetsAt: 1779202200 },
+    });
+    expect(tracker.getRateLimitResetAt()).toBeUndefined();
+  });
+});
+
 describe("SessionErrorTracker", () => {
   test("hasErrors returns false when no errors tracked", () => {
     const tracker = new SessionErrorTracker();
@@ -261,6 +293,18 @@ describe("trackErrorFromJson", () => {
   test("ignores unrelated event types", () => {
     const tracker = new SessionErrorTracker();
     trackErrorFromJson({ type: "content_block_delta", delta: {} }, tracker);
+    expect(tracker.hasErrors()).toBe(false);
+  });
+
+  test("rate_limit_event is not treated as an error signal", () => {
+    const tracker = new SessionErrorTracker();
+    trackErrorFromJson(
+      {
+        type: "rate_limit_event",
+        rate_limit_info: { status: "rejected", resetsAt: 1779202200 },
+      },
+      tracker,
+    );
     expect(tracker.hasErrors()).toBe(false);
   });
 });

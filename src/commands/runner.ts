@@ -2681,15 +2681,35 @@ async function checkCompletedProcesses(
           credentialInfo &&
           /rate.?limit|hit your limit|usage[ _-]?limit|too many requests/i.test(failureReason)
         ) {
-          // Try to extract reset time from the error message (e.g. "resets 3pm (UTC)")
-          const parsedResetTime = parseRateLimitResetTime(failureReason);
-          const defaultCooldownMs = 5 * 60 * 1000;
-          const rateLimitedUntil =
-            parsedResetTime ?? new Date(Date.now() + defaultCooldownMs).toISOString();
-          if (parsedResetTime) {
+          // Three-tier reset-time resolver (most to least precise):
+          // Tier 1: structured rate_limit_event from Claude CLI (resetsAt epoch sec)
+          // Tier 2: regex on the error message (e.g. "resets 3pm (UTC)")
+          // Tier 3: 5-min hard fallback — only when both structured and regex fail
+          // Tiers 1 & 2 are clamped to [now+60s, now+6h] at their source.
+          const clampResetTime = (isoString: string): string => {
+            const nowMs = Date.now();
+            const minMs = nowMs + 60_000;
+            const maxMs = nowMs + 6 * 60 * 60 * 1000;
+            const candidateMs = new Date(isoString).getTime();
+            return new Date(Math.min(Math.max(candidateMs, minMs), maxMs)).toISOString();
+          };
+
+          let rateLimitedUntil: string;
+          if (result.rateLimitResetAt) {
+            rateLimitedUntil = clampResetTime(result.rateLimitResetAt);
             console.log(
-              `[credentials] Parsed rate limit reset time from error: ${parsedResetTime}`,
+              `[credentials] Rate limit reset from rate_limit_event: ${rateLimitedUntil}`,
             );
+          } else {
+            const parsedResetTime = parseRateLimitResetTime(failureReason);
+            if (parsedResetTime) {
+              rateLimitedUntil = clampResetTime(parsedResetTime);
+              console.log(
+                `[credentials] Parsed rate limit reset time from error: ${rateLimitedUntil}`,
+              );
+            } else {
+              rateLimitedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+            }
           }
           reportKeyRateLimit(
             apiConfig.apiUrl,

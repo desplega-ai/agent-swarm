@@ -458,6 +458,7 @@ class ClaudeSession implements ProviderSession {
       cost: lastCost,
       isError: (exitCode ?? 1) !== 0,
       failureReason,
+      rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
     };
   }
 

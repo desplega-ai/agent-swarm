@@ -116,6 +116,14 @@ export interface ProviderResult {
   errorCategory?: string;
   /** Human-readable failure reason built from error tracking. */
   failureReason?: string;
+  /**
+   * ISO timestamp of the rate limit reset time, parsed from a structured
+   * `rate_limit_event` line in the Claude CLI stream. Only set by the Claude
+   * adapter when a `status: "rejected"` event is present. Already clamped to
+   * [now+60s, now+6h] at the source. The runner uses this as tier-1 of the
+   * three-tier cooldown resolver.
+   */
+  rateLimitResetAt?: string;
 }
 
 /** Behavioral traits that govern prompt assembly and feature gating. */

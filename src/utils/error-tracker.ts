@@ -10,8 +10,21 @@ export interface ErrorSignal {
   timestamp: string;
 }
 
+/**
+ * Clamps a candidate reset timestamp (ms) to [now+60s, now+6h].
+ * Protects against past timestamps (clock skew) and absurdly far future values (malformed).
+ */
+function clampRateLimitResetMs(candidateMs: number): number {
+  const nowMs = Date.now();
+  const minMs = nowMs + 60_000;
+  const maxMs = nowMs + 6 * 60 * 60 * 1000;
+  return Math.min(Math.max(candidateMs, minMs), maxMs);
+}
+
 export class SessionErrorTracker {
   private errors: ErrorSignal[] = [];
+  /** Stashed reset time (ms) from the last rejected rate_limit_event in this session. */
+  private rateLimitResetAtMs: number | undefined;
 
   /** Record an error from an assistant message with message.error field */
   addApiError(errorCategory: string, message: string): void {
@@ -51,6 +64,45 @@ export class SessionErrorTracker {
       message,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Process a parsed rate_limit_event JSON object from the Claude CLI stream.
+   * Only stashes the reset time when status === "rejected"; ignores all others.
+   * Last call wins — if the CLI emits multiple events, the final rejected one is used.
+   *
+   * `resetsAt` is **seconds** since epoch (empirically verified; Linear description is wrong).
+   * Conversion to ms happens here at this single well-named boundary.
+   */
+  processRateLimitEvent(json: Record<string, unknown>): void {
+    try {
+      const info = json.rate_limit_info as Record<string, unknown> | undefined;
+      if (!info) return;
+
+      if (info.status !== "rejected") return;
+
+      const resetsAtSec = info.resetsAt;
+      if (typeof resetsAtSec !== "number" || !Number.isFinite(resetsAtSec) || resetsAtSec <= 0) {
+        console.warn(
+          `[rate_limit_event] Malformed resetsAt value: ${JSON.stringify(resetsAtSec)} — ignoring`,
+        );
+        return;
+      }
+
+      const resetsAtMs = resetsAtSec * 1000;
+      this.rateLimitResetAtMs = clampRateLimitResetMs(resetsAtMs);
+    } catch (err) {
+      console.warn(`[rate_limit_event] Failed to process event: ${err}`);
+    }
+  }
+
+  /**
+   * Returns the stashed rate limit reset time as an ISO string, or undefined
+   * if no rejected rate_limit_event was seen in this session.
+   */
+  getRateLimitResetAt(): string | undefined {
+    if (this.rateLimitResetAtMs === undefined) return undefined;
+    return new Date(this.rateLimitResetAtMs).toISOString();
   }
 
   hasErrors(): boolean {
@@ -137,6 +189,12 @@ export function trackErrorFromJson(
   json: Record<string, unknown>,
   tracker: SessionErrorTracker,
 ): void {
+  // 0. Structured rate limit event — stash resetsAt for the three-tier resolver in runner.ts
+  if (json.type === "rate_limit_event") {
+    tracker.processRateLimitEvent(json);
+    return;
+  }
+
   // 1. Assistant messages with API errors (rate_limit, auth, billing, etc.)
   if (json.type === "assistant") {
     const message = json.message as Record<string, unknown> | undefined;
