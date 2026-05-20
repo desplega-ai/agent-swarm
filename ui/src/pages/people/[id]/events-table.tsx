@@ -283,8 +283,12 @@ function renderChange(e: IdentityEvent): ChangeRendering {
   }
   if (e.eventType === "manual_merge" || e.eventType === "auto_merge") {
     // Merge payloads are heterogeneous — best-effort surface a source name if
-    // it's present. Falls back to a generic "Merged into this user".
+    // it's present. `manual_merge` events carry the deleted source user under
+    // `after.source` ({id, name, email}); older events / `auto_merge` may only
+    // have a loose `sourceUserId`/`mergedFrom`. Falls back gracefully.
+    const source = after?.source as { name?: string; id?: string } | undefined;
     const from =
+      (source && (source.name ?? source.id)) ??
       (before && (before.name ?? before.id ?? before.sourceUserId)) ??
       (after && (after.sourceUserId ?? after.mergedFrom));
     const to = after && (after.name ?? after.id);

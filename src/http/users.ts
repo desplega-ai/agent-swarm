@@ -411,10 +411,11 @@ export async function handleUsers(
     const actor = getOperatorActor(req, res);
     if (!actor) return true;
 
-    const { kind } = parsed.params;
     // Path params arrive URL-encoded — decode so externalIds with `@`, `+`, `:`
-    // etc. (AgentMail email-as-externalId, "@handle" Linear usernames) land
-    // both in user_external_ids and kv-delete with their real value.
+    // etc. (AgentMail email-as-externalId, "@handle" Linear usernames) AND
+    // custom kinds containing `;`, `@`, `+` land both in user_external_ids and
+    // kv-delete with their real value.
+    const kind = decodeURIComponent(parsed.params.kind);
     const externalId = decodeURIComponent(parsed.params.externalId);
     try {
       let targetUserId: string;
@@ -489,9 +490,11 @@ export async function handleUsers(
     }
     try {
       // Path params arrive URL-encoded — decode so a stored `@handle` /
-      // email-as-externalId can actually be unlinked from the UI.
+      // email-as-externalId AND a custom kind with `;`, `@`, `+` can actually
+      // be unlinked from the UI.
+      const kind = decodeURIComponent(parsed.params.kind);
       const externalId = decodeURIComponent(parsed.params.externalId);
-      unlinkIdentity(parsed.params.id, parsed.params.kind, externalId, actor);
+      unlinkIdentity(parsed.params.id, kind, externalId, actor);
       json(res, { identities: getUserIdentities(parsed.params.id) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to unlink identity", 500);
@@ -562,8 +565,18 @@ export async function handleUsers(
       deleteUser(sourceId);
 
       // Single manual_merge event on target capturing the before/after rows.
+      // The source row is deleted above, so carry a minimal snapshot of the
+      // source user ({id, name, email}) inside the `after` payload under
+      // `source` — this lets the UI render "Merged manually from X → Y".
       const targetAfter = composeUser(targetId);
-      recordIdentityEvent(targetId, "manual_merge", actor, targetBefore, targetAfter);
+      recordIdentityEvent(targetId, "manual_merge", actor, targetBefore, {
+        ...targetAfter,
+        source: {
+          id: sourceBefore.id,
+          name: sourceBefore.name,
+          email: sourceBefore.email,
+        },
+      });
 
       // Re-compose AFTER the event so the response surfaces the merge event in
       // recentEvents (otherwise the timeline is missing the event we just wrote).

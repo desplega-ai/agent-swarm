@@ -491,6 +491,45 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
     };
     expect(listBody.unmapped.some((u) => u.externalId === literal)).toBe(false);
   });
+
+  test("URL-encoded kind is decoded — identity stored decoded, kv rows clear", async () => {
+    // A custom integration kind containing a URL-reserved char (`;`). The
+    // webhook writes the kv namespace with the literal kind; the path param
+    // arrives URL-encoded. The handler must decode `kind` before linking AND
+    // before computing the kv namespace for the two deletes.
+    const literalKind = "custom;crm";
+    const ns = `integration:unmapped:${literalKind}`;
+    const externalId = "CRM_42";
+    upsertKv({
+      namespace: ns,
+      key: `${externalId}:meta`,
+      value: { lastSeenAt: "2026-05-19T00:00:00Z", sampleEventType: "lead" },
+      valueType: "json",
+    });
+    upsertKv({ namespace: ns, key: `${externalId}:count`, value: 4, valueType: "integer" });
+
+    const r = await authedFetch(
+      `/api/users/unmapped/${encodeURIComponent(literalKind)}/${externalId}/resolve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ name: "CRM User", email: "crm@example.com" }),
+      },
+    );
+    expect(r.status).toBe(200);
+    const { user } = (await r.json()) as {
+      user: { identities: Array<{ kind: string; externalId: string }> };
+    };
+    // Identity stored with the DECODED kind (bug stored `custom%3Bcrm`).
+    expect(user.identities).toContainEqual({ kind: literalKind, externalId });
+
+    // Kv rows cleared — the bug computed `integration:unmapped:custom%3Bcrm`
+    // so the literal-namespace rows were never deleted.
+    const listR = await authedFetch(`/api/users/unmapped?kind=${encodeURIComponent(literalKind)}`);
+    const listBody = (await listR.json()) as {
+      unmapped: Array<{ externalId: string }>;
+    };
+    expect(listBody.unmapped.some((u) => u.externalId === externalId)).toBe(false);
+  });
 });
 
 describe("POST /api/users/:id/merge", () => {
@@ -527,6 +566,32 @@ describe("POST /api/users/:id/merge", () => {
     // Source user is gone.
     const sourceR = await authedFetch(`/api/users/${source.id}`);
     expect(sourceR.status).toBe(404);
+  });
+
+  test("manual_merge event payload carries the source user's id/name", async () => {
+    const target = createUser({ name: "MergeTarget", email: "mt@x.com" });
+    const source = createUser({ name: "MergeSource", email: "ms@x.com" });
+
+    const r = await authedFetch(`/api/users/${target.id}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ sourceUserId: source.id }),
+    });
+    expect(r.status).toBe(200);
+    const { user } = (await r.json()) as {
+      user: {
+        recentEvents: Array<{
+          eventType: string;
+          after: { source?: { id?: string; name?: string; email?: string } } | null;
+        }>;
+      };
+    };
+    const mergeEvent = user.recentEvents.find((e) => e.eventType === "manual_merge");
+    expect(mergeEvent).toBeDefined();
+    // The deleted source user is snapshotted under `after.source` so the UI
+    // can render "Merged manually from <source> → <target>".
+    expect(mergeEvent!.after?.source?.id).toBe(source.id);
+    expect(mergeEvent!.after?.source?.name).toBe("MergeSource");
+    expect(mergeEvent!.after?.source?.email).toBe("ms@x.com");
   });
 
   test("400 when target == source", async () => {
