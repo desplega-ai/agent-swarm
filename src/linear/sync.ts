@@ -1,4 +1,4 @@
-import { cancelTask, getAllAgents, getTaskById, resolveUser } from "../be/db";
+import { cancelTask, getAllAgents, getKv, getTaskById, incrKv, upsertKv } from "../be/db";
 import { getOAuthTokens } from "../be/db-queries/oauth";
 import {
   createTrackerSync,
@@ -6,6 +6,7 @@ import {
   getTrackerSyncByExternalId,
   updateTrackerSync,
 } from "../be/db-queries/tracker";
+import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { ensureToken } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { linearContextKey } from "../tasks/context-key";
@@ -343,6 +344,100 @@ function findLeadAgent() {
   return agents.find((a) => a.isLead) ?? null;
 }
 
+// ─── Identity resolution (Q21.A / Q21.C / Q17.B) ──────────────────────────
+//
+// Linear app config is currently agent-session-events-only — only
+// AgentSessionEvent.created/prompted arrive. If subscriptions widen to
+// Issue/Comment events later, handle system-actor case (per Q21.B / Q22).
+// Identity primitives in src/be/users.ts are event-type-agnostic; only the
+// extraction shape changes.
+
+const UNMAPPED_NAMESPACE = "integration:unmapped:linear";
+const UNMAPPED_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const LINEAR_WEBHOOK_ACTOR = { kind: "system", id: "webhook:linear" } as const;
+
+/** kv namespace for the Linear bot's appUserId (Q21.C). Keyed by workspace ID. */
+const APP_USER_ID_NAMESPACE = "integration:linear:bot-app-user-id";
+
+/**
+ * Read the bot's persisted appUserId for the given workspace (or the default
+ * slot). Returns null when not yet captured (early OAuth installs).
+ */
+function getStoredAppUserId(workspaceId: string | null): string | null {
+  const key = workspaceId && workspaceId !== "" ? workspaceId : "default";
+  const entry = getKv(APP_USER_ID_NAMESPACE, key);
+  if (!entry) return null;
+  return typeof entry.value === "string" ? entry.value : null;
+}
+
+/**
+ * Cascade per Q17.B:
+ *   1. `findUserByExternalId('linear', linearUserId)` (fast path).
+ *   2. On miss + email present → `findOrCreateUserByEmail(email, {name})` then
+ *      `linkIdentity(...)`.
+ *   3. Else record unmapped kv entries for operator triage.
+ *
+ * Q21.C bot-self-link guard: if `linearUserId === storedAppUserId` (the swarm
+ * hearing itself), short-circuit — no users row, no unmapped entry.
+ *
+ * Returns `undefined` when no mapping could be established — callers pass
+ * that straight to `requestedByUserId`.
+ */
+function resolveLinearActor(
+  linearUserId: string,
+  email: string,
+  name: string,
+  workspaceId: string | null,
+  sampleEventType: string,
+  sampleContext: string | null,
+): string | undefined {
+  if (!linearUserId) {
+    // No identifier — nothing to map. We don't even know what to track as
+    // unmapped, so just return undefined.
+    return undefined;
+  }
+
+  // Q21.C bot-self-link guard.
+  const storedAppUserId = getStoredAppUserId(workspaceId);
+  if (storedAppUserId && linearUserId === storedAppUserId) {
+    return undefined;
+  }
+  if (!storedAppUserId) {
+    // Non-fatal: log once per call. Real guard re-engages after the next
+    // OAuth refresh or admin capture step persists the appUserId.
+    console.warn("[linear] appUserId not yet stored; bot-self-link guard disabled");
+  }
+
+  const existing = findUserByExternalId("linear", linearUserId);
+  if (existing) return existing.id;
+
+  const trimmedEmail = typeof email === "string" ? email.trim() : "";
+  if (trimmedEmail !== "") {
+    const { user: linked } = findOrCreateUserByEmail(
+      trimmedEmail,
+      { name: name?.trim() || undefined },
+      LINEAR_WEBHOOK_ACTOR,
+    );
+    linkIdentity(linked.id, "linear", linearUserId, LINEAR_WEBHOOK_ACTOR);
+    return linked.id;
+  }
+
+  // No mapping + no inline email → unmapped tracker (Q14/Q17.D).
+  upsertKv({
+    namespace: UNMAPPED_NAMESPACE,
+    key: `${linearUserId}:meta`,
+    value: {
+      lastSeenAt: new Date().toISOString(),
+      sampleEventType,
+      sampleContext: sampleContext ? sampleContext.slice(0, 100) : null,
+    },
+    valueType: "json",
+    expiresAt: Date.now() + UNMAPPED_TTL_MS,
+  });
+  incrKv(UNMAPPED_NAMESPACE, `${linearUserId}:count`, 1);
+  return undefined;
+}
+
 /**
  * Handle AgentSession events from Linear.
  * These are fired when an issue is assigned to the Linear agent integration,
@@ -375,16 +470,26 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     return;
   }
 
-  // Extract actor identity from Linear webhook payload
-  const actor = event.actor as Record<string, unknown> | undefined;
-  const actorLinearId = actor ? String(actor.id ?? "") : "";
-  const actorName = actor ? String(actor.name ?? "") : "";
-  const actorEmail = actor ? String(actor.email ?? "") : "";
-  const requestedByUserId = resolveUser({
-    linearUserId: actorLinearId || undefined,
-    email: actorEmail || undefined,
-    name: actorName || undefined,
-  })?.id;
+  // Extract actor identity from Linear webhook payload (Q21.A bug fix).
+  // The old code read a top-level `actor` field that does NOT exist in
+  // AgentSessionEvent payloads. The human is at agentSession.creator for
+  // the `created` action and agentActivity.user for `prompted`.
+  const session = event.agentSession as Record<string, unknown> | undefined;
+  const creator = session?.creator as Record<string, unknown> | undefined;
+  const linearUserId = creator ? String(creator.id ?? "") : "";
+  const actorEmail = creator ? String(creator.email ?? "") : "";
+  const actorName = creator ? String(creator.name ?? "") : "";
+  const workspaceId = (event.organizationId ?? event.workspaceId) as string | undefined;
+  const sampleContext =
+    (session?.comment as { body?: string } | undefined)?.body ?? issueTitle ?? null;
+  const requestedByUserId = resolveLinearActor(
+    linearUserId,
+    actorEmail,
+    actorName,
+    workspaceId ?? null,
+    "AgentSessionEvent.created",
+    sampleContext,
+  );
 
   // Check if we already track this issue
   const existing = getTrackerSyncByExternalId("linear", "task", issueId);
@@ -687,16 +792,24 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   // Task is completed/failed/cancelled or doesn't exist — create a new follow-up task
   const lead = findLeadAgent();
 
-  // Extract actor identity from Linear webhook payload
-  const promptedActor = event.actor as Record<string, unknown> | undefined;
-  const promptedActorLinearId = promptedActor ? String(promptedActor.id ?? "") : "";
-  const promptedActorEmail = promptedActor ? String(promptedActor.email ?? "") : "";
-  const promptedActorName = promptedActor ? String(promptedActor.name ?? "") : "";
-  const promptedRequestedByUserId = resolveUser({
-    linearUserId: promptedActorLinearId || undefined,
-    email: promptedActorEmail || undefined,
-    name: promptedActorName || undefined,
-  })?.id;
+  // Extract actor identity from Linear webhook payload (Q21.A bug fix).
+  // For `prompted` action, the human is at `event.agentActivity.user`.
+  const activity = event.agentActivity as Record<string, unknown> | undefined;
+  const promptUser = activity?.user as Record<string, unknown> | undefined;
+  const promptedActorLinearId = promptUser ? String(promptUser.id ?? "") : "";
+  const promptedActorEmail = promptUser ? String(promptUser.email ?? "") : "";
+  const promptedActorName = promptUser ? String(promptUser.name ?? "") : "";
+  const promptedWorkspaceId = (event.organizationId ?? event.workspaceId) as string | undefined;
+  const promptedSampleContext =
+    (activity?.content as { body?: string } | undefined)?.body ?? userMessage ?? null;
+  const promptedRequestedByUserId = resolveLinearActor(
+    promptedActorLinearId,
+    promptedActorEmail,
+    promptedActorName,
+    promptedWorkspaceId ?? null,
+    "AgentSessionEvent.prompted",
+    promptedSampleContext,
+  );
 
   const followupResult = resolveTemplate("linear.issue.followup", {
     issue_identifier: issueIdentifier,

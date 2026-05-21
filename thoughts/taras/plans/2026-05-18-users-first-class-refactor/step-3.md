@@ -2,7 +2,7 @@
 id: step-3
 name: GitHub webhook rewire
 depends_on: [step-1]
-status: ready
+status: done
 ---
 
 # step-3: GitHub webhook rewire
@@ -57,10 +57,10 @@ Rewire all four GitHub webhook entry points to `findUserByExternalId('github', s
 
 #### Automated Verification:
 
-- [ ] `bun test src/tests/github-handlers.test.ts` — all cases pass.
-- [ ] `bun run lint` passes on `src/github/**`.
-- [ ] `grep -n 'resolveUser\s*(' src/github/` returns 0 hits.
-- [ ] `grep -n 'githubUsername' src/github/` returns 0 hits (no leftover references to the dropped column).
+- [x] `bun test src/tests/github-handlers.test.ts` — all cases pass.
+- [x] `bun run lint` passes on `src/github/**`.
+- [x] `grep -n 'resolveUser\s*(' src/github/` returns 0 hits.
+- [x] `grep -n 'githubUsername' src/github/` returns 0 hits (no leftover references to the dropped column).
 
 #### Automated QA:
 

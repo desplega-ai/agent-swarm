@@ -69,7 +69,8 @@
         "im:read",
         "im:write",
         "reactions:write",
-        "users:read"
+        "users:read",
+        "users:read.email"
       ]
     },
     "pkce_enabled": false

@@ -412,9 +412,18 @@ export async function handleWebhooks(
 
     try {
       switch (payload.event_type) {
+        case "message.received.unauthenticated":
+          console.warn(
+            `[AgentMail] Received unauthenticated message - treating as received event for inbox ${payload.message?.inbox_id ?? "unknown"}`,
+          );
+
+          await handleMessageReceived(payload);
+          break;
+
         case "message.received":
           await handleMessageReceived(payload);
           break;
+
         default:
           console.log(`[AgentMail] Ignoring event type: ${payload.event_type}`);
       }

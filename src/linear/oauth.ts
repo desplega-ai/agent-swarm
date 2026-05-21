@@ -1,5 +1,9 @@
+import { upsertKv } from "../be/db";
 import { getOAuthApp } from "../be/db-queries/oauth";
 import { buildAuthorizationUrl, exchangeCode, type OAuthProviderConfig } from "../oauth/wrapper";
+
+/** kv namespace for the Linear bot's appUserId (Q21.C). Keyed by workspace ID. */
+const APP_USER_ID_NAMESPACE = "integration:linear:bot-app-user-id";
 
 export function getLinearOAuthConfig(): OAuthProviderConfig | null {
   const app = getOAuthApp("linear");
@@ -31,7 +35,63 @@ export async function handleLinearCallback(
 ): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }> {
   const config = getLinearOAuthConfig();
   if (!config) throw new Error("Linear OAuth not configured");
-  return exchangeCode(config, code, state);
+  const result = await exchangeCode(config, code, state);
+
+  // Best-effort: capture the Linear bot's appUserId now that we have a fresh
+  // token (Q21.C). Persisted in kv_entries so webhook handlers can guard
+  // against the swarm hearing itself ("creator.id === storedAppUserId").
+  // Failure here is non-fatal — the guard is a no-op until the next refresh.
+  captureLinearAppUserId(result.accessToken).catch((err) => {
+    console.warn(
+      "[Linear] Failed to capture appUserId during OAuth completion (non-fatal):",
+      err instanceof Error ? err.message : err,
+    );
+  });
+
+  return result;
+}
+
+/**
+ * Query Linear's GraphQL `viewer` to find the OAuth-actor's user id and
+ * organization id, then persist it under `integration:linear:bot-app-user-id`.
+ *
+ * NOTE: when the OAuth app is installed with `actor=app`, Linear's `viewer`
+ * resolves to the synthetic app-user — the "bot identity" that emits
+ * AgentSessionEvent.created with `agentSession.creator.id === viewer.id`. That
+ * is precisely the value Q21.C asks us to compare against.
+ */
+export async function captureLinearAppUserId(accessToken: string): Promise<void> {
+  const query = `query { viewer { id organization { id } } }`;
+  const res = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) {
+    throw new Error(`Linear viewer query failed: HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as {
+    data?: { viewer?: { id?: string; organization?: { id?: string } } };
+    errors?: Array<{ message: string }>;
+  };
+  if (body.errors?.length) {
+    throw new Error(`Linear viewer query returned errors: ${body.errors[0]?.message ?? "?"}`);
+  }
+  const appUserId = body.data?.viewer?.id;
+  const workspaceId = body.data?.viewer?.organization?.id;
+  if (!appUserId) {
+    throw new Error("Linear viewer query returned no id");
+  }
+  upsertKv({
+    namespace: APP_USER_ID_NAMESPACE,
+    key: workspaceId && workspaceId !== "" ? workspaceId : "default",
+    value: appUserId,
+    valueType: "string",
+    expiresAt: null,
+  });
 }
 
 /**

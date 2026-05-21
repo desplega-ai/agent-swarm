@@ -224,18 +224,40 @@ export const UserSchema = z.object({
   email: z.string().optional(),
   role: z.string().optional(),
   notes: z.string().optional(),
-  slackUserId: z.string().optional(),
-  linearUserId: z.string().optional(),
-  githubUsername: z.string().optional(),
-  gitlabUsername: z.string().optional(),
   emailAliases: z.array(z.string()).default([]),
   preferredChannel: z.string().default("slack"),
   timezone: z.string().optional(),
+  // Phase 064: free-form JSON for operator notes + integration hints.
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  // NULL = unlimited (Phase 064).
+  dailyBudgetUsd: z.number().nullable().optional(),
+  // Lifecycle (Phase 064). CHECK constraint enforces these three values.
+  status: z.enum(["invited", "active", "suspended"]).default("active"),
   createdAt: z.iso.datetime(),
   lastUpdatedAt: z.iso.datetime(),
 });
 
 export type User = z.infer<typeof UserSchema>;
+
+/**
+ * Identity event types — mirrored in lockstep with the CHECK constraint on
+ * `user_identity_events.eventType` in migration 064. Drift breaks helper
+ * INSERTs at runtime; update both sides together.
+ */
+export const IdentityEventTypeSchema = z.enum([
+  "auto_merge",
+  "manual_merge",
+  "identity_added",
+  "identity_removed",
+  "email_added",
+  "email_removed",
+  "token_minted",
+  "token_revoked",
+  "budget_changed",
+  "status_changed",
+  "profile_changed",
+]);
+export type IdentityEventType = z.infer<typeof IdentityEventTypeSchema>;
 
 // ============================================================================
 // Inbox Item State (per-user dismiss/snooze/done for action-items inbox)

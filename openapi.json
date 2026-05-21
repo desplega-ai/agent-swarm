@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.80.2",
+    "version": "1.81.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -10418,13 +10418,28 @@
     },
     "/api/users": {
       "get": {
-        "summary": "List all users",
+        "summary": "List all users with identities, token summaries and recent events",
         "tags": [
           "Users"
         ],
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 50
+            },
+            "required": false,
+            "name": "recentEvents",
+            "in": "query"
           }
         ],
         "responses": {
@@ -10437,7 +10452,7 @@
         }
       },
       "post": {
-        "summary": "Create a new user",
+        "summary": "Create a new user (optionally with initial identity links)",
         "tags": [
           "Users"
         ],
@@ -10465,18 +10480,6 @@
                   "notes": {
                     "type": "string"
                   },
-                  "slackUserId": {
-                    "type": "string"
-                  },
-                  "linearUserId": {
-                    "type": "string"
-                  },
-                  "githubUsername": {
-                    "type": "string"
-                  },
-                  "gitlabUsername": {
-                    "type": "string"
-                  },
                   "emailAliases": {
                     "type": "array",
                     "items": {
@@ -10488,6 +10491,44 @@
                   },
                   "timezone": {
                     "type": "string"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "dailyBudgetUsd": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "invited",
+                      "active",
+                      "suspended"
+                    ]
+                  },
+                  "identities": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "externalId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "externalId"
+                      ]
+                    }
                   }
                 },
                 "required": [
@@ -10510,9 +10551,179 @@
         }
       }
     },
+    "/api/users/unmapped": {
+      "get": {
+        "summary": "List unmapped external identities (kv-backed triage queue)",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of unmapped identities sorted by count DESC, lastSeenAt DESC"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/users/unmapped/{kind}/{externalId}/resolve": {
+      "post": {
+        "summary": "Resolve an unmapped identity — link to an existing user or create a new one",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "kind",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "externalId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "userId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "userId"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "email": {
+                        "type": "string",
+                        "format": "email"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "email"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Identity linked + kv entries cleared"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Target user not found"
+          }
+        }
+      }
+    },
     "/api/users/{id}": {
-      "put": {
-        "summary": "Update an existing user (partial — at least one field required)",
+      "get": {
+        "summary": "Get a user by ID with identities, token summaries and recent events",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "recentEvents",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User row"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update an existing user (profile / budget / status / email-aliases / identities)",
         "tags": [
           "Users"
         ],
@@ -10550,18 +10761,6 @@
                   "notes": {
                     "type": "string"
                   },
-                  "slackUserId": {
-                    "type": "string"
-                  },
-                  "linearUserId": {
-                    "type": "string"
-                  },
-                  "githubUsername": {
-                    "type": "string"
-                  },
-                  "gitlabUsername": {
-                    "type": "string"
-                  },
                   "emailAliases": {
                     "type": "array",
                     "items": {
@@ -10573,6 +10772,47 @@
                   },
                   "timezone": {
                     "type": "string"
+                  },
+                  "metadata": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "dailyBudgetUsd": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "invited",
+                      "active",
+                      "suspended"
+                    ]
+                  },
+                  "identities": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "externalId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "externalId"
+                      ]
+                    }
                   }
                 }
               }
@@ -10585,6 +10825,223 @@
           },
           "400": {
             "description": "Validation error or empty body"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/users/{id}/merge": {
+      "post": {
+        "summary": "Merge another user into this one — moves identities + email aliases, deletes source",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sourceUserId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "sourceUserId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Merged user"
+          },
+          "400": {
+            "description": "Validation error (e.g. target == source)"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Target or source user not found"
+          }
+        }
+      }
+    },
+    "/api/users/{id}/events": {
+      "get": {
+        "summary": "Paginated identity-event timeline for a user (DESC by createdAt)",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "before",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of identity events"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/users/{id}/identities": {
+      "post": {
+        "summary": "Link a new (kind, externalId) identity to this user",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "externalId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "externalId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated identity list"
+          },
+          "400": {
+            "description": "Validation error or PK collision"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/users/{id}/identities/{kind}/{externalId}": {
+      "delete": {
+        "summary": "Remove a (kind, externalId) identity link from this user",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "kind",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "externalId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated identity list"
           },
           "401": {
             "description": "Unauthorized"

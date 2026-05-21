@@ -1,13 +1,9 @@
 import { Assistant } from "@slack/bolt";
-import {
-  getAgentWorkingOnThread,
-  getLeadAgent,
-  getMostRecentTaskInThread,
-  resolveUser,
-} from "../be/db";
+import { getAgentWorkingOnThread, getLeadAgent, getMostRecentTaskInThread } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { resolveSlackUserId } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import { bufferThreadMessage } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
@@ -41,7 +37,7 @@ export function createAssistant(): Assistant {
       await saveThreadContext();
     },
 
-    userMessage: async ({ message, body, say, setStatus, setTitle, getThreadContext }) => {
+    userMessage: async ({ message, body, say, setStatus, setTitle, getThreadContext, client }) => {
       // Slack retries deliveries on 3s timeout / 5xx. Drop duplicates before
       // any task-creation work runs (DES-293).
       const eventId = body?.event_id;
@@ -76,8 +72,15 @@ export function createAssistant(): Assistant {
         const messageText = (msg.text as string) || "";
         const userId = (msg.user as string) || "";
 
-        // Resolve canonical user identity (graceful — null if not found)
-        const requestedByUserId = userId ? resolveUser({ slackUserId: userId })?.id : undefined;
+        // Resolve canonical user identity via the shared cascade. On no-email,
+        // the cascade records the user in the kv unmapped tracker; this handler
+        // proceeds without a `requestedByUserId`.
+        const requestedByUserId = userId
+          ? await resolveSlackUserId(client, userId, {
+              sampleEventType: "assistant_message",
+              sampleContext: messageText,
+            })
+          : undefined;
 
         // 1. Check if an agent is already working in this thread
         const workingAgent = getAgentWorkingOnThread(channelId, threadTs);

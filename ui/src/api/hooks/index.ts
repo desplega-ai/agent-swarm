@@ -151,7 +151,18 @@ export {
   useTaskSessionLogs,
   useTasks,
 } from "./use-tasks";
-export { useCreateUser, useUsers } from "./use-users";
+export {
+  useAddUserIdentity,
+  useCreateUser,
+  useMergeUsers,
+  useRemoveUserIdentity,
+  useResolveUnmapped,
+  useUnmapped,
+  useUpdateUser,
+  useUser,
+  useUserEvents,
+  useUsers,
+} from "./use-users";
 export {
   useAllWorkflowRuns,
   useDeleteWorkflow,

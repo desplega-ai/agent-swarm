@@ -40,6 +40,13 @@ interface DataGridProps<TData> {
   domLayout?: "normal" | "autoHeight";
   enableCellTextSelection?: boolean;
   getRowId?: (params: GetRowIdParams<TData>) => string;
+  /**
+   * Override the AG-Grid default row height (~42px on the quartz theme).
+   * Set when a table renders multi-line cells and needs extra vertical
+   * breathing room — e.g. the identity events table (56) so the Change
+   * column can fit a richer two-line diff alongside the Time cell.
+   */
+  rowHeight?: number;
 }
 
 export function DataGrid<TData>({
@@ -55,6 +62,7 @@ export function DataGrid<TData>({
   domLayout = "normal",
   enableCellTextSelection = false,
   getRowId,
+  rowHeight,
 }: DataGridProps<TData>) {
   // AG Grid's edit-on-click only works when the cell can take focus. The
   // wrapper defaults to `suppressCellFocus` for the read-only data tables
@@ -144,6 +152,7 @@ export function DataGrid<TData>({
         suppressCellFocus={!hasEditableColumn}
         enableCellTextSelection={enableCellTextSelection}
         ensureDomOrder={enableCellTextSelection}
+        rowHeight={rowHeight}
       />
     </div>
   );

@@ -2,7 +2,7 @@
 id: step-8
 name: HTTP API + operator fingerprint middleware
 depends_on: [step-1]
-status: ready
+status: done
 ---
 
 # step-8: HTTP API + operator fingerprint middleware
@@ -167,12 +167,12 @@ bun run docs:openapi
 
 #### Automated Verification:
 
-- [ ] `bun test src/tests/http-users.test.ts` — all cases pass.
-- [ ] `bun run tsc:check` — passes for `src/http/**`.
-- [ ] `bun run lint` passes on `src/http/**`.
-- [ ] `bash scripts/check-api-key-boundary.sh` passes (operator middleware uses `getApiKey()`).
-- [ ] `bun run docs:openapi` runs clean — `openapi.json` updated; commit it + `docs-site/.../api-reference/**`.
-- [ ] `grep -n 'resolveUser\s*(' src/http/users.ts` returns 0 hits.
+- [x] `bun test src/tests/http-users.test.ts` — all cases pass.
+- [x] `bun run tsc:check` — passes for `src/http/**`.
+- [x] `bun run lint` passes on `src/http/**`.
+- [x] `bash scripts/check-api-key-boundary.sh` passes (operator middleware uses `getApiKey()`).
+- [x] `bun run docs:openapi` runs clean — `openapi.json` updated; commit it + `docs-site/.../api-reference/**`.
+- [x] `grep -n 'resolveUser\s*(' src/http/users.ts` returns 0 hits.
 
 #### Automated QA:
 

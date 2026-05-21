@@ -7,19 +7,61 @@ import {
   createUser,
   deleteUser,
   getAllUsers,
+  getDb,
   getTaskById,
   getUserById,
   initDb,
-  resolveUser,
   updateUser,
 } from "../be/db";
+import {
+  findOrCreateUserByEmail,
+  findUserByEmail,
+  findUserByExternalId,
+  findUserById,
+  fingerprintApiKey,
+  getUserIdentities,
+  type IdentityActor,
+  linkIdentity,
+  mintToken,
+  recordIdentityEvent,
+  resolveUserByToken,
+  revokeToken,
+  unlinkIdentity,
+} from "../be/users";
 
 const TEST_DB_PATH = "./test-user-identity.sqlite";
 
 let leadAgent: ReturnType<typeof createAgent>;
 let workerAgent: ReturnType<typeof createAgent>;
 
+const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test-suite" };
+const OPERATOR_ACTOR: IdentityActor = { kind: "operator", id: "op:0000000000000000" };
+
+function eventsFor(userId: string): Array<{
+  eventType: string;
+  actor: string;
+  beforeJson: string | null;
+  afterJson: string | null;
+}> {
+  // Order by createdAt then rowid — events emitted within the same
+  // millisecond (synchronous bursts in tests) need a stable tiebreaker.
+  return getDb()
+    .prepare<
+      { eventType: string; actor: string; beforeJson: string | null; afterJson: string | null },
+      string
+    >(
+      "SELECT eventType, actor, beforeJson, afterJson FROM user_identity_events WHERE userId = ? ORDER BY createdAt ASC, rowid ASC",
+    )
+    .all(userId);
+}
+
 beforeAll(() => {
+  // Best-effort cleanup of any lingering test DB from a previous crashed run.
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      unlinkSync(`${TEST_DB_PATH}${suffix}`);
+    } catch {}
+  }
   initDb(TEST_DB_PATH);
   leadAgent = createAgent({ name: "TestLead", isLead: true, status: "idle" });
   workerAgent = createAgent({ name: "TestWorker", isLead: false, status: "idle" });
@@ -27,19 +69,19 @@ beforeAll(() => {
 
 afterAll(() => {
   closeDb();
-  try {
-    unlinkSync(TEST_DB_PATH);
-    unlinkSync(`${TEST_DB_PATH}-wal`);
-    unlinkSync(`${TEST_DB_PATH}-shm`);
-  } catch {
-    // ignore
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      unlinkSync(`${TEST_DB_PATH}${suffix}`);
+    } catch {
+      // ignore
+    }
   }
 });
 
 // ─── User CRUD ────────────────────────────────────────────────────────────────
 
 describe("createUser", () => {
-  test("creates a user with required fields only", () => {
+  test("creates a user with required fields only — no identities yet", () => {
     const user = createUser({ name: "Alice" });
     expect(user.id).toBeDefined();
     expect(user.name).toBe("Alice");
@@ -47,49 +89,100 @@ describe("createUser", () => {
     expect(user.role).toBeUndefined();
     expect(user.emailAliases).toEqual([]);
     expect(user.preferredChannel).toBe("slack");
+    expect(user.status).toBe("active");
+    expect(user.dailyBudgetUsd).toBeNull();
     expect(user.createdAt).toBeDefined();
     expect(user.lastUpdatedAt).toBeDefined();
+    expect(getUserIdentities(user.id)).toEqual([]);
   });
 
-  test("creates a user with all fields", () => {
+  test("links identities one-by-one via linkIdentity", () => {
     const user = createUser({
       name: "Bob",
       email: "bob@example.com",
       role: "engineer",
       notes: "Test user",
-      slackUserId: "U_BOB",
-      linearUserId: "lin-bob-uuid",
-      githubUsername: "bob-gh",
-      gitlabUsername: "bob-gl",
       emailAliases: ["bob2@example.com", "robert@example.com"],
       preferredChannel: "email",
       timezone: "America/New_York",
     });
     expect(user.name).toBe("Bob");
     expect(user.email).toBe("bob@example.com");
-    expect(user.role).toBe("engineer");
-    expect(user.notes).toBe("Test user");
-    expect(user.slackUserId).toBe("U_BOB");
-    expect(user.linearUserId).toBe("lin-bob-uuid");
-    expect(user.githubUsername).toBe("bob-gh");
-    expect(user.gitlabUsername).toBe("bob-gl");
     expect(user.emailAliases).toEqual(["bob2@example.com", "robert@example.com"]);
-    expect(user.preferredChannel).toBe("email");
-    expect(user.timezone).toBe("America/New_York");
+
+    linkIdentity(user.id, "slack", "U_BOB", SYSTEM_ACTOR);
+    linkIdentity(user.id, "linear", "lin-bob-uuid", SYSTEM_ACTOR);
+    linkIdentity(user.id, "github", "bob-gh", SYSTEM_ACTOR);
+    linkIdentity(user.id, "gitlab", "bob-gl", SYSTEM_ACTOR);
+
+    const ids = getUserIdentities(user.id);
+    expect(ids).toContainEqual({ kind: "slack", externalId: "U_BOB" });
+    expect(ids).toContainEqual({ kind: "linear", externalId: "lin-bob-uuid" });
+    expect(ids).toContainEqual({ kind: "github", externalId: "bob-gh" });
+    expect(ids).toContainEqual({ kind: "gitlab", externalId: "bob-gl" });
   });
 
-  test("rejects duplicate slackUserId", () => {
-    createUser({ name: "First", slackUserId: "U_UNIQUE" });
-    expect(() => createUser({ name: "Second", slackUserId: "U_UNIQUE" })).toThrow();
-  });
-
-  test("rejects duplicate githubUsername", () => {
-    createUser({ name: "GH1", githubUsername: "unique-gh" });
-    expect(() => createUser({ name: "GH2", githubUsername: "unique-gh" })).toThrow();
+  test("supports new Phase 064 fields", () => {
+    const user = createUser({
+      name: "Budgeted",
+      dailyBudgetUsd: 12.5,
+      status: "invited",
+      metadata: { hint: "test" },
+    });
+    expect(user.dailyBudgetUsd).toBe(12.5);
+    expect(user.status).toBe("invited");
+    expect(user.metadata).toEqual({ hint: "test" });
   });
 });
 
-describe("getUserById", () => {
+describe("linkIdentity", () => {
+  test("rejects duplicate (kind, externalId) — PK collision", () => {
+    const u1 = createUser({ name: "Dup1" });
+    const u2 = createUser({ name: "Dup2" });
+    linkIdentity(u1.id, "slack", "U_DUP", SYSTEM_ACTOR);
+    expect(() => linkIdentity(u2.id, "slack", "U_DUP", SYSTEM_ACTOR)).toThrow();
+  });
+
+  test("rejects duplicate (kind, externalId) — same user, second call", () => {
+    const u = createUser({ name: "SelfDup" });
+    linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR);
+    expect(() => linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR)).toThrow();
+  });
+
+  test("emits identity_added event in the same transaction", () => {
+    const u = createUser({ name: "EventLink" });
+    linkIdentity(u.id, "slack", "U_EVENTLINK", SYSTEM_ACTOR);
+    const events = eventsFor(u.id);
+    expect(events.length).toBe(1);
+    expect(events[0]!.eventType).toBe("identity_added");
+    expect(events[0]!.actor).toBe("system:test-suite");
+    expect(JSON.parse(events[0]!.afterJson!)).toEqual({
+      kind: "slack",
+      externalId: "U_EVENTLINK",
+    });
+  });
+});
+
+describe("unlinkIdentity", () => {
+  test("removes the mapping and emits identity_removed", () => {
+    const u = createUser({ name: "Unlink" });
+    linkIdentity(u.id, "slack", "U_UNLINK", SYSTEM_ACTOR);
+    expect(findUserByExternalId("slack", "U_UNLINK")).not.toBeNull();
+
+    unlinkIdentity(u.id, "slack", "U_UNLINK", SYSTEM_ACTOR);
+    expect(findUserByExternalId("slack", "U_UNLINK")).toBeNull();
+
+    const events = eventsFor(u.id);
+    expect(events.map((e) => e.eventType)).toEqual(["identity_added", "identity_removed"]);
+    expect(JSON.parse(events[1]!.beforeJson!)).toEqual({
+      kind: "slack",
+      externalId: "U_UNLINK",
+    });
+    expect(events[1]!.afterJson).toBeNull();
+  });
+});
+
+describe("getUserById / getUserIdentities", () => {
   test("returns user by ID", () => {
     const created = createUser({ name: "GetById" });
     const fetched = getUserById(created.id);
@@ -98,8 +191,20 @@ describe("getUserById", () => {
     expect(fetched!.id).toBe(created.id);
   });
 
-  test("returns null for non-existent ID", () => {
-    expect(getUserById("nonexistent")).toBeNull();
+  test("findUserById returns null for non-existent ID", () => {
+    expect(findUserById("nonexistent")).toBeNull();
+  });
+
+  test("getUserIdentities returns sorted (kind, externalId) tuples", () => {
+    const u = createUser({ name: "IdList" });
+    linkIdentity(u.id, "slack", "U_LIST", SYSTEM_ACTOR);
+    linkIdentity(u.id, "github", "list-gh", SYSTEM_ACTOR);
+    const list = getUserIdentities(u.id);
+    expect(list.length).toBe(2);
+    expect(list).toEqual([
+      { kind: "github", externalId: "list-gh" },
+      { kind: "slack", externalId: "U_LIST" },
+    ]);
   });
 });
 
@@ -126,6 +231,18 @@ describe("updateUser", () => {
     expect(updated!.emailAliases).toEqual(["alias1@test.com", "alias2@test.com"]);
   });
 
+  test("updates new Phase 064 fields", () => {
+    const user = createUser({ name: "BudgetUser" });
+    const updated = updateUser(user.id, {
+      dailyBudgetUsd: 25.0,
+      status: "suspended",
+      metadata: { reason: "test" },
+    });
+    expect(updated!.dailyBudgetUsd).toBe(25.0);
+    expect(updated!.status).toBe("suspended");
+    expect(updated!.metadata).toEqual({ reason: "test" });
+  });
+
   test("returns null for non-existent user", () => {
     expect(updateUser("nonexistent", { name: "Nope" })).toBeNull();
   });
@@ -149,8 +266,11 @@ describe("deleteUser", () => {
     expect(deleteUser("nonexistent")).toBe(false);
   });
 
-  test("clears requestedByUserId on tasks when user is deleted", () => {
-    const user = createUser({ name: "TaskOwner", slackUserId: "U_TASKOWNER" });
+  test("clears requestedByUserId on tasks AND cascades user_external_ids", () => {
+    const user = createUser({ name: "TaskOwner" });
+    linkIdentity(user.id, "slack", "U_TASKOWNER", SYSTEM_ACTOR);
+    expect(findUserByExternalId("slack", "U_TASKOWNER")).not.toBeNull();
+
     const task = createTaskExtended("test task with user", {
       agentId: workerAgent.id,
       source: "slack",
@@ -160,92 +280,242 @@ describe("deleteUser", () => {
 
     deleteUser(user.id);
     expect(getTaskById(task.id)!.requestedByUserId).toBeUndefined();
+    // ON DELETE CASCADE on user_external_ids.userId should clear the mapping.
+    expect(findUserByExternalId("slack", "U_TASKOWNER")).toBeNull();
   });
 });
 
-// ─── resolveUser ──────────────────────────────────────────────────────────────
+// ─── findUserByExternalId ─────────────────────────────────────────────────────
 
-describe("resolveUser", () => {
+describe("findUserByExternalId", () => {
   let testUser: ReturnType<typeof createUser>;
 
   beforeAll(() => {
     testUser = createUser({
       name: "Resolve TestUser",
       email: "resolve-test@example.com",
-      slackUserId: "U_RESOLVE_SLACK",
-      linearUserId: "lin-resolve-uuid",
-      githubUsername: "resolve-gh",
-      gitlabUsername: "resolve-gl",
-      emailAliases: ["resolve-alias@example.com"],
     });
+    linkIdentity(testUser.id, "slack", "U_RESOLVE_SLACK", SYSTEM_ACTOR);
+    linkIdentity(testUser.id, "linear", "lin-resolve-uuid", SYSTEM_ACTOR);
+    linkIdentity(testUser.id, "github", "resolve-gh", SYSTEM_ACTOR);
+    linkIdentity(testUser.id, "gitlab", "resolve-gl", SYSTEM_ACTOR);
   });
 
-  test("resolves by slackUserId", () => {
-    const user = resolveUser({ slackUserId: "U_RESOLVE_SLACK" });
+  test("resolves by slack identity", () => {
+    const user = findUserByExternalId("slack", "U_RESOLVE_SLACK");
     expect(user).toBeDefined();
     expect(user!.id).toBe(testUser.id);
   });
 
-  test("resolves by linearUserId", () => {
-    const user = resolveUser({ linearUserId: "lin-resolve-uuid" });
-    expect(user).toBeDefined();
+  test("resolves by linear identity", () => {
+    const user = findUserByExternalId("linear", "lin-resolve-uuid");
     expect(user!.id).toBe(testUser.id);
   });
 
-  test("resolves by githubUsername", () => {
-    const user = resolveUser({ githubUsername: "resolve-gh" });
-    expect(user).toBeDefined();
+  test("resolves by github identity", () => {
+    const user = findUserByExternalId("github", "resolve-gh");
     expect(user!.id).toBe(testUser.id);
   });
 
-  test("resolves by gitlabUsername", () => {
-    const user = resolveUser({ gitlabUsername: "resolve-gl" });
-    expect(user).toBeDefined();
+  test("resolves by gitlab identity", () => {
+    const user = findUserByExternalId("gitlab", "resolve-gl");
     expect(user!.id).toBe(testUser.id);
   });
 
-  test("resolves by primary email", () => {
-    const user = resolveUser({ email: "resolve-test@example.com" });
-    expect(user).toBeDefined();
-    expect(user!.id).toBe(testUser.id);
+  test("returns null for unknown externalId", () => {
+    expect(findUserByExternalId("slack", "U_NONEXISTENT")).toBeNull();
+    expect(findUserByExternalId("github", "no-such-account")).toBeNull();
   });
 
-  test("resolves by email alias (case-insensitive)", () => {
-    const user = resolveUser({ email: "RESOLVE-ALIAS@EXAMPLE.COM" });
-    expect(user).toBeDefined();
-    expect(user!.id).toBe(testUser.id);
-  });
-
-  test("resolves by name substring (case-insensitive)", () => {
-    const user = resolveUser({ name: "resolve testuser" });
-    expect(user).toBeDefined();
-    expect(user!.id).toBe(testUser.id);
-  });
-
-  test("returns null for no match", () => {
-    expect(resolveUser({ slackUserId: "U_NONEXISTENT" })).toBeNull();
-    expect(resolveUser({ email: "nobody@nowhere.com" })).toBeNull();
-    expect(resolveUser({ name: "ZZZNoSuchPerson" })).toBeNull();
-  });
-
-  test("prioritizes platform ID over email", () => {
-    // Create a second user with different slack ID
-    const user2 = createUser({
-      name: "PriorityUser",
-      slackUserId: "U_OTHER_PRIORITY",
-    });
-    // When resolving with both slackUserId and email, slackUserId wins
-    const resolved = resolveUser({
-      slackUserId: "U_OTHER_PRIORITY",
-      email: "resolve-test@example.com", // belongs to testUser
-    });
-    expect(resolved!.id).toBe(user2.id);
-    // Cleanup
-    deleteUser(user2.id);
+  test("kind is exact — slack externalId does not resolve under github", () => {
+    expect(findUserByExternalId("github", "U_RESOLVE_SLACK")).toBeNull();
   });
 });
 
-// ─── requestedByUserId on tasks ─────────────────────────────────────────────
+// ─── findUserByEmail ──────────────────────────────────────────────────────────
+
+describe("findUserByEmail", () => {
+  test("matches primary email (case-insensitive)", () => {
+    const user = createUser({
+      name: "EmailPrimary",
+      email: "primary@example.com",
+    });
+    expect(findUserByEmail("primary@example.com")!.id).toBe(user.id);
+    expect(findUserByEmail("PRIMARY@example.com")!.id).toBe(user.id);
+  });
+
+  test("matches an emailAlias (case-insensitive)", () => {
+    const user = createUser({
+      name: "EmailAlias",
+      email: "main@example.com",
+      emailAliases: ["alt@example.com", "other@example.com"],
+    });
+    expect(findUserByEmail("alt@example.com")!.id).toBe(user.id);
+    expect(findUserByEmail("OTHER@EXAMPLE.COM")!.id).toBe(user.id);
+  });
+
+  test("returns null on no match", () => {
+    expect(findUserByEmail("nobody@nowhere.com")).toBeNull();
+  });
+});
+
+// ─── findOrCreateUserByEmail ──────────────────────────────────────────────────
+
+describe("findOrCreateUserByEmail", () => {
+  test("creates a fresh user + emits identity_added when no match", () => {
+    const result = findOrCreateUserByEmail(
+      "new-foc@example.com",
+      { name: "FocNew" },
+      { kind: "system", id: "webhook:test" },
+    );
+    expect(result.created).toBe(true);
+    expect(result.user.email).toBe("new-foc@example.com");
+    expect(result.user.name).toBe("FocNew");
+    const events = eventsFor(result.user.id);
+    expect(events.length).toBe(1);
+    expect(events[0]!.eventType).toBe("identity_added");
+    expect(events[0]!.actor).toBe("system:webhook:test");
+  });
+
+  test("returns the existing user + emits auto_merge on a second call", () => {
+    const first = findOrCreateUserByEmail(
+      "merge-foc@example.com",
+      { name: "FocMerge" },
+      SYSTEM_ACTOR,
+    );
+    expect(first.created).toBe(true);
+
+    const second = findOrCreateUserByEmail(
+      "merge-foc@example.com",
+      { name: "FocMergeRetry" },
+      SYSTEM_ACTOR,
+    );
+    expect(second.created).toBe(false);
+    expect(second.user.id).toBe(first.user.id);
+
+    const events = eventsFor(first.user.id);
+    // identity_added (initial) + auto_merge (second call) = 2 events.
+    expect(events.map((e) => e.eventType)).toEqual(["identity_added", "auto_merge"]);
+  });
+
+  test("falls back to email local-part when no name hint provided", () => {
+    const result = findOrCreateUserByEmail("auto-name@example.com", {}, SYSTEM_ACTOR);
+    expect(result.created).toBe(true);
+    expect(result.user.name).toBe("auto-name");
+  });
+});
+
+// ─── Tokens ───────────────────────────────────────────────────────────────────
+
+describe("mintToken / revokeToken / resolveUserByToken", () => {
+  test("mintToken returns aswt_-prefixed plaintext and stores hash + 4-char preview", () => {
+    const user = createUser({ name: "TokenUser" });
+    const { tokenId, plaintext } = mintToken(user.id, "CI test", OPERATOR_ACTOR);
+
+    expect(plaintext.startsWith("aswt_")).toBe(true);
+    expect(plaintext.length).toBeGreaterThanOrEqual(25);
+    expect(tokenId).toBeDefined();
+
+    // Stored row should have hash != plaintext and preview = last 4 chars.
+    const row = getDb()
+      .prepare<{ tokenHash: string; tokenPreview: string }, string>(
+        "SELECT tokenHash, tokenPreview FROM user_tokens WHERE id = ?",
+      )
+      .get(tokenId);
+    expect(row).toBeDefined();
+    expect(row!.tokenHash).not.toBe(plaintext);
+    expect(row!.tokenHash.length).toBe(64); // sha256 hex
+    expect(row!.tokenPreview).toBe(plaintext.slice(-4));
+
+    // token_minted event landed with operator actor.
+    const events = eventsFor(user.id);
+    expect(events.find((e) => e.eventType === "token_minted")).toBeDefined();
+    expect(events.find((e) => e.eventType === "token_minted")!.actor).toBe(
+      "operator:op:0000000000000000",
+    );
+  });
+
+  test("resolveUserByToken returns the owning user and bumps lastUsedAt", () => {
+    const user = createUser({ name: "ResolveTokenUser" });
+    const { tokenId, plaintext } = mintToken(user.id, null, OPERATOR_ACTOR);
+
+    const resolved = resolveUserByToken(plaintext);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.id).toBe(user.id);
+
+    const row = getDb()
+      .prepare<{ lastUsedAt: string | null }, string>(
+        "SELECT lastUsedAt FROM user_tokens WHERE id = ?",
+      )
+      .get(tokenId);
+    expect(row!.lastUsedAt).not.toBeNull();
+  });
+
+  test("revokeToken sets revokedAt + emits token_revoked + resolveUserByToken returns null", () => {
+    const user = createUser({ name: "RevokeUser" });
+    const { tokenId, plaintext } = mintToken(user.id, "to-revoke", OPERATOR_ACTOR);
+    revokeToken(tokenId, OPERATOR_ACTOR);
+
+    const row = getDb()
+      .prepare<{ revokedAt: string | null }, string>(
+        "SELECT revokedAt FROM user_tokens WHERE id = ?",
+      )
+      .get(tokenId);
+    expect(row!.revokedAt).not.toBeNull();
+
+    expect(resolveUserByToken(plaintext)).toBeNull();
+
+    const events = eventsFor(user.id);
+    expect(events.map((e) => e.eventType)).toContain("token_revoked");
+  });
+
+  test("resolveUserByToken returns null for unknown plaintext", () => {
+    expect(resolveUserByToken("aswt_unknown000000000000000000000")).toBeNull();
+  });
+});
+
+// ─── fingerprintApiKey ────────────────────────────────────────────────────────
+
+describe("fingerprintApiKey", () => {
+  test("returns op:<sha256-16-hex> format", () => {
+    expect(fingerprintApiKey("some-key")).toMatch(/^op:[0-9a-f]{16}$/);
+    expect(fingerprintApiKey("")).toMatch(/^op:[0-9a-f]{16}$/);
+  });
+
+  test("is deterministic", () => {
+    expect(fingerprintApiKey("same-input")).toBe(fingerprintApiKey("same-input"));
+  });
+});
+
+// ─── recordIdentityEvent (direct API) ─────────────────────────────────────────
+
+describe("recordIdentityEvent", () => {
+  test("can emit budget_changed / status_changed / email_* directly", () => {
+    const user = createUser({ name: "EventDirect" });
+    recordIdentityEvent(user.id, "budget_changed", OPERATOR_ACTOR, null, { dailyBudgetUsd: 10 });
+    recordIdentityEvent(
+      user.id,
+      "status_changed",
+      OPERATOR_ACTOR,
+      { status: "active" },
+      {
+        status: "suspended",
+      },
+    );
+    recordIdentityEvent(user.id, "email_added", OPERATOR_ACTOR, null, { email: "x@y.com" });
+    recordIdentityEvent(user.id, "email_removed", OPERATOR_ACTOR, { email: "x@y.com" }, null);
+
+    const events = eventsFor(user.id);
+    expect(events.map((e) => e.eventType)).toEqual([
+      "budget_changed",
+      "status_changed",
+      "email_added",
+      "email_removed",
+    ]);
+  });
+});
+
+// ─── requestedByUserId on tasks ───────────────────────────────────────────────
 
 describe("requestedByUserId in tasks", () => {
   test("createTaskExtended stores requestedByUserId", () => {

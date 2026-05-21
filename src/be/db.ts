@@ -8733,13 +8733,13 @@ type UserRow = {
   email: string | null;
   role: string | null;
   notes: string | null;
-  slackUserId: string | null;
-  linearUserId: string | null;
-  githubUsername: string | null;
-  gitlabUsername: string | null;
   emailAliases: string | null;
   preferredChannel: string | null;
   timezone: string | null;
+  // Phase 064 columns
+  metadata: string | null;
+  dailyBudgetUsd: number | null;
+  status: string;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -8751,84 +8751,15 @@ function rowToUser(row: UserRow): User {
     email: row.email ?? undefined,
     role: row.role ?? undefined,
     notes: row.notes ?? undefined,
-    slackUserId: row.slackUserId ?? undefined,
-    linearUserId: row.linearUserId ?? undefined,
-    githubUsername: row.githubUsername ?? undefined,
-    gitlabUsername: row.gitlabUsername ?? undefined,
     emailAliases: row.emailAliases ? JSON.parse(row.emailAliases) : [],
     preferredChannel: row.preferredChannel ?? "slack",
     timezone: row.timezone ?? undefined,
+    metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined,
+    dailyBudgetUsd: row.dailyBudgetUsd ?? null,
+    status: (row.status as "invited" | "active" | "suspended") ?? "active",
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
-}
-
-/**
- * Resolve a user by any platform-specific identifier.
- * Priority: exact match on platform ID, then email (including aliases), then name substring.
- */
-export function resolveUser(opts: {
-  slackUserId?: string;
-  linearUserId?: string;
-  githubUsername?: string;
-  gitlabUsername?: string;
-  email?: string;
-  name?: string;
-}): User | null {
-  const db = getDb();
-
-  // Try exact platform ID matches first
-  if (opts.slackUserId) {
-    const row = db
-      .prepare<UserRow, string>("SELECT * FROM users WHERE slackUserId = ?")
-      .get(opts.slackUserId);
-    if (row) return rowToUser(row);
-  }
-  if (opts.linearUserId) {
-    const row = db
-      .prepare<UserRow, string>("SELECT * FROM users WHERE linearUserId = ?")
-      .get(opts.linearUserId);
-    if (row) return rowToUser(row);
-  }
-  if (opts.githubUsername) {
-    const row = db
-      .prepare<UserRow, string>("SELECT * FROM users WHERE githubUsername = ?")
-      .get(opts.githubUsername);
-    if (row) return rowToUser(row);
-  }
-  if (opts.gitlabUsername) {
-    const row = db
-      .prepare<UserRow, string>("SELECT * FROM users WHERE gitlabUsername = ?")
-      .get(opts.gitlabUsername);
-    if (row) return rowToUser(row);
-  }
-
-  // Try email match (primary email)
-  if (opts.email) {
-    const row = db.prepare<UserRow, string>("SELECT * FROM users WHERE email = ?").get(opts.email);
-    if (row) return rowToUser(row);
-
-    // Check emailAliases (JSON array search)
-    const aliasRows = db
-      .prepare<UserRow, []>("SELECT * FROM users WHERE emailAliases != '[]'")
-      .all();
-    for (const r of aliasRows) {
-      const aliases: string[] = r.emailAliases ? JSON.parse(r.emailAliases) : [];
-      if (aliases.some((a) => a.toLowerCase() === opts.email!.toLowerCase())) {
-        return rowToUser(r);
-      }
-    }
-  }
-
-  // Try name substring match (case-insensitive)
-  if (opts.name) {
-    const row = db
-      .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(name) LIKE '%' || LOWER(?) || '%'")
-      .get(opts.name);
-    if (row) return rowToUser(row);
-  }
-
-  return null;
 }
 
 export function getUserById(id: string): User | null {
@@ -8845,20 +8776,19 @@ export function createUser(data: {
   email?: string;
   role?: string;
   notes?: string;
-  slackUserId?: string;
-  linearUserId?: string;
-  githubUsername?: string;
-  gitlabUsername?: string;
   emailAliases?: string[];
   preferredChannel?: string;
   timezone?: string;
+  metadata?: Record<string, unknown>;
+  dailyBudgetUsd?: number | null;
+  status?: "invited" | "active" | "suspended";
 }): User {
   const id = crypto.randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
   const row = getDb()
-    .prepare<UserRow, (string | null)[]>(
-      `INSERT INTO users (id, name, email, role, notes, slackUserId, linearUserId, githubUsername, gitlabUsername, emailAliases, preferredChannel, timezone, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    .prepare<UserRow, (string | number | null)[]>(
+      `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -8866,13 +8796,12 @@ export function createUser(data: {
       data.email ?? null,
       data.role ?? null,
       data.notes ?? null,
-      data.slackUserId ?? null,
-      data.linearUserId ?? null,
-      data.githubUsername ?? null,
-      data.gitlabUsername ?? null,
       JSON.stringify(data.emailAliases ?? []),
       data.preferredChannel ?? "slack",
       data.timezone ?? null,
+      data.metadata !== undefined ? JSON.stringify(data.metadata) : null,
+      data.dailyBudgetUsd ?? null,
+      data.status ?? "active",
       now,
       now,
     );
@@ -8887,17 +8816,16 @@ export function updateUser(
     email: string;
     role: string;
     notes: string;
-    slackUserId: string;
-    linearUserId: string;
-    githubUsername: string;
-    gitlabUsername: string;
     emailAliases: string[];
     preferredChannel: string;
     timezone: string;
+    metadata: Record<string, unknown> | null;
+    dailyBudgetUsd: number | null;
+    status: "invited" | "active" | "suspended";
   }>,
 ): User | null {
   const sets: string[] = [];
-  const params: (string | null)[] = [];
+  const params: (string | number | null)[] = [];
 
   if (data.name !== undefined) {
     sets.push("name = ?");
@@ -8915,22 +8843,6 @@ export function updateUser(
     sets.push("notes = ?");
     params.push(data.notes);
   }
-  if (data.slackUserId !== undefined) {
-    sets.push("slackUserId = ?");
-    params.push(data.slackUserId);
-  }
-  if (data.linearUserId !== undefined) {
-    sets.push("linearUserId = ?");
-    params.push(data.linearUserId);
-  }
-  if (data.githubUsername !== undefined) {
-    sets.push("githubUsername = ?");
-    params.push(data.githubUsername);
-  }
-  if (data.gitlabUsername !== undefined) {
-    sets.push("gitlabUsername = ?");
-    params.push(data.gitlabUsername);
-  }
   if (data.emailAliases !== undefined) {
     sets.push("emailAliases = ?");
     params.push(JSON.stringify(data.emailAliases));
@@ -8943,6 +8855,18 @@ export function updateUser(
     sets.push("timezone = ?");
     params.push(data.timezone);
   }
+  if (data.metadata !== undefined) {
+    sets.push("metadata = ?");
+    params.push(data.metadata === null ? null : JSON.stringify(data.metadata));
+  }
+  if (data.dailyBudgetUsd !== undefined) {
+    sets.push("dailyBudgetUsd = ?");
+    params.push(data.dailyBudgetUsd);
+  }
+  if (data.status !== undefined) {
+    sets.push("status = ?");
+    params.push(data.status);
+  }
 
   if (sets.length === 0) return getUserById(id);
 
@@ -8951,7 +8875,7 @@ export function updateUser(
   params.push(id);
 
   const row = getDb()
-    .prepare<UserRow, (string | null)[]>(
+    .prepare<UserRow, (string | number | null)[]>(
       `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
     )
     .get(...params);

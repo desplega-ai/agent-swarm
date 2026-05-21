@@ -43,6 +43,7 @@ export interface AgentMailWebhookPayload {
 
 export type AgentMailEventType =
   | "message.received"
+  | "message.received.unauthenticated"
   | "message.sent"
   | "message.delivered"
   | "message.bounced"

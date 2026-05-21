@@ -952,6 +952,15 @@ echo ""
 # into .local would otherwise block worker-side mkdir into .local/share.
 chown -R worker:worker /home/worker/.local 2>/dev/null || true
 
-# Run the agent using compiled binary
+# Run the agent using compiled binary.
+#
+# `tini` is prepended so PID 1 is a real init. The agent-swarm process spawns
+# the harness (Claude/Codex/pi) as a direct child — which Bun reaps — but the
+# harness in turn spawns grandchildren (npm, esbuild, headless chrome,
+# next-server, ffmpeg, git ...) while running agent tasks. When a grandchild
+# outlives its immediate parent it is reparented to PID 1. Without an init at
+# PID 1, those orphans become unreaped zombies that accumulate for the life of
+# the container (one per orphaned grandchild, unbounded over uptime). tini
+# calls waitpid(-1) and reaps every orphan, and forwards signals to the worker.
 echo "Starting $ROLE..."
-exec gosu worker /usr/local/bin/agent-swarm "$ROLE" "$@"
+exec tini -- gosu worker /usr/local/bin/agent-swarm "$ROLE" "$@"

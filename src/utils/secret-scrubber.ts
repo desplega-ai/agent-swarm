@@ -124,6 +124,11 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
     name: "signoz_ingestion_key",
     re: /\bsignoz-ingestion-key=[A-Za-z0-9._~+/-]{20,}={0,2}\b/g,
   },
+  // Agent-swarm MCP user tokens (`aswt_<base62-20+>`). Schema lands in
+  // migration 064; mint/revoke endpoints ship with the MCP-token plan.
+  // Rule lives here now so plaintexts never leak into logs once endpoints
+  // come online.
+  { name: "mcp_token", re: /\baswt_[A-Za-z0-9]{20,}\b/g },
 ];
 
 interface EnvValueEntry {

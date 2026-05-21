@@ -1586,10 +1586,14 @@ describe("AgentMail Webhooks (with filters)", () => {
     expect(body).toEqual({ received: true });
   });
 
-  test("accepts second allowed inbox domain", async () => {
-    const { status } = await postWebhook(
-      makePayload({ inboxId: "support@y.xyz", from: "bob@b.com" }),
-    );
+  test.each([
+    "message.received",
+    "message.received.unauthenticated",
+  ])("accepts webhook for allowed event type '%s'", async (eventType) => {
+    const { status } = await postWebhook({
+      ...makePayload({ inboxId: "support@y.xyz", from: "bob@b.com" }),
+      event_type: eventType,
+    });
     expect(status).toBe(200);
   });
 

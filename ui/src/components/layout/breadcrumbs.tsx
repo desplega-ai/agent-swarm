@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { usePage } from "@/api/hooks/use-pages";
+import { useUser } from "@/api/hooks/use-users";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 
 const routeLabels: Record<string, string> = {
@@ -28,6 +29,8 @@ const routeLabels: Record<string, string> = {
   keys: "API Keys",
   "api-keys": "API Keys",
   pages: "Pages",
+  people: "People",
+  unmapped: "Unmapped",
 };
 
 const INTEGRATION_NAME_BY_ID: Record<string, string> = Object.fromEntries(
@@ -67,6 +70,16 @@ export function Breadcrumbs() {
       : undefined;
   const { data: pageMeta } = usePage(pageId);
 
+  // Similarly for /people/:id — render the user's name as the leaf crumb
+  // instead of the raw UUID/hex id.
+  const personId =
+    segments[0] === "people" &&
+    segments[1] &&
+    (UUID_REGEX.test(segments[1]) || HEX32_REGEX.test(segments[1]))
+      ? segments[1]
+      : undefined;
+  const { data: personMeta } = useUser(personId);
+
   if (segments.length === 0) return null;
 
   const crumbs = segments.map((segment, index) => {
@@ -75,6 +88,7 @@ export function Breadcrumbs() {
     let label = formatSegment(segment, segments[index - 1]);
     // Pretty-print the page-detail leaf with the actual title when we have it.
     if (segment === pageId && pageMeta?.title) label = pageMeta.title;
+    if (segment === personId && personMeta?.name) label = personMeta.name;
     const isLast = index === segments.length - 1;
 
     return { path, label, isLast };

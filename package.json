@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.80.2",
+  "version": "1.81.0",
   "description": "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants",
   "license": "MIT",
   "author": "desplega.sh <contact@desplega.sh>",
@@ -42,7 +42,6 @@
   },
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
-    "build:script-types": "bun run scripts/bundle-script-types.ts",
     "tsc:check": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
@@ -85,7 +84,8 @@
     "pm2-logs": "pm2 logs swarm-api swarm-ui swarm-lead swarm-worker",
     "pm2-status": "pm2 status swarm-api swarm-ui swarm-lead swarm-worker",
     "seed": "bun scripts/seed.ts",
-    "seed:clean": "bun scripts/seed.ts --clean"
+    "seed:clean": "bun scripts/seed.ts --clean",
+    "seed:people": "bun scripts/seed-people.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",

@@ -6,13 +6,13 @@ import {
   getLeadAgent,
   getMostRecentTaskInThread,
   getTasksByAgentId,
-  resolveUser,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
+import { enrichSlackUserEmail, resolveSlackUserId } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
@@ -33,9 +33,6 @@ const allowedUserIds = (process.env.SLACK_ALLOWED_USER_IDS || "")
   .filter(Boolean);
 
 const filteringEnabled = allowedEmailDomains.length > 0 || allowedUserIds.length > 0;
-
-// Cache for user email lookups (to avoid repeated API calls)
-const userEmailCache = new Map<string, string | null>();
 
 /**
  * Configuration for user filtering.
@@ -110,19 +107,8 @@ async function isUserAllowed(client: WebClient, userId: string): Promise<boolean
     return false;
   }
 
-  // Check email domain
-  let email = userEmailCache.get(userId);
-  if (email === undefined) {
-    try {
-      const result = await client.users.info({ user: userId });
-      email = result.user?.profile?.email || null;
-      userEmailCache.set(userId, email);
-    } catch (error) {
-      console.error(`[Slack] Failed to fetch user email for ${userId}:`, error);
-      userEmailCache.set(userId, null);
-      email = null;
-    }
-  }
+  // Check email domain — uses kv-backed enrichment (24h TTL, only success cached).
+  const email = await enrichSlackUserEmail(client, userId);
 
   if (!email) {
     console.log(`[Slack] User ${userId} has no email, denying access`);
@@ -391,8 +377,14 @@ export function registerMessageHandler(app: App): void {
       return;
     }
 
-    // Resolve canonical user identity (graceful — null if not found)
-    const requestedByUserId = resolveUser({ slackUserId: msg.user })?.id;
+    // Resolve canonical user identity via the three-step cascade:
+    //   fast-path alias lookup → enrich+auto-link by email → unmapped tracker.
+    // Returns undefined when no email is recoverable; task creation proceeds
+    // without `requestedByUserId` and the operator triages from the Unmapped tab.
+    const requestedByUserId = await resolveSlackUserId(client, msg.user, {
+      sampleEventType: "message",
+      sampleContext: msg.text ?? "",
+    });
 
     // Emit workflow trigger event for Slack messages
     workflowEventBus.emit("slack.message", {

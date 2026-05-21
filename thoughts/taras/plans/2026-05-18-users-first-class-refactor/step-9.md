@@ -2,7 +2,7 @@
 id: step-9
 name: People page UI + Unmapped tab
 depends_on: [step-8]
-status: ready
+status: done
 ---
 
 # step-9: People page UI + Unmapped tab
@@ -100,12 +100,12 @@ Build the operator-facing People page. List view (identity badges + budget + sta
 
 #### Automated Verification:
 
-- [ ] `cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b` passes (CI mirror).
-- [ ] No new dependencies pulled in unless absolutely required (note any in the PR description).
+- [x] `cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b` passes (CI mirror).
+- [x] No new dependencies pulled in unless absolutely required (note any in the PR description).
 
 #### Automated QA:
 
-- [ ] Per memory `feedback_ui_tests_qa_use.md`: **skip qa-use YAML / UI unit-test infra in this repo**. Manual QA only. (Documenting this explicitly so the implementer doesn't accidentally add framework scaffolding.)
+- [x] Per memory `feedback_ui_tests_qa_use.md`: **skip qa-use YAML / UI unit-test infra in this repo**. Manual QA only. (Documenting this explicitly so the implementer doesn't accidentally add framework scaffolding.)
 
 #### Manual Verification:
 *(Taras manual-QAs the SPA in this repo — feedback memory `feedback_ui_tests_qa_use.md` — so every flow below is a human-only check.)*

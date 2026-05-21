@@ -2,7 +2,7 @@
 id: step-4
 name: GitLab webhook rewire
 depends_on: [step-1]
-status: ready
+status: done
 ---
 
 # step-4: GitLab webhook rewire
@@ -52,10 +52,10 @@ Rewire all three GitLab webhook entry points to `findUserByExternalId('gitlab', 
 
 #### Automated Verification:
 
-- [ ] `bun test src/tests/gitlab-handlers.test.ts` — all cases pass.
-- [ ] `bun run lint` passes on `src/gitlab/**`.
-- [ ] `grep -n 'resolveUser\s*(' src/gitlab/` returns 0 hits.
-- [ ] `grep -n 'gitlabUsername' src/gitlab/` returns 0 hits.
+- [x] `bun test src/tests/gitlab-handlers.test.ts` — all cases pass.
+- [x] `bun run lint` passes on `src/gitlab/**`.
+- [x] `grep -n 'resolveUser\s*(' src/gitlab/` returns 0 hits.
+- [x] `grep -n 'gitlabUsername' src/gitlab/` returns 0 hits.
 
 #### Automated QA:
 

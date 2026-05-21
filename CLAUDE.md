@@ -87,6 +87,41 @@ Use Bun, not Node/npm/pnpm/vite:
 
 </important>
 
+<important if="you are searching the codebase for code by intent, a symbol/identifier, or how something works">
+
+## Code Search
+
+Use `semble search` to find code by describing what it does or naming a symbol/identifier, instead of grep:
+
+```bash
+semble search "authentication flow" ./my-project
+semble search "save_pretrained" ./my-project
+semble search "save model to disk" ./my-project --top-k 10
+```
+
+Use `semble find-related` to discover code similar to a known location (pass `file_path` and `line` from a prior search result):
+
+```bash
+semble find-related src/auth.py 42 ./my-project
+```
+
+`path` defaults to the current directory when omitted; git URLs are accepted.
+
+If `semble` is not on `$PATH`, use `uvx --from "semble[mcp]" semble` in its place.
+
+If the `semble` MCP server is enabled, prefer its `search` / `find_related` tools over the CLI.
+
+To keep search output out of the main context, offload it to the `semble-search` subagent (`.claude/agents/semble-search.md`) via the `Task` tool — it runs the search/find-related loop and returns only the relevant findings.
+
+### Workflow
+
+1. Start with `semble search` to find relevant chunks.
+2. Inspect full files only when the returned chunk is not enough context.
+3. Optionally use `semble find-related` with a promising result's `file_path` and `line` to discover related implementations.
+4. Use grep only when you need exhaustive literal matches or quick confirmation of an exact string.
+
+</important>
+
 <important if="you are referencing Gemini models in tests, workflows, or examples">
 
 Default Gemini model: `google/gemini-3-flash-preview` (this is from OpenRouter).

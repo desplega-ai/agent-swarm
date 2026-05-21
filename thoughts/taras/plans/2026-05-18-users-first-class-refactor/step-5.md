@@ -2,7 +2,7 @@
 id: step-5
 name: Linear webhook rewire + Q21.A actor fix + appUserId guard
 depends_on: [step-1]
-status: ready
+status: done
 ---
 
 # step-5: Linear webhook rewire + Q21.A actor fix + appUserId guard
@@ -115,11 +115,11 @@ Same appUserId guard. Same cascade. `sampleContext` from `activity?.content?.bod
 
 #### Automated Verification:
 
-- [ ] `bun test src/tests/linear-sync.test.ts` — all cases pass, including the appUserId guard test.
-- [ ] `bun run lint` passes on `src/linear/**`.
-- [ ] `grep -n 'resolveUser\s*(' src/linear/` returns 0 hits.
-- [ ] `grep -n 'event\.actor' src/linear/` returns 0 hits (the broken extraction is gone).
-- [ ] `grep -n 'linearUserId' src/linear/` returns 0 hits referring to the dropped `users.linearUserId` column (refs to the local `linearUserId` variable in the new code are expected and fine).
+- [x] `bun test src/tests/linear-sync.test.ts` — all cases pass, including the appUserId guard test. (Ran as `bun test src/tests/linear-sync-identity.test.ts` — 9/9 pass.)
+- [x] `bun run lint` passes on `src/linear/**`. (Biome clean on `src/linear/` + new test file; repo-wide lint failures are in sibling-step files.)
+- [x] `grep -n 'resolveUser\s*(' src/linear/` returns 0 hits.
+- [x] `grep -n 'event\.actor' src/linear/` returns 0 hits (the broken extraction is gone).
+- [x] `grep -n 'linearUserId' src/linear/` returns 0 hits referring to the dropped `users.linearUserId` column (refs to the local `linearUserId` variable in the new code are expected and fine).
 
 #### Automated QA:
 

@@ -150,21 +150,38 @@ export interface AgentWithTasks extends Agent {
 
 /**
  * Identity (Phase 2 ≥1.76.0). Mirrors `UserSchema` in `src/types.ts` —
- * canonical row from the new `users` table.
+ * canonical row from the new `users` table. Phase 064: identity columns
+ * normalized into `user_external_ids`; surfaced here via `identities[]`.
+ *
+ * Step-9 (≥1.80.0): server-side `composeUser` decorates every list/detail
+ * response with `identities`, `tokens`, and `recentEvents` (limit configurable
+ * via `?recentEvents=N`). All three are present on every wire row produced by
+ * `/api/users*`.
  */
+export interface UserIdentity {
+  kind: string;
+  externalId: string;
+}
+
 export interface User {
   id: string;
   name: string;
   email?: string;
   role?: string;
   notes?: string;
-  slackUserId?: string;
-  linearUserId?: string;
-  githubUsername?: string;
-  gitlabUsername?: string;
   emailAliases: string[];
   preferredChannel: string;
   timezone?: string;
+  // Phase 064: list of platform identities composed from `user_external_ids`.
+  identities?: UserIdentity[];
+  // Phase 064: token summaries (no plaintext, just preview suffix).
+  tokens?: UserToken[];
+  // Phase 064: the last N identity events (server caps the limit).
+  recentEvents?: IdentityEvent[];
+  // Phase 064: NULL/undefined = unlimited.
+  dailyBudgetUsd?: number | null;
+  status: "invited" | "active" | "suspended";
+  metadata?: Record<string, unknown>;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -173,18 +190,126 @@ export interface UsersResponse {
   users: User[];
 }
 
+export interface UserResponse {
+  user: User;
+}
+
 export interface CreateUserInput {
   name: string;
   email?: string;
   role?: string;
   notes?: string;
-  slackUserId?: string;
-  linearUserId?: string;
-  githubUsername?: string;
-  gitlabUsername?: string;
   emailAliases?: string[];
   preferredChannel?: string;
   timezone?: string;
+  identities?: UserIdentity[];
+  dailyBudgetUsd?: number | null;
+  status?: "invited" | "active" | "suspended";
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * PATCH /api/users/:id body. Every field is optional (server requires
+ * at least one). Passing `identities` replaces the user's identity set.
+ */
+export interface UpdateUserInput {
+  name?: string;
+  email?: string;
+  role?: string;
+  notes?: string;
+  emailAliases?: string[];
+  preferredChannel?: string;
+  timezone?: string;
+  identities?: UserIdentity[];
+  dailyBudgetUsd?: number | null;
+  status?: "invited" | "active" | "suspended";
+  metadata?: Record<string, unknown> | null;
+}
+
+/**
+ * Identity event types — mirrors `IdentityEventTypeSchema` in `src/types.ts`
+ * and the CHECK constraint on `user_identity_events.eventType` in migration 064.
+ */
+export type IdentityEventType =
+  | "auto_merge"
+  | "manual_merge"
+  | "identity_added"
+  | "identity_removed"
+  | "email_added"
+  | "email_removed"
+  | "token_minted"
+  | "token_revoked"
+  | "budget_changed"
+  | "status_changed"
+  | "profile_changed";
+
+/**
+ * Server-decoded identity event (`src/be/users.ts: rowToEvent`). The
+ * `before`/`after` columns are JSON-parsed server-side so the UI doesn't
+ * have to repeat the parse. `eventType` is loosened to `string` on the wire
+ * (the server stores raw strings) but the UI narrows to `IdentityEventType`
+ * for rendering.
+ */
+export interface IdentityEvent {
+  id: string;
+  userId: string;
+  eventType: IdentityEventType | string;
+  actor: string;
+  before: unknown | null;
+  after: unknown | null;
+  createdAt: string;
+}
+
+export interface IdentityEventsResponse {
+  events: IdentityEvent[];
+}
+
+export interface IdentitiesResponse {
+  identities: UserIdentity[];
+}
+
+/**
+ * Read shape for a user-owned MCP token (Phase 064 schema, endpoints ship
+ * with the future MCP-token plan). `tokenPreview` is the last 4 chars of
+ * the plaintext for UI display ("…ax7b").
+ */
+export interface UserToken {
+  id: string;
+  userId: string;
+  label: string | null;
+  tokenPreview: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+/**
+ * Unmapped identity entry surfaced by `GET /api/users/unmapped`. Composed
+ * server-side by collapsing the two-key-per-identity kv shape
+ * (`<externalId>:meta` + `<externalId>:count`) into a single row.
+ */
+export interface UnmappedIdentity {
+  kind: string;
+  externalId: string;
+  lastSeenAt: string | null;
+  count: number;
+  sampleEventType: string | null;
+  sampleContext: unknown | null;
+}
+
+export interface UnmappedResponse {
+  unmapped: UnmappedIdentity[];
+}
+
+/**
+ * Resolve body — either link to an existing user (`userId`) OR create a
+ * new one inline (`name` + `email`). Mirrors the `z.union` in
+ * `src/http/users.ts: resolveUnmapped`.
+ */
+export type ResolveUnmappedInput = { userId: string } | { name: string; email: string };
+
+export interface MergeUsersInput {
+  sourceUserId: string;
 }
 
 /**

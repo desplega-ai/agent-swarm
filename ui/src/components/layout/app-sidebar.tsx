@@ -6,6 +6,7 @@ import {
   Cable,
   ClipboardCheck,
   Clock,
+  Contact,
   FileText,
   GitBranch,
   Globe,
@@ -56,6 +57,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
       { title: "Agents", path: "/agents", icon: Users },
       { title: "Sessions", path: "/sessions", icon: MessageSquare, gate: { minVersion: "1.76.0" } },
       { title: "Tasks", path: "/tasks", icon: ListTodo },
+      { title: "People", path: "/people", icon: Contact, gate: { minVersion: "1.80.0" } },
     ],
   },
   {
@@ -103,6 +105,7 @@ export function AppSidebar() {
   const gates: Record<string, ReturnType<typeof useFeatureGate>> = {
     "1.76.0": useFeatureGate("1.76.0"), // Sessions
     "1.79.0": useFeatureGate("1.79.0"), // Pages
+    "1.80.0": useFeatureGate("1.80.0"), // People
   };
   const isGated = (item: NavItem) =>
     !!item.gate && gates[item.gate.minVersion]?.supported === false;

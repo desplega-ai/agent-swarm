@@ -31,7 +31,9 @@ import {
 import type { ComponentType, ReactNode, SVGProps } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AgentTask } from "@/api/types";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useUsers } from "@/api/hooks/use-users";
+import type { AgentTask, User } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { DataGrid } from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
@@ -59,6 +61,7 @@ export type TasksTableColumnId =
   | "source"
   | "model"
   | "agent"
+  | "user"
   | "elapsed"
   | "created"
   | "type"
@@ -67,10 +70,16 @@ export type TasksTableColumnId =
 
 // Columns the user can hide via the visibility dropdown. Description+Status
 // stay pinned so the table always has an anchor.
+//
+// `user` is feature-gated on swarm ≥ 1.81.0 (the `requestedByUserId` column
+// landed in Phase 1 of the identity work; this table surfaces it once the
+// connected server has the People page + composeUser pipeline). When the
+// server is older, the table strips the column AND the menu omits the entry.
 export const TOGGLEABLE_COLUMNS: { id: TasksTableColumnId; label: string }[] = [
   { id: "source", label: "Source" },
   { id: "model", label: "Model" },
   { id: "agent", label: "Agent" },
+  { id: "user", label: "Requested by" },
   { id: "elapsed", label: "Elapsed" },
   { id: "created", label: "Created" },
   { id: "type", label: "Type" },
@@ -207,6 +216,33 @@ function AgentCell({
   );
 }
 
+/**
+ * "Requested by" cell — resolves `requestedByUserId` against the parent's
+ * `userById` map. Falls back name → email → truncated id → em-dash, in that
+ * order, so the cell always renders something legible even mid-merge or before
+ * the users query lands.
+ */
+function UserCell({
+  userId,
+  userById,
+}: {
+  userId: string | undefined | null;
+  userById: Map<string, User> | undefined;
+}) {
+  if (!userId) return DASH;
+  const user = userById?.get(userId);
+  const label = user?.name?.trim() || user?.email?.trim() || `${userId.slice(0, 8)}…`;
+  return (
+    <Link
+      to={`/people/${userId}`}
+      className="inline-flex items-center gap-1.5 text-foreground hover:underline min-w-0"
+    >
+      <UserCheck className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <span className="truncate">{label}</span>
+    </Link>
+  );
+}
+
 function DepsCell({ value }: { value: string[] | undefined }) {
   if (!value || value.length === 0) return DASH;
   return (
@@ -312,7 +348,10 @@ function saveHidden(storageKey: string | undefined, hidden: Set<TasksTableColumn
 
 export interface TasksColumnsState {
   isHidden: (id: TasksTableColumnId) => boolean;
+  /** Caller-forced columns: shown in menu as "locked". */
   forcedHidden: Set<TasksTableColumnId>;
+  /** Version-gated columns: omitted from menu entirely. */
+  gateHidden: Set<TasksTableColumnId>;
   toggle: (id: TasksTableColumnId, next: boolean) => void;
 }
 
@@ -325,7 +364,17 @@ export function useTasksColumns({
   hiddenColumns?: TasksTableColumnId[];
   defaultHiddenColumns?: TasksTableColumnId[];
 }): TasksColumnsState {
+  // Soft-gate the "Requested by" column on the swarm exposing the People
+  // surface. When the server is older (or unknown), drop the column AND its
+  // menu entry so users don't see a checkbox for a column that can never
+  // resolve. Mirrors the soft-degrade pattern used by other identity-aware
+  // surfaces (`useFeatureGate("1.76.0")` in CurrentUserContext).
+  const { supported: userColumnSupported } = useFeatureGate("1.81.0");
   const forcedHidden = useMemo(() => new Set(hiddenColumns ?? []), [hiddenColumns]);
+  const gateHidden = useMemo<Set<TasksTableColumnId>>(
+    () => (userColumnSupported ? new Set() : new Set(["user"])),
+    [userColumnSupported],
+  );
   const [userHidden, setUserHidden] = useState<Set<TasksTableColumnId>>(() => {
     const saved = loadHidden(storageKey);
     return saved ?? new Set(defaultHiddenColumns);
@@ -336,8 +385,8 @@ export function useTasksColumns({
   }, [storageKey, userHidden]);
 
   const isHidden = useCallback(
-    (id: TasksTableColumnId) => forcedHidden.has(id) || userHidden.has(id),
-    [forcedHidden, userHidden],
+    (id: TasksTableColumnId) => forcedHidden.has(id) || gateHidden.has(id) || userHidden.has(id),
+    [forcedHidden, gateHidden, userHidden],
   );
 
   const toggle = useCallback((id: TasksTableColumnId, next: boolean) => {
@@ -349,7 +398,7 @@ export function useTasksColumns({
     });
   }, []);
 
-  return { isHidden, forcedHidden, toggle };
+  return { isHidden, forcedHidden, gateHidden, toggle };
 }
 
 // ─── Columns menu (rendered wherever the parent wants) ───────────────────────
@@ -387,7 +436,7 @@ export function TasksColumnsMenu({
           </DropdownMenuCheckboxItem>
         ))}
         <DropdownMenuSeparator />
-        {TOGGLEABLE_COLUMNS.map(({ id, label }) => {
+        {TOGGLEABLE_COLUMNS.filter(({ id }) => !state.gateHidden.has(id)).map(({ id, label }) => {
           const forced = state.forcedHidden.has(id);
           return (
             <DropdownMenuCheckboxItem
@@ -436,6 +485,22 @@ export function TasksTable({
   emptyMessage = "No tasks found",
   domLayout,
 }: TasksTableProps) {
+  // Build a `userId → User` lookup for the "Requested by" column. We skip the
+  // network call entirely on swarms that don't support the column — the
+  // gate-hidden set already filters the column out of `columnDefs`, so the
+  // map would be wasted work. `useUsers()` itself is also gated server-side at
+  // ≥ 1.76.0 (older servers 404), but the explicit `enabled` guard keeps an
+  // older server quiet in the network tab.
+  const userColumnVisible = !columns.isHidden("user");
+  const { data: usersData } = useUsers();
+  const userById = useMemo<Map<string, User> | undefined>(() => {
+    if (!userColumnVisible) return undefined;
+    if (!usersData) return undefined;
+    const m = new Map<string, User>();
+    for (const u of usersData) m.set(u.id, u);
+    return m;
+  }, [userColumnVisible, usersData]);
+
   const columnDefs = useMemo<ColDef<AgentTask>[]>(() => {
     // DataGrid calls `sizeColumnsToFit()` on grid ready, which by default
     // proportionally resizes every column — including fixed ones — to fill
@@ -487,6 +552,23 @@ export function TasksTable({
         valueGetter: (params) => params.data?.agentId ?? "",
         cellRenderer: (p: { value: string }) => (
           <AgentCell agentId={p.value} agentName={agentNameById?.get(p.value)} />
+        ),
+      },
+      {
+        _id: "user",
+        headerName: "Requested by",
+        width: 180,
+        ...fixed,
+        // Sort by resolved display name (name → email → id) so the column
+        // alphabetizes the way it reads, not by opaque user id.
+        valueGetter: (params) => {
+          const id = params.data?.requestedByUserId;
+          if (!id) return "";
+          const user = userById?.get(id);
+          return user?.name?.trim() || user?.email?.trim() || id;
+        },
+        cellRenderer: (p: { data?: AgentTask }) => (
+          <UserCell userId={p.data?.requestedByUserId} userById={userById} />
         ),
       },
       {
@@ -544,7 +626,7 @@ export function TasksTable({
     ];
 
     return all.filter((c) => !columns.isHidden(c._id)).map(({ _id, ...col }) => col);
-  }, [agentNameById, columns]);
+  }, [agentNameById, columns, userById]);
 
   return (
     <DataGrid

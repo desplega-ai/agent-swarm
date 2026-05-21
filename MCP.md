@@ -221,22 +221,25 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 
 **Resolve user identity**
 
-Look up a canonical user profile by any platform-specific identifier (Slack ID, Linear ID, GitHub username, email, or name). Returns the full user profile or null.
+Look up a canonical user profile by an `(kind, externalId)` pair (e.g. `{kind: "slack", externalId: "U_X"}`) OR by email (primary or alias). Returns the user profile or "No user found".
+
+Caller MUST supply either (`kind` + `externalId`) OR `email`. Empty input is rejected by the validator.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `slackUserId` | `string` | No | - | Slack user ID (e.g., U08NR6QD6CS) |
-| `linearUserId` | `string` | No | - | Linear user UUID |
-| `githubUsername` | `string` | No | - | GitHub username |
-| `gitlabUsername` | `string` | No | - | GitLab username |
-| `email` | `string` | No | - | Email address |
-| `name` | `string` | No | - | Name (fuzzy substring match, lowest priority) |
+| `kind` | `string` | Conditional | - | Identity kind — `slack`, `linear`, `github`, `gitlab`, `jira`, or custom. Required when looking up by external ID. |
+| `externalId` | `string` | Conditional | - | Platform-specific identifier for the given kind (e.g. Slack user ID `U08NR6QD6CS`, Linear user UUID, GitHub login). Required when looking up by external ID. |
+| `email` | `string` | Conditional | - | Email address (primary or alias). Required when not looking up by external ID. |
+
+> **Migration note (2026-05)**: the old field names `slackUserId`, `linearUserId`, `githubUsername`, `gitlabUsername`, and the `name` fuzzy-match parameter were removed. Use `{kind, externalId}` or `email` instead. Old payloads fail Zod validation at runtime — no compatibility shim.
 
 ### manage-user
 
 **Manage user profiles**
 
 Create, update, delete, or list user profiles in the user registry. Lead-only.
+
+Identities are managed via a declarative `identities: [{kind, externalId}]` array. On `update`, the array is treated as the full desired set — entries not currently linked are added (emit `identity_added`), and entries currently linked but missing from the array are removed (emit `identity_removed`). Omit the field entirely to leave identities untouched.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -246,13 +249,15 @@ Create, update, delete, or list user profiles in the user registry. Lead-only.
 | `email` | `string` | No | - | Primary email address |
 | `role` | `string` | No | - | Role (e.g., "founder", "engineer") |
 | `notes` | `string` | No | - | Free-form notes |
-| `slackUserId` | `string` | No | - | Slack user ID |
-| `linearUserId` | `string` | No | - | Linear user UUID |
-| `githubUsername` | `string` | No | - | GitHub username |
-| `gitlabUsername` | `string` | No | - | GitLab username |
-| `emailAliases` | `array` | No | - | Additional email addresses |
+| `identities` | `array<{kind, externalId}>` | No | - | Declarative list of platform identities. On `create` every entry is linked; on `update` the diff is applied. |
+| `emailAliases` | `array<string>` | No | - | Additional email addresses. Diff vs current emits `email_added` / `email_removed` events on update. |
 | `preferredChannel` | `string` | No | - | Preferred contact channel |
 | `timezone` | `string` | No | - | Timezone (e.g., America/New_York) |
+| `dailyBudgetUsd` | `number \| null` | No | - | Daily budget cap in USD. `null` = unlimited. |
+| `status` | `invited \| active \| suspended` | No | `active` | User lifecycle status. |
+| `metadata` | `object \| null` | No | - | Free-form JSON metadata. `null` clears the field. |
+
+> **Migration note (2026-05)**: the old top-level identity fields (`slackUserId`, `linearUserId`, `githubUsername`, `gitlabUsername`) were removed. Pass identities through the `identities` array instead.
 
 ### db-query
 
