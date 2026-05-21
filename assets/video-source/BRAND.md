@@ -13,11 +13,6 @@
 - **Treatment**: Rounded-md corners, amber glow shadow (`0 4px 14px -2px oklch(0.769 0.188 70.08 / 0.35)`)
 - **No SVG version exists** — PNG only from the landing repo
 
-### Desplega Isotipo
-- **File**: `public/brand/desplega-iso.svg`
-- **Color**: `#1600ea` electric blue (fill)
-- **Usage**: Watermark / co-brand corner mark only — NOT the primary agent-swarm logo
-
 ### Wordmark
 - `<span>Agent Swarm</span>` in Space Grotesk Semibold (600), tracking -0.04em (hero headlines), -0.03em (section h2)
 - White on dark backgrounds; zinc-950 on light backgrounds
@@ -149,9 +144,10 @@ bg-zinc-950 text-white                       ← dark wrapper
 
 | ✅ Do | ❌ Don't |
 |-------|---------|
-| Use amber-700 (`#b45309`) as accent | Use lime-green (`#EBFF94`) — that's the Desplega.ai marketing brand |
+| Use amber-700 (`#b45309`) as accent | Use lime-green (`#EBFF94`) — that's a different product's brand |
 | Space Grotesk for display/body | Geist or Inter for display |
 | Space Mono for slash eyebrows | Geist Mono for eyebrows |
 | `/ label` eyebrow in amber-700 | Plain text section labels |
 | Gradient-text for italic hero phrase | Solid amber for italic accents |
-| logo.png (the orange "AS" square icon) | logo-iso.svg (that was from the wrong landing repo) |
+| logo.png (orange "AS" square icon) — `public/brand/logo.png` | Any external company's logo or mark |
+| "Agent Swarm" + `agent-swarm.dev` as the only brand in the video | Any other product/company name or logo |

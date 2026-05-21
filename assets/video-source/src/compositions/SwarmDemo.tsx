@@ -17,7 +17,7 @@ import sampleCursorTrack from "../fixtures/sample-cursor-track.json";
 // Structure:
 //   0-90    (0-3s)    Intro — logo.png + "Agent Swarm" wordmark in Space Grotesk
 //   90-765  (3-25.5s) E2E demo footage + real cursor from cursor-track.json
-//   765-900 (25.5-30s) Outro — wordmark + agent-swarm.dev + by desplega.ai
+//   765-900 (25.5-30s) Outro — wordmark + agent-swarm.dev
 //
 // Music: disabled by default (Researcher gathering candidates separately).
 // Add: <Audio src={staticFile("audio/bed.mp3")} volume={0.12} /> once music is picked.

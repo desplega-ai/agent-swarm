@@ -1,8 +1,6 @@
-// Brand tokens — derived from desplega-ai/agent-swarm-landing (verified 2026-05-21).
-// Source of truth: assets/video-source/BRAND.md
-//
-// Canonical brand: amber-700 primary, zinc neutral scale, Space Grotesk + Space Mono.
-// Slash-prefixed eyebrows: font-mono 11px tracking-[0.14em] uppercase text-amber-700.
+// Agent Swarm brand tokens — source: assets/video-source/BRAND.md (from agent-swarm-landing).
+// Amber-700 primary · zinc neutral scale · Space Grotesk + Space Mono.
+// Slash-prefixed eyebrows: Space Mono 11px tracking-[0.14em] uppercase amber-700.
 export const theme = {
   // Hero background (zinc-950) — dark scene background matching landing hero
   bg: "#09090b",

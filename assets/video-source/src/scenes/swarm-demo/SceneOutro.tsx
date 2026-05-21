@@ -1,8 +1,8 @@
-import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
+import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 import { theme } from "../../theme";
 
 // 765-900 frames (25.5-30s): outro title card.
-// Brand: zinc-950 bg, amber-700 primary, Space Grotesk wordmark + Desplega isotipo.
+// Brand: zinc-950 bg, amber-700 primary, Space Grotesk wordmark, agent-swarm.dev.
 // Pattern: slash-prefixed eyebrow in Space Mono amber-700.
 export const SceneOutro: React.FC = () => {
   const frame = useCurrentFrame(); // relative within sequence (0-134)
@@ -11,8 +11,6 @@ export const SceneOutro: React.FC = () => {
   const logoY = interpolate(frame, [0, 18], [14, 0], { extrapolateRight: "clamp" });
   const eyebrowOpacity = interpolate(frame, [16, 32], [0, 1], { extrapolateRight: "clamp" });
   const linkOpacity = interpolate(frame, [24, 42], [0, 1], { extrapolateRight: "clamp" });
-  const tagOpacity = interpolate(frame, [38, 56], [0, 1], { extrapolateRight: "clamp" });
-  const logoOpacity = interpolate(frame, [12, 30], [0, 1], { extrapolateRight: "clamp" });
 
   return (
     <AbsoluteFill
@@ -51,7 +49,7 @@ export const SceneOutro: React.FC = () => {
             opacity: eyebrowOpacity,
           }}
         >
-          / open source
+          / open source · mit
         </div>
 
         {/* "Agent Swarm" wordmark — Space Grotesk 600 */}
@@ -82,37 +80,6 @@ export const SceneOutro: React.FC = () => {
         >
           agent-swarm.dev
         </div>
-
-        {/* desplega.ai sub-label */}
-        <div
-          style={{
-            fontFamily: theme.mono,
-            fontSize: 11,
-            fontWeight: 400,
-            color: "rgba(255,255,255,0.25)",
-            letterSpacing: "0.10em",
-            textTransform: "uppercase",
-            marginTop: 10,
-            opacity: tagOpacity,
-          }}
-        >
-          by desplega.ai
-        </div>
-      </div>
-
-      {/* Desplega isotipo — bottom-right corner */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 48,
-          right: 64,
-          opacity: logoOpacity * 0.45,
-        }}
-      >
-        <Img
-          src={staticFile("brand/desplega-iso.svg")}
-          style={{ width: 26, height: 26, objectFit: "contain" }}
-        />
       </div>
     </AbsoluteFill>
   );

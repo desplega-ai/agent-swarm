@@ -13,7 +13,7 @@ export const SceneIntro: React.FC = () => {
   const eyebrowOpacity = interpolate(frame, [14, 30], [0, 1], { extrapolateRight: "clamp" });
   const wordmarkOpacity = interpolate(frame, [20, 38], [0, 1], { extrapolateRight: "clamp" });
   const wordmarkY = interpolate(frame, [20, 38], [12, 0], { extrapolateRight: "clamp" });
-  const tagOpacity = interpolate(frame, [38, 56], [0, 1], { extrapolateRight: "clamp" });
+  const taglineOpacity = interpolate(frame, [38, 56], [0, 1], { extrapolateRight: "clamp" });
   const fadeOut = interpolate(frame, [72, 90], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
 
   return (
@@ -113,7 +113,7 @@ export const SceneIntro: React.FC = () => {
               color: theme.muted,
               letterSpacing: "-0.02em",
               marginTop: 16,
-              opacity: tagOpacity,
+              opacity: taglineOpacity,
             }}
           >
             Your AI engineering team
@@ -121,22 +121,6 @@ export const SceneIntro: React.FC = () => {
         </div>
       </div>
 
-      {/* Corner brand mark — "by Desplega" */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 52,
-          right: 68,
-          fontFamily: theme.mono,
-          fontSize: 11,
-          color: "rgba(255,255,255,0.22)",
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          opacity: tagOpacity,
-        }}
-      >
-        by Desplega
-      </div>
     </AbsoluteFill>
   );
 };
