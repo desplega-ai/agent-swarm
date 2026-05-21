@@ -13,7 +13,7 @@ import { exec } from "node:child_process";
 import { emitKeypressEvents } from "node:readline";
 
 import { loginCodexOAuth } from "../providers/codex-oauth/flow.js";
-import { storeCodexOAuth } from "../providers/codex-oauth/storage.js";
+import { loadAllCodexOAuthSlots, storeCodexOAuth } from "../providers/codex-oauth/storage.js";
 import { getApiKey } from "../utils/api-key";
 
 type PromptTextFn = (label: string, defaultValue: string) => Promise<string>;
@@ -30,6 +30,7 @@ type RunCodexLoginDeps = {
   resolveConfig?: typeof resolveCodexLoginConfig;
   login?: typeof loginCodexOAuth;
   store?: typeof storeCodexOAuth;
+  loadAllSlots?: typeof loadAllCodexOAuthSlots;
   log?: (message: string) => void;
   error?: (message: string) => void;
   exit?: (code: number) => void;
@@ -38,6 +39,7 @@ type RunCodexLoginDeps = {
 type ParsedCodexLoginArgs = {
   apiUrl?: string;
   apiKey?: string;
+  slot?: number;
   showHelp: boolean;
 };
 
@@ -50,6 +52,8 @@ function parseCodexLoginArgs(args: string[]): ParsedCodexLoginArgs {
       parsed.apiUrl = args[++i]!;
     } else if (arg === "--api-key" && args[i + 1]) {
       parsed.apiKey = args[++i]!;
+    } else if (arg === "--slot" && args[i + 1]) {
+      parsed.slot = Number(args[++i]);
     } else if (arg === "--help" || arg === "-h") {
       parsed.showHelp = true;
     }
@@ -140,7 +144,7 @@ export async function promptHiddenInput(
 export async function resolveCodexLoginConfig(
   args: string[],
   deps: ResolveCodexLoginConfigDeps = {},
-): Promise<{ apiUrl: string; apiKey: string }> {
+): Promise<{ apiUrl: string; apiKey: string; slot?: number }> {
   const env = deps.env ?? process.env;
   const parsed = parseCodexLoginArgs(args);
   const promptText = deps.promptText ?? promptTextInput;
@@ -165,7 +169,7 @@ export async function resolveCodexLoginConfig(
       (await promptSecret("Swarm API key", defaultApiKey, apiKeyHelp)).trim() || defaultApiKey;
   }
 
-  return { apiUrl, apiKey };
+  return { apiUrl, apiKey, slot: parsed.slot };
 }
 
 function printHelp() {
@@ -178,6 +182,7 @@ Usage:
 Options:
   --api-url <url>    Swarm API URL (default: MCP_BASE_URL or http://localhost:3013)
   --api-key <key>    Swarm API key (default: API_KEY or 123123)
+  --slot <n>         Credential pool slot (0-9, default: next free slot)
   -h, --help         Show this help
 
 Without flags, the command prompts interactively for the target API URL and
@@ -193,10 +198,13 @@ Deployed Codex workers automatically restore these credentials at boot.
 `);
 }
 
+const MAX_SLOT = 9;
+
 export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}): Promise<void> {
   const resolveConfig = deps.resolveConfig ?? resolveCodexLoginConfig;
   const login = deps.login ?? loginCodexOAuth;
   const store = deps.store ?? storeCodexOAuth;
+  const loadAllSlots = deps.loadAllSlots ?? loadAllCodexOAuthSlots;
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
   const exit = deps.exit ?? ((code: number) => process.exit(code));
@@ -209,10 +217,32 @@ export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}
   let browserOpened = false;
 
   try {
-    const { apiUrl, apiKey } = await resolveConfig(args);
+    const { apiUrl, apiKey, slot: parsedSlot } = await resolveConfig(args);
+
+    // Resolve target slot: explicit --slot N, or auto-pick next free.
+    let slot: number;
+    if (parsedSlot !== undefined) {
+      if (!Number.isInteger(parsedSlot) || parsedSlot < 0 || parsedSlot > MAX_SLOT) {
+        error(`\nError: --slot must be an integer between 0 and ${MAX_SLOT}`);
+        exit(1);
+        return;
+      }
+      slot = parsedSlot;
+    } else {
+      const occupied = new Set((await loadAllSlots(apiUrl, apiKey)).map((s) => s.slot));
+      let next = 0;
+      while (occupied.has(next) && next <= MAX_SLOT) next++;
+      if (next > MAX_SLOT) {
+        error(`\nError: All credential slots (0-${MAX_SLOT}) are already in use`);
+        exit(1);
+        return;
+      }
+      slot = next;
+    }
 
     log("Starting Codex ChatGPT OAuth login...\n");
     log(`Target swarm API: ${apiUrl}\n`);
+    log(`Credential slot: ${slot}\n`);
 
     const creds = await login({
       onAuth: ({ url, instructions }) => {
@@ -253,8 +283,8 @@ export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}
 
     // Store credentials in the swarm API config store
     log("\nStoring credentials in swarm API config store...");
-    await store(apiUrl, apiKey, creds);
-    log("Credentials stored successfully!");
+    await store(apiUrl, apiKey, creds, slot);
+    log(`Credentials stored successfully in slot ${slot}!`);
 
     log("\nDeployed Codex workers will automatically restore these credentials at boot.");
   } catch (err) {

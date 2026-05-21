@@ -24,11 +24,11 @@
 
 import type { CodexAuthJson, CodexOAuthCredentials } from "./types.js";
 
-export function authJsonToCredentialSelection(auth: CodexAuthJson) {
+export function authJsonToCredentialSelection(auth: CodexAuthJson, slot = 0, total = 1) {
   return {
     selected: auth.tokens.account_id,
-    index: 0,
-    total: 1,
+    index: slot,
+    total,
     keySuffix: auth.tokens.account_id.slice(-5),
     keyType: "CODEX_OAUTH",
   };
