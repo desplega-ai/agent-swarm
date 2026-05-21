@@ -19,7 +19,7 @@
 - **Usage**: Watermark / co-brand corner mark only — NOT the primary agent-swarm logo
 
 ### Wordmark
-- `<span>Agent Swarm</span>` in Space Grotesk Semibold (600), tracking -0.01em
+- `<span>Agent Swarm</span>` in Space Grotesk Semibold (600), tracking -0.04em (hero headlines), -0.03em (section h2)
 - White on dark backgrounds; zinc-950 on light backgrounds
 
 ---
@@ -73,9 +73,12 @@ import { loadFont as loadSpaceGrotesk } from "@remotion/google-fonts/SpaceGrotes
 import { loadFont as loadSpaceMono } from "@remotion/google-fonts/SpaceMono";
 ```
 
-### Heading style (Hero)
-- Space Grotesk 600 (semibold), `tracking-[-0.04em]`
-- Example: `font-size: 68px; font-weight: 600; letter-spacing: -0.04em`
+### Heading sizes (from components)
+- Hero h1: `clamp(48px, 7vw, 104px)`, font-semibold, tracking -0.04em, leading-[0.96]
+- Section h2 (Pillars): 40-56px, font-semibold, tracking -0.03em, leading-[1.0]
+- Card h3 (Pricing): 22px, font-semibold, tracking -0.015em, leading-[1.15]
+- Price number: 44px, font-bold, tracking -0.03em
+- Video intro wordmark: 64px — Video outro wordmark: 76px
 
 ---
 
@@ -108,8 +111,11 @@ Hex equivalent: `linear-gradient(135deg, #b45309, #f59e0b, #b45309)`
 - No drop shadow by default
 
 ### CTA Button (primary)
-- `bg-amber-500 text-white font-medium px-5 py-2.5 rounded-lg`
-- Hover: `bg-amber-600`
+- `bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold rounded-xl h-11`
+- Box shadow: `0 14px 40px -8px oklch(0.769 0.188 70.08 / 0.55)` (amber glow)
+
+### CTA Button (secondary / ghost)
+- `bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.12] text-white font-semibold rounded-xl h-11`
 
 ### Hero Section Structure
 ```
