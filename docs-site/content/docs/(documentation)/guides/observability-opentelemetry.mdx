@@ -256,6 +256,62 @@ Common attributes:
 | `agentswarm.compaction.trigger` | Compaction trigger |
 | `agentswarm.compaction.pre_tokens` | Tokens before compaction |
 
+## Claude Code Telemetry
+
+The Claude Code CLI emits its own OpenTelemetry signal — metrics, log events, and (in beta) traces — from inside the worker subprocess. This is separate from the Agent Swarm spans described above: it is the model's own view of each interaction (`claude_code.interaction`), every LLM request, and every tool call.
+
+Agent Swarm leaves Claude Code's telemetry **off by default** and never force-enables it. Two independent controls govern it:
+
+1. **The operator enables Claude Code's exporters** through swarm config — the env vars below. This is what makes Claude Code emit anything at all.
+2. **The `SWARM_ENABLE_CLAUDE_CODE_OTEL` gate** makes the claude-adapter inject a `TRACEPARENT` at spawn time so Claude Code's spans nest inside the worker's trace, and pins privacy-safe logging defaults. This is what makes the two services show up as **one end-to-end trace**.
+
+### Enabling Claude Code's exporters
+
+Claude Code reads the standard `OTEL_*` exporter variables — endpoint, headers, protocol — which Agent Swarm already forwards to the subprocess. To turn its telemetry on, set these as swarm config (global, or agent-scoped to roll out gradually):
+
+```bash
+CLAUDE_CODE_ENABLE_TELEMETRY=1        # master switch — required
+CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1 # beta traces (claude_code.interaction et al.)
+OTEL_TRACES_EXPORTER=otlp             # traces
+OTEL_METRICS_EXPORTER=otlp            # token / cost / lines-of-code metrics
+OTEL_LOGS_EXPORTER=otlp               # user_prompt / tool_use log events
+```
+
+These are independent of the `SWARM_ENABLE_CLAUDE_CODE_OTEL` gate by design: an operator can run Claude Code telemetry on a single agent without any code change, and separately flip the gate when cross-service trace linking should turn on.
+
+### The `SWARM_ENABLE_CLAUDE_CODE_OTEL` gate
+
+When `SWARM_ENABLE_CLAUDE_CODE_OTEL` is truthy (`1`, `true`, `yes`, `on` — case-insensitive), the claude-adapter, on every session spawn:
+
+- **Injects `TRACEPARENT`** (and `TRACESTATE` when present) derived from the active `worker.session` span. Claude Code reads `TRACEPARENT` in non-interactive (`-p`) mode and parents its `claude_code.interaction` span to it instead of starting a fresh root span.
+- **Pins privacy-safe defaults** — `OTEL_LOG_USER_PROMPTS=0`, `OTEL_LOG_TOOL_DETAILS=0`, `OTEL_LOG_TOOL_CONTENT=0`, `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false`. These are only set when the operator has not already set them explicitly.
+
+The gate is read per-spawn from the resolved swarm config, so flipping it takes effect on the next session — no container restart required. When the gate is off, spawn behavior is unchanged: Claude Code (if its exporters are enabled) still emits, but its `claude_code.interaction` span is a disconnected root.
+
+### Expected SigNoz behavior
+
+- **A new `claude-code` service card** appears. Claude Code overrides `OTEL_SERVICE_NAME` with its own `service.name` for its spans — this is by design and expected. Agent Swarm does not strip or re-set it.
+- **Span hierarchy.** With the gate on, Claude Code's spans nest inside the worker trace:
+
+  ```
+  worker.session
+  └── worker.session.create
+      └── claude_code.interaction
+          ├── claude_code.llm_request
+          └── claude_code.tool
+  ```
+
+  A complete-task query (`agentswarm.task.id = '<task-id>'`) then returns the worker's `worker.tool` spans **and** Claude Code's `claude_code.*` spans in a single trace.
+- **Log events.** `user_prompt` and `tool_use` events are emitted with content redacted by default (see Privacy below).
+
+<Callout type="warn">
+**Privacy posture.** Agent Swarm's `scrubSecrets` does **not** run on Claude Code's exported payloads — they travel straight from the Claude Code process to your OTLP backend. The gate keeps `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`, and `OTEL_LOG_TOOL_CONTENT` all at `0` so prompt and tool content never leave the process. Do not flip these to `1` without a scrubbing story for Claude Code's payloads.
+</Callout>
+
+### Rollout
+
+`SWARM_ENABLE_CLAUDE_CODE_OTEL` is off by default. Recommended sequence: enable Claude Code's exporters on one agent, flip the gate agent-scoped on that same agent to validate the nested trace in SigNoz, watch span volume, then widen to global config.
+
 ## Metrics
 
 Agent Swarm currently emits traces, not standalone OTLP metrics. In SigNoz, create useful operational metrics from trace aggregations:
