@@ -4,6 +4,7 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  createUser,
   getRootTaskChain,
   initDb,
   listRecentSessions,
@@ -137,5 +138,57 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     for (let i = 1; i < sessions.length; i++) {
       expect(sessions[i - 1].lastActivityAt >= sessions[i].lastActivityAt).toBe(true);
     }
+  });
+
+  test("listRecentSessions — requestedByUserId filter: positive / negative / NULL exclusion / compat", () => {
+    const userA = createUser({ name: "Test User A" });
+    const userB = createUser({ name: "Test User B" });
+
+    const agent = createAgent({
+      id: "sessions-test-agent-user-filter",
+      name: "Sessions Test Agent UserFilter",
+      isLead: false,
+      status: "idle",
+    });
+    createTaskExtended("user-a session 1", {
+      agentId: agent.id,
+      requestedByUserId: userA.id,
+    });
+    createTaskExtended("user-a session 2", {
+      agentId: agent.id,
+      requestedByUserId: userA.id,
+    });
+    createTaskExtended("user-b session 1", {
+      agentId: agent.id,
+      requestedByUserId: userB.id,
+    });
+
+    // Positive: user A sees only their own sessions
+    const aOnly = listRecentSessions({ limit: 50, requestedByUserId: userA.id });
+    const aTasks = aOnly.map((s) => s.root.task);
+    expect(aTasks).toContain("user-a session 1");
+    expect(aTasks).toContain("user-a session 2");
+    expect(aTasks).not.toContain("user-b session 1");
+    for (const s of aOnly) {
+      expect(s.root.requestedByUserId).toBe(userA.id);
+    }
+
+    // Negative: user A cannot see user B's sessions
+    const hasUserBInA = aOnly.some((s) => s.root.requestedByUserId === userB.id);
+    expect(hasUserBInA).toBe(false);
+
+    // NULL exclusion: NULL requestedByUserId rows excluded when filter is active
+    const hasNullInA = aOnly.some((s) => s.root.requestedByUserId == null);
+    expect(hasNullInA).toBe(false);
+
+    // Empty: unknown user ID returns empty list
+    const nobody = listRecentSessions({ limit: 50, requestedByUserId: "non-existent-user-id" });
+    expect(nobody).toHaveLength(0);
+
+    // Compat: no filter returns all sessions including NULL rows and both users
+    const all = listRecentSessions({ limit: 100 });
+    expect(all.some((s) => s.root.requestedByUserId == null)).toBe(true);
+    expect(all.some((s) => s.root.requestedByUserId === userA.id)).toBe(true);
+    expect(all.some((s) => s.root.requestedByUserId === userB.id)).toBe(true);
   });
 });
