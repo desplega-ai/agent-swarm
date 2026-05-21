@@ -230,6 +230,10 @@ Single-credential deploys keep working unchanged:
 - The Docker entrypoint seeds `codex_oauth_0` from the legacy `codex_oauth` config key at boot (if `codex_oauth_0` does not yet exist). Workers never see the legacy key name at runtime.
 - If only one slot is provisioned, the pool still runs correctly — slot 0 is always selected and the availability filter is a no-op.
 
+### Known limitations
+
+**`refresh_token_reused` errors in multi-credential pools.** When two runners independently pick the same slot at the same moment and the stored token is expired, both will call the OAuth refresh endpoint concurrently. The second call fails with a `refresh_token_reused` / 401 error because OpenAI's token rotation invalidates the previous refresh token on first use. `materializeCodexAuthJson` is atomic at the filesystem level, but token refresh is not distributed-locked across workers. The random slot selection in `availableIndices` reduces collision probability as pool size grows — the simplest mitigation is to provision more slots so the odds of two workers landing on the same expired slot simultaneously are negligible. A distributed lock for token refresh would fully eliminate this race; that is tracked as a separate follow-up.
+
 ### Verification
 
 ```bash
