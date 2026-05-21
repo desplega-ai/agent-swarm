@@ -106,7 +106,7 @@ export function WorkflowNodeShell({
           ))}
         </div>
       ) : (
-        <Handle type="source" position={Position.Bottom} id="default" className={handleClass} />
+        <Handle type="source" position={Position.Bottom} id={ports[0]} className={handleClass} />
       )}
     </div>
   );

@@ -2,7 +2,14 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { z } from "zod";
-import { closeDb, createWorkflow, getWorkflowRun, initDb, updateWorkflow } from "../be/db";
+import {
+  closeDb,
+  createWorkflow,
+  getWorkflowRun,
+  initDb,
+  updateWorkflow,
+  upsertSwarmConfig,
+} from "../be/db";
 import type { Workflow } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
@@ -118,7 +125,12 @@ describe("handleWebhookTrigger", () => {
     hmac.update(body);
     const sig = `sha256=${hmac.digest("hex")}`;
 
-    const result = await handleWebhookTrigger(workflow.id, body, sig, sig, registry);
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": sig },
+      registry,
+    );
 
     expect(result.runId).toBeDefined();
     expect(typeof result.runId).toBe("string");
@@ -138,8 +150,7 @@ describe("handleWebhookTrigger", () => {
       await handleWebhookTrigger(
         workflow.id,
         '{"test":true}',
-        "sha256=invalid",
-        "sha256=invalid",
+        { "x-hub-signature-256": "sha256=invalid" },
         registry,
       );
       expect(true).toBe(false); // Should not reach here
@@ -155,7 +166,7 @@ describe("handleWebhookTrigger", () => {
     });
 
     try {
-      await handleWebhookTrigger(workflow.id, '{"test":true}', undefined, undefined, registry);
+      await handleWebhookTrigger(workflow.id, '{"test":true}', {}, registry);
       expect(true).toBe(false);
     } catch (err) {
       expect(err).toBeInstanceOf(WebhookError);
@@ -168,13 +179,7 @@ describe("handleWebhookTrigger", () => {
       triggers: [{ type: "webhook" }],
     });
 
-    const result = await handleWebhookTrigger(
-      workflow.id,
-      '{"data":"hello"}',
-      undefined,
-      undefined,
-      registry,
-    );
+    const result = await handleWebhookTrigger(workflow.id, '{"data":"hello"}', {}, registry);
 
     expect(result.runId).toBeDefined();
     const run = getWorkflowRun(result.runId);
@@ -183,13 +188,7 @@ describe("handleWebhookTrigger", () => {
 
   test("workflow not found returns 404", async () => {
     try {
-      await handleWebhookTrigger(
-        "00000000-0000-0000-0000-000000000000",
-        "{}",
-        undefined,
-        undefined,
-        registry,
-      );
+      await handleWebhookTrigger("00000000-0000-0000-0000-000000000000", "{}", {}, registry);
       expect(true).toBe(false);
     } catch (err) {
       expect(err).toBeInstanceOf(WebhookError);
@@ -205,12 +204,254 @@ describe("handleWebhookTrigger", () => {
     updateWorkflow(workflow.id, { enabled: false });
 
     try {
-      await handleWebhookTrigger(workflow.id, "{}", undefined, undefined, registry);
+      await handleWebhookTrigger(workflow.id, "{}", {}, registry);
       expect(true).toBe(false);
     } catch (err) {
       expect(err).toBeInstanceOf(WebhookError);
       expect((err as WebhookError).statusCode).toBe(400);
     }
+  });
+});
+
+// ─── Custom HMAC header + secret refs ───────────────────────
+
+describe("handleWebhookTrigger — custom hmacHeader", () => {
+  function signRaw(secret: string, body: string): string {
+    return crypto.createHmac("sha256", secret).update(body).digest("hex");
+  }
+
+  test("custom hmacHeader (X-Webhook-Signature) is picked up and verified", async () => {
+    const secret = "kapso-secret";
+    const workflow = makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret, hmacHeader: "X-Webhook-Signature" }],
+    });
+
+    const body = '{"event":"message"}';
+    // Kapso-style: raw hex, no `sha256=` prefix.
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-webhook-signature": signRaw(secret, body) },
+      registry,
+    );
+
+    expect(result.runId).toBeDefined();
+    expect(getWorkflowRun(result.runId)).not.toBeNull();
+  });
+
+  test("custom hmacHeader lookup is case-insensitive", async () => {
+    const secret = "kapso-secret-ci";
+    const workflow = makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret, hmacHeader: "X-Webhook-Signature" }],
+    });
+
+    const body = '{"event":"ci"}';
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "X-Webhook-Signature": signRaw(secret, body) },
+      registry,
+    );
+
+    expect(result.runId).toBeDefined();
+  });
+
+  test("signature on a non-configured header is rejected as missing", async () => {
+    const secret = "kapso-secret-2";
+    const workflow = makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret, hmacHeader: "X-Webhook-Signature" }],
+    });
+
+    const body = '{"event":"x"}';
+    // Use a header that is neither the configured one nor a known fallback.
+    try {
+      await handleWebhookTrigger(
+        workflow.id,
+        body,
+        { "x-some-other-header": signRaw(secret, body) },
+        registry,
+      );
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err).toBeInstanceOf(WebhookError);
+      expect((err as WebhookError).statusCode).toBe(401);
+    }
+  });
+
+  test("fallback header (x-signature) still works without explicit hmacHeader", async () => {
+    const secret = "fallback-secret";
+    const workflow = makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret }],
+    });
+
+    const body = '{"event":"fallback"}';
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-signature": signRaw(secret, body) },
+      registry,
+    );
+
+    expect(result.runId).toBeDefined();
+  });
+
+  test("default X-Hub-Signature-256 path still works (no regression)", async () => {
+    const secret = "default-header-secret";
+    const workflow = makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret }],
+    });
+
+    const body = '{"event":"default"}';
+    const sig = `sha256=${signRaw(secret, body)}`;
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": sig },
+      registry,
+    );
+
+    expect(result.runId).toBeDefined();
+  });
+});
+
+describe("handleWebhookTrigger — hmacSecret references", () => {
+  function signRaw(secret: string, body: string): string {
+    return crypto.createHmac("sha256", secret).update(body).digest("hex");
+  }
+
+  test("hmacSecret as secret.NAME ref resolves and verifies", async () => {
+    const SECRET_VALUE = "resolved-kapso-hmac-value";
+    upsertSwarmConfig({
+      scope: "global",
+      key: "TEST_KAPSO_WEBHOOK_HMAC_SECRET",
+      value: SECRET_VALUE,
+      isSecret: true,
+    });
+
+    const workflow = makeWorkflow({
+      triggers: [
+        {
+          type: "webhook",
+          hmacSecret: "secret.TEST_KAPSO_WEBHOOK_HMAC_SECRET",
+          hmacHeader: "X-Webhook-Signature",
+        },
+      ],
+    });
+
+    const body = '{"event":"secret-ref"}';
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-webhook-signature": signRaw(SECRET_VALUE, body) },
+      registry,
+    );
+
+    expect(result.runId).toBeDefined();
+    expect(getWorkflowRun(result.runId)).not.toBeNull();
+  });
+
+  test("unresolvable secret.NAME ref fails cleanly with a WebhookError", async () => {
+    const workflow = makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: "secret.NONEXISTENT_HMAC_SECRET_12345" }],
+    });
+
+    const body = '{"event":"missing-secret"}';
+    try {
+      await handleWebhookTrigger(
+        workflow.id,
+        body,
+        { "x-hub-signature-256": "deadbeef" },
+        registry,
+      );
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err).toBeInstanceOf(WebhookError);
+      expect((err as WebhookError).statusCode).toBe(500);
+    }
+  });
+
+  test("a literal hmacSecret is not treated as a reference", async () => {
+    const secret = "plain.literal-not-a-ref";
+    const workflow = makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret }],
+    });
+
+    const body = '{"event":"literal"}';
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": signRaw(secret, body) },
+      registry,
+    );
+
+    expect(result.runId).toBeDefined();
+  });
+});
+
+// ─── Trigger payload JSON parsing ───────────────────────────
+
+describe("handleWebhookTrigger — triggerData JSON parsing", () => {
+  function signRaw(secret: string, body: string): string {
+    return crypto.createHmac("sha256", secret).update(body).digest("hex");
+  }
+
+  test("JSON body is parsed and run.triggerData is a deep-equal object", async () => {
+    const workflow = makeWorkflow({ triggers: [{ type: "webhook" }] });
+    const payload = {
+      message: { from: "+34000111222", text: "hi" },
+      conversation: { id: "conv-abc-123" },
+    };
+    const body = JSON.stringify(payload);
+
+    const result = await handleWebhookTrigger(workflow.id, body, {}, registry);
+
+    const run = getWorkflowRun(result.runId);
+    expect(run).not.toBeNull();
+    expect(run!.triggerData).toEqual(payload);
+    // Deep paths must be reachable (this is what `{{trigger.message.from}}` needs).
+    expect((run!.triggerData as { message: { from: string } }).message.from).toBe("+34000111222");
+  });
+
+  test("signed JSON body: HMAC verified against raw bytes, triggerData parsed to object", async () => {
+    const secret = "kapso-deep-secret";
+    const workflow = makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret, hmacHeader: "X-Webhook-Signature" }],
+    });
+    // Use whitespace + unsorted keys so any re-serialization would change the bytes.
+    const body = '{ "message": {"from":"+1","text":"hi"},  "id":"x" }';
+    const sig = signRaw(secret, body);
+
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-webhook-signature": sig },
+      registry,
+    );
+
+    const run = getWorkflowRun(result.runId);
+    expect(run).not.toBeNull();
+    expect(run!.triggerData).toEqual({ message: { from: "+1", text: "hi" }, id: "x" });
+  });
+
+  test("non-JSON body falls back to the raw string and does not throw", async () => {
+    const workflow = makeWorkflow({ triggers: [{ type: "webhook" }] });
+    const body = "this is not json at all";
+
+    const result = await handleWebhookTrigger(workflow.id, body, {}, registry);
+
+    const run = getWorkflowRun(result.runId);
+    expect(run).not.toBeNull();
+    expect(run!.triggerData).toBe(body);
+  });
+
+  test("empty body produces a run without throwing", async () => {
+    const workflow = makeWorkflow({ triggers: [{ type: "webhook" }] });
+
+    const result = await handleWebhookTrigger(workflow.id, "", {}, registry);
+
+    expect(result.runId).toBeDefined();
+    const run = getWorkflowRun(result.runId);
+    expect(run).not.toBeNull();
   });
 });
 

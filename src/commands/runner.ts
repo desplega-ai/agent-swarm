@@ -368,7 +368,17 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "inject-learning": "🧠 Storing learning",
   "memory-search": "🧠 Searching memory",
   "memory-get": "🧠 Retrieving memory",
+  "memory-delete": "🧠 Deleting memory",
   "update-profile": "🪪 Updating profile",
+  // Users
+  "manage-user": "👤 Managing user",
+  "resolve-user": "👤 Resolving user",
+  // Key-value store
+  "kv-get": "🔑 Reading KV value",
+  "kv-set": "🔑 Setting KV value",
+  "kv-list": "🔑 Listing KV keys",
+  "kv-delete": "🔑 Deleting KV value",
+  "kv-incr": "🔑 Incrementing KV value",
   // Slack
   "slack-post": "💬 Posting to Slack",
   "slack-start-thread": "💬 Starting Slack thread",
@@ -388,20 +398,37 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "get-workflow": "⚙️ Checking workflow",
   "list-workflows": "⚙️ Listing workflows",
   "create-workflow": "⚙️ Creating workflow",
+  "update-workflow": "⚙️ Updating workflow",
+  "delete-workflow": "⚙️ Deleting workflow",
+  "patch-workflow": "⚙️ Patching workflow",
+  "patch-workflow-node": "⚙️ Patching workflow node",
+  "get-workflow-run": "⚙️ Checking workflow run",
+  "list-workflow-runs": "⚙️ Listing workflow runs",
+  "cancel-workflow-run": "⚙️ Cancelling workflow run",
+  "retry-workflow-run": "⚙️ Retrying workflow run",
   // Skills
   "skill-search": "🔎 Searching skills",
   "skill-install": "📦 Installing skill",
   "skill-install-remote": "📦 Installing remote skill",
   "skill-get": "📦 Getting skill details",
   "skill-list": "📦 Listing skills",
+  "skill-create": "📦 Creating skill",
+  "skill-update": "📦 Updating skill",
+  "skill-delete": "📦 Deleting skill",
+  "skill-publish": "📦 Publishing skill",
+  "skill-uninstall": "📦 Uninstalling skill",
+  "skill-sync-remote": "📦 Syncing remote skills",
   // Config
   "get-config": "⚙️ Reading config",
   "set-config": "⚙️ Setting config",
   "list-config": "⚙️ Listing config",
+  "delete-config": "⚙️ Deleting config",
   // Schedules
   "create-schedule": "📅 Creating schedule",
   "list-schedules": "📅 Listing schedules",
   "run-schedule-now": "📅 Running schedule",
+  "update-schedule": "📅 Updating schedule",
+  "delete-schedule": "📅 Deleting schedule",
   // Context
   "context-diff": "📜 Viewing context diff",
   "context-history": "📜 Viewing context history",
@@ -422,10 +449,34 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "script-query-types": "📜 Reading script types",
 };
 
-/** Convert kebab-case to sentence case: "get-task-details" → "Get task details" */
+/** Words that keep specific casing when humanizing tool names. */
+const TOOL_NAME_ACRONYMS: Record<string, string> = {
+  mcp: "MCP",
+  kv: "KV",
+  api: "API",
+  url: "URL",
+  id: "ID",
+};
+
+/**
+ * Convert kebab/snake-case to sentence case, preserving known acronyms.
+ * "get-task-details" → "Get task details"; "mcp-server-create" → "MCP server create".
+ */
 export function humanizeToolName(name: string): string {
   if (!name) return name;
-  return name.charAt(0).toUpperCase() + name.slice(1).replaceAll("-", " ");
+  const words = name
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => TOOL_NAME_ACRONYMS[w.toLowerCase()] ?? w);
+  const first = words[0];
+  if (!first) return name;
+  const head = TOOL_NAME_ACRONYMS[first.toLowerCase()]
+    ? first
+    : first.charAt(0).toUpperCase() + first.slice(1);
+  return [head, ...words.slice(1)].join(" ");
 }
 
 /**
@@ -501,7 +552,7 @@ export function toolCallToProgress(toolName: string, args: unknown): string | nu
       if (label === null) return null;
       if (label) return label;
 
-      return `🔧 ${toolName}`;
+      return `🔧 ${humanizeToolName(toolName)}`;
     }
   }
 }
@@ -2681,15 +2732,35 @@ async function checkCompletedProcesses(
           credentialInfo &&
           /rate.?limit|hit your limit|usage[ _-]?limit|too many requests/i.test(failureReason)
         ) {
-          // Try to extract reset time from the error message (e.g. "resets 3pm (UTC)")
-          const parsedResetTime = parseRateLimitResetTime(failureReason);
-          const defaultCooldownMs = 5 * 60 * 1000;
-          const rateLimitedUntil =
-            parsedResetTime ?? new Date(Date.now() + defaultCooldownMs).toISOString();
-          if (parsedResetTime) {
+          // Three-tier reset-time resolver (most to least precise):
+          // Tier 1: structured rate_limit_event from Claude CLI (resetsAt epoch sec)
+          // Tier 2: regex on the error message (e.g. "resets 3pm (UTC)")
+          // Tier 3: 5-min hard fallback — only when both structured and regex fail
+          // Tiers 1 & 2 are clamped to [now+60s, now+6h] at their source.
+          const clampResetTime = (isoString: string): string => {
+            const nowMs = Date.now();
+            const minMs = nowMs + 60_000;
+            const maxMs = nowMs + 6 * 60 * 60 * 1000;
+            const candidateMs = new Date(isoString).getTime();
+            return new Date(Math.min(Math.max(candidateMs, minMs), maxMs)).toISOString();
+          };
+
+          let rateLimitedUntil: string;
+          if (result.rateLimitResetAt) {
+            rateLimitedUntil = clampResetTime(result.rateLimitResetAt);
             console.log(
-              `[credentials] Parsed rate limit reset time from error: ${parsedResetTime}`,
+              `[credentials] Rate limit reset from rate_limit_event: ${rateLimitedUntil}`,
             );
+          } else {
+            const parsedResetTime = parseRateLimitResetTime(failureReason);
+            if (parsedResetTime) {
+              rateLimitedUntil = clampResetTime(parsedResetTime);
+              console.log(
+                `[credentials] Parsed rate limit reset time from error: ${rateLimitedUntil}`,
+              );
+            } else {
+              rateLimitedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+            }
           }
           reportKeyRateLimit(
             apiConfig.apiUrl,

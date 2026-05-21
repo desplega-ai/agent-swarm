@@ -13,13 +13,18 @@ export function resolveInputs(input: Record<string, string>): Record<string, str
   const resolved: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(input)) {
-    resolved[key] = resolveValue(value);
+    resolved[key] = resolveInputValue(value);
   }
 
   return resolved;
 }
 
-function resolveValue(value: string): string {
+/**
+ * Resolve a single input value, supporting `${ENV_VAR}` and `secret.NAME`
+ * references. A plain string is returned unchanged. Throws if a referenced
+ * env var or swarm secret cannot be found.
+ */
+export function resolveInputValue(value: string): string {
   // Env var reference: ${MY_VAR}
   const envMatch = /^\$\{(.+)\}$/.exec(value);
   if (envMatch?.[1]) {

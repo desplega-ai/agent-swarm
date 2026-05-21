@@ -3,19 +3,75 @@ import { getWorkflow, getWorkflowsByScheduleId } from "../be/db";
 import type { ScheduledTask, TriggerConfig } from "../types";
 import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
+import { resolveInputValue } from "./input";
+
+/** Header name used to look up an HMAC signature when the trigger configures none. */
+const DEFAULT_HMAC_HEADER = "X-Hub-Signature-256";
+
+/** Fallback header names checked (case-insensitive) after the trigger's configured header. */
+const FALLBACK_HMAC_HEADERS = ["x-hub-signature-256", "x-signature", "x-webhook-signature"];
+
+/** A bag of HTTP headers — values may be a string, a string array, or absent. */
+export type HeaderBag = Record<string, string | string[] | undefined>;
+
+/** Case-insensitive header lookup; returns the first value when an array is given. */
+function getHeader(headers: HeaderBag, name: string): string | undefined {
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) {
+      return Array.isArray(value) ? value[0] : value;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the HMAC signature from request headers. Checks the trigger's
+ * configured `hmacHeader` first, then well-known fallback header names.
+ */
+function resolveSignature(headers: HeaderBag, hmacHeader: string): string | undefined {
+  for (const name of [hmacHeader, ...FALLBACK_HMAC_HEADERS]) {
+    const value = getHeader(headers, name);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the configured `hmacSecret`. Supports `secret.NAME` swarm-secret refs
+ * and `${ENV_VAR}` env refs (reusing the workflow input resolver); a plain
+ * string is treated as a literal. Resolved per request, never at create time.
+ */
+function resolveHmacSecret(raw: string): string {
+  if (/^secret\..+$/.test(raw) || /^\$\{.+\}$/.test(raw)) {
+    try {
+      return resolveInputValue(raw);
+    } catch (err) {
+      throw new WebhookError(
+        `Failed to resolve webhook HMAC secret: ${err instanceof Error ? err.message : String(err)}`,
+        500,
+      );
+    }
+  }
+  return raw;
+}
 
 /**
  * Handle an incoming webhook trigger for a workflow.
  *
  * 1. Loads the workflow and finds a webhook trigger in `triggers[]`
- * 2. If `hmacSecret` is set, verifies HMAC-SHA256 signature
- * 3. Starts the workflow execution with the webhook payload
+ * 2. If `hmacSecret` is set, resolves the signature header + secret and
+ *    verifies the HMAC-SHA256 signature against the raw body bytes
+ * 3. Parses the raw body as JSON (falling back to the raw string when the
+ *    body is non-JSON) so downstream `{{trigger.deep.path}}` interpolation
+ *    can traverse the object — matches the shape produced by the
+ *    `trigger-workflow` MCP tool.
+ * 4. Starts the workflow execution with the parsed payload
  */
 export async function handleWebhookTrigger(
   workflowId: string,
   payload: unknown,
-  signature: string | undefined,
-  signatureHeader: string | undefined,
+  headers: HeaderBag,
   registry: ExecutorRegistry,
 ): Promise<{ runId: string }> {
   const workflow = getWorkflow(workflowId);
@@ -31,16 +87,20 @@ export async function handleWebhookTrigger(
   const webhookTrigger = workflow.triggers.find((t: TriggerConfig) => t.type === "webhook");
 
   // If the workflow has a webhook trigger with an hmacSecret, verify the signature
+  // against the RAW body bytes — re-serializing would change whitespace / key order
+  // and break the HMAC.
   if (webhookTrigger && webhookTrigger.type === "webhook" && webhookTrigger.hmacSecret) {
-    if (!signature && !signatureHeader) {
+    const hmacHeader = webhookTrigger.hmacHeader || DEFAULT_HMAC_HEADER;
+    const signature = resolveSignature(headers, hmacHeader);
+    if (!signature) {
       throw new WebhookError("Missing signature", 401);
     }
 
-    const rawSignature = signatureHeader || signature || "";
+    const secret = resolveHmacSecret(webhookTrigger.hmacSecret);
     const isValid = verifyHmacSignature(
-      webhookTrigger.hmacSecret,
+      secret,
       typeof payload === "string" ? payload : JSON.stringify(payload),
-      rawSignature,
+      signature,
     );
 
     if (!isValid) {
@@ -48,8 +108,28 @@ export async function handleWebhookTrigger(
     }
   }
 
-  const runId = await startWorkflowExecution(workflow, payload, registry);
+  // Parse the raw body so downstream nodes can interpolate deep paths
+  // (e.g. `{{trigger.message.from}}`). A non-JSON body falls back to the raw
+  // string so non-JSON webhooks don't break.
+  const triggerData = parseTriggerPayload(payload);
+
+  const runId = await startWorkflowExecution(workflow, triggerData, registry);
   return { runId };
+}
+
+/**
+ * If `payload` is a JSON string, parse and return the resulting value;
+ * otherwise return it as-is. Empty / non-JSON strings fall back to the raw
+ * value so non-JSON webhooks (text/plain, form-encoded, etc.) still produce
+ * a usable workflow run.
+ */
+function parseTriggerPayload(payload: unknown): unknown {
+  if (typeof payload !== "string" || payload.length === 0) return payload;
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return payload;
+  }
 }
 
 /**

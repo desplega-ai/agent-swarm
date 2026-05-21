@@ -34,6 +34,9 @@
   <a href="https://x.com/desplegalabs">
     <img src="https://img.shields.io/badge/𝕏-@desplegalabs-000?style=for-the-badge&logo=x&logoColor=white" alt="Follow on X">
   </a>
+  <a href="https://www.linkedin.com/company/desplega-labs/">
+    <img src="https://img.shields.io/badge/LinkedIn-Desplega%20Labs-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="Desplega Labs on LinkedIn">
+  </a>
 </p>
 
 > **What if your AI agents remembered everything, learned from every mistake, and got better with every task?**
