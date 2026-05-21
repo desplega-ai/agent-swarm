@@ -798,11 +798,10 @@ export async function handleComment(
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, comment, repository, sender, issue, pull_request, installation } = event;
 
-  // Resolve canonical user from GitHub sender (currently unused, but the
-  // unmapped-tracker side effect is still useful for operator triage).
-  const _requestedByUserId = resolveGitHubSender(
+  // Resolve canonical user from GitHub sender
+  const requestedByUserId = resolveGitHubSender(
     sender.login,
-    "issue_comment",
+    eventType,
     comment.body.slice(0, 100),
   );
 
@@ -873,6 +872,7 @@ export async function handleComment(
     vcsNumber: targetNumber,
     vcsCommentId: comment.id,
     vcsAuthor: sender.login,
+    requestedByUserId,
     vcsUrl: targetUrl,
     vcsInstallationId: installation?.id,
     vcsNodeId: comment.node_id,
@@ -911,9 +911,8 @@ export async function handlePullRequestReview(
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, review, pull_request: pr, repository, sender, installation } = event;
 
-  // Resolve canonical user from GitHub sender (currently unused, but the
-  // unmapped-tracker side effect is still useful for operator triage).
-  const _requestedByUserId = resolveGitHubSender(
+  // Resolve canonical user from GitHub sender
+  const requestedByUserId = resolveGitHubSender(
     sender.login,
     "pull_request_review",
     `Review on PR #${pr.number}: ${review.state}`,
@@ -995,6 +994,7 @@ export async function handlePullRequestReview(
     vcsEventType: "pull_request_review",
     vcsNumber: pr.number,
     vcsAuthor: sender.login,
+    requestedByUserId,
     vcsUrl: review.html_url,
     vcsInstallationId: installation?.id,
     vcsNodeId: review.node_id,

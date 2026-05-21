@@ -9110,11 +9110,14 @@ export function listRecentSessions(opts?: {
   source?: string[];
   /** Case-insensitive substring match against `r.task`. */
   q?: string;
+  /** When set, restrict to root tasks where `requestedByUserId` equals this value. NULL rows are excluded. */
+  requestedByUserId?: string;
 }): SessionListItem[] {
   const limit = opts?.limit ?? 25;
   const offset = opts?.offset ?? 0;
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
   const q = opts?.q?.trim();
+  const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
 
   const conditions: string[] = ["r.parentTaskId IS NULL"];
   const params: (string | number)[] = [];
@@ -9126,6 +9129,10 @@ export function listRecentSessions(opts?: {
   if (q && q.length > 0) {
     conditions.push("lower(r.task) LIKE ?");
     params.push(`%${q.toLowerCase()}%`);
+  }
+  if (requestedByUserId) {
+    conditions.push("r.requestedByUserId = ?");
+    params.push(requestedByUserId);
   }
   params.push(limit, offset);
 

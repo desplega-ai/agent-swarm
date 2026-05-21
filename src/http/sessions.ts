@@ -19,6 +19,12 @@ const listSessions = route({
     source: z.string().optional(),
     /** Case-insensitive substring match against the root task's text. */
     q: z.string().optional(),
+    /**
+     * When present, restrict results to root tasks where
+     * `agent_tasks.requestedByUserId` equals this value. NULL rows are
+     * excluded. Omit to return every session (legacy / non-UI callers).
+     */
+    requestedByUserId: z.string().min(1).optional(),
   }),
   responses: {
     200: { description: "Recent sessions ordered by chain-wide last activity" },
@@ -64,6 +70,7 @@ export async function handleSessions(
       offset: parsed.query.offset,
       source: sources,
       q: parsed.query.q,
+      requestedByUserId: parsed.query.requestedByUserId,
     });
     json(res, { sessions });
     return true;
