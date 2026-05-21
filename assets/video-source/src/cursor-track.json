@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "durationMs": 33437,
+  "durationMs": 24000,
   "viewport": {
     "width": 1920,
     "height": 1080
@@ -14,52 +14,118 @@
       "action": "move"
     },
     {
-      "tsMs": 5691,
+      "tsMs": 3422,
       "x": 960,
-      "y": 194,
+      "y": 173,
       "action": "hover"
     },
     {
-      "tsMs": 8888,
+      "tsMs": 4900,
       "x": 960,
-      "y": 346,
+      "y": 540,
+      "action": "move"
+    },
+    {
+      "tsMs": 5490,
+      "x": 568,
+      "y": 324,
       "action": "hover"
     },
     {
-      "tsMs": 9648,
-      "x": 960,
-      "y": 421,
+      "tsMs": 6146,
+      "x": 601,
+      "y": 410,
       "action": "hover"
     },
     {
-      "tsMs": 10422,
-      "x": 960,
+      "tsMs": 6844,
+      "x": 633,
       "y": 497,
       "action": "hover"
     },
     {
-      "tsMs": 16098,
+      "tsMs": 7511,
+      "x": 527,
+      "y": 583,
+      "action": "hover"
+    },
+    {
+      "tsMs": 8334,
+      "x": 672,
+      "y": 410,
+      "action": "hover"
+    },
+    {
+      "tsMs": 10400,
+      "x": 960,
+      "y": 540,
+      "action": "move"
+    },
+    {
+      "tsMs": 13183,
       "x": 672,
       "y": 238,
       "action": "hover"
     },
     {
-      "tsMs": 19470,
-      "x": 1574,
-      "y": 410,
+      "tsMs": 13344,
+      "x": 634,
+      "y": 216,
       "action": "hover"
     },
     {
-      "tsMs": 23596,
+      "tsMs": 13900,
+      "x": 634,
+      "y": 259,
+      "action": "hover"
+    },
+    {
+      "tsMs": 15400,
+      "x": 960,
+      "y": 540,
+      "action": "move"
+    },
+    {
+      "tsMs": 16167,
+      "x": 1574,
+      "y": 389,
+      "action": "hover"
+    },
+    {
+      "tsMs": 16624,
+      "x": 1574,
+      "y": 475,
+      "action": "hover"
+    },
+    {
+      "tsMs": 19000,
+      "x": 960,
+      "y": 540,
+      "action": "move"
+    },
+    {
+      "tsMs": 19755,
+      "x": 864,
+      "y": 518,
+      "action": "hover"
+    },
+    {
+      "tsMs": 20413,
+      "x": 864,
+      "y": 594,
+      "action": "hover"
+    },
+    {
+      "tsMs": 21070,
+      "x": 864,
+      "y": 670,
+      "action": "hover"
+    },
+    {
+      "tsMs": 23144,
       "x": 864,
       "y": 540,
-      "action": "hover"
-    },
-    {
-      "tsMs": 24483,
-      "x": 864,
-      "y": 626,
-      "action": "hover"
+      "action": "move"
     }
   ]
 }

@@ -1,34 +1,21 @@
 import { interpolate, useCurrentFrame } from "remotion";
 import type { CursorEvent, CursorTrack } from "../../cursor-track";
 
-// ---------------------------------------------------------------------------
-// Cursor component — replays real recorder events from cursor-track.json.
-//
-// The recorder emits CursorTrack alongside each beat clip, capturing real
-// element coordinates via `agent-browser get box` + `agent-browser mouse move`.
-// This component reads those events and replays them frame-accurately.
-//
-// Timing contract:
-//   - frame 0 in this component = demoStartFrame in the output video
-//   - recordingDurationMs tells us the total span of the cursor events
-//   - For each frame f: recordingTimeMs = (f / demoFrameCount) * recordingDurationMs
-//   - Then we interpolate cursor position from the two nearest events
-// ---------------------------------------------------------------------------
-
 interface CursorProps {
-  /** The cursor track loaded from cursor-track.json. */
   track: CursorTrack;
-  /** Total frames in the demo section (e.g. 675 for a 22.5s demo at 30fps). */
+  /** Total frames in the demo section — used only for fade in/out. */
   demoFrameCount: number;
-  /** Demo section start frame in the OUTPUT video (used for fade in/out). */
   demoStartFrame?: number;
+  /** Width of the container this cursor is rendered inside (default: 1920). */
+  containerW?: number;
+  /** Height of the container this cursor is rendered inside (default: 1080). */
+  containerH?: number;
 }
 
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
 }
 
-/** Find the cursor position at a given recording timestamp via linear interp with cubic easing. */
 function cursorAtMs(events: CursorEvent[], ms: number): { x: number; y: number } {
   if (events.length === 0) return { x: 960, y: 540 };
   if (ms <= events[0].tsMs) return { x: events[0].x, y: events[0].y };
@@ -51,31 +38,31 @@ function cursorAtMs(events: CursorEvent[], ms: number): { x: number; y: number }
   return { x: last.x, y: last.y };
 }
 
-/** True if a click event is nearby (within ±4 frames at 30fps = ±133ms). */
 function nearClick(events: CursorEvent[], ms: number): boolean {
-  const windowMs = 133;
-  return events.some((e) => e.action === "click" && Math.abs(e.tsMs - ms) <= windowMs);
+  return events.some((e) => e.action === "click" && Math.abs(e.tsMs - ms) <= 133);
 }
 
 export const Cursor: React.FC<CursorProps> = ({
   track,
   demoFrameCount,
   demoStartFrame = 90,
+  containerW = 1920,
+  containerH = 1080,
 }) => {
-  const frame = useCurrentFrame(); // 0-based within demo sequence
-
+  const frame = useCurrentFrame();
   const fps = 30;
-  const recordingMs = (frame / demoFrameCount) * track.durationMs;
+
+  // Direct frame→ms at 30fps — matches how <Video> plays back in Remotion.
+  // Frame 0 = recording t=0ms, frame 30 = t=1000ms, etc.
+  const recordingMs = (frame * 1000) / fps;
+
   const { x, y } = cursorAtMs(track.events, recordingMs);
   const isNearClick = nearClick(track.events, recordingMs);
 
-  // Scale cursor coords from recording viewport to 1920×1080 output
-  const scaleX = 1920 / track.viewport.width;
-  const scaleY = 1080 / track.viewport.height;
-  const cx = x * scaleX;
-  const cy = y * scaleY;
+  // Scale recording-viewport coords to the container's pixel space.
+  const cx = x * (containerW / track.viewport.width);
+  const cy = y * (containerH / track.viewport.height);
 
-  // Fade in at start of demo, fade out at end
   const opacity = interpolate(
     frame,
     [0, fps * 0.5, demoFrameCount - fps * 0.5, demoFrameCount],
@@ -83,14 +70,10 @@ export const Cursor: React.FC<CursorProps> = ({
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
 
-  // Click pulse — lime-green ring that expands on click events
   const clickPulseProgress = isNearClick
     ? interpolate(
         track.events.find(
-          (e) =>
-            e.action === "click" &&
-            Math.abs(e.tsMs - recordingMs) <=
-              133
+          (e) => e.action === "click" && Math.abs(e.tsMs - recordingMs) <= 133
         )?.tsMs ?? recordingMs,
         [recordingMs - 133, recordingMs + 133],
         [0, 1],
@@ -111,7 +94,6 @@ export const Cursor: React.FC<CursorProps> = ({
         zIndex: 100,
       }}
     >
-      {/* Click pulse ring — amber-500 */}
       {isNearClick && (
         <div
           style={{
@@ -127,7 +109,6 @@ export const Cursor: React.FC<CursorProps> = ({
           }}
         />
       )}
-      {/* OS-style arrow cursor */}
       <svg
         width={24}
         height={28}
