@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
@@ -140,6 +141,7 @@ interface SessionsListProps {
   onShowSystemChange: (value: boolean) => void;
   onCollapse?: () => void;
   onNewSession: () => void;
+  identityState: "pending" | "needs-pick" | "ready";
 }
 
 function SessionsList({
@@ -152,6 +154,7 @@ function SessionsList({
   onShowSystemChange,
   onCollapse,
   onNewSession,
+  identityState,
 }: SessionsListProps) {
   const items = sessions ?? [];
 
@@ -244,7 +247,15 @@ function SessionsList({
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {isLoading ? (
+        {identityState === "needs-pick" ? (
+          <div className="px-3">
+            <EmptyState
+              icon={MessageSquare}
+              title="Identify yourself"
+              description="Select your identity to see your sessions."
+            />
+          </div>
+        ) : isLoading ? (
           <div className="flex flex-col gap-2 px-3">
             {Array.from({ length: 6 }).map((_, idx) => (
               <Skeleton key={`skeleton-${idx}`} className="h-12 w-full" />
@@ -253,7 +264,7 @@ function SessionsList({
         ) : items.length === 0 ? (
           query.trim().length > 0 ? (
             <div className="px-3 py-6 text-xs text-muted-foreground text-center">
-              No sessions match “{query}”.
+              No sessions match "{query}".
             </div>
           ) : (
             <div className="px-3">
@@ -343,6 +354,7 @@ export interface SessionsShellProps {
 
 export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps) {
   const navigate = useNavigate();
+  const { userId, state: identityState } = useCurrentUser();
   const [collapsed, setCollapsed] = useState<boolean>(() => readBool(COLLAPSE_STORAGE_KEY, false));
   const [showSystem, setShowSystem] = useState<boolean>(() =>
     readBool(SHOW_SYSTEM_STORAGE_KEY, false),
@@ -367,6 +379,8 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
     limit: 50,
     source: sourceFilter,
     q: debouncedQuery.trim() || undefined,
+    requestedByUserId: userId ?? undefined,
+    enabled: identityState === "ready",
   });
 
   const openNew = useCallback(() => navigate("/sessions"), [navigate]);
@@ -400,6 +414,7 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
                 onShowSystemChange={setShowSystem}
                 onCollapse={() => setCollapsed(true)}
                 onNewSession={openNew}
+                identityState={identityState}
               />
             </aside>
           ) : null}

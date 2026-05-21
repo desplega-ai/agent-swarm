@@ -1727,12 +1727,15 @@ class ApiClient {
     source?: string[];
     /** Case-insensitive substring match against the root task's text. */
     q?: string;
+    /** When set, restrict results to sessions owned by this user. NULL rows are excluded. */
+    requestedByUserId?: string;
   }): Promise<SessionListItem[]> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set("limit", String(opts.limit));
     if (opts?.offset != null) params.set("offset", String(opts.offset));
     if (opts?.source && opts.source.length > 0) params.set("source", opts.source.join(","));
     if (opts?.q && opts.q.length > 0) params.set("q", opts.q);
+    if (opts?.requestedByUserId) params.set("requestedByUserId", opts.requestedByUserId);
     const qs = params.toString();
     const url = `${this.getBaseUrl()}/api/sessions${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
