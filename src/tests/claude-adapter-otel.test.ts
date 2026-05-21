@@ -68,6 +68,12 @@ describe("buildClaudeCodeOtelEnv — gate on", () => {
     }
   });
 
+  test("activates via the canonical SWARM_ENABLE_HARNESS_OTEL gate", () => {
+    const env = buildClaudeCodeOtelEnv({ SWARM_ENABLE_HARNESS_OTEL: "1" }, makeSpan());
+    expect(env.TRACEPARENT).toBe(`00-${TRACE_ID}-${SPAN_ID}-01`);
+    expect(env.OTEL_LOG_USER_PROMPTS).toBe("0");
+  });
+
   test("injects TRACEPARENT in W3C format from a sampled active span", () => {
     const env = buildClaudeCodeOtelEnv({ SWARM_ENABLE_CLAUDE_CODE_OTEL: "1" }, makeSpan());
     expect(env.TRACEPARENT).toBe(`00-${TRACE_ID}-${SPAN_ID}-01`);

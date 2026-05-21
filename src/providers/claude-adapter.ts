@@ -1,7 +1,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type Span, TraceFlags, trace } from "@opentelemetry/api";
+import { type Span, trace } from "@opentelemetry/api";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -16,6 +16,7 @@ import {
 } from "../utils/error-tracker";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
 import type {
   CostData,
   CredStatus,
@@ -267,31 +268,25 @@ export async function createSessionMcpConfig(
 }
 
 /**
- * Truthy-string gate check. Mirrors `isPollTracingEnabled` in src/otel.ts so
- * `SWARM_ENABLE_CLAUDE_CODE_OTEL` accepts the same `1/true/yes/on` spellings.
- */
-function isClaudeCodeOtelEnabled(value: string | undefined): boolean {
-  const v = (value ?? "").toLowerCase();
-  return v === "1" || v === "true" || v === "yes" || v === "on";
-}
-
-/**
  * Build the OpenTelemetry env additions for a spawned Claude Code subprocess.
  *
- * Gated behind `SWARM_ENABLE_CLAUDE_CODE_OTEL`, read per-spawn from the
- * resolved swarm-config env (`config.env`), so flipping the config takes
- * effect on the next session without a container restart. When the gate is
- * off this returns `{}` and spawn behavior is unchanged.
+ * Gated behind `SWARM_ENABLE_HARNESS_OTEL` (or the deprecated
+ * `SWARM_ENABLE_CLAUDE_CODE_OTEL` alias), read per-spawn from the resolved
+ * swarm-config env (`config.env`), so flipping the config takes effect on the
+ * next session without a container restart. When the gate is off this returns
+ * `{}` and spawn behavior is unchanged.
  *
  * When on:
  *  - Injects a W3C `TRACEPARENT` (+ `TRACESTATE` when non-empty) derived from
- *    the active worker span. Claude Code reads `TRACEPARENT` in `-p` mode and
- *    parents its `claude_code.interaction` span to it instead of starting a
- *    fresh root — so claude's spans nest inside our `worker.session` trace.
+ *    the active worker span (see `buildOtelTraceparentEnv`). Claude Code reads
+ *    `TRACEPARENT` in `-p` mode and parents its `claude_code.interaction` span
+ *    to it instead of starting a fresh root — so claude's spans nest inside
+ *    our `worker.session` trace.
  *  - Pins privacy-safe defaults (prompt / tool-detail / tool-content logging
- *    off, account UUID off). `scrubSecrets` does NOT run on Claude Code's
- *    exported OTEL payloads, so these stay off. Idempotent: a value already
- *    present in the resolved env (operator override) is left untouched.
+ *    off, account UUID off). These are Claude-Code-specific. `scrubSecrets`
+ *    does NOT run on Claude Code's exported OTEL payloads, so these stay off.
+ *    Idempotent: a value already present in the resolved env (operator
+ *    override) is left untouched.
  *
  * This does NOT set `CLAUDE_CODE_ENABLE_TELEMETRY` or the `OTEL_*` exporters —
  * those stay operator-controlled via swarm config, independent of this gate.
@@ -300,7 +295,7 @@ export function buildClaudeCodeOtelEnv(
   sourceEnv: Record<string, string | undefined>,
   activeSpan: Span | undefined = trace.getActiveSpan(),
 ): Record<string, string> {
-  if (!isClaudeCodeOtelEnabled(sourceEnv.SWARM_ENABLE_CLAUDE_CODE_OTEL)) {
+  if (!isHarnessOtelEnabled(sourceEnv)) {
     return {};
   }
 
@@ -318,14 +313,7 @@ export function buildClaudeCodeOtelEnv(
     }
   }
 
-  const spanContext = activeSpan?.spanContext();
-  if (spanContext && (spanContext.traceFlags & TraceFlags.SAMPLED) !== 0) {
-    otelEnv.TRACEPARENT = `00-${spanContext.traceId}-${spanContext.spanId}-01`;
-    const tracestate = spanContext.traceState?.serialize();
-    if (tracestate) {
-      otelEnv.TRACESTATE = tracestate;
-    }
-  }
+  Object.assign(otelEnv, buildOtelTraceparentEnv(sourceEnv, activeSpan));
 
   return otelEnv;
 }
@@ -357,11 +345,12 @@ class ClaudeSession implements ProviderSession {
     );
 
     const sourceEnv = config.env || process.env;
-    // Gated cross-service OTel linking: when SWARM_ENABLE_CLAUDE_CODE_OTEL is
-    // on, inject TRACEPARENT from the active worker span so Claude Code's spans
-    // nest under our worker.session trace. Returns {} (no-op) when off. Spread
-    // after sourceEnv so the freshly-computed TRACEPARENT wins over any stale
-    // value the container env might carry.
+    // Gated cross-service OTel linking: when SWARM_ENABLE_HARNESS_OTEL (or the
+    // deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias) is on, inject TRACEPARENT
+    // from the active worker span so Claude Code's spans nest under our
+    // worker.session trace. Returns {} (no-op) when off. Spread after sourceEnv
+    // so the freshly-computed TRACEPARENT wins over any stale value the
+    // container env might carry.
     const otelEnv = buildClaudeCodeOtelEnv(sourceEnv);
     this.proc = Bun.spawn(cmd, {
       cwd: this.config.cwd,
