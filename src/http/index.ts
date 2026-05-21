@@ -306,6 +306,16 @@ try {
   console.error("[startup] Failed to seed pricing rows:", err);
 }
 
+// Seed the built-in global scripts catalog so `script-search` returns useful
+// hits from a fresh DB. Idempotent (content-hash skip), so steady-state boots
+// do no extra work. See src/be/seed-scripts for the catalog.
+try {
+  const { seedGlobalScripts } = await import("../be/seed-scripts");
+  await seedGlobalScripts();
+} catch (err) {
+  console.error("[startup] Failed to seed global scripts:", err);
+}
+
 // business-use initialization (no-op if envs not set)
 initialize();
 
