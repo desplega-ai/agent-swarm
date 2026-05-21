@@ -1,0 +1,18 @@
+name: Migration Conflict Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  migration-conflict:
+    name: Migration Conflict Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Check for duplicate migration numbers
+        run: bash scripts/check-migration-conflicts.sh
