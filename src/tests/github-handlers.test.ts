@@ -187,6 +187,35 @@ describe("known github sender", () => {
     expect(getKv(UNMAPPED_NAMESPACE, "assigner:meta")).toBeNull();
     expect(getKv(UNMAPPED_NAMESPACE, "assigner:count")).toBeNull();
   });
+
+  test("comment event with bot mention from mapped user puts user id on the task", async () => {
+    const user = createUser({ name: "Mapped Commenter", email: "commenter@example.com" });
+    linkIdentity(user.id, "github", "commenter", SYSTEM_ACTOR);
+
+    const result = await handleComment(
+      makeCommentEvent("commenter", `Hey @${GITHUB_BOT_NAME} please take a look`),
+      "issue_comment",
+    );
+    expect(result.created).toBe(true);
+    expect(getMappedUserTaskCount(user.id)).toBe(1);
+
+    // Mapped sender → no unmapped kv writes.
+    expect(getKv(UNMAPPED_NAMESPACE, "commenter:meta")).toBeNull();
+    expect(getKv(UNMAPPED_NAMESPACE, "commenter:count")).toBeNull();
+  });
+
+  test("review event from mapped user puts user id on the task", async () => {
+    const user = createUser({ name: "Mapped Reviewer", email: "reviewer@example.com" });
+    linkIdentity(user.id, "github", "reviewer", SYSTEM_ACTOR);
+
+    const result = await handlePullRequestReview(makeReviewEvent("reviewer"));
+    expect(result.created).toBe(true);
+    expect(getMappedUserTaskCount(user.id)).toBe(1);
+
+    // Mapped sender → no unmapped kv writes.
+    expect(getKv(UNMAPPED_NAMESPACE, "reviewer:meta")).toBeNull();
+    expect(getKv(UNMAPPED_NAMESPACE, "reviewer:count")).toBeNull();
+  });
 });
 
 // ── Unknown sender → unmapped kv tracker ──
