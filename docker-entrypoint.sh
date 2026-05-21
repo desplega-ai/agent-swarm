@@ -98,11 +98,17 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
         fi
     fi
 
-    # Auth path 1: Restore codex_oauth from swarm config store (preferred).
+    # Auth path 1: Seed slot 0 from swarm config store at boot (backwards-compat).
+    # Tries codex_oauth_0 first (post-migration 068), then legacy codex_oauth key.
+    # Runner handles per-task materialization for multi-slot pools; this is only a
+    # boot-time seed so the credential-wait loop sees auth.json on fresh containers.
     if [ ! -f "$WORKER_CODEX_HOME/auth.json" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
         CODEX_OAUTH=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
-            "${MCP_BASE_URL}/api/config/resolved?includeSecrets=true&key=codex_oauth" \
-            2>/dev/null | jq -r '.configs[] | select(.key == "codex_oauth") | .value // empty' 2>/dev/null | head -1)
+            "${MCP_BASE_URL}/api/config/resolved?includeSecrets=true" \
+            2>/dev/null | jq -r '
+              (.configs[] | select(.key == "codex_oauth_0") | .value // empty),
+              (.configs[] | select(.key == "codex_oauth") | .value // empty)
+            ' 2>/dev/null | head -1)
         if [ -n "$CODEX_OAUTH" ]; then
             if ! echo "$CODEX_OAUTH" | jq '.' >/dev/null 2>&1; then
                 echo "Warning: codex_oauth from config store is not valid JSON, skipping" >&2
@@ -132,7 +138,7 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                 else
                 chown worker:worker "$WORKER_CODEX_HOME/auth.json" 2>/dev/null || true
                 chmod 600 "$WORKER_CODEX_HOME/auth.json"
-                echo "[entrypoint] Restored codex OAuth credentials from API config store"
+                echo "[entrypoint] Seeded codex OAuth credentials from config store (slot 0)"
                 fi
             fi
         fi
