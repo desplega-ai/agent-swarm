@@ -128,6 +128,10 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA busy_timeout = 5000;");
   database.run("PRAGMA foreign_keys = ON;");
+  database.run("PRAGMA synchronous = NORMAL;");
+  database.run("PRAGMA cache_size = -64000;");
+  database.run("PRAGMA mmap_size = 268435456;");
+  database.run("PRAGMA temp_store = MEMORY;");
 
   // Load sqlite-vec extension for vector search.
   // In compiled binaries (`bun build --compile`) the JS lives in /$bunfs/ and
