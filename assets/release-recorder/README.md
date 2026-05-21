@@ -96,14 +96,79 @@ assets/release-recorder/
 
 ---
 
+## Cursor-track pipeline (v2)
+
+The recorder emits a `cursor-track.json` file alongside each `.webm` clip. The
+Remotion composition (`SwarmDemo.tsx`) reads it and replays the exact cursor
+positions frame-accurately — no synthesized waypoints.
+
+### What gets recorded
+
+`record-e2e.ts` captures cursor events using `agent-browser`:
+
+```typescript
+// Get element center
+const box = JSON.parse(await $`agent-browser get box ${selector}`.text());
+const cx = Math.round(box.x + box.width / 2);
+const cy = Math.round(box.y + box.height / 2);
+
+// Move cursor (realistic approach: arrive 200-400ms before click)
+await $`agent-browser mouse move ${cx} ${cy}`;
+cursorEvents.push({ tsMs: Date.now() - recordingStartTs, x: cx, y: cy, action: "move" });
+
+// Click
+await $`agent-browser mouse click ${cx} ${cy}`;
+cursorEvents.push({ tsMs: Date.now() - recordingStartTs, x: cx, y: cy, action: "click" });
+```
+
+The emitted `cursor-track.json` schema (TypeScript types in `src/cursor-track.ts`):
+
+```json
+{
+  "version": "1",
+  "durationMs": 22500,
+  "viewport": { "width": 1920, "height": 1080 },
+  "theme": "light",
+  "events": [
+    { "tsMs": 1200, "x": 760, "y": 340, "action": "move" },
+    { "tsMs": 1450, "x": 760, "y": 340, "action": "click" }
+  ]
+}
+```
+
+### Browser defaults (v2)
+
+| Setting | Default | Override |
+|---------|---------|---------|
+| Resolution | **1920×1080** | `--width N --height N` CLI flags |
+| Theme | **light** | Pass `--theme dark` (injects `localStorage.theme=dark`) |
+
+### Using the cursor-track in Remotion
+
+1. After recording, a `<beat>-cursor.json` file lands in `raw/` alongside `<beat>.webm`.
+2. Copy it to `assets/video-source/src/fixtures/cursor-track.json`.
+3. `SwarmDemo.tsx` imports it as the cursor fixture — real positions, cubic-eased playback.
+4. `sample-cursor-track.json` ships as a committed fallback so the composition
+   always has valid data even without a fresh recording run.
+
+### Timing contract
+
+- Cursor moves arrive **200-400ms before** the click event (natural hand approach)
+- Lower-thirds fire **~100ms after** the event renders on screen (not at the click frame)
+- `Cursor.tsx` interpolates between events with `easeOutCubic` — no choppy linear jumps
+
+---
+
 ## Full pipeline
 
 1. **Storyboard** — `bin/storyboard-from-tag.ts vX.Y.Z` → `storyboard.json` *(Picateclas)*
 2. **Reset stack** — `bin/reset-demo-stack.sh` → API + UI with seeded fixtures
-3. **Record** — `bun assets/release-recorder/run.ts` → `raw/*.webm`
-4. **Edit** — open a Claude Code session with the `video-use` skill, point it at `raw/` + `storyboard.json` for VO lines
-5. **Brand wrap** — `ReleaseShell` Remotion composition adds title card, lower-thirds, outro *(Picateclas)*
-6. **Publish** — `gh release upload vX.Y.Z final.mp4`
+3. **Record** — `bun assets/release-recorder/record-e2e.ts` → `raw/*.webm` + `raw/*-cursor.json`
+4. **Copy fixture** — `cp raw/swarm-demo-cursor.json assets/video-source/src/fixtures/cursor-track.json`
+5. **Edit** — open a Claude Code session with the `video-use` skill, point it at `raw/` + `storyboard.json` for VO lines
+6. **Render** — `cd assets/video-source && npx remotion render SwarmDemo out/swarm-demo-final.mp4`
+7. **Brand wrap** — `SwarmDemo.tsx` (intro + demo + outro) already ships the brand wrap
+8. **Publish** — `gh release upload vX.Y.Z out/swarm-demo-final.mp4`
 
 ---
 
