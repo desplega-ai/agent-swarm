@@ -161,6 +161,9 @@ export function isSensitiveKey(key: string): boolean {
   for (const suffix of SENSITIVE_KEY_SUFFIXES) {
     if (key.endsWith(suffix)) return true;
   }
+  // Codex OAuth pool credentials: codex_oauth (legacy) + codex_oauth_0…N (pool slots).
+  // The outer JSON structure (accountId, expires) isn't covered by TOKEN_REGEXES.
+  if (/^codex_oauth(_\d+)?$/.test(key)) return true;
   return false;
 }
 
