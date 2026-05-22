@@ -7,7 +7,12 @@ import {
   trace,
 } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
-import { resourceFromAttributes } from "@opentelemetry/resources";
+import {
+  hostDetector,
+  osDetector,
+  processDetector,
+  resourceFromAttributes,
+} from "@opentelemetry/resources";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import pkg from "../package.json";
@@ -141,6 +146,17 @@ export async function boot(serviceRole: string): Promise<void> {
       env: configuredResourceAttributes.env || deploymentEnvironment,
       "agentswarm.service.role": serviceRole,
     }),
+    // NodeSDK's default resource detectors include `envDetector`, which reads
+    // `OTEL_SERVICE_NAME` (and `OTEL_RESOURCE_ATTRIBUTES`) straight from the
+    // process env — and NodeSDK merges detected attributes *over* the
+    // configured resource, so a detected `service.name` overwrites the
+    // per-role name computed by `resolveServiceName()`. Our deploy sets one
+    // shared `OTEL_SERVICE_NAME` on every process, so that merge silently
+    // collapsed the API and worker back onto a single `service.name`. Pin the
+    // detector list to host/os/process and drop `envDetector`: the resource
+    // configured above (service.name, service.instance.id, and the manually
+    // parsed `OTEL_RESOURCE_ATTRIBUTES`) then stays authoritative.
+    resourceDetectors: [hostDetector, osDetector, processDetector],
     traceExporter: new OTLPTraceExporter(),
   });
 

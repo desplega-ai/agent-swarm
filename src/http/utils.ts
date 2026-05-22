@@ -163,6 +163,50 @@ export function deriveApiBaseUrl(req: IncomingMessage): string {
 }
 
 /**
+ * Build the standard OpenTelemetry HTTP *server* semantic-convention span
+ * attributes that the API span doesn't already set directly.
+ *
+ * `http.request.method`, `url.path`, `http.route`, and
+ * `http.response.status_code` are set on the span in `src/http/index.ts`;
+ * this fills the remaining semconv gaps:
+ *
+ * - `server.address`           — request host, port stripped
+ * - `url.scheme`               — `https`/`http`, honoring `X-Forwarded-Proto`
+ * - `network.protocol.version` — HTTP version (`1.1`, `2`, …)
+ * - `user_agent.original`      — raw `User-Agent` header
+ *
+ * `undefined` values are dropped by the OTel span adapter, so absent headers
+ * simply omit the attribute.
+ */
+export function httpServerSemconvAttributes(req: IncomingMessage): {
+  "server.address"?: string;
+  "url.scheme": string;
+  "network.protocol.version"?: string;
+  "user_agent.original"?: string;
+} {
+  const headerValue = (v: string | string[] | undefined): string | undefined =>
+    Array.isArray(v) ? v[0] : v;
+  // Forwarded headers may be comma-joined by a chain of proxies — take the
+  // first hop. Never used for `User-Agent`, whose value legitimately contains
+  // commas (e.g. `(KHTML, like Gecko)`).
+  const firstHop = (v: string | string[] | undefined): string | undefined =>
+    headerValue(v)?.split(",")[0]?.trim() || undefined;
+
+  const fwdProto = firstHop(req.headers["x-forwarded-proto"]);
+  const host = firstHop(req.headers["x-forwarded-host"]) ?? headerValue(req.headers.host)?.trim();
+
+  return {
+    // Strip the trailing `:<port>` — `server.port` is a separate semconv
+    // attribute we don't emit. The anchored regex leaves bracketed IPv6
+    // literals intact (`[::1]:3013` → `[::1]`, bare `[::1]` unchanged).
+    "server.address": host ? host.replace(/:\d+$/, "") || undefined : undefined,
+    "url.scheme": fwdProto ?? "http",
+    "network.protocol.version": req.httpVersion || undefined,
+    "user_agent.original": headerValue(req.headers["user-agent"]),
+  };
+}
+
+/**
  * Match a route pattern against HTTP method and path segments.
  *
  * @param method - HTTP method from request (e.g. "GET", "POST")

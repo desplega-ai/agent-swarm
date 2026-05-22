@@ -63,7 +63,12 @@ import { handleTaskTemplates } from "./task-templates";
 import { handleTasks } from "./tasks";
 import { handleTrackers } from "./trackers";
 import { handleUsers } from "./users";
-import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
+import {
+  getPathSegments,
+  httpServerSemconvAttributes,
+  parseQueryParams,
+  setCorsHeaders,
+} from "./utils";
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflowEvents } from "./workflow-events";
 import { handleWorkflows } from "./workflows";
@@ -134,12 +139,19 @@ const httpServer = createHttpServer(async (req, res) => {
     // omitted (not fabricated) for unmatched core/MCP/404 paths. Raw path stays
     // on `url.path`.
     const { spanName, httpRoute } = describeRequestRoute(req.method, pathSegments);
+    // Standard OTel HTTP server semconv attributes — host, scheme, protocol
+    // version, user-agent (the method/path/route/status are set inline below).
+    const semconv = httpServerSemconvAttributes(req);
     const span = skipSpan
       ? null
       : startSpan(spanName, {
           "http.request.method": req.method ?? "",
           "url.path": reqPath,
+          "url.scheme": semconv["url.scheme"],
           "http.route": httpRoute,
+          "server.address": semconv["server.address"],
+          "network.protocol.version": semconv["network.protocol.version"],
+          "user_agent.original": semconv["user_agent.original"],
           "agent.id": req.headers["x-agent-id"] as string | undefined,
           "agentswarm.component": "api",
         });

@@ -134,7 +134,11 @@ Common attributes:
 | `http.request.method` | HTTP method |
 | `http.route` | Low-cardinality route template, e.g. `/api/tasks/{id}`. Omitted for unmatched core/MCP/404 paths. |
 | `url.path` | Raw request path (full path, including IDs) |
-| `responseStatusCode` | HTTP response status |
+| `url.scheme` | Request scheme — `https` or `http` (honors `X-Forwarded-Proto`) |
+| `server.address` | Request host with the port stripped (honors `X-Forwarded-Host`) |
+| `network.protocol.version` | HTTP protocol version, e.g. `1.1` or `2` |
+| `user_agent.original` | Raw `User-Agent` request header |
+| `http.response.status_code` | HTTP response status code (SigNoz surfaces this as the `responseStatusCode` column) |
 | `agentswarm.component` | `api` |
 | `agentswarm.http.duration_ms` | Server-side request duration |
 
@@ -146,7 +150,7 @@ Useful for:
 
 ### MCP Tool Calls
 
-Server-side MCP tool handlers emit `mcp.tool` spans. These nest under the API HTTP request span that triggered them.
+Server-side MCP tool handlers emit one span per call, named `mcp.tool <tool-name>` — for example `mcp.tool store-progress` — so the executed tool is readable straight from the trace tree. Tool names are a fixed enum, so the span name stays low-cardinality. These spans nest under the API HTTP request span that triggered them.
 
 Common attributes:
 
@@ -365,7 +369,7 @@ Agent Swarm currently emits traces, not standalone OTLP metrics. In SigNoz, crea
 | API errors | `count()` where `hasError = true` or `responseStatusCode >= 500` |
 | Worker task throughput | `count()` over `name = 'worker.session'`, grouped by `agentswarm.service.role` and `agentswarm.harness_provider` |
 | Worker session p95 duration | `p95(durationNano)` over `name = 'worker.session'` |
-| Tool call volume | `count()` over `name IN ('worker.tool', 'worker.mcp.tool', 'mcp.tool')`, grouped by `agentswarm.tool.name` or `mcp.tool.name` |
+| Tool call volume | `count()` over `name IN ('worker.tool', 'worker.mcp.tool')` plus `name LIKE 'mcp.tool %'` for server-side spans, grouped by `agentswarm.tool.name` or `mcp.tool.name` |
 | Slow tools | `p95(durationNano)` over tool spans, grouped by tool name |
 | Cost by model | `sum(agentswarm.cost.total_usd)` over session spans, grouped by `gen_ai.response.model` |
 | Token usage by model | `sum(gen_ai.usage.input_tokens)` and `sum(gen_ai.usage.output_tokens)`, grouped by model |
@@ -424,10 +428,10 @@ AND durationNano > 5000000000
 ```text
 service.namespace = 'agent-swarm'
 AND agentswarm.task.id = '<task-id>'
-AND (name = 'mcp.tool' OR name = 'worker.mcp.tool')
+AND (name LIKE 'mcp.tool %' OR name = 'worker.mcp.tool')
 ```
 
-Server-side `mcp.tool` spans live under `agent-swarm-api` and `worker.mcp.tool` under `agent-swarm`, so this query filters on `service.namespace` to catch both.
+Server-side `mcp.tool <tool-name>` spans live under `agent-swarm-api` and `worker.mcp.tool` under `agent-swarm`, so this query filters on `service.namespace` to catch both. The `LIKE 'mcp.tool %'` pattern matches every per-tool span name (`mcp.tool store-progress`, `mcp.tool poll-task`, …).
 
 ### Failed or Error-Spans
 
