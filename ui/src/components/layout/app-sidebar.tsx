@@ -20,6 +20,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import type { UserRole } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
+import { UserSwitcher } from "@/components/identity/user-switcher";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import {
@@ -87,6 +88,7 @@ const navGroups: NavGroup[] = [
     label: "SWARM",
     items: [
       { title: "Agents", path: "/agents", icon: Users },
+      { title: "People", path: "/people", icon: Contact, gate: { minVersion: "1.80.0" } },
       { title: "Workflows", path: "/workflows", icon: Workflow },
       { title: "Schedules", path: "/schedules", icon: Clock },
     ],
@@ -107,9 +109,9 @@ const navGroups: NavGroup[] = [
 /**
  * Account-area destinations pinned to the sidebar footer (bottom-aligned).
  * Settings and Usage carry a hover flyout listing their sub-routes; clicking
- * the item itself still navigates to its default route. People has no
- * sub-routes — plain link. Collapsing the sidebar is handled by clicking the
- * SidebarRail divider — there is no dedicated trigger button.
+ * the item itself still navigates to its default route. Collapsing the
+ * sidebar is handled by clicking the SidebarRail divider — there is no
+ * dedicated trigger button.
  */
 const footerNav: FooterItem[] = [
   {
@@ -134,7 +136,6 @@ const footerNav: FooterItem[] = [
       { title: "Budgets", path: "/usage/budgets" },
     ],
   },
-  { title: "People", path: "/people", icon: Contact, gate: { minVersion: "1.80.0" } },
 ];
 
 /** Delay (ms) before a flyout closes on mouse-leave — lets the cursor cross
@@ -361,6 +362,9 @@ export function AppSidebar() {
             );
           })}
         </SidebarMenu>
+        {/* Identity switcher — current user + change/create. Pinned to the
+            very bottom of the sidebar, below the account footer items. */}
+        <UserSwitcher />
       </SidebarFooter>
 
       <SidebarRail />

@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useHealth } from "@/api/hooks/use-stats";
 import type { StatusHealth } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
-import { UserSwitcher } from "@/components/identity/user-switcher";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -89,9 +88,6 @@ export function AppHeader() {
             {health?.version && <span>v{health.version}</span>}
           </div>
         )}
-
-        {/* Identity switcher — current user + change/create. */}
-        <UserSwitcher />
 
         {/* GitHub repo link */}
         <Tooltip>
