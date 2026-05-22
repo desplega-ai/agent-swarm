@@ -2,7 +2,7 @@ import Editor from "@monaco-editor/react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ArrowLeft, ChevronDown, ChevronRight, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { toast } from "sonner";
@@ -52,6 +52,10 @@ export default function TemplateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { theme } = useTheme();
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab = tabParam === "rendered" || tabParam === "history" ? tabParam : "raw";
 
   const { data, isLoading, isError } = usePromptTemplate(id);
   const { data: events } = usePromptTemplateEvents();
@@ -324,7 +328,20 @@ export default function TemplateDetailPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="raw" className="flex flex-col flex-1 min-h-0">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.set("tab", value);
+              return next;
+            },
+            { replace: true },
+          );
+        }}
+        className="flex flex-col flex-1 min-h-0"
+      >
         <TabsList>
           <TabsTrigger value="raw">Raw</TabsTrigger>
           <TabsTrigger value="rendered">Rendered</TabsTrigger>
