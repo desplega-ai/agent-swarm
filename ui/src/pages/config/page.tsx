@@ -34,7 +34,7 @@ export default function ConfigPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
-      <PageHeader title="Settings" />
+      <PageHeader title="Config" />
       <Tabs value={tab} onValueChange={(v) => setTab(v as ConfigTab)} className="flex-1 min-h-0">
         <TabsList variant="line">
           <TabsTrigger value="connections">Connections</TabsTrigger>

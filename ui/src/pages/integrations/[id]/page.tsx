@@ -155,14 +155,14 @@ export default function IntegrationDetailPage() {
 
   if (!def) {
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-4 p-2">
+      <div className="flex flex-col flex-1 min-h-0 gap-4">
         <EmptyState
           icon={Plug}
           title="Integration not found"
           description={`No integration matches "${id ?? ""}".`}
           action={
             <Button asChild size="sm" variant="outline">
-              <Link to="/integrations">← Back to integrations</Link>
+              <Link to="/settings/integrations">← Back to integrations</Link>
             </Button>
           }
         />
@@ -335,11 +335,11 @@ function IntegrationDetailInner({
   const isGithub = def.id === "github";
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-6 p-2">
+    <div className="flex flex-col flex-1 min-h-0 gap-6">
       {/* Header */}
       <div className="flex flex-col gap-2">
         <Button asChild size="sm" variant="ghost" className="self-start text-muted-foreground">
-          <Link to="/integrations">← All integrations</Link>
+          <Link to="/settings/integrations">← All integrations</Link>
         </Button>
         <PageHeader
           title={

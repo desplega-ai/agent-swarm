@@ -1,6 +1,7 @@
 import { lazy } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import { RootLayout } from "@/components/layout/root-layout";
+import { SettingsLayout } from "@/pages/settings/settings-layout";
 
 const DashboardPage = lazy(() => import("@/pages/dashboard/page"));
 const HomePage = lazy(() => import("@/pages/home/page"));
@@ -75,6 +76,19 @@ export const router = createBrowserRouter([
       { path: "config", element: <ConfigPage /> },
       { path: "integrations", element: <IntegrationsPage /> },
       { path: "integrations/:id", element: <IntegrationDetailPage /> },
+      {
+        path: "settings",
+        element: <SettingsLayout />,
+        children: [
+          { index: true, element: <Navigate to="/settings/config" replace /> },
+          { path: "config", element: <ConfigPage /> },
+          { path: "api-keys", element: <ApiKeysPage /> },
+          { path: "integrations", element: <IntegrationsPage /> },
+          { path: "integrations/:id", element: <IntegrationDetailPage /> },
+          { path: "repos", element: <ReposPage /> },
+          { path: "debug", element: <DebugPage /> },
+        ],
+      },
       { path: "templates", element: <TemplatesPage /> },
       { path: "templates/:id", element: <TemplateDetailPage /> },
       { path: "templates/:id/history/:version", element: <TemplateVersionDetailPage /> },

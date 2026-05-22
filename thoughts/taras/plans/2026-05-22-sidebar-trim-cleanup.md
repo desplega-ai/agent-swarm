@@ -6,7 +6,7 @@ tags: [plan, ui, navigation, sidebar, ia]
 status: in-progress
 related_brainstorm: thoughts/taras/brainstorms/2026-05-21-sidebar-trim-cleanup.md
 last_updated: 2026-05-22
-last_updated_by: claude (phase-running, phase 2)
+last_updated_by: claude (phase-running, phase 3)
 ---
 
 # Sidebar Trim & Cleanup — Implementation Plan
@@ -364,18 +364,18 @@ A new `/settings` route renders a left-rail shell whose nested routes host the 5
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] `/settings` redirects to `/settings/config` and shows the left-rail shell.
-- [ ] Each rail entry navigates to `/settings/config|api-keys|integrations|repos|debug` and
+- [x] `/settings` redirects to `/settings/config` and shows the left-rail shell.
+- [x] Each rail entry navigates to `/settings/config|api-keys|integrations|repos|debug` and
       renders the corresponding page with **no doubled header**.
-- [ ] `/settings/integrations/slack` (deep link) resolves to the Slack integration detail page.
-- [ ] The Integrations detail "← All integrations" button returns to `/settings/integrations`.
-- [ ] `ConfigPage`'s internal Connections/Secrets tabs still work inside the shell.
+- [x] `/settings/integrations/slack` (deep link) resolves to the Slack integration detail page.
+- [x] The Integrations detail "← All integrations" button returns to `/settings/integrations`.
+- [x] `ConfigPage`'s internal Connections/Secrets tabs still work inside the shell.
 
 #### Manual Verification:
 - [ ] Left-rail active-state and spacing look correct; no nested scrollbar artifacts on the

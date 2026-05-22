@@ -85,7 +85,7 @@ export default function IntegrationsPage() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-6 p-2">
+    <div className="flex flex-col flex-1 min-h-0 gap-6">
       <div className="space-y-2">
         <PageHeader
           title="Integrations"
