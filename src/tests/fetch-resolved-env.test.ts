@@ -61,7 +61,10 @@ async function fetchResolvedEnv(
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
     const url = `${apiUrl}/api/config/resolved?agentId=${encodeURIComponent(agentId)}&includeSecrets=true`;
-    const response = await nativeFetch(url, { headers });
+    const request = new Request(url, { headers });
+    const response = url.startsWith(testUrl)
+      ? await server.fetch(request)
+      : await nativeFetch(request);
 
     if (!response.ok) {
       return { ...baseEnv };
