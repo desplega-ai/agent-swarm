@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { ExternalLink, FolderGit2, GitBranch, Pencil, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, FolderGit2, GitBranch, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateRepo, useDeleteRepo, useRepos, useUpdateRepo } from "@/api/hooks/use-repos";
@@ -157,6 +157,7 @@ export default function ReposPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRepo, setEditingRepo] = useState<SwarmRepo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SwarmRepo | null>(null);
+  const [search, setSearch] = useState("");
 
   function handleAdd() {
     setEditingRepo(null);
@@ -341,9 +342,22 @@ export default function ReposPage() {
         }
       />
 
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search repos…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+      </div>
+
       <DataGrid
         rowData={repos ?? []}
         columnDefs={columnDefs}
+        quickFilterText={search}
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No repositories registered"

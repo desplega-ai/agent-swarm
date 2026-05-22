@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { Workflow as WorkflowIcon } from "lucide-react";
+import { Search, Workflow as WorkflowIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks/use-workflows";
@@ -8,6 +8,7 @@ import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TemplateRecommendationCard } from "@/components/shared/template-recommendation-card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
@@ -33,6 +34,9 @@ export default function WorkflowsPage() {
   const { data: workflows, isLoading: wfLoading } = useWorkflows();
   const { data: allRuns, isLoading: runsLoading } = useAllWorkflowRuns();
   const updateWorkflow = useUpdateWorkflow();
+
+  // Workflows tab search
+  const [search, setSearch] = useState("");
 
   // Run filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -208,10 +212,22 @@ export default function WorkflowsPage() {
           <TabsTrigger value="runs">Runs</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="workflows" className="flex flex-col flex-1 min-h-0 mt-2">
+        <TabsContent value="workflows" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search workflows…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          </div>
           <DataGrid
             rowData={workflows ?? []}
             columnDefs={workflowColumns}
+            quickFilterText={search}
             onRowClicked={onWorkflowRowClicked}
             loading={wfLoading}
             emptyMessage="No workflows configured"

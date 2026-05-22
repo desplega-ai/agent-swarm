@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { Pencil, Plus, Trash2, Wallet } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -736,7 +736,7 @@ export default function BudgetsPage() {
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
-      <PageHeader icon={Wallet} title="Budgets & spend" />
+      <PageHeader title="Budgets & spend" />
 
       {/* Global budget */}
       <Card>
