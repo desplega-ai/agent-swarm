@@ -1,11 +1,13 @@
 /**
- * Built-in global scripts catalog — seeded into the `scripts` table at API boot.
+ * Built-in global scripts catalog — the one concrete {@link Seeder} wired into
+ * the generic seeder framework (see `src/be/seed`).
  *
  * Each entry's runtime source is a real `.ts` file under `./catalog/`, imported
- * here as text so it ships embedded in the compiled binary. The seed mirrors the
- * `/api/scripts/upsert` pipeline (import allowlist -> typecheck -> signature +
- * argsSchema extraction -> upsert) and is idempotent: scripts whose content hash
- * is unchanged are skipped, so steady-state boots do no extra work.
+ * here as text so it ships embedded in the compiled binary. {@link scriptsSeeder}
+ * mirrors the `/api/scripts/upsert` pipeline (import allowlist -> typecheck ->
+ * signature + argsSchema extraction -> upsert at `global` scope). The framework
+ * harness makes re-seeding version-aware: a pristine script updates when its
+ * catalog source changes, a user-modified one is preserved.
  *
  * To add a script: drop a `<name>.ts` file in `./catalog/`, text-import it below,
  * and add a manifest entry to {@link SEED_SCRIPTS}. The `description` + `intent`
@@ -19,6 +21,7 @@ import { computeContentHash } from "../db";
 import { getScript, upsertScriptByName } from "../scripts/db";
 import { extractArgsJsonSchema } from "../scripts/extract-schema";
 import { typecheckScript } from "../scripts/typecheck";
+import type { Seeder, SeedItem } from "../seed/types";
 import dateResolveSrc from "./catalog/date-resolve.ts" with { type: "text" };
 import fetchReadableSrc from "./catalog/fetch-readable.ts" with { type: "text" };
 import ghPrSnapshotSrc from "./catalog/gh-pr-snapshot.ts" with { type: "text" };
@@ -121,80 +124,60 @@ export const SEED_SCRIPTS: SeedScript[] = [
   },
 ];
 
-export type SeedScriptsResult = {
-  seeded: number;
-  updated: number;
-  skipped: number;
-  failed: Array<{ name: string; error: string }>;
-};
+/** A catalog entry resolved into a generic {@link SeedItem}. */
+type ScriptSeedItem = SeedItem & { script: SeedScript };
 
 /**
- * Seed the built-in scripts into the catalog at `global` scope. Idempotent and
- * safe to call on every boot — unchanged scripts are skipped before the
- * (relatively expensive) typecheck + schema-extraction pipeline runs.
+ * The one concrete {@link Seeder} wired up today: lands the built-in scripts
+ * catalog at `global` scope.
+ *
+ * `key` is the script name. `contentHash` is the same SHA-256 of the source
+ * that the `scripts` table stores in its `contentHash` column, so a pristine
+ * upstream row hashes identically to its catalog source — letting the harness
+ * detect "pristine vs user-modified" without any script-specific logic.
  */
-export async function seedGlobalScripts(opts?: { quiet?: boolean }): Promise<SeedScriptsResult> {
-  const result: SeedScriptsResult = { seeded: 0, updated: 0, skipped: 0, failed: [] };
+export const scriptsSeeder: Seeder<ScriptSeedItem> = {
+  kind: "script",
 
-  for (const script of SEED_SCRIPTS) {
-    try {
-      const existing = getScript({ name: script.name, scope: "global" });
-      if (existing && existing.contentHash === computeContentHash(script.source)) {
-        result.skipped += 1;
-        continue;
-      }
+  items(): ScriptSeedItem[] {
+    return SEED_SCRIPTS.map((script) => ({
+      key: script.name,
+      contentHash: computeContentHash(script.source),
+      script,
+    }));
+  },
 
-      const imports = validateScriptImports(script.source);
-      if (!imports.ok) {
-        result.failed.push({ name: script.name, error: `import check: ${imports.diagnostic}` });
-        continue;
-      }
+  upstreamHash(item): string | null {
+    const existing = getScript({ name: item.key, scope: "global" });
+    return existing ? existing.contentHash : null;
+  },
 
-      const typecheck = typecheckScript(script.source);
-      if (!typecheck.ok) {
-        result.failed.push({
-          name: script.name,
-          error: `typecheck: ${typecheck.diagnostics.join(" | ")}`,
-        });
-        continue;
-      }
+  async apply(item): Promise<void> {
+    const { script } = item;
 
-      const argsJsonSchema = await extractArgsJsonSchema(script.source);
-      const upserted = await upsertScriptByName({
-        name: script.name,
-        scope: "global",
-        scopeId: null,
-        source: script.source,
-        description: script.description,
-        intent: script.intent,
-        signatureJson: JSON.stringify(extractScriptSignature(script.source)),
-        argsJsonSchema,
-        fsMode: "none",
-        agentId: null,
-        isScratch: false,
-        typeChecked: true,
-        changeReason: "Seeded from the built-in scripts catalog (src/be/seed-scripts)",
-      });
+    const imports = validateScriptImports(script.source);
+    if (!imports.ok) throw new Error(`import check: ${imports.diagnostic}`);
 
-      if (upserted.isNew) result.seeded += 1;
-      else result.updated += 1;
-    } catch (err) {
-      result.failed.push({
-        name: script.name,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+    const typecheck = typecheckScript(script.source);
+    if (!typecheck.ok) throw new Error(`typecheck: ${typecheck.diagnostics.join(" | ")}`);
 
-  if (!opts?.quiet) {
-    console.log(
-      `[seed-scripts] seeded=${result.seeded} updated=${result.updated} ` +
-        `skipped=${result.skipped} failed=${result.failed.length}`,
-    );
-    for (const f of result.failed) {
-      console.error(`[seed-scripts] FAILED ${f.name}: ${f.error}`);
-    }
-  }
-
-  return result;
-}
+    // upsertScriptByName handles both create and update (and bumps the
+    // script_versions history), so a single path serves either action.
+    const argsJsonSchema = await extractArgsJsonSchema(script.source);
+    await upsertScriptByName({
+      name: script.name,
+      scope: "global",
+      scopeId: null,
+      source: script.source,
+      description: script.description,
+      intent: script.intent,
+      signatureJson: JSON.stringify(extractScriptSignature(script.source)),
+      argsJsonSchema,
+      fsMode: "none",
+      agentId: null,
+      isScratch: false,
+      typeChecked: true,
+      changeReason: "Seeded from the built-in scripts catalog (src/be/seed-scripts)",
+    });
+  },
+};

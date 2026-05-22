@@ -1,12 +1,15 @@
 #!/usr/bin/env bun
 /**
- * Seed the built-in global scripts catalog into the swarm database.
+ * Seed the built-in entity catalog into the swarm database.
  *
- * The catalog source of truth is `src/be/seed-scripts/` (also seeded
- * automatically at API boot — see `src/http/index.ts`). This runner applies the
- * same catalog to a database on demand: useful for a fresh dev DB, after a DB
- * reset, or after editing a catalog script. It is idempotent — unchanged
- * scripts are skipped.
+ * The catalog source of truth lives under `src/be/` (scripts in
+ * `src/be/seed-scripts/`; future kinds register their own seeder). It is also
+ * seeded automatically at API boot — see `src/http/index.ts`. This runner
+ * applies the same catalog to a database on demand: useful for a fresh dev DB,
+ * after a DB reset, or after editing a catalog entry.
+ *
+ * Re-seeding is version-aware: a pristine entity updates when its source
+ * changes, a user-modified one is preserved. See `src/be/seed`.
  *
  * Usage:
  *   bun run seed:scripts
@@ -14,16 +17,17 @@
  */
 
 import { initDb } from "../src/be/db";
-import { seedGlobalScripts } from "../src/be/seed-scripts";
+import { runAllSeeders } from "../src/be/seed";
 
 const dbPath = process.env.DATABASE_PATH ?? "./agent-swarm-db.sqlite";
-console.log(`[seed-scripts] database: ${dbPath}`);
+console.log(`[seed] database: ${dbPath}`);
 initDb(dbPath);
 
-const result = await seedGlobalScripts();
-if (result.failed.length > 0) {
-  console.error(`[seed-scripts] ${result.failed.length} script(s) failed to seed — see errors above.`);
+const results = await runAllSeeders();
+const failed = results.reduce((n, r) => n + r.failed.length, 0);
+if (failed > 0) {
+  console.error(`[seed] ${failed} entit(ies) failed to seed — see errors above.`);
   process.exit(1);
 }
-console.log("[seed-scripts] done.");
+console.log("[seed] done.");
 process.exit(0);

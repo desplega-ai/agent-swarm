@@ -87,7 +87,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
-import { seedDefaultTemplates } from "./seed";
+import { seedDefaultTemplates } from "./seed-prompt-templates";
 import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 
 let db: Database | null = null;
