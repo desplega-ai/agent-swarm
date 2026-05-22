@@ -70,6 +70,8 @@ const listSchedules = route({
   path: "/api/schedules",
   pattern: ["api", "schedules"],
   summary: "List schedules",
+  description:
+    "Returns schedules with the full `taskTemplate` replaced by a short `taskTemplatePreview` by default — list views never render the full template. Pass `fields=full` to restore `taskTemplate`. Fetch the full template via `GET /api/schedules/{id}`.",
   tags: ["Schedules"],
   query: z.object({
     enabled: z
@@ -82,6 +84,8 @@ const listSchedules = route({
       .enum(["true", "false"])
       .optional()
       .transform((v) => (v === undefined ? undefined : v === "true")),
+    /** `full` restores the legacy shape (includes `taskTemplate`); default is slim. */
+    fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
     200: { description: "List of schedules" },
@@ -156,12 +160,17 @@ export async function handleSchedules(
   if (listSchedules.match(req.method, pathSegments)) {
     const parsed = await listSchedules.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const schedules = getScheduledTasks({
+    const filters = {
       enabled: parsed.query.enabled,
       name: parsed.query.name,
       scheduleType: parsed.query.scheduleType,
       hideCompleted: parsed.query.hideCompleted,
-    });
+    };
+    // List responses default to slim (no full `taskTemplate`); `?fields=full` restores it.
+    const schedules =
+      parsed.query.fields === "full"
+        ? getScheduledTasks(filters)
+        : getScheduledTasks(filters, { slim: true });
     json(res, { schedules, count: schedules.length });
     return true;
   }

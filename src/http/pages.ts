@@ -11,7 +11,7 @@ import {
   updatePage,
 } from "../be/db";
 import { snapshotPage } from "../pages/version";
-import { PageAuthModeSchema, PageContentTypeSchema } from "../types";
+import { type Page, PageAuthModeSchema, PageContentTypeSchema, type PageSummary } from "../types";
 import { issuePageSessionCookie } from "../utils/page-session";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
@@ -155,11 +155,15 @@ const listPagesRoute = route({
   path: "/api/pages",
   pattern: ["api", "pages"],
   summary: "List pages",
+  description:
+    "Returns pages WITHOUT the heavy `body` (the full HTML/JSON document) and `passwordHash` by default — list views never render the body. Pass `fields=full` to restore `body`. Fetch a full page via `GET /api/pages/{id}`.",
   tags: ["Pages"],
   query: z.object({
     agentId: z.string().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(500).optional(),
     offset: z.coerce.number().int().min(0).optional(),
+    /** `full` restores the legacy shape (includes `body`); default is slim. */
+    fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
     200: { description: "Page list with totals + share-URL pointers" },
@@ -429,9 +433,16 @@ export async function handlePages(
     if (!parsed) return true;
     const limit = parsed.query.limit ?? 50;
     const offset = parsed.query.offset ?? 0;
-    const pages = parsed.query.agentId
-      ? listPagesByAgent(parsed.query.agentId, limit, offset)
-      : listAllPages(limit, offset);
+    // List responses default to slim (no `body`); `?fields=full` restores it.
+    const full = parsed.query.fields === "full";
+    let pages: Array<Page | PageSummary>;
+    if (parsed.query.agentId) {
+      pages = full
+        ? listPagesByAgent(parsed.query.agentId, limit, offset)
+        : listPagesByAgent(parsed.query.agentId, limit, offset, { slim: true });
+    } else {
+      pages = full ? listAllPages(limit, offset) : listAllPages(limit, offset, { slim: true });
+    }
     json(res, {
       pages: pages.map(withShareUrls),
       total: pages.length,

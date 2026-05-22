@@ -11,6 +11,8 @@ const listSessions = route({
   path: "/api/sessions",
   pattern: ["api", "sessions"],
   summary: "List recent task sessions (root tasks + chain summary)",
+  description:
+    "Each item's `root` is a slim task summary by default — the full `task` text is replaced with a bounded `taskPreview` and completion/integration blobs are dropped. Pass `fields=full` to restore the full root `AgentTask`. The full root + descendant chain are on `GET /api/sessions/{rootTaskId}`.",
   tags: ["Sessions"],
   query: z.object({
     limit: z.coerce.number().int().optional(),
@@ -25,6 +27,8 @@ const listSessions = route({
      * excluded. Omit to return every session (legacy / non-UI callers).
      */
     requestedByUserId: z.string().min(1).optional(),
+    /** `full` restores the legacy shape (full root `AgentTask`); default is slim. */
+    fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
     200: { description: "Recent sessions ordered by chain-wide last activity" },
@@ -65,13 +69,18 @@ export async function handleSessions(
           .map((s) => s.trim())
           .filter(Boolean)
       : undefined;
-    const sessions = listRecentSessions({
+    const baseOpts = {
       limit: parsed.query.limit,
       offset: parsed.query.offset,
       source: sources,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
-    });
+    };
+    // List responses default to slim (root is a task summary); `?fields=full` restores it.
+    const sessions =
+      parsed.query.fields === "full"
+        ? listRecentSessions(baseOpts)
+        : listRecentSessions({ ...baseOpts, slim: true });
     json(res, { sessions });
     return true;
   }

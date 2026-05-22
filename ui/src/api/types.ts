@@ -867,8 +867,18 @@ export interface WorkflowVersion {
   createdAt: string;
 }
 
+/**
+ * Slim `/api/workflows` list row. The heavy `definition` (full DAG) and
+ * trigger config are dropped — the list only needs `nodeCount`. Fetch the full
+ * `Workflow` via `GET /api/workflows/{id}` (or `?fields=full` on the list).
+ */
+export type WorkflowSummary = Omit<
+  Workflow,
+  "definition" | "triggers" | "cooldown" | "input" | "triggerSchema"
+> & { nodeCount: number };
+
 export interface WorkflowsResponse {
-  workflows: Workflow[];
+  workflows: WorkflowSummary[];
 }
 
 export interface WorkflowRunsResponse {

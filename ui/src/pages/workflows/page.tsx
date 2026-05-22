@@ -3,7 +3,7 @@ import { Workflow as WorkflowIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks/use-workflows";
-import type { Workflow, WorkflowRun, WorkflowRunStatus } from "@/api/types";
+import type { WorkflowRun, WorkflowRunStatus, WorkflowSummary } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TemplateRecommendationCard } from "@/components/shared/template-recommendation-card";
@@ -45,14 +45,14 @@ export default function WorkflowsPage() {
   }, [workflows]);
 
   const handleToggleEnabled = useCallback(
-    (workflow: Workflow, enabled: boolean) => {
+    (workflow: WorkflowSummary, enabled: boolean) => {
       updateWorkflow.mutate({ id: workflow.id, data: { enabled } });
     },
     [updateWorkflow],
   );
 
   // Workflows tab columns
-  const workflowColumns = useMemo<ColDef<Workflow>[]>(
+  const workflowColumns = useMemo<ColDef<WorkflowSummary>[]>(
     () => [
       {
         field: "name",
@@ -75,13 +75,13 @@ export default function WorkflowsPage() {
       {
         headerName: "Nodes",
         width: 100,
-        valueGetter: (params) => params.data?.definition?.nodes?.length ?? 0,
+        valueGetter: (params) => params.data?.nodeCount ?? 0,
       },
       {
         field: "enabled",
         headerName: "Enabled",
         width: 100,
-        cellRenderer: (params: ICellRendererParams<Workflow>) => {
+        cellRenderer: (params: ICellRendererParams<WorkflowSummary>) => {
           const wf = params.data;
           if (!wf) return null;
           return (
@@ -106,7 +106,7 @@ export default function WorkflowsPage() {
   );
 
   const onWorkflowRowClicked = useCallback(
-    (event: RowClickedEvent<Workflow>) => {
+    (event: RowClickedEvent<WorkflowSummary>) => {
       const target = event.event?.target as HTMLElement | null;
       if (target?.closest('[data-slot="switch"], button')) return;
       if (event.data) navigate(`/workflows/${event.data.id}`);

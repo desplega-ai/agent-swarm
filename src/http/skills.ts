@@ -23,6 +23,8 @@ const listSkillsRoute = route({
   path: "/api/skills",
   pattern: ["api", "skills"],
   summary: "List skills with optional filters",
+  description:
+    "Returns skills WITHOUT the heavy `content` (full SKILL.md) by default — list views never render it. Pass `fields=full` to include `content` (e.g. for SDK consumers that read it from the list).",
   tags: ["Skills"],
   auth: { apiKey: true },
   query: z.object({
@@ -31,6 +33,8 @@ const listSkillsRoute = route({
     agentId: z.string().optional(),
     enabled: z.string().optional(),
     search: z.string().optional(),
+    /** `full` restores the legacy shape (includes `content`); default is slim. */
+    fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
     200: { description: "Skill list" },
@@ -371,14 +375,17 @@ export async function handleSkills(
     const parsed = await listSkillsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
+    // List responses default to slim (no `content`); `?fields=full` restores it.
+    const includeContent = parsed.query.fields === "full";
     const skills = parsed.query.search
-      ? searchSkills(parsed.query.search)
+      ? searchSkills(parsed.query.search, 20, includeContent)
       : listSkills({
           type: parsed.query.type as "remote" | "personal" | undefined,
           scope: parsed.query.scope as "global" | "swarm" | "agent" | undefined,
           ownerAgentId: parsed.query.agentId,
           isEnabled:
             parsed.query.enabled !== undefined ? parsed.query.enabled === "true" : undefined,
+          includeContent,
         });
 
     json(res, { skills, total: skills.length });

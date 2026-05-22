@@ -9,19 +9,26 @@ export const registerGetSwarmTool = (server: McpServer) => {
     "get-swarm",
     {
       title: "Get the agent swarm",
-      description: "Returns a list of agents in the swarm without their tasks.",
+      description:
+        "Returns a list of agents in the swarm without their tasks. Identity markdown (claudeMd/soulMd/identityMd/toolsMd/heartbeatMd/setupScript) is omitted by default — pass includeFull:true to include it.",
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({
         a: z.string().optional(),
+        includeFull: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include the six identity-markdown blobs (claudeMd/soulMd/identityMd/toolsMd/heartbeatMd/setupScript). Default false — they are large and rarely needed at the swarm-overview level.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
         agents: z.array(AgentSchema),
       }),
     },
-    async (_input, requestInfo, _meta) => {
-      const agents = getAllAgents();
+    async ({ includeFull }, requestInfo, _meta) => {
+      const agents = getAllAgents({ slim: !includeFull });
 
       return {
         content: [

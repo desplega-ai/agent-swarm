@@ -39,6 +39,8 @@ const listTasks = route({
   path: "/api/tasks",
   pattern: ["api", "tasks"],
   summary: "List tasks with filters",
+  description:
+    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`. Fetch a single task in full via `GET /api/tasks/{id}`.",
   tags: ["Tasks"],
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
@@ -53,6 +55,8 @@ const listTasks = route({
     source: z.string().optional(),
     limit: z.coerce.number().int().optional(),
     offset: z.coerce.number().int().optional(),
+    /** `full` restores the legacy shape (full `task` text + all fields); default is slim. */
+    fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
     200: { description: "Paginated task list" },
@@ -304,7 +308,10 @@ export async function handleTasks(
       limit: parsed.query.limit,
       offset: parsed.query.offset,
     };
-    const tasks = getAllTasks(filters);
+    // List responses default to slim (full `task` text → bounded `taskPreview`,
+    // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
+    const tasks =
+      parsed.query.fields === "full" ? getAllTasks(filters) : getAllTasks(filters, { slim: true });
     const total = getTasksCount(filters);
     json(res, { tasks, total });
     return true;
