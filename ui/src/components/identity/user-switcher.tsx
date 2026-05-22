@@ -79,18 +79,17 @@ export function UserSwitcher() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
-                size="lg"
                 tooltip={user ? `Acting as ${user.name}` : "Pick identity"}
                 aria-label={user ? `Acting as ${user.name} — click to switch` : "Pick identity"}
               >
                 <span
                   aria-hidden="true"
                   className={cn(
-                    "inline-flex size-8 shrink-0 items-center justify-center rounded-full font-mono text-xs font-semibold shadow-sm",
+                    "inline-flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold shadow-sm",
                     user ? "bg-primary text-primary-foreground" : "bg-primary/20 text-primary",
                   )}
                 >
-                  {user ? initials : <UserPlus className="size-4" />}
+                  {user ? initials : <UserPlus className="size-3.5" />}
                 </span>
                 <span
                   className={cn(
