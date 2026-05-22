@@ -9,8 +9,9 @@
  * before they can act. This switcher is for switching afterwards.
  */
 
-import { Check, Plus, UserPlus } from "lucide-react";
+import { BarChart3, Check, Plus, Settings, UserPlus } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useCreateUser, useUsers } from "@/api/hooks/use-users";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -43,6 +45,7 @@ function userInitials(name: string): string {
 
 export function UserSwitcher() {
   const gate = useFeatureGate("1.76.0");
+  const navigate = useNavigate();
   const { user, userId, setUserId, clearUser } = useCurrentUser();
   const { data: users } = useUsers();
   const createUser = useCreateUser();
@@ -98,6 +101,23 @@ export function UserSwitcher() {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuGroup>
+            <DropdownMenuItem
+              onSelect={() => navigate("/settings")}
+              className="flex items-center gap-2"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => navigate("/usage")}
+              className="flex items-center gap-2"
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              Usage
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
           <DropdownMenuLabel className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
             Acting as
           </DropdownMenuLabel>

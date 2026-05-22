@@ -6,7 +6,7 @@ tags: [plan, ui, navigation, sidebar, ia]
 status: in-progress
 related_brainstorm: thoughts/taras/brainstorms/2026-05-21-sidebar-trim-cleanup.md
 last_updated: 2026-05-22
-last_updated_by: claude (phase-running, phase 3)
+last_updated_by: claude (phase-running, phase 5)
 ---
 
 # Sidebar Trim & Cleanup — Implementation Plan
@@ -460,17 +460,17 @@ The header avatar dropdown gains two navigation entries — **Settings** (`/sett
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] Opening the header avatar dropdown shows "Settings" and "Usage" entries plus the existing
+- [x] Opening the header avatar dropdown shows "Settings" and "Usage" entries plus the existing
       identity-switcher items.
-- [ ] Clicking "Settings" navigates to `/settings` (→ `/settings/config`).
-- [ ] Clicking "Usage" navigates to `/usage`.
-- [ ] Identity switching still works (the new entries didn't break the existing menu).
+- [x] Clicking "Settings" navigates to `/settings` (→ `/settings/config`).
+- [x] Clicking "Usage" navigates to `/usage`.
+- [x] Identity switching still works (the new entries didn't break the existing menu).
 
 #### Manual Verification:
 - [ ] Dropdown grouping/separator reads cleanly; entries are visually distinct from the identity list.
