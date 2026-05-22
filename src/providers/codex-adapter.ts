@@ -79,6 +79,7 @@ import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
 import { getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
+import { buildOtelTraceparentEnv } from "./otel-env";
 import type {
   CostData,
   CredCheckOptions,
@@ -1209,6 +1210,13 @@ export class CodexAdapter implements ProviderAdapter {
           ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
           : {}),
         ...(config.env ?? {}),
+        // Gated cross-service OTel linking: when SWARM_ENABLE_HARNESS_OTEL (or
+        // the deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias) is on, inject
+        // TRACEPARENT from the active worker span so Codex's spans nest under
+        // our worker.session trace. Codex's Rust OTEL SDK reads W3C trace
+        // context from the env via the default tracecontext propagator.
+        // Returns {} (no-op) when off; spread last so the computed value wins.
+        ...buildOtelTraceparentEnv(config.env ?? process.env),
       };
 
       // The SDK's default `findCodexPath()` does `require.resolve("@openai/codex")`

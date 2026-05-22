@@ -2173,24 +2173,45 @@ async function spawnProviderProcess(
     codexSlot: oauthSelection?.index,
   };
 
-  const session = await withSpan(
-    "worker.session.create",
-    async (span) => {
-      const createdSession = await adapter.createSession(config);
-      span.setAttribute("agentswarm.provider.session_id", createdSession.sessionId || "pending");
-      return createdSession;
-    },
-    {
-      "agent.id": opts.agentId,
-      "agentswarm.task.id": effectiveTaskId,
-      "agentswarm.task.real_id": realTaskId,
-      "agentswarm.agent.role": opts.role,
-      "agentswarm.harness_provider": opts.harnessProvider,
-      "gen_ai.request.model": model || undefined,
-      "agentswarm.session.cwd": config.cwd,
-      "agentswarm.session.vcs_repo": opts.vcsRepo,
-      "agentswarm.session.additional_args_count": opts.additionalArgs?.length ?? 0,
-    },
+  // Create the long-lived `worker.session` span up front so the provider
+  // session — and the harness subprocess it spawns — is created within its
+  // trace context. This makes `worker.session.create` a child of
+  // `worker.session` instead of a separate root span, and gives the
+  // claude-adapter an active span to derive `TRACEPARENT` from when
+  // `SWARM_ENABLE_CLAUDE_CODE_OTEL` is on, so Claude Code's spans nest under
+  // our trace. `agentswarm.provider.session_id` is stamped once the provider
+  // session exists (below) and refreshed on the `session_init` event.
+  const sessionSpan = startSpan("worker.session", {
+    "agent.id": opts.agentId,
+    "agentswarm.task.id": effectiveTaskId,
+    "agentswarm.task.real_id": realTaskId,
+    "agentswarm.agent.role": opts.role,
+    "agentswarm.harness_provider": opts.harnessProvider,
+    "agentswarm.session.cwd": config.cwd,
+    "agentswarm.session.vcs_repo": opts.vcsRepo,
+    "gen_ai.request.model": model || undefined,
+  });
+
+  const session = await withSpanContext(sessionSpan, () =>
+    withSpan(
+      "worker.session.create",
+      async (span) => {
+        const createdSession = await adapter.createSession(config);
+        span.setAttribute("agentswarm.provider.session_id", createdSession.sessionId || "pending");
+        return createdSession;
+      },
+      {
+        "agent.id": opts.agentId,
+        "agentswarm.task.id": effectiveTaskId,
+        "agentswarm.task.real_id": realTaskId,
+        "agentswarm.agent.role": opts.role,
+        "agentswarm.harness_provider": opts.harnessProvider,
+        "gen_ai.request.model": model || undefined,
+        "agentswarm.session.cwd": config.cwd,
+        "agentswarm.session.vcs_repo": opts.vcsRepo,
+        "agentswarm.session.additional_args_count": opts.additionalArgs?.length ?? 0,
+      },
+    ),
   );
   const initialModelReport = buildLatestModelReport({
     model,
@@ -2263,17 +2284,11 @@ async function spawnProviderProcess(
       startedAt: number;
     }
   >();
-  const sessionSpan = startSpan("worker.session", {
-    "agent.id": opts.agentId,
-    "agentswarm.task.id": effectiveTaskId,
-    "agentswarm.task.real_id": realTaskId,
-    "agentswarm.agent.role": opts.role,
-    "agentswarm.harness_provider": opts.harnessProvider,
-    "agentswarm.provider.session_id": providerSessionId,
-    "agentswarm.session.cwd": config.cwd,
-    "agentswarm.session.vcs_repo": opts.vcsRepo,
-    "gen_ai.request.model": model || undefined,
-  });
+  // sessionSpan was created above (before provider-session creation). Stamp the
+  // provider session ID now that it exists; it's refreshed on `session_init`.
+  if (providerSessionId) {
+    sessionSpan.setAttribute("agentswarm.provider.session_id", providerSessionId);
+  }
 
   // Auto-progress throttle: don't update more than once per 3 seconds
   let lastProgressTime = 0;

@@ -1,6 +1,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { type Span, trace } from "@opentelemetry/api";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -15,6 +16,7 @@ import {
 } from "../utils/error-tracker";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
 import type {
   CostData,
   CredStatus,
@@ -265,6 +267,57 @@ export async function createSessionMcpConfig(
   }
 }
 
+/**
+ * Build the OpenTelemetry env additions for a spawned Claude Code subprocess.
+ *
+ * Gated behind `SWARM_ENABLE_HARNESS_OTEL` (or the deprecated
+ * `SWARM_ENABLE_CLAUDE_CODE_OTEL` alias), read per-spawn from the resolved
+ * swarm-config env (`config.env`), so flipping the config takes effect on the
+ * next session without a container restart. When the gate is off this returns
+ * `{}` and spawn behavior is unchanged.
+ *
+ * When on:
+ *  - Injects a W3C `TRACEPARENT` (+ `TRACESTATE` when non-empty) derived from
+ *    the active worker span (see `buildOtelTraceparentEnv`). Claude Code reads
+ *    `TRACEPARENT` in `-p` mode and parents its `claude_code.interaction` span
+ *    to it instead of starting a fresh root — so claude's spans nest inside
+ *    our `worker.session` trace.
+ *  - Pins privacy-safe defaults (prompt / tool-detail / tool-content logging
+ *    off, account UUID off). These are Claude-Code-specific. `scrubSecrets`
+ *    does NOT run on Claude Code's exported OTEL payloads, so these stay off.
+ *    Idempotent: a value already present in the resolved env (operator
+ *    override) is left untouched.
+ *
+ * This does NOT set `CLAUDE_CODE_ENABLE_TELEMETRY` or the `OTEL_*` exporters —
+ * those stay operator-controlled via swarm config, independent of this gate.
+ */
+export function buildClaudeCodeOtelEnv(
+  sourceEnv: Record<string, string | undefined>,
+  activeSpan: Span | undefined = trace.getActiveSpan(),
+): Record<string, string> {
+  if (!isHarnessOtelEnabled(sourceEnv)) {
+    return {};
+  }
+
+  const otelEnv: Record<string, string> = {};
+
+  const privacyDefaults: Record<string, string> = {
+    OTEL_LOG_USER_PROMPTS: "0",
+    OTEL_LOG_TOOL_DETAILS: "0",
+    OTEL_LOG_TOOL_CONTENT: "0",
+    OTEL_METRICS_INCLUDE_ACCOUNT_UUID: "false",
+  };
+  for (const [key, value] of Object.entries(privacyDefaults)) {
+    if (sourceEnv[key] === undefined) {
+      otelEnv[key] = value;
+    }
+  }
+
+  Object.assign(otelEnv, buildOtelTraceparentEnv(sourceEnv, activeSpan));
+
+  return otelEnv;
+}
+
 class ClaudeSession implements ProviderSession {
   private proc: ReturnType<typeof Bun.spawn>;
   private listeners: Array<(event: ProviderEvent) => void> = [];
@@ -292,11 +345,19 @@ class ClaudeSession implements ProviderSession {
     );
 
     const sourceEnv = config.env || process.env;
+    // Gated cross-service OTel linking: when SWARM_ENABLE_HARNESS_OTEL (or the
+    // deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias) is on, inject TRACEPARENT
+    // from the active worker span so Claude Code's spans nest under our
+    // worker.session trace. Returns {} (no-op) when off. Spread after sourceEnv
+    // so the freshly-computed TRACEPARENT wins over any stale value the
+    // container env might carry.
+    const otelEnv = buildClaudeCodeOtelEnv(sourceEnv);
     this.proc = Bun.spawn(cmd, {
       cwd: this.config.cwd,
       env: {
         ENABLE_PROMPT_CACHING_1H: "1",
         ...sourceEnv,
+        ...otelEnv,
         TASK_FILE: taskFilePath,
         // Belt-and-braces: TASK_FILE on disk can disappear mid-session (race
         // with task lifecycle), which silently drops the Stop-hook memory
