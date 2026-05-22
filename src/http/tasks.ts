@@ -139,6 +139,10 @@ const getTask = route({
   summary: "Get task details with logs",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
+  query: z.object({
+    /** Max number of log entries to return (newest-first). Default 200. */
+    logsLimit: z.coerce.number().int().min(1).max(1000).optional(),
+  }),
   responses: {
     200: { description: "Task with logs" },
     404: { description: "Task not found" },
@@ -511,7 +515,7 @@ export async function handleTasks(
       return true;
     }
 
-    const logs = getLogsByTaskId(parsed.params.id);
+    const logs = getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
     json(res, { ...task, logs });
     return true;
   }

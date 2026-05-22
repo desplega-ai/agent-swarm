@@ -2170,8 +2170,13 @@ export function getLogsByAgentId(agentId: string): AgentLog[] {
   return logQueries.getByAgentId().all(agentId).map(rowToAgentLog);
 }
 
-export function getLogsByTaskId(taskId: string): AgentLog[] {
-  return logQueries.getByTaskId().all(taskId).map(rowToAgentLog);
+export function getLogsByTaskId(taskId: string, limit = 200): AgentLog[] {
+  return getDb()
+    .prepare<AgentLogRow, [string, number]>(
+      "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
+    )
+    .all(taskId, limit)
+    .map(rowToAgentLog);
 }
 
 export function getLogsByTaskIdChronological(taskId: string): AgentLog[] {
@@ -9103,9 +9108,10 @@ export interface SessionListItem {
  * A "session" here is any task with `parentTaskId IS NULL` — its descendants
  * (children, grand-children, …) are summarized via the recursive CTE.
  *
- * `lastActivityAt` is `MAX(t.lastUpdatedAt)` over the entire chain rooted at
- * the candidate task, computed as a correlated subquery so the outer ORDER
- * BY can sort against it.
+ * Single-pass CTE: seeds with root tasks matching the filter, walks the full
+ * descendant tree once, then aggregates chainCount / lastActivityAt /
+ * latestStatus in two lightweight non-recursive CTEs — replacing the original
+ * pattern of 3 correlated subqueries each re-running the recursion per row.
  */
 export function listRecentSessions(opts?: {
   limit?: number;
@@ -9145,43 +9151,38 @@ export function listRecentSessions(opts?: {
       AgentTaskRow & { __chainCount: number; __lastActivityAt: string; __latestStatus: string },
       typeof params
     >(
-      `SELECT
+      `WITH RECURSIVE chain(root_id, id, lastUpdatedAt, status) AS (
+         SELECT r.id, r.id, r.lastUpdatedAt, r.status
+         FROM agent_tasks r
+         WHERE ${conditions.join(" AND ")}
+         UNION ALL
+         SELECT c.root_id, t.id, t.lastUpdatedAt, t.status
+         FROM agent_tasks t
+         JOIN chain c ON t.parentTaskId = c.id
+       ),
+       agg AS (
+         SELECT
+           root_id,
+           COUNT(*) AS chainCount,
+           MAX(lastUpdatedAt) AS lastActivityAt
+         FROM chain
+         GROUP BY root_id
+       ),
+       latest_status AS (
+         SELECT c.root_id, c.status AS latestStatus
+         FROM chain c
+         JOIN agg a ON c.root_id = a.root_id AND c.lastUpdatedAt = a.lastActivityAt
+         GROUP BY c.root_id
+       )
+       SELECT
          r.*,
-         (SELECT COUNT(*) FROM agent_tasks d
-            WHERE d.id IN (
-              WITH RECURSIVE chain(id) AS (
-                SELECT r.id
-                UNION ALL
-                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
-              )
-              SELECT id FROM chain
-            )
-         ) AS __chainCount,
-         (SELECT MAX(d.lastUpdatedAt) FROM agent_tasks d
-            WHERE d.id IN (
-              WITH RECURSIVE chain(id) AS (
-                SELECT r.id
-                UNION ALL
-                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
-              )
-              SELECT id FROM chain
-            )
-         ) AS __lastActivityAt,
-         (SELECT d.status FROM agent_tasks d
-            WHERE d.id IN (
-              WITH RECURSIVE chain(id) AS (
-                SELECT r.id
-                UNION ALL
-                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
-              )
-              SELECT id FROM chain
-            )
-            ORDER BY d.lastUpdatedAt DESC
-            LIMIT 1
-         ) AS __latestStatus
+         a.chainCount AS __chainCount,
+         a.lastActivityAt AS __lastActivityAt,
+         COALESCE(ls.latestStatus, r.status) AS __latestStatus
        FROM agent_tasks r
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY __lastActivityAt DESC
+       JOIN agg a ON a.root_id = r.id
+       LEFT JOIN latest_status ls ON ls.root_id = r.id
+       ORDER BY a.lastActivityAt DESC
        LIMIT ? OFFSET ?`,
     )
     .all(...params);

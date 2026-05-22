@@ -9715,6 +9715,16 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "logsLimit",
+            "in": "query"
           }
         ],
         "responses": {
