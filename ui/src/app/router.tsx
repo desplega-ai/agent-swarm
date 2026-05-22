@@ -1,7 +1,8 @@
 import { lazy } from "react";
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { createBrowserRouter, Navigate, type RouteObject } from "react-router-dom";
 import { RootLayout } from "@/components/layout/root-layout";
 import { SettingsLayout } from "@/pages/settings/settings-layout";
+import { RouteRedirect } from "./route-redirect";
 
 const DashboardPage = lazy(() => import("@/pages/dashboard/page"));
 const HomePage = lazy(() => import("@/pages/home/page"));
@@ -17,7 +18,6 @@ const ServicesPage = lazy(() => import("@/pages/services/page"));
 const SchedulesPage = lazy(() => import("@/pages/schedules/page"));
 const ScheduleDetailPage = lazy(() => import("@/pages/schedules/[id]/page"));
 const UsagePage = lazy(() => import("@/pages/usage/page"));
-const BudgetsPage = lazy(() => import("@/pages/budgets/page"));
 const ConfigPage = lazy(() => import("@/pages/config/page"));
 const IntegrationsPage = lazy(() => import("@/pages/integrations/page"));
 const IntegrationDetailPage = lazy(() => import("@/pages/integrations/[id]/page"));
@@ -46,6 +46,33 @@ const PageDetailPage = lazy(() => import("@/pages/pages/[id]/page"));
 const PagesListingPage = lazy(() => import("@/pages/pages/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
+/**
+ * Backward-compat redirect table — every old top-level URL that moved during
+ * the sidebar-trim IA rework maps to its new location, so no old link 404s.
+ * Simple (non-param) redirects live here; the param-aware `/integrations/:id`
+ * case is handled separately via `RouteRedirect` below.
+ */
+const REDIRECTS: Record<string, string> = {
+  dashboard: "/",
+  budgets: "/usage?tab=budgets",
+  config: "/settings/config",
+  keys: "/settings/api-keys",
+  integrations: "/settings/integrations",
+  repos: "/settings/repos",
+  debug: "/settings/debug",
+};
+
+const redirectRoutes: RouteObject[] = [
+  ...Object.entries(REDIRECTS).map(([from, to]) => ({
+    path: from,
+    element: <Navigate to={to} replace />,
+  })),
+  {
+    path: "integrations/:id",
+    element: <RouteRedirect to={({ id }) => `/settings/integrations/${id}`} />,
+  },
+];
+
 export const router = createBrowserRouter([
   {
     path: "/",
@@ -54,7 +81,6 @@ export const router = createBrowserRouter([
       { index: true, element: <UnifiedHome /> },
       { path: "old-home", element: <HomePage /> },
       { path: "old-dashboard", element: <DashboardPage /> },
-      { path: "dashboard", element: <DashboardPage /> },
       { path: "agents", element: <AgentsPage /> },
       { path: "agents/:id", element: <AgentDetailPage /> },
       { path: "tasks", element: <TasksPage /> },
@@ -72,10 +98,6 @@ export const router = createBrowserRouter([
       { path: "approval-requests", element: <ApprovalRequestsPage /> },
       { path: "approval-requests/:id", element: <ApprovalRequestDetailPage /> },
       { path: "usage", element: <UsagePage /> },
-      { path: "budgets", element: <BudgetsPage /> },
-      { path: "config", element: <ConfigPage /> },
-      { path: "integrations", element: <IntegrationsPage /> },
-      { path: "integrations/:id", element: <IntegrationDetailPage /> },
       {
         path: "settings",
         element: <SettingsLayout />,
@@ -96,16 +118,14 @@ export const router = createBrowserRouter([
       { path: "mcp-servers/:id", element: <McpServerDetailPage /> },
       { path: "skills", element: <SkillsPage /> },
       { path: "skills/:id", element: <SkillDetailPage /> },
-      { path: "repos", element: <ReposPage /> },
       { path: "repos/:id", element: <RepoDetailPage /> },
-      { path: "keys", element: <ApiKeysPage /> },
       { path: "people", element: <PeoplePage /> },
       { path: "people/unmapped", element: <PeoplePage /> },
       { path: "people/:id", element: <PersonDetailPage /> },
-      { path: "debug", element: <DebugPage /> },
       { path: "memory", element: <MemoryPage /> },
       { path: "pages", element: <PagesListingPage /> },
       { path: "pages/:id", element: <PageDetailPage /> },
+      ...redirectRoutes,
       { path: "*", element: <NotFoundPage /> },
     ],
   },

@@ -6,7 +6,7 @@ tags: [plan, ui, navigation, sidebar, ia]
 status: in-progress
 related_brainstorm: thoughts/taras/brainstorms/2026-05-21-sidebar-trim-cleanup.md
 last_updated: 2026-05-22
-last_updated_by: claude (phase-running, phase 5)
+last_updated_by: claude (phase-running, phase 6)
 ---
 
 # Sidebar Trim & Cleanup — Implementation Plan
@@ -520,19 +520,19 @@ the old standalone routes are replaced by `<Navigate>` redirects.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
-- [ ] No stale absolute links: `cd ui && grep -rn '"/\(config\|keys\|integrations\|repos\|debug\|budgets\|dashboard\)"' src` — every hit is either a redirect-table `to=` target in `router.tsx` or has been updated to the new `/settings/*` path. (Old route *definitions* use relative `path: "config"` and won't match this pattern.)
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
+- [x] No stale absolute links: `cd ui && grep -rn '"/\(config\|keys\|integrations\|repos\|debug\|budgets\|dashboard\)"' src` — every hit is either a redirect-table `to=` target in `router.tsx` or has been updated to the new `/settings/*` path. (Old route *definitions* use relative `path: "config"` and won't match this pattern.)
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] `/dashboard` → lands on `/`; `/budgets` → lands on `/usage?tab=budgets` (Budgets tab).
-- [ ] `/config` → `/settings/config`; `/keys` → `/settings/api-keys`; `/integrations` →
+- [x] `/dashboard` → lands on `/`; `/budgets` → lands on `/usage?tab=budgets` (Budgets tab).
+- [x] `/config` → `/settings/config`; `/keys` → `/settings/api-keys`; `/integrations` →
       `/settings/integrations`; `/repos` → `/settings/repos`; `/debug` → `/settings/debug`.
-- [ ] `/integrations/slack` → `/settings/integrations/slack` (deep link preserved).
-- [ ] `/old-home` and `/old-dashboard` still render directly (not redirected).
-- [ ] No old URL produces a 404 / blank error boundary.
+- [x] `/integrations/slack` → `/settings/integrations/slack` (deep link preserved).
+- [x] `/old-home` and `/old-dashboard` still render directly (not redirected).
+- [x] No old URL produces a 404 / blank error boundary.
 
 #### Manual Verification:
 - [ ] Spot-check that any in-app buttons/links that previously pointed at moved routes now land
