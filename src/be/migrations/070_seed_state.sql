@@ -1,4 +1,4 @@
--- 069_seed_state.sql
+-- 070_seed_state.sql
 -- Generic seed-state tracking for the built-in entity seeder framework.
 --
 -- The seeder framework (src/be/seed) re-seeds version-controlled entity
