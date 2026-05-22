@@ -107,9 +107,13 @@ const listAgents = route({
   path: "/api/agents",
   pattern: ["api", "agents"],
   summary: "List all agents",
+  description:
+    "Returns agents WITHOUT the six identity-markdown blobs (`claudeMd`/`soulMd`/`identityMd`/`toolsMd`/`heartbeatMd`/`setupScript`) by default — they bloat the list by ~16 KB/agent and the overview never renders them. Pass `fields=full` to restore them, or fetch a single agent via `GET /api/agents/{id}`.",
   tags: ["Agents"],
   query: z.object({
     include: z.enum(["tasks"]).optional(),
+    /** `full` restores the legacy shape (includes identity markdown); default is slim. */
+    fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
     200: { description: "Agent list with capacity info" },
@@ -367,7 +371,9 @@ export async function handleAgentsRest(
     const parsed = await listAgents.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeTasks = parsed.query.include === "tasks";
-    const agents = includeTasks ? getAllAgentsWithTasks() : getAllAgents();
+    // List responses default to slim (no identity markdown); `?fields=full` restores it.
+    const slim = parsed.query.fields !== "full";
+    const agents = includeTasks ? getAllAgentsWithTasks({ slim }) : getAllAgents({ slim });
     const agentsWithCapacity = agents.map(agentWithCapacity);
     json(res, { agents: agentsWithCapacity });
     return true;
