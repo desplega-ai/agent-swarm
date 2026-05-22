@@ -169,7 +169,8 @@ export const registerSendTaskTool = (server: McpServer) => {
 
       // Inherit requestedByUserId from the caller's current task when not explicitly provided
       const callerTask = requestInfo.sourceTaskId ? getTaskById(requestInfo.sourceTaskId) : null;
-      const effectiveRequestedByUserId = requestedByUserId ?? callerTask?.requestedByUserId ?? undefined;
+      const effectiveRequestedByUserId =
+        requestedByUserId ?? callerTask?.requestedByUserId ?? undefined;
 
       // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
       let effectiveAgentId = agentId;
