@@ -37,6 +37,7 @@ import { handleKv } from "./kv";
 import { handleMcp } from "./mcp";
 import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
+import { handleMcpUser } from "./mcp-user";
 import { handleMemory } from "./memory";
 import { handlePageProxy } from "./page-proxy";
 import { handlePages } from "./pages";
@@ -78,6 +79,8 @@ const apiKey = getApiKey();
 const globalState = globalThis as typeof globalThis & {
   __httpServer?: Server<typeof IncomingMessage, typeof ServerResponse>;
   __transports?: Record<string, StreamableHTTPServerTransport>;
+  __transportsUser?: Record<string, StreamableHTTPServerTransport>;
+  __sessionUsers?: Record<string, string>;
   __sigintRegistered?: boolean;
   __runId?: string;
 };
@@ -89,6 +92,9 @@ if (globalState.__httpServer) {
 }
 
 const transports: Record<string, StreamableHTTPServerTransport> = globalState.__transports ?? {};
+const transportsUser: Record<string, StreamableHTTPServerTransport> =
+  globalState.__transportsUser ?? {};
+const sessionUsers: Record<string, string> = globalState.__sessionUsers ?? {};
 
 const httpServer = createHttpServer(async (req, res) => {
   const startTime = performance.now();
@@ -207,6 +213,7 @@ const httpServer = createHttpServer(async (req, res) => {
       () => handleInboxState(req, res, pathSegments, queryParams),
       () => handleTaskTemplates(req, res, pathSegments, queryParams),
       () => handleMcp(req, res, transports),
+      () => handleMcpUser(req, res, transportsUser, sessionUsers),
     ];
 
     try {
@@ -237,6 +244,8 @@ const httpServer = createHttpServer(async (req, res) => {
 // Store references in globalThis for hot reload persistence
 globalState.__httpServer = httpServer;
 globalState.__transports = transports;
+globalState.__transportsUser = transportsUser;
+globalState.__sessionUsers = sessionUsers;
 
 async function shutdown() {
   console.log("Shutting down HTTP server...");
@@ -267,6 +276,13 @@ async function shutdown() {
     console.log(`[HTTP] Closing transport ${id}`);
     transport.close();
     delete transports[id];
+  }
+
+  for (const [id, transport] of Object.entries(transportsUser)) {
+    console.log(`[HTTP] Closing user transport ${id}`);
+    transport.close();
+    delete transportsUser[id];
+    delete sessionUsers[id];
   }
 
   // Close all active connections forcefully

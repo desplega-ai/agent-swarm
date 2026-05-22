@@ -194,6 +194,17 @@ export interface UserResponse {
   user: User;
 }
 
+export interface MintTokenResponse {
+  plaintext: string;
+  token: UserToken;
+  user: User;
+}
+
+export interface McpUserConfigResponse {
+  mcpBaseUrl: string;
+  mcpUserUrl: string;
+}
+
 export interface CreateUserInput {
   name: string;
   email?: string;

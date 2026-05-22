@@ -42,11 +42,13 @@ import { json, jsonError } from "./utils";
  * + workflow bus emit. See `src/be/budget-refusal-notify.ts`.
  */
 function buildBudgetRefusedTrigger(refusal: {
-  cause: "agent" | "global";
+  cause: "agent" | "global" | "user";
   agentSpend?: number;
   agentBudget?: number;
   globalSpend?: number;
   globalBudget?: number;
+  userSpend?: number;
+  userBudget?: number;
   resetAt: string;
 }): { type: "budget_refused"; [key: string]: unknown } {
   const trigger: { type: "budget_refused"; [key: string]: unknown } = {
@@ -58,6 +60,8 @@ function buildBudgetRefusedTrigger(refusal: {
   if (refusal.agentBudget !== undefined) trigger.agentBudget = refusal.agentBudget;
   if (refusal.globalSpend !== undefined) trigger.globalSpend = refusal.globalSpend;
   if (refusal.globalBudget !== undefined) trigger.globalBudget = refusal.globalBudget;
+  if (refusal.userSpend !== undefined) trigger.userSpend = refusal.userSpend;
+  if (refusal.userBudget !== undefined) trigger.userBudget = refusal.userBudget;
   return trigger;
 }
 
@@ -180,7 +184,7 @@ export async function handlePoll(
             // the capacity check so capacity AND budget gates share atomicity.
             // Phase 5 also records the dedup row + captures the side-effect
             // context here so the after-commit step can notify the lead.
-            const admission = canClaim(myAgentId, new Date());
+            const admission = canClaim(myAgentId, new Date(), pendingTask.requestedByUserId);
             if (!admission.allowed) {
               const utcDate = new Date().toISOString().slice(0, 10);
               const dedup = recordBudgetRefusalNotification({
@@ -192,6 +196,8 @@ export async function handlePoll(
                 agentBudgetUsd: admission.agentBudget,
                 globalSpendUsd: admission.globalSpend,
                 globalBudgetUsd: admission.globalBudget,
+                userSpendUsd: admission.userSpend,
+                userBudgetUsd: admission.userBudget,
               });
               return {
                 trigger: buildBudgetRefusedTrigger(admission),
@@ -200,6 +206,7 @@ export async function handlePoll(
                     task: {
                       id: pendingTask.id,
                       task: pendingTask.task,
+                      requestedByUserId: pendingTask.requestedByUserId,
                       slackChannelId: pendingTask.slackChannelId,
                       slackThreadTs: pendingTask.slackThreadTs,
                       slackUserId: pendingTask.slackUserId,
@@ -211,6 +218,8 @@ export async function handlePoll(
                     agentBudgetUsd: admission.agentBudget,
                     globalSpendUsd: admission.globalSpend,
                     globalBudgetUsd: admission.globalBudget,
+                    userSpendUsd: admission.userSpend,
+                    userBudgetUsd: admission.userBudget,
                     resetAt: admission.resetAt,
                   },
                   inserted: dedup.inserted,
@@ -303,10 +312,10 @@ export async function handlePoll(
             // refusal, and the dedup is per-(task,date) so subsequent same-day
             // refusals on the same lead-candidate are suppressed.
             if (unassignedIds.length > 0) {
-              const admission = canClaim(myAgentId, new Date());
+              const candidateId = unassignedIds[0]!;
+              const candidateTask = getTaskById(candidateId);
+              const admission = canClaim(myAgentId, new Date(), candidateTask?.requestedByUserId);
               if (!admission.allowed) {
-                const candidateId = unassignedIds[0]!;
-                const candidateTask = getTaskById(candidateId);
                 const utcDate = new Date().toISOString().slice(0, 10);
                 const dedup = recordBudgetRefusalNotification({
                   taskId: candidateId,
@@ -317,6 +326,8 @@ export async function handlePoll(
                   agentBudgetUsd: admission.agentBudget,
                   globalSpendUsd: admission.globalSpend,
                   globalBudgetUsd: admission.globalBudget,
+                  userSpendUsd: admission.userSpend,
+                  userBudgetUsd: admission.userBudget,
                 });
                 return {
                   trigger: buildBudgetRefusedTrigger(admission),
@@ -326,6 +337,7 @@ export async function handlePoll(
                           task: {
                             id: candidateTask.id,
                             task: candidateTask.task,
+                            requestedByUserId: candidateTask.requestedByUserId,
                             slackChannelId: candidateTask.slackChannelId,
                             slackThreadTs: candidateTask.slackThreadTs,
                             slackUserId: candidateTask.slackUserId,
@@ -337,6 +349,8 @@ export async function handlePoll(
                           agentBudgetUsd: admission.agentBudget,
                           globalSpendUsd: admission.globalSpend,
                           globalBudgetUsd: admission.globalBudget,
+                          userSpendUsd: admission.userSpend,
+                          userBudgetUsd: admission.userBudget,
                           resetAt: admission.resetAt,
                         },
                         inserted: dedup.inserted,

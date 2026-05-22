@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { api } from "@/api/client";
 import { getConfig } from "@/lib/config";
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,14 @@ export function useReloadConfig() {
     onError: (err) => {
       toast.error(`Reload failed: ${err.message}`);
     },
+  });
+}
+
+export function useMcpUserConfig() {
+  return useQuery({
+    queryKey: ["integrations", "mcp-user", "config"],
+    queryFn: () => api.getMcpUserConfig(),
+    staleTime: 30_000,
   });
 }
 

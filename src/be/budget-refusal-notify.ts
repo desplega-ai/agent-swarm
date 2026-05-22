@@ -18,22 +18,28 @@ import {
   createTaskExtended,
   getAgentById,
   getLeadAgent,
+  getUserById,
   setBudgetRefusalFollowUpTaskId,
 } from "./db";
 
 export interface BudgetRefusalContext {
   /** The task that was refused (provides Slack context, description). */
-  task: Pick<AgentTask, "id" | "task" | "slackChannelId" | "slackThreadTs" | "slackUserId">;
+  task: Pick<
+    AgentTask,
+    "id" | "task" | "requestedByUserId" | "slackChannelId" | "slackThreadTs" | "slackUserId"
+  >;
   /** Refusing agent id. */
   agentId: string;
   /** UTC date `YYYY-MM-DD` used as the dedup key alongside `task.id`. */
   date: string;
   /** Refusal cause. */
-  cause: "agent" | "global";
+  cause: "agent" | "global" | "user";
   agentSpendUsd?: number;
   agentBudgetUsd?: number;
   globalSpendUsd?: number;
   globalBudgetUsd?: number;
+  userSpendUsd?: number;
+  userBudgetUsd?: number;
   /** ISO 8601 of the next UTC midnight (when the daily budget resets). */
   resetAt: string;
 }
@@ -48,6 +54,9 @@ function formatSpendSummary(ctx: BudgetRefusalContext): string {
   const fmt = (n: number | undefined): string => (n === undefined ? "?" : `$${n.toFixed(2)}`);
   if (ctx.cause === "agent") {
     return `${fmt(ctx.agentSpendUsd)} / ${fmt(ctx.agentBudgetUsd)}`;
+  }
+  if (ctx.cause === "user") {
+    return `${fmt(ctx.userSpendUsd)} / ${fmt(ctx.userBudgetUsd)}`;
   }
   return `${fmt(ctx.globalSpendUsd)} / ${fmt(ctx.globalBudgetUsd)}`;
 }
@@ -79,6 +88,10 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
       if (leadAgent) {
         const refusingAgent = getAgentById(ctx.agentId);
         const agentName = refusingAgent?.name || ctx.agentId.slice(0, 8);
+        const userName = ctx.task.requestedByUserId
+          ? (getUserById(ctx.task.requestedByUserId)?.name ??
+            ctx.task.requestedByUserId.slice(0, 8))
+          : undefined;
         const taskDesc = ctx.task.task.slice(0, 200);
         const spendSummary = formatSpendSummary(ctx);
 
@@ -86,7 +99,8 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
           "task.budget.refused",
           {
             cause: ctx.cause,
-            agent_name: agentName,
+            agent_name:
+              ctx.cause === "user" && userName ? `${agentName} for user ${userName}` : agentName,
             task_desc: taskDesc,
             spend_summary: spendSummary,
             reset_at: ctx.resetAt,
@@ -135,6 +149,8 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
         agentBudgetUsd: ctx.agentBudgetUsd,
         globalSpendUsd: ctx.globalSpendUsd,
         globalBudgetUsd: ctx.globalBudgetUsd,
+        userSpendUsd: ctx.userSpendUsd,
+        userBudgetUsd: ctx.userBudgetUsd,
         resetAt: ctx.resetAt,
       });
     });

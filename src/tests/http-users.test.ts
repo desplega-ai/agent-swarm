@@ -20,7 +20,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createUser, getDb, initDb, upsertKv } from "../be/db";
+import { closeDb, createUser, getBudget, getDb, initDb, upsertKv } from "../be/db";
 import { fingerprintApiKey, linkIdentity } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
@@ -92,6 +92,7 @@ beforeEach(() => {
   db.run("DELETE FROM user_external_ids");
   db.run("DELETE FROM user_tokens");
   db.run("DELETE FROM users");
+  db.run("DELETE FROM budgets");
   db.run("DELETE FROM kv_entries");
 });
 
@@ -185,6 +186,33 @@ describe("POST /api/users", () => {
 });
 
 describe("PATCH /api/users/:id", () => {
+  test("dailyBudgetUsd mirrors into user-scoped budgets and null removes the mirror", async () => {
+    const create = await authedFetch("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Budget Mirror",
+        dailyBudgetUsd: 1.25,
+      }),
+    });
+    expect(create.status).toBe(200);
+    const { user } = (await create.json()) as { user: { id: string } };
+    expect(getBudget("user", user.id)?.dailyBudgetUsd).toBe(1.25);
+
+    const update = await authedFetch(`/api/users/${user.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ dailyBudgetUsd: 2.5 }),
+    });
+    expect(update.status).toBe(200);
+    expect(getBudget("user", user.id)?.dailyBudgetUsd).toBe(2.5);
+
+    const remove = await authedFetch(`/api/users/${user.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ dailyBudgetUsd: null }),
+    });
+    expect(remove.status).toBe(200);
+    expect(getBudget("user", user.id)).toBeNull();
+  });
+
   test("budget / status / emailAliases diffs each emit the right event types", async () => {
     const u = createUser({
       name: "Patcher",

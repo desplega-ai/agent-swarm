@@ -1400,6 +1400,8 @@ export interface TaskFilters {
   source?: AgentTaskSource[];
   /** ISO 8601 timestamp; only return tasks where createdAt >= this. */
   createdAfter?: string;
+  /** Only return tasks requested by this canonical user. NULL rows are excluded. */
+  requestedByUserId?: string;
   limit?: number;
   offset?: number;
   includeHeartbeat?: boolean;
@@ -1481,6 +1483,11 @@ export function getAllTasks(
   if (filters?.createdAfter) {
     conditions.push("createdAt >= ?");
     params.push(filters.createdAfter);
+  }
+
+  if (filters?.requestedByUserId) {
+    conditions.push("requestedByUserId = ?");
+    params.push(filters.requestedByUserId);
   }
 
   // Exclude system/heartbeat tasks by default. The flag is still called
@@ -9504,6 +9511,8 @@ interface BudgetRefusalNotificationRow {
   agent_budget_usd: number | null;
   global_spend_usd: number | null;
   global_budget_usd: number | null;
+  user_spend_usd: number | null;
+  user_budget_usd: number | null;
   follow_up_task_id: string | null;
   createdAt: number;
 }
@@ -9534,6 +9543,8 @@ function rowToBudgetRefusalNotification(
     agentBudgetUsd: row.agent_budget_usd ?? undefined,
     globalSpendUsd: row.global_spend_usd ?? undefined,
     globalBudgetUsd: row.global_budget_usd ?? undefined,
+    userSpendUsd: row.user_spend_usd ?? undefined,
+    userBudgetUsd: row.user_budget_usd ?? undefined,
     followUpTaskId: row.follow_up_task_id ?? undefined,
     createdAt: row.createdAt,
   };
@@ -9784,6 +9795,24 @@ export function getDailySpendGlobal(dateUtc: string): number {
   return row?.total ?? 0;
 }
 
+/**
+ * Sum of `totalCostUsd` across all `session_costs` rows whose task was
+ * requested by a given user on a given UTC calendar day. `dateUtc` MUST be
+ * `'YYYY-MM-DD'` (UTC). Costs are joined through `agent_tasks` deliberately;
+ * `session_costs` stays task/session-scoped and does not grow a userId column.
+ */
+export function getDailySpendForUser(userId: string, dateUtc: string): number {
+  const row = getDb()
+    .prepare<CoalesceSumRow, [string, string]>(
+      `SELECT COALESCE(SUM(sc.totalCostUsd), 0) AS total
+       FROM session_costs sc
+       JOIN agent_tasks t ON sc.taskId = t.id
+       WHERE t.requestedByUserId = ? AND substr(sc.createdAt, 1, 10) = ?`,
+    )
+    .get(userId, dateUtc);
+  return row?.total ?? 0;
+}
+
 export interface RecordBudgetRefusalNotificationInput {
   taskId: string;
   date: string;
@@ -9793,6 +9822,8 @@ export interface RecordBudgetRefusalNotificationInput {
   agentBudgetUsd?: number;
   globalSpendUsd?: number;
   globalBudgetUsd?: number;
+  userSpendUsd?: number;
+  userBudgetUsd?: number;
 }
 
 /**
@@ -9811,8 +9842,8 @@ export function recordBudgetRefusalNotification(input: RecordBudgetRefusalNotifi
   const result = db
     .prepare(
       `INSERT OR IGNORE INTO budget_refusal_notifications
-       (task_id, date, agent_id, cause, agent_spend_usd, agent_budget_usd, global_spend_usd, global_budget_usd, follow_up_task_id, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+       (task_id, date, agent_id, cause, agent_spend_usd, agent_budget_usd, global_spend_usd, global_budget_usd, user_spend_usd, user_budget_usd, follow_up_task_id, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
     )
     .run(
       input.taskId,
@@ -9823,6 +9854,8 @@ export function recordBudgetRefusalNotification(input: RecordBudgetRefusalNotifi
       input.agentBudgetUsd ?? null,
       input.globalSpendUsd ?? null,
       input.globalBudgetUsd ?? null,
+      input.userSpendUsd ?? null,
+      input.userBudgetUsd ?? null,
       now,
     );
 
