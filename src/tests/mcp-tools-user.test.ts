@@ -132,7 +132,7 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
       const msg = JSON.stringify(parsed.error.issues);
-      expect(msg).toMatch(/Provide either \(kind \+ externalId\) or email/);
+      expect(msg).toMatch(/Provide either \(kind \+ externalId\), email, or userId/);
     }
   });
 
