@@ -1,0 +1,180 @@
+---
+title: Scripts runtime
+description: What the swarm-scripts runtime exposes to user code, what it does NOT expose, and how the typecheck stays aligned.
+---
+
+Swarm scripts are TypeScript modules persisted in the catalog via
+[`/api/scripts/upsert`](../api-reference/scripts) and executed by the
+`scripts-runtime`. The save-time typecheck and the runtime are deliberately
+aligned — what passes the typecheck is what actually runs. This page documents
+the full surface so script authors don't have to bisect.
+
+## What the runtime provides
+
+Scripts run inside a `bun run` subprocess (`src/scripts-runtime/eval-harness.ts`)
+with the environment stripped to a small allowlist. Everything below is
+available as a plain global in user code AND typechecks cleanly.
+
+### ES2022 standard library
+
+The typecheck loads `lib.es2022.d.ts`. All standard ES2022 built-ins resolve:
+
+- Primitives + boxed types: `Number`, `String`, `Boolean`, `Symbol`, `BigInt`
+- Collections: `Array`, `Map`, `Set`, `WeakMap`, `WeakSet`
+- Errors: `Error`, `TypeError`, `RangeError`, `SyntaxError`, `ReferenceError`
+- Async: `Promise`, `Promise.all`, `Promise.allSettled`, `Promise.race`, `Promise.any`
+- Iteration: `Iterator`, `IterableIterator`, `Generator`
+- Reflection: `Object`, `Reflect`, `Proxy`
+- JSON / Math / Date / RegExp
+- Free functions: `isFinite`, `isNaN`, `parseInt`, `parseFloat`,
+  `encodeURIComponent`, `decodeURIComponent`, `encodeURI`, `decodeURI`
+
+`Array<T>`, `Promise<T>`, `Record<K, V>`, and structural object types all work
+as you'd expect. No `any`-everywhere required.
+
+### Web platform — fetch, URL, encoding, timers, abort
+
+These are exposed by Bun's runtime and explicitly declared in the typecheck
+runtime-globals shim:
+
+- `fetch`, `Request`, `Response`, `Headers`, `RequestInit`, `ResponseInit`, `Blob`, `FormData`
+- `URL`, `URLSearchParams`
+- `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `setImmediate`,
+  `clearImmediate`, `queueMicrotask`
+- `AbortController`, `AbortSignal`
+- `TextEncoder`, `TextDecoder`, `atob`, `btoa`, `structuredClone`
+- `crypto.randomUUID()`, `crypto.getRandomValues(...)`, `crypto.subtle`
+
+The `fetch` available in the runtime IS the one Bun provides — same shape as
+Node 18+'s undici fetch. Prefer `ctx.stdlib.fetch` / `ctx.stdlib.fetchJson` for
+built-in retries; bare `fetch` works too.
+
+### Console + logger
+
+`console.log` / `.warn` / `.error` / `.info` / `.debug` are global. They also
+hang off `ctx.logger`. Both write to the subprocess `stderr` (captured by the
+executor and returned in the HTTP response's `stderr` field).
+
+### Node-compat surface
+
+Bun's Node compatibility layer makes these available:
+
+- `Buffer` (Uint8Array-compatible, with `Buffer.from(...)`, `Buffer.concat(...)`, etc.)
+- `process.env` — typed as `Record<string, string | undefined>`. The environment
+  is **stripped to a small allowlist** before the user script runs. You should
+  NOT assume any specific env keys exist. Today's surviving keys: `HOME`,
+  `LANG`, `LC_ALL`, `PATH`, `TMPDIR`, `SWARM_SCRIPT_*` (internal).
+- `process.platform`, `process.arch`, `process.version`, `process.cwd()`, `process.hrtime()`
+
+### Swarm-specific imports
+
+```ts
+import { fetch, fetchJson, grep, glob, table, Redacted } from "stdlib";
+// stdlib also flows through ctx.stdlib at runtime
+```
+
+```ts
+import type { ScriptContext, ScriptMain, SwarmConfig, Redacted } from "swarm-sdk";
+```
+
+The `ScriptContext` passed to your `default` export carries:
+
+- `ctx.swarm` — typed SDK for in-swarm operations (memory, kv, tasks, scripts,
+  repos, schedules). Method allowlist: see
+  `src/scripts-runtime/sdk-allowlist.ts`.
+- `ctx.swarm.config` — `apiKey`, `agentId`, `mcpBaseUrl` (all wrapped in
+  `Redacted<string>`; unwrap via `ctx.stdlib.Redacted.value(...)`).
+- `ctx.stdlib` — the runtime helpers (`fetch`, `fetchJson`, `grep`, `glob`,
+  `table`, `Redacted`).
+- `ctx.logger` — Console-compatible logger; same destination as the global
+  `console`.
+
+### Allowed bare imports
+
+The TypeScript import allowlist (`src/scripts-runtime/import-allowlist.ts`):
+
+- `stdlib`
+- `swarm-sdk`
+- `zod` — for declaring `export const argsSchema = z.object({...})`
+
+`import "fs"` / `"node:fs"` / `"path"` / any unlisted bare specifier is
+rejected at upsert and at run time.
+
+## What the runtime does NOT provide
+
+These are **rejected** by the typecheck and would also fail at runtime — they
+do NOT exist in the script sandbox:
+
+- DOM APIs — `window`, `document`, `localStorage`, `sessionStorage`,
+  `HTMLElement`, `Event`, etc. The typecheck does NOT include
+  `lib.dom.d.ts`. We did this on purpose; the runtime is not a browser.
+- Filesystem — `fs`, `node:fs`, `node:fs/promises`. Use `ctx.stdlib.glob` and
+  `ctx.stdlib.grep` for read-only file inspection in `workspace-rw` mode
+  (v2 only).
+- Subprocess — `node:child_process`, `Bun.spawn`. Scripts cannot shell out.
+- Net — `node:net`, raw TCP/UDP. Outbound HTTP via `fetch` only.
+- `Bun.*` globals — even though Bun is the runtime, scripts cannot access the
+  `Bun` object directly. Use `ctx.stdlib` instead.
+
+## Typecheck diagnostics
+
+When `script-upsert` rejects code, the response is structured:
+
+```json
+{
+  "error": "typecheck_failed",
+  "diagnostics": ["...colorized full diagnostic..."],
+  "structured": [
+    {
+      "severity": "error",
+      "code": 2552,
+      "message": "Cannot find name 'Mat'. Did you mean 'Math'?",
+      "file": "/virtual/user-script.ts",
+      "line": 1,
+      "column": 28,
+      "endLine": 1,
+      "endColumn": 31,
+      "identifier": "Mat",
+      "suggestion": "Math"
+    }
+  ]
+}
+```
+
+Each entry carries the TypeScript diagnostic `code` (`TS2552`, `TS2304`, …),
+the precise location, the offending identifier when it's a name lookup, and
+the compiler's "did you mean…" hint when one is offered.
+
+## Runtime errors
+
+When a script throws at runtime, the HTTP response includes a
+`runtimeError` field beside `stderr`:
+
+```json
+{
+  "exitCode": 1,
+  "error": "eval_error",
+  "stderr": "Error: kaboom from line 4\n    at user-script.ts:4:13",
+  "runtimeError": {
+    "name": "Error",
+    "message": "kaboom from line 4",
+    "stack": "Error: kaboom from line 4\n    at .../user-script.ts:4:13\n    ...",
+    "userFrames": [{ "file": "user-script.ts", "line": 4, "column": 13, "raw": "at user-script.ts:4:13" }],
+    "userScriptLine": 4,
+    "userScriptColumn": 13
+  }
+}
+```
+
+Stack frames inside the harness or `node_modules` are stripped from the
+`stderr` text shown to clients (they remain in `runtimeError.stack` for
+debugging). The user-script path is normalized to the basename
+`user-script.ts` — absolute tmpdir paths never leak.
+
+## When to escalate
+
+If you find code that runs fine in the runtime but fails the typecheck, treat
+it as a swarm bug, not a script bug. Add a probe to `src/tests/scripts-typecheck.test.ts`
+and either expand the runtime-globals shim
+(`SCRIPT_RUNTIME_GLOBALS` in `src/be/scripts/typecheck.ts`) or open an issue
+with the failing snippet.

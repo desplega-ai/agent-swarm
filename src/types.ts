@@ -215,6 +215,74 @@ export const AgentTaskSchema = z.object({
 });
 
 // ============================================================================
+// Task Attachments (Phase 1 — pointer-based artifacts)
+// ============================================================================
+//
+// Pointer-only: no inline blobs. Agents upload artifacts to agent-fs (or
+// another addressable surface) first and attach them by path / URL / page id
+// via `store-progress`. The `kind` enum here MUST stay in sync with the SQL
+// CHECK constraint on `task_attachments.kind` (migration 072).
+
+export const TaskAttachmentKindSchema = z.enum(["agent-fs", "url", "shared-fs", "page"]);
+export type TaskAttachmentKind = z.infer<typeof TaskAttachmentKindSchema>;
+
+const attachmentCommonFields = {
+  name: z.string().min(1).describe("Display name for the attachment."),
+  mimeType: z.string().optional(),
+  sizeBytes: z.number().int().min(0).optional(),
+  sha256: z.string().optional(),
+  intent: z
+    .string()
+    .optional()
+    .describe("WHY this attachment exists — the purpose it serves for this task."),
+  description: z.string().optional().describe("Optional: what the attachment is."),
+  isPrimary: z.boolean().optional(),
+};
+
+export const AttachmentInputSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("agent-fs"),
+    path: z.string().min(1).describe("agent-fs path the attachment points at."),
+    ...attachmentCommonFields,
+  }),
+  z.object({
+    kind: z.literal("url"),
+    url: z.string().min(1).describe("External URL the attachment points at."),
+    ...attachmentCommonFields,
+  }),
+  z.object({
+    kind: z.literal("shared-fs"),
+    path: z.string().min(1).describe("Shared-filesystem path the attachment points at."),
+    ...attachmentCommonFields,
+  }),
+  z.object({
+    kind: z.literal("page"),
+    pageId: z.string().min(1).describe("Swarm Page id the attachment points at."),
+    ...attachmentCommonFields,
+  }),
+]);
+export type AttachmentInput = z.infer<typeof AttachmentInputSchema>;
+
+export const TaskAttachmentSchema = z.object({
+  id: z.uuid(),
+  taskId: z.uuid(),
+  agentId: z.uuid().nullable(),
+  name: z.string(),
+  kind: TaskAttachmentKindSchema,
+  url: z.string().optional(),
+  path: z.string().optional(),
+  pageId: z.string().optional(),
+  mimeType: z.string().optional(),
+  sizeBytes: z.number().int().min(0).optional(),
+  sha256: z.string().optional(),
+  intent: z.string().optional(),
+  description: z.string().optional(),
+  isPrimary: z.boolean().default(false),
+  createdAt: z.iso.datetime(),
+});
+export type TaskAttachment = z.infer<typeof TaskAttachmentSchema>;
+
+// ============================================================================
 // User Identity Types
 // ============================================================================
 

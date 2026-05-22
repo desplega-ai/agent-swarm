@@ -37,6 +37,22 @@ export type ScriptExecutorError =
   | "eval_error"
   | "executor_error";
 
+export type ScriptStackFrame = {
+  file: string;
+  line: number;
+  column: number;
+  raw: string;
+};
+
+export type ScriptRuntimeError = {
+  name: string;
+  message: string;
+  stack: string;
+  userFrames: ScriptStackFrame[];
+  userScriptLine?: number;
+  userScriptColumn?: number;
+};
+
 export type ExecutorOutput = {
   result: unknown | undefined;
   stdout: string;
@@ -45,6 +61,7 @@ export type ExecutorOutput = {
   durationMs: number;
   exitCode: number;
   error?: ScriptExecutorError;
+  runtimeError?: ScriptRuntimeError;
 };
 
 export interface ScriptExecutor {

@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import "./utils/internal-ai/register-bedrock.ts";
+
 import { Spinner } from "@inkjs/ui";
 import { Box, render, Text, useApp } from "ink";
 import { useEffect, useState } from "react";

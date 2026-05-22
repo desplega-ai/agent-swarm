@@ -7,7 +7,7 @@ import "../http/tasks";
 import "../http/agents";
 import "../http/sessions";
 
-import { deriveSpanName, findRoute } from "../http/route-def";
+import { describeRequestRoute, findRoute } from "../http/route-def";
 
 describe("findRoute", () => {
   test("matches a parameterized GET /api/tasks/{id}", () => {
@@ -44,33 +44,63 @@ describe("findRoute", () => {
   });
 });
 
-describe("deriveSpanName", () => {
+describe("describeRequestRoute", () => {
   test("matched route produces `{METHOD} {template}` (with {id} placeholder, not a raw UUID)", () => {
-    const name = deriveSpanName("GET", ["api", "tasks", "550e8400-e29b-41d4-a716-446655440000"]);
-    expect(name).toBe("GET /api/tasks/{id}");
+    const { spanName } = describeRequestRoute("GET", [
+      "api",
+      "tasks",
+      "550e8400-e29b-41d4-a716-446655440000",
+    ]);
+    expect(spanName).toBe("GET /api/tasks/{id}");
     // Cardinality guard: never embed raw IDs in the span name.
-    expect(name).not.toContain("550e8400");
+    expect(spanName).not.toContain("550e8400");
   });
 
-  test("matched POST list endpoint", () => {
-    expect(deriveSpanName("POST", ["api", "tasks"])).toBe("POST /api/tasks");
+  test("matched route sets http.route to the bounded-cardinality template", () => {
+    const { httpRoute } = describeRequestRoute("GET", [
+      "api",
+      "tasks",
+      "550e8400-e29b-41d4-a716-446655440000",
+    ]);
+    // http.route is the template, never the raw UUID.
+    expect(httpRoute).toBe("/api/tasks/{id}");
+    expect(httpRoute).not.toContain("550e8400");
   });
 
-  test("unmatched path falls back to `{METHOD} /{firstSegment}`", () => {
+  test("matched POST list endpoint sets spanName and http.route", () => {
+    const desc = describeRequestRoute("POST", ["api", "tasks"]);
+    expect(desc.spanName).toBe("POST /api/tasks");
+    expect(desc.httpRoute).toBe("/api/tasks");
+  });
+
+  test("unmatched path falls back to `{METHOD} /{firstSegment}` and omits http.route", () => {
     // /health is a core route not declared via route(), so no template match.
-    expect(deriveSpanName("GET", ["health"])).toBe("GET /health");
+    const desc = describeRequestRoute("GET", ["health"]);
+    expect(desc.spanName).toBe("GET /health");
+    // No fabricated value — http.route is omitted for unmatched paths.
+    expect(desc.httpRoute).toBeUndefined();
   });
 
-  test("unmatched deeper path still only uses the first segment", () => {
+  test("unmatched deeper path still only uses the first segment, no http.route", () => {
     // Bounded cardinality: never `GET /mcp/<session-id>`.
-    expect(deriveSpanName("POST", ["mcp", "session-xyz", "messages"])).toBe("POST /mcp");
+    const desc = describeRequestRoute("POST", ["mcp", "session-xyz", "messages"]);
+    expect(desc.spanName).toBe("POST /mcp");
+    expect(desc.httpRoute).toBeUndefined();
+  });
+
+  test("known path with unknown method omits http.route", () => {
+    // No PATCH handler on /api/tasks — must not fabricate a template.
+    const desc = describeRequestRoute("PATCH", ["api", "tasks"]);
+    expect(desc.httpRoute).toBeUndefined();
   });
 
   test("root path produces bare method", () => {
-    expect(deriveSpanName("GET", [])).toBe("GET");
+    const desc = describeRequestRoute("GET", []);
+    expect(desc.spanName).toBe("GET");
+    expect(desc.httpRoute).toBeUndefined();
   });
 
   test("missing method falls back to UNKNOWN", () => {
-    expect(deriveSpanName(undefined, [])).toBe("UNKNOWN");
+    expect(describeRequestRoute(undefined, []).spanName).toBe("UNKNOWN");
   });
 });

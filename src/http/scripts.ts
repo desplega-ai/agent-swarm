@@ -210,7 +210,15 @@ export async function handleScripts(
 
     const typecheck = typecheckScript(parsed.body.source);
     if (!typecheck.ok) {
-      json(res, { error: "typecheck_failed", diagnostics: typecheck.diagnostics }, 400);
+      json(
+        res,
+        {
+          error: "typecheck_failed",
+          diagnostics: typecheck.diagnostics,
+          structured: typecheck.structured,
+        },
+        400,
+      );
       return true;
     }
 
@@ -312,6 +320,7 @@ export async function handleScripts(
         stderr: output.stderr,
         exitCode: output.exitCode,
         error: output.error,
+        runtimeError: output.runtimeError,
       }),
     );
     return true;

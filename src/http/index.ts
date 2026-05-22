@@ -14,7 +14,13 @@ import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
 import { initJira } from "../jira";
 import { initLinear } from "../linear";
-import { initOtel, isPollTracingEnabled, startSpan, withRemoteContext } from "../otel";
+import {
+  initOtel,
+  isPollTracingEnabled,
+  startSpan,
+  withRemoteContext,
+  withSpanContext,
+} from "../otel";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
 import { getApiKey } from "../utils/api-key";
@@ -46,7 +52,7 @@ import { handlePoll } from "./poll";
 import { handlePricing } from "./pricing";
 import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
-import { deriveSpanName } from "./route-def";
+import { describeRequestRoute } from "./route-def";
 import { handleSchedules } from "./schedules";
 import { handleScripts } from "./scripts";
 import { handleSessionData } from "./session-data";
@@ -58,7 +64,12 @@ import { handleTaskTemplates } from "./task-templates";
 import { handleTasks } from "./tasks";
 import { handleTrackers } from "./trackers";
 import { handleUsers } from "./users";
-import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
+import {
+  getPathSegments,
+  httpServerSemconvAttributes,
+  parseQueryParams,
+  setCorsHeaders,
+} from "./utils";
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflowEvents } from "./workflow-events";
 import { handleWorkflows } from "./workflows";
@@ -128,14 +139,25 @@ const httpServer = createHttpServer(async (req, res) => {
     const reqPath = req.url?.split("?")[0] ?? "";
     const pathSegments = getPathSegments(req.url || "");
     const skipSpan = reqPath === "/api/poll" && !isPollTracingEnabled();
-    // Per OTel HTTP semantic conventions: `{METHOD} {route-template}` — gives
-    // SigNoz a bounded-cardinality endpoint key. Raw path stays on `url.path`.
-    const spanName = deriveSpanName(req.method, pathSegments);
+    // Per OTel HTTP semantic conventions: span name is `{METHOD} {route-template}`
+    // and `http.route` carries the bounded-cardinality template so SigNoz can
+    // group/filter/aggregate by endpoint as a first-class field. `http.route` is
+    // omitted (not fabricated) for unmatched core/MCP/404 paths. Raw path stays
+    // on `url.path`.
+    const { spanName, httpRoute } = describeRequestRoute(req.method, pathSegments);
+    // Standard OTel HTTP server semconv attributes — host, scheme, protocol
+    // version, user-agent (the method/path/route/status are set inline below).
+    const semconv = httpServerSemconvAttributes(req);
     const span = skipSpan
       ? null
       : startSpan(spanName, {
           "http.request.method": req.method ?? "",
           "url.path": reqPath,
+          "url.scheme": semconv["url.scheme"],
+          "http.route": httpRoute,
+          "server.address": semconv["server.address"],
+          "network.protocol.version": semconv["network.protocol.version"],
+          "user_agent.original": semconv["user_agent.original"],
           "agent.id": req.headers["x-agent-id"] as string | undefined,
           "agentswarm.component": "api",
         });
@@ -163,80 +185,92 @@ const httpServer = createHttpServer(async (req, res) => {
       });
     }
 
-    setCorsHeaders(req, res);
+    // Run request handling inside the HTTP span's active context so any spans
+    // created downstream (MCP `mcp.tool` spans, future DB/auto-instrumentation)
+    // nest under it instead of attaching to the root with no parent.
+    const handleRequest = async () => {
+      setCorsHeaders(req, res);
 
-    // ── Core routes (OPTIONS, health, auth, /me, /cancelled-tasks, /ping, /close) ──
-    if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, apiKey)) return;
+      // ── Core routes (OPTIONS, health, auth, /me, /cancelled-tasks, /ping, /close) ──
+      if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, apiKey))
+        return;
 
-    const queryParams = parseQueryParams(req.url || "");
-    const myAgentId = req.headers["x-agent-id"] as string | undefined;
+      const queryParams = parseQueryParams(req.url || "");
+      const myAgentId = req.headers["x-agent-id"] as string | undefined;
 
-    // ── Route handlers (order matters — first match wins) ──
-    const handlers: (() => Promise<boolean>)[] = [
-      () => handleAgentRegister(req, res, pathSegments, myAgentId),
-      () => handlePoll(req, res, pathSegments, queryParams, myAgentId),
-      () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
-      () => handleEcosystem(req, res, pathSegments, myAgentId),
-      () => handleTrackers(req, res, pathSegments),
-      () => handleWebhooks(req, res, pathSegments),
-      () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
-      () => handleBudgets(req, res, pathSegments, queryParams, myAgentId),
-      () => handleContext(req, res, pathSegments, queryParams, myAgentId),
-      () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
-      () => handleStats(req, res, pathSegments, queryParams),
-      () => handleStatus(req, res, pathSegments, queryParams),
-      () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
-      () => handlePricing(req, res, pathSegments, queryParams, myAgentId),
-      () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
-      () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
-      () => handleWorkflowEvents(req, res, pathSegments, queryParams),
-      () => handleApprovalRequests(req, res, pathSegments, queryParams),
-      () => handleConfig(req, res, pathSegments, queryParams),
-      () => handleKv(req, res, pathSegments, queryParams),
-      () => handleIntegrations(req, res, pathSegments),
-      () => handlePromptTemplates(req, res, pathSegments, queryParams),
-      () => handleDbQuery(req, res, pathSegments, queryParams),
-      () => handleRepos(req, res, pathSegments, queryParams),
-      () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
-      () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
-      () => handleMcpServers(req, res, pathSegments, queryParams),
-      () => handleMcpOAuth(req, res, pathSegments, queryParams),
-      () => handleMemory(req, res, pathSegments, myAgentId),
-      () => handlePagesPublic(req, res, pathSegments, queryParams),
-      () => handlePageProxy(req, res),
-      () => handlePages(req, res, pathSegments, queryParams, myAgentId),
-      () => handleApiKeys(req, res, pathSegments, queryParams),
-      () => handleHeartbeat(req, res, pathSegments),
-      () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
-      () => handleUsers(req, res, pathSegments, queryParams),
-      () => handleSessions(req, res, pathSegments, queryParams),
-      () => handleInboxState(req, res, pathSegments, queryParams),
-      () => handleTaskTemplates(req, res, pathSegments, queryParams),
-      () => handleMcp(req, res, transports),
-      () => handleMcpUser(req, res, transportsUser, sessionUsers),
-    ];
+      // ── Route handlers (order matters — first match wins) ──
+      const handlers: (() => Promise<boolean>)[] = [
+        () => handleAgentRegister(req, res, pathSegments, myAgentId),
+        () => handlePoll(req, res, pathSegments, queryParams, myAgentId),
+        () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
+        () => handleEcosystem(req, res, pathSegments, myAgentId),
+        () => handleTrackers(req, res, pathSegments),
+        () => handleWebhooks(req, res, pathSegments),
+        () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
+        () => handleBudgets(req, res, pathSegments, queryParams, myAgentId),
+        () => handleContext(req, res, pathSegments, queryParams, myAgentId),
+        () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
+        () => handleStats(req, res, pathSegments, queryParams),
+        () => handleStatus(req, res, pathSegments, queryParams),
+        () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
+        () => handlePricing(req, res, pathSegments, queryParams, myAgentId),
+        () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
+        () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
+        () => handleWorkflowEvents(req, res, pathSegments, queryParams),
+        () => handleApprovalRequests(req, res, pathSegments, queryParams),
+        () => handleConfig(req, res, pathSegments, queryParams),
+        () => handleKv(req, res, pathSegments, queryParams),
+        () => handleIntegrations(req, res, pathSegments),
+        () => handlePromptTemplates(req, res, pathSegments, queryParams),
+        () => handleDbQuery(req, res, pathSegments, queryParams),
+        () => handleRepos(req, res, pathSegments, queryParams),
+        () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
+        () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
+        () => handleMcpServers(req, res, pathSegments, queryParams),
+        () => handleMcpOAuth(req, res, pathSegments, queryParams),
+        () => handleMemory(req, res, pathSegments, myAgentId),
+        () => handlePagesPublic(req, res, pathSegments, queryParams),
+        () => handlePageProxy(req, res),
+        () => handlePages(req, res, pathSegments, queryParams, myAgentId),
+        () => handleApiKeys(req, res, pathSegments, queryParams),
+        () => handleHeartbeat(req, res, pathSegments),
+        () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
+        () => handleUsers(req, res, pathSegments, queryParams),
+        () => handleSessions(req, res, pathSegments, queryParams),
+        () => handleInboxState(req, res, pathSegments, queryParams),
+        () => handleTaskTemplates(req, res, pathSegments, queryParams),
+        () => handleMcp(req, res, transports),
+        () => handleMcpUser(req, res, transportsUser, sessionUsers),
+      ];
 
-    try {
-      for (const handler of handlers) {
-        if (await handler()) return;
+      try {
+        for (const handler of handlers) {
+          if (await handler()) return;
+        }
+
+        // ── 404 ──
+        res.writeHead(404);
+        res.end("Not Found");
+      } catch (err) {
+        if (span) {
+          span.recordException(err);
+          span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[HTTP] ❌ ${req.method} ${req.url} → ${message}`);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: message }));
+        } else if (!res.writableEnded) {
+          res.end();
+        }
       }
+    };
 
-      // ── 404 ──
-      res.writeHead(404);
-      res.end("Not Found");
-    } catch (err) {
-      if (span) {
-        span.recordException(err);
-        span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[HTTP] ❌ ${req.method} ${req.url} → ${message}`);
-      if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: message }));
-      } else if (!res.writableEnded) {
-        res.end();
-      }
+    if (span) {
+      await withSpanContext(span, handleRequest);
+    } else {
+      await handleRequest();
     }
   });
 });

@@ -208,6 +208,7 @@ Stores the progress of a specific task. Can also mark task as completed or faile
 | `status` | `completed \| failed` | No | - | Set to 'completed' or 'failed' to finish the task. |
 | `output` | `string` | No | - | The output of the task (used when completing). |
 | `failureReason` | `string` | No | - | The reason for failure (used when failing). |
+| `attachments` | `array` | No | - | Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name). |
 
 ### my-agent-info
 

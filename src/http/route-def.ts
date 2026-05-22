@@ -104,24 +104,43 @@ export function findRoute(
   return undefined;
 }
 
+/** OTel descriptors derived from a matched (or unmatched) inbound request. */
+export interface RequestRouteDescriptor {
+  /**
+   * Low-cardinality OTel span name following the HTTP semantic conventions:
+   * `{METHOD} {route-template}`.
+   *
+   * - Matched `route()` handler: `GET /api/tasks/{id}`
+   * - Unmatched (core /health /ping /me, MCP transport, 404s): `GET /<first-segment>`
+   * - Root or empty path: bare `GET`
+   */
+  spanName: string;
+  /**
+   * Value for the `http.route` span attribute — the bounded-cardinality route
+   * template (e.g. `/api/tasks/{id}`). Set ONLY when a `route()` handler
+   * matched; left `undefined` for core/MCP/404 paths so callers omit the
+   * attribute rather than fabricating a value.
+   */
+  httpRoute?: string;
+}
+
 /**
- * Compute a low-cardinality OTel span name for an inbound HTTP request, following
- * the HTTP semantic conventions: `{METHOD} {route-template}`.
+ * Describe an inbound HTTP request for OTel: a low-cardinality span name plus
+ * the `http.route` attribute value (per the HTTP server semantic conventions).
  *
- * - Matched `route()` handler: `GET /api/tasks/{id}`
- * - Unmatched (core /health /ping /me, MCP transport, 404s): `GET /<first-segment>`
- * - Root or empty path: bare `GET`
- *
- * Never embeds raw path params or query strings — the goal is one span name per
- * endpoint so SigNoz can group by it. The raw path is still preserved on the
- * `url.path` attribute.
+ * Never embeds raw path params or query strings — the goal is one span name and
+ * one `http.route` value per endpoint so SigNoz can group/filter/aggregate by
+ * them. The raw path is still preserved on the `url.path` attribute.
  */
-export function deriveSpanName(method: string | undefined, pathSegments: string[]): string {
+export function describeRequestRoute(
+  method: string | undefined,
+  pathSegments: string[],
+): RequestRouteDescriptor {
   const m = (method ?? "").toUpperCase() || "UNKNOWN";
   const matched = findRoute(method, pathSegments);
-  if (matched) return `${m} ${matched.path}`;
+  if (matched) return { spanName: `${m} ${matched.path}`, httpRoute: matched.path };
   const first = pathSegments[0];
-  return first ? `${m} /${first}` : m;
+  return { spanName: first ? `${m} /${first}` : m };
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────────────

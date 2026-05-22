@@ -194,6 +194,116 @@ describe("/api/scripts HTTP", () => {
     expect(getScript({ name: "bad-types", scope: "agent", scopeId: workerId })).toBeNull();
   });
 
+  test("upsert typecheck failure surfaces structured diagnostics with location + identifier", async () => {
+    const res = await upsert({
+      name: "structured-diag",
+      source: `export default async () => { return noSuchGlobal; };`,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: string;
+      structured: Array<{
+        severity: string;
+        code: number;
+        message: string;
+        file: string;
+        line: number;
+        column: number;
+        identifier?: string;
+      }>;
+    };
+    expect(body.error).toBe("typecheck_failed");
+    expect(Array.isArray(body.structured)).toBe(true);
+    const cantFind = body.structured.find((d) => d.code === 2304 || d.code === 2552);
+    expect(cantFind).toBeDefined();
+    expect(cantFind?.severity).toBe("error");
+    expect(cantFind?.identifier).toBe("noSuchGlobal");
+    expect(cantFind?.line).toBeGreaterThan(0);
+    expect(cantFind?.column).toBeGreaterThan(0);
+  });
+
+  test("upsert typecheck surfaces 'did you mean' suggestions when TS offers one", async () => {
+    const res = await upsert({
+      name: "did-you-mean",
+      source: `export default async () => Mat.floor(3.7);`,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      structured: Array<{ code: number; suggestion?: string; identifier?: string }>;
+    };
+    const hint = body.structured.find((d) => d.code === 2552);
+    expect(hint).toBeDefined();
+    expect(hint?.identifier).toBe("Mat");
+    expect(hint?.suggestion).toBe("Math");
+  });
+
+  test("upsert accepts runtime-shaped TypeScript: Promise<T>, Array<T>, Error, fetch, JSON, Date", async () => {
+    // Litmus from #gtm `daily-growth-snapshot` thread — these patterns all
+    // failed against the old typecheck and forced authors into `any`-everywhere
+    // contortions. They MUST all pass now without any escape hatches.
+    const source = `
+      export default async function main(args: { url: string }): Promise<{ count: number; titles: string[]; when: string }> {
+        if (typeof args.url !== "string") throw new Error("url required");
+        const res = await fetch(args.url);
+        const body = await res.json() as { items: Array<{ title: string }> };
+        const titles: string[] = body.items.map((item) => item.title);
+        const payload = { count: titles.length, titles, when: new Date().toISOString() };
+        const _serialized: string = JSON.stringify(payload);
+        const _all: number[] = await Promise.all([Promise.resolve(1), Promise.resolve(2)]);
+        return payload;
+      }
+    `;
+    const res = await upsert({ name: "runtime-shaped-clean", source });
+    expect(res.status).toBe(200);
+    expect((await res.json()).version).toBe(1);
+  });
+
+  test("inline script throws and run response carries structured runtimeError", async () => {
+    const res = await dispatch("/api/scripts/run", {
+      method: "POST",
+      agentId: workerId,
+      body: JSON.stringify({
+        source: `
+          export default async () => {
+            const x: number = 1;
+            if (x === 1) {
+              throw new Error("kaboom from line 4");
+            }
+            return x;
+          };
+        `,
+        intent: "runtime error",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      runtimeError?: {
+        name: string;
+        message: string;
+        stack: string;
+        userScriptLine?: number;
+        userScriptColumn?: number;
+        userFrames: Array<{ file: string; line: number; column: number }>;
+      };
+      stderr: string;
+      exitCode: number;
+    };
+    expect(body.exitCode).not.toBe(0);
+    expect(body.runtimeError).toBeDefined();
+    expect(body.runtimeError?.name).toBe("Error");
+    expect(body.runtimeError?.message).toContain("kaboom from line 4");
+    // userFrames may be empty under some Bun stack-formatting modes; when
+    // present, the first user frame must point at user-script.ts.
+    if (body.runtimeError?.userFrames && body.runtimeError.userFrames.length > 0) {
+      expect(body.runtimeError.userFrames[0].file).toBe("user-script.ts");
+      expect(body.runtimeError.userFrames[0].line).toBeGreaterThan(0);
+      expect(body.runtimeError.userScriptLine).toBeGreaterThan(0);
+    }
+    // stderr should NOT leak the absolute tmpdir path of the harness;
+    // user-script.ts must be referenced by basename.
+    expect(body.stderr).not.toContain("/swarm-script-");
+  });
+
   test("upsert rejects unknown ctx.swarm tools", async () => {
     const res = await upsert({
       name: "unknown-tool",

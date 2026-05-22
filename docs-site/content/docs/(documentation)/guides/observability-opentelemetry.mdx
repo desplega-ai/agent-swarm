@@ -45,11 +45,11 @@ The important local filter tags are:
 
 | Attribute | Value | Purpose |
 |-----------|-------|---------|
-| `service.name` | `agent-swarm` | Keeps API and workers under one SigNoz service. |
+| `service.name` | `agent-swarm-api` (API) / `agent-swarm` (workers) | The API process and worker processes report distinct service names — see [Service names](#service-names-api-vs-worker). |
 | `deployment.environment` | `local` | Standard OpenTelemetry environment label. |
 | `env` | `local` | Short convenience label for filtering local/dev traffic. |
-| `service.namespace` | `agent-swarm` | Groups Agent Swarm spans together in mixed backends. |
-| `agentswarm.service.role` | `api`, `lead`, or `worker` | Distinguishes API, lead runner, and worker runner spans while keeping one service. |
+| `service.namespace` | `agent-swarm` | Groups the API and worker services together — use this to query across both. |
+| `agentswarm.service.role` | `api`, `lead`, or `worker` | Distinguishes API, lead runner, and worker runner spans. |
 
 ### Production Docker Compose
 
@@ -64,11 +64,24 @@ environment:
   - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=production,env=production,service.namespace=agent-swarm}
 ```
 
-Use a single `OTEL_SERVICE_NAME=agent-swarm` if you want one service with role tags. Use separate service names such as `agent-swarm-api` and `agent-swarm-worker` only if you prefer separate service cards in your observability backend.
+`OTEL_SERVICE_NAME` sets the **base** service name (default `agent-swarm`). Agent Swarm derives the per-process `service.name` from it — see [Service names](#service-names-api-vs-worker) — so a single shared `OTEL_SERVICE_NAME` is all you need; no per-service wiring.
+
+### Service names: API vs worker
+
+The API process and the worker (and lead) processes report **distinct** `service.name` values so they show up as separate service cards in SigNoz:
+
+| Process | `service.name` |
+|---------|----------------|
+| API server | `agent-swarm-api` |
+| Worker / lead runner | `agent-swarm` |
+
+Both are derived per process from `OTEL_SERVICE_NAME` (the base name, default `agent-swarm`): the API appends an `-api` suffix, workers use the base name unchanged. The suffix is applied even when `OTEL_SERVICE_NAME` is set identically across every process — a shared env var can't collapse the API and workers onto one name.
+
+Both processes still set `service.namespace=agent-swarm`, so `service.namespace = 'agent-swarm'` is the filter to use when you want spans from **both** services in one query.
 
 ### Filtering poll noise
 
-Worker long-polls run continuously and account for the majority of span volume in a steady-state deployment. To keep your observability backend focused on real work, Agent Swarm skips the `worker.poll` (worker side) and `/api/poll` `http.server` (API side) spans by default.
+Worker long-polls run continuously and account for the majority of span volume in a steady-state deployment. To keep your observability backend focused on real work, Agent Swarm skips the `worker.poll` (worker side) and the `/api/poll` request span (API side) by default.
 
 To opt in — useful when debugging queue or claim behavior — set on every API and worker process:
 
@@ -88,7 +101,7 @@ Agent Swarm sets resource attributes once per process:
 
 | Attribute | Source |
 |-----------|--------|
-| `service.name` | `OTEL_SERVICE_NAME`, falling back to role-specific defaults |
+| `service.name` | Per process: API → `<base>-api`, workers → `<base>`; base from `OTEL_SERVICE_NAME` (default `agent-swarm`) |
 | `service.version` | `package.json` version |
 | `service.namespace` | `OTEL_RESOURCE_ATTRIBUTES` or `agent-swarm` |
 | `service.instance.id` | `AGENT_ID` or a generated UUID |
@@ -102,15 +115,30 @@ Sensitive exception messages, status messages, tool previews, and OTLP auth head
 
 ### API HTTP Requests
 
-Every API request is wrapped in an `http.server` span.
+Every API request is wrapped in a span named after its route, following the OpenTelemetry HTTP server semantic conventions: `{METHOD} {route-template}` — for example `GET /api/tasks/{id}` or `POST /api/tasks`.
+
+The route template is **low-cardinality**: a request to `/api/tasks/abc-123` and one to `/api/tasks/def-456` share the span name `GET /api/tasks/{id}`, so SigNoz can group and aggregate by endpoint without raw IDs fragmenting the data. Requests that don't match a registered route — core routes (`/health`, `/ping`, `/me`), the MCP transport, and 404s — fall back to `{METHOD} /{first-segment}` (e.g. `GET /health`, `POST /mcp`), or a bare `{METHOD}` for the root path. The full raw request path is always preserved on the `url.path` attribute.
+
+The same route template is also published on the `http.route` span attribute, so SigNoz can group, filter, and aggregate by endpoint as a first-class field instead of parsing it out of the span name. `http.route` is **omitted** (not fabricated) for requests that don't match a registered route.
+
+Request handling runs inside the HTTP server span's active context, so server-side spans created while serving the request — notably the `mcp.tool` spans from MCP tool calls — nest underneath it as children rather than appearing as disconnected root spans.
+
+<Callout type="info">
+Earlier releases named every API request span `http.server`. If you have saved SigNoz queries or dashboards that filter on `name = 'http.server'`, switch them to filter on the `agentswarm.component = 'api'` attribute (set on every API span) and group by span `name` or the `http.route` attribute to get a per-endpoint breakdown.
+</Callout>
 
 Common attributes:
 
 | Attribute | Description |
 |-----------|-------------|
 | `http.request.method` | HTTP method |
-| `url.path` | Request path |
-| `responseStatusCode` | HTTP response status |
+| `http.route` | Low-cardinality route template, e.g. `/api/tasks/{id}`. Omitted for unmatched core/MCP/404 paths. |
+| `url.path` | Raw request path (full path, including IDs) |
+| `url.scheme` | Request scheme — `https` or `http` (honors `X-Forwarded-Proto`) |
+| `server.address` | Request host with the port stripped (honors `X-Forwarded-Host`) |
+| `network.protocol.version` | HTTP protocol version, e.g. `1.1` or `2` |
+| `user_agent.original` | Raw `User-Agent` request header |
+| `http.response.status_code` | HTTP response status code (SigNoz surfaces this as the `responseStatusCode` column) |
 | `agentswarm.component` | `api` |
 | `agentswarm.http.duration_ms` | Server-side request duration |
 
@@ -122,7 +150,7 @@ Useful for:
 
 ### MCP Tool Calls
 
-Server-side MCP tool handlers emit `mcp.tool` spans.
+Server-side MCP tool handlers emit one span per call, named `mcp.tool <tool-name>` — for example `mcp.tool store-progress` — so the executed tool is readable straight from the trace tree. Tool names are a fixed enum, so the span name stays low-cardinality. These spans nest under the API HTTP request span that triggered them.
 
 Common attributes:
 
@@ -336,12 +364,12 @@ Agent Swarm currently emits traces, not standalone OTLP metrics. In SigNoz, crea
 
 | Metric | Query shape |
 |--------|-------------|
-| API request rate | `rate(count())` over `name = 'http.server'`, grouped by `url.path` |
-| API p95 latency | `p95(durationNano)` over `name = 'http.server'`, grouped by `url.path` |
+| API request rate | `rate(count())` over `agentswarm.component = 'api'`, grouped by span `name` |
+| API p95 latency | `p95(durationNano)` over `agentswarm.component = 'api'`, grouped by span `name` |
 | API errors | `count()` where `hasError = true` or `responseStatusCode >= 500` |
 | Worker task throughput | `count()` over `name = 'worker.session'`, grouped by `agentswarm.service.role` and `agentswarm.harness_provider` |
 | Worker session p95 duration | `p95(durationNano)` over `name = 'worker.session'` |
-| Tool call volume | `count()` over `name IN ('worker.tool', 'worker.mcp.tool', 'mcp.tool')`, grouped by `agentswarm.tool.name` or `mcp.tool.name` |
+| Tool call volume | `count()` over `name IN ('worker.tool', 'worker.mcp.tool')` plus `name LIKE 'mcp.tool %'` for server-side spans, grouped by `agentswarm.tool.name` or `mcp.tool.name` |
 | Slow tools | `p95(durationNano)` over tool spans, grouped by tool name |
 | Cost by model | `sum(agentswarm.cost.total_usd)` over session spans, grouped by `gen_ai.response.model` |
 | Token usage by model | `sum(gen_ai.usage.input_tokens)` and `sum(gen_ai.usage.output_tokens)`, grouped by model |
@@ -351,22 +379,26 @@ Agent Swarm currently emits traces, not standalone OTLP metrics. In SigNoz, crea
 
 Use these in SigNoz Traces Explorer or as dashboard widget filters.
 
+<Callout type="info">
+The API process reports `service.name = 'agent-swarm-api'` and workers report `service.name = 'agent-swarm'` (see [Service names](#service-names-api-vs-worker)). Queries that should span **both** filter on `service.namespace = 'agent-swarm'` instead; worker-only queries keep `service.name = 'agent-swarm'`.
+</Callout>
+
 ### All Local Agent Swarm Traffic
 
 ```text
-service.name = 'agent-swarm' AND env = 'local'
+service.namespace = 'agent-swarm' AND env = 'local'
 ```
 
 ### Production Traffic Only
 
 ```text
-service.name = 'agent-swarm' AND deployment.environment = 'production'
+service.namespace = 'agent-swarm' AND deployment.environment = 'production'
 ```
 
 ### A Complete Task Execution
 
 ```text
-service.name = 'agent-swarm' AND agentswarm.task.id = '<task-id>'
+service.namespace = 'agent-swarm' AND agentswarm.task.id = '<task-id>'
 ```
 
 Start here when debugging a concrete task. You should see session spans, tool spans, and any server-side MCP spans that carried the task ID.
@@ -394,22 +426,24 @@ AND durationNano > 5000000000
 ### MCP Tool Calls for a Task
 
 ```text
-service.name = 'agent-swarm'
+service.namespace = 'agent-swarm'
 AND agentswarm.task.id = '<task-id>'
-AND (name = 'mcp.tool' OR name = 'worker.mcp.tool')
+AND (name LIKE 'mcp.tool %' OR name = 'worker.mcp.tool')
 ```
+
+Server-side `mcp.tool <tool-name>` spans live under `agent-swarm-api` and `worker.mcp.tool` under `agent-swarm`, so this query filters on `service.namespace` to catch both. The `LIKE 'mcp.tool %'` pattern matches every per-tool span name (`mcp.tool store-progress`, `mcp.tool poll-task`, …).
 
 ### Failed or Error-Spans
 
 ```text
-service.name = 'agent-swarm' AND hasError = true
+service.namespace = 'agent-swarm' AND hasError = true
 ```
 
 For HTTP 5xx responses:
 
 ```text
-service.name = 'agent-swarm'
-AND name = 'http.server'
+service.name = 'agent-swarm-api'
+AND agentswarm.component = 'api'
 AND responseStatusCode >= 500
 ```
 
@@ -463,8 +497,8 @@ Start with these panels:
 
 | Panel | Signal |
 |-------|--------|
-| API request rate by route | Trace count over `http.server`, grouped by `url.path` |
-| API p95 latency by route | `p95(durationNano)` over `http.server`, grouped by `url.path` |
+| API request rate by route | Trace count over `agentswarm.component = 'api'`, grouped by span `name` |
+| API p95 latency by route | `p95(durationNano)` over `agentswarm.component = 'api'`, grouped by span `name` |
 | Worker sessions by harness | Trace count over `worker.session`, grouped by `agentswarm.harness_provider` |
 | Worker session duration | `p95(durationNano)` over `worker.session`, grouped by harness |
 | Tool calls by name | Trace count over tool spans, grouped by `agentswarm.tool.name` |
@@ -520,13 +554,9 @@ Then filter with `env` or `deployment.environment`.
 
 ### API and workers show as separate services
 
-Set the same `OTEL_SERVICE_NAME` everywhere:
+This is intentional. The API process reports `service.name = agent-swarm-api` and worker/lead processes report `service.name = agent-swarm` so they appear as separate service cards in SigNoz — see [Service names](#service-names-api-vs-worker).
 
-```bash
-OTEL_SERVICE_NAME=agent-swarm
-```
-
-Use `agentswarm.service.role` to split API, lead, and worker views without fragmenting the service.
+To query across both at once, filter on `service.namespace = 'agent-swarm'` (set by every process) instead of `service.name`. Within a single service, `agentswarm.service.role` further splits `api`, `lead`, and `worker` spans.
 
 ## Related
 

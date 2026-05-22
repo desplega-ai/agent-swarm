@@ -1,10 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
-import { getLogsByTaskIdChronological, getTaskById, getUserById } from "@/be/db";
+import {
+  getLogsByTaskIdChronological,
+  getTaskAttachments,
+  getTaskById,
+  getUserById,
+} from "@/be/db";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentLogSchema, AgentTaskSchema } from "@/types";
+import { AgentLogSchema, AgentTaskSchema, TaskAttachmentSchema } from "@/types";
 
 export const getTaskDetailsInputSchema = z.object({
   taskId: z.uuid().describe("The ID of the task to get details for."),
@@ -20,6 +25,12 @@ export const getTaskDetailsOutputSchema = z.object({
     .optional()
     .describe("Resolved user who requested this task"),
   logs: z.array(AgentLogSchema).optional(),
+  attachments: z
+    .array(TaskAttachmentSchema)
+    .optional()
+    .describe(
+      "Pointer-based artifacts attached to this task via store-progress, ordered by created_at.",
+    ),
 });
 
 type GetTaskDetailsArgs = z.infer<typeof getTaskDetailsInputSchema>;
@@ -46,6 +57,7 @@ export async function getTaskDetailsHandler(
   if (ownershipError) return ownershipError;
 
   const logs = getLogsByTaskIdChronological(taskId);
+  const attachments = getTaskAttachments(taskId);
 
   // Resolve requesting user details if available
   const requestedByUser = task.requestedByUserId ? getUserById(task.requestedByUserId) : undefined;
@@ -62,6 +74,7 @@ export async function getTaskDetailsHandler(
       task,
       requestedBy,
       logs,
+      attachments,
     },
   };
 }

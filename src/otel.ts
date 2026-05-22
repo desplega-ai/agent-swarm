@@ -66,9 +66,7 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
     realWithSpanContext = impl.withSpanContext;
     realInjectTraceContext = impl.injectTraceContext;
     realShutdown = impl.shutdown;
-    console.log(
-      `[OTel] enabled for ${process.env.OTEL_SERVICE_NAME ?? "agent-swarm"} (${serviceRole})`,
-    );
+    console.log(`[OTel] enabled for ${impl.resolveServiceName(serviceRole)} (${serviceRole})`);
   } catch (error) {
     console.warn(`[OTel] disabled after initialization failure: ${error}`);
   }

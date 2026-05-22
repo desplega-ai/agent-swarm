@@ -160,7 +160,9 @@ export const createToolRegistrar = (server: McpServer) => {
     return server.registerTool(name, config, (async (args: InferInput<InputArgs>, meta: Meta) => {
       const requestInfo = getRequestInfo(meta);
       return withSpan(
-        "mcp.tool",
+        // Span name carries the tool: a static `mcp.tool` is unreadable in a
+        // trace tree. Cardinality is bounded — tool names are a fixed enum.
+        `mcp.tool ${name}`,
         async (span) => {
           const result = await (
             cb as (

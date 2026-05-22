@@ -75,6 +75,13 @@ export const sendTaskInputSchema = z.object({
     .optional()
     .describe("Slack thread timestamp. Required with slackChannelId for thread-level updates."),
   slackUserId: z.string().optional().describe("Slack user ID of the original requester."),
+  requestedByUserId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "ID of the human user who originally requested this task chain. When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically.",
+    ),
 });
 
 export const sendTaskOutputSchema = z.object({
@@ -104,6 +111,7 @@ export async function sendTaskHandler(
     slackChannelId,
     slackThreadTs,
     slackUserId,
+    requestedByUserId: inputRequestedByUserId,
   }: SendTaskArgs,
 ): Promise<CallToolResult> {
   if (ctx.kind === "owner" && !ctx.agentId) {
@@ -123,8 +131,12 @@ export async function sendTaskHandler(
   }
 
   const creatorAgentId = ctx.kind === "owner" ? ctx.agentId : undefined;
-  const requestedByUserId = ctx.kind === "user" ? ctx.userId : undefined;
   const sourceTaskId = ctx.kind === "owner" ? ctx.sourceTaskId : undefined;
+  const callerTask = sourceTaskId ? getTaskById(sourceTaskId) : null;
+  const requestedByUserId =
+    ctx.kind === "user"
+      ? ctx.userId
+      : (inputRequestedByUserId ?? callerTask?.requestedByUserId ?? undefined);
 
   if (ctx.kind === "owner" && agentId === ctx.agentId) {
     return {

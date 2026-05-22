@@ -8,10 +8,78 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+type StackFrame = { file: string; line: number; column: number; raw: string };
+type StructuredError = {
+  name: string;
+  message: string;
+  stack: string;
+  userFrames: StackFrame[];
+  userScriptLine?: number;
+  userScriptColumn?: number;
+};
+
+function buildStructuredError(err: unknown, userModulePath: string): StructuredError {
+  const errObj = err instanceof Error ? err : new Error(String(err));
+  const name = errObj.name || "Error";
+  const message = errObj.message || String(err);
+  const stack = errObj.stack || `${name}: ${message}`;
+
+  const userScriptName = userModulePath.split("/").pop() ?? "user-script.ts";
+  const userFrames: StackFrame[] = [];
+
+  // Stack frames look like:
+  //   "    at functionName (/tmp/.../user-script.ts:LINE:COL)"
+  //   "    at /tmp/.../user-script.ts:LINE:COL"
+  // We surface only frames inside the user's script. The userModulePath is the
+  // exact tmpdir copy created above, so match either that absolute path or the
+  // bare basename "user-script.ts".
+  const frameRe = /\s+at\s+(?:[^\s]+\s+\()?([^\s()]+):(\d+):(\d+)\)?/g;
+  for (const match of stack.matchAll(frameRe)) {
+    const [, file, line, col] = match;
+    if (!file || !line || !col) continue;
+    if (file === userModulePath || file.endsWith(`/${userScriptName}`)) {
+      userFrames.push({
+        file: userScriptName,
+        line: Number(line),
+        column: Number(col),
+        raw: match[0].trim(),
+      });
+    }
+  }
+
+  return {
+    name,
+    message,
+    stack,
+    userFrames,
+    userScriptLine: userFrames[0]?.line,
+    userScriptColumn: userFrames[0]?.column,
+  };
+}
+
+const userModulePath = `${requiredEnv("SWARM_SCRIPT_TMPDIR")}/user-script.ts`;
+const errorFile = process.env.SWARM_SCRIPT_ERROR_FILE;
+
+async function emitError(err: unknown): Promise<void> {
+  const structured = buildStructuredError(err, userModulePath);
+  const filtered = structured.userFrames.length
+    ? `${structured.name}: ${structured.message}\n${structured.userFrames.map((f) => `    at ${f.file}:${f.line}:${f.column}`).join("\n")}`
+    : structured.stack;
+  console.error(filtered);
+  if (errorFile) {
+    try {
+      await Bun.write(errorFile, JSON.stringify(structured));
+    } catch {
+      // Best-effort: if we can't write the structured error file, the stderr
+      // text we already printed is the fallback.
+    }
+  }
+}
+
 try {
   const stdin = await Bun.stdin.text();
   if (!stdin.trim()) {
-    console.error("Swarm script config payload was empty");
+    await emitError(new Error("Swarm script config payload was empty"));
     process.exit(2);
   }
 
@@ -23,7 +91,6 @@ try {
   const ctx = buildCtx({ swarmConfig });
 
   const sourceText = await Bun.file(requiredEnv("SWARM_SCRIPT_SOURCE_FILE")).text();
-  const userModulePath = `${requiredEnv("SWARM_SCRIPT_TMPDIR")}/user-script.ts`;
   await Bun.write(userModulePath, sourceText);
 
   const mod = await import(userModulePath);
@@ -58,6 +125,6 @@ try {
   const result = await mod.default(validatedArgs, ctx);
   await Bun.write(requiredEnv("SWARM_SCRIPT_RESULT_FILE"), JSON.stringify(result ?? null));
 } catch (error) {
-  console.error(error instanceof Error ? error.stack || error.message : String(error));
+  await emitError(error);
   process.exit(1);
 }

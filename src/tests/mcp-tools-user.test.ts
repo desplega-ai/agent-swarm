@@ -132,7 +132,7 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
       const msg = JSON.stringify(parsed.error.issues);
-      expect(msg).toMatch(/Provide either \(kind \+ externalId\) or email/);
+      expect(msg).toMatch(/Provide either \(kind \+ externalId\), email, or userId/);
     }
   });
 
@@ -157,6 +157,53 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
   test("valid {email} input passes the schema", () => {
     const parsed = resolveUserInputSchema.safeParse({ email: "x@example.com" });
     expect(parsed.success).toBe(true);
+  });
+
+  test("valid {userId} input passes the schema", () => {
+    const parsed = resolveUserInputSchema.safeParse({ userId: "some-user-id" });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("response includes externalIds populated from user_external_ids rows", async () => {
+    const user = createUser({ name: "External ID User", email: "extid@example.com" });
+    linkIdentity(user.id, "github", "extid-gh-handle", SYSTEM_ACTOR);
+    linkIdentity(user.id, "slack", "U_EXTID", SYSTEM_ACTOR);
+
+    const result = await callTool(server, "resolve-user", {
+      kind: "github",
+      externalId: "extid-gh-handle",
+    });
+    const parsed = JSON.parse(textOf(result));
+    expect(parsed.id).toBe(user.id);
+    expect(Array.isArray(parsed.externalIds)).toBe(true);
+    const kinds = parsed.externalIds.map((e: { kind: string }) => e.kind).sort();
+    expect(kinds).toEqual(["github", "slack"]);
+  });
+
+  test("externalIds is empty array when user has no identities", async () => {
+    const user = createUser({ name: "No Identities User", email: "noid@example.com" });
+
+    const result = await callTool(server, "resolve-user", { email: "noid@example.com" });
+    const parsed = JSON.parse(textOf(result));
+    expect(parsed.id).toBe(user.id);
+    expect(parsed.externalIds).toEqual([]);
+  });
+
+  test("userId lookup returns user profile with externalIds", async () => {
+    const user = createUser({ name: "User ID Lookup", email: "uidlookup@example.com" });
+    linkIdentity(user.id, "linear", "L_UIDLOOKUP", SYSTEM_ACTOR);
+
+    const result = await callTool(server, "resolve-user", { userId: user.id });
+    const parsed = JSON.parse(textOf(result));
+    expect(parsed.id).toBe(user.id);
+    expect(parsed.name).toBe("User ID Lookup");
+    expect(parsed.externalIds).toHaveLength(1);
+    expect(parsed.externalIds[0]).toMatchObject({ kind: "linear", externalId: "L_UIDLOOKUP" });
+  });
+
+  test("userId lookup returns 'No user found' for unknown ID", async () => {
+    const result = await callTool(server, "resolve-user", { userId: "nonexistent-user-id-xyz" });
+    expect(textOf(result)).toContain("No user found");
   });
 });
 
