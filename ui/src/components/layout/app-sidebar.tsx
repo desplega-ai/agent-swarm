@@ -15,11 +15,13 @@ import {
   Users,
   Workflow,
 } from "lucide-react";
+import { useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import type { UserRole } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import {
   Sidebar,
   SidebarContent,
@@ -32,6 +34,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 import { SwarmSwitcher } from "./swarm-switcher";
 
 interface NavItem {
@@ -55,6 +58,19 @@ interface NavGroup {
   items: NavItem[];
 }
 
+/** A sub-route entry surfaced in a footer item's hover flyout. */
+interface FlyoutEntry {
+  title: string;
+  path: string;
+  /** Match the path exactly (index routes) rather than by prefix. */
+  end?: boolean;
+}
+
+/** Footer destination — optionally carrying a hover flyout of sub-routes. */
+interface FooterItem extends NavItem {
+  flyout?: FlyoutEntry[];
+}
+
 const navGroups: NavGroup[] = [
   {
     id: "work",
@@ -71,7 +87,6 @@ const navGroups: NavGroup[] = [
     label: "SWARM",
     items: [
       { title: "Agents", path: "/agents", icon: Users },
-      { title: "People", path: "/people", icon: Contact, gate: { minVersion: "1.80.0" } },
       { title: "Workflows", path: "/workflows", icon: Workflow },
       { title: "Schedules", path: "/schedules", icon: Clock },
     ],
@@ -91,13 +106,130 @@ const navGroups: NavGroup[] = [
 
 /**
  * Account-area destinations pinned to the sidebar footer (bottom-aligned).
- * Collapsing the sidebar is handled by clicking the SidebarRail divider —
- * there is no dedicated trigger button.
+ * Settings and Usage carry a hover flyout listing their sub-routes; clicking
+ * the item itself still navigates to its default route. People has no
+ * sub-routes — plain link. Collapsing the sidebar is handled by clicking the
+ * SidebarRail divider — there is no dedicated trigger button.
  */
-const footerNav: NavItem[] = [
-  { title: "Settings", path: "/settings", icon: Settings },
-  { title: "Usage", path: "/usage", icon: BarChart3 },
+const footerNav: FooterItem[] = [
+  {
+    title: "Settings",
+    path: "/settings",
+    icon: Settings,
+    flyout: [
+      { title: "Connections", path: "/settings/connections" },
+      { title: "Secrets", path: "/settings/secrets" },
+      { title: "API Keys", path: "/settings/api-keys" },
+      { title: "Integrations", path: "/settings/integrations" },
+      { title: "Repos", path: "/settings/repos" },
+      { title: "Debug", path: "/settings/debug" },
+    ],
+  },
+  {
+    title: "Usage",
+    path: "/usage",
+    icon: BarChart3,
+    flyout: [
+      { title: "Usage", path: "/usage", end: true },
+      { title: "Budgets", path: "/usage/budgets" },
+    ],
+  },
+  { title: "People", path: "/people", icon: Contact, gate: { minVersion: "1.80.0" } },
 ];
+
+/** Delay (ms) before a flyout closes on mouse-leave — lets the cursor cross
+ * the gap between trigger and flyout content without it snapping shut. */
+const FLYOUT_CLOSE_DELAY = 120;
+
+interface FooterNavItemProps {
+  item: FooterItem;
+  isActive: boolean;
+}
+
+/**
+ * A single footer destination. Items with a `flyout` render a hover-driven
+ * Popover (open on enter, close after a short delay on leave) anchored to the
+ * right of the sidebar; the trigger itself remains a NavLink so a click still
+ * navigates. Items without a flyout render a plain link.
+ */
+function FooterNavItem({ item, isActive }: FooterNavItemProps) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function cancelClose() {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
+
+  function scheduleClose() {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setOpen(false), FLYOUT_CLOSE_DELAY);
+  }
+
+  const link = (
+    <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
+      <NavLink to={item.path}>
+        <item.icon className="size-4" />
+        <span>{item.title}</span>
+      </NavLink>
+    </SidebarMenuButton>
+  );
+
+  if (!item.flyout) {
+    return <SidebarMenuItem>{link}</SidebarMenuItem>;
+  }
+
+  return (
+    <SidebarMenuItem>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverAnchor asChild>
+          <div
+            onMouseEnter={() => {
+              cancelClose();
+              setOpen(true);
+            }}
+            onMouseLeave={scheduleClose}
+          >
+            {link}
+          </div>
+        </PopoverAnchor>
+        <PopoverContent
+          side="right"
+          align="start"
+          sideOffset={8}
+          className="w-48 p-1"
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+          // Hover-driven — don't steal focus from the page on open.
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <div className="flex flex-col gap-0.5">
+            {item.flyout.map((entry) => (
+              <NavLink
+                key={entry.path}
+                to={entry.path}
+                end={entry.end}
+                onClick={() => setOpen(false)}
+                className={({ isActive: entryActive }) =>
+                  cn(
+                    "rounded-sm px-2 py-1.5 text-sm transition-colors",
+                    entryActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  )
+                }
+              >
+                {entry.title}
+              </NavLink>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </SidebarMenuItem>
+  );
+}
 
 export function AppSidebar() {
   const location = useLocation();
@@ -218,20 +350,16 @@ export function AppSidebar() {
 
       <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu>
-          {footerNav.map((item) => (
-            <SidebarMenuItem key={item.path}>
-              <SidebarMenuButton
-                asChild
+          {footerNav.map((item) => {
+            if (isGated(item)) return null;
+            return (
+              <FooterNavItem
+                key={item.path}
+                item={item}
                 isActive={location.pathname.startsWith(item.path)}
-                tooltip={item.title}
-              >
-                <NavLink to={item.path}>
-                  <item.icon className="size-4" />
-                  <span>{item.title}</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
+              />
+            );
+          })}
         </SidebarMenu>
       </SidebarFooter>
 

@@ -22,7 +22,8 @@ const UsageContent = lazy(() =>
   import("@/pages/usage/usage-content").then((m) => ({ default: m.UsageContent })),
 );
 const BudgetsPage = lazy(() => import("@/pages/budgets/page"));
-const ConfigPage = lazy(() => import("@/pages/config/page"));
+const ConnectionsPage = lazy(() => import("@/pages/settings/connections-page"));
+const SecretsPage = lazy(() => import("@/pages/settings/secrets-page"));
 const IntegrationsPage = lazy(() => import("@/pages/integrations/page"));
 const IntegrationDetailPage = lazy(() => import("@/pages/integrations/[id]/page"));
 const ReposPage = lazy(() => import("@/pages/repos/page"));
@@ -59,7 +60,7 @@ const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 const REDIRECTS: Record<string, string> = {
   dashboard: "/",
   budgets: "/usage/budgets",
-  config: "/settings/config",
+  config: "/settings/connections",
   keys: "/settings/api-keys",
   integrations: "/settings/integrations",
   repos: "/settings/repos",
@@ -113,8 +114,10 @@ export const router = createBrowserRouter([
         path: "settings",
         element: <SettingsLayout />,
         children: [
-          { index: true, element: <Navigate to="/settings/config" replace /> },
-          { path: "config", element: <ConfigPage /> },
+          { index: true, element: <Navigate to="/settings/connections" replace /> },
+          { path: "config", element: <Navigate to="/settings/connections" replace /> },
+          { path: "connections", element: <ConnectionsPage /> },
+          { path: "secrets", element: <SecretsPage /> },
           { path: "api-keys", element: <ApiKeysPage /> },
           { path: "integrations", element: <IntegrationsPage /> },
           { path: "integrations/:id", element: <IntegrationDetailPage /> },
