@@ -28,6 +28,8 @@ export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr
   stderr: string;
 };
 
+export type { ScriptRuntimeError, ScriptStackFrame } from "./executors/types";
+
 function buildConfigPayload(input: RunScriptInput): SwarmConfigPayload {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("Swarm API key is required to run scripts");

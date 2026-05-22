@@ -61,6 +61,20 @@ async function readResultFile(path: string): Promise<unknown | undefined> {
   return JSON.parse(text);
 }
 
+async function readRuntimeError(
+  path: string,
+): Promise<import("./types").ScriptRuntimeError | undefined> {
+  const file = Bun.file(path);
+  if (!(await file.exists())) return undefined;
+  const text = await file.text();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text) as import("./types").ScriptRuntimeError;
+  } catch {
+    return undefined;
+  }
+}
+
 async function writeBareImportShim(tmpdir: string, name: string, targetUrl: URL): Promise<void> {
   const dir = `${tmpdir}/node_modules/${name}`;
   await Bun.$`mkdir -p ${dir}`;
@@ -116,7 +130,7 @@ function harnessCommand(harnessPath: string, input: ExecutorInput): string[] {
   return [
     "sh",
     "-c",
-    `${ulimits}; exec env -i PATH="$PATH" HOME="$HOME" LANG="$LANG" LC_ALL="$LC_ALL" TMPDIR="$TMPDIR" SWARM_SCRIPT_TMPDIR="$SWARM_SCRIPT_TMPDIR" SWARM_SCRIPT_ARGS_FILE="$SWARM_SCRIPT_ARGS_FILE" SWARM_SCRIPT_SOURCE_FILE="$SWARM_SCRIPT_SOURCE_FILE" SWARM_SCRIPT_RESULT_FILE="$SWARM_SCRIPT_RESULT_FILE" bun run ${harness}`,
+    `${ulimits}; exec env -i PATH="$PATH" HOME="$HOME" LANG="$LANG" LC_ALL="$LC_ALL" TMPDIR="$TMPDIR" SWARM_SCRIPT_TMPDIR="$SWARM_SCRIPT_TMPDIR" SWARM_SCRIPT_ARGS_FILE="$SWARM_SCRIPT_ARGS_FILE" SWARM_SCRIPT_SOURCE_FILE="$SWARM_SCRIPT_SOURCE_FILE" SWARM_SCRIPT_RESULT_FILE="$SWARM_SCRIPT_RESULT_FILE" SWARM_SCRIPT_ERROR_FILE="$SWARM_SCRIPT_ERROR_FILE" bun run ${harness}`,
   ];
 }
 
@@ -135,6 +149,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
     const argsFile = `${tmpdir}/args.json`;
     const sourceFile = `${tmpdir}/source.ts`;
     const resultFile = `${tmpdir}/result.json`;
+    const errorFile = `${tmpdir}/error.json`;
     // In compiled binary mode, import.meta.url points into /$bunfs/ which spawned
     // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
     const harnessPath = process.env.SCRIPT_RUNTIME_DIR
@@ -185,6 +200,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
           SWARM_SCRIPT_ARGS_FILE: argsFile,
           SWARM_SCRIPT_SOURCE_FILE: sourceFile,
           SWARM_SCRIPT_RESULT_FILE: resultFile,
+          SWARM_SCRIPT_ERROR_FILE: errorFile,
         },
         cwd: tmpdir,
         stdin: "pipe",
@@ -203,6 +219,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
       ]).finally(() => clearTimeout(timeout));
 
       const result = exitCode === 0 ? await readResultFile(resultFile) : undefined;
+      const runtimeError = exitCode === 0 ? undefined : await readRuntimeError(errorFile);
       const error = classifyExit(exitCode, timedOut, killed);
 
       return {
@@ -213,6 +230,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
         durationMs: Date.now() - start,
         exitCode,
         ...(error ? { error } : {}),
+        ...(runtimeError ? { runtimeError } : {}),
       };
     } catch (error) {
       return {

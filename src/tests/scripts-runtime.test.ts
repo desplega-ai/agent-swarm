@@ -183,6 +183,7 @@ describe("runScript", () => {
         "LC_ALL",
         "PATH",
         "SWARM_SCRIPT_ARGS_FILE",
+        "SWARM_SCRIPT_ERROR_FILE",
         "SWARM_SCRIPT_RESULT_FILE",
         "SWARM_SCRIPT_SOURCE_FILE",
         "SWARM_SCRIPT_TMPDIR",
