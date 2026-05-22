@@ -277,7 +277,7 @@ Same-PR doc-update rule: update [docs-site/.../guides/cost-and-context-computati
 
 ## Related
 
-- [runbooks/](./runbooks/) — ci, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers
+- [runbooks/](./runbooks/) — ci, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference

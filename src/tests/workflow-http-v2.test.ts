@@ -22,6 +22,7 @@ import type {
   WorkflowEdge,
   WorkflowRun,
   WorkflowRunStep,
+  WorkflowSummary,
   WorkflowVersion,
 } from "../types";
 import { initWorkflows, stopRetryPoller } from "../workflows";
@@ -254,13 +255,26 @@ describe("Workflow HTTP API v2", () => {
   // ─── LIST ────────────────────────────────────────────────
 
   describe("GET /api/workflows (list)", () => {
-    test("returns all workflows with new fields", async () => {
+    test("returns slim workflows by default (no definition, has nodeCount)", async () => {
       const res = await fetch(`${baseUrl}/api/workflows`, { headers });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as WorkflowSummary[];
+      expect(Array.isArray(body)).toBe(true);
+      expect(body.length).toBeGreaterThan(0);
+      // Slim rows drop the heavy `definition`/`triggers` and carry `nodeCount`.
+      for (const wf of body) {
+        expect((wf as unknown as Workflow).definition).toBeUndefined();
+        expect((wf as unknown as Workflow).triggers).toBeUndefined();
+        expect(typeof wf.nodeCount).toBe("number");
+      }
+    });
+
+    test("?fields=full restores the full workflow shape", async () => {
+      const res = await fetch(`${baseUrl}/api/workflows?fields=full`, { headers });
       expect(res.status).toBe(200);
       const body = (await res.json()) as Workflow[];
       expect(Array.isArray(body)).toBe(true);
       expect(body.length).toBeGreaterThan(0);
-      // Each workflow should have the new fields
       for (const wf of body) {
         expect(Array.isArray(wf.triggers)).toBe(true);
         expect(wf.definition).toBeDefined();

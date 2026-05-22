@@ -9,7 +9,7 @@ export const registerListSchedulesTool = (server: McpServer) => {
     {
       title: "List Scheduled Tasks",
       description:
-        "View all scheduled tasks with optional filters. Use this to discover existing schedules.",
+        "View all scheduled tasks with optional filters. Use this to discover existing schedules. Rows are slim by default — the full `taskTemplate` is replaced with a short `taskTemplatePreview`; pass includeFull:true (or call `get-schedule` by id) for the full template.",
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({
@@ -24,6 +24,12 @@ export const registerListSchedulesTool = (server: McpServer) => {
           .default(true)
           .optional()
           .describe("Hide completed one-time schedules (default: true)"),
+        includeFull: z
+          .boolean()
+          .optional()
+          .describe(
+            "Return the full `taskTemplate` instead of a short `taskTemplatePreview`. Default false.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -36,7 +42,9 @@ export const registerListSchedulesTool = (server: McpServer) => {
             description: z.string().optional(),
             cronExpression: z.string().optional(),
             intervalMs: z.number().optional(),
-            taskTemplate: z.string(),
+            // Slim rows carry `taskTemplatePreview`; `includeFull` rows carry `taskTemplate`.
+            taskTemplate: z.string().optional(),
+            taskTemplatePreview: z.string().optional(),
             taskType: z.string().optional(),
             tags: z.array(z.string()),
             priority: z.number(),
@@ -54,7 +62,7 @@ export const registerListSchedulesTool = (server: McpServer) => {
         count: z.number(),
       }),
     },
-    async ({ enabled, name, scheduleType, hideCompleted }, requestInfo, _meta) => {
+    async ({ enabled, name, scheduleType, hideCompleted, includeFull }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
@@ -68,7 +76,10 @@ export const registerListSchedulesTool = (server: McpServer) => {
       }
 
       try {
-        const schedules = getScheduledTasks({ enabled, name, scheduleType, hideCompleted });
+        const filters = { enabled, name, scheduleType, hideCompleted };
+        const schedules = includeFull
+          ? getScheduledTasks(filters)
+          : getScheduledTasks(filters, { slim: true });
         const count = schedules.length;
         const statusSummary =
           count === 0 ? "No schedules found." : `Found ${count} schedule${count === 1 ? "" : "s"}.`;

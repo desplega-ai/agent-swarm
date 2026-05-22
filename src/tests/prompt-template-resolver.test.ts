@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getPromptTemplates, initDb, upsertPromptTemplate } from "../be/db";
-import { seedDefaultTemplates } from "../be/seed";
+import { seedDefaultTemplates } from "../be/seed-prompt-templates";
 import {
   clearTemplateDefinitions,
   getAllTemplateDefinitions,
