@@ -35,6 +35,16 @@ RUN mkdir -p scripts-runtime && \
 # these real-filesystem copies.
 RUN mkdir -p typescript-lib && cp node_modules/typescript/lib/lib.*.d.ts typescript-lib/
 
+# Stage the `zod` declaration files for script typecheck in compiled-binary mode.
+# `zod` is on the script import allowlist, but the compiled binary doesn't ship
+# node_modules — so the TypeScript compiler can't resolve `import { z } from "zod"`
+# without a real on-disk copy. Copy only the declaration files (mirrors the
+# typescript-lib step above) to keep the runtime image slim.
+RUN mkdir -p script-types/node_modules && cd node_modules && \
+    find zod \( -name '*.d.ts' -o -name '*.d.cts' -o -name 'package.json' \) -print0 \
+      | tar --null -cf - -T - \
+      | tar -xf - -C /build/script-types/node_modules
+
 # Compile HTTP server to standalone binary
 RUN bun build ./src/http.ts --compile --outfile ./agent-swarm-api
 
@@ -83,6 +93,11 @@ COPY --from=builder /build/scripts-runtime/ /app/scripts-runtime/
 # Copy TypeScript lib .d.ts files for script typecheck in compiled binary mode.
 COPY --from=builder /build/typescript-lib/ /app/typescript-lib/
 
+# Copy staged `zod` declaration files for script typecheck in compiled binary
+# mode. `zod` is on the script import allowlist; the compiled binary doesn't
+# ship node_modules, so the TypeScript compiler resolves it from here instead.
+COPY --from=builder /build/script-types/ /app/script-types/
+
 # Install archil CLI for FUSE/R2-backed disk mounts
 RUN curl https://s3.amazonaws.com/archil-client/install | sh
 
@@ -96,6 +111,7 @@ ENV MIGRATIONS_DIR=/app/migrations
 ENV SQLITE_VEC_EXTENSION_PATH=/app/extensions/vec0.so
 ENV SCRIPT_RUNTIME_DIR=/app/scripts-runtime
 ENV TS_LIB_DIR=/app/typescript-lib
+ENV SCRIPT_TYPES_DIR=/app/script-types
 
 VOLUME /app/data
 

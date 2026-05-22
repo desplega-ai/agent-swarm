@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { unlink } from "node:fs/promises";
+import { cp, mkdir, readdir, rm, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { closeDb, initDb } from "../be/db";
 import { getScript, listScripts, upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
@@ -140,5 +142,79 @@ describe("seed-scripts catalog", () => {
     // The user's edit survived — the seed did not clobber it.
     const row = getScript({ name: target.name, scope: "global" });
     expect(row?.source).toBe(userSource);
+  });
+});
+
+/**
+ * Regression guard for the production seeding failure: in the `bun build
+ * --compile` binary, `node_modules` is NOT shipped, so `typecheckScript` could
+ * not resolve `import { z } from "zod"` (TS2307) and every catalog script
+ * failed to seed. The Dockerfile now stages zod's declaration files under
+ * `SCRIPT_TYPES_DIR`; these tests prove resolution works from that staged copy
+ * alone — they deliberately do NOT rely on the repo's dev `node_modules`.
+ */
+describe("script typecheck resolves zod in compiled-binary mode", () => {
+  const ENV_KEY = "SCRIPT_TYPES_DIR";
+  const originalEnv = process.env[ENV_KEY];
+  const tmpDirs: string[] = [];
+
+  // Use the OS temp dir, NOT a path inside the repo: TypeScript's module
+  // resolution walks UP looking for `node_modules`, so a base dir under the
+  // repo would silently resolve zod from the repo's dev `node_modules` and mask
+  // the very gap these tests exist to catch.
+  async function makeTmpDir(): Promise<string> {
+    const dir = join(tmpdir(), `swarm-zod-types-${crypto.randomUUID()}`);
+    await mkdir(dir, { recursive: true });
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  // Mirror the Dockerfile builder step: stage ONLY zod's declaration files and
+  // package.json manifests into `<baseDir>/node_modules/zod`. If this slim set
+  // is insufficient, the typecheck below fails — exactly as production would.
+  async function stageSlimZod(baseDir: string): Promise<void> {
+    const src = "./node_modules/zod";
+    const dest = join(baseDir, "node_modules", "zod");
+    for (const rel of await readdir(src, { recursive: true })) {
+      const keep =
+        rel.endsWith(".d.ts") || rel.endsWith(".d.cts") || basename(rel) === "package.json";
+      if (!keep) continue;
+      const target = join(dest, rel);
+      await mkdir(dirname(target), { recursive: true });
+      await cp(join(src, rel), target);
+    }
+  }
+
+  afterAll(async () => {
+    if (originalEnv === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = originalEnv;
+    for (const dir of tmpDirs) await rm(dir, { recursive: true, force: true });
+  });
+
+  test("every catalog script typechecks against the staged (declaration-only) zod copy", async () => {
+    const base = await makeTmpDir();
+    await stageSlimZod(base);
+    process.env[ENV_KEY] = base;
+
+    const failures: string[] = [];
+    for (const s of SEED_SCRIPTS) {
+      const tc = typecheckScript(s.source);
+      if (!tc.ok) failures.push(`${s.name}: ${tc.diagnostics.join(" | ")}`);
+    }
+    expect(failures).toEqual([]);
+  });
+
+  test("typecheck fails when zod is not staged — the production gap, now guarded", async () => {
+    // An empty SCRIPT_TYPES_DIR simulates the compiled binary BEFORE this fix:
+    // no node_modules/zod on disk. The dev-node_modules fallback masked this in
+    // CI; pinning resolution to SCRIPT_TYPES_DIR makes the gap reproducible.
+    const empty = await makeTmpDir();
+    process.env[ENV_KEY] = empty;
+
+    const result = typecheckScript(SEED_SCRIPTS[0].source);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.diagnostics.join(" ")).toContain("TS2307");
+    }
   });
 });

@@ -94,6 +94,22 @@ const CHECK_FILE = "/virtual/check.ts";
 const SDK_FILE = "/virtual/swarm-sdk.d.ts";
 const STDLIB_FILE = "/virtual/stdlib.d.ts";
 
+/**
+ * Directory whose `node_modules` holds the type declarations for the bare
+ * imports on the script allowlist (today just `zod`).
+ *
+ * In dev this is the repo root — `node_modules/zod` exists, resolution just
+ * works. In the `bun build --compile` binary `node_modules` is NOT shipped, so
+ * the Dockerfile stages the zod declaration files under `SCRIPT_TYPES_DIR`
+ * (mirroring how `TS_LIB_DIR` stages the TypeScript libs). When that env var is
+ * set, resolve bare imports from there instead.
+ */
+function scriptTypesBase(): string {
+  const dir = process.env.SCRIPT_TYPES_DIR;
+  if (dir) return `${dir}/index.ts`;
+  return new URL("../../index.ts", import.meta.url).pathname;
+}
+
 function createCompilerHost(
   files: Map<string, string>,
   options: ts.CompilerOptions,
@@ -120,9 +136,9 @@ function createCompilerHost(
     return files.get(normalized) ?? ts.sys.readFile(fileName);
   };
 
-  // Resolve external packages (e.g. "zod") from the project root rather than
-  // the virtual path "/virtual/..." so TypeScript can find real node_modules.
-  const projectBase = new URL("../../index.ts", import.meta.url).pathname;
+  // Resolve external packages (e.g. "zod") from a real on-disk base rather than
+  // the virtual path "/virtual/..." so TypeScript can find a real node_modules.
+  const projectBase = scriptTypesBase();
 
   host.resolveModuleNames = (moduleNames, containingFile) =>
     moduleNames.map((moduleName) => {
