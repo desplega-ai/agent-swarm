@@ -6,7 +6,7 @@ tags: [plan, ui, navigation, sidebar, ia]
 status: in-progress
 related_brainstorm: thoughts/taras/brainstorms/2026-05-21-sidebar-trim-cleanup.md
 last_updated: 2026-05-22
-last_updated_by: claude (phase-running, phase 1)
+last_updated_by: claude (phase-running, phase 2)
 ---
 
 # Sidebar Trim & Cleanup — Implementation Plan
@@ -291,18 +291,18 @@ Dashboard implementations are preserved verbatim at `/old-home` and `/old-dashbo
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] `/` shows the welcome `<h1>` and a full-bleed `AgentCanvas` reaching the content-area edges
+- [x] `/` shows the welcome `<h1>` and a full-bleed `AgentCanvas` reaching the content-area edges
       (no card border, no 24px gutter around the canvas).
-- [ ] `/old-home` renders the original Home (WelcomeCard + SetupChecklist + …).
-- [ ] `/old-dashboard` renders the original Dashboard (Canvas/Table toggle + InboxPanel).
-- [ ] The Home sidebar item is present and links to `/`.
-- [ ] Non-Home routes still show the standard `p-4 md:p-6` content padding.
+- [x] `/old-home` renders the original Home (WelcomeCard + SetupChecklist + …).
+- [x] `/old-dashboard` renders the original Dashboard (Canvas/Table toggle + InboxPanel).
+- [x] The Home sidebar item is present and links to `/`.
+- [x] Non-Home routes still show the standard `p-4 md:p-6` content padding.
 
 #### Manual Verification:
 - [ ] Welcome copy reads naturally with and without a current-user name.

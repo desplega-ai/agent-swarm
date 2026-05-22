@@ -100,8 +100,6 @@ export function AppSidebar() {
   };
   const isGated = (item: NavItem) =>
     !!item.gate && gates[item.gate.minVersion]?.supported === false;
-  // 404 from /status (older API) → hide the Home nav item.
-  const homeAvailable = status !== null;
   const identityName = status?.identity.name ?? "Agent Swarm";
   const identityLogo = status?.identity.logo_url ?? "/logo.png";
   const brandColor = status?.identity.brand_color ?? null;
@@ -110,7 +108,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
         <NavLink
-          to={homeAvailable ? "/" : "/dashboard"}
+          to="/"
           className="flex h-10 items-center gap-2 group-data-[collapsible=icon]:justify-center"
         >
           <img
@@ -139,7 +137,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         {navGroups.map((group) => {
-          const items = homeAvailable ? group.items : group.items.filter((i) => i.path !== "/");
+          const items = group.items;
           if (items.length === 0) return null;
           return (
             <SidebarGroup key={group.id}>

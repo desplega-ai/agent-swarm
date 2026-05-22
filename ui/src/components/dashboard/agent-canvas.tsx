@@ -34,6 +34,12 @@ const nodeTypes = { agentNode: AgentNode };
 interface AgentCanvasProps {
   rows: AgentActivityRow[];
   className?: string;
+  /**
+   * Full-bleed variant — fills the parent's height with no border, radius, or
+   * card background. Requires a definite-height parent (see `UnifiedHome`).
+   * When false (default) the canvas renders as a clamped-height bordered card.
+   */
+  fullBleed?: boolean;
 }
 
 interface LayoutResult {
@@ -129,20 +135,19 @@ function buildLayout(rows: AgentActivityRow[]): LayoutResult {
   return { nodes, edges };
 }
 
-export function AgentCanvas({ rows, className }: AgentCanvasProps) {
+export function AgentCanvas({ rows, className, fullBleed }: AgentCanvasProps) {
   const { theme } = useTheme();
   const navigate = useNavigate();
 
   const { nodes, edges } = useMemo(() => buildLayout(rows), [rows]);
 
+  const sizeClasses = fullBleed
+    ? "h-full"
+    : "h-[clamp(280px,38vh,460px)] rounded-lg border bg-card";
+
   if (rows.length === 0) {
     return (
-      <div
-        className={cn(
-          "h-[clamp(280px,38vh,460px)] rounded-lg border bg-card flex items-center justify-center",
-          className,
-        )}
-      >
+      <div className={cn(sizeClasses, "flex items-center justify-center", className)}>
         <EmptyState
           icon={Bot}
           title="No agents connected"
@@ -153,7 +158,7 @@ export function AgentCanvas({ rows, className }: AgentCanvasProps) {
   }
 
   return (
-    <div className={cn("h-[clamp(280px,38vh,460px)] rounded-lg border bg-card", className)}>
+    <div className={cn(sizeClasses, className)}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
