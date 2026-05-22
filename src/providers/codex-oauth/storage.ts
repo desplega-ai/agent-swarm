@@ -6,7 +6,7 @@
  *
  * Multi-slot support: credentials are keyed as `codex_oauth_0`, `codex_oauth_1`,
  * etc. The legacy `codex_oauth` key is treated as slot 0 (read-only fallback)
- * until the 068 migration renames it.
+ * until the 071 migration renames it.
  */
 
 import { refreshAccessToken } from "./flow.js";
@@ -111,7 +111,7 @@ export async function loadCodexOAuth(
   let entry = data.configs?.find((c) => c.key === slotKey);
 
   // Backwards-compat: if slot 0 requested and no slot key found, check legacy key.
-  // Do NOT auto-migrate — the 068 migration handles that.
+  // Do NOT auto-migrate — the 071 migration handles that.
   if (!entry && slot === 0) {
     entry = data.configs?.find((c) => c.key === CODEX_OAUTH_KEY_LEGACY);
   }
