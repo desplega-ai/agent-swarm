@@ -68,7 +68,7 @@ Use a single `OTEL_SERVICE_NAME=agent-swarm` if you want one service with role t
 
 ### Filtering poll noise
 
-Worker long-polls run continuously and account for the majority of span volume in a steady-state deployment. To keep your observability backend focused on real work, Agent Swarm skips the `worker.poll` (worker side) and `/api/poll` `http.server` (API side) spans by default.
+Worker long-polls run continuously and account for the majority of span volume in a steady-state deployment. To keep your observability backend focused on real work, Agent Swarm skips the `worker.poll` (worker side) and the `/api/poll` request span (API side) by default.
 
 To opt in — useful when debugging queue or claim behavior — set on every API and worker process:
 
@@ -102,14 +102,20 @@ Sensitive exception messages, status messages, tool previews, and OTLP auth head
 
 ### API HTTP Requests
 
-Every API request is wrapped in an `http.server` span.
+Every API request is wrapped in a span named after its route, following the OpenTelemetry HTTP server semantic conventions: `{METHOD} {route-template}` — for example `GET /api/tasks/{id}` or `POST /api/tasks`.
+
+The route template is **low-cardinality**: a request to `/api/tasks/abc-123` and one to `/api/tasks/def-456` share the span name `GET /api/tasks/{id}`, so SigNoz can group and aggregate by endpoint without raw IDs fragmenting the data. Requests that don't match a registered route — core routes (`/health`, `/ping`, `/me`), the MCP transport, and 404s — fall back to `{METHOD} /{first-segment}` (e.g. `GET /health`, `POST /mcp`), or a bare `{METHOD}` for the root path. The full raw request path is always preserved on the `url.path` attribute.
+
+<Callout type="info">
+Earlier releases named every API request span `http.server`. If you have saved SigNoz queries or dashboards that filter on `name = 'http.server'`, switch them to filter on the `agentswarm.component = 'api'` attribute (set on every API span) and group by span `name` to get a per-endpoint breakdown.
+</Callout>
 
 Common attributes:
 
 | Attribute | Description |
 |-----------|-------------|
 | `http.request.method` | HTTP method |
-| `url.path` | Request path |
+| `url.path` | Raw request path (full path, including IDs) |
 | `responseStatusCode` | HTTP response status |
 | `agentswarm.component` | `api` |
 | `agentswarm.http.duration_ms` | Server-side request duration |
@@ -336,8 +342,8 @@ Agent Swarm currently emits traces, not standalone OTLP metrics. In SigNoz, crea
 
 | Metric | Query shape |
 |--------|-------------|
-| API request rate | `rate(count())` over `name = 'http.server'`, grouped by `url.path` |
-| API p95 latency | `p95(durationNano)` over `name = 'http.server'`, grouped by `url.path` |
+| API request rate | `rate(count())` over `agentswarm.component = 'api'`, grouped by span `name` |
+| API p95 latency | `p95(durationNano)` over `agentswarm.component = 'api'`, grouped by span `name` |
 | API errors | `count()` where `hasError = true` or `responseStatusCode >= 500` |
 | Worker task throughput | `count()` over `name = 'worker.session'`, grouped by `agentswarm.service.role` and `agentswarm.harness_provider` |
 | Worker session p95 duration | `p95(durationNano)` over `name = 'worker.session'` |
@@ -409,7 +415,7 @@ For HTTP 5xx responses:
 
 ```text
 service.name = 'agent-swarm'
-AND name = 'http.server'
+AND agentswarm.component = 'api'
 AND responseStatusCode >= 500
 ```
 
@@ -463,8 +469,8 @@ Start with these panels:
 
 | Panel | Signal |
 |-------|--------|
-| API request rate by route | Trace count over `http.server`, grouped by `url.path` |
-| API p95 latency by route | `p95(durationNano)` over `http.server`, grouped by `url.path` |
+| API request rate by route | Trace count over `agentswarm.component = 'api'`, grouped by span `name` |
+| API p95 latency by route | `p95(durationNano)` over `agentswarm.component = 'api'`, grouped by span `name` |
 | Worker sessions by harness | Trace count over `worker.session`, grouped by `agentswarm.harness_provider` |
 | Worker session duration | `p95(durationNano)` over `worker.session`, grouped by harness |
 | Tool calls by name | Trace count over tool spans, grouped by `agentswarm.tool.name` |
