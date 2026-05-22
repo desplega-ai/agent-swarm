@@ -9795,7 +9795,8 @@
     },
     "/api/tasks/{id}": {
       "get": {
-        "summary": "Get task details with logs",
+        "summary": "Get task details with logs and attachments",
+        "description": "Returns the full `AgentTask` row decorated with `logs` (capped by `logsLimit`) and `attachments` (pointer-based artifacts stored on the task, ordered by `created_at`).",
         "tags": [
           "Tasks"
         ],
@@ -9826,7 +9827,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Task with logs"
+            "description": "Task with logs and attachments"
           },
           "404": {
             "description": "Task not found"

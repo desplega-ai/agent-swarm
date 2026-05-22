@@ -10,6 +10,7 @@ import {
   getLeadAgent,
   getLogsByTaskId,
   getPausedTasksForAgent,
+  getTaskAttachments,
   getTaskById,
   getTasksCount,
   getUserById,
@@ -140,7 +141,9 @@ const getTask = route({
   method: "get",
   path: "/api/tasks/{id}",
   pattern: ["api", "tasks", null],
-  summary: "Get task details with logs",
+  summary: "Get task details with logs and attachments",
+  description:
+    "Returns the full `AgentTask` row decorated with `logs` (capped by `logsLimit`) and `attachments` (pointer-based artifacts stored on the task, ordered by `created_at`).",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   query: z.object({
@@ -148,7 +151,7 @@ const getTask = route({
     logsLimit: z.coerce.number().int().min(1).max(1000).optional(),
   }),
   responses: {
-    200: { description: "Task with logs" },
+    200: { description: "Task with logs and attachments" },
     404: { description: "Task not found" },
   },
 });
@@ -523,7 +526,8 @@ export async function handleTasks(
     }
 
     const logs = getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
-    json(res, { ...task, logs });
+    const attachments = getTaskAttachments(parsed.params.id);
+    json(res, { ...task, logs, attachments });
     return true;
   }
 

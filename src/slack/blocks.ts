@@ -5,7 +5,8 @@
  * across responses.ts, handlers.ts, thread-buffer.ts).
  */
 
-import { getAppUrl } from "../utils/constants";
+import type { TaskAttachment } from "../types";
+import { getAgentFsLiveUrl, getAppUrl } from "../utils/constants";
 
 // Slack limits section text to 3000 chars; we use 2900 for safety
 const MAX_SECTION_LENGTH = 2900;
@@ -127,6 +128,59 @@ function cancelActionBlock(taskId: string): SlackBlock {
 
 // --- Utilities ---
 
+// Mirrors the `store-progress` input cap so a misbehaving agent can't fill
+// the Slack card with hundreds of lines.
+const SLACK_ATTACHMENTS_MAX = 20;
+
+/**
+ * Resolve an attachment to a Slack-friendly display string — a plain URL
+ * when one can be derived, otherwise a `<kind>:<pointer>` fallback. We use
+ * *plain* URLs (no `<URL|text>` mrkdwn shortcut) because Slack auto-unfurls
+ * them and the shortcut form has historically triggered `invalid_blocks`.
+ *
+ * `agent-fs` attachments currently fall back to the raw `agent-fs:<path>`
+ * form: the attachment row stores only `path`, not the agent-fs `<org_id>/
+ * <drive_id>` needed to build a public live-host URL. Phase 2b can resolve
+ * these properly once we add an org/drive lookup; the spec explicitly
+ * permits the raw-path fallback here.
+ */
+function resolveAttachmentDisplay(a: TaskAttachment): string {
+  switch (a.kind) {
+    case "url":
+      return a.url ?? "";
+    case "page":
+      return a.pageId ? `${getAppUrl()}/pages/${a.pageId}` : "page:";
+    case "agent-fs":
+      // TODO(phase-2b): once org_id / drive_id are stored on attachments,
+      // resolve to `${getAgentFsLiveUrl()}/file/~/<org_id>/<drive_id>/<path>`.
+      void getAgentFsLiveUrl;
+      return `agent-fs:${a.path ?? ""}`;
+    case "shared-fs":
+      return `shared-fs:${a.path ?? ""}`;
+  }
+}
+
+/**
+ * Build a compact "Attachments (N):" block in Slack mrkdwn for the completion
+ * card. Returns empty string when there are no attachments so callers can
+ * blindly concat without worrying about a stray label.
+ *
+ * Per-line format: `• <name> — _<intent>_ — <plain URL>` where the italic
+ * descriptor falls back to `description` and is omitted when both are empty.
+ */
+export function formatAttachmentsBlockForSlack(attachments: TaskAttachment[]): string {
+  if (attachments.length === 0) return "";
+  const capped = attachments.slice(0, SLACK_ATTACHMENTS_MAX);
+  const lines = capped.map((a) => {
+    const descriptor = a.intent || a.description;
+    const middle = descriptor ? ` — _${descriptor}_` : "";
+    const display = resolveAttachmentDisplay(a);
+    const tail = display ? ` — ${display}` : "";
+    return `• *${a.name}*${middle}${tail}`;
+  });
+  return `\n\n*Attachments (${attachments.length}):*\n${lines.join("\n")}`;
+}
+
 /**
  * Format a duration between two dates in a compact human-readable form.
  * Examples: "45s", "2m 14s", "1h 30m"
@@ -169,6 +223,11 @@ export function buildCompletedBlocks(opts: {
   body: string;
   duration?: string;
   minimal?: boolean; // true = suppress body (agent already replied via slack-reply)
+  /**
+   * Optional trailer rendered even when `minimal` is true. Used for the
+   * attachments block so links survive on the compact completion card.
+   */
+  trailer?: string;
 }): SlackBlock[] {
   const taskLink = getTaskLink(opts.taskId);
   let line = `✅ *${opts.agentName}* (${taskLink})`;
@@ -179,6 +238,10 @@ export function buildCompletedBlocks(opts: {
   // Only include body if not minimal (agent didn't reply via slack-reply)
   if (!opts.minimal) {
     for (const chunk of splitText(opts.body)) {
+      blocks.push(sectionBlock(chunk));
+    }
+  } else if (opts.trailer && opts.trailer.length > 0) {
+    for (const chunk of splitText(opts.trailer)) {
       blocks.push(sectionBlock(chunk));
     }
   }
