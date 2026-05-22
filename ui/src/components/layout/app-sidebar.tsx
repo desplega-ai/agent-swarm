@@ -1,28 +1,21 @@
 import {
-  BarChart3,
   BookOpen,
   Brain,
-  Bug,
   Cable,
   ClipboardCheck,
   Clock,
   Contact,
   FileText,
-  GitBranch,
   Globe,
   Home,
-  Key,
-  LayoutDashboard,
   ListTodo,
   MessageSquare,
-  Plug,
-  Settings,
   Users,
-  Wallet,
   Workflow,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import type { UserRole } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import {
@@ -46,53 +39,51 @@ interface NavItem {
   icon: typeof Home;
   /** When set, item is shown as disabled with this tooltip when condition fails. */
   gate?: { minVersion: string };
+  /**
+   * Declarative minimum role required to see this item. Purely a type-level
+   * annotation for future RBAC — render logic does NOT consult it today, so
+   * every item stays visible to everyone. See plan Phase 1 / Appendix.
+   */
+  minRole?: UserRole;
 }
 
-const navGroups: { label: string; items: NavItem[] }[] = [
+interface NavGroup {
+  /** Stable identifier — used to build the localStorage collapse-state key. */
+  id: string;
+  label: string;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
   {
-    label: "Core",
+    id: "work",
+    label: "WORK",
     items: [
       { title: "Home", path: "/", icon: Home },
-      { title: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
-      { title: "Agents", path: "/agents", icon: Users },
-      { title: "Sessions", path: "/sessions", icon: MessageSquare, gate: { minVersion: "1.76.0" } },
       { title: "Tasks", path: "/tasks", icon: ListTodo },
-      { title: "People", path: "/people", icon: Contact, gate: { minVersion: "1.80.0" } },
+      { title: "Sessions", path: "/sessions", icon: MessageSquare, gate: { minVersion: "1.76.0" } },
+      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
     ],
   },
   {
-    label: "AI",
+    id: "swarm",
+    label: "SWARM",
+    items: [
+      { title: "Agents", path: "/agents", icon: Users },
+      { title: "People", path: "/people", icon: Contact, gate: { minVersion: "1.80.0" } },
+      { title: "Workflows", path: "/workflows", icon: Workflow },
+      { title: "Schedules", path: "/schedules", icon: Clock },
+    ],
+  },
+  {
+    id: "resources",
+    label: "RESOURCES",
     items: [
       { title: "Skills", path: "/skills", icon: BookOpen },
       { title: "MCP Servers", path: "/mcp-servers", icon: Cable },
       { title: "Memory", path: "/memory", icon: Brain },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      { title: "Schedules", path: "/schedules", icon: Clock },
-      { title: "Workflows", path: "/workflows", icon: Workflow },
       { title: "Pages", path: "/pages", icon: Globe, gate: { minVersion: "1.79.0" } },
-      { title: "Usage", path: "/usage", icon: BarChart3 },
-      { title: "Budgets", path: "/budgets", icon: Wallet },
-    ],
-  },
-  {
-    label: "Configuration",
-    items: [
-      { title: "Integrations", path: "/integrations", icon: Plug },
       { title: "Templates", path: "/templates", icon: FileText },
-      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
-      { title: "Repos", path: "/repos", icon: GitBranch },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { title: "Config", path: "/config", icon: Settings },
-      { title: "API Keys", path: "/keys", icon: Key },
-      { title: "Debug", path: "/debug", icon: Bug },
     ],
   },
 ];
@@ -151,12 +142,16 @@ export function AppSidebar() {
           const items = homeAvailable ? group.items : group.items.filter((i) => i.path !== "/");
           if (items.length === 0) return null;
           return (
-            <SidebarGroup key={group.label}>
+            <SidebarGroup key={group.id}>
               {/* Section title is hidden in icon-collapsed mode — the items
                   themselves stay so you still get the navigation, just
-                  without the truncated "COR / AI / OPE…" labels. */}
+                  without the truncated "WOR / SWA / RES…" labels. */}
               <div className="group-data-[collapsible=icon]:hidden">
-                <CollapsibleSection title={group.label} defaultOpen>
+                <CollapsibleSection
+                  title={group.label}
+                  defaultOpen
+                  persistKey={`agent-swarm:sidebar-group:${group.id}`}
+                >
                   <SidebarGroupContent>
                     <SidebarMenu>
                       {items.map((item) => {

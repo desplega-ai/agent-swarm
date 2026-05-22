@@ -3,10 +3,10 @@ date: 2026-05-22T00:00:00Z
 topic: "Sidebar Trim & Cleanup — Implementation Plan"
 author: taras
 tags: [plan, ui, navigation, sidebar, ia]
-status: draft
+status: in-progress
 related_brainstorm: thoughts/taras/brainstorms/2026-05-21-sidebar-trim-cleanup.md
 last_updated: 2026-05-22
-last_updated_by: taras
+last_updated_by: claude (phase-running, phase 1)
 ---
 
 # Sidebar Trim & Cleanup — Implementation Plan
@@ -204,19 +204,19 @@ state survives reload via `localStorage`, and `NavItem` gains a declarative `min
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] Sidebar shows exactly 3 group headers (WORK, SWARM, RESOURCES) and 13 items total (against
+- [x] Sidebar shows exactly 3 group headers (WORK, SWARM, RESOURCES) and 13 items total (against
       a current API server — items behind unmet version gates are still dropped).
-- [ ] Config / API Keys / Integrations / Repos / Debug / Dashboard / Usage / Budgets are **absent**
+- [x] Config / API Keys / Integrations / Repos / Debug / Dashboard / Usage / Budgets are **absent**
       from the sidebar.
-- [ ] Collapsing the SWARM group, then reloading the page, leaves SWARM still collapsed
+- [x] Collapsing the SWARM group, then reloading the page, leaves SWARM still collapsed
       (verify `localStorage` key `agent-swarm:sidebar-group:swarm` is written).
-- [ ] Each of the 13 items navigates to a non-404 route.
+- [x] Each of the 13 items navigates to a non-404 route.
 
 #### Manual Verification:
 - [ ] Group ordering and labels read correctly; icon choices look right.
