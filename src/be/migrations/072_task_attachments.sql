@@ -28,7 +28,11 @@ CREATE TABLE task_attachments (
   intent       TEXT,                          -- WHY this attachment exists
   description  TEXT,                          -- optional: what it is
   is_primary   INTEGER NOT NULL DEFAULT 0,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  -- ISO-8601 UTC (T separator, trailing Z) so rows satisfy the
+  -- `z.iso.datetime()` shape on `TaskAttachmentSchema.createdAt`. Plain
+  -- `datetime('now')` yields a space-separated, Z-less string that fails
+  -- that validator. Matches the `session_costs` insert convention.
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE INDEX idx_task_attachments_task ON task_attachments(task_id);
 CREATE INDEX idx_task_attachments_sha  ON task_attachments(sha256) WHERE sha256 IS NOT NULL;

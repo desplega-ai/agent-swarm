@@ -9,7 +9,7 @@ import {
   initDb,
   insertTaskAttachment,
 } from "../be/db";
-import { AttachmentInputSchema } from "../types";
+import { AttachmentInputSchema, TaskAttachmentSchema } from "../types";
 
 const TEST_DB_PATH = "./test-store-progress-attachments.sqlite";
 
@@ -253,5 +253,60 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
 
     getDb().run("DELETE FROM agent_tasks WHERE id = ?", [task.id]);
     expect(getTaskAttachments(task.id).length).toBe(0);
+  });
+
+  // Regression: created_at must be ISO-8601 UTC so a stored row round-trips
+  // through `TaskAttachmentSchema` — that schema is `get-task-details`'s
+  // declared outputSchema. A plain `datetime('now')` default (space
+  // separator, no trailing Z) fails `z.iso.datetime()` and made the tool
+  // return rows that violate its own contract.
+  test("stored rows satisfy TaskAttachmentSchema end-to-end (insert -> read -> parse)", () => {
+    const task = newTask("schema round-trip");
+
+    // The row RETURNING from the insert helper must already parse.
+    const inserted = insertTaskAttachment({
+      taskId: task.id,
+      agentId,
+      name: "report.pdf",
+      kind: "agent-fs",
+      path: "/thoughts/report.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 2048,
+      sha256: "roundtrip-sha",
+      intent: "deliverable for Taras",
+      description: "the final report",
+      isPrimary: true,
+    });
+    const insertParse = TaskAttachmentSchema.safeParse(inserted);
+    expect(insertParse.success).toBe(true);
+
+    // And the row read back via getTaskAttachments must parse too.
+    const rows = getTaskAttachments(task.id);
+    expect(rows.length).toBe(1);
+    for (const row of rows) {
+      const parsed = TaskAttachmentSchema.safeParse(row);
+      if (!parsed.success) {
+        throw new Error(
+          `TaskAttachmentSchema rejected a stored row: ${JSON.stringify(parsed.error.issues)}`,
+        );
+      }
+    }
+
+    // created_at must be ISO-8601 UTC: T separator + trailing Z.
+    expect(rows[0].createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+  });
+
+  test("created_at parses with a minimal-fields attachment too", () => {
+    const task = newTask("schema round-trip minimal");
+    insertTaskAttachment({
+      taskId: task.id,
+      agentId: null,
+      name: "x.txt",
+      kind: "url",
+      url: "https://example.com/x",
+    });
+    const rows = getTaskAttachments(task.id);
+    expect(rows.length).toBe(1);
+    expect(TaskAttachmentSchema.safeParse(rows[0]).success).toBe(true);
   });
 });
