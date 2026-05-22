@@ -435,7 +435,7 @@ When a worker starts, it:
 |----------|-------------|---------|
 | `PORT` | Port for MCP HTTP server | `3013` |
 | `API_KEY` | API key for server authentication | - |
-| `MCP_BASE_URL` | Base URL (for setup command) | `https://agent-swarm-mcp.desplega.sh` |
+| `MCP_BASE_URL` | Base URL (for setup command) | `https://api.desplega.agent-swarm.dev` |
 | `SWARM_URL` | Base domain for service discovery | `localhost` |
 | `APP_URL` | Dashboard URL for Slack message links | - |
 | `ENV` | Environment mode (`development` adds prefix to Slack agent names) | - |
