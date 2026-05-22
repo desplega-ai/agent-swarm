@@ -15,6 +15,7 @@ import type {
   AgentTask,
   AgentTaskSource,
   AgentTaskStatus,
+  AgentTaskSummary,
   AgentWithTasks,
   Budget,
   BudgetRefusalCause,
@@ -44,6 +45,7 @@ import type {
   PageAuthMode,
   PageContentType,
   PageSnapshot,
+  PageSummary,
   PageVersion,
   PricingProvider,
   PricingRow,
@@ -53,6 +55,7 @@ import type {
   ProviderName,
   RepoGuidelines,
   ScheduledTask,
+  ScheduledTaskSummary,
   Service,
   ServiceStatus,
   SessionCost,
@@ -80,6 +83,7 @@ import type {
   WorkflowRunStep,
   WorkflowRunStepStatus,
   WorkflowSnapshot,
+  WorkflowSummary,
   WorkflowVersion,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
@@ -87,7 +91,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
-import { seedDefaultTemplates } from "./seed";
+import { seedDefaultTemplates } from "./seed-prompt-templates";
 import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 
 let db: Database | null = null;
@@ -128,6 +132,10 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA busy_timeout = 5000;");
   database.run("PRAGMA foreign_keys = ON;");
+  database.run("PRAGMA synchronous = NORMAL;");
+  database.run("PRAGMA cache_size = -64000;");
+  database.run("PRAGMA mmap_size = 268435456;");
+  database.run("PRAGMA temp_store = MEMORY;");
 
   // Load sqlite-vec extension for vector search.
   // In compiled binaries (`bun build --compile`) the JS lives in /$bunfs/ and
@@ -575,8 +583,15 @@ type AgentRow = {
   cred_status: string | null;
 };
 
-function rowToAgent(row: AgentRow): Agent {
-  return {
+/**
+ * Map an agent row to the `Agent` shape. When `slim` is true the six identity
+ * markdown blobs (`claudeMd`/`soulMd`/`identityMd`/`toolsMd`/`heartbeatMd`/
+ * `setupScript`) are omitted — they bloat list responses by ~16 KB/agent and
+ * are never needed at the swarm-overview level. Fetch them via
+ * `GET /api/agents/{id}` when required.
+ */
+function rowToAgent(row: AgentRow, slim = false): Agent {
+  const base: Agent = {
     id: row.id,
     name: row.name,
     isLead: row.isLead === 1,
@@ -586,12 +601,6 @@ function rowToAgent(row: AgentRow): Agent {
     capabilities: row.capabilities ? JSON.parse(row.capabilities) : [],
     maxTasks: row.maxTasks ?? 1,
     emptyPollCount: row.emptyPollCount ?? 0,
-    claudeMd: row.claudeMd ?? undefined,
-    soulMd: row.soulMd ?? undefined,
-    identityMd: row.identityMd ?? undefined,
-    setupScript: row.setupScript ?? undefined,
-    toolsMd: row.toolsMd ?? undefined,
-    heartbeatMd: row.heartbeatMd ?? undefined,
     lastActivityAt: row.lastActivityAt ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
     harnessProvider: (row.harness_provider as ProviderName | null) ?? null,
@@ -601,6 +610,16 @@ function rowToAgent(row: AgentRow): Agent {
       ? (JSON.parse(row.credentialMissing) as string[])
       : null,
     credStatus: row.cred_status ? (JSON.parse(row.cred_status) as AgentCredStatus) : null,
+  };
+  if (slim) return base;
+  return {
+    ...base,
+    claudeMd: row.claudeMd ?? undefined,
+    soulMd: row.soulMd ?? undefined,
+    identityMd: row.identityMd ?? undefined,
+    setupScript: row.setupScript ?? undefined,
+    toolsMd: row.toolsMd ?? undefined,
+    heartbeatMd: row.heartbeatMd ?? undefined,
   };
 }
 
@@ -680,8 +699,11 @@ export function getAgentById(id: string): Agent | null {
   return row ? rowToAgent(row) : null;
 }
 
-export function getAllAgents(): Agent[] {
-  return agentQueries.getAll().all().map(rowToAgent);
+export function getAllAgents(opts?: { slim?: boolean }): Agent[] {
+  return agentQueries
+    .getAll()
+    .all()
+    .map((row) => rowToAgent(row, opts?.slim ?? false));
 }
 
 export function getLeadAgent(): Agent | null {
@@ -778,7 +800,7 @@ export function listAgentsWithCredStatusByProvider(provider: string): Agent[] {
   const rows = getDb()
     .prepare<AgentRow, [string]>(`SELECT * FROM agents WHERE harness_provider = ? ORDER BY name`)
     .all(provider);
-  return rows.map(rowToAgent);
+  return rows.map((row) => rowToAgent(row));
 }
 
 /**
@@ -1055,6 +1077,41 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
   };
 }
 
+/**
+ * Slim list-row mapper — truncates the `task` text to a bounded preview and
+ * drops completion/integration/context blobs (`output`, `failureReason`,
+ * `providerMeta`, all `vcs*`/`slack*`/`agentmail*`/`credential*`/`mention*` and
+ * context-window fields). The preview is long enough for pool-triage; the full
+ * brief is on `get-task-details` / `GET /api/tasks/{id}`.
+ */
+function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
+  const t = rowToAgentTask(row);
+  return {
+    id: t.id,
+    agentId: t.agentId,
+    creatorAgentId: t.creatorAgentId,
+    task: previewText(t.task, TASK_PREVIEW_LENGTH),
+    status: t.status,
+    source: t.source,
+    taskType: t.taskType,
+    tags: t.tags,
+    priority: t.priority,
+    dependsOn: t.dependsOn,
+    offeredTo: t.offeredTo,
+    acceptedAt: t.acceptedAt,
+    parentTaskId: t.parentTaskId,
+    scheduleId: t.scheduleId,
+    model: t.model,
+    provider: t.provider,
+    requestedByUserId: t.requestedByUserId,
+    progress: t.progress,
+    createdAt: t.createdAt,
+    lastUpdatedAt: t.lastUpdatedAt,
+    finishedAt: t.finishedAt,
+    peakContextPercent: t.peakContextPercent,
+  };
+}
+
 export const taskQueries = {
   insert: () =>
     getDb().prepare<
@@ -1224,7 +1281,7 @@ export function markTaskSlackReplySent(taskId: string): void {
 export function getChildTasks(parentTaskId: string): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks WHERE parentTaskId = ? ORDER BY createdAt ASC`,
+      `SELECT * FROM agent_tasks WHERE parentTaskId = ? ORDER BY createdAt ASC, rowid ASC`,
     )
     .all(parentTaskId)
     .map(rowToAgentTask);
@@ -1348,7 +1405,15 @@ export interface TaskFilters {
   includeHeartbeat?: boolean;
 }
 
-export function getAllTasks(filters?: TaskFilters): AgentTask[] {
+export function getAllTasks(filters?: TaskFilters): AgentTask[];
+export function getAllTasks(
+  filters: TaskFilters | undefined,
+  opts: { slim: true },
+): AgentTaskSummary[];
+export function getAllTasks(
+  filters?: TaskFilters,
+  opts?: { slim?: boolean },
+): AgentTask[] | AgentTaskSummary[] {
   const conditions: string[] = [];
   const params: (string | AgentTaskStatus)[] = [];
 
@@ -1433,19 +1498,25 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   const offset = filters?.offset ?? 0;
   const query = `SELECT * FROM agent_tasks ${whereClause} ORDER BY lastUpdatedAt DESC, priority DESC LIMIT ${limit} OFFSET ${offset}`;
 
-  let tasks = getDb()
+  const rows = getDb()
     .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(query)
-    .all(...params)
-    .map(rowToAgentTask);
+    .all(...params);
 
-  // Filter for ready tasks (dependencies met) if requested
-  if (filters?.readyOnly) {
-    tasks = tasks.filter((task) => {
-      if (!task.dependsOn || task.dependsOn.length === 0) return true;
-      return checkDependencies(task.id).ready;
-    });
+  // Filter for ready tasks (dependencies met) if requested. Both the full and
+  // the slim row shapes carry `id` + `dependsOn`, so the same predicate works.
+  const isReady = (task: { id: string; dependsOn: string[] }): boolean => {
+    if (!task.dependsOn || task.dependsOn.length === 0) return true;
+    return checkDependencies(task.id).ready;
+  };
+
+  if (opts?.slim) {
+    let tasks = rows.map(rowToAgentTaskSummary);
+    if (filters?.readyOnly) tasks = tasks.filter(isReady);
+    return tasks;
   }
 
+  let tasks = rows.map(rowToAgentTask);
+  if (filters?.readyOnly) tasks = tasks.filter(isReady);
   return tasks;
 }
 
@@ -2000,7 +2071,7 @@ export function getPausedTasksForAgent(agentId: string): AgentTask[] {
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks
        WHERE agentId = ? AND status = 'paused'
-       ORDER BY createdAt ASC`,
+       ORDER BY createdAt ASC, rowid ASC`,
     )
     .all(agentId);
   return rows.map(rowToAgentTask);
@@ -2070,9 +2141,9 @@ export function getAgentWithTasks(id: string): AgentWithTasks | null {
   return txn();
 }
 
-export function getAllAgentsWithTasks(): AgentWithTasks[] {
+export function getAllAgentsWithTasks(opts?: { slim?: boolean }): AgentWithTasks[] {
   const txn = getDb().transaction(() => {
-    const agents = getAllAgents();
+    const agents = getAllAgents({ slim: opts?.slim ?? false });
     return agents.map((agent) => ({
       ...agent,
       tasks: getTasksByAgentId(agent.id),
@@ -2166,8 +2237,13 @@ export function getLogsByAgentId(agentId: string): AgentLog[] {
   return logQueries.getByAgentId().all(agentId).map(rowToAgentLog);
 }
 
-export function getLogsByTaskId(taskId: string): AgentLog[] {
-  return logQueries.getByTaskId().all(taskId).map(rowToAgentLog);
+export function getLogsByTaskId(taskId: string, limit = 200): AgentLog[] {
+  return getDb()
+    .prepare<AgentLogRow, [string, number]>(
+      "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
+    )
+    .all(taskId, limit)
+    .map(rowToAgentLog);
 }
 
 export function getLogsByTaskIdChronological(taskId: string): AgentLog[] {
@@ -2629,7 +2705,7 @@ export function releaseStaleReviewingTasks(timeoutMinutes: number = 30): number 
 export function getOfferedTasksForAgent(agentId: string): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, [string]>(
-      "SELECT * FROM agent_tasks WHERE offeredTo = ? AND status = 'offered' ORDER BY createdAt ASC",
+      "SELECT * FROM agent_tasks WHERE offeredTo = ? AND status = 'offered' ORDER BY createdAt ASC, rowid ASC",
     )
     .all(agentId)
     .map(rowToAgentTask);
@@ -2682,7 +2758,7 @@ export function getUnassignedTasksCount(): number {
 export function getUnassignedTaskIds(limit = 10): string[] {
   const rows = getDb()
     .prepare<{ id: string }, [number]>(
-      "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC LIMIT ?",
+      "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ?",
     )
     .all(limit);
   return rows.map((r) => r.id);
@@ -4477,6 +4553,21 @@ type ScheduledTaskRow = {
   lastUpdatedAt: string;
 };
 
+// ── List-endpoint slimming helpers ──────────────────────────────────────────
+// List endpoints ship slim rows by default; heavy text fields are replaced
+// with bounded previews. Lengths are generous enough for triage/recognition
+// while keeping list payloads small.
+/** Preview length for a schedule's `taskTemplate`. */
+const SCHEDULE_TEMPLATE_PREVIEW_LENGTH = 280;
+/** Preview length for a task's `task` text (pool-triage needs to read it). */
+const TASK_PREVIEW_LENGTH = 300;
+
+/** Truncate text for a list-row preview. Appends an ellipsis when clipped. */
+function previewText(text: string | null | undefined, maxChars: number): string {
+  const s = text ?? "";
+  return s.length > maxChars ? `${s.slice(0, maxChars)}…` : s;
+}
+
 function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
   return {
     id: row.id,
@@ -4511,7 +4602,28 @@ export interface ScheduledTaskFilters {
   hideCompleted?: boolean;
 }
 
-export function getScheduledTasks(filters?: ScheduledTaskFilters): ScheduledTask[] {
+/**
+ * Slim list-row mapper — replaces the full `taskTemplate` (the per-run prompt,
+ * avg ~3.6 KB) with a bounded `taskTemplatePreview`. Fetch the full template
+ * via `getScheduledTaskById(id)`.
+ */
+function rowToScheduledTaskSummary(row: ScheduledTaskRow): ScheduledTaskSummary {
+  const { taskTemplate, ...rest } = rowToScheduledTask(row);
+  return {
+    ...rest,
+    taskTemplatePreview: previewText(taskTemplate, SCHEDULE_TEMPLATE_PREVIEW_LENGTH),
+  };
+}
+
+export function getScheduledTasks(filters?: ScheduledTaskFilters): ScheduledTask[];
+export function getScheduledTasks(
+  filters: ScheduledTaskFilters | undefined,
+  opts: { slim: true },
+): ScheduledTaskSummary[];
+export function getScheduledTasks(
+  filters?: ScheduledTaskFilters,
+  opts?: { slim?: boolean },
+): ScheduledTask[] | ScheduledTaskSummary[] {
   let query = "SELECT * FROM scheduled_tasks WHERE 1=1";
   const params: (string | number)[] = [];
 
@@ -4536,10 +4648,10 @@ export function getScheduledTasks(filters?: ScheduledTaskFilters): ScheduledTask
 
   query += " ORDER BY name ASC";
 
-  return getDb()
+  const rows = getDb()
     .prepare<ScheduledTaskRow, (string | number)[]>(query)
-    .all(...params)
-    .map(rowToScheduledTask);
+    .all(...params);
+  return opts?.slim ? rows.map(rowToScheduledTaskSummary) : rows.map(rowToScheduledTask);
 }
 
 export function getScheduledTaskById(id: string): ScheduledTask | null {
@@ -5580,7 +5692,7 @@ export function getIdleWorkersWithCapacity(): Agent[] {
        WHERE status = 'idle' AND isLead = 0`,
     )
     .all()
-    .map(rowToAgent);
+    .map((row) => rowToAgent(row));
 
   return agents.filter((agent) => {
     const activeCount = getActiveTaskCount(agent.id);
@@ -5739,7 +5851,43 @@ export function getWorkflow(id: string): Workflow | null {
   return row ? rowToWorkflow(row) : null;
 }
 
-export function listWorkflows(filters?: { enabled?: boolean }): Workflow[] {
+/**
+ * Slim list-row mapper — drops the heavy `definition` (avg ~18 KB/row) and the
+ * trigger config, keeping a derived `nodeCount` so the list view can still
+ * answer "how big is this workflow" without the full DAG. Fetch the full shape
+ * via `getWorkflow(id)`.
+ */
+function rowToWorkflowSummary(row: WorkflowRow): WorkflowSummary {
+  let nodeCount = 0;
+  try {
+    const def = JSON.parse(row.definition) as WorkflowDefinition;
+    nodeCount = Array.isArray(def?.nodes) ? def.nodes.length : 0;
+  } catch {
+    nodeCount = 0;
+  }
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? undefined,
+    enabled: row.enabled === 1,
+    dir: row.dir ?? undefined,
+    vcsRepo: row.vcs_repo ?? undefined,
+    createdByAgentId: row.createdByAgentId ?? undefined,
+    createdAt: normalizeDateRequired(row.createdAt),
+    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
+    nodeCount,
+  };
+}
+
+export function listWorkflows(filters?: { enabled?: boolean }): Workflow[];
+export function listWorkflows(
+  filters: { enabled?: boolean } | undefined,
+  opts: { slim: true },
+): WorkflowSummary[];
+export function listWorkflows(
+  filters?: { enabled?: boolean },
+  opts?: { slim?: boolean },
+): Workflow[] | WorkflowSummary[] {
   let query = "SELECT * FROM workflows WHERE 1=1";
   const params: (string | number)[] = [];
   if (filters?.enabled !== undefined) {
@@ -5747,10 +5895,10 @@ export function listWorkflows(filters?: { enabled?: boolean }): Workflow[] {
     params.push(filters.enabled ? 1 : 0);
   }
   query += " ORDER BY name ASC";
-  return getDb()
+  const rows = getDb()
     .prepare<WorkflowRow, (string | number)[]>(query)
-    .all(...params)
-    .map(rowToWorkflow);
+    .all(...params);
+  return opts?.slim ? rows.map(rowToWorkflowSummary) : rows.map(rowToWorkflow);
 }
 
 export function updateWorkflow(
@@ -6378,22 +6526,67 @@ export function getPageBySlug(agentId: string, slug: string): Page | null {
   return row ? rowToPage(row) : null;
 }
 
-export function listPagesByAgent(agentId: string, limit = 100, offset = 0): Page[] {
-  return getDb()
+/**
+ * Slim list-row mapper — drops the page `body` (the full HTML/JSON document,
+ * up to ~290 KB and ~95% of a list payload) and `passwordHash`. Fetch the
+ * full page via `getPage(id)`.
+ */
+function rowToPageSummary(row: PageRow): PageSummary {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    slug: row.slug,
+    title: row.title,
+    description: row.description ?? undefined,
+    contentType: row.contentType as PageContentType,
+    authMode: row.authMode as PageAuthMode,
+    needsCredentials: row.needsCredentials
+      ? (JSON.parse(row.needsCredentials) as string[])
+      : undefined,
+    viewCount: typeof row.view_count === "number" ? row.view_count : 0,
+    createdAt: normalizeDateRequired(row.createdAt),
+    updatedAt: normalizeDateRequired(row.updatedAt),
+  };
+}
+
+export function listPagesByAgent(agentId: string, limit?: number, offset?: number): Page[];
+export function listPagesByAgent(
+  agentId: string,
+  limit: number | undefined,
+  offset: number | undefined,
+  opts: { slim: true },
+): PageSummary[];
+export function listPagesByAgent(
+  agentId: string,
+  limit = 100,
+  offset = 0,
+  opts?: { slim?: boolean },
+): Page[] | PageSummary[] {
+  const rows = getDb()
     .prepare<PageRow, [string, number, number]>(
       "SELECT * FROM pages WHERE agentId = ? ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
     )
-    .all(agentId, limit, offset)
-    .map(rowToPage);
+    .all(agentId, limit, offset);
+  return opts?.slim ? rows.map(rowToPageSummary) : rows.map(rowToPage);
 }
 
-export function listAllPages(limit = 100, offset = 0): Page[] {
-  return getDb()
+export function listAllPages(limit?: number, offset?: number): Page[];
+export function listAllPages(
+  limit: number | undefined,
+  offset: number | undefined,
+  opts: { slim: true },
+): PageSummary[];
+export function listAllPages(
+  limit = 100,
+  offset = 0,
+  opts?: { slim?: boolean },
+): Page[] | PageSummary[] {
+  const rows = getDb()
     .prepare<PageRow, [number, number]>(
       "SELECT * FROM pages ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
     )
-    .all(limit, offset)
-    .map(rowToPage);
+    .all(limit, offset);
+  return opts?.slim ? rows.map(rowToPageSummary) : rows.map(rowToPage);
 }
 
 /**
@@ -7842,11 +8035,16 @@ export interface SkillFilters {
   includeContent?: boolean;
 }
 
+/**
+ * Explicit column list used when `includeContent: false` — selects every
+ * skill column except the heavy `content` (the full SKILL.md, avg ~10 KB),
+ * which is replaced with an empty string so the row still satisfies `Skill`.
+ */
+const SKILL_SLIM_COLUMNS =
+  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
+
 export function listSkills(filters?: SkillFilters): Skill[] {
-  const columns =
-    filters?.includeContent === false
-      ? "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, createdAt, lastUpdatedAt, lastFetchedAt, '' as content"
-      : "*";
+  const columns = filters?.includeContent === false ? SKILL_SLIM_COLUMNS : "*";
   let query = `SELECT ${columns} FROM skills WHERE 1=1`;
   const params: (string | number)[] = [];
 
@@ -7885,11 +8083,12 @@ export function listSkills(filters?: SkillFilters): Skill[] {
     .map(rowToSkill);
 }
 
-export function searchSkills(query: string, limit = 20): Skill[] {
+export function searchSkills(query: string, limit = 20, includeContent = true): Skill[] {
   const term = `%${query}%`;
+  const columns = includeContent === false ? SKILL_SLIM_COLUMNS : "*";
   return getDb()
     .prepare<SkillRow, [string, string, number]>(
-      "SELECT * FROM skills WHERE (name LIKE ? OR description LIKE ?) AND isEnabled = 1 ORDER BY name ASC LIMIT ?",
+      `SELECT ${columns} FROM skills WHERE (name LIKE ? OR description LIKE ?) AND isEnabled = 1 ORDER BY name ASC LIMIT ?`,
     )
     .all(term, term, limit)
     .map(rowToSkill);
@@ -9095,15 +9294,29 @@ export interface SessionListItem {
 }
 
 /**
+ * Slim variant of {@link SessionListItem} — the `root` task is an
+ * `AgentTaskSummary` (full `task` text + completion/integration blobs dropped).
+ * The session list only renders a brief of the root; the full root + chain are
+ * on `GET /api/sessions/{rootTaskId}`.
+ */
+export interface SessionListItemSummary {
+  root: AgentTaskSummary;
+  chainTaskCount: number;
+  lastActivityAt: string;
+  latestStatus: AgentTaskStatus;
+}
+
+/**
  * List the most recent sessions ordered by chain-wide latest activity.
  * A "session" here is any task with `parentTaskId IS NULL` — its descendants
  * (children, grand-children, …) are summarized via the recursive CTE.
  *
- * `lastActivityAt` is `MAX(t.lastUpdatedAt)` over the entire chain rooted at
- * the candidate task, computed as a correlated subquery so the outer ORDER
- * BY can sort against it.
+ * Single-pass CTE: seeds with root tasks matching the filter, walks the full
+ * descendant tree once, then aggregates chainCount / lastActivityAt /
+ * latestStatus in two lightweight non-recursive CTEs — replacing the original
+ * pattern of 3 correlated subqueries each re-running the recursion per row.
  */
-export function listRecentSessions(opts?: {
+interface ListRecentSessionsOpts {
   limit?: number;
   offset?: number;
   /** Filter to root tasks whose `source` is in this list. Empty/undefined → no source filter. */
@@ -9112,7 +9325,19 @@ export function listRecentSessions(opts?: {
   q?: string;
   /** When set, restrict to root tasks where `requestedByUserId` equals this value. NULL rows are excluded. */
   requestedByUserId?: string;
-}): SessionListItem[] {
+  /** When true, return slim `SessionListItemSummary` rows (default: full). */
+  slim?: boolean;
+}
+
+export function listRecentSessions(
+  opts?: ListRecentSessionsOpts & { slim?: false },
+): SessionListItem[];
+export function listRecentSessions(
+  opts: ListRecentSessionsOpts & { slim: true },
+): SessionListItemSummary[];
+export function listRecentSessions(
+  opts?: ListRecentSessionsOpts,
+): SessionListItem[] | SessionListItemSummary[] {
   const limit = opts?.limit ?? 25;
   const offset = opts?.offset ?? 0;
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
@@ -9141,48 +9366,55 @@ export function listRecentSessions(opts?: {
       AgentTaskRow & { __chainCount: number; __lastActivityAt: string; __latestStatus: string },
       typeof params
     >(
-      `SELECT
+      `WITH RECURSIVE chain(root_id, id, lastUpdatedAt, status) AS (
+         SELECT r.id, r.id, r.lastUpdatedAt, r.status
+         FROM agent_tasks r
+         WHERE ${conditions.join(" AND ")}
+         UNION ALL
+         SELECT c.root_id, t.id, t.lastUpdatedAt, t.status
+         FROM agent_tasks t
+         JOIN chain c ON t.parentTaskId = c.id
+       ),
+       agg AS (
+         SELECT
+           root_id,
+           COUNT(*) AS chainCount,
+           MAX(lastUpdatedAt) AS lastActivityAt
+         FROM chain
+         GROUP BY root_id
+       ),
+       latest_status AS (
+         SELECT c.root_id, c.status AS latestStatus
+         FROM chain c
+         JOIN agg a ON c.root_id = a.root_id AND c.lastUpdatedAt = a.lastActivityAt
+         GROUP BY c.root_id
+       )
+       SELECT
          r.*,
-         (SELECT COUNT(*) FROM agent_tasks d
-            WHERE d.id IN (
-              WITH RECURSIVE chain(id) AS (
-                SELECT r.id
-                UNION ALL
-                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
-              )
-              SELECT id FROM chain
-            )
-         ) AS __chainCount,
-         (SELECT MAX(d.lastUpdatedAt) FROM agent_tasks d
-            WHERE d.id IN (
-              WITH RECURSIVE chain(id) AS (
-                SELECT r.id
-                UNION ALL
-                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
-              )
-              SELECT id FROM chain
-            )
-         ) AS __lastActivityAt,
-         (SELECT d.status FROM agent_tasks d
-            WHERE d.id IN (
-              WITH RECURSIVE chain(id) AS (
-                SELECT r.id
-                UNION ALL
-                SELECT t.id FROM agent_tasks t JOIN chain c ON t.parentTaskId = c.id
-              )
-              SELECT id FROM chain
-            )
-            ORDER BY d.lastUpdatedAt DESC
-            LIMIT 1
-         ) AS __latestStatus
+         a.chainCount AS __chainCount,
+         a.lastActivityAt AS __lastActivityAt,
+         COALESCE(ls.latestStatus, r.status) AS __latestStatus
        FROM agent_tasks r
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY __lastActivityAt DESC
+       JOIN agg a ON a.root_id = r.id
+       LEFT JOIN latest_status ls ON ls.root_id = r.id
+       ORDER BY a.lastActivityAt DESC
        LIMIT ? OFFSET ?`,
     )
     .all(...params);
 
-  return rootRows.map((row) => {
+  if (opts?.slim) {
+    return rootRows.map((row): SessionListItemSummary => {
+      const { __chainCount, __lastActivityAt, __latestStatus, ...taskRow } = row;
+      return {
+        root: rowToAgentTaskSummary(taskRow as AgentTaskRow),
+        chainTaskCount: __chainCount,
+        lastActivityAt: __lastActivityAt ?? row.lastUpdatedAt,
+        latestStatus: (__latestStatus as AgentTaskStatus) ?? row.status,
+      };
+    });
+  }
+
+  return rootRows.map((row): SessionListItem => {
     const { __chainCount, __lastActivityAt, __latestStatus, ...taskRow } = row;
     return {
       root: rowToAgentTask(taskRow as AgentTaskRow),

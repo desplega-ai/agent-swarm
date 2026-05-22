@@ -2,12 +2,16 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAllTasks } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
+import type { AgentTask, AgentTaskSummary } from "@/types";
 import { AgentTaskStatusSchema } from "@/types";
 
 const TaskSummarySchema = z.object({
   id: z.string(),
   agentId: z.string().nullable(),
-  task: z.string(),
+  // Slim rows (default) carry `taskPreview` (~300 chars); `includeFull` rows
+  // carry the full `task` text. Exactly one is present.
+  task: z.string().optional(),
+  taskPreview: z.string().optional(),
   status: AgentTaskStatusSchema,
   taskType: z.string().optional(),
   tags: z.array(z.string()),
@@ -26,7 +30,7 @@ export const registerGetTasksTool = (server: McpServer) => {
     {
       title: "Get tasks",
       description:
-        "Returns a list of tasks in the swarm with various filters. Sorted by priority (desc) then lastUpdatedAt (desc).",
+        "Returns a list of tasks in the swarm with various filters. Sorted by priority (desc) then lastUpdatedAt (desc). Each row carries a `taskPreview` (~300 chars) — enough to pool-triage; pass includeFull:true (or call `get-task-details` by id) for the full `task` text.",
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({
@@ -59,6 +63,12 @@ export const registerGetTasksTool = (server: McpServer) => {
           .max(100)
           .optional()
           .describe("Max tasks to return (default: 25, max: 100)."),
+        includeFull: z
+          .boolean()
+          .optional()
+          .describe(
+            "Return the full `task` text instead of a ~300-char `taskPreview`. Default false.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -78,6 +88,7 @@ export const registerGetTasksTool = (server: McpServer) => {
         scheduleId,
         includeHeartbeat,
         limit,
+        includeFull,
       },
       requestInfo,
       _meta,
@@ -85,7 +96,7 @@ export const registerGetTasksTool = (server: McpServer) => {
       const agentId = requestInfo.agentId;
 
       // Build filters
-      const tasks = getAllTasks({
+      const taskFilters = {
         status,
         agentId: mineOnly ? (agentId ?? undefined) : undefined,
         unassigned,
@@ -97,12 +108,18 @@ export const registerGetTasksTool = (server: McpServer) => {
         scheduleId,
         includeHeartbeat,
         limit,
-      });
+      };
+      // Default to slim rows (full `task` text → ~300-char `taskPreview`).
+      const tasks: Array<AgentTask | AgentTaskSummary> = includeFull
+        ? getAllTasks(taskFilters)
+        : getAllTasks(taskFilters, { slim: true });
 
+      // Slim rows carry a truncated `task`; surface it as `taskPreview` so the
+      // agent knows it is truncated. `includeFull` returns the full `task`.
       const taskSummaries = tasks.map((t) => ({
         id: t.id,
         agentId: t.agentId,
-        task: t.task,
+        ...(includeFull ? { task: t.task } : { taskPreview: t.task }),
         status: t.status,
         taskType: t.taskType,
         tags: t.tags,

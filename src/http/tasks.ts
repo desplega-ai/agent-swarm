@@ -39,6 +39,8 @@ const listTasks = route({
   path: "/api/tasks",
   pattern: ["api", "tasks"],
   summary: "List tasks with filters",
+  description:
+    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`. Fetch a single task in full via `GET /api/tasks/{id}`.",
   tags: ["Tasks"],
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
@@ -53,6 +55,8 @@ const listTasks = route({
     source: z.string().optional(),
     limit: z.coerce.number().int().optional(),
     offset: z.coerce.number().int().optional(),
+    /** `full` restores the legacy shape (full `task` text + all fields); default is slim. */
+    fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
     200: { description: "Paginated task list" },
@@ -139,6 +143,10 @@ const getTask = route({
   summary: "Get task details with logs",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
+  query: z.object({
+    /** Max number of log entries to return (newest-first). Default 200. */
+    logsLimit: z.coerce.number().int().min(1).max(1000).optional(),
+  }),
   responses: {
     200: { description: "Task with logs" },
     404: { description: "Task not found" },
@@ -304,7 +312,10 @@ export async function handleTasks(
       limit: parsed.query.limit,
       offset: parsed.query.offset,
     };
-    const tasks = getAllTasks(filters);
+    // List responses default to slim (full `task` text → bounded `taskPreview`,
+    // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
+    const tasks =
+      parsed.query.fields === "full" ? getAllTasks(filters) : getAllTasks(filters, { slim: true });
     const total = getTasksCount(filters);
     json(res, { tasks, total });
     return true;
@@ -511,7 +522,7 @@ export async function handleTasks(
       return true;
     }
 
-    const logs = getLogsByTaskId(parsed.params.id);
+    const logs = getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
     json(res, { ...task, logs });
     return true;
   }

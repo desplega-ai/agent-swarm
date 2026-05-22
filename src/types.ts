@@ -1182,6 +1182,66 @@ export const PageSchema = z.object({
 });
 export type Page = z.infer<typeof PageSchema>;
 
+// ---------------------------------------------------------------------------
+// Slim list-endpoint variants
+// ---------------------------------------------------------------------------
+// List endpoints default to these slimmed shapes — heavy fields (`body`,
+// `definition`, `taskTemplate`, full task text, …) are stripped because list
+// views never render them and they are all available via the get-by-id
+// endpoints. Callers that still need the full shape opt in with `?fields=full`
+// (HTTP) or `includeFull: true` (MCP). See the PR for per-endpoint sizes.
+
+/** `/api/workflows` list item — drops `definition` + trigger config, keeps a derived `nodeCount`. */
+export type WorkflowSummary = Omit<
+  Workflow,
+  "definition" | "triggers" | "cooldown" | "input" | "triggerSchema"
+> & { nodeCount: number };
+
+/** `/api/pages` list item — drops the (potentially huge) `body` and `passwordHash`. */
+export type PageSummary = Omit<Page, "body" | "passwordHash">;
+
+/** `/api/schedules` list item — swaps the full `taskTemplate` for a short preview. */
+export type ScheduledTaskSummary = Omit<ScheduledTask, "taskTemplate"> & {
+  taskTemplatePreview: string;
+};
+
+/**
+ * `/api/tasks` + `/api/sessions` list item — a strict subset of `AgentTask`.
+ * The `task` text is truncated to a bounded preview (~300 chars) and the
+ * completion/integration/context blobs (`output`, `failureReason`, `vcs*`,
+ * `slack*`, `agentmail*`, `providerMeta`, …) are dropped. Because every field
+ * here also exists on `AgentTask` (with the dropped ones optional), an
+ * `AgentTaskSummary` value is assignable wherever an `AgentTask` is expected —
+ * existing consumers keep compiling. The full brief is on `get-task-details` /
+ * `GET /api/tasks/{id}` (or pass `?fields=full`). The MCP `get-tasks` tool
+ * re-exposes the truncated text as a distinct `taskPreview` field.
+ */
+export type AgentTaskSummary = Pick<
+  AgentTask,
+  | "id"
+  | "agentId"
+  | "creatorAgentId"
+  | "task"
+  | "status"
+  | "source"
+  | "taskType"
+  | "tags"
+  | "priority"
+  | "dependsOn"
+  | "offeredTo"
+  | "acceptedAt"
+  | "parentTaskId"
+  | "scheduleId"
+  | "model"
+  | "provider"
+  | "requestedByUserId"
+  | "progress"
+  | "createdAt"
+  | "lastUpdatedAt"
+  | "finishedAt"
+  | "peakContextPercent"
+>;
+
 export const PageVersionSchema = z.object({
   id: z.string(),
   pageId: z.string(),

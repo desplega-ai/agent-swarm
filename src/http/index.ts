@@ -306,6 +306,17 @@ try {
   console.error("[startup] Failed to seed pricing rows:", err);
 }
 
+// Seed the built-in entity catalog (scripts today; more kinds later) so
+// `script-search` & co. return useful hits from a fresh DB. Idempotent and
+// version-aware: a pristine entity updates when its source changes, a
+// user-modified one is preserved. See src/be/seed for the framework.
+try {
+  const { runAllSeeders } = await import("../be/seed");
+  await runAllSeeders();
+} catch (err) {
+  console.error("[startup] Failed to seed built-in entities:", err);
+}
+
 // business-use initialization (no-op if envs not set)
 initialize();
 

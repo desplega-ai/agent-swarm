@@ -360,6 +360,7 @@
       },
       "get": {
         "summary": "List all agents",
+        "description": "Returns agents WITHOUT the six identity-markdown blobs (`claudeMd`/`soulMd`/`identityMd`/`toolsMd`/`heartbeatMd`/`setupScript`) by default — they bloat the list by ~16 KB/agent and the overview never renders them. Pass `fields=full` to restore them, or fetch a single agent via `GET /api/agents/{id}`.",
         "tags": [
           "Agents"
         ],
@@ -378,6 +379,18 @@
             },
             "required": false,
             "name": "include",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
             "in": "query"
           }
         ],
@@ -4524,6 +4537,7 @@
       },
       "get": {
         "summary": "List pages",
+        "description": "Returns pages WITHOUT the heavy `body` (the full HTML/JSON document) and `passwordHash` by default — list views never render the body. Pass `fields=full` to restore `body`. Fetch a full page via `GET /api/pages/{id}`.",
         "tags": [
           "Pages"
         ],
@@ -4562,6 +4576,18 @@
             },
             "required": false,
             "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
             "in": "query"
           }
         ],
@@ -6731,6 +6757,7 @@
       },
       "get": {
         "summary": "List schedules",
+        "description": "Returns schedules with the full `taskTemplate` replaced by a short `taskTemplatePreview` by default — list views never render the full template. Pass `fields=full` to restore `taskTemplate`. Fetch the full template via `GET /api/schedules/{id}`.",
         "tags": [
           "Schedules"
         ],
@@ -6782,6 +6809,18 @@
             },
             "required": false,
             "name": "hideCompleted",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
             "in": "query"
           }
         ],
@@ -7312,6 +7351,7 @@
     "/api/sessions": {
       "get": {
         "summary": "List recent task sessions (root tasks + chain summary)",
+        "description": "Each item's `root` is a slim task summary by default — the full `task` text is replaced with a bounded `taskPreview` and completion/integration blobs are dropped. Pass `fields=full` to restore the full root `AgentTask`. The full root + descendant chain are on `GET /api/sessions/{rootTaskId}`.",
         "tags": [
           "Sessions"
         ],
@@ -7367,6 +7407,18 @@
             "required": false,
             "name": "requestedByUserId",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
+            "in": "query"
           }
         ],
         "responses": {
@@ -7416,6 +7468,7 @@
     "/api/skills": {
       "get": {
         "summary": "List skills with optional filters",
+        "description": "Returns skills WITHOUT the heavy `content` (full SKILL.md) by default — list views never render it. Pass `fields=full` to include `content` (e.g. for SDK consumers that read it from the list).",
         "tags": [
           "Skills"
         ],
@@ -7463,6 +7516,18 @@
             },
             "required": false,
             "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
             "in": "query"
           }
         ],
@@ -9355,6 +9420,7 @@
     "/api/tasks": {
       "get": {
         "summary": "List tasks with filters",
+        "description": "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`. Fetch a single task in full via `GET /api/tasks/{id}`.",
         "tags": [
           "Tasks"
         ],
@@ -9445,6 +9511,18 @@
             },
             "required": false,
             "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
             "in": "query"
           }
         ],
@@ -9715,6 +9793,16 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "logsLimit",
+            "in": "query"
           }
         ],
         "responses": {
@@ -11223,12 +11311,27 @@
     "/api/workflows": {
       "get": {
         "summary": "List all workflows",
+        "description": "Returns workflows WITHOUT the heavy `definition` (the full DAG) by default — the list view only needs a `nodeCount`, which is included. Pass `fields=full` to restore `definition` + trigger config. Fetch the full workflow via `GET /api/workflows/{id}`.",
         "tags": [
           "Workflows"
         ],
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
+            "in": "query"
           }
         ],
         "responses": {

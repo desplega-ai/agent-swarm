@@ -10,7 +10,7 @@ import { ThemeProvider } from "@/hooks/use-theme";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchInterval: 5000,
+      refetchInterval: 10000,
       staleTime: 2000,
       retry: 2,
     },

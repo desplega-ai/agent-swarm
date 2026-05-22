@@ -38,7 +38,13 @@ const listWorkflowsRoute = route({
   path: "/api/workflows",
   pattern: ["api", "workflows"],
   summary: "List all workflows",
+  description:
+    "Returns workflows WITHOUT the heavy `definition` (the full DAG) by default — the list view only needs a `nodeCount`, which is included. Pass `fields=full` to restore `definition` + trigger config. Fetch the full workflow via `GET /api/workflows/{id}`.",
   tags: ["Workflows"],
+  query: z.object({
+    /** `full` restores the legacy shape (includes `definition`); default is slim. */
+    fields: z.enum(["full", "slim"]).optional(),
+  }),
   responses: {
     200: { description: "Workflow list" },
   },
@@ -391,7 +397,11 @@ export async function handleWorkflows(
   }
 
   if (listWorkflowsRoute.match(req.method, pathSegments)) {
-    const workflows = listWorkflows();
+    const parsed = await listWorkflowsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    // List responses default to slim (no `definition`); `?fields=full` restores it.
+    const workflows =
+      parsed.query.fields === "full" ? listWorkflows() : listWorkflows(undefined, { slim: true });
     json(res, workflows);
     return true;
   }

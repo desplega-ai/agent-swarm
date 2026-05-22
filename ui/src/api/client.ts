@@ -78,6 +78,7 @@ import type {
   WorkflowRun,
   WorkflowRunStep,
   WorkflowRunWithSteps,
+  WorkflowSummary,
   WorkflowsResponse,
   WorkflowVersion,
 } from "./types";
@@ -766,13 +767,9 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/workflows`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflows: ${res.status}`);
-    const workflows = (await res.json()) as Workflow[];
-    // List endpoint doesn't include auto-generated edges — ensure the field exists
-    for (const w of workflows) {
-      if (!w.definition.edges) {
-        w.definition.edges = [];
-      }
-    }
+    // List endpoint returns slim rows (no `definition` — just `nodeCount`).
+    // Fetch a single workflow via `fetchWorkflow(id)` for the full DAG.
+    const workflows = (await res.json()) as WorkflowSummary[];
     return { workflows };
   }
 
