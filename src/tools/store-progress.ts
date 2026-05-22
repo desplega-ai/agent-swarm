@@ -9,7 +9,9 @@ import {
   getDb,
   getLeadAgent,
   getSessionLogsByTaskId,
+  getTaskAttachments,
   getTaskById,
+  insertTaskAttachment,
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
@@ -18,7 +20,7 @@ import { getRetrievalsForTask } from "@/be/memory/raters/retrieval";
 import { runServerRaters } from "@/be/memory/raters/run-server-raters";
 import { resolveTemplate } from "@/prompts/resolver";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema } from "@/types";
+import { AgentTaskSchema, AttachmentInputSchema, type TaskAttachment } from "@/types";
 // Side-effect import: registers task lifecycle templates in the in-memory registry
 import "./templates";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
@@ -29,6 +31,29 @@ import { validateJsonSchema } from "@/workflows/json-schema-validator";
 // calling `store-progress` rarely knew the real numbers and historically
 // echoed the schema example, producing noise rows keyed `mcp-<taskId>-<ts>`
 // that double-counted alongside the harness's authoritative entry.
+
+function attachmentPointer(a: TaskAttachment): string {
+  switch (a.kind) {
+    case "url":
+      return a.url ?? "";
+    case "page":
+      return `page:${a.pageId ?? ""}`;
+    case "agent-fs":
+      return `agent-fs:${a.path ?? ""}`;
+    case "shared-fs":
+      return `shared-fs:${a.path ?? ""}`;
+  }
+}
+
+function formatAttachmentsBlock(attachments: TaskAttachment[]): string {
+  if (attachments.length === 0) return "";
+  const lines = attachments.map((a) => {
+    const tag = a.isPrimary ? "[primary] " : "";
+    const intent = a.intent ? ` (intent: ${a.intent})` : "";
+    return `- ${tag}${a.name} — ${attachmentPointer(a)}${intent}`;
+  });
+  return `\n\nAttachments (${attachments.length}):\n${lines.join("\n")}`;
+}
 
 export const registerStoreProgressTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -51,6 +76,13 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .string()
           .optional()
           .describe("The reason for failure (used when failing)."),
+        attachments: z
+          .array(AttachmentInputSchema)
+          .max(20)
+          .optional()
+          .describe(
+            "Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name).",
+          ),
         // Phase 11: `costData` removed. The harness adapter is the sole
         // writer of `session_costs` (see POST /api/session-costs in the
         // runner). If a payload still includes the field, Zod's
@@ -69,7 +101,11 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ),
       }),
     },
-    async ({ taskId, progress, status, output, failureReason }, requestInfo, _meta) => {
+    async (
+      { taskId, progress, status, output, failureReason, attachments },
+      requestInfo,
+      _meta,
+    ) => {
       if (!requestInfo.agentId) {
         return {
           content: [
@@ -122,6 +158,31 @@ export const registerStoreProgressTool = (server: McpServer) => {
             task: existingTask,
             wasNoOp: true,
           };
+        }
+
+        // Attachments — pointer-based, append-only. Insert each row inside
+        // this transaction; the helper dedups by sha256 (when present) or by
+        // (kind, pointer, name), so idempotent re-calls don't fan out
+        // duplicates. Intentionally NOT reached on the terminal-status no-op
+        // short-circuit above (per Phase 1 spec).
+        if (attachments && attachments.length > 0 && !isTerminal) {
+          for (const a of attachments) {
+            insertTaskAttachment({
+              taskId,
+              agentId: requestInfo.agentId ?? null,
+              name: a.name,
+              kind: a.kind,
+              url: a.kind === "url" ? a.url : undefined,
+              path: a.kind === "agent-fs" || a.kind === "shared-fs" ? a.path : undefined,
+              pageId: a.kind === "page" ? a.pageId : undefined,
+              mimeType: a.mimeType,
+              sizeBytes: a.sizeBytes,
+              sha256: a.sha256,
+              intent: a.intent,
+              description: a.description,
+              isPrimary: a.isPrimary,
+            });
+          }
         }
 
         // Update progress if provided (with deduplication)
@@ -373,9 +434,10 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
               let followUpDescription: string;
               if (status === "completed") {
+                const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(taskId));
                 const outputSummary = output
-                  ? `${output.slice(0, 500)}${output.length > 500 ? "..." : ""}`
-                  : "(no output)";
+                  ? `${output.slice(0, 500)}${output.length > 500 ? "..." : ""}${attachmentsBlock}`
+                  : `(no output)${attachmentsBlock}`;
                 const completedResult = resolveTemplate("task.worker.completed", {
                   agent_name: agentName,
                   task_desc: taskDesc,

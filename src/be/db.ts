@@ -67,6 +67,7 @@ import type {
   SkillWithInstallInfo,
   SwarmConfig,
   SwarmRepo,
+  TaskAttachment,
   TaskTemplate,
   TaskTemplateKind,
   TriggerConfig,
@@ -2123,6 +2124,172 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
     } catch {}
   }
   return row ? rowToAgentTask(row) : null;
+}
+
+// ============================================================================
+// Task Attachments (Phase 1 — pointer-based artifacts)
+// ============================================================================
+//
+// Pointer-only attachments live in their own table; `agent_tasks` is
+// untouched. Append-only in Phase 1 — `insertTaskAttachment` silently no-ops
+// on a duplicate (sha256 match, or kind+pointer+name tuple match) so
+// idempotent re-calls don't fan out duplicate rows. The `kind` enum here
+// MUST stay in sync with the SQL CHECK constraint (migration 072) and the
+// `TaskAttachmentKindSchema` zod enum.
+
+type TaskAttachmentRow = {
+  id: string;
+  task_id: string;
+  agent_id: string | null;
+  name: string;
+  kind: string;
+  url: string | null;
+  path: string | null;
+  page_id: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  sha256: string | null;
+  intent: string | null;
+  description: string | null;
+  is_primary: number;
+  created_at: string;
+};
+
+function rowToTaskAttachment(row: TaskAttachmentRow): TaskAttachment {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    agentId: row.agent_id,
+    name: row.name,
+    kind: row.kind as TaskAttachment["kind"],
+    url: row.url ?? undefined,
+    path: row.path ?? undefined,
+    pageId: row.page_id ?? undefined,
+    mimeType: row.mime_type ?? undefined,
+    sizeBytes: row.size_bytes ?? undefined,
+    sha256: row.sha256 ?? undefined,
+    intent: row.intent ?? undefined,
+    description: row.description ?? undefined,
+    isPrimary: !!row.is_primary,
+    createdAt: row.created_at,
+  };
+}
+
+export interface InsertTaskAttachmentInput {
+  taskId: string;
+  agentId: string | null;
+  name: string;
+  kind: TaskAttachment["kind"];
+  url?: string;
+  path?: string;
+  pageId?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  sha256?: string;
+  intent?: string;
+  description?: string;
+  isPrimary?: boolean;
+}
+
+/**
+ * Insert a task attachment. Append-only + dedup:
+ *   - if sha256 is present and a row for this task already has that sha256,
+ *     skip (return existing row);
+ *   - otherwise skip if a row exists for the same task with the same
+ *     (kind, path|url|page_id, name) tuple.
+ * Returns the stored attachment (newly inserted or pre-existing duplicate).
+ */
+export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAttachment {
+  const db = getDb();
+
+  if (input.sha256) {
+    const existing = db
+      .prepare<TaskAttachmentRow, [string, string]>(
+        "SELECT * FROM task_attachments WHERE task_id = ? AND sha256 = ? LIMIT 1",
+      )
+      .get(input.taskId, input.sha256);
+    if (existing) return rowToTaskAttachment(existing);
+  }
+
+  const tupleExisting = db
+    .prepare<TaskAttachmentRow, [string, string, string, string, string, string]>(
+      `SELECT * FROM task_attachments
+       WHERE task_id = ?
+         AND kind = ?
+         AND IFNULL(path, '')    = ?
+         AND IFNULL(url, '')     = ?
+         AND IFNULL(page_id, '') = ?
+         AND name = ?
+       ORDER BY created_at ASC
+       LIMIT 1`,
+    )
+    .get(
+      input.taskId,
+      input.kind,
+      input.path ?? "",
+      input.url ?? "",
+      input.pageId ?? "",
+      input.name,
+    );
+  if (tupleExisting) return rowToTaskAttachment(tupleExisting);
+
+  const id = crypto.randomUUID();
+  const row = db
+    .prepare<
+      TaskAttachmentRow,
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        number | null,
+        string | null,
+        string | null,
+        string | null,
+        number,
+      ]
+    >(
+      `INSERT INTO task_attachments
+         (id, task_id, agent_id, name, kind, url, path, page_id,
+          mime_type, size_bytes, sha256, intent, description, is_primary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .get(
+      id,
+      input.taskId,
+      input.agentId ?? null,
+      input.name,
+      input.kind,
+      input.url ?? null,
+      input.path ?? null,
+      input.pageId ?? null,
+      input.mimeType ?? null,
+      input.sizeBytes ?? null,
+      input.sha256 ?? null,
+      input.intent ?? null,
+      input.description ?? null,
+      input.isPrimary ? 1 : 0,
+    );
+
+  if (!row) {
+    throw new Error("Failed to insert task attachment");
+  }
+  return rowToTaskAttachment(row);
+}
+
+export function getTaskAttachments(taskId: string): TaskAttachment[] {
+  return getDb()
+    .prepare<TaskAttachmentRow, [string]>(
+      "SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at ASC, rowid ASC",
+    )
+    .all(taskId)
+    .map(rowToTaskAttachment);
 }
 
 // ============================================================================

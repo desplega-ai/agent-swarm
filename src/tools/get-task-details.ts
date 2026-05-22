@@ -1,8 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getLogsByTaskIdChronological, getTaskById, getUserById } from "@/be/db";
+import {
+  getLogsByTaskIdChronological,
+  getTaskAttachments,
+  getTaskById,
+  getUserById,
+} from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentLogSchema, AgentTaskSchema } from "@/types";
+import { AgentLogSchema, AgentTaskSchema, TaskAttachmentSchema } from "@/types";
 
 export const registerGetTaskDetailsTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -26,6 +31,12 @@ export const registerGetTaskDetailsTool = (server: McpServer) => {
           .optional()
           .describe("Resolved user who requested this task"),
         logs: z.array(AgentLogSchema).optional(),
+        attachments: z
+          .array(TaskAttachmentSchema)
+          .optional()
+          .describe(
+            "Pointer-based artifacts attached to this task via store-progress, ordered by created_at.",
+          ),
       }),
     },
     async ({ taskId }, requestInfo, _meta) => {
@@ -43,6 +54,7 @@ export const registerGetTaskDetailsTool = (server: McpServer) => {
       }
 
       const logs = getLogsByTaskIdChronological(taskId);
+      const attachments = getTaskAttachments(taskId);
 
       // Resolve requesting user details if available
       const requestedByUser = task.requestedByUserId
@@ -61,6 +73,7 @@ export const registerGetTaskDetailsTool = (server: McpServer) => {
           task,
           requestedBy,
           logs,
+          attachments,
         },
       };
     },
