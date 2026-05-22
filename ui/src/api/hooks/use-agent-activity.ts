@@ -118,8 +118,11 @@ export function useAgentActivity(opts: UseAgentActivityOptions = {}): UseAgentAc
 
 export const MIN_NODE_WIDTH = 200;
 export const MAX_NODE_WIDTH = 360;
-export const MIN_NODE_HEIGHT = 80;
-export const MAX_NODE_HEIGHT = 140;
+// Min height must fit the node's fixed content (icon/name row + role pill +
+// stats line) under `box-sizing: border-box` with a 2px border + py-2 padding.
+// 80px clipped the stats line; 104px contains it at the smallest size.
+export const MIN_NODE_HEIGHT = 104;
+export const MAX_NODE_HEIGHT = 152;
 
 const TASK_WEIGHT = 0.6;
 const COST_WEIGHT = 0.4;

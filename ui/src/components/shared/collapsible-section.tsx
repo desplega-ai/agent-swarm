@@ -8,6 +8,23 @@ import { cn } from "@/lib/utils";
  * - "plain" (default): minimal styling with just a toggle header
  * - "card": bordered card with optional icon and color theming
  */
+/**
+ * Read the persisted open/closed state for `persistKey` from `localStorage`,
+ * falling back to `defaultOpen` when the key is absent, unparseable, or
+ * `localStorage` is unavailable (private mode / quota).
+ */
+function readPersistedOpen(persistKey: string | undefined, defaultOpen: boolean): boolean {
+  if (!persistKey) return defaultOpen;
+  try {
+    const raw = localStorage.getItem(persistKey);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return defaultOpen;
+  } catch {
+    return defaultOpen;
+  }
+}
+
 export function CollapsibleSection({
   title,
   icon: Icon,
@@ -19,6 +36,7 @@ export function CollapsibleSection({
   variant = "plain",
   className,
   badge,
+  persistKey,
 }: {
   title: string;
   icon?: React.ElementType;
@@ -30,15 +48,32 @@ export function CollapsibleSection({
   variant?: "plain" | "card";
   className?: string;
   badge?: React.ReactNode;
+  /**
+   * When set, the open/closed state is persisted to `localStorage` under this
+   * key and restored on remount. Absent → pure local `defaultOpen` state.
+   */
+  persistKey?: string;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(() => readPersistedOpen(persistKey, defaultOpen));
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (persistKey) {
+      try {
+        localStorage.setItem(persistKey, String(next));
+      } catch {
+        // Ignore — private mode / quota. State still toggles in-memory.
+      }
+    }
+  };
 
   if (variant === "card") {
     return (
       <div className={cn("rounded-md border shrink-0", borderColor, bgColor, className)}>
         <button
           type="button"
-          onClick={() => setOpen(!open)}
+          onClick={toggle}
           className="flex items-center gap-2 w-full px-3 py-2 text-left"
         >
           {open ? (
@@ -57,11 +92,7 @@ export function CollapsibleSection({
 
   return (
     <div className={cn("space-y-1", className)}>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-left group"
-      >
+      <button type="button" onClick={toggle} className="flex items-center gap-1.5 text-left group">
         {open ? (
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
         ) : (

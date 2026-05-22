@@ -9,6 +9,8 @@ import {
   computeActivityScores,
   MAX_NODE_HEIGHT,
   MAX_NODE_WIDTH,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
   nodeSizeFromScore,
 } from "@/api/hooks/use-agent-activity";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -34,6 +36,12 @@ const nodeTypes = { agentNode: AgentNode };
 interface AgentCanvasProps {
   rows: AgentActivityRow[];
   className?: string;
+  /**
+   * Full-bleed variant — fills the parent's height with no border, radius, or
+   * card background. Requires a definite-height parent (see `UnifiedHome`).
+   * When false (default) the canvas renders as a clamped-height bordered card.
+   */
+  fullBleed?: boolean;
 }
 
 interface LayoutResult {
@@ -52,9 +60,18 @@ function buildLayout(rows: AgentActivityRow[]): LayoutResult {
 
   const scores = computeActivityScores(rows);
 
-  // Sized node descriptors keyed by agent id.
+  // Sized node descriptors keyed by agent id. The lead is pinned to the
+  // baseline (min) size so its box stays dimensionally consistent with the
+  // worker nodes — the lead naturally scores highest on 24h activity and would
+  // otherwise balloon to the max size. Visual emphasis comes from the crown
+  // icon + accent handle, not an oversized box. Keeping it at the min size
+  // also keeps the dagre layout (which reads these same dimensions) correct.
   const sized = new Map<string, { width: number; height: number; row: AgentActivityRow }>();
   for (const r of rows) {
+    if (r === lead) {
+      sized.set(r.agent.id, { width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT, row: r });
+      continue;
+    }
     const score = scores.get(r.agent.id) ?? 0;
     sized.set(r.agent.id, { ...nodeSizeFromScore(score), row: r });
   }
@@ -129,20 +146,19 @@ function buildLayout(rows: AgentActivityRow[]): LayoutResult {
   return { nodes, edges };
 }
 
-export function AgentCanvas({ rows, className }: AgentCanvasProps) {
+export function AgentCanvas({ rows, className, fullBleed }: AgentCanvasProps) {
   const { theme } = useTheme();
   const navigate = useNavigate();
 
   const { nodes, edges } = useMemo(() => buildLayout(rows), [rows]);
 
+  const sizeClasses = fullBleed
+    ? "h-full"
+    : "h-[clamp(280px,38vh,460px)] rounded-lg border bg-card";
+
   if (rows.length === 0) {
     return (
-      <div
-        className={cn(
-          "h-[clamp(280px,38vh,460px)] rounded-lg border bg-card flex items-center justify-center",
-          className,
-        )}
-      >
+      <div className={cn(sizeClasses, "flex items-center justify-center", className)}>
         <EmptyState
           icon={Bot}
           title="No agents connected"
@@ -153,7 +169,7 @@ export function AgentCanvas({ rows, className }: AgentCanvasProps) {
   }
 
   return (
-    <div className={cn("h-[clamp(280px,38vh,460px)] rounded-lg border bg-card", className)}>
+    <div className={cn(sizeClasses, className)}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

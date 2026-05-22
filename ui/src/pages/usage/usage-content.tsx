@@ -28,7 +28,7 @@ function getStartDateISO(range: DateRange): string | undefined {
   return d.toISOString().slice(0, 10);
 }
 
-export default function UsagePage() {
+export function UsageContent() {
   const [dateRange, setDateRange] = useState<DateRange>("30d");
   const [agentFilter, setAgentFilter] = useState("all");
 

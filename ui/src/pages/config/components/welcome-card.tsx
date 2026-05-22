@@ -12,7 +12,14 @@ import { generateSlug } from "@/lib/slugs";
 function resolvePostConnectRedirect(from: unknown): string {
   if (typeof from !== "string") return "/";
   if (!from.startsWith("/")) return "/";
-  if (from === "/config" || from.startsWith("/config?") || from.startsWith("/config#")) return "/";
+  // The config page now lives at /settings/connections — don't bounce back to it.
+  if (
+    from === "/settings/connections" ||
+    from.startsWith("/settings/connections?") ||
+    from.startsWith("/settings/connections#")
+  ) {
+    return "/";
+  }
   return from;
 }
 

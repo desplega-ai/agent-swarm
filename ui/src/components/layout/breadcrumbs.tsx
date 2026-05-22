@@ -1,7 +1,16 @@
 import { ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { useAgent } from "@/api/hooks/use-agents";
+import { useApprovalRequest } from "@/api/hooks/use-approval-requests";
+import { useMcpServer } from "@/api/hooks/use-mcp-servers";
 import { usePage } from "@/api/hooks/use-pages";
+import { useRepo } from "@/api/hooks/use-repos";
+import { useScheduledTask } from "@/api/hooks/use-schedules";
+import { useSession } from "@/api/hooks/use-sessions";
+import { useSkill } from "@/api/hooks/use-skills";
+import { useTask } from "@/api/hooks/use-tasks";
 import { useUser } from "@/api/hooks/use-users";
+import { useWorkflow } from "@/api/hooks/use-workflows";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 
 const routeLabels: Record<string, string> = {
@@ -20,7 +29,10 @@ const routeLabels: Record<string, string> = {
   usage: "Usage",
   budgets: "Budgets",
   memory: "Memory",
+  settings: "Settings",
   config: "Config",
+  connections: "Connections",
+  secrets: "Secrets",
   repos: "Repos",
   templates: "Templates",
   history: "History",
@@ -57,38 +69,94 @@ function formatSegment(segment: string, prevSegment?: string): string {
   return segment;
 }
 
+/** True when a path segment looks like an entity id (UUID or 32-char hex). */
+function isEntityId(segment: string | undefined): boolean {
+  return !!segment && (UUID_REGEX.test(segment) || HEX32_REGEX.test(segment));
+}
+
+/** Cap a contextual breadcrumb name at a safe length, appending an ellipsis. */
+const CONTEXTUAL_NAME_MAX = 40;
+function capContextualName(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed.length <= CONTEXTUAL_NAME_MAX) return trimmed;
+  return `${trimmed.slice(0, CONTEXTUAL_NAME_MAX)}…`;
+}
+
 export function Breadcrumbs() {
   const location = useLocation();
   const segments = location.pathname.split("/").filter(Boolean);
 
-  // When we're on /pages/:id, fetch the page so the breadcrumb shows the
-  // actual title instead of the truncated hex id. Hook runs unconditionally
-  // (passes undefined when not applicable) to keep hook order stable.
-  const pageId =
-    segments[0] === "pages" && segments[1] && HEX32_REGEX.test(segments[1])
-      ? segments[1]
-      : undefined;
+  // Detail routes (/<parent>/:id[/...]) get a contextual leaf name fetched
+  // from the matching single-entity hook instead of the truncated raw id.
+  // The id segment is always `segments[1]` under a known `segments[0]`
+  // parent. We compute one id-or-empty value per entity type and call every
+  // hook unconditionally (empty string → query disabled) so hook order stays
+  // stable across renders (React rules of hooks).
+  const parent = segments[0];
+  const detailId =
+    segments.length >= 2 && isEntityId(segments[1]) ? (segments[1] as string) : undefined;
+  const idFor = (route: string): string => (parent === route && detailId ? detailId : "");
+
+  // `usePage` / `useUser` / `useSession` accept `string | undefined`; the rest
+  // accept `string` and disable themselves on a falsy id. Pass `""` uniformly.
+  const pageId = parent === "pages" && detailId ? detailId : undefined;
   const { data: pageMeta } = usePage(pageId);
 
-  // Similarly for /people/:id — render the user's name as the leaf crumb
-  // instead of the raw UUID/hex id.
-  const personId =
-    segments[0] === "people" &&
-    segments[1] &&
-    (UUID_REGEX.test(segments[1]) || HEX32_REGEX.test(segments[1]))
-      ? segments[1]
-      : undefined;
+  const personId = parent === "people" && detailId ? detailId : undefined;
   const { data: personMeta } = useUser(personId);
 
+  const sessionId = parent === "sessions" && detailId ? detailId : undefined;
+  const { data: sessionMeta } = useSession(sessionId);
+
+  const { data: agentMeta } = useAgent(idFor("agents"));
+  const { data: taskMeta } = useTask(idFor("tasks"));
+  const { data: workflowMeta } = useWorkflow(idFor("workflows"));
+  const { data: scheduleMeta } = useScheduledTask(idFor("schedules"));
+  const { data: skillMeta } = useSkill(idFor("skills"));
+  const { data: mcpServerMeta } = useMcpServer(idFor("mcp-servers"));
+  const { data: repoMeta } = useRepo(idFor("repos"));
+  const { data: approvalMeta } = useApprovalRequest(idFor("approval-requests"));
+
   if (segments.length === 0) return null;
+
+  // Resolve the contextual name for the detail-id segment, if any. Falls back
+  // to `undefined` (→ truncated-id display) while the entity is still loading.
+  const contextualName: string | undefined = detailId
+    ? parent === "pages"
+      ? pageMeta?.title
+      : parent === "people"
+        ? personMeta?.name
+        : parent === "sessions"
+          ? sessionMeta?.root.task
+          : parent === "agents"
+            ? agentMeta?.name
+            : parent === "tasks"
+              ? taskMeta?.task
+              : parent === "workflows"
+                ? workflowMeta?.name
+                : parent === "schedules"
+                  ? scheduleMeta?.name
+                  : parent === "skills"
+                    ? skillMeta?.name
+                    : parent === "mcp-servers"
+                      ? mcpServerMeta?.name
+                      : parent === "repos"
+                        ? repoMeta?.name
+                        : parent === "approval-requests"
+                          ? approvalMeta?.title
+                          : undefined
+    : undefined;
 
   const crumbs = segments.map((segment, index) => {
     const defaultPath = `/${segments.slice(0, index + 1).join("/")}`;
     const path = routeRedirects[segment] ?? defaultPath;
     let label = formatSegment(segment, segments[index - 1]);
-    // Pretty-print the page-detail leaf with the actual title when we have it.
-    if (segment === pageId && pageMeta?.title) label = pageMeta.title;
-    if (segment === personId && personMeta?.name) label = personMeta.name;
+    // Pretty-print the detail-id leaf with the resolved entity name. Only the
+    // id segment at index 1 is replaced — other path segments keep their
+    // routeLabels behavior.
+    if (index === 1 && segment === detailId && contextualName) {
+      label = capContextualName(contextualName);
+    }
     const isLast = index === segments.length - 1;
 
     return { path, label, isLast };

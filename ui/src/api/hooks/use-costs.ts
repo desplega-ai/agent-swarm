@@ -114,9 +114,17 @@ export function useUsageSummary(filters?: {
   });
 }
 
-export function useDashboardCosts() {
+/**
+ * Swarm-wide cost rollup (`costToday` / `costMtd`) from
+ * `GET /api/session-costs/dashboard`.
+ *
+ * `opts.enabled` lets feature-gated callers suppress the query on older API
+ * servers — pass `false` until the gate confirms support.
+ */
+export function useDashboardCosts(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["dashboard-costs"],
     queryFn: () => api.fetchDashboardCosts(),
+    enabled: opts?.enabled ?? true,
   });
 }

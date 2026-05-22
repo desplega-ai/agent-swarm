@@ -88,7 +88,7 @@ export function SwarmSwitcher() {
             )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={() => navigate("/config")}
+              onClick={() => navigate("/settings/connections")}
               className="flex items-center gap-2 text-xs"
             >
               <Settings className="size-3.5 shrink-0" />

@@ -1,15 +1,15 @@
 /**
- * Header user switcher — surfaces the current identity in the app header
- * (always visible, single click to change). Replaces the "you must
- * pick one" modal as a discovery point: users see who they're acting as,
- * and switch / create a new identity from a dropdown.
+ * Sidebar-footer user switcher — surfaces the current identity at the bottom
+ * of the app sidebar (always visible, single click to change). Replaces the
+ * "you must pick one" modal as a discovery point: users see who they're
+ * acting as, and switch / create a new identity from a dropdown.
  *
  * The non-dismissible <IdentityModal> is still mounted at app root so
  * brand-new connections still get forced through identity selection
  * before they can act. This switcher is for switching afterwards.
  */
 
-import { Check, Plus, UserPlus } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useCreateUser, useUsers } from "@/api/hooks/use-users";
@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { cn } from "@/lib/utils";
 
@@ -70,72 +71,81 @@ export function UserSwitcher() {
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              "flex items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors",
-              "hover:bg-accent",
-              user ? "text-foreground" : "text-primary",
-            )}
-            title={user ? `Acting as ${user.name}` : "Pick identity"}
-            aria-label={user ? `Acting as ${user.name} — click to switch` : "Pick identity"}
-          >
-            <span
-              aria-hidden="true"
-              className={cn(
-                "inline-flex items-center justify-center rounded-full font-mono font-semibold",
-                "h-5 w-5 text-[9px] shadow-sm",
-                user ? "bg-primary text-primary-foreground" : "bg-primary/20 text-primary",
-              )}
-            >
-              {user ? initials : <UserPlus className="h-3 w-3" />}
-            </span>
-            <span className="hidden sm:inline font-medium max-w-[140px] truncate">
-              {user ? user.name : "Pick identity"}
-            </span>
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-60">
-          <DropdownMenuLabel className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
-            Acting as
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {users && users.length > 0 ? (
-            users.map((u) => (
-              <DropdownMenuItem
-                key={u.id}
-                onClick={() => setUserId(u.id)}
-                className="flex items-center gap-2"
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <SidebarMenuButton
+                tooltip={user ? `Acting as ${user.name}` : "Pick identity"}
+                aria-label={user ? `Acting as ${user.name} — click to switch` : "Pick identity"}
               >
                 <span
                   aria-hidden="true"
-                  className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted font-mono text-[9px] font-semibold text-muted-foreground shrink-0"
+                  className={cn(
+                    "inline-flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold shadow-sm",
+                    user ? "bg-primary text-primary-foreground" : "bg-primary/20 text-primary",
+                  )}
                 >
-                  {userInitials(u.name)}
+                  {user ? initials : <UserPlus className="size-3.5" />}
                 </span>
-                <span className="flex-1 truncate">{u.name}</span>
-                {u.id === userId ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
+                <span
+                  className={cn(
+                    "grid flex-1 text-left text-sm leading-tight",
+                    user ? "text-foreground" : "text-primary",
+                  )}
+                >
+                  <span className="truncate font-medium">{user ? user.name : "Pick identity"}</span>
+                </span>
+                <ChevronsUpDown className="ml-auto size-4 shrink-0 opacity-60" />
+              </SidebarMenuButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top" className="w-60">
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
+                Acting as
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {users && users.length > 0 ? (
+                users.map((u) => (
+                  <DropdownMenuItem
+                    key={u.id}
+                    onClick={() => setUserId(u.id)}
+                    className="flex items-center gap-2"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted font-mono text-[9px] font-semibold text-muted-foreground shrink-0"
+                    >
+                      {userInitials(u.name)}
+                    </span>
+                    <span className="flex-1 truncate">{u.name}</span>
+                    {u.id === userId ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <div className="px-2 py-3 text-xs text-muted-foreground italic">
+                  No users yet — create the first one below.
+                </div>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => setCreateOpen(true)}
+                className="flex items-center gap-2"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Create new user…
               </DropdownMenuItem>
-            ))
-          ) : (
-            <div className="px-2 py-3 text-xs text-muted-foreground italic">
-              No users yet — create the first one below.
-            </div>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setCreateOpen(true)} className="flex items-center gap-2">
-            <Plus className="h-3.5 w-3.5" />
-            Create new user…
-          </DropdownMenuItem>
-          {userId ? (
-            <DropdownMenuItem onClick={() => clearUser()} className="text-muted-foreground text-xs">
-              Clear identity
-            </DropdownMenuItem>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
+              {userId ? (
+                <DropdownMenuItem
+                  onClick={() => clearUser()}
+                  className="text-muted-foreground text-xs"
+                >
+                  Clear identity
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarMenuItem>
+      </SidebarMenu>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-sm">

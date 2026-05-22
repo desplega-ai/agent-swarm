@@ -1,9 +1,13 @@
 import { lazy } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate, type RouteObject } from "react-router-dom";
 import { RootLayout } from "@/components/layout/root-layout";
+import { SettingsLayout } from "@/pages/settings/settings-layout";
+import { UsageLayout } from "@/pages/usage/usage-layout";
+import { RouteRedirect } from "./route-redirect";
 
 const DashboardPage = lazy(() => import("@/pages/dashboard/page"));
 const HomePage = lazy(() => import("@/pages/home/page"));
+const UnifiedHome = lazy(() => import("@/pages/home/unified-home"));
 const AgentsPage = lazy(() => import("@/pages/agents/page"));
 const AgentDetailPage = lazy(() => import("@/pages/agents/[id]/page"));
 const TasksPage = lazy(() => import("@/pages/tasks/page"));
@@ -14,9 +18,12 @@ const ChatPage = lazy(() => import("@/pages/chat/page"));
 const ServicesPage = lazy(() => import("@/pages/services/page"));
 const SchedulesPage = lazy(() => import("@/pages/schedules/page"));
 const ScheduleDetailPage = lazy(() => import("@/pages/schedules/[id]/page"));
-const UsagePage = lazy(() => import("@/pages/usage/page"));
+const UsageContent = lazy(() =>
+  import("@/pages/usage/usage-content").then((m) => ({ default: m.UsageContent })),
+);
 const BudgetsPage = lazy(() => import("@/pages/budgets/page"));
-const ConfigPage = lazy(() => import("@/pages/config/page"));
+const ConnectionsPage = lazy(() => import("@/pages/settings/connections-page"));
+const SecretsPage = lazy(() => import("@/pages/settings/secrets-page"));
 const IntegrationsPage = lazy(() => import("@/pages/integrations/page"));
 const IntegrationDetailPage = lazy(() => import("@/pages/integrations/[id]/page"));
 const ReposPage = lazy(() => import("@/pages/repos/page"));
@@ -44,13 +51,41 @@ const PageDetailPage = lazy(() => import("@/pages/pages/[id]/page"));
 const PagesListingPage = lazy(() => import("@/pages/pages/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
+/**
+ * Backward-compat redirect table — every old top-level URL that moved during
+ * the sidebar-trim IA rework maps to its new location, so no old link 404s.
+ * Simple (non-param) redirects live here; the param-aware `/integrations/:id`
+ * case is handled separately via `RouteRedirect` below.
+ */
+const REDIRECTS: Record<string, string> = {
+  dashboard: "/",
+  budgets: "/usage/budgets",
+  config: "/settings/connections",
+  keys: "/settings/api-keys",
+  integrations: "/settings/integrations",
+  repos: "/settings/repos",
+  debug: "/settings/debug",
+};
+
+const redirectRoutes: RouteObject[] = [
+  ...Object.entries(REDIRECTS).map(([from, to]) => ({
+    path: from,
+    element: <Navigate to={to} replace />,
+  })),
+  {
+    path: "integrations/:id",
+    element: <RouteRedirect to={({ id }) => `/settings/integrations/${id}`} />,
+  },
+];
+
 export const router = createBrowserRouter([
   {
     path: "/",
     element: <RootLayout />,
     children: [
-      { index: true, element: <HomePage /> },
-      { path: "dashboard", element: <DashboardPage /> },
+      { index: true, element: <UnifiedHome /> },
+      { path: "old-home", element: <HomePage /> },
+      { path: "old-dashboard", element: <DashboardPage /> },
       { path: "agents", element: <AgentsPage /> },
       { path: "agents/:id", element: <AgentDetailPage /> },
       { path: "tasks", element: <TasksPage /> },
@@ -67,11 +102,29 @@ export const router = createBrowserRouter([
       { path: "workflow-runs/:id", element: <WorkflowRunDetailPage /> },
       { path: "approval-requests", element: <ApprovalRequestsPage /> },
       { path: "approval-requests/:id", element: <ApprovalRequestDetailPage /> },
-      { path: "usage", element: <UsagePage /> },
-      { path: "budgets", element: <BudgetsPage /> },
-      { path: "config", element: <ConfigPage /> },
-      { path: "integrations", element: <IntegrationsPage /> },
-      { path: "integrations/:id", element: <IntegrationDetailPage /> },
+      {
+        path: "usage",
+        element: <UsageLayout />,
+        children: [
+          { index: true, element: <UsageContent /> },
+          { path: "budgets", element: <BudgetsPage /> },
+        ],
+      },
+      {
+        path: "settings",
+        element: <SettingsLayout />,
+        children: [
+          { index: true, element: <Navigate to="/settings/connections" replace /> },
+          { path: "config", element: <Navigate to="/settings/connections" replace /> },
+          { path: "connections", element: <ConnectionsPage /> },
+          { path: "secrets", element: <SecretsPage /> },
+          { path: "api-keys", element: <ApiKeysPage /> },
+          { path: "integrations", element: <IntegrationsPage /> },
+          { path: "integrations/:id", element: <IntegrationDetailPage /> },
+          { path: "repos", element: <ReposPage /> },
+          { path: "debug", element: <DebugPage /> },
+        ],
+      },
       { path: "templates", element: <TemplatesPage /> },
       { path: "templates/:id", element: <TemplateDetailPage /> },
       { path: "templates/:id/history/:version", element: <TemplateVersionDetailPage /> },
@@ -79,16 +132,14 @@ export const router = createBrowserRouter([
       { path: "mcp-servers/:id", element: <McpServerDetailPage /> },
       { path: "skills", element: <SkillsPage /> },
       { path: "skills/:id", element: <SkillDetailPage /> },
-      { path: "repos", element: <ReposPage /> },
       { path: "repos/:id", element: <RepoDetailPage /> },
-      { path: "keys", element: <ApiKeysPage /> },
       { path: "people", element: <PeoplePage /> },
       { path: "people/unmapped", element: <PeoplePage /> },
       { path: "people/:id", element: <PersonDetailPage /> },
-      { path: "debug", element: <DebugPage /> },
       { path: "memory", element: <MemoryPage /> },
       { path: "pages", element: <PagesListingPage /> },
       { path: "pages/:id", element: <PageDetailPage /> },
+      ...redirectRoutes,
       { path: "*", element: <NotFoundPage /> },
     ],
   },

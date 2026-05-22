@@ -374,6 +374,15 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchMetrics(): Promise<import("./types").SwarmMetrics | null> {
+    const url = `${this.getBaseUrl()}/api/metrics`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    // Older API servers predate `/api/metrics`. Return null on any non-2xx so
+    // consumers hide the sidebar indicators instead of surfacing an error.
+    if (!res.ok) return null;
+    return res.json();
+  }
+
   async checkHealth(): Promise<{ status: string; version: string }> {
     const config = getConfig();
     const baseUrl =

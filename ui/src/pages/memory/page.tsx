@@ -1,6 +1,7 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
 import { Brain, FileText, Loader2, Search, Trash2 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useDeleteMemory, useMemoryList } from "@/api/hooks/use-memory";
@@ -68,9 +69,34 @@ export default function MemoryPage() {
 
   const { data, isLoading, isFetching, error } = useMemoryList(submitted);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [selected, setSelected] = useState<MemoryEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MemoryEntry | null>(null);
   const deleteMemory = useDeleteMemory();
+
+  const setMemoryIdParam = useCallback(
+    (memoryId: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (memoryId) next.set("memoryId", memoryId);
+          else next.delete("memoryId");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const selectMemory = useCallback(
+    (entry: MemoryEntry | null) => {
+      setSelected(entry);
+      setMemoryIdParam(entry?.id ?? null);
+    },
+    [setMemoryIdParam],
+  );
 
   const submit = useCallback(() => {
     setSubmitted({
@@ -98,10 +124,10 @@ export default function MemoryPage() {
     deleteMemory.mutate(id, {
       onSettled: () => {
         setDeleteTarget(null);
-        if (selected?.id === id) setSelected(null);
+        if (selected?.id === id) selectMemory(null);
       },
     });
-  }, [deleteMemory, deleteTarget, selected]);
+  }, [deleteMemory, deleteTarget, selected, selectMemory]);
 
   const agentName = useCallback(
     (id: string | null) => {
@@ -218,13 +244,24 @@ export default function MemoryPage() {
     return cols;
   }, [agentName, isSemantic]);
 
-  const onRowClicked = useCallback((event: RowClickedEvent<MemoryEntry>) => {
-    const target = event.event?.target as HTMLElement | undefined;
-    if (target?.closest("button")) return;
-    if (event.data) setSelected(event.data);
-  }, []);
+  const onRowClicked = useCallback(
+    (event: RowClickedEvent<MemoryEntry>) => {
+      const target = event.event?.target as HTMLElement | undefined;
+      if (target?.closest("button")) return;
+      if (event.data) selectMemory(event.data);
+    },
+    [selectMemory],
+  );
 
   const results = data?.results ?? [];
+
+  // Auto-select the memory referenced by ?memoryId= once it appears in results.
+  const memoryIdParam = searchParams.get("memoryId");
+  useEffect(() => {
+    if (!memoryIdParam || selected) return;
+    const match = results.find((r) => r.id === memoryIdParam);
+    if (match) setSelected(match);
+  }, [memoryIdParam, selected, results]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -353,7 +390,7 @@ export default function MemoryPage() {
         getRowId={(p) => p.data.id}
       />
 
-      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+      <Sheet open={!!selected} onOpenChange={(open) => !open && selectMemory(null)}>
         <SheetContent className="w-[640px] sm:max-w-[640px] p-0">
           {selected && (
             <div className="flex flex-col h-full">

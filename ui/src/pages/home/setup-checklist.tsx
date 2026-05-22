@@ -306,7 +306,7 @@ export function SetupChecklist({ setup, harnessProvider }: SetupChecklistProps) 
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => navigate("/integrations")}
+                onClick={() => navigate("/settings/integrations")}
                 className="text-xs"
               >
                 All integrations <ArrowRight className="ml-1 h-3 w-3" />

@@ -1,6 +1,6 @@
 import { ArrowLeft, Check, Crown, Pencil, Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useMemo, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAgent, useUpdateAgentName, useUpdateAgentProfile } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useAgentMcpServers, useUninstallMcpServer } from "@/api/hooks/use-mcp-servers";
@@ -44,6 +44,16 @@ import { CredentialsPanel } from "./credentials-panel";
 const PAGE_SIZE = 100;
 
 type MdField = "soulMd" | "identityMd" | "claudeMd" | "toolsMd" | "setupScript" | "heartbeatMd";
+
+const AGENT_TABS = [
+  "profile",
+  "credentials",
+  "documents",
+  "tasks",
+  "skills",
+  "mcp-servers",
+  "usage",
+] as const;
 
 const DOCUMENT_FIELDS: Array<{ field: MdField; tab: string; label: string }> = [
   { field: "soulMd", tab: "soul", label: "SOUL.md" },
@@ -136,7 +146,43 @@ export default function AgentDetailPage() {
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
-  const [activeTab, setActiveTab] = useState("profile");
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab = AGENT_TABS.includes(tabParam as (typeof AGENT_TABS)[number])
+    ? (tabParam as string)
+    : "profile";
+  const setActiveTab = useCallback(
+    (value: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("tab", value);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const docTypeParam = searchParams.get("docType");
+  const activeDocType = DOCUMENT_FIELDS.some((d) => d.tab === docTypeParam)
+    ? (docTypeParam as string)
+    : "soul";
+  const setActiveDocType = useCallback(
+    (value: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("docType", value);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   // Task tab filters
   const [taskSearch, setTaskSearch] = useState("");
@@ -344,7 +390,11 @@ export default function AgentDetailPage() {
           value="documents"
           className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden"
         >
-          <Tabs defaultValue="soul" className="flex flex-col flex-1 min-h-0">
+          <Tabs
+            value={activeDocType}
+            onValueChange={setActiveDocType}
+            className="flex flex-col flex-1 min-h-0"
+          >
             <TabsList className="shrink-0 w-full justify-start">
               {DOCUMENT_FIELDS.map(({ tab, label, field }) => {
                 const empty = !agent[field];

@@ -251,14 +251,14 @@ export default function RepoDetailPage() {
   }
 
   function handleDelete() {
-    deleteRepo.mutate(repo!.id, { onSuccess: () => navigate("/repos") });
+    deleteRepo.mutate(repo!.id, { onSuccess: () => navigate("/settings/repos") });
   }
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-auto gap-4">
       <button
         type="button"
-        onClick={() => navigate("/repos")}
+        onClick={() => navigate("/settings/repos")}
         className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
       >
         <ArrowLeft className="h-4 w-4" /> Back to Repos

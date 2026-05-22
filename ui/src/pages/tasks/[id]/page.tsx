@@ -601,7 +601,7 @@ export default function TaskDetailPage() {
       )}
       {task.credentialKeySuffix && (
         <MetaRow icon={Key} label="API Key">
-          <Link to="/keys" className="text-primary hover:underline font-mono text-xs">
+          <Link to="/settings/api-keys" className="text-primary hover:underline font-mono text-xs">
             {task.credentialKeyType === "CLAUDE_CODE_OAUTH_TOKEN"
               ? "OAuth"
               : task.credentialKeyType === "ANTHROPIC_API_KEY"

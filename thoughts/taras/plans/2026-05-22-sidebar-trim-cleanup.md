@@ -3,10 +3,10 @@ date: 2026-05-22T00:00:00Z
 topic: "Sidebar Trim & Cleanup — Implementation Plan"
 author: taras
 tags: [plan, ui, navigation, sidebar, ia]
-status: draft
+status: completed
 related_brainstorm: thoughts/taras/brainstorms/2026-05-21-sidebar-trim-cleanup.md
 last_updated: 2026-05-22
-last_updated_by: taras
+last_updated_by: claude (phase-running, phase 6)
 ---
 
 # Sidebar Trim & Cleanup — Implementation Plan
@@ -204,19 +204,19 @@ state survives reload via `localStorage`, and `NavItem` gains a declarative `min
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] Sidebar shows exactly 3 group headers (WORK, SWARM, RESOURCES) and 13 items total (against
+- [x] Sidebar shows exactly 3 group headers (WORK, SWARM, RESOURCES) and 13 items total (against
       a current API server — items behind unmet version gates are still dropped).
-- [ ] Config / API Keys / Integrations / Repos / Debug / Dashboard / Usage / Budgets are **absent**
+- [x] Config / API Keys / Integrations / Repos / Debug / Dashboard / Usage / Budgets are **absent**
       from the sidebar.
-- [ ] Collapsing the SWARM group, then reloading the page, leaves SWARM still collapsed
+- [x] Collapsing the SWARM group, then reloading the page, leaves SWARM still collapsed
       (verify `localStorage` key `agent-swarm:sidebar-group:swarm` is written).
-- [ ] Each of the 13 items navigates to a non-404 route.
+- [x] Each of the 13 items navigates to a non-404 route.
 
 #### Manual Verification:
 - [ ] Group ordering and labels read correctly; icon choices look right.
@@ -291,18 +291,18 @@ Dashboard implementations are preserved verbatim at `/old-home` and `/old-dashbo
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] `/` shows the welcome `<h1>` and a full-bleed `AgentCanvas` reaching the content-area edges
+- [x] `/` shows the welcome `<h1>` and a full-bleed `AgentCanvas` reaching the content-area edges
       (no card border, no 24px gutter around the canvas).
-- [ ] `/old-home` renders the original Home (WelcomeCard + SetupChecklist + …).
-- [ ] `/old-dashboard` renders the original Dashboard (Canvas/Table toggle + InboxPanel).
-- [ ] The Home sidebar item is present and links to `/`.
-- [ ] Non-Home routes still show the standard `p-4 md:p-6` content padding.
+- [x] `/old-home` renders the original Home (WelcomeCard + SetupChecklist + …).
+- [x] `/old-dashboard` renders the original Dashboard (Canvas/Table toggle + InboxPanel).
+- [x] The Home sidebar item is present and links to `/`.
+- [x] Non-Home routes still show the standard `p-4 md:p-6` content padding.
 
 #### Manual Verification:
 - [ ] Welcome copy reads naturally with and without a current-user name.
@@ -364,18 +364,18 @@ A new `/settings` route renders a left-rail shell whose nested routes host the 5
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] `/settings` redirects to `/settings/config` and shows the left-rail shell.
-- [ ] Each rail entry navigates to `/settings/config|api-keys|integrations|repos|debug` and
+- [x] `/settings` redirects to `/settings/config` and shows the left-rail shell.
+- [x] Each rail entry navigates to `/settings/config|api-keys|integrations|repos|debug` and
       renders the corresponding page with **no doubled header**.
-- [ ] `/settings/integrations/slack` (deep link) resolves to the Slack integration detail page.
-- [ ] The Integrations detail "← All integrations" button returns to `/settings/integrations`.
-- [ ] `ConfigPage`'s internal Connections/Secrets tabs still work inside the shell.
+- [x] `/settings/integrations/slack` (deep link) resolves to the Slack integration detail page.
+- [x] The Integrations detail "← All integrations" button returns to `/settings/integrations`.
+- [x] `ConfigPage`'s internal Connections/Secrets tabs still work inside the shell.
 
 #### Manual Verification:
 - [ ] Left-rail active-state and spacing look correct; no nested scrollbar artifacts on the
@@ -415,17 +415,17 @@ without pausing (autopilot).
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] `/usage` shows two tabs (Usage, Budgets); Usage tab is active by default.
-- [ ] Clicking the Budgets tab updates the URL to `/usage?tab=budgets` and renders the budgets
+- [x] `/usage` shows two tabs (Usage, Budgets); Usage tab is active by default.
+- [x] Clicking the Budgets tab updates the URL to `/usage?tab=budgets` and renders the budgets
       content (global budget, per-agent budgets, refusals, pricing, audit feed).
-- [ ] Loading `/usage?tab=budgets` directly opens on the Budgets tab.
-- [ ] Both tabs' data loads without console errors.
+- [x] Loading `/usage?tab=budgets` directly opens on the Budgets tab.
+- [x] Both tabs' data loads without console errors.
 
 #### Manual Verification:
 - [ ] Tab content scrolls independently and looks correct (no clipped sections).
@@ -460,17 +460,17 @@ The header avatar dropdown gains two navigation entries — **Settings** (`/sett
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] Opening the header avatar dropdown shows "Settings" and "Usage" entries plus the existing
+- [x] Opening the header avatar dropdown shows "Settings" and "Usage" entries plus the existing
       identity-switcher items.
-- [ ] Clicking "Settings" navigates to `/settings` (→ `/settings/config`).
-- [ ] Clicking "Usage" navigates to `/usage`.
-- [ ] Identity switching still works (the new entries didn't break the existing menu).
+- [x] Clicking "Settings" navigates to `/settings` (→ `/settings/config`).
+- [x] Clicking "Usage" navigates to `/usage`.
+- [x] Identity switching still works (the new entries didn't break the existing menu).
 
 #### Manual Verification:
 - [ ] Dropdown grouping/separator reads cleanly; entries are visually distinct from the identity list.
@@ -520,19 +520,19 @@ the old standalone routes are replaced by `<Navigate>` redirects.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd ui && pnpm exec tsc -b`
-- [ ] Lint passes: `cd ui && pnpm lint`
-- [ ] Build passes: `cd ui && pnpm build`
-- [ ] No stale absolute links: `cd ui && grep -rn '"/\(config\|keys\|integrations\|repos\|debug\|budgets\|dashboard\)"' src` — every hit is either a redirect-table `to=` target in `router.tsx` or has been updated to the new `/settings/*` path. (Old route *definitions* use relative `path: "config"` and won't match this pattern.)
+- [x] Type-check passes: `cd ui && pnpm exec tsc -b`
+- [x] Lint passes: `cd ui && pnpm lint`
+- [x] Build passes: `cd ui && pnpm build`
+- [x] No stale absolute links: `cd ui && grep -rn '"/\(config\|keys\|integrations\|repos\|debug\|budgets\|dashboard\)"' src` — every hit is either a redirect-table `to=` target in `router.tsx` or has been updated to the new `/settings/*` path. (Old route *definitions* use relative `path: "config"` and won't match this pattern.)
 
 #### Automated QA:
 *(Agent drives `http://localhost:5274` with the browser-use skill.)*
-- [ ] `/dashboard` → lands on `/`; `/budgets` → lands on `/usage?tab=budgets` (Budgets tab).
-- [ ] `/config` → `/settings/config`; `/keys` → `/settings/api-keys`; `/integrations` →
+- [x] `/dashboard` → lands on `/`; `/budgets` → lands on `/usage?tab=budgets` (Budgets tab).
+- [x] `/config` → `/settings/config`; `/keys` → `/settings/api-keys`; `/integrations` →
       `/settings/integrations`; `/repos` → `/settings/repos`; `/debug` → `/settings/debug`.
-- [ ] `/integrations/slack` → `/settings/integrations/slack` (deep link preserved).
-- [ ] `/old-home` and `/old-dashboard` still render directly (not redirected).
-- [ ] No old URL produces a 404 / blank error boundary.
+- [x] `/integrations/slack` → `/settings/integrations/slack` (deep link preserved).
+- [x] `/old-home` and `/old-dashboard` still render directly (not redirected).
+- [x] No old URL produces a 404 / blank error boundary.
 
 #### Manual Verification:
 - [ ] Spot-check that any in-app buttons/links that previously pointed at moved routes now land

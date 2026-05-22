@@ -39,8 +39,8 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Chat", path: "/chat", icon: MessageSquare },
   { label: "Schedules", path: "/schedules", icon: Clock },
   { label: "Usage", path: "/usage", icon: BarChart3 },
-  { label: "Config", path: "/config", icon: Settings },
-  { label: "Repos", path: "/repos", icon: FolderGit2 },
+  { label: "Connections", path: "/settings/connections", icon: Settings },
+  { label: "Repos", path: "/settings/repos", icon: FolderGit2 },
   { label: "Pages", path: "/pages", icon: Globe, gate: { minVersion: "1.79.0" } },
   { label: "Services", path: "/services", icon: Server },
 ];

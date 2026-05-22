@@ -156,9 +156,10 @@ function HomePageContent() {
 
   // /status returned 404 (older API), threw any other error, or otherwise
   // came back empty — fall back to the legacy dashboard so the user always
-  // lands on a working page.
+  // lands on a working page. The legacy dashboard now lives at /old-dashboard
+  // (the IA rework moved the new unified Home to /).
   if (status === null || error || !status) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/old-dashboard" replace />;
   }
 
   const { setup, activity, agent_fs } = status;

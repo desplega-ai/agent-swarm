@@ -97,6 +97,7 @@ export {
   useUpdateMcpServer,
 } from "./use-mcp-servers";
 export { useDeleteMemory, useMemoryList } from "./use-memory";
+export { useMetrics } from "./use-metrics";
 export type { PromptTemplateFilters } from "./use-prompt-templates";
 export {
   useCheckoutTemplate,

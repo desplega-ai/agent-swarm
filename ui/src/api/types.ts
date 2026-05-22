@@ -163,6 +163,14 @@ export interface UserIdentity {
   externalId: string;
 }
 
+/**
+ * Coarse user-role union. The backend stores `role` as a free-form string;
+ * this union captures the values the UI currently reasons about and gives a
+ * declarative type for future RBAC (e.g. `NavItem.minRole`). Loosened to
+ * `string` on the `User` row since the wire value is not constrained.
+ */
+export type UserRole = "admin" | "member" | "viewer";
+
 export interface User {
   id: string;
   name: string;
@@ -1450,4 +1458,19 @@ export interface PageListItem {
 export interface PagesListResponse {
   pages: PageListItem[];
   total: number;
+}
+
+/**
+ * Lightweight swarm-wide counts from `GET /api/metrics` (API >= the
+ * generic-metrics release). Pure `COUNT(*)` aggregates — no cost/usage data.
+ * Older API servers don't expose this route; the client returns `null` for a
+ * 404 so consumers hide the indicators rather than erroring.
+ */
+export interface SwarmMetrics {
+  tasks: { total: number; by_status: Record<string, number> };
+  agents: { total: number; by_status: Record<string, number> };
+  workflows: { total: number; enabled: number };
+  pages: { total: number };
+  sessions: { active: number };
+  skills: { total: number };
 }

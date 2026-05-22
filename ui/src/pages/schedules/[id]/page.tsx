@@ -1,6 +1,6 @@
 import { ArrowLeft, Clock, ListTodo, Pencil, Play, Timer, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import {
   useDeleteSchedule,
@@ -115,6 +115,9 @@ export default function ScheduleDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") === "tasks" ? "tasks" : "schedule";
+
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
     agents?.forEach((a) => {
@@ -199,7 +202,19 @@ export default function ScheduleDetailPage() {
 
       <DetailPageBody
         main={
-          <Tabs defaultValue="schedule">
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => {
+              setSearchParams(
+                (prev) => {
+                  const next = new URLSearchParams(prev);
+                  next.set("tab", value);
+                  return next;
+                },
+                { replace: true },
+              );
+            }}
+          >
             <TabsList>
               <TabsTrigger value="schedule">
                 <Clock className="h-3.5 w-3.5" />

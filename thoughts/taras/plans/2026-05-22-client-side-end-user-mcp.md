@@ -1,12 +1,10 @@
 ---
 date: 2026-05-22T00:00:00Z
 topic: "Client-side end-user MCP (DES-444) — Implementation Plan"
-status: completed
+status: draft
 autonomy: autopilot
 planner: Claude
 researcher: Claude
-last_updated: 2026-05-22T17:04:17+02:00
-last_updated_by: Codex
 related:
   - thoughts/taras/research/2026-05-21-client-side-mcp-grounding.md
   - thoughts/taras/brainstorms/2026-05-15-client-side-mcp.md
@@ -182,18 +180,18 @@ branches are fully implemented and unit-testable even though no `/mcp-user` rout
 ### Success Criteria:
 
 #### Automated Verification:
-- [x] Type check passes: `bun run tsc:check`
+- [ ] Type check passes: `bun run tsc:check`
 - [ ] Lint passes: `bun run lint`
-- [x] DB-boundary check passes (`task-tool-ctx.ts` must not import `src/be/db` if placed in
+- [ ] DB-boundary check passes (`task-tool-ctx.ts` must not import `src/be/db` if placed in
       worker scope — it is API-side, but confirm): `bash scripts/check-db-boundary.sh`
-- [x] Existing registrar test still green: `bun test src/tests/tool-registrar-no-input.test.ts`
-- [x] New unit test `src/tests/task-tools-ctx.test.ts`: `sendTaskHandler` with a fake
+- [ ] Existing registrar test still green: `bun test src/tests/tool-registrar-no-input.test.ts`
+- [ ] New unit test `src/tests/task-tools-ctx.test.ts`: `sendTaskHandler` with a fake
       `userCtx` writes `requestedByUserId`; `getTasksHandler` with `userCtx` only returns
       that user's tasks; `assertOwnsTask` returns an `isError` forbidden result for a
       foreign task and `null` for an owned one and for any owner ctx — `bun test src/tests/task-tools-ctx.test.ts`
 
 #### Automated QA:
-- [x] Start `bun run start:http`; over the owner `/mcp` route call `send-task` and
+- [ ] Start `bun run start:http`; over the owner `/mcp` route call `send-task` and
       `get-tasks` exactly as before — confirm responses are unchanged (no regression from
       the extraction).
 
@@ -246,15 +244,15 @@ Apply the same `(ctx, args) → result` split to `get-task-details`, `cancel-tas
 ### Success Criteria:
 
 #### Automated Verification:
-- [x] Type check passes: `bun run tsc:check`
+- [ ] Type check passes: `bun run tsc:check`
 - [ ] Lint passes: `bun run lint`
-- [x] New unit tests `src/tests/task-tools-ownership.test.ts`: each of the 3 handlers, with
+- [ ] New unit tests `src/tests/task-tools-ownership.test.ts`: each of the 3 handlers, with
       a `userCtx` whose `userId` ≠ `task.requestedByUserId`, returns the forbidden result;
       with a matching `userId`, succeeds; owner ctx behaves as before — `bun test src/tests/task-tools-ownership.test.ts`
 - [ ] Full suite passes: `bun test`
 
 #### Automated QA:
-- [x] Over owner `/mcp`, exercise `get-task-details`, `cancel-task`, `task-action`
+- [ ] Over owner `/mcp`, exercise `get-task-details`, `cancel-task`, `task-action`
       (release/accept) against a real task — confirm identical behavior to pre-refactor.
 
 #### Manual Verification:
@@ -335,9 +333,9 @@ refactored task tools bound with a `user` ctx.
 ### Success Criteria:
 
 #### Automated Verification:
-- [x] Type check passes: `bun run tsc:check`
-- [x] Lint passes: `bun run lint`
-- [x] New test `src/tests/mcp-user-route.test.ts`: request to `/mcp-user` with no token →
+- [ ] Type check passes: `bun run tsc:check`
+- [ ] Lint passes: `bun run lint`
+- [ ] New test `src/tests/mcp-user-route.test.ts`: request to `/mcp-user` with no token →
       401; with a revoked token → 401; with a **suspended user's** valid token → 401 (C1);
       with a token whose user ≠ the `mcp-session-id`'s opening user → 401 (I1); with a valid
       active-user token → MCP `initialize` + `tools/list` returns exactly the 5 task tools —
@@ -345,12 +343,12 @@ refactored task tools bound with a `user` ctx.
 - [ ] Full suite passes: `bun test`
 
 #### Automated QA:
-- [x] Mint a token (via `mintToken` in a script or, after Phase 4, the endpoint); `curl` an
+- [ ] Mint a token (via `mintToken` in a script or, after Phase 4, the endpoint); `curl` an
       MCP `initialize` → `tools/list` → `tools/call send-task` against
       `http://localhost:3013/mcp-user` with `Authorization: Bearer aswt_…`. Confirm the
       created task has `requestedByUserId` = that user, and `get-tasks` over `/mcp-user`
       returns only that user's tasks.
-- [x] Confirm owner `/mcp` still works with the swarm key (regression).
+- [ ] Confirm owner `/mcp` still works with the swarm key (regression).
 
 #### Manual Verification:
 - [ ] Confirm a revoked token stops working on the *next* request within an open session.
@@ -390,15 +388,15 @@ new `route()` calls self-register. Run `bun run docs:openapi` and commit the reg
 ### Success Criteria:
 
 #### Automated Verification:
-- [x] Type check passes: `bun run tsc:check`
-- [x] Lint passes: `bun run lint`
+- [ ] Type check passes: `bun run tsc:check`
+- [ ] Lint passes: `bun run lint`
 - [ ] OpenAPI spec is fresh (no diff after regen): `bun run docs:openapi` then `git diff --exit-code openapi.json`
-- [x] New test `src/tests/user-token-routes.test.ts`: `POST` mints (returns plaintext once,
+- [ ] New test `src/tests/user-token-routes.test.ts`: `POST` mints (returns plaintext once,
       `aswt_`-prefixed, persists only the hash); `DELETE` revokes; both reject without the
       swarm key (401); `DELETE` of an unknown token → 404 — `bun test src/tests/user-token-routes.test.ts`
 
 #### Automated QA:
-- [x] `curl -X POST .../api/users/<id>/mcp-tokens` with the swarm key → plaintext token in
+- [ ] `curl -X POST .../api/users/<id>/mcp-tokens` with the swarm key → plaintext token in
       the response; `curl` `GET /api/users/<id>` shows the token summary (preview only, no
       plaintext); `curl -X DELETE` revokes it; the user's `recentEvents` show
       `token_minted` then `token_revoked`.
@@ -467,10 +465,10 @@ producing 5 copy entries + curl from one template, given `{ serverUrl, token }`:
 ### Success Criteria:
 
 #### Automated Verification:
-- [x] UI type check + lint pass: `cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b`
+- [ ] UI type check + lint pass: `cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b`
 
 #### Automated QA:
-- [x] Browser-use (agent-browser, local URL `http://localhost:5274`) walkthrough with
+- [ ] Browser-use (agent-browser, local URL `http://localhost:5274`) walkthrough with
       screenshots: open a person → Tokens tab → mint a token → verify plaintext + snippets
       render and copy → revoke → verify the token shows revoked. Attach screenshots.
 
@@ -561,27 +559,28 @@ Backoff already keys on refusal generically; confirm it needs no `cause`-specifi
 ### Success Criteria:
 
 #### Automated Verification:
-- [x] Type check passes: `bun run tsc:check`
-- [x] Lint passes: `bun run lint`
-- [x] Migration applies cleanly on a fresh DB **and** an existing DB (`rm agent-swarm-db.sqlite
+- [ ] Type check passes: `bun run tsc:check`
+- [ ] Lint passes: `bun run lint`
+- [ ] Migration applies cleanly on a fresh DB **and** an existing DB (`rm agent-swarm-db.sqlite
       && bun run start:http`, then again against the pre-existing DB).
-- [x] New test `src/tests/budget-user-scope.test.ts`: `getDailySpendForUser` sums only that
+- [ ] New test `src/tests/budget-user-scope.test.ts`: `getDailySpendForUser` sums only that
       user's tasks' costs; `canClaim` refuses with `cause: "user"` when the user's spend ≥
       cap and allows when below; agent/global gates unaffected — `bun test src/tests/budget-user-scope.test.ts`
-- [x] Existing budget tests still green: `bun test src/tests/budgets-routes.test.ts` and any
+- [ ] Existing budget tests still green: `bun test src/tests/budgets-routes.test.ts` and any
       `budget-admission` test file
 - [ ] Full suite passes: `bun test`
 
 #### Automated QA:
-- [x] Create a user with `dailyBudgetUsd` = small value; mint a token; over `/mcp-user`
+- [ ] Create a user with `dailyBudgetUsd` = small value; mint a token; over `/mcp-user`
       `send-task` repeatedly; seed `session_costs` rows (or run real tasks) to exceed the
       cap; confirm the next claim is refused at admission time (task stays `pending`, worker
       backs off) and the lead gets one notification for that `(task, day)`.
-- [x] PATCH the user's `dailyBudgetUsd` via the People page → confirm the `budgets`
+- [ ] PATCH the user's `dailyBudgetUsd` via the People page → confirm the `budgets`
       `user`-row updates (and is deleted when the field is cleared to null).
 
 #### Manual Verification:
-- [ ] Confirm the People-page budget copy now accurately describes claim-time enforcement.
+- [ ] Confirm the People-page budget copy ("Soft cap, enforced once MCP user-tokens ship")
+      is now accurate — optionally update the copy.
 
 **Implementation Note**: After this phase, pause for manual confirmation.
 

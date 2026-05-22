@@ -69,16 +69,16 @@ export function AgentNode({ data }: NodeProps) {
           </span>
         ) : null}
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-xs font-semibold truncate">{agent.name}</span>
             {isLead ? <Crown className="h-3 w-3 text-primary shrink-0" /> : null}
           </div>
           {agent.role ? (
-            <Badge variant="outline" size="tag" className="mt-0.5">
+            <Badge variant="outline" size="tag" className="mt-0.5 max-w-full truncate">
               {agent.role}
             </Badge>
           ) : (
-            <span className="text-[10px] text-muted-foreground uppercase">
+            <span className="block truncate text-[10px] text-muted-foreground uppercase">
               {agent.status.replace(/_/g, " ")}
             </span>
           )}
@@ -86,10 +86,10 @@ export function AgentNode({ data }: NodeProps) {
       </div>
 
       <div className="flex items-center justify-between gap-2 mt-1.5 text-[10px] text-muted-foreground">
-        <span title={`${taskCount24h} tasks in last 24h`}>
+        <span className="truncate" title={`${taskCount24h} tasks in last 24h`}>
           <span className="font-mono text-foreground">{taskCount24h}</span> tasks
         </span>
-        <span title={`${formatCost(cost24h, { precision: 4 })} in last 24h`}>
+        <span className="truncate" title={`${formatCost(cost24h, { precision: 4 })} in last 24h`}>
           <span className="font-mono text-foreground">{formatCost(cost24h)}</span> · 24h
         </span>
       </div>
