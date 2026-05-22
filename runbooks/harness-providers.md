@@ -9,7 +9,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Claude Code | `claude` | `ClaudeAdapter` | Default; spawns `claude` CLI |
 | Codex | `codex` | `CodexAdapter` | Spawns `codex` CLI; OpenAI/ChatGPT OAuth |
 | opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary; agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) |
-| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter or Anthropic |
+| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 
@@ -50,6 +50,16 @@ Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOption
 When supported, validation happens in the `store-progress` MCP tool (see `src/tools/store-progress.ts:159-190`). When the schema is missing or violated, the tool call fails and the agent is asked to retry.
 
 **Caveat for default-mode Devin:** `ensureTaskFinished` in `src/commands/runner.ts` writes Devin's `providerOutput` directly into `task.output` without schema validation. Callers consuming a schema'd task's output should not assume `JSON.parse(task.output)` will succeed when the task ran on default-mode Devin.
+
+## pi-mono + Amazon Bedrock auth
+
+When `MODEL_OVERRIDE=amazon-bedrock/<model-id>` (e.g. `amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0`), credential resolution is delegated to the AWS SDK's default chain — agent-swarm does no presence check beyond detecting the `amazon-bedrock/` prefix.
+
+- Any source the AWS SDK accepts works: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ optional `AWS_SESSION_TOKEN`), `AWS_PROFILE` + `~/.aws/credentials`, SSO sessions in `~/.aws/config`, EC2 IMDS / ECS task role, web-identity / OIDC, `credential_process`, assume-role chains.
+- `AWS_REGION` (or `AWS_DEFAULT_REGION`) is required by the SDK and must be a Bedrock-enabled region.
+- The boot credential gate (`checkPiMonoCredentials`) short-circuits to `satisfiedBy: "sdk-delegated"` without inspecting any AWS env var or file. The worker does **not** park in `credential-wait` for Bedrock — even with no creds visible to agent-swarm, it claims tasks.
+- Credential errors surface at the first Bedrock inference call as an AWS SDK error in the session log (scrubbed via `scrubSecrets` at egress). Treat this the same as a codex `auth.json` failure: the adapter/SDK is the source of truth, not the boot gate.
+- This is the closest precedent to codex's "presence-only" pattern (`codexAuthFileExists` → `presenceCheckOk`). If pi-ai later exposes a `validateBedrockCredentials` helper, the live-test branch in `validateProviderCredentials` can be upgraded without touching the boot gate.
 
 ## Same-PR doc-update rule
 

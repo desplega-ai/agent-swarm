@@ -99,9 +99,28 @@ The runner consumes these events (not the provider's native ones) to post progre
 | File | Transport | Auth |
 |---|---|---|
 | [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) | `Bun.spawn` of `claude` CLI with `--output-format stream-json`, JSONL stdout parsing | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
-| [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` |
+| [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `MODEL_OVERRIDE=amazon-bedrock/*`, anything the AWS SDK default chain accepts (see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Wraps `@openai/codex-sdk` `Codex` / `Thread`; `thread.runStreamed()` yields `ThreadEvent` async iterator | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
+
+### pi-mono + Amazon Bedrock auth
+
+pi-mono routes to Amazon Bedrock when `MODEL_OVERRIDE=amazon-bedrock/<model-id>` (e.g. `amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0`). Bedrock authenticates through the AWS SDK's default credential chain — not a single API key — so agent-swarm **delegates credential resolution to the SDK**. The boot credential gate detects the `amazon-bedrock/` prefix and short-circuits to `satisfiedBy: "sdk-delegated"` without inspecting any AWS env var or file.
+
+**Accepted credential sources** — anything the AWS SDK accepts:
+
+- `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ optional `AWS_SESSION_TOKEN`)
+- `AWS_PROFILE` resolved against `~/.aws/credentials` and `~/.aws/config`
+- AWS SSO sessions configured in `~/.aws/config`
+- EC2 IMDS instance role / ECS task role
+- Web-identity / OIDC (`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`)
+- `credential_process` and assume-role chains
+
+`AWS_REGION` (or `AWS_DEFAULT_REGION`) is required by the SDK and must be a Bedrock-enabled region.
+
+**Failure mode.** No `credential-wait` parking — the worker claims tasks immediately. If creds are missing, the first Bedrock inference call fails with the AWS SDK's own error (e.g. `CredentialsProviderError: Could not load credentials from any providers`), which surfaces in the session log via the existing error path (scrubbed through `scrubSecrets`). Treat this the same way you treat a stale codex `auth.json`: the underlying SDK is the source of truth.
+
+This is intentionally the same pattern codex uses for OAuth credentials (`codexAuthFileExists` → `presenceCheckOk` in [`src/commands/provider-credentials.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/provider-credentials.ts)) — presence-only gate, runtime validation owned by the adapter/SDK, no upstream call from agent-swarm. pi-ai does not currently expose a Bedrock-specific credential check we could call; if it does in the future, the live-test branch can be upgraded without touching the boot gate.
 
 ### Cost & context tracking
 

@@ -238,6 +238,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
  * | `opencode`       | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` (pi-style) | matching provider's `/v1/models` |
  * | `pi`             | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY`           | matching provider's `/v1/models` |
+ * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (validated at first inference call) |
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v1/sessions?limit=1` |
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
@@ -296,6 +297,16 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
       }
       case "pi":
       case "opencode": {
+        // pi-mono with MODEL_OVERRIDE=amazon-bedrock/* delegates credential
+        // resolution to the AWS SDK default chain (env, ~/.aws/*, SSO, IMDS,
+        // assume-role, …). pi-ai exposes no Bedrock-specific check we could
+        // call here, and the SDK chain may issue slow IMDS network calls on
+        // non-EC2 hosts — so the live test is a presence check, mirroring the
+        // codex-OAuth pattern above. Real validation happens at the first
+        // Bedrock inference call.
+        if (provider === "pi" && env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/")) {
+          return presenceCheckOk();
+        }
         // Both pi-mono and opencode resolve credentials in the same order:
         // OPENROUTER → ANTHROPIC → OPENAI. Live-test against the matching
         // provider's models endpoint.

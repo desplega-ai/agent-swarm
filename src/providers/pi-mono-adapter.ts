@@ -72,17 +72,34 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
 
 /**
  * Pi-mono is satisfied by ANY of:
- *   1. `~/.pi/agent/auth.json` exists.
- *   2. `MODEL_OVERRIDE` is set to a provider-prefixed model — only the
+ *   1. `MODEL_OVERRIDE` selects the `amazon-bedrock` provider — credential
+ *      resolution is delegated to the AWS SDK's default chain at first
+ *      inference call. agent-swarm does no presence check; if creds are
+ *      missing the SDK error surfaces in the session log.
+ *   2. `~/.pi/agent/auth.json` exists.
+ *   3. `MODEL_OVERRIDE` is set to a provider-prefixed model — only the
  *      matching provider's key is required.
- *   3. `MODEL_OVERRIDE` is empty / unprefixed — any one of the supported
+ *   4. `MODEL_OVERRIDE` is empty / unprefixed — any one of the supported
  *      keys (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY) is
  *      enough.
+ *
+ * Bedrock is checked first so a stale `auth.json` (Anthropic / OpenRouter
+ * creds from a previous login) doesn't get falsely reported as the
+ * satisfying source when the model is actually going to AWS.
  */
 export function checkPiMonoCredentials(
   env: Record<string, string | undefined>,
   opts: CredCheckOptions = {},
 ): CredStatus {
+  if (env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/")) {
+    return {
+      ready: true,
+      missing: [],
+      satisfiedBy: "sdk-delegated",
+      hint: "AWS SDK will resolve credentials at first Bedrock call (env, ~/.aws/*, SSO, IMDS, etc.).",
+    };
+  }
+
   const homeDir = opts.homeDir ?? env.HOME ?? "/root";
   const probe = opts.fs?.existsSync ?? existsSync;
   const authFile = `${homeDir}/.pi/agent/auth.json`;

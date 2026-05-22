@@ -224,6 +224,53 @@ describe("checkPiMonoCredentials", () => {
       ).toBe(true);
     }
   });
+
+  // ─── amazon-bedrock: AWS SDK delegates credential resolution ───────────────
+  // When MODEL_OVERRIDE selects amazon-bedrock, pi-mono routes through the AWS
+  // SDK's default credential chain (env, ~/.aws/*, SSO, IMDS, assume-role,
+  // web-identity, …). agent-swarm does no presence check beyond detecting the
+  // `amazon-bedrock/` prefix — the SDK validates at first inference call.
+  // Mirrors the codex auth.json "presence-only" pattern.
+
+  test("amazon-bedrock: ready (sdk-delegated) with no env vars and no auth.json", () => {
+    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const status = checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("sdk-delegated");
+    expect(status.missing).toEqual([]);
+  });
+
+  test("amazon-bedrock: stays sdk-delegated even when ANTHROPIC_API_KEY is also set", () => {
+    // The Anthropic-shape key is irrelevant here — the model is routed through
+    // AWS Bedrock, not Anthropic. Reporting satisfiedBy="env" would mislead.
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      ANTHROPIC_API_KEY: "x",
+    };
+    const status = checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("sdk-delegated");
+  });
+
+  test("amazon-bedrock: stays sdk-delegated even when auth.json exists", () => {
+    // auth.json holds Anthropic/OpenRouter/OpenAI creds — none used by Bedrock.
+    // Bedrock branch must win over the file probe.
+    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const status = checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: fsWith(new Set([AUTH])),
+    });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("sdk-delegated");
+  });
+
+  test("amazon-bedrock: provider-prefix match is case-insensitive", () => {
+    // Mirrors modelToCredKeys' .toLowerCase() at line 54 of pi-mono-adapter.
+    const env = { MODEL_OVERRIDE: "Amazon-Bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const status = checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("sdk-delegated");
+  });
 });
 
 // ─── opencode ────────────────────────────────────────────────────────────────

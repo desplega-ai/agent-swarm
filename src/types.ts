@@ -491,7 +491,10 @@ export type AgentLatestModel = z.infer<typeof AgentLatestModelSchema>;
 export const AgentCredStatusSchema = z.object({
   ready: z.boolean(),
   missing: z.array(z.string()).default([]),
-  satisfiedBy: z.enum(["env", "file", "side-effect-pending"]).nullable().default(null),
+  satisfiedBy: z
+    .enum(["env", "file", "side-effect-pending", "sdk-delegated"])
+    .nullable()
+    .default(null),
   hint: z.string().nullable().default(null),
   liveTest: AgentCredStatusLiveTestSchema.nullable().default(null),
   latestModel: AgentLatestModelSchema.nullable().default(null),

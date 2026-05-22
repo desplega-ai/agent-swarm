@@ -163,11 +163,15 @@ export interface ProviderAdapter {
  *   (e.g. `codex login --with-api-key`) still needs to run before the
  *   adapter can use them. Workers should treat this as "ready" for the
  *   purposes of the boot loop — the side-effect is the entrypoint's job.
+ * - `'sdk-delegated'` — the harness's underlying SDK owns credential
+ *   resolution at runtime (e.g. AWS SDK default chain for pi-mono +
+ *   `MODEL_OVERRIDE=amazon-bedrock/...`); agent-swarm does no presence check
+ *   and any error surfaces from the first inference call.
  */
 export interface CredStatus {
   ready: boolean;
   missing: string[];
-  satisfiedBy?: "env" | "file" | "side-effect-pending";
+  satisfiedBy?: "env" | "file" | "side-effect-pending" | "sdk-delegated";
   hint?: string;
 }
 

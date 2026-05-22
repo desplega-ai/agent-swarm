@@ -20,10 +20,22 @@ set -e
 HARNESS_PROVIDER="${HARNESS_PROVIDER:-claude}"
 
 if [ "$HARNESS_PROVIDER" = "pi" ]; then
-    # Pi-mono auth: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or auth.json must exist
-    if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
-        echo "Warning: pi provider has no credentials yet (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / ~/.pi/agent/auth.json). Worker will park in credential-wait until creds appear in swarm_config."
-    fi
+    # Pi-mono auth: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or auth.json must
+    # exist — UNLESS MODEL_OVERRIDE selects amazon-bedrock, in which case
+    # credential resolution is delegated to the AWS SDK at first inference
+    # call (env vars, ~/.aws/*, SSO, IMDS, assume-role, etc.). The boot gate
+    # in checkPiMonoCredentials short-circuits to satisfiedBy=sdk-delegated
+    # for that case, so don't emit a misleading warning here.
+    case "$(echo "${MODEL_OVERRIDE:-}" | tr '[:upper:]' '[:lower:]')" in
+        amazon-bedrock/*)
+            echo "pi provider: MODEL_OVERRIDE=${MODEL_OVERRIDE} — AWS SDK will resolve Bedrock credentials at runtime (env, ~/.aws/*, SSO, IMDS)."
+            ;;
+        *)
+            if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
+                echo "Warning: pi provider has no credentials yet (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / ~/.pi/agent/auth.json). Worker will park in credential-wait until creds appear in swarm_config."
+            fi
+            ;;
+    esac
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or auth.json must exist
     OPENCODE_AUTH_FILE="${HOME}/.local/share/opencode/auth.json"
