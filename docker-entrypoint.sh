@@ -99,7 +99,7 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     fi
 
     # Auth path 1: Seed slot 0 from swarm config store at boot (backwards-compat).
-    # Tries codex_oauth_0 first (post-migration 069), then legacy codex_oauth key.
+    # Tries codex_oauth_0 first (post-migration 071), then legacy codex_oauth key.
     # Runner handles per-task materialization for multi-slot pools; this is only a
     # boot-time seed so the credential-wait loop sees auth.json on fresh containers.
     if [ ! -f "$WORKER_CODEX_HOME/auth.json" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
