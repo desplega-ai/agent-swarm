@@ -58,6 +58,7 @@ import { MarkdownView } from "@/components/shared/markdown-view";
 import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -528,6 +529,7 @@ export default function TaskDetailPage() {
   const hasSessionLogs = sessionLogs && sessionLogs.length > 0;
   const hasOutput = !!task.output;
   const hasEvents = task.logs && task.logs.length > 0;
+  const hasAttachments = !!(task.attachments && task.attachments.length > 0);
 
   // LEFT RAIL — meta info + SCM card + Dependencies + Progress + Context budget +
   // Session Cost. Mirrors brand-kit `preview/task-detail.html` left column
@@ -811,7 +813,9 @@ export default function TaskDetailPage() {
         </CollapsibleSection>
       )}
 
-      {!isFailed && !hasOutput && (
+      <TaskAttachmentsSection attachments={task.attachments} />
+
+      {!isFailed && !hasOutput && !hasAttachments && (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
           <p className="text-xs">No output available</p>
         </div>
@@ -1050,6 +1054,8 @@ export default function TaskDetailPage() {
                 <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-48" />
               </CollapsibleSection>
             )}
+
+            <TaskAttachmentsSection attachments={task.attachments} />
 
             {hasSessionLogs ? (
               <SessionLogViewer

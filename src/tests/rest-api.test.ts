@@ -7,7 +7,9 @@ import {
   createTaskExtended,
   getAgentById,
   getDb,
+  getTaskAttachments,
   initDb,
+  insertTaskAttachment,
   updateAgentStatus,
 } from "../be/db";
 
@@ -137,7 +139,11 @@ async function handleRequest(
       return { status: 404, body: { error: "Task not found" } };
     }
 
-    return { status: 200, body: task };
+    // Mirror the real `GET /api/tasks/:id` handler in `src/http/tasks.ts`
+    // by decorating the row with `attachments`. The mock omits `logs` since
+    // those tests live elsewhere; attachments are cheap enough to inline.
+    const attachments = getTaskAttachments(taskId);
+    return { status: 200, body: { ...(task as object), attachments } };
   }
 
   // GET /api/stats - Dashboard summary stats
@@ -537,6 +543,50 @@ describe("REST API Endpoints", () => {
       expect(data.id).toBe(task.id);
       expect(data.task).toBe("Test task for GET endpoint");
       expect(data.status).toBe("unassigned");
+    });
+
+    test("should include attachments[] in the response", async () => {
+      const task = createTaskExtended("Task with attachments", {
+        creatorAgentId: "test-agent-attach",
+      });
+      insertTaskAttachment({
+        taskId: task.id,
+        kind: "url",
+        name: "report",
+        url: "https://example.com/r.pdf",
+        intent: "primary deliverable",
+        isPrimary: true,
+      });
+      insertTaskAttachment({
+        taskId: task.id,
+        kind: "agent-fs",
+        name: "doc",
+        path: "/thoughts/a.md",
+      });
+
+      const response = await fetch(`${baseUrl}/api/tasks/${task.id}`);
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as {
+        id: string;
+        attachments: Array<{ kind: string; name: string; url?: string; path?: string }>;
+      };
+      expect(data.attachments).toBeDefined();
+      expect(data.attachments.length).toBe(2);
+      expect(data.attachments[0]?.kind).toBe("url");
+      expect(data.attachments[0]?.name).toBe("report");
+      expect(data.attachments[1]?.kind).toBe("agent-fs");
+      expect(data.attachments[1]?.path).toBe("/thoughts/a.md");
+    });
+
+    test("should return an empty attachments[] when none are attached", async () => {
+      const task = createTaskExtended("Task without attachments", {
+        creatorAgentId: "test-agent-noattach",
+      });
+      const response = await fetch(`${baseUrl}/api/tasks/${task.id}`);
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { attachments: unknown[] };
+      expect(Array.isArray(data.attachments)).toBe(true);
+      expect(data.attachments.length).toBe(0);
     });
   });
 

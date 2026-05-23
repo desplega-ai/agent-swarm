@@ -1,5 +1,5 @@
 import type { WebClient } from "@slack/web-api";
-import { getAgentById } from "../be/db";
+import { getAgentById, getTaskAttachments } from "../be/db";
 import type { Agent, AgentTask } from "../types";
 import { getSlackApp } from "./app";
 import {
@@ -7,6 +7,7 @@ import {
   buildCompletedBlocks,
   buildFailedBlocks,
   buildProgressBlocks,
+  formatAttachmentsBlockForSlack,
   formatDuration,
   markdownToSlack,
 } from "./blocks";
@@ -50,6 +51,8 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
     if (task.status === "completed") {
       const output = task.output || "Task completed.";
       const slackOutput = markdownToSlack(output);
+      const attachmentsBlock = formatAttachmentsBlockForSlack(getTaskAttachments(task.id));
+      const body = slackOutput + attachmentsBlock;
       const duration =
         task.finishedAt && task.createdAt
           ? formatDuration(new Date(task.createdAt), new Date(task.finishedAt))
@@ -60,14 +63,18 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
       const blocks = buildCompletedBlocks({
         agentName,
         taskId: task.id,
-        body: slackOutput,
+        body,
         duration,
+        // When the agent already posted output via slack-reply, the header
+        // card stays minimal. We still surface the attachments block as a
+        // trailing addendum so links are visible without expanding the card.
         minimal: !!task.slackReplySent,
+        trailer: task.slackReplySent ? attachmentsBlock : undefined,
       });
       await sendWithPersona(client, {
         channel: task.slackChannelId,
         thread_ts: task.slackThreadTs,
-        text: task.slackReplySent ? `✅ ${agentName} completed` : slackOutput,
+        text: task.slackReplySent ? `✅ ${agentName} completed` : body,
         username: getAgentDisplayName(agent),
         icon_emoji: getAgentEmoji(agent),
         blocks,
@@ -175,6 +182,8 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
   if (task.status === "completed") {
     const output = task.output || "Task completed.";
     const slackOutput = markdownToSlack(output);
+    const attachmentsBlock = formatAttachmentsBlockForSlack(getTaskAttachments(task.id));
+    const body = slackOutput + attachmentsBlock;
     const duration =
       task.finishedAt && task.createdAt
         ? formatDuration(new Date(task.createdAt), new Date(task.finishedAt))
@@ -185,11 +194,12 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
     blocks = buildCompletedBlocks({
       agentName,
       taskId: task.id,
-      body: slackOutput,
+      body,
       duration,
       minimal: !!task.slackReplySent,
+      trailer: task.slackReplySent ? attachmentsBlock : undefined,
     });
-    text = task.slackReplySent ? `✅ ${agentName} completed` : slackOutput;
+    text = task.slackReplySent ? `✅ ${agentName} completed` : body;
   } else if (task.status === "cancelled") {
     blocks = buildCancelledBlocks({ agentName, taskId: task.id });
     text = "Task cancelled";
