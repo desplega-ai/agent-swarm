@@ -144,28 +144,17 @@ export const registerStoreProgressTool = (server: McpServer) => {
         let updatedTask = existingTask;
         const isTerminal = ["completed", "failed", "cancelled"].includes(existingTask.status);
 
-        // Idempotency guard: short-circuit terminal-status writes (completed/failed)
-        // BEFORE any side-effects fire (event emission, memory write, follow-up task,
-        // business-use ensure). Without this, a multi-session race causes duplicate
-        // follow-up tasks to lead, vector index pollution, and spurious BU events.
-        // First-call-wins: existing output / finishedAt are preserved.
-        if (status && isTerminal) {
-          return {
-            success: true,
-            message:
-              `Task "${taskId}" is already ${existingTask.status}; treating as no-op. ` +
-              `Existing output preserved (first-call-wins).`,
-            task: existingTask,
-            wasNoOp: true,
-          };
-        }
-
         // Attachments — pointer-based, append-only. Insert each row inside
         // this transaction; the helper dedups by sha256 (when present) or by
         // (kind, pointer, name), so idempotent re-calls don't fan out
-        // duplicates. Intentionally NOT reached on the terminal-status no-op
-        // short-circuit above (per Phase 1 spec).
-        if (attachments && attachments.length > 0 && !isTerminal) {
+        // duplicates. Run BEFORE the terminal-status short-circuit: smoke
+        // tests and post-completion artifact uploads target already-completed
+        // tasks, and the schema explicitly documents that attachments "may be
+        // sent on any call (progress or completion) and accumulate across
+        // calls." Status writes still no-op on terminal tasks (see below);
+        // attachment writes don't change task state, so they're safe to
+        // accept on any status.
+        if (attachments && attachments.length > 0) {
           for (const a of attachments) {
             insertTaskAttachment({
               taskId,
@@ -185,6 +174,22 @@ export const registerStoreProgressTool = (server: McpServer) => {
               isPrimary: a.isPrimary,
             });
           }
+        }
+
+        // Idempotency guard: short-circuit terminal-status writes (completed/failed)
+        // BEFORE any side-effects fire (event emission, memory write, follow-up task,
+        // business-use ensure). Without this, a multi-session race causes duplicate
+        // follow-up tasks to lead, vector index pollution, and spurious BU events.
+        // First-call-wins: existing output / finishedAt are preserved.
+        if (status && isTerminal) {
+          return {
+            success: true,
+            message:
+              `Task "${taskId}" is already ${existingTask.status}; treating as no-op. ` +
+              `Existing output preserved (first-call-wins).`,
+            task: existingTask,
+            wasNoOp: true,
+          };
         }
 
         // Update progress if provided (with deduplication)
