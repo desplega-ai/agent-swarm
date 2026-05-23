@@ -12,6 +12,7 @@ import {
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
+import { acquireRaterSlot, isApiHealthy } from "../utils/rater-semaphore";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
@@ -246,6 +247,10 @@ export interface RunStopHookSessionSummaryDeps {
   fetchRetrievalsForTask?: typeof fetchRetrievalsForTask;
   postRatings?: typeof postRatings;
   buildRatingsFromLlm?: typeof buildRatingsFromLlm;
+  /** Test injection for the host-wide concurrency throttle. */
+  acquireRaterSlot?: typeof acquireRaterSlot;
+  /** Test injection for the API back-pressure probe. */
+  isApiHealthy?: typeof isApiHealthy;
 }
 
 export interface RunStopHookSessionSummaryOpts {
@@ -284,6 +289,8 @@ export async function runStopHookSessionSummary(
   const _fetchRetrievals = deps.fetchRetrievalsForTask ?? fetchRetrievalsForTask;
   const _postRatings = deps.postRatings ?? postRatings;
   const _buildRatings = deps.buildRatingsFromLlm ?? buildRatingsFromLlm;
+  const _acquireRaterSlot = deps.acquireRaterSlot ?? acquireRaterSlot;
+  const _isApiHealthy = deps.isApiHealthy ?? isApiHealthy;
 
   try {
     let transcript = "";
@@ -304,89 +311,124 @@ export async function runStopHookSessionSummary(
     const apiUrl = env.MCP_BASE_URL || `http://localhost:${env.PORT || "3013"}`;
     const apiKey = getApiKey(env);
 
-    // Memory-rater v1.5 step-4: piggyback per-memory ratings on the
-    // existing summary call when MEMORY_RATERS includes `llm`.
-    const llmRaterEnabled = isLlmRaterEnabled();
-    let retrievals: RetrievalRow[] = [];
-    if (llmRaterEnabled && taskId) {
-      const rawRetrievals = await _fetchRetrievals({
+    // Back-pressure: skip the rater spawn when the control plane is
+    // unreachable. Fanning out 250-MiB-each `claude -p` haiku subprocesses
+    // while the api is down just makes recovery harder — this was the
+    // tail end of an OOM cascade we observed in production. `SKIP_RATER_THROTTLE` also
+    // skips the concurrency semaphore below — used by tests that don't
+    // bring an HTTP server up and don't want filesystem-state coupling.
+    const throttleEnabled = !env.SKIP_RATER_THROTTLE;
+    if (throttleEnabled) {
+      const healthy = await _isApiHealthy({ apiUrl, apiKey });
+      if (!healthy) {
+        console.error("[memory-rater] skipping rater — api /health not reachable");
+        return;
+      }
+    }
+
+    // Host-wide concurrency throttle: at most N rater spawns in flight
+    // across all sessions on this host (default 2, override via
+    // `MEMORY_RATER_MAX_CONCURRENT`). When the semaphore is full, skip the
+    // rater rather than queue — Stop hooks must never block session
+    // shutdown. Matches the upstream Hetzner mem_limit defaults so a 15
+    // GiB host can't be pegged by hook-driven fan-out. See module docs in
+    // `src/utils/rater-semaphore.ts` for why this is a filesystem
+    // semaphore and not p-limit.
+    const slot = throttleEnabled ? _acquireRaterSlot() : { release: () => {}, path: "" };
+    if (!slot) {
+      console.error("[memory-rater] skipping rater — host-wide concurrent-rater limit reached");
+      return;
+    }
+
+    try {
+      // Memory-rater v1.5 step-4: piggyback per-memory ratings on the
+      // existing summary call when MEMORY_RATERS includes `llm`.
+      const llmRaterEnabled = isLlmRaterEnabled();
+      let retrievals: RetrievalRow[] = [];
+      if (llmRaterEnabled && taskId) {
+        const rawRetrievals = await _fetchRetrievals({
+          apiUrl,
+          apiKey,
+          agentId: opts.agentId,
+          taskId,
+        });
+        // Dedup self-similar cron-task memories before sending to the
+        // rater — see `dedupeRetrievalsForRater` doc for the why.
+        retrievals = dedupeRetrievalsForRater(rawRetrievals);
+      }
+
+      const result = await _runSummarize({
+        harness: "claude",
+        transcript,
+        retrievals,
+        taskContext: {
+          sourceTaskId: taskId ?? "",
+          agentId: opts.agentId,
+          // claude's path doesn't pass the user prompt here today — leave undefined.
+          prompt: undefined,
+        },
         apiUrl,
         apiKey,
-        agentId: opts.agentId,
-        taskId,
       });
-      // Dedup self-similar cron-task memories before sending to the
-      // rater — see `dedupeRetrievalsForRater` doc for the why.
-      retrievals = dedupeRetrievalsForRater(rawRetrievals);
-    }
+      // null = no auth resolved (no OPENROUTER, ANTHROPIC, OPENAI, codex OAuth,
+      // or CLAUDE_CODE_OAUTH_TOKEN) — silent skip, same as today's no-key behavior.
+      if (!result) return;
 
-    const result = await _runSummarize({
-      harness: "claude",
-      transcript,
-      retrievals,
-      taskContext: {
-        sourceTaskId: taskId ?? "",
-        agentId: opts.agentId,
-        // claude's path doesn't pass the user prompt here today — leave undefined.
-        prompt: undefined,
-      },
-      apiUrl,
-      apiKey,
-    });
-    // null = no auth resolved (no OPENROUTER, ANTHROPIC, OPENAI, codex OAuth,
-    // or CLAUDE_CODE_OAUTH_TOKEN) — silent skip, same as today's no-key behavior.
-    if (!result) return;
+      const summary = result.summary.trim();
+      const ratings = result.ratings ?? [];
 
-    const summary = result.summary.trim();
-    const ratings = result.ratings ?? [];
-
-    // Skip indexing if the session had no significant learnings.
-    if (summary.length > 20 && !summary.toLowerCase().includes("no significant learnings")) {
-      await fetch(`${apiUrl}/api/memory/index`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-          "X-Agent-ID": opts.agentId,
-        },
-        body: JSON.stringify({
-          agentId: opts.agentId,
-          content: summary,
-          name: taskContext
-            ? `Session: ${taskContext.slice(0, 80)}`
-            : `Session: ${new Date().toISOString().slice(0, 16)}`,
-          scope: "agent",
-          source: "session_summary",
-          ...(taskId ? { sourceTaskId: taskId } : {}),
-        }),
-      });
-    }
-
-    // Best-effort: post LLM ratings. Never blocks summary indexing.
-    if (llmRaterEnabled && taskId && retrievals.length > 0 && ratings.length === 0) {
-      console.error("[memory-rater:llm] piggyback produced no ratings", {
-        retrievalsLen: retrievals.length,
-        ratingsLen: 0,
-      });
-    }
-    if (llmRaterEnabled && taskId && ratings.length > 0) {
-      try {
-        const events = _buildRatings(ratings, retrievals);
-        if (events.length > 0) {
-          await _postRatings({
-            apiUrl,
-            apiKey,
+      // Skip indexing if the session had no significant learnings.
+      if (summary.length > 20 && !summary.toLowerCase().includes("no significant learnings")) {
+        await fetch(`${apiUrl}/api/memory/index`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+            "X-Agent-ID": opts.agentId,
+          },
+          body: JSON.stringify({
             agentId: opts.agentId,
-            taskId,
-            events,
-          });
-        }
-      } catch (err) {
-        console.error(
-          "[memory-rater:llm] piggyback rating emission failed:",
-          (err as Error).message,
-        );
+            content: summary,
+            name: taskContext
+              ? `Session: ${taskContext.slice(0, 80)}`
+              : `Session: ${new Date().toISOString().slice(0, 16)}`,
+            scope: "agent",
+            source: "session_summary",
+            ...(taskId ? { sourceTaskId: taskId } : {}),
+          }),
+        });
       }
+
+      // Best-effort: post LLM ratings. Never blocks summary indexing.
+      if (llmRaterEnabled && taskId && retrievals.length > 0 && ratings.length === 0) {
+        console.error("[memory-rater:llm] piggyback produced no ratings", {
+          retrievalsLen: retrievals.length,
+          ratingsLen: 0,
+        });
+      }
+      if (llmRaterEnabled && taskId && ratings.length > 0) {
+        try {
+          const events = _buildRatings(ratings, retrievals);
+          if (events.length > 0) {
+            await _postRatings({
+              apiUrl,
+              apiKey,
+              agentId: opts.agentId,
+              taskId,
+              events,
+            });
+          }
+        } catch (err) {
+          console.error(
+            "[memory-rater:llm] piggyback rating emission failed:",
+            (err as Error).message,
+          );
+        }
+      }
+    } finally {
+      // Release the semaphore slot regardless of how the rater path
+      // exited (success, summary skip, runSummarize throw). Idempotent.
+      slot.release();
     }
   } catch {
     // Non-blocking — session summarization failure should never block shutdown

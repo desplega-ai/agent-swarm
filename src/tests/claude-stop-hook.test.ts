@@ -97,11 +97,15 @@ afterEach(() => {
 
 function makeEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   // Minimal env that drives the SUT through its happy path. Tests override
-  // selectively via `extra`.
+  // selectively via `extra`. SKIP_RATER_THROTTLE disables the rater
+  // back-pressure (health probe + concurrency semaphore) so the
+  // existing happy-path tests don't depend on a live api server or on
+  // shared `/tmp` lock files across tests.
   return {
     MCP_BASE_URL: "http://localhost:3013",
     API_KEY: "test-key",
     AGENT_SWARM_TASK_ID: "task-stop-1",
+    SKIP_RATER_THROTTLE: "1",
     ...extra,
   };
 }
@@ -428,5 +432,149 @@ describe("runStopHookSessionSummary", () => {
 
     const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
     expect(indexCalls.length).toBe(0);
+  });
+
+  // ── Rater back-pressure (semaphore + API health probe) ─────────────────────
+
+  test("rater throttle — api unhealthy → skip runSummarize, no POST, error log breadcrumb", async () => {
+    const transcriptPath = await writeTempTranscript(longTranscript());
+
+    let runSummarizeCalled = false;
+    let slotAcquired = false;
+    const deps: RunStopHookSessionSummaryDeps = {
+      runSummarize: async () => {
+        runSummarizeCalled = true;
+        return {
+          summary: "won't be reached",
+          ratings: [],
+        } as RunSummarizeResult;
+      },
+      acquireRaterSlot: () => {
+        slotAcquired = true;
+        return { release: () => {}, path: "" };
+      },
+      isApiHealthy: async () => false,
+    };
+
+    await runStopHookSessionSummary(
+      {
+        agentId: "agent-throttle-1",
+        // Drop SKIP_RATER_THROTTLE so the back-pressure path actually runs.
+        transcriptPath,
+        env: makeEnv({ SKIP_RATER_THROTTLE: undefined }),
+      },
+      deps,
+    );
+
+    expect(runSummarizeCalled).toBe(false);
+    expect(slotAcquired).toBe(false); // health check fails BEFORE slot acquire
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(0);
+    // Breadcrumb so operators can correlate skipped raters with api outages.
+    const skipLog = consoleErrors.find((args) =>
+      args.some((a) => typeof a === "string" && a.includes("api /health not reachable")),
+    );
+    expect(skipLog).toBeDefined();
+  });
+
+  test("rater throttle — semaphore full → skip runSummarize, no POST, error log breadcrumb", async () => {
+    const transcriptPath = await writeTempTranscript(longTranscript());
+
+    let runSummarizeCalled = false;
+    const deps: RunStopHookSessionSummaryDeps = {
+      runSummarize: async () => {
+        runSummarizeCalled = true;
+        return {
+          summary: "won't be reached",
+          ratings: [],
+        } as RunSummarizeResult;
+      },
+      acquireRaterSlot: () => null, // semaphore full
+      isApiHealthy: async () => true,
+    };
+
+    await runStopHookSessionSummary(
+      {
+        agentId: "agent-throttle-2",
+        transcriptPath,
+        env: makeEnv({ SKIP_RATER_THROTTLE: undefined }),
+      },
+      deps,
+    );
+
+    expect(runSummarizeCalled).toBe(false);
+    const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
+    expect(indexCalls.length).toBe(0);
+    const skipLog = consoleErrors.find((args) =>
+      args.some((a) => typeof a === "string" && a.includes("concurrent-rater limit reached")),
+    );
+    expect(skipLog).toBeDefined();
+  });
+
+  test("rater throttle — slot acquired then released on success", async () => {
+    const transcriptPath = await writeTempTranscript(longTranscript());
+
+    let acquires = 0;
+    let releases = 0;
+    const deps: RunStopHookSessionSummaryDeps = {
+      runSummarize: async () =>
+        ({
+          summary: "Concrete reusable fact discovered.",
+          ratings: [],
+        }) as RunSummarizeResult,
+      acquireRaterSlot: () => {
+        acquires++;
+        return {
+          path: "/tmp/test-lock",
+          release: () => {
+            releases++;
+          },
+        };
+      },
+      isApiHealthy: async () => true,
+    };
+
+    await runStopHookSessionSummary(
+      {
+        agentId: "agent-throttle-3",
+        transcriptPath,
+        env: makeEnv({ SKIP_RATER_THROTTLE: undefined }),
+      },
+      deps,
+    );
+
+    expect(acquires).toBe(1);
+    expect(releases).toBe(1);
+  });
+
+  test("rater throttle — slot released even when runSummarize throws", async () => {
+    const transcriptPath = await writeTempTranscript(longTranscript());
+
+    let releases = 0;
+    const deps: RunStopHookSessionSummaryDeps = {
+      runSummarize: async () => {
+        throw new Error("simulated runSummarize crash");
+      },
+      acquireRaterSlot: () => ({
+        path: "/tmp/test-lock",
+        release: () => {
+          releases++;
+        },
+      }),
+      isApiHealthy: async () => true,
+    };
+
+    await expect(
+      runStopHookSessionSummary(
+        {
+          agentId: "agent-throttle-4",
+          transcriptPath,
+          env: makeEnv({ SKIP_RATER_THROTTLE: undefined }),
+        },
+        deps,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(releases).toBe(1);
   });
 });
