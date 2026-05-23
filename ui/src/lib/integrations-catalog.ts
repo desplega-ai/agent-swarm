@@ -450,6 +450,16 @@ export const INTEGRATIONS: IntegrationDef[] = [
     restartRequired: true,
     fields: [
       {
+        key: "AGENTMAIL_API_KEY",
+        label: "API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        helpText:
+          "AgentMail API key for sending replies. Find it at https://agentmail.to under Inboxes → API keys (`am_us_inbox_…`).",
+        affectsRestart: true,
+      },
+      {
         key: "AGENTMAIL_WEBHOOK_SECRET",
         label: "Webhook secret",
         type: "password",
