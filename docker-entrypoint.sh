@@ -208,8 +208,13 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     echo "opencode CLI: $(command -v "$OPENCODE_BIN")"
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
-    if ! command -v "$CLAUDE_BIN" > /dev/null 2>&1; then
-        echo "FATAL: Claude CLI not found: '$CLAUDE_BIN'"
+    # CLAUDE_BINARY may be a whitespace-separated command string (e.g.
+    # "bunx @dexh/shannon" — see guides/shannon-experimental.mdx). Only
+    # the first token is the executable on PATH; the rest are argv.
+    # Mirrors parseClaudeBinary in src/providers/claude-adapter.ts.
+    CLAUDE_BIN_EXEC=$(echo "$CLAUDE_BIN" | awk '{print $1}')
+    if ! command -v "$CLAUDE_BIN_EXEC" > /dev/null 2>&1; then
+        echo "FATAL: Claude CLI not found: '$CLAUDE_BIN_EXEC' (from CLAUDE_BINARY='$CLAUDE_BIN')"
         echo "  PATH=$PATH"
         for loc in /usr/local/bin/claude /usr/bin/claude; do
             if [ -f "$loc" ]; then
@@ -218,7 +223,7 @@ elif [ "$HARNESS_PROVIDER" != "pi" ]; then
         done
         exit 1
     fi
-    echo "Claude CLI: $(command -v "$CLAUDE_BIN")"
+    echo "Claude CLI: $(command -v "$CLAUDE_BIN_EXEC") (CLAUDE_BINARY='$CLAUDE_BIN')"
 fi
 
 # ---- Git safe.directory backstop ----
