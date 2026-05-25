@@ -50,12 +50,25 @@ export type IntegrationSpecialFlow =
 /** Which agent role(s) the swarm needs to have a given skill installed on. */
 export type AgentRole = "lead" | "worker";
 
-export interface RequiredSkill {
-  /** Canonical skill name as it appears in the skills registry. */
-  skill: string;
-  /** Roles that need the skill installed for this integration to work end-to-end. */
+/**
+ * Where a recommended skill lives.
+ *
+ * - `'swarm-registry'`: already published in the swarm skills registry
+ *   (installable from /settings/skills, resolvable by name in the `skills` DB table).
+ * - `'template'`: definition is checked in to `src/be/seed-skills/catalog/` and
+ *   seeded on boot by the skills seeder — the direct mirror of the scripts seeder
+ *   pattern from PR #519.
+ */
+export type SkillSource = "swarm-registry" | "template";
+
+export interface RecommendedSkill {
+  /** Canonical name — matches the `name` column in the swarm skills registry. */
+  name: string;
+  /** Where this skill lives (see {@link SkillSource}). */
+  source: SkillSource;
+  /** Agent roles that need the skill installed for this integration to work end-to-end. */
   roles: AgentRole[];
-  /** One-liner shown as a tooltip beside the skill, explains why it's needed. */
+  /** One-liner shown beside the skill explaining why it's needed. */
   reason?: string;
 }
 
@@ -77,12 +90,12 @@ export interface IntegrationDef {
   /** Custom flow that overrides the generic field form. */
   specialFlow?: IntegrationSpecialFlow;
   /**
-   * Agent-side skills the integration also needs in order to function
-   * end-to-end. Pure env-var configuration is not always enough — some
-   * integrations depend on procedural knowledge that lives in a skill
-   * installed on a specific agent role (e.g. the lead).
+   * Skills recommended alongside this integration. Env-var configuration is
+   * not always enough — some integrations depend on procedural knowledge (a
+   * skill) installed on a specific agent role. Each entry declares where the
+   * skill lives so the operator knows how to get it.
    */
-  requiredSkills?: RequiredSkill[];
+  recommendedSkills?: RecommendedSkill[];
 }
 
 export const INTEGRATIONS: IntegrationDef[] = [
@@ -467,9 +480,10 @@ export const INTEGRATIONS: IntegrationDef[] = [
     docsUrl: "https://docs.agent-swarm.dev/integrations/agentmail",
     disableKey: "AGENTMAIL_DISABLE",
     restartRequired: true,
-    requiredSkills: [
+    recommendedSkills: [
       {
-        skill: "agentmail-sending",
+        name: "agentmail-sending",
+        source: "swarm-registry",
         roles: ["lead"],
         reason:
           "Needed for agents to send/reply to email via AgentMail (the env keys alone only enable receive).",
