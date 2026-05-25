@@ -33,7 +33,7 @@ LINEAR_DISABLE=true \
 bun run start:http
 ```
 
-The server applied migrations through `073_user_budget_scope` and served MCP at
+The server applied migrations through `074_user_budget_scope` and served MCP at
 `http://localhost:4313/mcp`.
 
 ## Test Cases
@@ -41,7 +41,7 @@ The server applied migrations through `073_user_budget_scope` and served MCP at
 | ID | Scenario | Result | Evidence |
 |---|---|---:|---|
 | TC-1 | CI is green for PR #536 on the current head SHA | PASS | GitHub PR check rollup for `7729e522`: Merge Gate, Run Tests, Lint and Type Check, UI Lint and Type Check, OpenAPI Spec Freshness Check, Dockerfile builds, CodeQL, Vercel previews all `SUCCESS`. |
-| TC-2 | Fresh DB/server boots and applies DES-444 migration chain | PASS | Fresh server on `/tmp/des444-qa.sqlite`; migrations `001` through `073_user_budget_scope` applied successfully. |
+| TC-2 | Fresh DB/server boots and applies DES-444 migration chain | PASS | Fresh server on `/tmp/des444-qa.sqlite`; migrations `001` through `074_user_budget_scope` applied successfully. |
 | TC-3 | Operator can create a user and mint an `aswt_` MCP token | PASS | `POST /api/users` returned user `6c3510a3...`; `POST /api/users/{id}/mcp-tokens` returned a one-time plaintext token with `aswt_` prefix and token summary. Plaintext token is not stored in this report. |
 | TC-4 | `/mcp-user` rejects missing token | PASS | `POST /mcp-user initialize` without `Authorization` returned `401`. |
 | TC-5 | `/mcp-user` initializes with valid active-user token and exposes exactly the user task tools | PASS | `initialize` returned an `mcp-session-id`; `tools/list` returned exactly `cancel-task,get-task-details,get-tasks,send-task,task-action`. |

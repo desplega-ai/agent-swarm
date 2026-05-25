@@ -1,4 +1,4 @@
--- 073_user_budget_scope.sql
+-- 074_user_budget_scope.sql
 -- Add per-user budget enforcement for client-side MCP users.
 --
 -- SQLite cannot widen a CHECK constraint in place, so recreate the affected
