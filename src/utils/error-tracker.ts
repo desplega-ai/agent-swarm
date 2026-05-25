@@ -297,12 +297,19 @@ export function parseCodexRateLimitResetTime(
     if (monthIdx !== undefined) {
       const day = Number.parseInt(datedMatch[2]!, 10);
       const year = Number.parseInt(datedMatch[3]!, 10);
-      let hours = Number.parseInt(datedMatch[4]!, 10);
+      const rawHours = Number.parseInt(datedMatch[4]!, 10);
       const minutes = Number.parseInt(datedMatch[5]!, 10);
       const ampm = datedMatch[6]!.toLowerCase();
+      if (rawHours < 1 || rawHours > 12 || minutes < 0 || minutes > 59) return undefined;
+      let hours = rawHours;
       if (ampm === "pm" && hours !== 12) hours += 12;
       if (ampm === "am" && hours === 12) hours = 0;
-      return new Date(Date.UTC(year, monthIdx, day, hours, minutes, 0)).toISOString();
+      const d = new Date(Date.UTC(year, monthIdx, day, hours, minutes, 0));
+      // Round-trip guard: Date.UTC silently normalises out-of-range days (e.g. May 32 → June 1).
+      if (d.getUTCFullYear() !== year || d.getUTCMonth() !== monthIdx || d.getUTCDate() !== day) {
+        return undefined;
+      }
+      return d.toISOString();
     }
   }
 
@@ -310,9 +317,11 @@ export function parseCodexRateLimitResetTime(
   // Anchored on "try again at" so we don't match times elsewhere in the message.
   const timeMatch = message.match(/\btry again at\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/i);
   if (timeMatch) {
-    let hours = Number.parseInt(timeMatch[1]!, 10);
+    const rawHours = Number.parseInt(timeMatch[1]!, 10);
     const minutes = Number.parseInt(timeMatch[2]!, 10);
     const ampm = timeMatch[3]!.toLowerCase();
+    if (rawHours < 1 || rawHours > 12 || minutes < 0 || minutes > 59) return undefined;
+    let hours = rawHours;
     if (ampm === "pm" && hours !== 12) hours += 12;
     if (ampm === "am" && hours === 12) hours = 0;
     const candidate = new Date(
