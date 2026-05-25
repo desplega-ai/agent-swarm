@@ -135,6 +135,52 @@ describe("parseCodexRateLimitResetTime — negative cases", () => {
   });
 });
 
+describe("parseCodexRateLimitResetTime — invalid component rejection (CAI-1284 review)", () => {
+  const now = new Date("2026-05-25T18:00:00Z");
+
+  test("'Try again at 99:99 PM.' → undefined (hour and minute out of range)", () => {
+    expect(
+      parseCodexRateLimitResetTime("usage limit. Try again at 99:99 PM.", now),
+    ).toBeUndefined();
+  });
+
+  test("'Try again at 13:99 PM.' → undefined (hour out of range)", () => {
+    expect(
+      parseCodexRateLimitResetTime("usage limit. Try again at 13:99 PM.", now),
+    ).toBeUndefined();
+  });
+
+  test("'Try again at 0:30 PM.' → undefined (hour 0 is not 1–12)", () => {
+    expect(
+      parseCodexRateLimitResetTime("usage limit. Try again at 0:30 PM.", now),
+    ).toBeUndefined();
+  });
+
+  test("'Try again at 12:60 PM.' → undefined (minute 60 out of range)", () => {
+    expect(
+      parseCodexRateLimitResetTime("usage limit. Try again at 12:60 PM.", now),
+    ).toBeUndefined();
+  });
+
+  test("'Try again at May 32nd, 2026 8:35 PM.' → undefined (day overflow)", () => {
+    expect(
+      parseCodexRateLimitResetTime("usage limit. Try again at May 32nd, 2026 8:35 PM.", now),
+    ).toBeUndefined();
+  });
+
+  test("'Try again at Feb 30th, 2026 8:35 PM.' → undefined (Feb has ≤29 days)", () => {
+    expect(
+      parseCodexRateLimitResetTime("usage limit. Try again at Feb 30th, 2026 8:35 PM.", now),
+    ).toBeUndefined();
+  });
+
+  test("'Try again at May 26th, 2026 8:35 PM.' → valid (positive control)", () => {
+    expect(
+      parseCodexRateLimitResetTime("usage limit. Try again at May 26th, 2026 8:35 PM.", now),
+    ).toBe("2026-05-26T20:35:00.000Z");
+  });
+});
+
 describe("parseCodexRateLimitResetTime — case-insensitive", () => {
   test("'TRY AGAIN AT 8:35 PM' (all caps) parses", () => {
     const now = new Date("2026-05-25T00:00:00Z");
