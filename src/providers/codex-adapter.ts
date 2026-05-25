@@ -66,6 +66,7 @@ import {
   type WebSearchItem,
 } from "@openai/codex-sdk";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
+import { SessionErrorTracker } from "../utils/error-tracker";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -413,6 +414,7 @@ class CodexSession implements ProviderSession {
   private lastUsage: Usage | null = null;
   private aborted = false;
   private settled = false;
+  private readonly errorTracker = new SessionErrorTracker();
   /**
    * Result captured by `settle` but held back from `resolveCompletion` until
    * `runSession`'s `finally` block has fully cleaned up (log writer flush,
@@ -951,9 +953,11 @@ class CodexSession implements ProviderSession {
           }
           if (event.type === "turn.failed" && !terminalError) {
             terminalError = this.formatTerminalError(event.error.message);
+            this.errorTracker.processCodexUsageLimitMessage(event.error.message);
           }
           if (event.type === "error" && !terminalError) {
             terminalError = this.formatTerminalError(event.message);
+            this.errorTracker.processCodexUsageLimitMessage(event.message);
           }
         }
       } catch (err) {
@@ -967,6 +971,30 @@ class CodexSession implements ProviderSession {
             cost,
             isError: true,
             failureReason: "cancelled",
+          });
+          return;
+        }
+        // The Codex CLI exits with code 1 after emitting a UsageLimitReached or
+        // other terminal error event. The SDK then throws "Codex Exec exited with
+        // code 1: Reading prompt from stdin" AFTER the event loop ends, which
+        // would overwrite the structured terminalError we already captured above.
+        // Preserve the structured error so the [usage-limit] prefix survives to
+        // the runner's rate-limit resolver.
+        if (terminalError) {
+          const cost = this.buildCostData(this.lastUsage, true);
+          this.emit({
+            type: "result",
+            cost,
+            isError: true,
+            errorCategory: terminalError.category ?? "turn_failed",
+          });
+          this.settle({
+            exitCode: 1,
+            sessionId: this._sessionId,
+            cost,
+            isError: true,
+            failureReason: terminalError.message,
+            rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
           });
           return;
         }
@@ -987,6 +1015,7 @@ class CodexSession implements ProviderSession {
         cost,
         isError,
         failureReason: terminalError?.message,
+        rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1000,6 +1029,7 @@ class CodexSession implements ProviderSession {
         cost,
         isError: true,
         failureReason: message,
+        rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
       });
     } finally {
       // Session-end summarization. Pure addition for codex — no behavior to

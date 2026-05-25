@@ -97,6 +97,26 @@ export class SessionErrorTracker {
   }
 
   /**
+   * Process a Codex-style usage-limit error message (from a `{type:"error"}`
+   * or `{type:"turn.failed"}` SDK event). Only stashes when the message
+   * contains the usage-limit signature AND carries a parseable wall-clock
+   * reset time. "Try again later." and workspace-credit branches fall through
+   * to the runner's tier-3 fallback instead.
+   * Last call wins — multiple events per session are deduped to the latest.
+   */
+  processCodexUsageLimitMessage(message: string): void {
+    if (!message) return;
+    if (!/usage limit|hit your usage/i.test(message)) return;
+
+    const iso = parseCodexRateLimitResetTime(message);
+    if (!iso) return;
+
+    const candidateMs = new Date(iso).getTime();
+    if (!Number.isFinite(candidateMs)) return;
+    this.rateLimitResetAtMs = clampRateLimitResetMs(candidateMs);
+  }
+
+  /**
    * Returns the stashed rate limit reset time as an ISO string, or undefined
    * if no rejected rate_limit_event was seen in this session.
    */
@@ -249,6 +269,66 @@ const MONTH_NAMES: Record<string, number> = {
   dec: 11,
   december: 11,
 };
+
+/**
+ * Parse the reset time embedded in a Codex `UsageLimitReached` error message.
+ * Codex emits one of these formats via chrono's `%-I:%M %p` (same day) or
+ * `%b %-d{th/st/nd/rd}, %Y %-I:%M %p` (different day):
+ *   "Try again at 8:35 PM."
+ *   "or try again at 8:35 PM."
+ *   "Try again at May 26th, 2026 8:35 PM."
+ *   "or try again at May 26th, 2026 8:35 PM."
+ * Wall-clock times are UTC because the agent-swarm Docker worker has TZ=Etc/UTC;
+ * chrono::Local resolves to UTC in that container.
+ */
+export function parseCodexRateLimitResetTime(
+  message: string,
+  now: Date = new Date(),
+): string | undefined {
+  if (!message) return undefined;
+
+  // Different-day format (more specific — try first):
+  // "Month Day{st/nd/rd/th}, Year HH:MM AM/PM"
+  const datedMatch = message.match(
+    /\btry again at\s+([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,\s+(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/i,
+  );
+  if (datedMatch) {
+    const monthIdx = MONTH_NAMES[datedMatch[1]!.toLowerCase()];
+    if (monthIdx !== undefined) {
+      const day = Number.parseInt(datedMatch[2]!, 10);
+      const year = Number.parseInt(datedMatch[3]!, 10);
+      let hours = Number.parseInt(datedMatch[4]!, 10);
+      const minutes = Number.parseInt(datedMatch[5]!, 10);
+      const ampm = datedMatch[6]!.toLowerCase();
+      if (ampm === "pm" && hours !== 12) hours += 12;
+      if (ampm === "am" && hours === 12) hours = 0;
+      return new Date(Date.UTC(year, monthIdx, day, hours, minutes, 0)).toISOString();
+    }
+  }
+
+  // Same-day format: "HH:MM AM/PM"
+  // Anchored on "try again at" so we don't match times elsewhere in the message.
+  const timeMatch = message.match(/\btry again at\s+(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b/i);
+  if (timeMatch) {
+    let hours = Number.parseInt(timeMatch[1]!, 10);
+    const minutes = Number.parseInt(timeMatch[2]!, 10);
+    const ampm = timeMatch[3]!.toLowerCase();
+    if (ampm === "pm" && hours !== 12) hours += 12;
+    if (ampm === "am" && hours === 12) hours = 0;
+    const candidate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hours, minutes, 0),
+    );
+    // Rollover: if the parsed wall-clock is at-or-before "now", assume tomorrow.
+    // Codex uses same-day format only when the reset is on the current calendar day,
+    // so a past time almost certainly means tomorrow (the next quota bucket).
+    if (candidate.getTime() <= now.getTime()) {
+      candidate.setUTCDate(candidate.getUTCDate() + 1);
+    }
+    return candidate.toISOString();
+  }
+
+  return undefined;
+}
 
 /**
  * Parse a rate limit error message to extract a reset time, returning an ISO datetime string.
