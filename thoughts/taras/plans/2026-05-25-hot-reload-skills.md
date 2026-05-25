@@ -1,7 +1,7 @@
 ---
 date: 2026-05-25
 author: taras
-status: in-progress
+status: completed
 autonomy: critical
 commit-per-phase: yes
 ---
@@ -302,18 +302,18 @@ That's the **entire** per-task hook. The existing `taskBasePrompt = await buildS
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type-check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] New helper test passes: `bun test src/tests/runner-skills-refresh.test.ts`
-- [ ] Full skills test suite passes: `bun test src/tests/skill-sync.test.ts src/tests/skills-*.test.ts src/tests/runner-skills-refresh.test.ts`
-- [ ] Full unit suite passes: `bun test`
-- [ ] DB boundary holds: `bash scripts/check-db-boundary.sh`
-- [ ] API key boundary holds: `bash scripts/check-api-key-boundary.sh`
+- [x] Type-check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] New helper test passes: `bun test src/tests/runner-skills-refresh.test.ts`
+- [x] Full skills test suite passes: `bun test src/tests/skill-sync.test.ts src/tests/skills-*.test.ts src/tests/runner-skills-refresh.test.ts`
+- [x] Full unit suite passes: `bun test`
+- [x] DB boundary holds: `bash scripts/check-db-boundary.sh`
+- [x] API key boundary holds: `bash scripts/check-api-key-boundary.sh`
 
 #### Automated QA:
-- [ ] Helper test asserts only one HTTP call is made when the signature is unchanged (no list fetch, no sync POST)
-- [ ] Helper test asserts a fresh summary is returned on hash mismatch
-- [ ] Helper test asserts `claude-managed` predicate skips the helper entirely (verified by call site, not the helper itself)
+- [x] Helper test asserts only one HTTP call is made when the signature is unchanged (no list fetch, no sync POST)
+- [x] Helper test asserts a fresh summary is returned on hash mismatch
+- [x] Helper test asserts `claude-managed` predicate skips the helper entirely (verified by call site, not the helper itself)
 
 #### Manual Verification:
 - [ ] Boot logs show the existing line "Loaded N skills for system prompt" (boot path still works)

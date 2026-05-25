@@ -288,6 +288,123 @@ async function fetchResolvedEnv(
   return { env, credentialSelections, resolvedProvider };
 }
 
+type SkillsRefreshContext = {
+  apiUrl: string;
+  swarmUrl: string;
+  apiKey: string;
+  agentId: string;
+  role: string;
+};
+
+type SkillsRefreshResult = {
+  changed: boolean;
+  summary?: { name: string; description: string }[];
+};
+
+/**
+ * Signature-gated per-task skill refresh.
+ *
+ * 1. GET /api/agents/:id/skills/signature — cheap probe (~80 byte body).
+ * 2. If the hash matches the last seen hash, short-circuit (changed: false).
+ * 3. Otherwise GET /api/agents/:id/skills (returns the list + the same
+ *    signature computed from that snapshot — store *that* hash, not the
+ *    one from step 1, to avoid a stale-hash race) and POST
+ *    /api/skills/sync-filesystem to re-materialize codex/claude/pi dirs.
+ *
+ * Transient errors are swallowed (returned as changed: false) — a flaky
+ * API mustn't churn the system prompt.
+ */
+async function refreshSkillsIfChanged(
+  ctx: SkillsRefreshContext,
+  lastHashRef: { current: string | null },
+): Promise<SkillsRefreshResult> {
+  const { apiUrl, swarmUrl, apiKey, agentId, role } = ctx;
+  const authHeaders: Record<string, string> = { "X-Agent-ID": agentId };
+  if (apiKey) authHeaders.Authorization = `Bearer ${apiKey}`;
+
+  // Step 1: cheap signature probe
+  try {
+    const sigResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills/signature`, {
+      headers: authHeaders,
+    });
+    if (sigResp.ok) {
+      const sig = (await sigResp.json()) as { hash: string };
+      if (lastHashRef.current !== null && sig.hash === lastHashRef.current) {
+        return { changed: false };
+      }
+    } else if (sigResp.status >= 500) {
+      // Transient — don't churn the prompt on a flaky API
+      return { changed: false };
+    }
+    // 4xx falls through (e.g. fresh worker with no signature endpoint yet on a
+    // legacy server) — let the list call drive the result.
+  } catch {
+    return { changed: false };
+  }
+
+  // Step 2: full fetch + sync (only reached when hash differs or first call)
+  let summary: { name: string; description: string }[] | undefined;
+  let newHash: string | null = null;
+  try {
+    const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
+      headers: authHeaders,
+    });
+    if (skillsResp.ok) {
+      const skillsData = (await skillsResp.json()) as {
+        skills: { name: string; description: string; isActive: boolean; isEnabled: boolean }[];
+        signature?: string;
+      };
+      summary = skillsData.skills
+        .filter((s) => s.isActive && s.isEnabled)
+        .map((s) => ({ name: s.name, description: s.description }));
+      if (typeof skillsData.signature === "string") {
+        newHash = skillsData.signature;
+      }
+    }
+  } catch {
+    // Non-fatal — skills are optional
+  }
+
+  // Step 3: filesystem sync (claude/pi/codex dirs)
+  try {
+    const syncHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Agent-ID": agentId,
+    };
+    if (apiKey) syncHeaders.Authorization = `Bearer ${apiKey}`;
+    const syncRes = await fetch(`${swarmUrl}/api/skills/sync-filesystem`, {
+      method: "POST",
+      headers: syncHeaders,
+    });
+    if (syncRes.ok) {
+      const syncResult = (await syncRes.json()) as {
+        synced: number;
+        removed: number;
+        errors: string[];
+      };
+      console.log(
+        `[${role}] Skills synced: ${syncResult.synced} written, ${syncResult.removed} removed`,
+      );
+      if (syncResult.errors.length > 0) {
+        console.warn(`[${role}] Skill sync errors: ${syncResult.errors.join(", ")}`);
+      }
+    } else {
+      console.warn(`[${role}] Skill sync failed: HTTP ${syncRes.status}`);
+    }
+  } catch (err) {
+    console.warn(`[${role}] Skill sync failed: ${(err as Error).message}`);
+  }
+
+  if (summary === undefined && newHash === null) {
+    return { changed: false };
+  }
+
+  if (newHash !== null) {
+    lastHashRef.current = newHash;
+  }
+  return { changed: true, summary };
+}
+
 /**
  * Keys we permit `applyResolvedEnvToProcessEnv` to mutate live.
  *
@@ -3511,34 +3628,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         }
       }
 
-      // Fetch installed skills for system prompt
-      try {
-        const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "X-Agent-ID": agentId,
-          },
-        });
-        if (skillsResp.ok) {
-          const skillsData = (await skillsResp.json()) as {
-            skills: {
-              name: string;
-              description: string;
-              isActive: boolean;
-              isEnabled: boolean;
-            }[];
-          };
-          agentSkillsSummary = skillsData.skills
-            .filter((s) => s.isActive && s.isEnabled)
-            .map((s) => ({ name: s.name, description: s.description }));
-          if (agentSkillsSummary.length > 0) {
-            console.log(`[${role}] Loaded ${agentSkillsSummary.length} skills for system prompt`);
-          }
-        }
-      } catch {
-        // Non-fatal — skills are optional
-      }
-
       // Fetch installed MCP servers for system prompt
       try {
         const mcpServersResp = await fetch(`${apiUrl}/api/agents/${agentId}/mcp-servers`, {
@@ -3649,35 +3738,32 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   }
 
-  // ========== Sync skills to filesystem ==========
-  try {
+  // ========== Boot-time skill load (signature-gated, replaces the standalone
+  // skill-fetch + FS sync blocks). The polling loop below calls the same
+  // helper per task to hot-reload skills mid-flight. Skipped for
+  // `claude-managed` (cloud sandbox owns skill delivery).
+  const lastSkillHash: { current: string | null } = { current: null };
+  if (state.harnessProvider !== "claude-managed") {
     console.log(`[${role}] Syncing skills to filesystem...`);
-    const syncHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
-      "X-Agent-ID": agentId,
-    };
-    if (apiKey) syncHeaders.Authorization = `Bearer ${apiKey}`;
-    const syncRes = await fetch(`${swarmUrl}/api/skills/sync-filesystem`, {
-      method: "POST",
-      headers: syncHeaders,
-    });
-    if (syncRes.ok) {
-      const syncResult = (await syncRes.json()) as {
-        synced: number;
-        removed: number;
-        errors: string[];
-      };
-      console.log(
-        `[${role}] Skills synced: ${syncResult.synced} written, ${syncResult.removed} removed`,
-      );
-      if (syncResult.errors.length > 0) {
-        console.warn(`[${role}] Skill sync errors: ${syncResult.errors.join(", ")}`);
+    const skillResult = await refreshSkillsIfChanged(
+      { apiUrl, swarmUrl, apiKey, agentId, role },
+      lastSkillHash,
+    );
+    if (skillResult.changed && skillResult.summary) {
+      agentSkillsSummary = skillResult.summary;
+      if (agentSkillsSummary.length > 0) {
+        console.log(`[${role}] Loaded ${agentSkillsSummary.length} skills for system prompt`);
       }
-    } else {
-      console.warn(`[${role}] Skill sync failed: HTTP ${syncRes.status}`);
+      // Rebuild base prompt now that we have skills.
+      basePrompt = await buildSystemPrompt();
+      resolvedSystemPrompt = additionalSystemPrompt
+        ? `${basePrompt}\n\n${additionalSystemPrompt}`
+        : basePrompt;
     }
-  } catch (err) {
-    console.warn(`[${role}] Skill sync failed: ${(err as Error).message}`);
+  } else {
+    console.log(
+      `[${role}] Skipping skill sync (claude-managed reads skills from agent definition)`,
+    );
   }
 
   // ========== Resume paused tasks with PRIORITY ==========
@@ -4166,6 +4252,23 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         let cwdWarning = "";
         if (taskDir && !effectiveCwd) {
           cwdWarning = `\n\nNote: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`;
+        }
+
+        // Per-task skill hot-reload. Reuses the boot-time helper; signature
+        // probe short-circuits when nothing changed. Skipped for
+        // `claude-managed`. Read state.harnessProvider live so an adapter
+        // swap mid-loop honors the new provider.
+        if (state.harnessProvider !== "claude-managed") {
+          const skillResult = await refreshSkillsIfChanged(
+            { apiUrl, swarmUrl, apiKey, agentId, role },
+            lastSkillHash,
+          );
+          if (skillResult.changed && skillResult.summary) {
+            agentSkillsSummary = skillResult.summary;
+            console.log(
+              `[${role}] Skills changed — refreshing system prompt (${agentSkillsSummary.length} skills)`,
+            );
+          }
         }
 
         // Rebuild system prompt with per-task repo context
