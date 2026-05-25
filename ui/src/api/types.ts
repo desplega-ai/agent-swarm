@@ -1241,7 +1241,7 @@ export interface DbQueryResponse {
 }
 
 // Budgets & Pricing — see src/types.ts in the API repo for the source of truth.
-export type BudgetScope = "global" | "agent";
+export type BudgetScope = "global" | "agent" | "user";
 
 export interface Budget {
   scope: BudgetScope;
