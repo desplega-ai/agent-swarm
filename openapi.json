@@ -7903,6 +7903,35 @@
         }
       }
     },
+    "/api/agents/{id}/skills/signature": {
+      "get": {
+        "summary": "Compute a stable signature over an agent's installed skills",
+        "description": "Returns a sha256 hash over per-row mutation fields of the agent's active+enabled skill set. Workers poll this to detect skill changes cheaply without fetching the full list.",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skills signature"
+          }
+        }
+      }
+    },
     "/api/scripts/upsert": {
       "post": {
         "operationId": "scripts_upsert",
