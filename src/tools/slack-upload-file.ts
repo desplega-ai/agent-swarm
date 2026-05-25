@@ -13,6 +13,13 @@ const WORKSPACE_DIR = "/workspace";
 
 /**
  * Resolves a file path to an absolute path and checks if it exists.
+ *
+ * NOTE: existence is checked on the API server's filesystem (where this tool
+ * runs), NOT the caller's. Worker/lead containers have their own `/tmp` that
+ * the API server cannot see — the only volume mounted on both is
+ * `/workspace/shared/`. Files outside `/workspace/shared/` must be passed
+ * inline via the `content` (base64) param instead of `filePath`.
+ *
  * Handles several common patterns:
  * 1. Relative paths (e.g., "shared/file.png") -> resolved from /workspace
  * 2. Absolute paths under /workspace (e.g., "/workspace/shared/file.png") -> used as-is
@@ -110,14 +117,17 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
           .optional()
           .describe(
             "Path to the file to upload. Either filePath OR content must be provided. " +
-              "Relative paths are resolved from /workspace (e.g., 'shared/file.png' -> '/workspace/shared/file.png'). " +
-              "Absolute paths work if they exist or if the file exists under /workspace with that path (e.g., '/tmp/file.png' checks '/tmp/file.png' then '/workspace/tmp/file.png').",
+              "IMPORTANT: the file is read on the API server's filesystem (where this tool runs), NOT on the caller's. " +
+              "Worker/lead containers do NOT share /tmp or /workspace/personal/ with the API server — the only shared volume is /workspace/shared/. " +
+              "Use /workspace/shared/<agent-id>/file.png (or a relative path like 'shared/<agent-id>/file.png'). " +
+              "For files that only live on the caller (e.g. /tmp), pass them inline via `content` (base64) instead.",
           ),
         content: z
           .string()
           .optional()
           .describe(
-            "Base64-encoded file content. Use this when the file is not on the local filesystem. Either filePath OR content must be provided.",
+            "Base64-encoded file content. Use this when the file lives on the caller's filesystem and isn't reachable by the API server " +
+              "(e.g. anything under /tmp on a worker/lead container). Either filePath OR content must be provided.",
           ),
         filename: z
           .string()
@@ -287,9 +297,11 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
             `${pathResult.error}\n` +
             `Provided path: ${filePath}\n` +
             `Tried locations:\n${triedPathsList}\n\n` +
+            `Note: this tool reads the file on the API server's filesystem, NOT the caller's. ` +
+            `Worker/lead containers do not share /tmp or /workspace/personal/ with the API server — only /workspace/shared/.\n\n` +
             `Tips:\n` +
-            `- Use relative paths from /workspace (e.g., 'shared/my-file.png')\n` +
-            `- Or use absolute paths under /workspace (e.g., '/workspace/shared/my-file.png')`;
+            `- Put the file in /workspace/shared/<agent-id>/ (e.g., '/workspace/shared/<agent-id>/my-file.png') and pass that path.\n` +
+            `- Or pass the file inline via the \`content\` arg as base64 (with \`filename\`) so no shared-mount round-trip is needed.`;
           return {
             content: [{ type: "text", text: errorMsg }],
             structuredContent: { success: false, message: errorMsg },
