@@ -23,8 +23,18 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         name: z.string().optional().describe("Schedule name to update (alternative to ID)"),
         newName: z.string().min(1).max(100).optional().describe("New name for the schedule"),
         taskTemplate: z.string().min(1).optional().describe("New task template"),
-        cronExpression: z.string().optional().describe("New cron expression"),
-        intervalMs: z.number().int().positive().optional().describe("New interval in milliseconds"),
+        cronExpression: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("New cron expression (null to clear)"),
+        intervalMs: z
+          .number()
+          .int()
+          .positive()
+          .nullable()
+          .optional()
+          .describe("New interval in milliseconds (null to clear)"),
         description: z.string().optional().describe("New description"),
         taskType: z.string().max(50).optional().describe("New task type"),
         tags: z.array(z.string()).optional().describe("New tags"),

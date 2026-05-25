@@ -968,6 +968,42 @@ describe("Schedule CRUD", () => {
     expect(status).toBe(404);
   });
 
+  test("PUT /api/schedules/:id — cron-based schedule accepts null intervalMs", async () => {
+    // Reproduces CAI-1283: dashboard sends null for unused timing field
+    const { status, body } = await put(`/api/schedules/${scheduleId}`, {
+      body: { cronExpression: "0 2 * * *", intervalMs: null },
+    });
+    expect(status).toBe(200);
+    expect(body.cronExpression).toBe("0 2 * * *");
+    // intervalMs omitted from response when not set (null serialized as undefined in JSON)
+    expect(body.intervalMs == null).toBe(true);
+  });
+
+  test("PUT /api/schedules/:id — interval-based schedule accepts null cronExpression", async () => {
+    // Create an interval-based schedule to test against
+    const { body: created } = await post("/api/schedules", {
+      body: {
+        name: "interval-test-cai-1283",
+        taskTemplate: "interval task",
+        intervalMs: 60000,
+      },
+    });
+    const { status, body } = await put(`/api/schedules/${created.id}`, {
+      body: { intervalMs: 60000, cronExpression: null },
+    });
+    expect(status).toBe(200);
+    expect(body.intervalMs).toBe(60000);
+    // Clean up
+    await del(`/api/schedules/${created.id}`);
+  });
+
+  test("PUT /api/schedules/:id — both intervalMs and cronExpression null returns 400", async () => {
+    const { status } = await put(`/api/schedules/${scheduleId}`, {
+      body: { cronExpression: null, intervalMs: null },
+    });
+    expect(status).toBe(400);
+  });
+
   test("POST /api/schedules/:id/run — run now creates a task", async () => {
     const { status, body } = await post(`/api/schedules/${scheduleId}/run`);
     expect(status).toBe(200);

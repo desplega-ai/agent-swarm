@@ -112,21 +112,36 @@ const updateSchedule = route({
   summary: "Update a schedule",
   tags: ["Schedules"],
   params: z.object({ id: z.string() }),
-  body: z.object({
-    name: z.string().optional(),
-    description: z.string().optional(),
-    cronExpression: z.string().optional(),
-    intervalMs: z.number().int().optional(),
-    taskTemplate: z.string().optional(),
-    taskType: z.string().optional(),
-    tags: z.array(z.string()).optional(),
-    priority: z.number().int().optional(),
-    targetAgentId: z.string().uuid().optional(),
-    enabled: z.boolean().optional(),
-    timezone: z.string().optional(),
-    model: z.string().optional(),
-    nextRunAt: z.string().nullable().optional(),
-  }),
+  body: z
+    .object({
+      name: z.string().optional(),
+      description: z.string().optional(),
+      cronExpression: z.string().nullable().optional(),
+      intervalMs: z.number().int().positive().nullable().optional(),
+      taskTemplate: z.string().optional(),
+      taskType: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      priority: z.number().int().optional(),
+      targetAgentId: z.string().uuid().optional(),
+      enabled: z.boolean().optional(),
+      timezone: z.string().optional(),
+      model: z.string().optional(),
+      nextRunAt: z.string().nullable().optional(),
+    })
+    .superRefine((body, ctx) => {
+      if (
+        body.cronExpression !== undefined &&
+        body.intervalMs !== undefined &&
+        body.cronExpression === null &&
+        body.intervalMs === null
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "At least one of intervalMs or cronExpression must be set",
+          path: ["intervalMs"],
+        });
+      }
+    }),
   responses: {
     200: { description: "Schedule updated" },
     400: { description: "Validation error" },
@@ -440,9 +455,13 @@ export async function handleSchedules(
         (parsed.body.enabled === true && !existing.enabled)
       ) {
         const merged = {
-          cronExpression: parsed.body.cronExpression ?? existing.cronExpression,
-          intervalMs: parsed.body.intervalMs ?? existing.intervalMs,
-          timezone: parsed.body.timezone ?? existing.timezone,
+          cronExpression:
+            parsed.body.cronExpression !== undefined
+              ? parsed.body.cronExpression
+              : existing.cronExpression,
+          intervalMs:
+            parsed.body.intervalMs !== undefined ? parsed.body.intervalMs : existing.intervalMs,
+          timezone: parsed.body.timezone !== undefined ? parsed.body.timezone : existing.timezone,
         };
         if (merged.cronExpression || merged.intervalMs) {
           // biome-ignore lint/suspicious/noExplicitAny: need partial ScheduledTask for calculateNextRun

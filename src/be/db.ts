@@ -4906,8 +4906,8 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
 export interface UpdateScheduledTaskData {
   name?: string;
   description?: string;
-  cronExpression?: string;
-  intervalMs?: number;
+  cronExpression?: string | null;
+  intervalMs?: number | null;
   taskTemplate?: string;
   taskType?: string;
   tags?: string[];
