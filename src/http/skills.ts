@@ -12,7 +12,7 @@ import {
   updateSkill,
 } from "../be/db";
 import { parseSkillContent } from "../be/skill-parser";
-import { syncSkillsToFilesystem } from "../be/skill-sync";
+import { computeAgentSkillsSignature, syncSkillsToFilesystem } from "../be/skill-sync";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -193,6 +193,21 @@ const getAgentSkillsRoute = route({
   },
 });
 
+const getAgentSkillsSignatureRoute = route({
+  method: "get",
+  path: "/api/agents/{id}/skills/signature",
+  pattern: ["api", "agents", null, "skills", "signature"],
+  summary: "Compute a stable signature over an agent's installed skills",
+  description:
+    "Returns a sha256 hash over per-row mutation fields of the agent's active+enabled skill set. Workers poll this to detect skill changes cheaply without fetching the full list.",
+  tags: ["Skills"],
+  auth: { apiKey: true },
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Skills signature" },
+  },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleSkills(
@@ -202,12 +217,22 @@ export async function handleSkills(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  // GET /api/agents/:id/skills/signature (must come before the shorter pattern)
+  if (getAgentSkillsSignatureRoute.match(req.method, pathSegments)) {
+    const parsed = await getAgentSkillsSignatureRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const sig = computeAgentSkillsSignature(parsed.params.id);
+    json(res, { hash: sig.hash, count: sig.count, generatedAt: new Date().toISOString() });
+    return true;
+  }
+
   // GET /api/agents/:id/skills (must be before /api/skills routes)
   if (getAgentSkillsRoute.match(req.method, pathSegments)) {
     const parsed = await getAgentSkillsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const skills = getAgentSkills(parsed.params.id);
-    json(res, { skills, total: skills.length });
+    const signature = computeAgentSkillsSignature(parsed.params.id).hash;
+    json(res, { skills, total: skills.length, signature });
     return true;
   }
 
