@@ -31,7 +31,9 @@ import type {
   McpOAuthStatusResponse,
   McpServer,
   McpServersResponse,
+  McpUserConfigResponse,
   MessagesResponse,
+  MintTokenResponse,
   PageListItem,
   PageMetadata,
   PagesListResponse,
@@ -1630,6 +1632,33 @@ class ApiClient {
     return body.user;
   }
 
+  async mintUserToken(id: string, label?: string | null): Promise<MintTokenResponse> {
+    const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(id)}/mcp-tokens`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ label: label ?? null }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to mint token" }));
+      throw new Error(err.error || `Failed to mint token: ${res.status}`);
+    }
+    return (await res.json()) as MintTokenResponse;
+  }
+
+  async revokeUserToken(id: string, tokenId: string): Promise<User> {
+    const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(
+      id,
+    )}/mcp-tokens/${encodeURIComponent(tokenId)}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to revoke token" }));
+      throw new Error(err.error || `Failed to revoke token: ${res.status}`);
+    }
+    const body = (await res.json()) as UserResponse;
+    return body.user;
+  }
+
   async addUserIdentity(id: string, ident: UserIdentity): Promise<UserIdentity[]> {
     const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(id)}/identities`;
     const res = await fetch(url, {
@@ -1722,6 +1751,13 @@ class ApiClient {
     }
     const data = (await res.json()) as UserResponse;
     return data.user;
+  }
+
+  async getMcpUserConfig(): Promise<McpUserConfigResponse> {
+    const url = `${this.getBaseUrl()}/api/integrations/mcp-user/config`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch MCP user config: ${res.status}`);
+    return (await res.json()) as McpUserConfigResponse;
   }
 
   // ─── Sessions (Phase 4 ≥1.76.0) ───────────────────────────────────────────

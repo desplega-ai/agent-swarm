@@ -45,6 +45,20 @@ const claudeManagedTestRoute = route({
   },
 });
 
+const mcpUserConfigRoute = route({
+  method: "get",
+  path: "/api/integrations/mcp-user/config",
+  pattern: ["api", "integrations", "mcp-user", "config"],
+  summary: "Get server-derived config for end-user MCP clients.",
+  tags: ["Integrations"],
+  responses: {
+    200: {
+      description:
+        "Server-derived MCP user config. `mcpBaseUrl` is the API server base URL and `mcpUserUrl` appends `/mcp-user`.",
+    },
+  },
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -73,6 +87,12 @@ function resolveConfigValue(key: string): string | null {
   return null;
 }
 
+function resolveMcpBaseUrl(): string {
+  const configured = resolveConfigValue("MCP_BASE_URL");
+  const fallback = `http://localhost:${process.env.PORT || "3013"}`;
+  return (configured || fallback).replace(/\/+$/, "");
+}
+
 // ─── Public handler factory ──────────────────────────────────────────────────
 
 /**
@@ -89,6 +109,12 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
     res: ServerResponse,
     pathSegments: string[],
   ): Promise<boolean> {
+    if (mcpUserConfigRoute.match(req.method, pathSegments)) {
+      const mcpBaseUrl = resolveMcpBaseUrl();
+      json(res, { mcpBaseUrl, mcpUserUrl: `${mcpBaseUrl}/mcp-user` });
+      return true;
+    }
+
     if (claudeManagedTestRoute.match(req.method, pathSegments)) {
       const apiKey = resolveConfigValue("ANTHROPIC_API_KEY");
       const agentId = resolveConfigValue("MANAGED_AGENT_ID");

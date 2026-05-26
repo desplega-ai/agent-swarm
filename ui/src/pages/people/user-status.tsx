@@ -54,8 +54,7 @@ export function UserStatusPill({ status }: { status: User["status"] }) {
 /**
  * Render the per-user daily budget badge. `dailyBudgetUsd === null` /
  * `undefined` → "Unlimited". Tooltip text is owned by the caller (the People
- * list/detail wraps the badge in a `<Tooltip>` to surface the "Enforced once
- * MCP user-tokens ship" hint).
+ * list/detail wraps the badge in a `<Tooltip>` to describe enforcement).
  */
 export function BudgetBadge({ value }: { value: number | null | undefined }) {
   if (value == null) {

@@ -202,6 +202,17 @@ export interface UserResponse {
   user: User;
 }
 
+export interface MintTokenResponse {
+  plaintext: string;
+  token: UserToken;
+  user: User;
+}
+
+export interface McpUserConfigResponse {
+  mcpBaseUrl: string;
+  mcpUserUrl: string;
+}
+
 export interface CreateUserInput {
   name: string;
   email?: string;
@@ -1267,7 +1278,7 @@ export interface DbQueryResponse {
 }
 
 // Budgets & Pricing — see src/types.ts in the API repo for the source of truth.
-export type BudgetScope = "global" | "agent";
+export type BudgetScope = "global" | "agent" | "user";
 
 export interface Budget {
   scope: BudgetScope;

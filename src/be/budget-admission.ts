@@ -8,7 +8,7 @@
 // /api/poll pool, MCP `task-action` `accept`) translate refusals into the
 // `budget_refused` trigger envelope.
 
-import { getBudget, getDailySpendForAgent, getDailySpendGlobal } from "./db";
+import { getBudget, getDailySpendForAgent, getDailySpendForUser, getDailySpendGlobal } from "./db";
 
 export interface BudgetAdmissionAllowed {
   allowed: true;
@@ -16,11 +16,13 @@ export interface BudgetAdmissionAllowed {
 
 export interface BudgetAdmissionRefused {
   allowed: false;
-  cause: "agent" | "global";
+  cause: "agent" | "global" | "user";
   agentSpend?: number;
   agentBudget?: number;
   globalSpend?: number;
   globalBudget?: number;
+  userSpend?: number;
+  userBudget?: number;
   /** ISO 8601 of the next UTC midnight (the moment daily spend rolls over). */
   resetAt: string;
 }
@@ -60,12 +62,17 @@ function nextUtcMidnight(now: Date): string {
  *   0. Kill-switch (`BUDGET_ADMISSION_DISABLED=true`) ⇒ allowed.
  *   1. Global budget set + global daily spend ≥ ceiling ⇒ refused (`global`).
  *   2. Agent budget set + agent daily spend ≥ ceiling ⇒ refused (`agent`).
- *   3. Otherwise ⇒ allowed.
+ *   3. User budget set + user's task spend ≥ ceiling ⇒ refused (`user`).
+ *   4. Otherwise ⇒ allowed.
  *
  * Global is checked first by design: a tripped global budget halts the entire
  * swarm regardless of any single agent's spend.
  */
-export function canClaim(agentId: string, nowUtc: Date): BudgetAdmissionResult {
+export function canClaim(
+  agentId: string,
+  nowUtc: Date,
+  requestedByUserId?: string,
+): BudgetAdmissionResult {
   if (process.env.BUDGET_ADMISSION_DISABLED === "true") {
     if (!killSwitchWarned) {
       killSwitchWarned = true;
@@ -106,6 +113,23 @@ export function canClaim(agentId: string, nowUtc: Date): BudgetAdmissionResult {
         agentBudget: agentBudget.dailyBudgetUsd,
         resetAt,
       };
+    }
+  }
+
+  // 3. Per-user budget gate. Only applies to tasks tied to a canonical user.
+  if (requestedByUserId) {
+    const userBudget = getBudget("user", requestedByUserId);
+    if (userBudget !== null) {
+      const userSpend = getDailySpendForUser(requestedByUserId, dateUtc);
+      if (userSpend >= userBudget.dailyBudgetUsd) {
+        return {
+          allowed: false,
+          cause: "user",
+          userSpend,
+          userBudget: userBudget.dailyBudgetUsd,
+          resetAt,
+        };
+      }
     }
   }
 

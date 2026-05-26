@@ -240,7 +240,10 @@ export async function handleCore(
   // fall through to the bearer check (fail-closed).
   if (apiKey) {
     const pathSegments = getPathSegments(req.url || "");
-    if (!isPublicRoute(req.method, pathSegments)) {
+    const isUserMcpRoute = req.url === "/mcp-user";
+    // `/mcp-user` runs its own `aswt_`-token auth in `handleMcpUser`; the swarm
+    // API key must not gate it.
+    if (!isUserMcpRoute && !isPublicRoute(req.method, pathSegments)) {
       const authHeader = req.headers.authorization;
       const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 

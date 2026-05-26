@@ -1682,7 +1682,7 @@ export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;
 // effective_from <= now" lookup is a pure integer comparison. Matches the
 // SQL columns in migration 046_budgets_and_pricing.sql verbatim.
 
-export const BudgetScopeSchema = z.enum(["global", "agent"]);
+export const BudgetScopeSchema = z.enum(["global", "agent", "user"]);
 export type BudgetScope = z.infer<typeof BudgetScopeSchema>;
 
 export const BudgetSchema = z.object({
@@ -1730,7 +1730,7 @@ export const PricingRowSchema = z.object({
 });
 export type PricingRow = z.infer<typeof PricingRowSchema>;
 
-export const BudgetRefusalCauseSchema = z.enum(["agent", "global"]);
+export const BudgetRefusalCauseSchema = z.enum(["agent", "global", "user"]);
 export type BudgetRefusalCause = z.infer<typeof BudgetRefusalCauseSchema>;
 
 export const BudgetRefusalNotificationSchema = z.object({
@@ -1742,6 +1742,8 @@ export const BudgetRefusalNotificationSchema = z.object({
   agentBudgetUsd: z.number().nullable().optional(),
   globalSpendUsd: z.number().nullable().optional(),
   globalBudgetUsd: z.number().nullable().optional(),
+  userSpendUsd: z.number().nullable().optional(),
+  userBudgetUsd: z.number().nullable().optional(),
   followUpTaskId: z.string().nullable().optional(),
   createdAt: z.number(), // epoch ms
 });
@@ -1761,6 +1763,8 @@ export const BudgetRefusedTriggerSchema = z.object({
   agentBudget: z.number().optional(),
   globalSpend: z.number().optional(),
   globalBudget: z.number().optional(),
+  userSpend: z.number().optional(),
+  userBudget: z.number().optional(),
   resetAt: z.string(), // ISO 8601, next UTC midnight
 });
 export type BudgetRefusedTrigger = z.infer<typeof BudgetRefusedTriggerSchema>;

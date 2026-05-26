@@ -59,6 +59,32 @@ export function useUpdateUser() {
   });
 }
 
+export function useMintUserToken() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, label }: { id: string; label?: string | null }) =>
+      api.mintUserToken(id, label),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["user", id] });
+      queryClient.invalidateQueries({ queryKey: ["user-events", id] });
+    },
+  });
+}
+
+export function useRevokeUserToken() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, tokenId }: { id: string; tokenId: string }) =>
+      api.revokeUserToken(id, tokenId),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["user", id] });
+      queryClient.invalidateQueries({ queryKey: ["user-events", id] });
+    },
+  });
+}
+
 export function useAddUserIdentity() {
   const queryClient = useQueryClient();
   return useMutation({

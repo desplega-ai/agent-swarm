@@ -115,7 +115,7 @@ function PeopleTable({
                   <BudgetBadge value={params.data.dailyBudgetUsd} />
                 </span>
               </TooltipTrigger>
-              <TooltipContent>Enforced once MCP user-tokens ship.</TooltipContent>
+              <TooltipContent>Enforced at task claim time for MCP-created tasks.</TooltipContent>
             </Tooltip>
           );
         },

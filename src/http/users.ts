@@ -7,8 +7,7 @@
  * pass it as the `IdentityActor` arg to the helpers in `src/be/users.ts` — so
  * every identity mutation lands an event row tagged `op:<sha256-16>`.
  *
- * Endpoint set (Core Req #6, minus `POST/DELETE /users/:id/mcp-tokens` which
- * are deferred to the MCP plan):
+ * Endpoint set:
  *
  *   GET    /api/users
  *   POST   /api/users
@@ -16,6 +15,8 @@
  *   POST   /api/users/unmapped/:kind/:externalId/resolve
  *   GET    /api/users/:id
  *   PATCH  /api/users/:id
+ *   POST   /api/users/:id/mcp-tokens
+ *   DELETE /api/users/:id/mcp-tokens/:tokenId
  *   POST   /api/users/:id/merge
  *   GET    /api/users/:id/events
  *   POST   /api/users/:id/identities
@@ -26,12 +27,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   createUser,
+  deleteBudget,
   deleteKv,
   deleteUser,
   getAllUsers,
   getUserById,
   listKv,
   updateUser,
+  upsertBudget,
 } from "../be/db";
 import {
   getUserIdentities,
@@ -39,7 +42,9 @@ import {
   linkIdentity,
   listUserEvents,
   listUserTokens,
+  mintToken,
   recordIdentityEvent,
+  revokeToken,
   unlinkIdentity,
 } from "../be/users";
 import { getOperatorActor } from "./operator-actor";
@@ -62,6 +67,15 @@ function composeUser(userId: string, recentEventLimit = 5) {
     tokens: listUserTokens(userId),
     recentEvents: listUserEvents(userId, { limit: recentEventLimit }),
   };
+}
+
+function syncUserBudgetMirror(userId: string, dailyBudgetUsd: number | null | undefined): void {
+  if (dailyBudgetUsd === undefined) return;
+  if (dailyBudgetUsd === null) {
+    deleteBudget("user", userId);
+    return;
+  }
+  upsertBudget("user", userId, dailyBudgetUsd);
 }
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -199,6 +213,41 @@ const updateUserRoute = route({
     400: { description: "Validation error or empty body" },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
+  },
+  auth: { apiKey: true },
+});
+
+const mintUserMcpTokenRoute = route({
+  method: "post",
+  path: "/api/users/{id}/mcp-tokens",
+  pattern: ["api", "users", null, "mcp-tokens"],
+  summary: "Mint a one-time plaintext MCP token for a user",
+  description:
+    "Returns the plaintext token exactly once. Subsequent reads only expose token summaries.",
+  tags: ["Users"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    label: z.string().nullable().optional(),
+  }),
+  responses: {
+    200: { description: "Minted token plaintext, token summary and composed user" },
+    401: { description: "Unauthorized" },
+    404: { description: "User not found" },
+  },
+  auth: { apiKey: true },
+});
+
+const revokeUserMcpTokenRoute = route({
+  method: "delete",
+  path: "/api/users/{id}/mcp-tokens/{tokenId}",
+  pattern: ["api", "users", null, "mcp-tokens", null],
+  summary: "Revoke a user's MCP token",
+  tags: ["Users"],
+  params: z.object({ id: z.string(), tokenId: z.string() }),
+  responses: {
+    200: { description: "Composed user after token revocation" },
+    401: { description: "Unauthorized" },
+    404: { description: "User or token not found" },
   },
   auth: { apiKey: true },
 });
@@ -370,6 +419,7 @@ export async function handleUsers(
     try {
       const { identities, ...userFields } = parsed.body;
       const user = createUser(userFields);
+      syncUserBudgetMirror(user.id, userFields.dailyBudgetUsd);
       for (const ident of identities ?? []) {
         linkIdentity(user.id, ident.kind, ident.externalId, actor);
       }
@@ -456,6 +506,60 @@ export async function handleUsers(
       before: parsed.query.before,
     });
     json(res, { events });
+    return true;
+  }
+
+  // ─── POST /api/users/:id/mcp-tokens ───────────────────────────────────────
+  if (mintUserMcpTokenRoute.match(req.method, pathSegments)) {
+    const parsed = await mintUserMcpTokenRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const actor = getOperatorActor(req, res);
+    if (!actor) return true;
+    if (!getUserById(parsed.params.id)) {
+      jsonError(res, "User not found", 404);
+      return true;
+    }
+
+    try {
+      const { tokenId, plaintext } = mintToken(parsed.params.id, parsed.body.label ?? null, actor);
+      const token = listUserTokens(parsed.params.id).find((t) => t.id === tokenId);
+      json(res, { plaintext, token, user: composeUser(parsed.params.id) });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to mint token", 500);
+    }
+    return true;
+  }
+
+  // ─── DELETE /api/users/:id/mcp-tokens/:tokenId ────────────────────────────
+  if (revokeUserMcpTokenRoute.match(req.method, pathSegments)) {
+    const parsed = await revokeUserMcpTokenRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const actor = getOperatorActor(req, res);
+    if (!actor) return true;
+    if (!getUserById(parsed.params.id)) {
+      jsonError(res, "User not found", 404);
+      return true;
+    }
+
+    const tokenBelongsToUser = listUserTokens(parsed.params.id).some(
+      (token) => token.id === parsed.params.tokenId,
+    );
+    if (!tokenBelongsToUser) {
+      jsonError(res, "Token not found", 404);
+      return true;
+    }
+
+    try {
+      revokeToken(parsed.params.tokenId, actor);
+      json(res, { user: composeUser(parsed.params.id) });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to revoke token";
+      if (message.includes("Token not found")) {
+        jsonError(res, "Token not found", 404);
+      } else {
+        jsonError(res, message, 500);
+      }
+    }
     return true;
   }
 
@@ -625,6 +729,7 @@ export async function handleUsers(
         jsonError(res, "User not found", 404);
         return true;
       }
+      syncUserBudgetMirror(parsed.params.id, parsed.body.dailyBudgetUsd);
 
       // Budget event
       if (

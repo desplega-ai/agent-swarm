@@ -1440,7 +1440,8 @@
                             "type": "string",
                             "enum": [
                               "global",
-                              "agent"
+                              "agent",
+                              "user"
                             ]
                           },
                           "scopeId": {
@@ -1526,7 +1527,8 @@
                             "type": "string",
                             "enum": [
                               "agent",
-                              "global"
+                              "global",
+                              "user"
                             ]
                           },
                           "agentSpendUsd": {
@@ -1548,6 +1550,18 @@
                             ]
                           },
                           "globalBudgetUsd": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "userSpendUsd": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "userBudgetUsd": {
                             "type": [
                               "number",
                               "null"
@@ -1600,7 +1614,8 @@
               "type": "string",
               "enum": [
                 "global",
-                "agent"
+                "agent",
+                "user"
               ]
             },
             "required": true,
@@ -1631,7 +1646,8 @@
                       "type": "string",
                       "enum": [
                         "global",
-                        "agent"
+                        "agent",
+                        "user"
                       ]
                     },
                     "scopeId": {
@@ -1680,7 +1696,8 @@
               "type": "string",
               "enum": [
                 "global",
-                "agent"
+                "agent",
+                "user"
               ]
             },
             "required": true,
@@ -1729,7 +1746,8 @@
                       "type": "string",
                       "enum": [
                         "global",
-                        "agent"
+                        "agent",
+                        "user"
                       ]
                     },
                     "scopeId": {
@@ -1778,7 +1796,8 @@
               "type": "string",
               "enum": [
                 "global",
-                "agent"
+                "agent",
+                "user"
               ]
             },
             "required": true,
@@ -3358,6 +3377,24 @@
         "responses": {
           "200": {
             "description": "Connection result — `{ ok: true, agentName, model }` on success or `{ ok: false, error }` on any failure (missing config, Anthropic API error). Always 200 OK."
+          }
+        }
+      }
+    },
+    "/api/integrations/mcp-user/config": {
+      "get": {
+        "summary": "Get server-derived config for end-user MCP clients.",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-derived MCP user config. `mcpBaseUrl` is the API server base URL and `mcpUserUrl` appends `/mcp-user`."
           }
         }
       }
@@ -10985,6 +11022,100 @@
           },
           "404": {
             "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/users/{id}/mcp-tokens": {
+      "post": {
+        "summary": "Mint a one-time plaintext MCP token for a user",
+        "description": "Returns the plaintext token exactly once. Subsequent reads only expose token summaries.",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Minted token plaintext, token summary and composed user"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/users/{id}/mcp-tokens/{tokenId}": {
+      "delete": {
+        "summary": "Revoke a user's MCP token",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tokenId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Composed user after token revocation"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User or token not found"
           }
         }
       }

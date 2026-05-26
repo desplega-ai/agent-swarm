@@ -42,6 +42,7 @@ import { IdentitiesTable } from "../identities-table";
 import { getIntegrationLabel, IntegrationIcon } from "../integration-icons";
 import { BudgetBadge, UserStatusPill } from "../user-status";
 import { EventsTable } from "./events-table";
+import { TokensTable } from "./tokens-table";
 
 const STATUS_OPTIONS: Array<User["status"]> = ["invited", "active", "suspended"];
 const ROLE_PRESETS: Array<{ value: string; label: string }> = [
@@ -71,8 +72,8 @@ const TZ_DATALIST = [
 ];
 
 /** Active tab values surfaced in `?tab=`. Unknown values fall back to "profile". */
-type TabValue = "profile" | "identities" | "events";
-const TAB_VALUES = new Set<TabValue>(["profile", "identities", "events"]);
+type TabValue = "profile" | "identities" | "tokens" | "events";
+const TAB_VALUES = new Set<TabValue>(["profile", "identities", "tokens", "events"]);
 function coerceTab(raw: string | null): TabValue {
   return raw && (TAB_VALUES as Set<string>).has(raw) ? (raw as TabValue) : "profile";
 }
@@ -395,7 +396,7 @@ function ProfileCard({ user }: { user: User }) {
             <Field
               label="Daily budget"
               htmlFor="f-budget"
-              helper="Soft cap, enforced once MCP user-tokens ship."
+              helper="Soft cap, enforced at task claim time for this user's MCP-created tasks."
             >
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
@@ -562,6 +563,7 @@ export default function PersonDetailPage() {
 
   const identitiesCount = useMemo(() => user?.identities?.length ?? 0, [user]);
   const aliasesCount = useMemo(() => user?.emailAliases?.length ?? 0, [user]);
+  const tokensCount = useMemo(() => user?.tokens?.length ?? 0, [user]);
 
   if (isLoading) return <PageSkeleton />;
 
@@ -615,6 +617,7 @@ export default function PersonDetailPage() {
           <TabsTrigger value="identities">
             Identities ({identitiesCount + aliasesCount})
           </TabsTrigger>
+          <TabsTrigger value="tokens">Tokens ({tokensCount})</TabsTrigger>
           <TabsTrigger value="events">Events</TabsTrigger>
         </TabsList>
 
@@ -691,6 +694,10 @@ export default function PersonDetailPage() {
               <IdentitiesTable user={user} />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="tokens" className="mt-4 overflow-y-auto">
+          <TokensTable user={user} />
         </TabsContent>
 
         <TabsContent value="events" className="mt-4 overflow-y-auto">
