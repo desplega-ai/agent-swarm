@@ -215,6 +215,15 @@ export const INTEGRATIONS: IntegrationDef[] = [
     category: "comm",
     iconKey: "message-circle",
     docsUrl: "https://docs.agent-swarm.dev/integrations/kapso",
+    recommendedSkills: [
+      {
+        name: "kapso-whatsapp",
+        source: "swarm-registry",
+        roles: ["lead", "worker"],
+        reason:
+          "Canonical recipes for WhatsApp beyond plain text send/reply (templates, media, reactions, typing, signature verify, contact resolution). The MCP tools only cover the common text path.",
+      },
+    ],
     fields: [
       {
         key: "KAPSO_API_KEY",
