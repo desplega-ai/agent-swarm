@@ -25,8 +25,6 @@ export interface KapsoNumberMapping {
   phoneNumberId: string;
   /** Route inbound to this agent as a task. */
   agentId?: string;
-  /** Context key for thread/session continuity across messages. */
-  contextKey?: string;
   /** Advanced override: dispatch via this workflow's webhook trigger instead of a task. */
   workflowId?: string;
   /** Human-friendly display name for the number. */

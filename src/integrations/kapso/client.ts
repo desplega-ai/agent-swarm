@@ -104,11 +104,51 @@ export interface KapsoWebhookResult {
   status: number;
   raw: unknown;
   errorMessage?: string;
+  /** True when an identical webhook already existed and we skipped re-creating it. */
+  alreadyRegistered?: boolean;
+}
+
+/** Pull a webhook array out of the various shapes Kapso's list endpoint may return. */
+function extractWebhookList(raw: unknown): Array<{ url?: string; kind?: string }> {
+  if (Array.isArray(raw)) return raw as Array<{ url?: string; kind?: string }>;
+  if (raw && typeof raw === "object") {
+    for (const key of ["whatsapp_webhooks", "webhooks", "data"]) {
+      const val = (raw as Record<string, unknown>)[key];
+      if (Array.isArray(val)) return val as Array<{ url?: string; kind?: string }>;
+    }
+  }
+  return [];
+}
+
+/**
+ * Return true when a Kapso webhook already points at `webhookUrl` for this
+ * phone number — used to avoid creating duplicate webhooks on re-registration.
+ * Best-effort: returns false if the list endpoint is unavailable.
+ */
+async function kapsoWebhookExists(params: {
+  apiBaseUrl: string;
+  apiKey: string;
+  phoneNumberId: string;
+  webhookUrl: string;
+}): Promise<boolean> {
+  const url = `${params.apiBaseUrl}/platform/v1/whatsapp/phone_numbers/${params.phoneNumberId}/webhooks`;
+  try {
+    const res = await fetch(url, { headers: { "X-API-Key": params.apiKey } });
+    if (!res.ok) return false;
+    const raw = await parseJsonSafe(res);
+    return extractWebhookList(raw).some((w) => w?.url === params.webhookUrl);
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Register (or re-point) the Kapso webhook for a phone number so inbound events
  * are delivered to `webhookUrl`, signed with `secret` via `X-Webhook-Signature`.
+ *
+ * First checks whether an identical webhook already exists for the number and
+ * skips the create call if so, to avoid piling up duplicate webhooks when a
+ * number is registered more than once.
  */
 export async function registerKapsoWebhook(params: {
   apiBaseUrl: string;
@@ -119,6 +159,18 @@ export async function registerKapsoWebhook(params: {
   events?: string[];
 }): Promise<KapsoWebhookResult> {
   const url = `${params.apiBaseUrl}/platform/v1/whatsapp/phone_numbers/${params.phoneNumberId}/webhooks`;
+
+  if (
+    await kapsoWebhookExists({
+      apiBaseUrl: params.apiBaseUrl,
+      apiKey: params.apiKey,
+      phoneNumberId: params.phoneNumberId,
+      webhookUrl: params.webhookUrl,
+    })
+  ) {
+    return { ok: true, status: 200, raw: null, alreadyRegistered: true };
+  }
+
   const whatsapp_webhook: Record<string, unknown> = {
     kind: "kapso",
     url: params.webhookUrl,

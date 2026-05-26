@@ -1,5 +1,7 @@
+import { resolveTemplate } from "@/prompts/resolver";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import { workflowEventBus } from "@/workflows/event-bus";
+import "@/tools/templates";
 import { getKapsoNumberMapping, markKapsoMessageSeen } from "./config";
 
 /** Minimal shape of the Kapso v2 inbound webhook payload (see the kapso-whatsapp skill). */
@@ -37,23 +39,15 @@ function extractText(message: NonNullable<KapsoWebhookPayload["message"]>): stri
 function buildTaskDescription(payload: KapsoWebhookPayload): string {
   const message = payload.message ?? {};
   const conversation = payload.conversation ?? {};
-  const text = extractText(message);
-  const testNote = payload.test ? "\n- test: true (do NOT send a real WhatsApp reply)" : "";
-  return [
-    "# WhatsApp inbound (Kapso)",
-    "",
-    "A Kapso webhook fired on our provisioned WhatsApp number. Load the `kapso-whatsapp` skill, then triage this like any other interaction and reply on WhatsApp by quote-replying the inbound WAMID (`context.message_id`).",
-    "",
-    "## Source: WhatsApp (Kapso)",
-    `- conversation_id: ${conversation.id ?? "unknown"}`,
-    `- inbound_wamid: ${message.id ?? "unknown"}`,
-    `- sender_phone: ${message.from ?? conversation.phone_number ?? "unknown"}`,
-    `- contact_name: ${conversation.contact_name ?? "unknown"}`,
-    `- phone_number_id: ${payload.phone_number_id ?? "unknown"}${testNote}`,
-    "",
-    "## Message",
-    text,
-  ].join("\n");
+  return resolveTemplate("kapso.message.received", {
+    conversation_id: conversation.id ?? "unknown",
+    inbound_wamid: message.id ?? "unknown",
+    sender_phone: message.from ?? conversation.phone_number ?? "unknown",
+    contact_name: conversation.contact_name ?? "unknown",
+    phone_number_id: payload.phone_number_id ?? "unknown",
+    test_note: payload.test ? "\n- test: true (do NOT send a real WhatsApp reply)" : "",
+    message_text: extractText(message),
+  }).text;
 }
 
 /**
@@ -110,7 +104,7 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     taskType: "kapso-inbound",
     tags: ["kapso-whatsapp", "inbound"],
     priority: 70,
-    contextKey: mapping.contextKey ?? `kapso:conversation:${payload.conversation?.id ?? messageId}`,
+    contextKey: `kapso:conversation:${payload.conversation?.id ?? messageId}`,
   });
 
   return { kind: "task", taskId: task.id };
