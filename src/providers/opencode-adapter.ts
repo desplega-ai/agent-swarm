@@ -100,6 +100,74 @@ function isAssistantMessage(msg: unknown): msg is AssistantMessage {
 }
 
 const DOCKER_PLUGIN_PATH = "/home/worker/.config/opencode/plugins/agent-swarm.ts";
+const MODEL_CACHE_REFRESH_TIMEOUT_MS = 15_000;
+
+function isOpenRouterModel(model: string | undefined): boolean {
+  return Boolean(model?.toLowerCase().startsWith("openrouter/"));
+}
+
+function isModelNotFoundError(message: string): boolean {
+  return /model not found:/i.test(message);
+}
+
+async function readSpawnOutput(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+  if (!stream) return "";
+  return await new Response(stream).text();
+}
+
+function formatUnknownError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function refreshOpenRouterModelCache(
+  opencodeConfig: Config & { plugin?: string[] },
+  configFilePath: string,
+  dataHomePath: string,
+): Promise<void> {
+  const binary = process.env.OPENCODE_BINARY || "opencode";
+  const proc = Bun.spawn([binary, "models", "--refresh", "openrouter"], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      OPENCODE_CONFIG: configFilePath,
+      OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig),
+      OPENCODE_DATA_HOME: dataHomePath,
+    },
+  });
+
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    proc.kill();
+  }, MODEL_CACHE_REFRESH_TIMEOUT_MS);
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    readSpawnOutput(proc.stdout),
+    readSpawnOutput(proc.stderr),
+    proc.exited,
+  ]).finally(() => clearTimeout(timeout));
+
+  if (timedOut) {
+    throw new Error(
+      `opencode models --refresh openrouter timed out after ${MODEL_CACHE_REFRESH_TIMEOUT_MS}ms`,
+    );
+  }
+  if (exitCode !== 0) {
+    const detail = scrubSecrets([stderr.trim(), stdout.trim()].filter(Boolean).join("\n"));
+    throw new Error(
+      `opencode models --refresh openrouter exited with code ${exitCode}${detail ? `: ${detail}` : ""}`,
+    );
+  }
+}
+
+let refreshOpenRouterModelCacheImpl = refreshOpenRouterModelCache;
+
+export function _setOpenRouterModelCacheRefreshForTests(
+  fn: typeof refreshOpenRouterModelCache | null,
+): void {
+  refreshOpenRouterModelCacheImpl = fn ?? refreshOpenRouterModelCache;
+}
 
 function resolvePluginPath(): string {
   const override = process.env.OPENCODE_SWARM_PLUGIN_PATH;
@@ -141,6 +209,8 @@ export class OpencodeSession implements ProviderSession {
   private agentFilePath: string;
   private configFilePath: string;
   private dataHomePath: string;
+  private retryAfterModelRefresh?: () => Promise<boolean>;
+  private modelRefreshRecoveryInFlight = false;
 
   // Track which tool callIDs have already emitted tool_start, so transitions
   // through pending → running → completed don't fire duplicate events.
@@ -155,6 +225,7 @@ export class OpencodeSession implements ProviderSession {
     agentFilePath: string,
     configFilePath: string,
     dataHomePath: string,
+    retryAfterModelRefresh?: () => Promise<boolean>,
   ) {
     this._sessionId = sessionId;
     this.server = server;
@@ -164,6 +235,7 @@ export class OpencodeSession implements ProviderSession {
     this.agentFilePath = agentFilePath;
     this.configFilePath = configFilePath;
     this.dataHomePath = dataHomePath;
+    this.retryAfterModelRefresh = retryAfterModelRefresh;
     this.completionPromise = new Promise<ProviderResult>((resolve, reject) => {
       this.completionResolve = resolve;
       this.completionReject = reject;
@@ -209,6 +281,33 @@ export class OpencodeSession implements ProviderSession {
       return;
     }
     for (const l of this.listeners) l(event);
+  }
+
+  emitModelCacheRefreshProgress(): void {
+    this.emit({
+      type: "progress",
+      message: "opencode model cache is stale; refreshing OpenRouter models and retrying once",
+    });
+  }
+
+  emitModelCacheRefreshFailure(message: string, err: unknown): void {
+    this.emitError(`${message}; OpenRouter model cache refresh failed: ${formatUnknownError(err)}`);
+  }
+
+  private recoverFromModelNotFound(message: string): void {
+    if (!this.retryAfterModelRefresh || this.modelRefreshRecoveryInFlight) {
+      this.emitError(message);
+      return;
+    }
+    this.modelRefreshRecoveryInFlight = true;
+    this.emitModelCacheRefreshProgress();
+    this.retryAfterModelRefresh()
+      .then((retried) => {
+        if (!retried) this.emitError(message);
+      })
+      .catch((err: unknown) => {
+        this.emitModelCacheRefreshFailure(message, err);
+      });
   }
 
   /** Best-effort cleanup of per-task isolation files and directories. */
@@ -361,6 +460,10 @@ export class OpencodeSession implements ProviderSession {
           ev.properties.error && "message" in ev.properties.error
             ? String((ev.properties.error as { message?: string }).message ?? "unknown error")
             : "opencode session error";
+        if (isModelNotFoundError(errMsg)) {
+          this.recoverFromModelNotFound(errMsg);
+          break;
+        }
         this.emitError(errMsg);
         break;
       }
@@ -562,6 +665,30 @@ export class OpencodeAdapter implements ProviderAdapter {
     const opencodeSession = createResult.data;
     const sessionId = opencodeSession.id;
 
+    let promptRefreshAttempted = false;
+    let promptRefreshPromise: Promise<boolean> | undefined;
+    const sendPrompt = async () => {
+      await client.session.prompt({
+        path: { id: sessionId },
+        query: { directory: config.cwd },
+        body: {
+          agent: agentName,
+          parts: [{ type: "text", text: config.prompt }],
+        },
+      });
+    };
+    const refreshOpenRouterAndRetryPrompt = async (): Promise<boolean> => {
+      if (promptRefreshPromise) return await promptRefreshPromise;
+      if (promptRefreshAttempted || !isOpenRouterModel(config.model)) return false;
+      promptRefreshAttempted = true;
+      promptRefreshPromise = (async () => {
+        await refreshOpenRouterModelCacheImpl(opencodeConfig, configFilePath, dataHomePath);
+        await sendPrompt();
+        return true;
+      })();
+      return await promptRefreshPromise;
+    };
+
     const session = new OpencodeSession(
       sessionId,
       server,
@@ -571,6 +698,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       agentFilePath,
       configFilePath,
       dataHomePath,
+      isOpenRouterModel(config.model) ? refreshOpenRouterAndRetryPrompt : undefined,
     );
 
     // Emit session_init synchronously; the session buffers events until the
@@ -594,21 +722,28 @@ export class OpencodeAdapter implements ProviderAdapter {
       });
 
     // Fire-and-forget: send the prompt using the per-task agent
-    client.session
-      .prompt({
-        path: { id: sessionId },
-        query: { directory: config.cwd },
-        body: {
-          agent: agentName,
-          parts: [{ type: "text", text: config.prompt }],
-        },
-      })
-      .catch((err: unknown) => {
-        session.handleOpencodeEvent({
-          type: "session.error",
-          properties: { sessionID: sessionId, error: { message: String(err) } as never },
-        });
+    sendPrompt().catch((err: unknown) => {
+      const message = formatUnknownError(err);
+      if (isModelNotFoundError(message) && isOpenRouterModel(config.model)) {
+        session.emitModelCacheRefreshProgress();
+        refreshOpenRouterAndRetryPrompt()
+          .then((retried) => {
+            if (retried) return;
+            session.handleOpencodeEvent({
+              type: "session.error",
+              properties: { sessionID: sessionId, error: { message } as never },
+            });
+          })
+          .catch((retryErr: unknown) => {
+            session.emitModelCacheRefreshFailure(message, retryErr);
+          });
+        return;
+      }
+      session.handleOpencodeEvent({
+        type: "session.error",
+        properties: { sessionID: sessionId, error: { message } as never },
       });
+    });
 
     return session;
   }

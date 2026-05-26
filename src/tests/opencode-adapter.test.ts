@@ -141,6 +141,81 @@ describe("OpencodeSession — SSE→ProviderEvent mapping", () => {
     expect(result.failureReason).toContain("provider overloaded");
   });
 
+  test("prompt Model not found refreshes OpenRouter cache and retries once", async () => {
+    const emitted: ProviderEvent[] = [];
+    const refreshCalls: Array<{ model?: string; configFilePath: string; dataHomePath: string }> =
+      [];
+    const fakeSessionId = "sess-abc-123";
+    let promptCalls = 0;
+    let resolveSecondPrompt!: () => void;
+    const secondPromptSent = new Promise<void>((resolve) => {
+      resolveSecondPrompt = resolve;
+    });
+
+    const fakeClient = {
+      session: {
+        create: async () => ({ data: { id: fakeSessionId }, error: undefined }),
+        prompt: async (args: unknown) => {
+          lastPromptArgs = args;
+          promptCalls += 1;
+          if (promptCalls === 1) {
+            throw new Error(
+              "Model not found: openrouter/x-ai/grok-4.3. Did you mean: x-ai/grok-4.3?",
+            );
+          }
+          resolveSecondPrompt();
+          return { data: {}, error: undefined };
+        },
+      },
+      event: {
+        subscribe: async () => ({
+          stream: (async function* (): AsyncGenerator<OpencodeEvent> {
+            await secondPromptSent;
+            yield { type: "session.idle", properties: { sessionID: fakeSessionId } };
+          })(),
+        }),
+      },
+    };
+    const fakeServer = { url: "http://127.0.0.1:12345", close: mock(() => {}) };
+
+    mock.module("@opencode-ai/sdk", () => ({
+      createOpencode: async () => ({ client: fakeClient, server: fakeServer }),
+    }));
+
+    const { OpencodeAdapter, _setOpenRouterModelCacheRefreshForTests } = await import(
+      "../providers/opencode-adapter"
+    );
+    _setOpenRouterModelCacheRefreshForTests(
+      async (opencodeConfig, configFilePath, dataHomePath) => {
+        refreshCalls.push({ model: opencodeConfig.model, configFilePath, dataHomePath });
+      },
+    );
+    try {
+      const adapter = new OpencodeAdapter();
+      const session = await adapter.createSession(
+        testConfig({ model: "openrouter/x-ai/grok-4.3", taskId: "task-refresh" }),
+      );
+      session.onEvent((e) => emitted.push(e));
+
+      const result = await session.waitForCompletion();
+
+      expect(result.isError).toBe(false);
+      expect(promptCalls).toBe(2);
+      expect(refreshCalls).toEqual([
+        {
+          model: "openrouter/x-ai/grok-4.3",
+          configFilePath: "/tmp/opencode-task-refresh.json",
+          dataHomePath: "/tmp/opencode-data-task-refresh",
+        },
+      ]);
+      expect(emitted.some((e) => e.type === "progress" && e.message.includes("refreshing"))).toBe(
+        true,
+      );
+    } finally {
+      _setOpenRouterModelCacheRefreshForTests(null);
+    }
+  });
+
   test("permission.updated → emits error (headless cannot approve)", async () => {
     const events: OpencodeEvent[] = [
       {
