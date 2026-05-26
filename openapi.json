@@ -10839,11 +10839,13 @@
                       "email": {
                         "type": "string",
                         "format": "email"
+                      },
+                      "notes": {
+                        "type": "string"
                       }
                     },
                     "required": [
-                      "name",
-                      "email"
+                      "name"
                     ]
                   }
                 ]

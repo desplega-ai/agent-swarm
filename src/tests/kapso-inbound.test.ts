@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { closeDb, createAgent, getTaskById, initDb } from "../be/db";
+import { closeDb, createAgent, createUser, getKv, getTaskById, initDb } from "../be/db";
+import { findUserByExternalId, linkIdentity } from "../be/users";
 import { handleWebhooks } from "../http/webhooks";
 import { putKapsoNumberMapping } from "../integrations/kapso/config";
 import { routeKapsoInbound } from "../integrations/kapso/inbound";
@@ -105,6 +106,64 @@ describe("routeKapsoInbound", () => {
     expect(task!.taskType).toBe("kapso-inbound");
     expect(task!.agentId).toBe(agentId);
     expect(task!.task).toContain("## Source: WhatsApp (Kapso)");
+  });
+
+  test("known Kapso sender → populates requestedByUserId and skips unmapped tracker", () => {
+    putKapsoNumberMapping({
+      phoneNumberId: "pn-known-sender",
+      agentId,
+      createdAt: new Date().toISOString(),
+    });
+    const user = createUser({ name: "Known WhatsApp Sender" });
+    linkIdentity(user.id, "kapso", "34679077778", { kind: "system", id: "test-fixture" });
+
+    const routing = routeKapsoInbound(
+      makePayload({
+        phoneNumberId: "pn-known-sender",
+        messageId: "wamid.KNOWN_SENDER",
+        from: "+34 679 077 778",
+        conversationId: "conv-known-sender",
+      }),
+    );
+
+    expect(routing.kind).toBe("task");
+    if (routing.kind !== "task") throw new Error("expected task");
+    const task = getTaskById(routing.taskId);
+    expect(task!.requestedByUserId).toBe(user.id);
+    expect(getKv("integration:unmapped:kapso", "34679077778:meta")).toBeNull();
+  });
+
+  test("unknown Kapso sender → records unmapped identity and leaves task unowned", () => {
+    putKapsoNumberMapping({
+      phoneNumberId: "pn-unknown-sender",
+      agentId,
+      createdAt: new Date().toISOString(),
+    });
+    expect(findUserByExternalId("kapso", "34679077779")).toBeNull();
+
+    const routing = routeKapsoInbound(
+      makePayload({
+        phoneNumberId: "pn-unknown-sender",
+        messageId: "wamid.UNKNOWN_SENDER",
+        from: "+34 679 077 779",
+        conversationId: "conv-unknown-sender",
+      }),
+    );
+
+    expect(routing.kind).toBe("task");
+    if (routing.kind !== "task") throw new Error("expected task");
+    const task = getTaskById(routing.taskId);
+    expect(task!.requestedByUserId).toBeUndefined();
+
+    const meta = getKv("integration:unmapped:kapso", "34679077779:meta");
+    expect(meta?.valueType).toBe("json");
+    expect(meta?.value).toMatchObject({
+      sampleEventType: "kapso.message.received",
+    });
+    expect(String(meta?.value.sampleContext)).toContain("contact=Taras");
+    expect(String(meta?.value.sampleContext)).toContain("message=wamid.UNKNOWN_SENDER");
+    const count = getKv("integration:unmapped:kapso", "34679077779:count");
+    expect(count?.value).toBe(1);
   });
 
   test("no mapping → no_mapping (does not break, no task)", () => {

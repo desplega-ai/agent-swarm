@@ -439,6 +439,26 @@ describe("GET /api/users/unmapped", () => {
     expect(body.unmapped[0]!.count).toBe(5);
     expect(body.unmapped[1]!.externalId).toBe("U_LOW");
   });
+
+  test("default unmapped list includes Kapso sender identities", async () => {
+    const ns = "integration:unmapped:kapso";
+    upsertKv({
+      namespace: ns,
+      key: "34679077777:meta",
+      value: { lastSeenAt: "2026-05-20T00:00:00Z", sampleEventType: "kapso.message.received" },
+      valueType: "json",
+    });
+    upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
+
+    const r = await authedFetch("/api/users/unmapped");
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      unmapped: Array<{ kind: string; externalId: string }>;
+    };
+    expect(body.unmapped).toContainEqual(
+      expect.objectContaining({ kind: "kapso", externalId: "34679077777" }),
+    );
+  });
 });
 
 describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
@@ -480,6 +500,39 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
     };
     expect(user.name).toBe("GH User");
     expect(user.identities).toContainEqual({ kind: "github", externalId: "ghuser" });
+  });
+
+  test("create-new branch supports phone-only Kapso contacts without email", async () => {
+    const ns = "integration:unmapped:kapso";
+    upsertKv({
+      namespace: ns,
+      key: "34679077777:meta",
+      value: { lastSeenAt: "x", sampleEventType: "kapso.message.received" },
+      valueType: "json",
+    });
+    upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
+
+    const r = await authedFetch("/api/users/unmapped/kapso/34679077777/resolve", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Taras",
+        notes: "WhatsApp: +34 679 077 777 (E.164: 34679077777)",
+      }),
+    });
+    expect(r.status).toBe(200);
+    const { user } = (await r.json()) as {
+      user: {
+        id: string;
+        name: string;
+        email?: string;
+        notes?: string;
+        identities: Array<{ kind: string; externalId: string }>;
+      };
+    };
+    expect(user.name).toBe("Taras");
+    expect(user.email).toBeUndefined();
+    expect(user.notes).toContain("E.164: 34679077777");
+    expect(user.identities).toContainEqual({ kind: "kapso", externalId: "34679077777" });
   });
 
   test("URL-encoded externalId is decoded — kv rows clear, identity stored decoded", async () => {
