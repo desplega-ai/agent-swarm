@@ -23,6 +23,15 @@ const BOOTSTRAP_TOTAL_MAX_CHARS = 150_000;
 const truncationNotice = (file: string) =>
   `\n\n[...truncated, see /workspace/${file} for full content]\n`;
 
+const SLACK_TOOL_NAME_RE = /\bslack-[a-z-]+\b/;
+
+export function areSlackPromptToolsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const slackDisable = env.SLACK_DISABLE;
+  if (slackDisable === "true" || slackDisable === "1") return false;
+
+  return Boolean(env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN);
+}
+
 export type BasePromptArgs = {
   role: string;
   agentId: string;
@@ -71,9 +80,10 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const compositeResult = await resolveTemplateAsync(compositeEventType, vars);
   let prompt = compositeResult.text;
 
+  const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
+
   // Conditionally inject Slack instructions for workers with Slack-originated tasks
-  // Skip for providers without MCP — they can't call Slack tools (slack-reply, etc.)
-  if (role !== "lead" && args.slackContext && hasMcp) {
+  if (role !== "lead" && args.slackContext && hasMcp && slackPromptToolsEnabled) {
     const slackResult = await resolveTemplateAsync("system.agent.worker.slack", {
       slackChannelId: args.slackContext.channelId,
       slackThreadTs: args.slackContext.threadTs ?? "",
@@ -251,8 +261,18 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     prompt += conditionalSuffix;
   }
 
-  return prompt;
+  return slackPromptToolsEnabled ? prompt : stripSlackToolReferences(prompt);
 };
+
+function stripSlackToolReferences(prompt: string): string {
+  const lines = prompt.split("\n");
+  const keptLines = lines.filter((line) => !SLACK_TOOL_NAME_RE.test(line));
+
+  return keptLines
+    .join("\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trimEnd();
+}
 
 /** Truncate a section to fit within a character budget, appending a notice if cut */
 function truncateSection(

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt";
 import type { ProviderTraits } from "../providers/types";
 
@@ -8,6 +8,39 @@ const minimalArgs: BasePromptArgs = {
   agentId: "agent-abc-123",
   swarmUrl: "swarm.example.com",
 };
+
+const originalSlackDisable = process.env.SLACK_DISABLE;
+const originalSlackBotToken = process.env.SLACK_BOT_TOKEN;
+const originalSlackAppToken = process.env.SLACK_APP_TOKEN;
+
+afterEach(() => {
+  restoreEnv("SLACK_DISABLE", originalSlackDisable);
+  restoreEnv("SLACK_BOT_TOKEN", originalSlackBotToken);
+  restoreEnv("SLACK_APP_TOKEN", originalSlackAppToken);
+});
+
+function restoreEnv(
+  name: "SLACK_DISABLE" | "SLACK_BOT_TOKEN" | "SLACK_APP_TOKEN",
+  value: string | undefined,
+) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
+function enableSlackPromptTools() {
+  process.env.SLACK_DISABLE = "false";
+  process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
+  process.env.SLACK_APP_TOKEN = "xapp-test-token";
+}
+
+function disableSlackPromptTools() {
+  process.env.SLACK_DISABLE = "true";
+  delete process.env.SLACK_BOT_TOKEN;
+  delete process.env.SLACK_APP_TOKEN;
+}
 
 // ---------------------------------------------------------------------------
 // Basic fields
@@ -531,5 +564,42 @@ describe("getBasePrompt — local providers unaffected", () => {
     const result = await getBasePrompt(minimalArgs);
     expect(result).toContain("store-progress");
     expect(result).toContain("/workspace");
+  });
+});
+
+describe("getBasePrompt — Slack-disabled prompt pruning", () => {
+  test("removes slack tool names from composed prompt when Slack is disabled", async () => {
+    disableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      slackContext: { channelId: "C123", threadTs: "123.456" },
+      claudeMd: "Use `slack-reply` only when available.",
+      toolsMd: "Local note: `slack-upload-file` exists in Slack-enabled swarms.",
+      skillsSummary: [
+        { name: "custom", description: "Read context with `slack-read` before replying." },
+      ],
+      repoContext: {
+        clonePath: "/workspace/my-repo",
+        claudeMd: "Repo instruction: avoid `slack-post` unless requested.",
+      },
+    });
+
+    expect(result).not.toMatch(/\bslack-[a-z-]+\b/);
+    expect(result).toContain("Task Routing");
+  });
+
+  test("keeps slack tool names in composed prompt when Slack is enabled", async () => {
+    enableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "worker",
+      slackContext: { channelId: "C123", threadTs: "123.456" },
+    });
+
+    expect(result).toContain("slack-reply");
+    expect(result).toContain("C123");
   });
 });
