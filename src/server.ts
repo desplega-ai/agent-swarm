@@ -59,10 +59,6 @@ import {
   registerRegisterKapsoNumberTool,
   registerUnregisterKapsoNumberTool,
 } from "./tools/register-kapso-number";
-import {
-  registerReplyWhatsappMessageTool,
-  registerSendWhatsappMessageTool,
-} from "./tools/whatsapp-message";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
 // Repo management tools
@@ -126,6 +122,10 @@ import { registerUnregisterServiceTool } from "./tools/unregister-service";
 // Profiles capability
 import { registerUpdateProfileTool } from "./tools/update-profile";
 import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
+import {
+  registerReplyWhatsappMessageTool,
+  registerSendWhatsappMessageTool,
+} from "./tools/whatsapp-message";
 // Workflows capability
 import {
   registerCancelWorkflowRunTool,
