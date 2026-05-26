@@ -47,6 +47,50 @@ export type IntegrationSpecialFlow =
   | "codex-cli"
   | "claude-managed-cli";
 
+/** Which agent role(s) the swarm needs to have a given skill installed on. */
+export type AgentRole = "lead" | "worker";
+
+/**
+ * Where a recommended skill lives.
+ *
+ * - `'swarm-registry'`: already published in the swarm skills registry
+ *   (installable from /settings/skills, resolvable by name in the `skills` DB table).
+ * - `'template'`: checked in under `templates/skills/<name>/SKILL.md` in the
+ *   agent-swarm repo. Installable via `skill-install-remote` using the
+ *   `templateRepo` + `templatePath` fields on the entry.
+ */
+export type SkillSource = "swarm-registry" | "template";
+
+export interface RecommendedSkill {
+  /** Canonical name — matches the `name` column in the swarm skills registry. */
+  name: string;
+  /** Where this skill lives (see {@link SkillSource}). */
+  source: SkillSource;
+  /** Agent roles that need the skill installed for this integration to work end-to-end. */
+  roles: AgentRole[];
+  /** One-liner shown beside the skill explaining why it's needed. */
+  reason?: string;
+  /**
+   * GitHub repo slug (`owner/repo`) hosting the SKILL.md.
+   * Only set when `source === 'template'`.
+   * Passed directly to `skill-install-remote` as `sourceRepo`.
+   */
+  templateRepo?: string;
+  /**
+   * Path inside `templateRepo` that contains `SKILL.md`.
+   * Only set when `source === 'template'`.
+   * Passed directly to `skill-install-remote` as `sourcePath`.
+   */
+  templatePath?: string;
+  /**
+   * When true, the skill is automatically installed (via `skill-install-remote`)
+   * as part of integration setup — the operator doesn't need to visit
+   * /settings/skills to install it manually.
+   * Only meaningful when `source === 'template'` and `templateRepo` is set.
+   */
+  installOnSetup?: boolean;
+}
+
 export interface IntegrationDef {
   /** URL slug (kebab-case). Must be unique. */
   id: string;
@@ -64,6 +108,13 @@ export interface IntegrationDef {
   restartRequired?: boolean;
   /** Custom flow that overrides the generic field form. */
   specialFlow?: IntegrationSpecialFlow;
+  /**
+   * Skills recommended alongside this integration. Env-var configuration is
+   * not always enough — some integrations depend on procedural knowledge (a
+   * skill) installed on a specific agent role. Each entry declares where the
+   * skill lives so the operator knows how to get it.
+   */
+  recommendedSkills?: RecommendedSkill[];
 }
 
 export const INTEGRATIONS: IntegrationDef[] = [
@@ -448,6 +499,18 @@ export const INTEGRATIONS: IntegrationDef[] = [
     docsUrl: "https://docs.agent-swarm.dev/integrations/agentmail",
     disableKey: "AGENTMAIL_DISABLE",
     restartRequired: true,
+    recommendedSkills: [
+      {
+        name: "agentmail-sending",
+        source: "template",
+        templateRepo: "desplega-ai/agent-swarm",
+        templatePath: "templates/skills/agentmail-sending",
+        roles: ["lead"],
+        reason:
+          "Needed for agents to send/reply to email via AgentMail (the env keys alone only enable receive).",
+        installOnSetup: true,
+      },
+    ],
     fields: [
       {
         key: "AGENTMAIL_API_KEY",

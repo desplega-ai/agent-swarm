@@ -34,6 +34,7 @@ import {
   useEnvPresence,
   useReloadConfig,
 } from "@/api/hooks/use-integrations-meta";
+import { useInstallRemoteSkill } from "@/api/hooks/use-skills";
 import type { SwarmConfig } from "@/api/types";
 import { ClaudeManagedSection } from "@/components/integrations/claude-managed-section";
 import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section";
@@ -41,6 +42,7 @@ import { FieldRenderer } from "@/components/integrations/field-renderer";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
 import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
 import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
+import { RecommendedSkillsSection } from "@/components/integrations/required-skills-section";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -208,6 +210,7 @@ function IntegrationDetailInner({
 
   const [state, setState] = useState<DirtyState>(initialState);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+  const installRemoteSkill = useInstallRemoteSkill();
 
   function updateField(key: string, patch: Partial<DirtyField>) {
     setState((prev) => ({
@@ -255,6 +258,30 @@ function IntegrationDetailInner({
     if (!hasDirty) return;
     const saveResult = await upsertBatch.mutateAsync(dirtyEntries);
     if (saveResult.failureCount > 0) return; // upsertBatch already surfaced the error toast
+
+    // Auto-install skills flagged installOnSetup so operators don't need a
+    // separate visit to /settings/skills after configuring the integration.
+    const autoInstallSkills =
+      def.recommendedSkills?.filter(
+        (s) => s.installOnSetup && s.source === "template" && s.templateRepo,
+      ) ?? [];
+    await Promise.allSettled(
+      autoInstallSkills.map((s) =>
+        installRemoteSkill
+          .mutateAsync({ sourceRepo: s.templateRepo!, sourcePath: s.templatePath })
+          .then(() => {
+            toast.success(`Skill "${s.name}" installed automatically.`);
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : "install failed";
+            // Silently skip if already installed; surface other errors.
+            if (!msg.includes("already") && !msg.includes("exist")) {
+              toast.error(`Auto-install of "${s.name}" failed: ${msg}`);
+            }
+          }),
+      ),
+    );
+
     try {
       const reload = await reloadConfig.mutateAsync();
       const summary =
@@ -265,7 +292,7 @@ function IntegrationDetailInner({
     } catch {
       // reload hook surfaces its own error toast
     }
-  }, [hasDirty, dirtyEntries, upsertBatch, reloadConfig]);
+  }, [hasDirty, dirtyEntries, upsertBatch, reloadConfig, def, installRemoteSkill]);
 
   // Cmd/Ctrl+S = Save. We intentionally let it fire even when focus is inside
   // a textarea (private keys, etc.) — users expect cmd+S universally and can
@@ -476,6 +503,10 @@ function IntegrationDetailInner({
                       />
                     </div>
                   </details>
+                )}
+
+                {def.recommendedSkills && def.recommendedSkills.length > 0 && (
+                  <RecommendedSkillsSection recommendedSkills={def.recommendedSkills} />
                 )}
               </div>
             )}
