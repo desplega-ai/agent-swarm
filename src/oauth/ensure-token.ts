@@ -18,6 +18,7 @@ function getOAuthConfig(provider: string): OAuthProviderConfig | null {
     redirectUri: app.redirectUri,
     scopes: app.scopes.split(","),
     extraParams: metadata.extraParams ?? (metadata.actor ? { actor: metadata.actor } : undefined),
+    requiresRefreshTokenRotation: provider === "jira",
   };
 }
 

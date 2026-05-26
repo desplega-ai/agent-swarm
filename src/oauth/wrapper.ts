@@ -1,5 +1,5 @@
 import * as oauth from "oauth4webapi";
-import { storeOAuthTokens } from "../be/db-queries/oauth";
+import { storeOAuthTokens, updateOAuthTokensAfterRefresh } from "../be/db-queries/oauth";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -13,6 +13,12 @@ export interface OAuthProviderConfig {
   scopes: string[];
   /** Extra query params appended to the authorization URL (e.g. { actor: "app" } for Linear) */
   extraParams?: Record<string, string>;
+  /**
+   * Provider rotates refresh tokens on every refresh. When true, a refresh
+   * response without a new refresh token is unusable because the old one may
+   * already be invalidated server-side.
+   */
+  requiresRefreshTokenRotation?: boolean;
   /**
    * How to join `scopes` in the authorization URL.
    *
@@ -160,7 +166,7 @@ export async function exchangeCode(
 export async function refreshAccessToken(
   config: OAuthProviderConfig,
   refreshToken: string,
-): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number }> {
+): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     client_id: config.clientId,
@@ -183,23 +189,48 @@ export async function refreshAccessToken(
     access_token: string;
     token_type: string;
     expires_in?: number;
+    scope?: string;
     refresh_token?: string;
   };
+
+  if (typeof data.access_token !== "string" || data.access_token.length === 0) {
+    throw new Error(`Token refresh failed: ${config.provider} response missing access_token`);
+  }
+
+  if (
+    config.requiresRefreshTokenRotation &&
+    (typeof data.refresh_token !== "string" || data.refresh_token.length === 0)
+  ) {
+    throw new Error(
+      `Token refresh failed: ${config.provider} response did not include a rotated refresh_token`,
+    );
+  }
 
   const expiresAt = data.expires_in
     ? new Date(Date.now() + data.expires_in * 1000).toISOString()
     : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-  storeOAuthTokens(config.provider, {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token ?? null,
-    expiresAt,
-  });
+  const nextRefreshToken = data.refresh_token ?? refreshToken;
+  try {
+    updateOAuthTokensAfterRefresh(config.provider, refreshToken, {
+      accessToken: data.access_token,
+      refreshToken: nextRefreshToken,
+      expiresAt,
+      scope: data.scope ?? null,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[OAuth] Refusing to use refreshed ${config.provider} access token because persistence failed: ${message}`,
+    );
+    throw err;
+  }
 
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
     expiresIn: data.expires_in,
+    scope: data.scope,
   };
 }
 

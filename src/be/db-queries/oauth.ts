@@ -127,6 +127,49 @@ export function storeOAuthTokens(
     .run(provider, data.accessToken, data.refreshToken ?? null, data.expiresAt, data.scope ?? null);
 }
 
+export function updateOAuthTokensAfterRefresh(
+  provider: string,
+  expectedRefreshToken: string,
+  data: {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: string;
+    scope?: string | null;
+  },
+): void {
+  const result = getDb()
+    .query(
+      `UPDATE oauth_tokens
+       SET accessToken = ?,
+           refreshToken = ?,
+           expiresAt = ?,
+           scope = COALESCE(?, scope),
+           updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE provider = ? AND refreshToken = ?`,
+    )
+    .run(
+      data.accessToken,
+      data.refreshToken,
+      data.expiresAt,
+      data.scope ?? null,
+      provider,
+      expectedRefreshToken,
+    );
+
+  if (result.changes === 1) return;
+
+  const current = getOAuthTokens(provider);
+  if (!current) {
+    throw new Error(`OAuth token refresh persistence failed for ${provider}: token row missing`);
+  }
+  if (current.refreshToken !== expectedRefreshToken) {
+    throw new Error(
+      `OAuth token refresh persistence failed for ${provider}: stored refresh token changed during refresh`,
+    );
+  }
+  throw new Error(`OAuth token refresh persistence failed for ${provider}: no rows updated`);
+}
+
 export function deleteOAuthTokens(provider: string): void {
   getDb().query("DELETE FROM oauth_tokens WHERE provider = ?").run(provider);
 }

@@ -1,5 +1,5 @@
 import { getOAuthTokens } from "../be/db-queries/oauth";
-import { ensureToken } from "../oauth/ensure-token";
+import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
 import { getJiraMetadata } from "./metadata";
 
 /**
@@ -36,8 +36,7 @@ export function getJiraCloudId(): string {
  * - Prepends `https://api.atlassian.com/ex/jira/{cloudId}` to `path`.
  * - Sets `Authorization: Bearer <token>` and `Accept: application/json`.
  * - Sets `Content-Type: application/json` when a body is provided.
- * - On 401: refreshes the token (forced via `ensureToken("jira", 0)`) and
- *   retries once.
+ * - On 401: forces a token refresh and retries once.
  * - On 429: respects `Retry-After` (in seconds) with a single retry.
  *
  * Returns the raw `Response` — callers handle `response.json()`/`response.text()`
@@ -64,8 +63,7 @@ export async function jiraFetch(path: string, init?: RequestInit): Promise<Respo
   let response = await send(token);
 
   if (response.status === 401) {
-    // Force refresh — bufferMs=0 means "always refresh if any expiry is set"
-    await ensureToken("jira", 0);
+    await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
     token = await getJiraAccessToken();
     response = await send(token);
   }
