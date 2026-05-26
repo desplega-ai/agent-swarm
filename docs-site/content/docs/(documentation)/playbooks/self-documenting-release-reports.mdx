@@ -61,13 +61,13 @@ Keep your docs fresh automatically. Generate release notes from real commits. Pr
 
 ## Workflows / Schedules
 
-- **`daily-docs-update`** — daily. Checks if any PRs merged in the last 24h. **No-op if none.** Otherwise updates docs + CHANGELOG + timestamps, cuts a release if needed. See the [No-op pattern](./patterns/no-op-workflows).
+- **`daily-docs-update`** — daily. Checks if any PRs merged in the last 24h. **No-op if none.** Otherwise updates docs + CHANGELOG + timestamps, cuts a release if needed. See the [No-op pattern](/docs/playbooks/patterns/no-op-workflows).
 - **`docs-site-releases`** — weekly. Generates MDX release notes for the docs site: pulls commits, evaluates significance, plans, writes MDX, validates, opens a PR.
 - **`weekly-new-releases`** — weekly. Release-notes **blog post** for the marketing site (product repos only, not internal infra).
 
 ## Patterns used
 
-- [**No-op When Nothing Changed**](./patterns/no-op-workflows) — the daily docs job skips silently on a quiet day.
+- [**No-op When Nothing Changed**](/docs/playbooks/patterns/no-op-workflows) — the daily docs job skips silently on a quiet day.
 
 ## Tips for new swarm users
 

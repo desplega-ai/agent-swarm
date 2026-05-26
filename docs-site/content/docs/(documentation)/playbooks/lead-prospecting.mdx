@@ -50,7 +50,7 @@ Every morning the swarm discovers companies with growth signals, finds the right
 
 ### Built-in (ships with agent-swarm)
 
-- **`request-human-input`** — the HITL gate. Workflow pauses until a human reacts in Slack. See the [HITL Gates pattern](./patterns/hitl-gates).
+- **`request-human-input`** — the HITL gate. Workflow pauses until a human reacts in Slack. See the [HITL Gates pattern](/docs/playbooks/patterns/hitl-gates).
 - **`slack-post` / `slack-reply`** — surface the review and accept the gate response.
 - **[agent-fs](https://github.com/desplega-ai/agent-fs)** — drafts live here, one folder per day's batch. You can edit before approving.
 - **Swarm KV store** — namespaced per-workflow state for the "contacted prospects" set, so re-fires don't re-prospect the same person.
@@ -80,7 +80,7 @@ These are *integrations*, not skills — wire them in via a [script node](/docs/
 
 ## Patterns used
 
-- [**HITL Gates**](./patterns/hitl-gates) — a human approves before any outbound email sends.
+- [**HITL Gates**](/docs/playbooks/patterns/hitl-gates) — a human approves before any outbound email sends.
 
 ## Tips for new swarm users
 

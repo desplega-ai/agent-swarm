@@ -66,12 +66,12 @@ A request arrives in Slack or as a [Linear](https://linear.app) ticket. The [lea
 - **`autopilot`** — manually triggered, full pipeline: research → review-research → plan → review-plan → implement → verify. Each phase has its own review gate so errata are caught before downstream steps.
 - **`autopilot-plan`** — skip research when you already have one: plan → review-plan → implement → verify.
 - **`autopilot-research`** — research-only, when you just want vetted findings.
-- **`linear-drain-loop`** — given a Linear parent issue with sub-issues, branches off the previous PR's branch (stacked PRs), implements each, opens PRs, transitions Linear states. See the [Drain Loops pattern](./patterns/drain-loops).
+- **`linear-drain-loop`** — given a Linear parent issue with sub-issues, branches off the previous PR's branch (stacked PRs), implements each, opens PRs, transitions Linear states. See the [Drain Loops pattern](/docs/playbooks/patterns/drain-loops).
 - **`linear-merge-loop`** — companion: reviews the bottom-most open PR with `base=main`, squash-merges when the reviewer approves and CI is green, transitions the linked Linear sub-issue to Done, then loops up the stack.
 
 ## Patterns used
 
-- [**Drain Loops**](./patterns/drain-loops) — turn one big Linear ticket into a chain of stacked, individually-reviewable PRs.
+- [**Drain Loops**](/docs/playbooks/patterns/drain-loops) — turn one big Linear ticket into a chain of stacked, individually-reviewable PRs.
 
 ## Tips for new swarm users
 

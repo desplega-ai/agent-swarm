@@ -34,7 +34,7 @@ Standing agents per top account: scheduled value-showcase reports, post-meeting 
 
 ## What it does
 
-Each top account gets a [per-customer working directory](./patterns/per-customer-working-directories) in the swarm's shared filesystem ([agent-fs](https://github.com/desplega-ai/agent-fs)). An agent maintains running notes, integration history, open questions, and recent activity. On a cadence (or on demand), the agent produces a customer-facing value-showcase report: data-driven usage + outcomes framed in *their* language, not your internal feature names.
+Each top account gets a [per-customer working directory](/docs/playbooks/patterns/per-customer-working-directories) in the swarm's shared filesystem ([agent-fs](https://github.com/desplega-ai/agent-fs)). An agent maintains running notes, integration history, open questions, and recent activity. On a cadence (or on demand), the agent produces a customer-facing value-showcase report: data-driven usage + outcomes framed in *their* language, not your internal feature names.
 
 ## Agents
 
@@ -46,7 +46,7 @@ Each top account gets a [per-customer working directory](./patterns/per-customer
 
 ### Built-in (ships with agent-swarm)
 
-- **[agent-fs](https://github.com/desplega-ai/agent-fs)** — per-customer working directories. Persistent across sessions; each account accumulates institutional knowledge over months. See the [Per-Customer Working Directories pattern](./patterns/per-customer-working-directories).
+- **[agent-fs](https://github.com/desplega-ai/agent-fs)** — per-customer working directories. Persistent across sessions; each account accumulates institutional knowledge over months. See the [Per-Customer Working Directories pattern](/docs/playbooks/patterns/per-customer-working-directories).
 - **`slack-post`** — internal handoffs + human review before send.
 
 ### Custom (swarm-managed)
@@ -78,8 +78,8 @@ Post-call automation: a [Granola](https://www.granola.ai/) webhook fires after e
 
 ## Patterns used
 
-- [**Per-Customer Working Directories**](./patterns/per-customer-working-directories) — persistent per-account context that compounds over months.
-- [**HITL Gates**](./patterns/hitl-gates) — a human signs off before any direct-to-customer email.
+- [**Per-Customer Working Directories**](/docs/playbooks/patterns/per-customer-working-directories) — persistent per-account context that compounds over months.
+- [**HITL Gates**](/docs/playbooks/patterns/hitl-gates) — a human signs off before any direct-to-customer email.
 
 ## Tips for new swarm users
 

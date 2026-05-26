@@ -19,7 +19,7 @@ A durable directory per account (e.g. `customers/<account>/`) in [agent-fs](http
 
 ## Where we use it
 
-- **[Proactive customer support](../proactive-customer-support)** — each top account has a directory. A post-call [Granola](https://www.granola.ai/) transcript appends automatically; the next report-generation task reads months of accumulated context.
+- **[Proactive customer support](/docs/playbooks/proactive-customer-support)** — each top account has a directory. A post-call [Granola](https://www.granola.ai/) transcript appends automatically; the next report-generation task reads months of accumulated context.
 
 ## Why it works
 
@@ -32,8 +32,8 @@ A durable directory per account (e.g. `customers/<account>/`) in [agent-fs](http
 - One directory per account, predictable path. Keep a short `README`/`index` at the root summarizing current state.
 - Append, don't overwrite — transcripts and notes are an audit trail.
 - Separate internal notes from customer-facing drafts so a redaction pass is easy.
-- Pair with the [HITL gate](./hitl-gates): the directory feeds the draft; a human approves the send.
+- Pair with the [HITL gate](/docs/playbooks/patterns/hitl-gates): the directory feeds the draft; a human approves the send.
 
 ## Used in
 
-- [Proactive Customer Support](../proactive-customer-support)
+- [Proactive Customer Support](/docs/playbooks/proactive-customer-support)
