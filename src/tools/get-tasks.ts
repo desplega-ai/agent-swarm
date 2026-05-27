@@ -140,6 +140,10 @@ export async function getTasksHandler(
   if (scheduleId) filters.push(`scheduleId='${scheduleId}'`);
 
   const filterMsg = filters.length > 0 ? ` (${filters.join(", ")})` : "";
+  const structuredContent = {
+    yourAgentId: agentId,
+    tasks: taskSummaries,
+  };
 
   return {
     content: [
@@ -147,11 +151,12 @@ export async function getTasksHandler(
         type: "text",
         text: `Found ${taskSummaries.length} task(s)${filterMsg}.`,
       },
+      {
+        type: "text",
+        text: JSON.stringify(structuredContent),
+      },
     ],
-    structuredContent: {
-      yourAgentId: agentId,
-      tasks: taskSummaries,
-    },
+    structuredContent,
   };
 }
 

@@ -142,12 +142,20 @@ export async function cancelTaskHandler(
 
   if ("content" in result) return result;
 
+  const structuredContent = {
+    yourAgentId: agentId,
+    ...result,
+  };
+
   return {
-    content: [{ type: "text", text: result.message }],
-    structuredContent: {
-      yourAgentId: agentId,
-      ...result,
-    },
+    content: [
+      { type: "text", text: result.message },
+      {
+        type: "text",
+        text: JSON.stringify(structuredContent),
+      },
+    ],
+    structuredContent,
   };
 }
 

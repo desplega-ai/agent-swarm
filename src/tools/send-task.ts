@@ -326,13 +326,17 @@ export async function sendTaskHandler(
   });
 
   const result = txn();
+  const structuredContent = {
+    yourAgentId: creatorAgentId,
+    ...result,
+  };
 
   return {
-    content: [{ type: "text", text: result.message }],
-    structuredContent: {
-      yourAgentId: creatorAgentId,
-      ...result,
-    },
+    content: [
+      { type: "text", text: result.message },
+      { type: "text", text: JSON.stringify(result) },
+    ],
+    structuredContent,
   };
 }
 

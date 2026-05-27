@@ -108,24 +108,34 @@ type TaskActionResult = {
 
 function agentOnlyActionResult(): CallToolResult {
   const message = "This action is only available to worker agents.";
+  const structuredContent = {
+    success: false,
+    message,
+  };
+
   return {
     isError: true,
-    content: [{ type: "text", text: message }],
-    structuredContent: {
-      success: false,
-      message,
-    },
+    content: [
+      { type: "text", text: message },
+      { type: "text", text: JSON.stringify(structuredContent) },
+    ],
+    structuredContent,
   };
 }
 
 function taskActionCallResult(result: TaskActionResult, agentId?: string): CallToolResult {
   const { refusalSideEffects: _omit, ...publicResult } = result;
+  const structuredContent = {
+    yourAgentId: agentId,
+    ...publicResult,
+  };
+
   return {
-    content: [{ type: "text", text: result.message }],
-    structuredContent: {
-      yourAgentId: agentId,
-      ...publicResult,
-    },
+    content: [
+      { type: "text", text: result.message },
+      { type: "text", text: JSON.stringify(structuredContent) },
+    ],
+    structuredContent,
   };
 }
 
