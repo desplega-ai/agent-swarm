@@ -47,7 +47,7 @@ The `pricing` table is seeded at server boot from the vendored models.dev snapsh
 - **Manual overrides** (claude-managed `runtime_hour` at $0.08/hr, devin `acu` at $2.25): `MANUAL_PRICING_OVERRIDES` in the same file. Each entry carries its source URL and a `verified` date.
 - **Refresh procedure**: run `bun run scripts/refresh-modelsdev-pricing.ts` to fetch the latest snapshot, see a diff summary, and write the new file. Commit it alongside the PR.
 
-Operator reference: [`src/providers/pricing-sources.md`](../../../../../src/providers/pricing-sources.md).
+Operator reference: [`src/providers/pricing-sources.md`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pricing-sources.md).
 
 ## How context-window usage is computed
 
@@ -96,5 +96,5 @@ Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wi
 ## Related docs
 
 - [Harness providers](./harness-providers) — provider-specific quirks
-- [`src/providers/pricing-sources.md`](../../../../../src/providers/pricing-sources.md) — operator workflow
-- [`BUSINESS_USE.md`](../../../../../BUSINESS_USE.md) — flow diagrams for `task` / `agent` / `api` events
+- [`src/providers/pricing-sources.md`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pricing-sources.md) — operator workflow
+- [`BUSINESS_USE.md`](https://github.com/desplega-ai/agent-swarm/blob/main/BUSINESS_USE.md) — flow diagrams for `task` / `agent` / `api` events

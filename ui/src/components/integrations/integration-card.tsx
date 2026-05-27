@@ -12,6 +12,7 @@ import {
   ListChecks,
   type LucideIcon,
   Mail,
+  MessageCircle,
   MessageSquare,
   Plug,
   Route,
@@ -31,6 +32,7 @@ import { IntegrationStatusBadge } from "./integration-status-badge";
 // rendering even if the catalog gains a new entry before this map is updated.
 const ICON_MAP: Record<string, LucideIcon> = {
   "message-square": MessageSquare,
+  "message-circle": MessageCircle,
   github: Github,
   "git-merge": GitMerge,
   "git-branch": GitBranch,

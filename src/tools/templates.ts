@@ -8,6 +8,41 @@
 import { registerTemplate } from "../prompts/registry";
 
 // ============================================================================
+// Kapso/WhatsApp inbound (native handler creates a kapso-inbound task)
+// ============================================================================
+
+registerTemplate({
+  eventType: "kapso.message.received",
+  header: "",
+  defaultBody: `# WhatsApp inbound (Kapso)
+
+A Kapso webhook fired on the swarm's provisioned WhatsApp number. Load the \`kapso-whatsapp\` skill, then triage this like any other interaction and reply on WhatsApp by quote-replying the inbound WAMID (\`context.message_id\`).
+
+## Source: WhatsApp (Kapso)
+- conversation_id: {{conversation_id}}
+- inbound_wamid: {{inbound_wamid}}
+- sender_phone: {{sender_phone}}
+- contact_name: {{contact_name}}
+- phone_number_id: {{phone_number_id}}{{test_note}}
+
+## Message
+{{message_text}}`,
+  variables: [
+    { name: "conversation_id", description: "Kapso conversation id, or 'unknown'" },
+    { name: "inbound_wamid", description: "Inbound message WAMID, or 'unknown'" },
+    { name: "sender_phone", description: "Sender phone (E.164 no +), or 'unknown'" },
+    { name: "contact_name", description: "Contact display name, or 'unknown'" },
+    { name: "phone_number_id", description: "Provisioned phone-number id, or 'unknown'" },
+    {
+      name: "test_note",
+      description: "Appended note when the payload is a Kapso test delivery (else empty)",
+    },
+    { name: "message_text", description: "Inbound message text or a non-text placeholder" },
+  ],
+  category: "event",
+});
+
+// ============================================================================
 // Worker task follow-ups (created by store-progress for the lead)
 // ============================================================================
 

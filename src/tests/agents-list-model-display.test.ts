@@ -1,0 +1,33 @@
+import { describe, expect, test } from "bun:test";
+import { getAgentModelDisplay } from "../../ui/src/lib/agents-list-model-display";
+
+describe("agents list model display", () => {
+  test("shows configured and last-used models when they diverge", () => {
+    const display = getAgentModelDisplay("claude-opus-4-7", "claude-sonnet-4-6");
+
+    expect(display).toEqual({
+      configured: "claude-opus-4-7",
+      lastUsed: "claude-sonnet-4-6",
+      primary: "claude-opus-4-7",
+      diverged: true,
+    });
+  });
+
+  test("shows one model when configured and last-used match", () => {
+    const display = getAgentModelDisplay("claude-sonnet-4-6", "claude-sonnet-4-6");
+
+    expect(display).toEqual({
+      configured: "claude-sonnet-4-6",
+      lastUsed: "claude-sonnet-4-6",
+      primary: "claude-sonnet-4-6",
+      diverged: false,
+    });
+  });
+
+  test("shows configured model alone before an agent reports a last-used model", () => {
+    const display = getAgentModelDisplay("claude-opus-4-7", null);
+
+    expect(display.primary).toBe("claude-opus-4-7");
+    expect(display.diverged).toBe(false);
+  });
+});

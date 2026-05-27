@@ -1,0 +1,81 @@
+---
+title: Feature Development
+description: Take feature requests from Slack or a Linear ticket and turn them into pull requests, end to end — with research, planning, implementation, review, and merge handled by specialized agents that hand context off via agent-fs.
+---
+
+<JsonLd
+  data={{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "Run feature development through an agent swarm",
+    description:
+      "How to wire Slack and Linear into an agent swarm so feature requests become pull requests via research, plan, implementation, and review stages.",
+    totalTime: "PT2H",
+    step: [
+      { "@type": "HowToStep", name: "Triage", text: "Lead agent picks up the Slack ping or Linear ticket and decides whether research, plan, or direct implementation is needed." },
+      { "@type": "HowToStep", name: "Research", text: "Researcher agent runs /desplega:research and persists findings in agent-fs." },
+      { "@type": "HowToStep", name: "Plan", text: "Plan node turns findings into an implementation plan via /desplega:create-plan." },
+      { "@type": "HowToStep", name: "Implement", text: "Coder agent runs /desplega:implement-plan, opens a PR with conventional commits, and triggers CI." },
+      { "@type": "HowToStep", name: "Review", text: "Reviewer agent reviews the PR with gh or glab CLI; merges (squash) when approved and CI is green; transitions the Linear sub-issue to Done." }
+    ]
+  }}
+/>
+
+Take a feature request from [Slack](https://slack.com) or a [Linear](https://linear.app) ticket and turn it into a merged pull request without losing context across the handoffs.
+
+<Mermaid chart={`flowchart LR
+  S["Slack request / Linear ticket"] --> L["Lead<br/>triage + route"]
+  L --> R["Researcher<br/>/desplega:research"]
+  R --> P["Plan<br/>/desplega:create-plan"]
+  P --> I["Coder<br/>implement + open PR"]
+  I --> V{"Reviewer<br/>review PR"}
+  V -- "approved + CI green" --> M["Merge (squash)<br/>Linear → Done"]
+  V -- "changes requested" --> I
+`} />
+
+## What it does
+
+A request arrives in Slack or as a [Linear](https://linear.app) ticket. The [lead agent](https://templates.agent-swarm.dev/official/lead) triages, kicks off research, drafts a plan, ships an implementation PR, waits for CI, and routes a critical review — all without humans hand-walking the context across steps.
+
+## Agents
+
+- **[Lead](https://templates.agent-swarm.dev/official/lead)** — orchestrator. Picks up the ping, decides whether a research/plan step is needed (complex feature) or direct implementation suffices (bug fix / small change), and routes the work.
+- **[Researcher](https://templates.agent-swarm.dev/official/researcher)** — deep codebase research and analysis. Outputs structured findings into [agent-fs](https://github.com/desplega-ai/agent-fs) so downstream agents can pull them.
+- **[Coder](https://templates.agent-swarm.dev/official/coder)** (ours is named *Picateclas*) — turns the plan into a working PR using git worktrees, conventional commits, and the repo's existing test discipline.
+- **[Reviewer](https://templates.agent-swarm.dev/official/reviewer)** — critical PR reviewer that doesn't rubber-stamp. Uses [`gh`](https://cli.github.com/) / [`glab`](https://gitlab.com/gitlab-org/cli) CLI for inline comments and review submissions.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **[Slack](https://slack.com), [Linear](https://linear.app), [GitHub](https://github.com), [GitLab](https://gitlab.com) integrations** — read/reply/post, [inbound Linear AgentSession sync](/docs/integrations/linear), [`gh`](https://cli.github.com/) / [`glab`](https://gitlab.com/gitlab-org/cli) CLI in every worker container.
+- **`implement-issue`, `review-pr`, `respond-github`, `create-pr`** — built-in skills. Source: [`plugin/commands`](https://github.com/desplega-ai/agent-swarm/tree/main/plugin/commands) + [`plugin/pi-skills`](https://github.com/desplega-ai/agent-swarm/tree/main/plugin/pi-skills).
+- **[agent-fs](https://github.com/desplega-ai/agent-fs)** — persistent, searchable filesystem shared across agents. Plans and research live here; any agent can pull them.
+- **`parentTaskId`** (core swarm feature) — follow-up tasks ("address review feedback") resume the original agent session, preserving context across reviews and re-pushes.
+
+### From ai-toolbox
+
+- **[`/desplega:research` → `/desplega:create-plan` → `/desplega:implement-plan`](https://github.com/desplega-ai/ai-toolbox/tree/main/cc-plugin/base/commands)** — our open-source [Claude Code](https://www.anthropic.com/claude-code) plugin. Enforces "research before plan before code" and persists artifacts in [agent-fs](https://github.com/desplega-ai/agent-fs). Thin command wrappers in [`cc-plugin/base/commands`](https://github.com/desplega-ai/ai-toolbox/tree/main/cc-plugin/base/commands) over [`cc-plugin/base/skills`](https://github.com/desplega-ai/ai-toolbox/tree/main/cc-plugin/base/skills) (`researching`, `implementing`, …).
+
+### Custom (swarm-managed)
+
+- **`linear-interaction`, `linear-expert`** — outbound [Linear](https://linear.app) updates ([Linear sync is inbound-only](/docs/integrations/linear) by default — these handle the outbound side: transitioning state, posting comments, creating issues). Publishing model under [discussion](https://linear.app/desplega-labs/issue/DES-510).
+
+## Workflows / Schedules
+
+- **`autopilot`** — manually triggered, full pipeline: research → review-research → plan → review-plan → implement → verify. Each phase has its own review gate so errata are caught before downstream steps.
+- **`autopilot-plan`** — skip research when you already have one: plan → review-plan → implement → verify.
+- **`autopilot-research`** — research-only, when you just want vetted findings.
+- **`linear-drain-loop`** — given a Linear parent issue with sub-issues, branches off the previous PR's branch (stacked PRs), implements each, opens PRs, transitions Linear states. See the [Drain Loops pattern](/docs/playbooks/patterns/drain-loops).
+- **`linear-merge-loop`** — companion: reviews the bottom-most open PR with `base=main`, squash-merges when the reviewer approves and CI is green, transitions the linked Linear sub-issue to Done, then loops up the stack.
+
+## Patterns used
+
+- [**Drain Loops**](/docs/playbooks/patterns/drain-loops) — turn one big Linear ticket into a chain of stacked, individually-reviewable PRs.
+
+## Tips for new swarm users
+
+- Use a `dependsOn` chain for research → plan → implement. Don't let downstream steps fire before upstream artifacts exist.
+- **One reviewer per PR** — a single reviewer can (and should) review multiple times across revisions. What you want to avoid is *multiple different* reviewers on the same PR, which creates conflicting requests.
+- Pin code-implementing schedules to a specific code-capable agent (`targetAgentId`). Pool dispatch can land on a worker without the right harness.
+- Stacked PRs are great for breaking a big ticket into reviewable chunks — but the drain/merge loop only works if each PR is independently mergeable.

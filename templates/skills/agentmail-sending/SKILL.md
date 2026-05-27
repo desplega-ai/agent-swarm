@@ -1,49 +1,169 @@
 ---
 name: agentmail-sending
-description: CRITICAL rules for sending emails via AgentMail API. Covers the HTML bug workaround, BCC policy, and best practices. ALL agents MUST follow these rules when using send_message or reply_to_message.
+description: Canonical AgentMail send-message API reference for swarm agents. Pins the base URL, required field names, text-only rendering workaround, BCC policy, and ready-to-copy curl / swarm-script examples so agents do not rediscover the API surface at runtime.
 user-invocable: false
 ---
 
-# AgentMail Sending Rules
+# AgentMail Sending
 
-These rules are MANDATORY for all agents sending email via AgentMail. Violating them will result in blank emails reaching real people.
+## Canonical Base URL
 
-## Rule 1: TEXT ONLY — Never Pass `html` Parameter
+Use this base URL exactly:
 
-**AgentMail has a critical bug (as of 2026-03-25):** When both `text` and `html` parameters are passed to `send_message` or `reply_to_message`, the HTML body content is silently dropped. The resulting email has an empty `<div dir="ltr"></div>`. Email clients (Gmail, etc.) prefer the HTML version over plain text, so recipients see a completely blank email.
-
-**What to do:**
-- ONLY pass the `text` parameter
-- NEVER pass the `html` parameter
-- This applies to BOTH `send_message` and `reply_to_message`
-
-**Why this matters:** This bug causes outbound emails to arrive completely blank, burning contacts permanently. It is not a cosmetic issue — it is a data loss / reputation issue.
-
-## Rule 2: BCC a Human Oversight Address on Outbound Emails
-
-All outbound emails to external recipients MUST include a human oversight email address as BCC. This gives your team visibility into what the swarm is sending on your behalf.
-
-**Configure a BCC oversight address for your swarm** (e.g. a founder address, ops inbox, or shared team address):
-
-```
-send_message({
-  inboxId: "<your-agentmail-inbox-id>",
-  to: ["recipient@example.com"],
-  bcc: ["oversight@yourcompany.com"],
-  subject: "...",
-  text: "..."
-})
+```text
+https://api.agentmail.to/v0/
 ```
 
-**Exception:** Internal emails between your swarm's own agent inboxes do NOT need BCC.
+DO NOT use `api.agentmail.ai`. That host is a hallucination and will not send mail through AgentMail's current API.
 
-## Rule 3: Human Approval Before Sending to External Recipients
+## Canonical Send-Message Fields
 
-Never send outreach or cold emails to external recipients without explicit human approval. Draft the emails, present them for review, and only send after receiving "approved" or equivalent confirmation.
+For `POST /inboxes/{inbox}/messages/send`, the JSON body fields are exactly:
 
-## Summary Checklist
+```text
+to
+bcc
+subject
+text
+```
 
-Before every `send_message` or `reply_to_message` call:
-- [ ] Only `text` param, NO `html` param
-- [ ] BCC your oversight address if recipient is external
-- [ ] Human-approved if it is outreach/cold email
+Use `text`, NOT `text_body`, `body`, or `content`.
+
+Do NOT pass `html`. AgentMail has a known rendering bug: when `html` is passed with `text`, the HTML body can be empty and email clients may show a blank email. AgentMail renders `text` correctly on its own.
+
+## Rule 0: One-Shots Stay One-Shots
+
+For a one-off send, such as a kickoff email or a single notification, do not create a reusable swarm-script. Use raw `curl` from Bash, or inline `script_run` if you need swarm-visible execution.
+
+Only use `script_upsert` when the send will be reused by a workflow that fires repeatedly.
+
+## Default Example: Raw curl
+
+Use this direct API call first. It does not assume any SDK is installed.
+
+Endpoint:
+
+```text
+https://api.agentmail.to/v0/inboxes/{inbox}/messages/send
+```
+
+```bash
+INBOX="<agentmail-inbox-id>"
+
+curl -sS -X POST "https://api.agentmail.to/v0/inboxes/${INBOX}/messages/send" \
+  -H "Authorization: Bearer $AGENTMAIL_API_KEY" \
+  -H "Content-Type: application/json" \
+  --data-binary @- <<'JSON'
+{
+  "to": ["recipient@example.com"],
+  "bcc": ["oversight@example.com"],
+  "subject": "Subject line",
+  "text": "Plain-text email body."
+}
+JSON
+```
+
+Notes:
+
+- `AGENTMAIL_API_KEY` must be configured in swarm config or exported into the shell before running curl.
+- Keep `bcc` for external recipients so a human oversight inbox sees outbound email.
+- Do not add `html`; `text` is the canonical content field.
+
+## Reusable Workflow Example: script_upsert
+
+Use this only when the send is part of a reusable workflow. The script resolves the API key from swarm config at runtime and calls the same raw HTTP endpoint with `fetch`.
+
+```ts
+await script_upsert({
+  name: "send-agentmail-text-email",
+  description: "Send a text-only AgentMail message from a reusable workflow.",
+  intent: "Reusable workflow email send via AgentMail raw API",
+  scope: "agent",
+  source: `
+import type { ScriptContext } from "swarm-sdk";
+
+type Args = {
+  inbox: string;
+  to: string[];
+  bcc: string[];
+  subject: string;
+  text: string;
+};
+
+export default async (args: Args, ctx: ScriptContext) => {
+  const redactedKey = ctx.swarm.config.get('AGENTMAIL_API_KEY');
+  if (!redactedKey) {
+    throw new Error("AGENTMAIL_API_KEY is not configured in swarm config");
+  }
+
+  const apiKey = ctx.stdlib.Redacted.value(redactedKey);
+  const response = await ctx.stdlib.fetch(
+    \`https://api.agentmail.to/v0/inboxes/\${encodeURIComponent(args.inbox)}/messages/send\`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: \`Bearer \${apiKey}\`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: args.to,
+        bcc: args.bcc,
+        subject: args.subject,
+        text: args.text,
+      }),
+    },
+  );
+
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(\`AgentMail send failed: \${response.status} \${responseText}\`);
+  }
+
+  return responseText ? JSON.parse(responseText) : { ok: true };
+};
+`,
+});
+```
+
+Run it from a workflow with args shaped like:
+
+```json
+{
+  "inbox": "<agentmail-inbox-id>",
+  "to": ["recipient@example.com"],
+  "bcc": ["oversight@example.com"],
+  "subject": "Subject line",
+  "text": "Plain-text email body."
+}
+```
+
+## BCC Policy
+
+All outbound emails to external recipients MUST include a human oversight email address in `bcc`. This gives the operator visibility into what the swarm sends.
+
+Exception: internal emails between the swarm's own agent inboxes do not need BCC.
+
+## Human Approval
+
+Never send outreach or cold emails to external recipients without explicit human approval. Draft the email, present it for review, and send only after receiving approval.
+
+## Checklist
+
+Before every AgentMail send:
+
+- Use `https://api.agentmail.to/v0/`.
+- Use only `to`, `bcc`, `subject`, and `text` in the send-message JSON body.
+- Use `text`, not `text_body`, `body`, or `content`.
+- Do not pass `html`.
+- BCC a human oversight address for external recipients.
+- Get human approval for outreach or cold email.
+- Use raw `curl` or inline `script_run` for one-offs; reserve `script_upsert` for reusable workflow sends.
+
+## Common Errors
+
+| Symptom | Cause / fix |
+|---|---|
+| 404 on `/v0/inboxes/.../send` | Check the base URL. Use `api.agentmail.to`, not `api.agentmail.ai`. |
+| 422 `{"detail":"text Field required"}` | The request used `text_body` or `body` instead of `text`. |
+| 401 | `AGENTMAIL_API_KEY` is not configured in swarm config. In scripts, use `swarm.config.get('AGENTMAIL_API_KEY')`. |
+| HTML rendering bug | Do not pass `html` at all. AgentMail renders `text` correctly. |

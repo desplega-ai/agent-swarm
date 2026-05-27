@@ -43,6 +43,10 @@
   - [slack-upload-file](#slack-upload-file)
   - [slack-download-file](#slack-download-file)
   - [register-agentmail-inbox](#register-agentmail-inbox)
+  - [register-kapso-number](#register-kapso-number)
+  - [unregister-kapso-number](#unregister-kapso-number)
+  - [send-whatsapp-message](#send-whatsapp-message)
+  - [reply-whatsapp-message](#reply-whatsapp-message)
 - [Task Pool Tools](#task-pool-tools)
   - [task-action](#task-action)
 - [Messaging Tools](#messaging-tools)
@@ -532,6 +536,55 @@ Register an AgentMail inbox ID to route incoming emails to this agent. When emai
 | `action` | `register \| unregister \| list` | Yes | - | Action to perform: register, unregister, or list inbox mappings. |
 | `inboxId` | `string` | No | - | The AgentMail inbox ID (e.g., 'inb_xxx'). Required for register/unregister. |
 | `inboxEmail` | `string` | No | - | Optional email address for this inbox (for reference only). |
+
+### register-kapso-number
+
+**Register Kapso WhatsApp Number**
+
+Provision a Kapso WhatsApp phone number for native inbound routing. Lead-only. Points the number's Kapso webhook at the swarm's native handler (signed with KAPSO_WEBHOOK_HMAC_SECRET) and stores a KV mapping so inbound messages route to an agent (defaults to the lead, or a workflow if workflowId is given). Returns the stored mapping + the registered webhook URL.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | Kapso/Meta phone-number ID to provision (KAPSO_PHONE_NUMBER_ID). |
+| `agentId` | `string` | No | - | Agent to route inbound messages to as a `kapso-inbound` task. Defaults to the lead agent when omitted. |
+| `workflowId` | `string` | No | - | Advanced override: dispatch inbound via this workflow's webhook trigger instead of a task. |
+| `name` | `string` | No | - | Human-friendly display name for the number. |
+
+### unregister-kapso-number
+
+**Unregister Kapso WhatsApp Number**
+
+Remove a Kapso phone number's native routing mapping from the KV store. Lead-only. Inbound messages for the number stop routing through the native handler. The Kapso-side webhook is not deleted automatically.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | Kapso/Meta phone-number ID whose mapping should be removed. |
+
+### send-whatsapp-message
+
+**Send WhatsApp Message**
+
+Send a free-form WhatsApp text via Kapso (within the 24h session window). Thin wrapper over the Kapso Meta-proxy send. For templates/media/reactions use the `kapso-whatsapp` skill. If the recipient is outside the 24h window the call returns a structured error pointing at the template path.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | The swarm's Kapso/Meta phone-number ID to send from (KAPSO_PHONE_NUMBER_ID). |
+| `to` | `string` | Yes | - | Recipient phone in E.164 WITHOUT '+' (e.g. '15551234567'). |
+| `body` | `string` | Yes | - | Message text. |
+| `previewUrl` | `boolean` | No | - | Render a link preview for URLs in the body (default false). |
+
+### reply-whatsapp-message
+
+**Reply to WhatsApp Message**
+
+Quote-reply a WhatsApp message via Kapso. Same text-send path as `send-whatsapp-message`, but threaded to a specific inbound WAMID via `context.message_id`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | The swarm's Kapso/Meta phone-number ID to send from (KAPSO_PHONE_NUMBER_ID). |
+| `to` | `string` | Yes | - | Recipient phone in E.164 WITHOUT '+'. |
+| `inReplyTo` | `string` | Yes | - | The inbound WAMID to quote-reply (set as context.message_id). |
+| `body` | `string` | Yes | - | Reply text. |
 
 ## Task Pool Tools
 
@@ -1374,4 +1427,3 @@ Delete an MCP server definition. Only the owning agent or lead can delete.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | ID of the MCP server to delete |
-

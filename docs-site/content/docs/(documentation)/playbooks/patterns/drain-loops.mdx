@@ -1,0 +1,52 @@
+---
+title: 'Pattern: Drain Loops (Stacked PRs + Merge Loop)'
+description: Turn one big parent issue into a chain of small, individually-reviewable stacked PRs, then review-and-merge them bottom-up with a merge loop that halts on the first failure.
+---
+
+Turn one big parent issue into a chain of small, individually-reviewable PRs — then review-and-merge them bottom-up, halting on the first failure.
+
+<Mermaid chart={`flowchart TB
+  P["Parent issue<br/>(N sub-issues)"] --> D["Drain loop"]
+  D --> B["Pick next Backlog/Todo sub-issue"]
+  B --> BR["Branch off previous PR's branch<br/>(stacked)"]
+  BR --> IM["Implement + push + open PR"]
+  IM --> TR["Linear → In Review"]
+  TR --> MORE{"More<br/>sub-issues?"}
+  MORE -- yes --> B
+  MORE -- no --> ML["Merge loop"]
+  ML --> RV{"Review bottom-most PR<br/>(base = main)"}
+  RV -- "approved + CI green" --> MG["Squash-merge<br/>Linear → Done"]
+  MG --> ML
+  RV -- "changes requested / CI red" --> HALT["Halt"]
+`} />
+
+## What it is
+
+Two complementary loops:
+
+- **Drain loop** — iterate the sub-issues of a parent. For each: branch off the *previous* PR's branch (so PRs stack), implement, push, open a PR, move the sub-issue to In Review. Repeat until drained.
+- **Merge loop** — review the bottom-most open PR with `base=main`. If the reviewer approves and CI is green, squash-merge it, move the sub-issue to Done, and loop up the stack. **Halt on the first request-changes or red CI** so a bad change doesn't cascade.
+
+## Where we use it
+
+- **[Feature development](/docs/playbooks/feature-development)** — `linear-drain-loop` + `linear-merge-loop` drive a [Linear](https://linear.app) epic from sub-issues to merged PRs.
+- **Weekly code-health** — top-N concerns become one PR each, drained with an internal reviewer (capped review rounds).
+- **UX audits** — an umbrella's sub-issues can feed a drain loop for the low-risk fixes.
+
+## Why it works
+
+- Small PRs review faster and roll back cleaner than one mega-PR.
+- Stacking keeps the chain coherent while each piece stays independently reviewable.
+- Halting on first failure prevents a broken base from poisoning everything above it.
+
+## How to apply
+
+- Each sub-issue must be independently mergeable — if they're entangled, the stack breaks.
+- Cap iterations (`maxIterations`) so a runaway loop can't churn forever.
+- Keep tracker state in lockstep: In Review on PR open, Done on merge. Stale tracker state is the usual failure mode.
+
+## Used in
+
+- [Feature Development](/docs/playbooks/feature-development)
+- [UX Command Center](/docs/playbooks/ux-command-center)
+- [Code Health & Alert Management](/docs/playbooks/code-health-alert-management)

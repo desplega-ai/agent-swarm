@@ -323,9 +323,10 @@ describe("Tool Annotations & Classification", () => {
   test("registered tool count matches expected total", () => {
     const count = Object.keys(tools).length;
     // We expect all tools to be registered when all capabilities are enabled (default)
-    // Includes 11 skill tools, 7 MCP server tools, and reusable script tools
+    // Includes 11 skill tools, 7 MCP server tools, reusable script tools, and the
+    // native Kapso/WhatsApp tools (register/unregister number + send/reply message).
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(100);
+    expect(count).toBeLessThanOrEqual(120);
   });
 
   test("core tools are fewer than deferred tools", () => {

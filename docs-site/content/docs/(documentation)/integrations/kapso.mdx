@@ -1,0 +1,75 @@
+---
+title: Kapso (WhatsApp)
+description: Inbound WhatsApp messages become swarm tasks via Kapso; agents reply in-thread. Native webhook handler, KV-backed number routing, outbound send/reply MCP tools, and the kapso-whatsapp skill for everything beyond plain text.
+---
+
+Agent Swarm integrates with [Kapso](https://kapso.ai) — a WhatsApp platform vendor that fronts the Meta Cloud API — as an inbound chat source. A provisioned WhatsApp number's inbound messages become swarm tasks, and agents reply in-thread over WhatsApp.
+
+<Callout type="info">
+The thin `send-whatsapp-message` / `reply-whatsapp-message` MCP tools cover the common text path. Everything else — templates, media, reactions, typing indicator, mark-as-read, signature verification, contact resolution, conversation history — lives in the **`kapso-whatsapp` skill** (shipped as a template skill in this repo). Drop to the skill's REST recipes for those.
+</Callout>
+
+## What it does
+
+- **Inbound on message.** A provisioned number's webhook is pointed at the swarm's native handler. An inbound `whatsapp.message.received` event becomes a `kapso-inbound` task (or is dispatched to a workflow, if the number maps to one).
+- **KV-backed routing, no table.** The phone-number → routing mapping lives in the swarm KV store (`integrations:kapso:numbers`), written by the lead-only `register-kapso-number` tool. No migration required.
+- **Webhook signing + dedup.** Inbound deliveries are HMAC-SHA256 verified against `KAPSO_WEBHOOK_HMAC_SECRET` (`X-Webhook-Signature` header) and deduped by message id (`integrations:kapso:dedupe`, 24h TTL).
+- **Default routing to the lead.** When a number is registered without an explicit agent or workflow, inbound tasks route to the lead agent.
+- **Outbound tools.** `send-whatsapp-message` and `reply-whatsapp-message` wrap the Kapso Meta-proxy text send (the latter quote-replies an inbound WAMID).
+
+## Setup
+
+### 1. Configure environment
+
+Add these as swarm config values in the integrations dashboard, or set them in your `.env` for a self-hosted deployment:
+
+```bash
+# Required — Kapso API key (X-API-Key header)
+KAPSO_API_KEY=your-kapso-api-key
+
+# Required — the WhatsApp Business phone-number ID the swarm sends from
+KAPSO_PHONE_NUMBER_ID=123456789012345
+
+# Recommended — shared secret Kapso signs inbound webhooks with (X-Webhook-Signature, raw hex)
+KAPSO_WEBHOOK_HMAC_SECRET=your-webhook-secret
+
+# Optional — override the Kapso API base URL (defaults to https://api.kapso.ai)
+# KAPSO_API_BASE_URL=https://api.kapso.ai
+```
+
+### 2. Register the number
+
+Provisioning is a **lead-only** operation. The lead calls the `register-kapso-number` MCP tool, which:
+
+1. Points the number's Kapso webhook at `<MCP_BASE_URL>/api/integrations/kapso/webhook` (signed with `KAPSO_WEBHOOK_HMAC_SECRET`). This step is idempotent — an identical existing webhook is detected and not re-created.
+2. Writes the routing mapping to KV so inbound messages route to an agent (defaults to the lead) or a workflow.
+
+The tool also accepts optional `agentId`, `workflowId`, and `name` fields so you can route a number to a specific agent target, dispatch it through a workflow trigger, and label the mapping for operators.
+
+To stop routing, the lead calls `unregister-kapso-number` (also lead-only). The Kapso-side webhook is not deleted automatically — remove it in the Kapso dashboard if you want deliveries to stop.
+
+### 3. Install the skill
+
+The `kapso-whatsapp` skill is the canonical reference for any WhatsApp interaction beyond plain text. It ships as a template skill at `templates/skills/kapso-whatsapp` and is recommended (auto-installable) on the integration's dashboard card.
+
+## How it works
+
+Two inbound paths exist:
+
+- **Native handler** (`/api/integrations/kapso/webhook`) — fires for any phone number registered via `register-kapso-number`. Verifies HMAC, dedupes by message id, reads the routing mapping from KV, and either dispatches a `kapso-inbound` task or delegates to a workflow trigger. Also emits a `kapso.message.received` event on the workflow event bus (additive — event-subscribed workflows can observe inbound regardless of mapping).
+- **Workflow path** — a number whose mapping points at a `workflowId` dispatches inbound via that workflow's webhook trigger instead of creating a task directly.
+
+The `kapso-inbound` task description is rendered from the `kapso.message.received` prompt template, so operators can customize the triage instructions without code changes.
+
+Inbound events are filtered to `message.kapso.direction == "inbound"` — the swarm's own outbound sends, deliveries, reads, and failures do not create tasks.
+
+## Outbound updates
+
+- **Text (common case):** `send-whatsapp-message` / `reply-whatsapp-message` MCP tools. Free-form text is only allowed within the 24h WhatsApp session window; outside it the tool returns a structured `sessionWindowExpired` error pointing at the template path.
+- **Provisioning / teardown:** `register-kapso-number` and `unregister-kapso-number` are the lead-only MCP tools for turning native routing on or off for a specific phone-number ID.
+- **Everything else:** the `kapso-whatsapp` skill's REST recipes — templates (outside the 24h window), media (image / document / audio / video), reactions, typing indicator, mark-as-read, signature verification, contact resolution, and conversation history.
+
+## Reference
+
+- [Kapso](https://kapso.ai) — platform vendor.
+- `kapso-whatsapp` skill — `templates/skills/kapso-whatsapp/SKILL.md` in this repo.

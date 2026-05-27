@@ -1,0 +1,198 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import crypto from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { closeDb, createAgent, getTaskById, initDb } from "../be/db";
+import { handleWebhooks } from "../http/webhooks";
+import { putKapsoNumberMapping } from "../integrations/kapso/config";
+import { routeKapsoInbound } from "../integrations/kapso/inbound";
+
+const TEST_DB_PATH = "./test-kapso-inbound.sqlite";
+const HMAC_SECRET = "kapso-test-hmac-secret";
+
+let agentId: string;
+
+function makePayload(opts: {
+  phoneNumberId: string;
+  messageId?: string;
+  direction?: string;
+  type?: string;
+  text?: string;
+  from?: string;
+  conversationId?: string;
+}) {
+  return {
+    message: {
+      id: opts.messageId ?? `wamid.${Math.random().toString(36).slice(2)}`,
+      from: opts.from ?? "34679077777",
+      type: opts.type ?? "text",
+      text: { body: opts.text ?? "hola" },
+      kapso: { direction: opts.direction ?? "inbound", content: opts.text ?? "hola" },
+    },
+    conversation: {
+      id: opts.conversationId ?? "conv-1",
+      phone_number: opts.from ?? "34679077777",
+      contact_name: "Taras",
+    },
+    phone_number_id: opts.phoneNumberId,
+  };
+}
+
+function sign(secret: string, body: string): string {
+  return crypto.createHmac("sha256", secret).update(body).digest("hex");
+}
+
+/** Minimal fake req/res to drive handleWebhooks without a live server. */
+function fakeReqRes(rawBody: string, headers: Record<string, string>) {
+  const req = {
+    method: "POST",
+    headers,
+    async *[Symbol.asyncIterator]() {
+      yield Buffer.from(rawBody);
+    },
+  } as unknown as IncomingMessage;
+
+  const captured = { status: 0, body: "" };
+  const res = {
+    writeHead(status: number) {
+      captured.status = status;
+      return this;
+    },
+    end(chunk?: string) {
+      if (chunk) captured.body = chunk;
+      return this;
+    },
+  } as unknown as ServerResponse;
+
+  return { req, res, captured };
+}
+
+const KAPSO_PATH = ["api", "integrations", "kapso", "webhook"];
+
+beforeAll(() => {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      require("node:fs").unlinkSync(`${TEST_DB_PATH}${suffix}`);
+    } catch {}
+  }
+  initDb(TEST_DB_PATH);
+  process.env.KAPSO_WEBHOOK_HMAC_SECRET = HMAC_SECRET;
+  const agent = createAgent({ name: "KapsoWorker", isLead: false, status: "idle" });
+  agentId = agent.id;
+});
+
+afterAll(() => {
+  closeDb();
+  delete process.env.KAPSO_WEBHOOK_HMAC_SECRET;
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      require("node:fs").unlinkSync(`${TEST_DB_PATH}${suffix}`);
+    } catch {}
+  }
+});
+
+describe("routeKapsoInbound", () => {
+  test("mapping hit → dispatches a kapso-inbound task to the mapped agent", () => {
+    putKapsoNumberMapping({
+      phoneNumberId: "pn-task",
+      agentId,
+      createdAt: new Date().toISOString(),
+    });
+    const routing = routeKapsoInbound(makePayload({ phoneNumberId: "pn-task" }));
+    expect(routing.kind).toBe("task");
+    if (routing.kind !== "task") throw new Error("expected task");
+    const task = getTaskById(routing.taskId);
+    expect(task).not.toBeNull();
+    expect(task!.taskType).toBe("kapso-inbound");
+    expect(task!.agentId).toBe(agentId);
+    expect(task!.task).toContain("## Source: WhatsApp (Kapso)");
+  });
+
+  test("no mapping → no_mapping (does not break, no task)", () => {
+    const routing = routeKapsoInbound(makePayload({ phoneNumberId: "pn-unregistered" }));
+    expect(routing.kind).toBe("no_mapping");
+  });
+
+  test("workflow mapping → signals workflow dispatch", () => {
+    putKapsoNumberMapping({
+      phoneNumberId: "pn-wf",
+      workflowId: "11111111-1111-4111-8111-111111111111",
+      createdAt: new Date().toISOString(),
+    });
+    const routing = routeKapsoInbound(makePayload({ phoneNumberId: "pn-wf" }));
+    expect(routing.kind).toBe("workflow");
+    if (routing.kind !== "workflow") throw new Error("expected workflow");
+    expect(routing.workflowId).toBe("11111111-1111-4111-8111-111111111111");
+  });
+
+  test("non-inbound (outbound/status) → skip", () => {
+    const routing = routeKapsoInbound(
+      makePayload({ phoneNumberId: "pn-task", direction: "outbound" }),
+    );
+    expect(routing.kind).toBe("skip");
+  });
+
+  test("duplicate delivery of the same message id → second is deduped", () => {
+    putKapsoNumberMapping({
+      phoneNumberId: "pn-dup",
+      agentId,
+      createdAt: new Date().toISOString(),
+    });
+    const messageId = "wamid.DUPLICATE_TEST";
+    const first = routeKapsoInbound(makePayload({ phoneNumberId: "pn-dup", messageId }));
+    expect(first.kind).toBe("task");
+    const second = routeKapsoInbound(makePayload({ phoneNumberId: "pn-dup", messageId }));
+    expect(second.kind).toBe("duplicate");
+  });
+});
+
+describe("handleWebhooks — Kapso HMAC gate", () => {
+  test("valid HMAC + mapping hit → 200 and task routing", async () => {
+    putKapsoNumberMapping({
+      phoneNumberId: "pn-http",
+      agentId,
+      createdAt: new Date().toISOString(),
+    });
+    const rawBody = JSON.stringify(
+      makePayload({ phoneNumberId: "pn-http", messageId: "wamid.HTTP_OK" }),
+    );
+    const { req, res, captured } = fakeReqRes(rawBody, {
+      "x-webhook-signature": sign(HMAC_SECRET, rawBody),
+    });
+    const handled = await handleWebhooks(req, res, KAPSO_PATH);
+    expect(handled).toBe(true);
+    expect(captured.status).toBe(200);
+    expect(JSON.parse(captured.body)).toMatchObject({ received: true, routing: "task" });
+  });
+
+  test("valid HMAC + no mapping → 200 no_mapping (fallback, does not break)", async () => {
+    const rawBody = JSON.stringify(
+      makePayload({ phoneNumberId: "pn-http-unmapped", messageId: "wamid.HTTP_NOMAP" }),
+    );
+    const { req, res, captured } = fakeReqRes(rawBody, {
+      "x-webhook-signature": sign(HMAC_SECRET, rawBody),
+    });
+    await handleWebhooks(req, res, KAPSO_PATH);
+    expect(captured.status).toBe(200);
+    expect(JSON.parse(captured.body)).toMatchObject({ routing: "no_mapping" });
+  });
+
+  test("invalid HMAC → 401", async () => {
+    const rawBody = JSON.stringify(
+      makePayload({ phoneNumberId: "pn-http", messageId: "wamid.HTTP_BAD" }),
+    );
+    const { req, res, captured } = fakeReqRes(rawBody, {
+      "x-webhook-signature": sign("wrong-secret", rawBody),
+    });
+    await handleWebhooks(req, res, KAPSO_PATH);
+    expect(captured.status).toBe(401);
+  });
+
+  test("missing signature → 401", async () => {
+    const rawBody = JSON.stringify(
+      makePayload({ phoneNumberId: "pn-http", messageId: "wamid.HTTP_NOSIG" }),
+    );
+    const { req, res, captured } = fakeReqRes(rawBody, {});
+    await handleWebhooks(req, res, KAPSO_PATH);
+    expect(captured.status).toBe(401);
+  });
+});

@@ -1,0 +1,40 @@
+---
+title: 'Pattern: Litmus Tests (LLM-as-Judge Quality Gates)'
+description: A quality gate where one agent hard-rejects another agent's output against an explicit rubric — using a different model family so the judgment is genuinely independent and not rubber-stamping in disguise.
+---
+
+A quality gate where one agent hard-rejects another agent's output against explicit criteria — using a *different model family* so the judgment is genuinely independent.
+
+<Mermaid chart={`flowchart LR
+  W["Writer / Generator<br/>(model family A)"] --> O["Output"]
+  O --> J{"Litmus judge<br/>(model family B)"}
+  J -- "fails criteria" --> W
+  J -- "passes" --> SHIP["Ship / publish"]
+`} />
+
+## What it is
+
+Instead of trusting a generator's self-assessment, you run its output through a separate "judge" agent that scores it against a fixed rubric and **hard-rejects** anything below bar. The rejection loops back to the generator with the specific failures. Critically, the judge runs on a *different model family* than the generator — same-family review tends to rubber-stamp.
+
+## Where we use it
+
+- **[Content generation](/docs/playbooks/content-generation)** — the Content Reviewer scores blog drafts across Depth, Code Quality, Structure, SEO, Voice & Tone, Readability/AEO. Sub-bar drafts never publish.
+- **How-to / competitor page generators** — litmus hard-rejects pages with missing/empty schema markup or a wrong canonical URL, because that's exactly what kills the SEO value.
+- **Topic mining** — a litmus gate filters low-intent or duplicate topic proposals before they enter the supply table.
+
+## Why it works
+
+- A fixed rubric makes "good" objective and reviewable, not vibes.
+- Hard-reject (not "suggest improvements") forces the generator to actually clear the bar.
+- Cross-family judging catches blind spots one model shares with itself.
+
+## How to apply
+
+- Write the rubric as explicit, checkable criteria — "has 4–8 schema steps", not "is well-structured".
+- Pick a judge model from a different family than the generator (e.g. [Claude](https://www.anthropic.com/claude) writes, [Gemini](https://deepmind.google/technologies/gemini/) judges, or vice versa).
+- Make the gate **blocking**: a fail returns to the generator, it doesn't warn-and-continue.
+- Log scores over time so you can calibrate thresholds (too strict = nothing ships; too loose = the gate is theater).
+
+## Used in
+
+- [Content Generation](/docs/playbooks/content-generation)

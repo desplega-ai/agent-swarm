@@ -7,6 +7,7 @@ import {
   getOAuthTokens,
   isTokenExpiringSoon,
   storeOAuthTokens,
+  updateOAuthTokensAfterRefresh,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
 
@@ -138,6 +139,48 @@ describe("OAuth Tokens CRUD", () => {
     expect(tokens!.accessToken).toBe("access-updated");
     // refreshToken should be preserved (COALESCE)
     expect(tokens!.refreshToken).toBe("refresh-xyz");
+  });
+
+  test("updateOAuthTokensAfterRefresh replaces the rotated refresh token atomically", () => {
+    const futureDate = new Date(Date.now() + 7200000).toISOString();
+    storeOAuthTokens("token-test", {
+      accessToken: "access-before-refresh",
+      refreshToken: "refresh-before-refresh",
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+    });
+
+    updateOAuthTokensAfterRefresh("token-test", "refresh-before-refresh", {
+      accessToken: "access-after-refresh",
+      refreshToken: "refresh-after-refresh",
+      expiresAt: futureDate,
+      scope: "read,write",
+    });
+
+    const tokens = getOAuthTokens("token-test");
+    expect(tokens!.accessToken).toBe("access-after-refresh");
+    expect(tokens!.refreshToken).toBe("refresh-after-refresh");
+    expect(tokens!.expiresAt).toBe(futureDate);
+    expect(tokens!.scope).toBe("read,write");
+  });
+
+  test("updateOAuthTokensAfterRefresh refuses to overwrite a concurrently rotated token", () => {
+    storeOAuthTokens("token-test", {
+      accessToken: "access-current",
+      refreshToken: "refresh-current",
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+    });
+
+    expect(() =>
+      updateOAuthTokensAfterRefresh("token-test", "refresh-stale", {
+        accessToken: "access-stale-result",
+        refreshToken: "refresh-stale-result",
+        expiresAt: new Date(Date.now() + 7200000).toISOString(),
+      }),
+    ).toThrow(/stored refresh token changed during refresh/);
+
+    const tokens = getOAuthTokens("token-test");
+    expect(tokens!.accessToken).toBe("access-current");
+    expect(tokens!.refreshToken).toBe("refresh-current");
   });
 
   test("deleteOAuthTokens removes tokens", () => {

@@ -1,0 +1,92 @@
+---
+title: Content Generation
+description: Topic mining, blog posts, social posts, memes, comparison and how-to pages, and release notes — at the cadence you want, with LLM-as-judge quality gates and human craft on top before anything ships.
+---
+
+<JsonLd
+  data={{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "Run an analytics-driven content engine with quality gates",
+    description:
+      "How to combine Search Console topic mining, a writer agent, a different-model-family judge agent, and human craft to ship content that ranks.",
+    step: [
+      { "@type": "HowToStep", name: "Mine topics", text: "Pull high-signal topics from Search Console, label and rank them, and write to a topic-supply table." },
+      { "@type": "HowToStep", name: "Pick next topic", text: "Content Strategist selects the next topic using a coverage cursor that avoids duplicates." },
+      { "@type": "HowToStep", name: "Draft", text: "Content Writer drafts the post (TSX component) and includes schema markup." },
+      { "@type": "HowToStep", name: "Litmus review", text: "Content Reviewer (different model family) scores Depth, Code Quality, Structure, SEO, Voice & Tone, AEO. Hard-rejects sub-bar drafts." },
+      { "@type": "HowToStep", name: "Human craft", text: "Human reviewer tailors, edits, or gives feedback on the draft before publish." },
+      { "@type": "HowToStep", name: "Publish + AEO", text: "Open PR, publish; Discoverability Optimizer audits schema markup and acceptmarkdown compliance." }
+    ]
+  }}
+/>
+
+Data-driven content production with quality gates that reject low-depth content before it ships.
+
+<Mermaid chart={`flowchart LR
+  TM["gsc-topic-miner<br/>(weekly)"] --> TS[("topic supply<br/>table")]
+  TS --> CS["Content Strategist<br/>pick next topic"]
+  CS --> CW["Content Writer<br/>draft TSX"]
+  CW --> CR{"Content Reviewer<br/>litmus (diff. model)"}
+  CR -- reject --> CW
+  CR -- pass --> HR["Human craft<br/>(tailor / edit / feedback)"]
+  HR --> PR["PR + publish"]
+  PR --> DO["Discoverability Optimizer<br/>schema / AEO"]
+`} />
+
+## What it does
+
+A topic miner pulls high-signal topics from your search analytics, a strategist picks what to write next (avoiding duplication), a writer drafts the post, a separate LLM-as-judge reviewer hard-rejects low-quality drafts, **and then a human reviews, tailors, or gives feedback before anything goes live** — *all* content is human-crafted or human-approved before release. Memes are queued for review and tailoring before LinkedIn. Daily X/Twitter cadence is automated with the same craft step. Comparison and how-to pages are auto-generated from search gaps.
+
+## Agents
+
+- **[Content Strategist](https://templates.agent-swarm.dev/official/content-strategist)** — analytics-driven topic selection ([Plausible](https://plausible.io/) + [Google Search Console](https://search.google.com/search-console)), content calendar, performance calibration.
+- **[Content Writer](https://templates.agent-swarm.dev/official/content-writer)** — drafts posts in TSX (a `BlogArticle` component pattern), generates memes, owns voice and tone.
+- **[Content Reviewer](https://templates.agent-swarm.dev/official/content-reviewer)** — LLM-as-judge quality gate scored across Depth, Code Quality, Structure, SEO, Voice & Tone, Readability/AEO. **Uses a different model family than the writer** so the review is genuinely independent.
+- **[Discoverability Optimizer](https://templates.agent-swarm.dev/official/discoverability-optimizer)** — SEO/AEO/schema-markup specialist; owns `/md/` + `/llms.txt` ([acceptmarkdown](https://acceptmarkdown.com/)) compliance and structured-data wins.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **[agent-fs](https://github.com/desplega-ai/agent-fs)** (drafts/research), **swarm KV** (content-state cursors), **scheduled workflows** (cadence), **`slack-post`** (visibility).
+
+### Custom (swarm-managed)
+
+- **`meme-creation`** — [imgflip](https://imgflip.com/) catalog with cooldown dedup.
+- **`gsc-analytics`** — [Google Search Console](https://search.google.com/search-console) queries (top queries/pages, WoW delta).
+- **`acceptmarkdown-compliance`** — verifies `/md/` + `/llms.txt` content negotiation per [acceptmarkdown.com](https://acceptmarkdown.com/).
+- **`x-posting-guidelines`, `x-api-interactions`** — brand voice + [X API](https://developer.x.com/) posting.
+- **`desplega-workshop-voice`** — brand-voice anchors.
+- **Tool-creation workflow** — when a topic miner surfaces a recurring need (e.g. "find comparable companies for outreach"), a meta-workflow spins up a new swarm-managed skill rather than inlining ad-hoc HTTP calls. Keeps the catalog growing in lockstep with the work.
+
+### Third-party providers
+
+- **State / cache** — we use [Turso](https://turso.tech/) for the `content-state` LibSQL DB (topic supply, dispatch history, cooldowns).
+- **Social scheduler** — we use [Buffer](https://buffer.com/) for the LinkedIn queue.
+- **[imgflip](https://imgflip.com/) + [X](https://x.com/) APIs** — meme generation + posting.
+
+## Workflows / Schedules
+
+- **`gsc-topic-miner`** — weekly. 6 sources → label-and-enrich (multi-label) → bucket-and-rank (8 buckets × 10, target 80) → write to topic supply table. Downstream generators pull from the table.
+- **`unified-daily-blog`** — Tue + Thu. One context-builder fans out to 3 parallel series branches, each producing a post with research, litmus tests, image generation, and TSX assembly; converges at a merge step.
+- **`agent-swarm-blog`** — Mon + Wed. Agent-swarm learnings blog; litmus pushes for surprising/counterintuitive angles.
+- **`how-to-generator-with-schema`** — single-shot how-to page generator. Litmus **hard-rejects** drafts with missing/empty `HowToSchema` — structured data is what drives the lift.
+- **`competitor-page-generator`** + **`competitor-radar`** — radar scans search analytics for competitor-brand queries without a matching `/competitor/alternatives/{brand}` page; dispatches top gaps to the generator.
+- **`daily-meme-tweet`** — daily [X/Twitter](https://x.com/) meme. No hashtags.
+- **`weekly-meme-linkedin`** — stages weekly memes in [Buffer](https://buffer.com/) for human review and tailoring before publish.
+- **`weekly-new-releases`** — release-notes blog post from product-repo commits.
+- **`new-skill-bootstrap`** — meta-workflow: takes a new-skill spec from a content gap and scaffolds it into the swarm's skill registry.
+
+## Patterns used
+
+- [**Litmus Tests**](/docs/playbooks/patterns/litmus-tests) — a different-model-family judge hard-rejects sub-bar drafts before publish.
+- [**HITL Gates**](/docs/playbooks/patterns/hitl-gates) — every piece of content goes through human craft, tailoring, or feedback before release.
+
+## Tips for new swarm users
+
+- **Litmus tests are the unlock.** Use a *different model family* for the reviewer than the writer — same-family review is rubber-stamping in disguise.
+- **Schema markup compounds.** Don't skip it. Page-level structured data (HowTo, FAQ, Article, BreadcrumbList) is the difference between a page that ranks and one that doesn't.
+- **Choose topics by data, not gut.** A topic miner backed by real search analytics surfaces high-intent topics your team would never brainstorm.
+- **Avoid duplication** with a topic-coverage cursor (KV or DB).
+- **Queue social content, don't auto-post.** Stage in a [Buffer](https://buffer.com/)-style queue with human review days before go-live. Recall is cheaper than apology.

@@ -1,0 +1,47 @@
+---
+title: Playbooks
+description: Eight production playbooks for running an agent swarm — feature development, prospecting, content, UX audits, customer support, code health, cross-source reports, and self-documenting releases. Real flows, real schedules, real agents.
+---
+
+These playbooks document how we actually run our internal swarm at [Desplega Labs](https://desplega.ai). Each one corresponds to a "Known Use Case" from the [agent-swarm README](https://github.com/desplega-ai/agent-swarm) and gives you the same three things:
+
+1. **Agents** — which roles do the work, with links to the [official agent templates](https://templates.agent-swarm.dev/official).
+2. **Tools & Skills** — what each agent calls, grouped by source (see the legend below).
+3. **Workflows / Schedules** — the actual scheduled jobs and on-demand flows that drive the use case.
+
+<Callout type="info">
+**These are starting points, not the only way.** They're deliberately high-level — copy the structure, adapt the specifics, and lean on the [hot patterns](/docs/playbooks/patterns) (litmus tests, drain loops, HITL gates, per-customer working directories, no-op workflows) that recur across every flow.
+</Callout>
+
+## Skill-source legend
+
+Every skill referenced in a playbook is tagged with one of three sources:
+
+| Tag | Meaning | Where it lives |
+|---|---|---|
+| **`[Built-in]`** | Ships with the `agent-swarm` package | [`desplega-ai/agent-swarm` → `plugin/`](https://github.com/desplega-ai/agent-swarm/tree/main/plugin) |
+| **`[ai-toolbox]`** | Open-source Claude Code plugin | [`desplega-ai/ai-toolbox` → `cc-plugin/`](https://github.com/desplega-ai/ai-toolbox/tree/main/cc-plugin) |
+| **`[Custom]`** | Authored by us, currently swarm-managed via `skill-create` / `skill-install` (publishing model under [discussion](https://linear.app/desplega-labs/issue/DES-510)) | Not in a public repo yet |
+
+Agent links always point at the matching [official template](https://templates.agent-swarm.dev/official) so new swarm users can clone the template as a starting point.
+
+## The eight playbooks
+
+- [Feature Development](/docs/playbooks/feature-development) — Slack/Linear request → research → plan → implementation PR → review → merge.
+- [Lead Prospecting](/docs/playbooks/lead-prospecting) — Daily discovery + drafting + scheduling, with a human approval gate before sending.
+- [Content Generation](/docs/playbooks/content-generation) — Topic mining, blog/social/meme production, all gated by a different-model-family LLM-as-judge reviewer and finalized by humans.
+- [UX Command Center](/docs/playbooks/ux-command-center) — Weekly UX audits, agentic session recording, design-system enforcement, telemetry-driven proposals.
+- [Proactive Customer Support](/docs/playbooks/proactive-customer-support) — Per-customer working directories, scheduled value-showcase reports, post-meeting follow-ups.
+- [Code Health & Alert Management](/docs/playbooks/code-health-alert-management) — Datadog/New Relic/Sentry/SigNoz alerts kick off fixes or proposals; daily/weekly health audits.
+- [Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources) — Join your data warehouse, analytics, billing, search, and observability into one swarm.
+- [Self-Documenting & Release Reports](/docs/playbooks/self-documenting-release-reports) — Auto-update docs, generate release notes, render release videos with [Remotion](https://www.remotion.dev/) + browser captures.
+
+## Hot patterns
+
+Patterns that recur across multiple playbooks — read these too if you want to skip the same mistakes we made:
+
+- [Litmus Tests](/docs/playbooks/patterns/litmus-tests) — LLM-as-judge quality gates that hard-reject sub-bar output.
+- [Drain Loops](/docs/playbooks/patterns/drain-loops) — turn one big ticket into stacked, individually-reviewable PRs, then a merge loop.
+- [HITL Gates](/docs/playbooks/patterns/hitl-gates) — pause a workflow until a human approves in Slack.
+- [Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories) — persistent per-account context in [agent-fs](https://github.com/desplega-ai/agent-fs).
+- [No-op When Nothing Changed](/docs/playbooks/patterns/no-op-workflows) — detect "nothing changed" and skip silently.

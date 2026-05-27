@@ -2,12 +2,10 @@
   <a href="https://github.com/desplega-ai/agent-swarm/stargazers"><img src="https://img.shields.io/github/stars/desplega-ai/agent-swarm?style=flat-square&color=yellow" alt="GitHub Stars"></a>
   <a href="https://github.com/desplega-ai/agent-swarm/blob/main/LICENSE"><img src="https://img.shields.io/github/license/desplega-ai/agent-swarm?style=flat-square" alt="MIT License"></a>
   <a href="https://github.com/desplega-ai/agent-swarm/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome"></a>
-  <a href="https://discord.gg/KZgfyyDVZa"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://docs.agent-swarm.dev"><img src="https://img.shields.io/badge/docs-agent--swarm.dev-blue?style=flat-square" alt="Docs"></a>
 </p>
 
 <p align="center">
-  <b>Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.</b><br/>
+  <b>An engine to make your company AI Native</b><br/>
   <sub>Built by <a href="https://desplega.sh">desplega.sh</a> — by builders, for builders.</sub>
 </p>
 
@@ -39,11 +37,19 @@
   </a>
 </p>
 
-> **What if your AI agents remembered everything, learned from every mistake, and got better with every task?**
+> **Agent Swarm is your Company's Compounding Intelligence Layer. A system of AI agents that remember, reason, act and get better with every task.**
+
+> AI-Native · Compounds · Presence · Harness & LLM-Agnostic · Your Infra · Your Memory · 
 
 ## What it does
 
-Agent Swarm runs a team of AI coding agents that coordinate autonomously. A **lead agent** receives tasks — from Slack, GitHub, GitLab, email, or the API — breaks them down, and delegates to **worker agents** running in Docker containers. Workers execute tasks, ship code, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
+Agent Swarm runs a team of AI agents that coordinate autonomously. A **lead agent** receives tasks ( from Slack, GitHub, GitLab, Linear, Jira, email, or the API) breaks them down, and delegates to **worker agents** running in isolated environments (Docker). Workers execute tasks, ship solutions, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
+
+You can run agents for Marketing, Product, UX, Engineering, Support, Operations, HR, Finance, or any role you can think of. A centralized Lead coordinates them, and they share the learnings horizontally. That's the true difference between [*AI First*](https://www.pleasedontdeploy.com/i/197193364/ai-first) and [*AI Native*](https://www.pleasedontdeploy.com/i/197193364/third-the-ai-native-metamorphosis).
+
+Agent Swarm is the shared cloud brain and muscle that makes your whole company better every day.
+
+Sometimes humans are the blocker. We can help you. Contact us [contact@desplega.sh](mailto:contact@desplega.sh).
 
 Learn more in the [architecture overview](https://docs.agent-swarm.dev/docs/architecture/overview).
 
@@ -85,20 +91,47 @@ flowchart LR
     WORKERS --> OUT
 ```
 
+## Known Use Cases
+
+Use cases that are used daily by ourselves and others.
+Each playbook contains: the agents, the tools & skills, and workflows & schedules behind it. **[Browse all playbooks →](https://docs.agent-swarm.dev/docs/playbooks)**
+
+- **[Feature Development](https://docs.agent-swarm.dev/docs/playbooks/feature-development)** — Integrated with Linear and GitHub to take feature requests from Slack and turn them into pull requests.
+- **[Lead Prospecting](https://docs.agent-swarm.dev/docs/playbooks/lead-prospecting)** — Integrate your prospecting tools with the swarm and let agents handle outreach, scheduling, and follow-up.
+- **[Content Generation](https://docs.agent-swarm.dev/docs/playbooks/content-generation)** — Generate engagement tools, blog posts, manage social media presence, update your website, and more.
+- **[UX Command Center](https://docs.agent-swarm.dev/docs/playbooks/ux-command-center)** — Agents that keep your product usable: record agentic sessions, enforce your design system, and mine user logs to detect and propose UX improvements.
+- **[Proactive Customer Support](https://docs.agent-swarm.dev/docs/playbooks/proactive-customer-support)** — Agents that oversee your top accounts, prepare scheduled reports, and leverage everything they know about your platform to keep those accounts up to date.
+- **[Code Health & Alert Management](https://docs.agent-swarm.dev/docs/playbooks/code-health-alert-management)** — Datadog, New Relic, Sentry, or any alerting tool can kick off fixes or new proposals. Monitor code health and propose improvements weekly, daily, or hourly.
+- **[Reports from Multiple Sources](https://docs.agent-swarm.dev/docs/playbooks/reports-multiple-sources)** — Integrate your data warehouse to generate tailored reports and answer the key questions your team has, with fresh data. Your BI tool may be a thing of the past.
+- **[Self-Documenting & Release Reports](https://docs.agent-swarm.dev/docs/playbooks/self-documenting-release-reports)** — Update your docs and use frameworks like [Remotion](https://www.remotion.dev/), [qa-use](https://github.com/qa-use/qa-use), and [browser-use](https://github.com/browser-use/browser-use) to generate release videos and rich documentation in seconds, at the cadence you need.
+- Do you have a cool playbook to share? Send us a PR!
+
+> **The patterns that compound.** Five recipes show up in nearly every playbook — they're how the swarm stays reliable as it scales:
+> **[Litmus Tests](https://docs.agent-swarm.dev/docs/playbooks/patterns/litmus-tests)** (LLM-as-judge quality gates) ·
+> **[Drain Loops](https://docs.agent-swarm.dev/docs/playbooks/patterns/drain-loops)** (one ticket → a chain of reviewable PRs) ·
+> **[HITL Gates](https://docs.agent-swarm.dev/docs/playbooks/patterns/hitl-gates)** (pause for human approval on irreversible steps) ·
+> **[Per-Customer Working Directories](https://docs.agent-swarm.dev/docs/playbooks/patterns/per-customer-working-directories)** (context that compounds per account) ·
+> **[No-op Workflows](https://docs.agent-swarm.dev/docs/playbooks/patterns/no-op-workflows)** (skip silently when nothing changed).
+> **[See all patterns →](https://docs.agent-swarm.dev/docs/playbooks/patterns)**
+
+Check [our templates](https://templates.agent-swarm.dev) for a quick start.
+
 ## Highlights
 
 - **Lead/worker orchestration in Docker** — isolated dev environments, priority queues, pause/resume across deploys. [Architecture →](https://docs.agent-swarm.dev/docs/architecture/overview)
 - **Compounding memory & persistent identity** — agents remember past sessions and evolve their own persona, expertise, and notes. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [Agents →](https://docs.agent-swarm.dev/docs/architecture/agents)
-- **Multi-channel inputs** — Slack, GitHub, GitLab, email, Linear, Jira, and the HTTP API all create tasks. [Integrations](#integrations)
+- **Multi-channel inputs** — Slack, GitHub, GitLab, email, WhatsApp, Linear, Jira, and the HTTP API all create tasks. [Integrations](#integrations)
 - **Workflow engine with Human-in-the-Loop** — DAG-based automation with approval gates, retries, and structured I/O. [Workflows →](https://docs.agent-swarm.dev/docs/concepts/workflows)
 - **Scheduled & recurring tasks** — cron-based automation for standing work. [Scheduling →](https://docs.agent-swarm.dev/docs/concepts/scheduling)
-- **Multi-provider** — run with Claude Code, OpenAI Codex, pi-mono, Devin, Claude Managed Agents, or opencode. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
+- **Harness & LLM agnostic** — run with Claude Code, OpenAI Codex, pi-mono, Devin, Claude Managed Agents, raw LLMs, or opencode. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
 - **Skills & MCP servers** — reusable procedural knowledge and per-agent MCP servers with scope cascade. [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools)
 - **DB-backed pages** — agents publish HTML or JSON pages (reports, dashboards, action specs) via the `create_page` MCP tool with public / authed / password modes, version history, view counters, diff helpers, and PDF export. [MCP tools → Pages](https://docs.agent-swarm.dev/docs/reference/mcp-tools#pages-tools)
 - **KV store** — Redis-like namespaced key/value store with auto-scoped context (Slack thread / PR / Linear issue / page). [MCP tools → KV](https://docs.agent-swarm.dev/docs/reference/mcp-tools#kv-tools)
 - **Real-time dashboard** — monitor agents, tasks, and inter-agent chat. [app.agent-swarm.dev →](https://app.agent-swarm.dev)
 
 ## Quick Start
+
+Need help? Contact us at [contact@desplega.sh](mailto:contact@desplega.sh).
 
 **Prerequisites:** [Docker](https://docker.com) and a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) OAuth token (`claude setup-token`).
 
@@ -144,12 +177,14 @@ Worker  Worker  Worker
 2. The lead plans and delegates subtasks to workers.
 3. Workers execute in isolated Docker containers (git, Node.js, Python, etc.).
 4. Progress streams to the dashboard, Slack threads, or the API.
-5. Results ship back out as PRs, issue replies, or Slack messages.
+5. Results ship back out as PRs, custom pages, issue replies, or Slack messages.
 6. Session learnings are extracted and become memory for future tasks.
 
 More detail in the [task lifecycle docs](https://docs.agent-swarm.dev/docs/concepts/task-lifecycle).
 
 ## Integrations
+
+Missing one? Ask the swarm to build it.
 
 | Integration | What it does | Setup |
 |---|---|---|
@@ -157,9 +192,11 @@ More detail in the [task lifecycle docs](https://docs.agent-swarm.dev/docs/conce
 | **GitHub App** | @mention or assign the bot on issues/PRs; CI failures create follow-up tasks | [Guide](https://docs.agent-swarm.dev/docs/guides/github-integration) |
 | **GitLab** | Same model as GitHub — webhooks on issues/MRs, `glab` preinstalled in workers | [Guide](https://docs.agent-swarm.dev/docs/guides/gitlab-integration) |
 | **AgentMail** | Give each agent an inbox; emails become tasks or lead messages | [Guide](https://docs.agent-swarm.dev/docs/guides/agentmail-integration) |
+| **Kapso (WhatsApp)** | Native inbound WhatsApp webhook routing; agents reply over WhatsApp with MCP tools or the `kapso-whatsapp` skill | [Guide](https://docs.agent-swarm.dev/docs/integrations/kapso) |
 | **Linear** | Bidirectional ticket sync via OAuth + webhooks | [Guide](https://docs.agent-swarm.dev/docs/guides/linear-integration) |
 | **Jira Cloud** | OAuth 3LO ticket sync — assignee/comment events create tasks; lifecycle posts comments back | [Guide](https://docs.agent-swarm.dev/docs/guides/jira-integration) |
 | **Sentry** | Workers can triage Sentry issues with the `/investigate-sentry-issue` command | [Guide](https://docs.agent-swarm.dev/docs/guides/sentry-integration) |
+| **Devin** | Devin can be a node in your swarm — keep your existing configuration | [Guide](https://docs.agent-swarm.dev/docs/guides/harness-configuration#supported-providers) |
 
 ## Dashboard
 
@@ -196,6 +233,7 @@ Everything lives at **[docs.agent-swarm.dev](https://docs.agent-swarm.dev)**. Go
 
 - [Getting Started](https://docs.agent-swarm.dev/docs/getting-started) — install, configure, and run your first task
 - [Architecture overview](https://docs.agent-swarm.dev/docs/architecture/overview) — how the swarm is wired together
+- [Playbooks](https://docs.agent-swarm.dev/docs/playbooks) — eight production flows we use to run Desplega, plus the patterns behind them
 - [CLI reference](https://docs.agent-swarm.dev/docs/reference/cli) and [Environment variables](https://docs.agent-swarm.dev/docs/reference/environment-variables)
 - [API reference](https://docs.agent-swarm.dev/docs/api-reference) — every HTTP endpoint
 
@@ -211,6 +249,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) to get started. The quickest way to con
 4. Open a PR
 
 Join our [Discord](https://discord.gg/KZgfyyDVZa) if you have questions or want to discuss ideas.
+
+> Are you an agent? Go to [agent-swarm.dev/skill.md](https://www.agent-swarm.dev/skill.md).
 
 ## Star History
 

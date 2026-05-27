@@ -21,7 +21,7 @@ import {
   getTrackerSyncByExternalId,
   updateTrackerSyncSwarmId,
 } from "../be/db-queries/tracker";
-import { ensureToken } from "../oauth/ensure-token";
+import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { buildJiraContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -91,7 +91,7 @@ export async function resolveBotAccountId(): Promise<string | null> {
     // Mirror jiraFetch's 401-retry pattern: a token may go stale between the
     // proactive ensureToken call and the request reaching Atlassian.
     if (res.status === 401) {
-      await ensureToken("jira", 0);
+      await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
       tokens = getOAuthTokens("jira");
       if (!tokens?.accessToken) {
         console.warn("[Jira Sync] /me returned 401 and refresh produced no token");

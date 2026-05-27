@@ -41,7 +41,11 @@ import {
   isGitLabEnabled,
   verifyGitLabWebhook,
 } from "../gitlab";
+import { getKapsoConfig } from "../integrations/kapso/config";
+import { routeKapsoInbound } from "../integrations/kapso/inbound";
+import { getExecutorRegistry } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
+import { handleWebhookTrigger, verifyHmacSignature, WebhookError } from "../workflows/triggers";
 import { route } from "./route-def";
 
 // ─── Route Definitions (documentation only — webhooks handle their own body parsing) ─
@@ -85,6 +89,20 @@ const agentmailWebhook = route({
     200: { description: "Event received" },
     401: { description: "Invalid signature" },
     503: { description: "AgentMail integration not configured" },
+  },
+});
+
+const kapsoWebhook = route({
+  method: "post",
+  path: "/api/integrations/kapso/webhook",
+  pattern: ["api", "integrations", "kapso", "webhook"],
+  summary: "Handle native Kapso/WhatsApp webhook events",
+  tags: ["Webhooks"],
+  auth: { apiKey: false },
+  responses: {
+    200: { description: "Event received" },
+    401: { description: "Invalid signature" },
+    503: { description: "Kapso integration not configured" },
   },
 });
 
@@ -433,6 +451,89 @@ export async function handleWebhooks(
       if (err instanceof Error && err.stack) {
         console.error(err.stack);
       }
+    }
+    return true;
+  }
+
+  // Native Kapso/WhatsApp webhook — needs raw body for HMAC verification.
+  // Registered numbers route here (register-kapso-number points Kapso's webhook
+  // at this URL); the generic workflow-webhook path (/api/webhooks/{id}) is
+  // untouched and still serves any number not registered in KV.
+  if (kapsoWebhook.match(req.method, pathSegments)) {
+    const config = getKapsoConfig();
+    if (!config.webhookHmacSecret) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Kapso integration not configured" }));
+      return true;
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    const rawBody = Buffer.concat(chunks).toString();
+
+    const signature = req.headers["x-webhook-signature"];
+    const signatureValue = Array.isArray(signature) ? signature[0] : signature;
+    if (
+      !signatureValue ||
+      !verifyHmacSignature(config.webhookHmacSecret, rawBody, signatureValue)
+    ) {
+      console.log("[Kapso] Invalid webhook signature");
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid signature" }));
+      return true;
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON body" }));
+      return true;
+    }
+
+    try {
+      const routing = routeKapsoInbound(payload);
+      switch (routing.kind) {
+        case "workflow":
+          // Advanced override — dispatch through the workflow's webhook trigger.
+          await handleWebhookTrigger(
+            routing.workflowId,
+            rawBody,
+            req.headers,
+            getExecutorRegistry(),
+          );
+          break;
+        case "no_mapping":
+          console.warn(
+            `[Kapso] No native mapping for phone_number_id "${routing.phoneNumberId}" — ignoring (register it with register-kapso-number)`,
+          );
+          break;
+        case "task":
+          console.log(`[Kapso] Dispatched kapso-inbound task ${routing.taskId}`);
+          break;
+        case "duplicate":
+          console.log(`[Kapso] Duplicate delivery for message ${routing.messageId}, skipping`);
+          break;
+        case "skip":
+          console.log(`[Kapso] Skipping event: ${routing.reason}`);
+          break;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ received: true, routing: routing.kind }));
+    } catch (err) {
+      // Never fail the delivery on a downstream dispatch error — we already
+      // verified + deduped. Log and ack so Kapso doesn't hammer retries.
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (err instanceof WebhookError) {
+        console.warn(`[Kapso] Workflow dispatch rejected: ${errorMessage}`);
+      } else {
+        console.error(`[Kapso] Error handling inbound event: ${errorMessage}`);
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ received: true, routing: "error" }));
     }
     return true;
   }

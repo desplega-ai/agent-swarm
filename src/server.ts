@@ -55,6 +55,10 @@ import {
 } from "./tools/prompt-templates";
 import { registerReadMessagesTool } from "./tools/read-messages";
 import { registerRegisterAgentmailInboxTool } from "./tools/register-agentmail-inbox";
+import {
+  registerRegisterKapsoNumberTool,
+  registerUnregisterKapsoNumberTool,
+} from "./tools/register-kapso-number";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
 // Repo management tools
@@ -118,6 +122,10 @@ import { registerUnregisterServiceTool } from "./tools/unregister-service";
 // Profiles capability
 import { registerUpdateProfileTool } from "./tools/update-profile";
 import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
+import {
+  registerReplyWhatsappMessageTool,
+  registerSendWhatsappMessageTool,
+} from "./tools/whatsapp-message";
 // Workflows capability
 import {
   registerCancelWorkflowRunTool,
@@ -227,6 +235,12 @@ export function createServer() {
 
   // AgentMail integration tool (always registered, self-service inbox mapping)
   registerRegisterAgentmailInboxTool(server);
+
+  // Kapso/WhatsApp integration tools (native inbound provisioning + outbound)
+  registerRegisterKapsoNumberTool(server);
+  registerUnregisterKapsoNumberTool(server);
+  registerSendWhatsappMessageTool(server);
+  registerReplyWhatsappMessageTool(server);
 
   // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
   if (hasCapability("task-pool")) {

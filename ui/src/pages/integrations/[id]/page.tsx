@@ -14,6 +14,7 @@ import {
   ListChecks,
   type LucideIcon,
   Mail,
+  MessageCircle,
   MessageSquare,
   Plug,
   Route,
@@ -77,6 +78,7 @@ import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-st
 // the same icon as the card without a round-trip import.
 const ICON_MAP: Record<string, LucideIcon> = {
   "message-square": MessageSquare,
+  "message-circle": MessageCircle,
   github: Github,
   "git-merge": GitMerge,
   "git-branch": GitBranch,

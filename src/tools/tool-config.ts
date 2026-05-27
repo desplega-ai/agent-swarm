@@ -98,6 +98,12 @@ export const DEFERRED_TOOLS = new Set([
   // AgentMail (1)
   "register-agentmail-inbox",
 
+  // Kapso/WhatsApp (4)
+  "register-kapso-number",
+  "unregister-kapso-number",
+  "send-whatsapp-message",
+  "reply-whatsapp-message",
+
   // Tracker (6)
   "tracker-status",
   "tracker-link-task",

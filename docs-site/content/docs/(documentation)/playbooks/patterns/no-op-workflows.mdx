@@ -1,0 +1,41 @@
+---
+title: 'Pattern: No-op When Nothing Changed'
+description: A scheduled workflow that first asks "did anything actually happen?" and skips silently if not — so it never produces empty reports, noise commits, or training-data-style "nothing to report" messages.
+---
+
+A scheduled workflow that first asks "did anything actually happen?" and **skips silently** if not — so it never produces empty reports or noise commits.
+
+<Mermaid chart={`flowchart LR
+  C["Cron fires"] --> Q{"Did anything<br/>change?"}
+  Q -- no --> NO["No-op: exit quietly<br/>(no post, no commit)"]
+  Q -- yes --> WORK["Do the work<br/>(update / report / notify)"]
+`} />
+
+## What it is
+
+The first node of a recurring workflow is a cheap check: were there merged PRs, new alerts, fresh data, anything worth acting on? If not, the workflow exits without posting, committing, or notifying. The default for a scheduled job is **silence**, not output.
+
+## Where we use it
+
+- **[Daily docs update](/docs/playbooks/self-documenting-release-reports)** — if no PRs merged in the last 24h, it does nothing. No empty changelog entry, no "no changes today" commit.
+- **[Health/blocker digests](/docs/playbooks/code-health-alert-management)** — a quiet day produces no digest rather than a "nothing to report" message.
+- **[Release-notes generators](/docs/playbooks/self-documenting-release-reports)** — skip a week with no significant commits instead of manufacturing filler.
+
+## Why it works
+
+- Agents that always emit something train your team to ignore them. Silence-by-default keeps every notification meaningful.
+- It prevents commit/changelog pollution — your history reflects real changes, not the scheduler's heartbeat.
+- It saves tokens and run time on quiet days.
+
+## How to apply
+
+- Put the "did anything change?" check **first**, before any expensive work.
+- Make the no-op path genuinely silent — no Slack post, no empty PR, no timestamp-only commit.
+- Distinguish "nothing changed" (no-op) from "I failed to check" (real failure that *should* alert).
+- When something *does* change, make the output proportional — a one-line change gets a one-line note.
+
+## Used in
+
+- [Code Health & Alert Management](/docs/playbooks/code-health-alert-management)
+- [Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources)
+- [Self-Documenting & Release Reports](/docs/playbooks/self-documenting-release-reports)

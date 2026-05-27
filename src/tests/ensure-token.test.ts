@@ -25,10 +25,15 @@ const originalFetch = globalThis.fetch;
 beforeAll(() => {
   initDb(TEST_DB_PATH);
   upsertOAuthApp("test-provider", testApp);
+  upsertOAuthApp("jira", {
+    ...testApp,
+    tokenUrl: "https://example.com/jira/oauth/token",
+  });
 });
 
 beforeEach(() => {
   deleteOAuthTokens("test-provider");
+  deleteOAuthTokens("jira");
   globalThis.fetch = originalFetch;
 });
 
@@ -265,5 +270,93 @@ describe("ensureTokenOrThrow", () => {
     const tokens = getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("rotated-token");
     expect(tokens?.refreshToken).toBe("rotated-refresh");
+  });
+
+  test("persists Jira's rotated refresh token before reporting refresh success", async () => {
+    storeOAuthTokens("jira", {
+      accessToken: "old-jira-access",
+      refreshToken: "old-jira-refresh",
+      expiresAt: new Date(Date.now() + 50 * 60 * 1000).toISOString(),
+    });
+
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "new-jira-access",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "new-jira-refresh",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
+
+    const tokens = getOAuthTokens("jira");
+    expect(tokens?.accessToken).toBe("new-jira-access");
+    expect(tokens?.refreshToken).toBe("new-jira-refresh");
+  });
+
+  test("rejects a Jira refresh response that omits the rotated refresh token", async () => {
+    storeOAuthTokens("jira", {
+      accessToken: "old-jira-access",
+      refreshToken: "old-jira-refresh",
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "new-jira-access",
+            token_type: "Bearer",
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(ensureTokenOrThrow("jira")).rejects.toThrow(/rotated refresh_token/);
+
+    const tokens = getOAuthTokens("jira");
+    expect(tokens?.accessToken).toBe("old-jira-access");
+    expect(tokens?.refreshToken).toBe("old-jira-refresh");
+  });
+
+  test("does not use a refreshed Jira access token when persistence loses the CAS race", async () => {
+    storeOAuthTokens("jira", {
+      accessToken: "old-jira-access",
+      refreshToken: "old-jira-refresh",
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+
+    globalThis.fetch = mock(() => {
+      storeOAuthTokens("jira", {
+        accessToken: "concurrent-jira-access",
+        refreshToken: "concurrent-jira-refresh",
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "stale-result-access",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "stale-result-refresh",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    });
+
+    await expect(ensureTokenOrThrow("jira")).rejects.toThrow(/stored refresh token changed/);
+
+    const tokens = getOAuthTokens("jira");
+    expect(tokens?.accessToken).toBe("concurrent-jira-access");
+    expect(tokens?.refreshToken).toBe("concurrent-jira-refresh");
   });
 });
