@@ -24,6 +24,7 @@ import {
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
 import { getApiKey } from "../utils/api-key";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
@@ -68,6 +69,7 @@ import {
   getPathSegments,
   httpServerSemconvAttributes,
   parseQueryParams,
+  safeRequestUrlForLog,
   setCorsHeaders,
 } from "./utils";
 import { handleWebhooks } from "./webhooks";
@@ -124,7 +126,9 @@ const httpServer = createHttpServer(async (req, res) => {
   const logRequest = () => {
     const elapsed = (performance.now() - startTime).toFixed(1);
     const statusEmoji = statusCode >= 400 ? "⚠️" : "✓";
-    console.log(`[HTTP] ${statusEmoji} ${req.method} ${req.url} → ${statusCode} (${elapsed}ms)`);
+    console.log(
+      `[HTTP] ${statusEmoji} ${req.method} ${safeRequestUrlForLog(req.url)} → ${statusCode} (${elapsed}ms)`,
+    );
   };
 
   // Ensure we log on response finish
@@ -132,7 +136,9 @@ const httpServer = createHttpServer(async (req, res) => {
 
   // Log errors
   res.on("error", (err) => {
-    console.error(`[HTTP] ❌ ${req.method} ${req.url} → Error: ${err.message}`);
+    console.error(
+      `[HTTP] ❌ ${req.method} ${safeRequestUrlForLog(req.url)} → Error: ${scrubSecrets(err.message)}`,
+    );
   });
 
   await withRemoteContext(req.headers as Record<string, unknown>, async () => {
@@ -257,7 +263,9 @@ const httpServer = createHttpServer(async (req, res) => {
           span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
         }
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[HTTP] ❌ ${req.method} ${req.url} → ${message}`);
+        console.error(
+          `[HTTP] ❌ ${req.method} ${safeRequestUrlForLog(req.url)} → ${scrubSecrets(message)}`,
+        );
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: message }));

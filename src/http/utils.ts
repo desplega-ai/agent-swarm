@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getActiveTaskCount } from "../be/db";
+import { scrubSecrets } from "../utils/secret-scrubber";
 
 export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
   // Echo the request Origin (rather than emitting `*`) so credentialed fetches
@@ -44,6 +45,22 @@ export function getPathSegments(url: string): string[] {
   const pathEnd = url.indexOf("?");
   const path = pathEnd === -1 ? url : url.slice(0, pathEnd);
   return path.split("/").filter(Boolean);
+}
+
+export function safeRequestUrlForLog(rawUrl: string | undefined): string {
+  if (!rawUrl) return "";
+
+  try {
+    const url = new URL(rawUrl, "http://localhost");
+    const params = Array.from(url.searchParams.keys());
+    if (params.length === 0) return url.pathname;
+
+    const redactedQuery = params.map((key) => `${key}=[REDACTED]`).join("&");
+    return `${url.pathname}?${redactedQuery}`;
+  } catch {
+    const pathOnly = rawUrl.split("?")[0] || rawUrl;
+    return scrubSecrets(pathOnly);
+  }
 }
 
 /** Add capacity info to agent response */

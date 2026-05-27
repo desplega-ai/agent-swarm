@@ -43,6 +43,7 @@ import { registerMemoryGetTool } from "./tools/memory-get";
 import { registerMemoryRateTool } from "./tools/memory-rate";
 import { registerMemorySearchTool } from "./tools/memory-search";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
+import { registerGetOauthAccessTokenTool } from "./tools/oauth-access-token";
 import { registerPollTaskTool } from "./tools/poll-task";
 import { registerPostMessageTool } from "./tools/post-message";
 // Prompt template tools
@@ -199,6 +200,7 @@ export function createServer() {
 
   // Debug tools - always registered (self-guards with lead check)
   registerDbQueryTool(server);
+  registerGetOauthAccessTokenTool(server);
 
   // Swarm config tools - always registered (config management is fundamental)
   registerSetConfigTool(server);
