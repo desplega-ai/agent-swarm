@@ -21,7 +21,7 @@ const TEST_DB_PATH = "./test-memory-rater-implicit-citation.sqlite";
 describe("ImplicitCitationRater (pure)", () => {
   const rater = new ImplicitCitationRater();
 
-  test("name is 'implicit-citation'", () => {
+  test("name is 'implicit-citation'", async () => {
     expect(rater.name).toBe("implicit-citation");
   });
 
@@ -113,9 +113,9 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
         await unlink(TEST_DB_PATH + suffix);
       } catch {}
     }
-    initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Citation Test Agent", isLead: false, status: "idle" });
-    const insertTask = getDb().prepare(
+    await initDb(TEST_DB_PATH);
+    await createAgent({ id: agentId, name: "Citation Test Agent", isLead: false, status: "idle" });
+    const insertTask = (await getDb()).prepare(
       `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
     );
@@ -134,15 +134,15 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
     }
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM memory_rating");
-    getDb().run("DELETE FROM memory_retrieval");
-    getDb().run("DELETE FROM session_logs");
-    getDb().run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
+  beforeEach(async () => {
+    (await getDb()).run("DELETE FROM memory_rating");
+    (await getDb()).run("DELETE FROM memory_retrieval");
+    (await getDb()).run("DELETE FROM session_logs");
+    (await getDb()).run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
   });
 
-  function makeMemory(name: string): { id: string } {
-    const memory = store.store({
+  async function makeMemory(name: string): Promise<{ id: string }> {
+    const memory = await store.store({
       agentId,
       scope: "agent",
       name,
@@ -152,8 +152,8 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
     return { id: memory.id };
   }
 
-  function readPosterior(id: string): { alpha: number; beta: number } {
-    const row = getDb()
+  async function readPosterior(id: string): Promise<{ alpha: number; beta: number }> {
+    const row = (await getDb())
       .prepare<{ alpha: number; beta: number }, [string]>(
         "SELECT alpha, beta FROM agent_memory WHERE id = ?",
       )
@@ -162,8 +162,8 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
     return { alpha: row.alpha, beta: row.beta };
   }
 
-  function getRatings(taskId: string) {
-    return getDb()
+  async function getRatings(taskId: string) {
+    return (await getDb())
       .prepare<
         {
           memoryId: string;
@@ -176,47 +176,47 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
       .all(taskId);
   }
 
-  test("recordRetrievals writes one row per result for the task", () => {
-    const m1 = makeMemory("retrieval-target-1");
-    const m2 = makeMemory("retrieval-target-2");
-    recordRetrievals(taskId, agentId, [
+  test("recordRetrievals writes one row per result for the task", async () => {
+    const m1 = await makeMemory("retrieval-target-1");
+    const m2 = await makeMemory("retrieval-target-2");
+    await recordRetrievals(taskId, agentId, [
       { memoryId: m1.id, similarity: 0.9 },
       { memoryId: m2.id, similarity: 0.7 },
     ]);
-    const rows = getRetrievalsForTask(taskId);
+    const rows = await getRetrievalsForTask(taskId);
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.memoryId).sort()).toEqual([m1.id, m2.id].sort());
   });
 
-  test("recordRetrievals is a no-op when taskId is undefined", () => {
-    const m = makeMemory("no-task");
-    recordRetrievals(undefined, agentId, [{ memoryId: m.id, similarity: 0.9 }]);
-    const rows = getDb().prepare("SELECT COUNT(*) as n FROM memory_retrieval").get() as {
+  test("recordRetrievals is a no-op when taskId is undefined", async () => {
+    const m = await makeMemory("no-task");
+    await recordRetrievals(undefined, agentId, [{ memoryId: m.id, similarity: 0.9 }]);
+    const rows = (await getDb()).prepare("SELECT COUNT(*) as n FROM memory_retrieval").get() as {
       n: number;
     };
     expect(rows.n).toBe(0);
   });
 
-  test("recordRetrievals is a no-op when results is empty", () => {
-    recordRetrievals(taskId, agentId, []);
-    const rows = getDb().prepare("SELECT COUNT(*) as n FROM memory_retrieval").get() as {
+  test("recordRetrievals is a no-op when results is empty", async () => {
+    await recordRetrievals(taskId, agentId, []);
+    const rows = (await getDb()).prepare("SELECT COUNT(*) as n FROM memory_retrieval").get() as {
       n: number;
     };
     expect(rows.n).toBe(0);
   });
 
   test("end-to-end: cited memory shifts alpha by 0.5; uncited memory shifts beta by 0.25", async () => {
-    const cited = makeMemory("cited");
-    const uncited = makeMemory("uncited");
+    const cited = await makeMemory("cited");
+    const uncited = await makeMemory("uncited");
 
     // 1. Search-time: log the retrievals.
-    recordRetrievals(taskId, agentId, [
+    await recordRetrievals(taskId, agentId, [
       { memoryId: cited.id, similarity: 0.9 },
       { memoryId: uncited.id, similarity: 0.85 },
     ]);
 
     // 2. During the task: session_logs accumulate text mentioning ONE of them.
-    createSessionLogs({
+    await createSessionLogs({
       taskId,
       sessionId: "session-1",
       iteration: 1,
@@ -225,9 +225,9 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
     });
 
     // 3. Task completion: simulate the store-progress server-rater fire.
-    const retrievals = getRetrievalsForTask(taskId);
+    const retrievals = await getRetrievalsForTask(taskId);
     const retrievedMemoryIds = retrievals.map((r) => r.memoryId);
-    const evidence = getDb()
+    const evidence = (await getDb())
       .prepare<{ content: string }, [string]>(
         "SELECT content FROM session_logs WHERE taskId = ? ORDER BY iteration, lineNumber",
       )
@@ -243,15 +243,15 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
       evidence,
     });
     const stamped: RatingEvent[] = events.map((e) => ({ ...e, source: rater.name }));
-    const result = applyRating(stamped, { taskId });
+    const result = await applyRating(stamped, { taskId });
     expect(result.applied).toBe(2);
 
     // 4. Posteriors moved as documented.
-    expect(readPosterior(cited.id)).toEqual({ alpha: 1.5, beta: 1.0 });
-    expect(readPosterior(uncited.id)).toEqual({ alpha: 1.0, beta: 1.25 });
+    expect(await readPosterior(cited.id)).toEqual({ alpha: 1.5, beta: 1.0 });
+    expect(await readPosterior(uncited.id)).toEqual({ alpha: 1.0, beta: 1.25 });
 
     // 5. Audit rows written with `source = 'implicit-citation'`.
-    const ratings = getRatings(taskId);
+    const ratings = await getRatings(taskId);
     expect(ratings).toHaveLength(2);
     for (const r of ratings) {
       expect(r.source).toBe("implicit-citation");
@@ -263,9 +263,9 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
   });
 
   test("negative path: no citation in session_logs → only beta moves", async () => {
-    const m = makeMemory("never-cited");
-    recordRetrievals(taskIdMiss, agentId, [{ memoryId: m.id, similarity: 0.9 }]);
-    createSessionLogs({
+    const m = await makeMemory("never-cited");
+    await recordRetrievals(taskIdMiss, agentId, [{ memoryId: m.id, similarity: 0.9 }]);
+    await createSessionLogs({
       taskId: taskIdMiss,
       sessionId: "session-2",
       iteration: 1,
@@ -281,12 +281,12 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
       evidence: "completely unrelated content",
     });
     const stamped: RatingEvent[] = events.map((e) => ({ ...e, source: rater.name }));
-    applyRating(stamped, { taskId: taskIdMiss });
+    await applyRating(stamped, { taskId: taskIdMiss });
 
-    expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.25 });
+    expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.25 });
   });
 
-  test("registry: implicit-citation is in SERVER_RATERS and instantiable via MEMORY_RATERS", () => {
+  test("registry: implicit-citation is in SERVER_RATERS and instantiable via MEMORY_RATERS", async () => {
     expect(SERVER_RATERS.has("implicit-citation")).toBe(true);
 
     const previous = process.env.MEMORY_RATERS;

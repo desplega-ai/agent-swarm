@@ -29,9 +29,9 @@ beforeAll(async () => {
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   // Create a lead agent so handlers can assign tasks
-  createAgent({
+  await createAgent({
     id: "lead-gh-001",
     name: "GitHubTestLead",
     status: "idle",

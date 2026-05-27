@@ -112,11 +112,11 @@ function decryptTokenRow(row: McpOAuthTokenRow): McpOAuthToken {
 
 // ─── mcp_oauth_tokens ────────────────────────────────────────────────────────
 
-export function getMcpOAuthToken(
+export async function getMcpOAuthToken(
   mcpServerId: string,
   userId: string | null = null,
-): McpOAuthToken | null {
-  const row = getDb()
+): Promise<McpOAuthToken | null> {
+  const row = (await getDb())
     .query(
       userId == null
         ? "SELECT * FROM mcp_oauth_tokens WHERE mcpServerId = ? AND userId IS NULL"
@@ -126,15 +126,15 @@ export function getMcpOAuthToken(
   return row ? decryptTokenRow(row) : null;
 }
 
-export function getMcpOAuthTokenById(id: string): McpOAuthToken | null {
-  const row = getDb()
+export async function getMcpOAuthTokenById(id: string): Promise<McpOAuthToken | null> {
+  const row = (await getDb())
     .query("SELECT * FROM mcp_oauth_tokens WHERE id = ?")
     .get(id) as McpOAuthTokenRow | null;
   return row ? decryptTokenRow(row) : null;
 }
 
-export function listMcpOAuthTokensForMcp(mcpServerId: string): McpOAuthToken[] {
-  const rows = getDb()
+export async function listMcpOAuthTokensForMcp(mcpServerId: string): Promise<McpOAuthToken[]> {
+  const rows = (await getDb())
     .query("SELECT * FROM mcp_oauth_tokens WHERE mcpServerId = ?")
     .all(mcpServerId) as McpOAuthTokenRow[];
   return rows.map(decryptTokenRow);
@@ -170,15 +170,15 @@ export interface UpsertMcpOAuthTokenInput {
  * SQLite treats NULL values in UNIQUE(mcpServerId, userId) as distinct, so the
  * v1 per-swarm case (userId IS NULL) would never trigger the conflict path.
  */
-export function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): void {
+export async function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): Promise<void> {
   const userId = input.userId ?? null;
   const encryptedAccess = encryptSecret(input.accessToken, getEncryptionKey());
   const encryptedRefresh = encryptOrNull(input.refreshToken);
   const encryptedClientSecret = encryptOrNull(input.dcrClientSecret);
 
-  const existing = getMcpOAuthToken(input.mcpServerId, userId);
+  const existing = await getMcpOAuthToken(input.mcpServerId, userId);
   if (!existing) {
-    getDb()
+    (await getDb())
       .query(
         `INSERT INTO mcp_oauth_tokens (
           mcpServerId, userId,
@@ -213,7 +213,7 @@ export function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): void {
     return;
   }
 
-  getDb()
+  (await getDb())
     .query(
       `UPDATE mcp_oauth_tokens SET
         accessToken = ?,
@@ -262,7 +262,7 @@ export function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): void {
  * Apply a refresh result: rewrite access token, optionally refresh token, and
  * bump expiresAt + status. Does not touch AS metadata.
  */
-export function applyMcpOAuthRefresh(
+export async function applyMcpOAuthRefresh(
   id: string,
   data: {
     accessToken: string;
@@ -270,7 +270,7 @@ export function applyMcpOAuthRefresh(
     expiresAt?: string | null;
     scope?: string | null;
   },
-): void {
+): Promise<void> {
   const key = getEncryptionKey();
   const encryptedAccess = encryptSecret(data.accessToken, key);
   const encryptedRefresh =
@@ -281,7 +281,7 @@ export function applyMcpOAuthRefresh(
         : encryptSecret(data.refreshToken, key);
 
   if (encryptedRefresh === undefined) {
-    getDb()
+    (await getDb())
       .query(
         `UPDATE mcp_oauth_tokens
          SET accessToken = ?,
@@ -295,7 +295,7 @@ export function applyMcpOAuthRefresh(
       )
       .run(encryptedAccess, data.expiresAt ?? null, data.scope ?? null, id);
   } else {
-    getDb()
+    (await getDb())
       .query(
         `UPDATE mcp_oauth_tokens
          SET accessToken = ?,
@@ -312,12 +312,12 @@ export function applyMcpOAuthRefresh(
   }
 }
 
-export function markMcpOAuthTokenStatus(
+export async function markMcpOAuthTokenStatus(
   id: string,
   status: McpOAuthStatus,
   errorMessage?: string | null,
-): void {
-  getDb()
+): Promise<void> {
+  (await getDb())
     .query(
       `UPDATE mcp_oauth_tokens
        SET status = ?,
@@ -328,8 +328,11 @@ export function markMcpOAuthTokenStatus(
     .run(status, errorMessage ?? null, id);
 }
 
-export function deleteMcpOAuthToken(mcpServerId: string, userId: string | null = null): boolean {
-  const result = getDb()
+export async function deleteMcpOAuthToken(
+  mcpServerId: string,
+  userId: string | null = null,
+): Promise<boolean> {
+  const result = (await getDb())
     .query(
       userId == null
         ? "DELETE FROM mcp_oauth_tokens WHERE mcpServerId = ? AND userId IS NULL"
@@ -339,7 +342,10 @@ export function deleteMcpOAuthToken(mcpServerId: string, userId: string | null =
   return result.changes > 0;
 }
 
-export function isMcpTokenExpiringSoon(token: McpOAuthToken, bufferMs = 5 * 60 * 1000): boolean {
+export async function isMcpTokenExpiringSoon(
+  token: McpOAuthToken,
+  bufferMs = 5 * 60 * 1000,
+): Promise<boolean> {
   if (!token.expiresAt) return false;
   const expiresAt = new Date(token.expiresAt).getTime();
   if (Number.isNaN(expiresAt)) return true;
@@ -366,9 +372,9 @@ export interface InsertMcpOAuthPendingInput {
   finalRedirect?: string | null;
 }
 
-export function insertMcpOAuthPending(input: InsertMcpOAuthPendingInput): void {
+export async function insertMcpOAuthPending(input: InsertMcpOAuthPendingInput): Promise<void> {
   const key = getEncryptionKey();
-  getDb()
+  (await getDb())
     .query(
       `INSERT INTO mcp_oauth_pending (
         state, mcpServerId, userId,
@@ -416,12 +422,12 @@ interface McpOAuthPendingRawRow {
   createdAt: string;
 }
 
-export function consumeMcpOAuthPending(state: string): McpOAuthPendingRow | null {
-  const row = getDb()
+export async function consumeMcpOAuthPending(state: string): Promise<McpOAuthPendingRow | null> {
+  const row = (await getDb())
     .query("SELECT * FROM mcp_oauth_pending WHERE state = ?")
     .get(state) as McpOAuthPendingRawRow | null;
   if (!row) return null;
-  getDb().query("DELETE FROM mcp_oauth_pending WHERE state = ?").run(state);
+  (await getDb()).query("DELETE FROM mcp_oauth_pending WHERE state = ?").run(state);
   const key = getEncryptionKey();
   return {
     ...row,
@@ -430,9 +436,11 @@ export function consumeMcpOAuthPending(state: string): McpOAuthPendingRow | null
   };
 }
 
-export function gcMcpOAuthPending(olderThanMs = 10 * 60 * 1000): number {
+export async function gcMcpOAuthPending(olderThanMs = 10 * 60 * 1000): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-  const result = getDb().query("DELETE FROM mcp_oauth_pending WHERE createdAt < ?").run(cutoff);
+  const result = (await getDb())
+    .query("DELETE FROM mcp_oauth_pending WHERE createdAt < ?")
+    .run(cutoff);
   return result.changes;
 }
 
@@ -440,15 +448,20 @@ export function gcMcpOAuthPending(olderThanMs = 10 * 60 * 1000): number {
 
 export type McpAuthMethod = "static" | "oauth" | "auto";
 
-export function getMcpServerAuthMethod(mcpServerId: string): McpAuthMethod | null {
-  const row = getDb().query("SELECT authMethod FROM mcp_servers WHERE id = ?").get(mcpServerId) as {
+export async function getMcpServerAuthMethod(mcpServerId: string): Promise<McpAuthMethod | null> {
+  const row = (await getDb())
+    .query("SELECT authMethod FROM mcp_servers WHERE id = ?")
+    .get(mcpServerId) as {
     authMethod: McpAuthMethod;
   } | null;
   return row?.authMethod ?? null;
 }
 
-export function setMcpServerAuthMethod(mcpServerId: string, authMethod: McpAuthMethod): void {
-  getDb()
+export async function setMcpServerAuthMethod(
+  mcpServerId: string,
+  authMethod: McpAuthMethod,
+): Promise<void> {
+  (await getDb())
     .query(
       "UPDATE mcp_servers SET authMethod = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
     )

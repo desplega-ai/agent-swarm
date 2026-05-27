@@ -14,9 +14,9 @@ const TEST_DB_PATH = "./test-slack-assistant.sqlite";
 
 let _leadAgent: ReturnType<typeof createAgent>;
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
-  _leadAgent = createAgent({ name: "AssistantLead", isLead: true, status: "idle" });
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
+  _leadAgent = await createAgent({ name: "AssistantLead", isLead: true, status: "idle" });
 });
 
 afterAll(() => {
@@ -31,21 +31,21 @@ afterAll(() => {
 });
 
 describe("assistant userMessage routing — new thread (no working agent)", () => {
-  test("getAgentWorkingOnThread returns null when no tasks exist for thread", () => {
-    const result = getAgentWorkingOnThread("D_ASSISTANT", "6666666666.000001");
+  test("getAgentWorkingOnThread returns null when no tasks exist for thread", async () => {
+    const result = await getAgentWorkingOnThread("D_ASSISTANT", "6666666666.000001");
     expect(result).toBeNull();
   });
 
-  test("getLeadAgent returns the lead agent for task assignment", () => {
-    const lead = getLeadAgent();
+  test("getLeadAgent returns the lead agent for task assignment", async () => {
+    const lead = await getLeadAgent();
     expect(lead).toBeDefined();
     expect(lead!.name).toBe("AssistantLead");
     expect(lead!.isLead).toBe(true);
   });
 
-  test("creates task with slack context for new assistant thread message", () => {
-    const lead = getLeadAgent()!;
-    const task = createTaskExtended("What's the status of all agents?", {
+  test("creates task with slack context for new assistant thread message", async () => {
+    const lead = await getLeadAgent()!;
+    const task = await createTaskExtended("What's the status of all agents?", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: "D_ASSISTANT",
@@ -57,16 +57,16 @@ describe("assistant userMessage routing — new thread (no working agent)", () =
     expect(task.task).toBe("What's the status of all agents?");
     expect(task.source).toBe("slack");
 
-    const fetched = getTaskById(task.id);
+    const fetched = await getTaskById(task.id);
     expect(fetched).toBeDefined();
     expect(fetched!.slackChannelId).toBe("D_ASSISTANT");
     expect(fetched!.slackThreadTs).toBe("7777777777.000001");
     expect(fetched!.slackUserId).toBe("U_ASSISTANT");
   });
 
-  test("queues task without agentId when no lead is available", () => {
+  test("queues task without agentId when no lead is available", async () => {
     // Create a task without agentId (simulates no lead scenario)
-    const task = createTaskExtended("queued task, no lead", {
+    const task = await createTaskExtended("queued task, no lead", {
       source: "slack",
       slackChannelId: "D_NOHEAD",
       slackThreadTs: "8888888888.000001",
@@ -74,7 +74,7 @@ describe("assistant userMessage routing — new thread (no working agent)", () =
     });
 
     expect(task).toBeDefined();
-    const fetched = getTaskById(task.id);
+    const fetched = await getTaskById(task.id);
     expect(fetched).toBeDefined();
     // Task should be created but unassigned (pending or similar status)
     expect(fetched!.agentId).toBeNull();
@@ -82,9 +82,9 @@ describe("assistant userMessage routing — new thread (no working agent)", () =
 });
 
 describe("assistant userMessage routing — follow-up (working agent exists)", () => {
-  test("getAgentWorkingOnThread returns the agent working on an active thread task", () => {
-    const worker = createAgent({ name: "ThreadWorker", isLead: false, status: "idle" });
-    createTaskExtended("initial task in thread", {
+  test("getAgentWorkingOnThread returns the agent working on an active thread task", async () => {
+    const worker = await createAgent({ name: "ThreadWorker", isLead: false, status: "idle" });
+    await createTaskExtended("initial task in thread", {
       agentId: worker.id,
       source: "slack",
       slackChannelId: "D_FOLLOWUP",
@@ -92,16 +92,16 @@ describe("assistant userMessage routing — follow-up (working agent exists)", (
       slackUserId: "U_FOLLOWUP",
     });
 
-    const result = getAgentWorkingOnThread("D_FOLLOWUP", "9999999999.000001");
+    const result = await getAgentWorkingOnThread("D_FOLLOWUP", "9999999999.000001");
     expect(result).toBeDefined();
     expect(result!.name).toBe("ThreadWorker");
   });
 
-  test("creates follow-up task assigned to the working agent", () => {
-    const workingAgent = getAgentWorkingOnThread("D_FOLLOWUP", "9999999999.000001");
+  test("creates follow-up task assigned to the working agent", async () => {
+    const workingAgent = await getAgentWorkingOnThread("D_FOLLOWUP", "9999999999.000001");
     expect(workingAgent).toBeDefined();
 
-    const followUp = createTaskExtended("follow-up message in assistant thread", {
+    const followUp = await createTaskExtended("follow-up message in assistant thread", {
       agentId: workingAgent!.id,
       source: "slack",
       slackChannelId: "D_FOLLOWUP",
@@ -112,7 +112,7 @@ describe("assistant userMessage routing — follow-up (working agent exists)", (
     expect(followUp).toBeDefined();
     expect(followUp.agentId).toBe(workingAgent!.id);
 
-    const fetched = getTaskById(followUp.id);
+    const fetched = await getTaskById(followUp.id);
     expect(fetched).toBeDefined();
     expect(fetched!.slackChannelId).toBe("D_FOLLOWUP");
     expect(fetched!.slackThreadTs).toBe("9999999999.000001");

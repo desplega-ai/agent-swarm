@@ -22,7 +22,7 @@ beforeAll(async () => {
       // File doesn't exist
     }
   }
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 beforeEach(async () => {
@@ -74,8 +74,8 @@ describe("GitHub template registration", () => {
 
 describe("backward compatibility — byte-identical output", () => {
   // -- PR assigned --
-  test("github.pull_request.assigned produces expected output", () => {
-    const result = resolveTemplate("github.pull_request.assigned", {
+  test("github.pull_request.assigned produces expected output", async () => {
+    const result = await resolveTemplate("github.pull_request.assigned", {
       pr_number: 42,
       pr_title: "Fix bug",
       bot_name: "agent-swarm-bot",
@@ -109,8 +109,8 @@ Some PR body text
   });
 
   // -- PR review requested --
-  test("github.pull_request.review_requested produces expected output", () => {
-    const result = resolveTemplate("github.pull_request.review_requested", {
+  test("github.pull_request.review_requested produces expected output", async () => {
+    const result = await resolveTemplate("github.pull_request.review_requested", {
       pr_number: 42,
       pr_title: "Fix bug",
       bot_name: "agent-swarm-bot",
@@ -143,8 +143,8 @@ Fix bug
   });
 
   // -- PR closed (merged) --
-  test("github.pull_request.closed (merged) produces expected output", () => {
-    const result = resolveTemplate("github.pull_request.closed", {
+  test("github.pull_request.closed (merged) produces expected output", async () => {
+    const result = await resolveTemplate("github.pull_request.closed", {
       status_emoji: "\ud83c\udf89",
       pr_number: 42,
       status: "MERGED",
@@ -174,8 +174,8 @@ Related task: task-123
   });
 
   // -- PR closed (not merged) --
-  test("github.pull_request.closed (not merged) produces expected output", () => {
-    const result = resolveTemplate("github.pull_request.closed", {
+  test("github.pull_request.closed (not merged) produces expected output", async () => {
+    const result = await resolveTemplate("github.pull_request.closed", {
       status_emoji: "\u274c",
       pr_number: 42,
       status: "CLOSED",
@@ -205,8 +205,8 @@ Related task: task-123
   });
 
   // -- PR synchronize --
-  test("github.pull_request.synchronize produces expected output", () => {
-    const result = resolveTemplate("github.pull_request.synchronize", {
+  test("github.pull_request.synchronize produces expected output", async () => {
+    const result = await resolveTemplate("github.pull_request.synchronize", {
       pr_number: 42,
       pr_title: "Fix bug",
       repo_full_name: "owner/repo",
@@ -235,8 +235,8 @@ Related task: task-123
   });
 
   // -- PR mentioned --
-  test("github.pull_request.mentioned produces expected output", () => {
-    const result = resolveTemplate("github.pull_request.mentioned", {
+  test("github.pull_request.mentioned produces expected output", async () => {
+    const result = await resolveTemplate("github.pull_request.mentioned", {
       pr_number: 42,
       pr_title: "Fix bug",
       sender_login: "alice",
@@ -267,8 +267,8 @@ Please review this PR
   });
 
   // -- Issue assigned --
-  test("github.issue.assigned produces expected output", () => {
-    const result = resolveTemplate("github.issue.assigned", {
+  test("github.issue.assigned produces expected output", async () => {
+    const result = await resolveTemplate("github.issue.assigned", {
       issue_number: 10,
       issue_title: "Bug report",
       bot_name: "agent-swarm-bot",
@@ -298,8 +298,8 @@ Issue body text
   });
 
   // -- Issue mentioned --
-  test("github.issue.mentioned produces expected output", () => {
-    const result = resolveTemplate("github.issue.mentioned", {
+  test("github.issue.mentioned produces expected output", async () => {
+    const result = await resolveTemplate("github.issue.mentioned", {
       issue_number: 10,
       issue_title: "Bug report",
       sender_login: "alice",
@@ -327,8 +327,8 @@ Please look at this
   });
 
   // -- Comment mentioned (PR, with existing task) --
-  test("github.comment.mentioned (PR, with related task) produces expected output", () => {
-    const result = resolveTemplate("github.comment.mentioned", {
+  test("github.comment.mentioned (PR, with related task) produces expected output", async () => {
+    const result = await resolveTemplate("github.comment.mentioned", {
       target_type: "PR",
       target_number: 42,
       target_title: "Fix bug",
@@ -362,8 +362,8 @@ Related task: task-123
   });
 
   // -- Comment mentioned (Issue, no existing task) --
-  test("github.comment.mentioned (Issue, no related task) produces expected output", () => {
-    const result = resolveTemplate("github.comment.mentioned", {
+  test("github.comment.mentioned (Issue, no related task) produces expected output", async () => {
+    const result = await resolveTemplate("github.comment.mentioned", {
       target_type: "Issue",
       target_number: 10,
       target_title: "Bug report",
@@ -394,8 +394,8 @@ Any update?
   });
 
   // -- PR review submitted (approved, with existing task) --
-  test("github.pull_request.review_submitted (approved, related task) produces expected output", () => {
-    const result = resolveTemplate("github.pull_request.review_submitted", {
+  test("github.pull_request.review_submitted (approved, related task) produces expected output", async () => {
+    const result = await resolveTemplate("github.pull_request.review_submitted", {
       review_emoji: "\u2705",
       pr_number: 42,
       review_label: "APPROVED",
@@ -431,8 +431,8 @@ Related task: task-123
   });
 
   // -- PR review submitted (changes_requested, no review body, no existing task) --
-  test("github.pull_request.review_submitted (changes_requested, no body, no related task) produces expected output", () => {
-    const result = resolveTemplate("github.pull_request.review_submitted", {
+  test("github.pull_request.review_submitted (changes_requested, no body, no related task) produces expected output", async () => {
+    const result = await resolveTemplate("github.pull_request.review_submitted", {
       review_emoji: "\ud83d\udd04",
       pr_number: 42,
       review_label: "CHANGES REQUESTED",
@@ -462,8 +462,8 @@ URL: https://github.com/owner/repo/pull/42#pullrequestreview-789
   });
 
   // -- Check run failed --
-  test("github.check_run.failed produces expected output", () => {
-    const result = resolveTemplate("github.check_run.failed", {
+  test("github.check_run.failed produces expected output", async () => {
+    const result = await resolveTemplate("github.check_run.failed", {
       conclusion_emoji: "\u274c",
       pr_number: 42,
       check_name: "lint",
@@ -494,8 +494,8 @@ Related task: task-123
   });
 
   // -- Check run failed (no summary) --
-  test("github.check_run.failed (no summary) produces expected output", () => {
-    const result = resolveTemplate("github.check_run.failed", {
+  test("github.check_run.failed (no summary) produces expected output", async () => {
+    const result = await resolveTemplate("github.check_run.failed", {
       conclusion_emoji: "\u274c",
       pr_number: 42,
       check_name: "lint",
@@ -523,8 +523,8 @@ Related task: task-123
   });
 
   // -- Check suite failed --
-  test("github.check_suite.failed produces expected output", () => {
-    const result = resolveTemplate("github.check_suite.failed", {
+  test("github.check_suite.failed produces expected output", async () => {
+    const result = await resolveTemplate("github.check_suite.failed", {
       conclusion_emoji: "\u274c",
       pr_number: 42,
       conclusion_label: "FAILED",
@@ -551,8 +551,8 @@ Related task: task-123
   });
 
   // -- Workflow run failed --
-  test("github.workflow_run.failed produces expected output", () => {
-    const result = resolveTemplate("github.workflow_run.failed", {
+  test("github.workflow_run.failed produces expected output", async () => {
+    const result = await resolveTemplate("github.workflow_run.failed", {
       conclusion_emoji: "\u274c",
       pr_number: 42,
       workflow_run_name: "CI",
@@ -591,15 +591,15 @@ Related task: task-123
 // ============================================================================
 
 describe("skip_event suppresses task creation", () => {
-  test("skip_event on a GitHub template returns skipped=true", () => {
-    upsertPromptTemplate({
+  test("skip_event on a GitHub template returns skipped=true", async () => {
+    await upsertPromptTemplate({
       eventType: "github.pull_request.assigned",
       scope: "global",
       state: "skip_event",
       body: "Skipped body",
     });
 
-    const result = resolveTemplate("github.pull_request.assigned", {
+    const result = await resolveTemplate("github.pull_request.assigned", {
       pr_number: 42,
       pr_title: "Fix bug",
       bot_name: "agent-swarm-bot",
@@ -621,16 +621,16 @@ describe("skip_event suppresses task creation", () => {
 // ============================================================================
 
 describe("custom body override replaces default", () => {
-  test("custom body is used instead of default template", () => {
+  test("custom body is used instead of default template", async () => {
     // Upsert a custom body for the issue mentioned template
-    upsertPromptTemplate({
+    await upsertPromptTemplate({
       eventType: "github.issue.mentioned",
       scope: "global",
       state: "enabled",
       body: "Custom body for issue #{{issue_number}}: {{issue_title}}",
     });
 
-    const result = resolveTemplate("github.issue.mentioned", {
+    const result = await resolveTemplate("github.issue.mentioned", {
       issue_number: 99,
       issue_title: "Custom test",
       sender_login: "alice",
@@ -654,16 +654,16 @@ describe("custom body override replaces default", () => {
 // ============================================================================
 
 describe("common template override affects all referencing templates", () => {
-  test("overriding common.delegation_instruction changes output of dependent templates", () => {
+  test("overriding common.delegation_instruction changes output of dependent templates", async () => {
     // Override the delegation instruction
-    upsertPromptTemplate({
+    await upsertPromptTemplate({
       eventType: "common.delegation_instruction",
       scope: "global",
       state: "enabled",
       body: "Custom delegation: please assign to a worker.",
     });
 
-    const result = resolveTemplate("github.pull_request.mentioned", {
+    const result = await resolveTemplate("github.pull_request.mentioned", {
       pr_number: 1,
       pr_title: "Test",
       sender_login: "alice",

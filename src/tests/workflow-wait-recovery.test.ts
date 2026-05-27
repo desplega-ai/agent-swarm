@@ -33,8 +33,11 @@ const deps: ExecutorDependencies = {
 
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(name: string, def: WorkflowDefinition): Workflow {
-  const wf = createWorkflow({ name: `${name}-${Date.now()}-${Math.random()}`, definition: def });
+async function makeWorkflow(name: string, def: WorkflowDefinition): Promise<Workflow> {
+  const wf = await createWorkflow({
+    name: `${name}-${Date.now()}-${Math.random()}`,
+    definition: def,
+  });
   createdWorkflowIds.push(wf.id);
   return wf;
 }
@@ -45,13 +48,13 @@ beforeAll(async () => {
   } catch {
     // ignore
   }
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
   for (const id of createdWorkflowIds) {
     try {
-      deleteWorkflow(id);
+      await deleteWorkflow(id);
     } catch {
       // already deleted
     }
@@ -81,20 +84,20 @@ describe("WaitExecutor — recovery on startup", () => {
         { id: "done", type: "notify", config: { channel: "swarm", template: "recovered" } },
       ],
     };
-    const wf = makeWorkflow("wait-recovery-overdue", def);
+    const wf = await makeWorkflow("wait-recovery-overdue", def);
 
-    const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
-    updateWorkflowRun(run.id, { status: "waiting" });
+    const run = await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
+    await updateWorkflowRun(run.id, { status: "waiting" });
 
-    const step = createWorkflowRunStep({
+    const step = await createWorkflowRunStep({
       id: crypto.randomUUID(),
       runId: run.id,
       nodeId: "w1",
       nodeType: "wait",
     });
-    updateWorkflowRunStep(step.id, { status: "waiting" });
+    await updateWorkflowRunStep(step.id, { status: "waiting" });
 
-    createWaitState({
+    await createWaitState({
       id: crypto.randomUUID(),
       workflowRunId: run.id,
       workflowRunStepId: step.id,
@@ -103,26 +106,26 @@ describe("WaitExecutor — recovery on startup", () => {
     });
 
     // Sanity: run is paused, wait is pending overdue.
-    expect(getWorkflowRun(run.id)?.status).toBe("waiting");
-    expect(getWaitStateByStepId(step.id)?.status).toBe("pending");
+    expect((await getWorkflowRun(run.id))?.status).toBe("waiting");
+    expect((await getWaitStateByStepId(step.id))?.status).toBe("pending");
 
     // 2. Run recovery — must resume the wait and walk to 'done'.
     await recoverIncompleteRuns(registry);
 
     // 3. Assertions: wait fired, wait step completed via 'default' port,
     // notify step ran, run completed.
-    const recoveredWait = getWaitStateByStepId(step.id);
+    const recoveredWait = await getWaitStateByStepId(step.id);
     expect(recoveredWait?.status).toBe("fired");
     expect(recoveredWait?.resolvedAt).not.toBeNull();
 
-    const recoveredStep = getWorkflowRunStep(step.id);
+    const recoveredStep = await getWorkflowRunStep(step.id);
     expect(recoveredStep?.status).toBe("completed");
     expect(recoveredStep?.nextPort).toBe("default");
 
-    const recoveredRun = getWorkflowRun(run.id);
+    const recoveredRun = await getWorkflowRun(run.id);
     expect(recoveredRun?.status).toBe("completed");
 
-    const allSteps = getWorkflowRunStepsByRunId(run.id);
+    const allSteps = await getWorkflowRunStepsByRunId(run.id);
     const doneStep = allSteps.find((s) => s.nodeId === "done");
     expect(doneStep?.status).toBe("completed");
   });
@@ -141,19 +144,19 @@ describe("WaitExecutor — recovery on startup", () => {
         { id: "done", type: "notify", config: { channel: "swarm", template: "recovered" } },
       ],
     };
-    const wf = makeWorkflow("wait-recovery-idempotent", def);
-    const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
-    updateWorkflowRun(run.id, { status: "waiting" });
+    const wf = await makeWorkflow("wait-recovery-idempotent", def);
+    const run = await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
+    await updateWorkflowRun(run.id, { status: "waiting" });
 
-    const step = createWorkflowRunStep({
+    const step = await createWorkflowRunStep({
       id: crypto.randomUUID(),
       runId: run.id,
       nodeId: "w1",
       nodeType: "wait",
     });
-    updateWorkflowRunStep(step.id, { status: "waiting" });
+    await updateWorkflowRunStep(step.id, { status: "waiting" });
 
-    createWaitState({
+    await createWaitState({
       id: crypto.randomUUID(),
       workflowRunId: run.id,
       workflowRunStepId: step.id,
@@ -162,8 +165,8 @@ describe("WaitExecutor — recovery on startup", () => {
     });
 
     await recoverIncompleteRuns(registry);
-    const stepsAfter1 = getWorkflowRunStepsByRunId(run.id);
-    expect(getWorkflowRun(run.id)?.status).toBe("completed");
+    const stepsAfter1 = await getWorkflowRunStepsByRunId(run.id);
+    expect((await getWorkflowRun(run.id))?.status).toBe("completed");
     const doneCount1 = stepsAfter1.filter((s) => s.nodeId === "done").length;
     expect(doneCount1).toBe(1);
 
@@ -171,8 +174,8 @@ describe("WaitExecutor — recovery on startup", () => {
     // recovery query). resumeWaitState's atomic update returns updated=false,
     // so the step shouldn't re-run.
     await recoverIncompleteRuns(registry);
-    const stepsAfter2 = getWorkflowRunStepsByRunId(run.id);
+    const stepsAfter2 = await getWorkflowRunStepsByRunId(run.id);
     expect(stepsAfter2.filter((s) => s.nodeId === "done").length).toBe(1);
-    expect(getWorkflowRun(run.id)?.status).toBe("completed");
+    expect((await getWorkflowRun(run.id))?.status).toBe("completed");
   });
 });

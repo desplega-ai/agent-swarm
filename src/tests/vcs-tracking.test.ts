@@ -15,9 +15,9 @@ beforeAll(async () => {
   try {
     await unlink(TEST_DB_PATH);
   } catch {}
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 
-  createAgent({
+  await createAgent({
     id: "vcs-track-agent-001",
     name: "VcsTrackingTestAgent",
     status: "idle",
@@ -35,13 +35,13 @@ afterAll(async () => {
 });
 
 describe("updateTaskVcs", () => {
-  test("sets all VCS fields correctly", () => {
-    const task = createTaskExtended("Test task for VCS update", {
+  test("sets all VCS fields correctly", async () => {
+    const task = await createTaskExtended("Test task for VCS update", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });
 
-    const updated = updateTaskVcs(task.id, {
+    const updated = await updateTaskVcs(task.id, {
       vcsProvider: "github",
       vcsRepo: "desplega-ai/agent-swarm",
       vcsNumber: 42,
@@ -55,8 +55,8 @@ describe("updateTaskVcs", () => {
     expect(updated!.vcsUrl).toBe("https://github.com/desplega-ai/agent-swarm/pull/42");
   });
 
-  test("returns null for non-existent task", () => {
-    const result = updateTaskVcs("non-existent-id", {
+  test("returns null for non-existent task", async () => {
+    const result = await updateTaskVcs("non-existent-id", {
       vcsProvider: "github",
       vcsRepo: "owner/repo",
       vcsNumber: 1,
@@ -65,8 +65,8 @@ describe("updateTaskVcs", () => {
     expect(result).toBeNull();
   });
 
-  test("updates lastUpdatedAt", () => {
-    const task = createTaskExtended("Test lastUpdatedAt", {
+  test("updates lastUpdatedAt", async () => {
+    const task = await createTaskExtended("Test lastUpdatedAt", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });
@@ -74,7 +74,7 @@ describe("updateTaskVcs", () => {
     const before = new Date(task.lastUpdatedAt).getTime();
 
     // Small delay to ensure timestamp differs
-    const updated = updateTaskVcs(task.id, {
+    const updated = await updateTaskVcs(task.id, {
       vcsProvider: "github",
       vcsRepo: "owner/repo",
       vcsNumber: 10,
@@ -86,8 +86,8 @@ describe("updateTaskVcs", () => {
     expect(after).toBeGreaterThanOrEqual(before);
   });
 
-  test("overwrites existing VCS fields (last PR wins)", () => {
-    const task = createTaskExtended("Test overwrite VCS", {
+  test("overwrites existing VCS fields (last PR wins)", async () => {
+    const task = await createTaskExtended("Test overwrite VCS", {
       agentId: "vcs-track-agent-001",
       source: "github",
       vcsProvider: "github",
@@ -98,7 +98,7 @@ describe("updateTaskVcs", () => {
 
     expect(task.vcsNumber).toBe(1);
 
-    const updated = updateTaskVcs(task.id, {
+    const updated = await updateTaskVcs(task.id, {
       vcsProvider: "github",
       vcsRepo: "owner/repo",
       vcsNumber: 2,
@@ -110,17 +110,17 @@ describe("updateTaskVcs", () => {
     expect(updated!.vcsUrl).toBe("https://github.com/owner/repo/pull/2");
   });
 
-  test("findTaskByVcs finds task after updateTaskVcs", () => {
-    const task = createTaskExtended("Test findTaskByVcs linkage", {
+  test("findTaskByVcs finds task after updateTaskVcs", async () => {
+    const task = await createTaskExtended("Test findTaskByVcs linkage", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });
 
     // Before update — no VCS fields, shouldn't be found
-    const notFound = findTaskByVcs("owner/findme", 99);
+    const notFound = await findTaskByVcs("owner/findme", 99);
     expect(notFound).toBeNull();
 
-    updateTaskVcs(task.id, {
+    await updateTaskVcs(task.id, {
       vcsProvider: "github",
       vcsRepo: "owner/findme",
       vcsNumber: 99,
@@ -128,13 +128,13 @@ describe("updateTaskVcs", () => {
     });
 
     // After update — should be found (task is pending, not completed/failed)
-    const found = findTaskByVcs("owner/findme", 99);
+    const found = await findTaskByVcs("owner/findme", 99);
     expect(found).not.toBeNull();
     expect(found!.id).toBe(task.id);
   });
 
-  test("idempotent: calling twice with same data both succeed", () => {
-    const task = createTaskExtended("Test idempotency", {
+  test("idempotent: calling twice with same data both succeed", async () => {
+    const task = await createTaskExtended("Test idempotency", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });
@@ -146,8 +146,8 @@ describe("updateTaskVcs", () => {
       vcsUrl: "https://github.com/owner/idem/pull/50",
     };
 
-    const first = updateTaskVcs(task.id, vcs);
-    const second = updateTaskVcs(task.id, vcs);
+    const first = await updateTaskVcs(task.id, vcs);
+    const second = await updateTaskVcs(task.id, vcs);
 
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
@@ -155,13 +155,13 @@ describe("updateTaskVcs", () => {
     expect(second!.vcsNumber).toBe(50);
   });
 
-  test("supports gitlab provider", () => {
-    const task = createTaskExtended("Test gitlab VCS", {
+  test("supports gitlab provider", async () => {
+    const task = await createTaskExtended("Test gitlab VCS", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });
 
-    const updated = updateTaskVcs(task.id, {
+    const updated = await updateTaskVcs(task.id, {
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
       vcsNumber: 7,

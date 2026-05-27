@@ -16,7 +16,7 @@ beforeAll(async () => {
   } catch {
     // Ignore
   }
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
@@ -35,69 +35,69 @@ describe("getWorkflowsByScheduleId", () => {
   const scheduleId2 = crypto.randomUUID();
   const scheduleIdUnlinked = crypto.randomUUID();
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Workflow linked to scheduleId1
-    createWorkflow({
+    await createWorkflow({
       name: "wf-linked-1",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
       triggers: [{ type: "schedule", scheduleId: scheduleId1 }],
     });
 
     // Second workflow also linked to scheduleId1 (multiple workflows same schedule)
-    createWorkflow({
+    await createWorkflow({
       name: "wf-linked-2",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
       triggers: [{ type: "schedule", scheduleId: scheduleId1 }],
     });
 
     // Workflow linked to scheduleId2
-    createWorkflow({
+    await createWorkflow({
       name: "wf-linked-other",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
       triggers: [{ type: "schedule", scheduleId: scheduleId2 }],
     });
 
     // Disabled workflow linked to scheduleId1 — should NOT be returned
-    const disabled = createWorkflow({
+    const disabled = await createWorkflow({
       name: "wf-disabled",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
       triggers: [{ type: "schedule", scheduleId: scheduleId1 }],
     });
-    updateWorkflow(disabled.id, { enabled: false });
+    await updateWorkflow(disabled.id, { enabled: false });
 
     // Workflow with webhook trigger only (no schedule) — should NOT match
-    createWorkflow({
+    await createWorkflow({
       name: "wf-webhook-only",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
       triggers: [{ type: "webhook" }],
     });
   });
 
-  test("returns workflows with matching schedule trigger", () => {
-    const results = getWorkflowsByScheduleId(scheduleId1);
+  test("returns workflows with matching schedule trigger", async () => {
+    const results = await getWorkflowsByScheduleId(scheduleId1);
     expect(results.length).toBe(2);
     const names = results.map((w) => w.name).sort();
     expect(names).toEqual(["wf-linked-1", "wf-linked-2"]);
   });
 
-  test("returns empty when no workflows match", () => {
-    const results = getWorkflowsByScheduleId(scheduleIdUnlinked);
+  test("returns empty when no workflows match", async () => {
+    const results = await getWorkflowsByScheduleId(scheduleIdUnlinked);
     expect(results.length).toBe(0);
   });
 
-  test("ignores disabled workflows", () => {
-    const results = getWorkflowsByScheduleId(scheduleId1);
+  test("ignores disabled workflows", async () => {
+    const results = await getWorkflowsByScheduleId(scheduleId1);
     const names = results.map((w) => w.name);
     expect(names).not.toContain("wf-disabled");
   });
 
-  test("multiple workflows can reference the same schedule", () => {
-    const results = getWorkflowsByScheduleId(scheduleId1);
+  test("multiple workflows can reference the same schedule", async () => {
+    const results = await getWorkflowsByScheduleId(scheduleId1);
     expect(results.length).toBe(2);
   });
 
-  test("returns correct workflow for different schedule", () => {
-    const results = getWorkflowsByScheduleId(scheduleId2);
+  test("returns correct workflow for different schedule", async () => {
+    const results = await getWorkflowsByScheduleId(scheduleId2);
     expect(results.length).toBe(1);
     expect(results[0]!.name).toBe("wf-linked-other");
   });

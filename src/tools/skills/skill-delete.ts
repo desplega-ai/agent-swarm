@@ -27,7 +27,7 @@ export const registerSkillDeleteTool = (server: McpServer) => {
         };
       }
 
-      const existing = getSkillById(args.skillId);
+      const existing = await getSkillById(args.skillId);
       if (!existing) {
         return {
           content: [{ type: "text", text: "Skill not found." }],
@@ -39,7 +39,7 @@ export const registerSkillDeleteTool = (server: McpServer) => {
         };
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (existing.ownerAgentId !== requestInfo.agentId && !agent?.isLead) {
         return {
           content: [{ type: "text", text: "Only the owning agent or lead can delete this skill." }],
@@ -51,7 +51,7 @@ export const registerSkillDeleteTool = (server: McpServer) => {
         };
       }
 
-      const deleted = deleteSkill(args.skillId);
+      const deleted = await deleteSkill(args.skillId);
       return {
         content: [
           { type: "text", text: deleted ? `Deleted skill "${existing.name}".` : "Delete failed." },

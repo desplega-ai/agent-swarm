@@ -42,7 +42,7 @@ async function handleRequest(req: {
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
     if (!agent) {
       return { status: 404, body: { error: "Agent not found" } };
     }
@@ -52,7 +52,7 @@ async function handleRequest(req: {
 
     if (taskId) {
       // Check specific task
-      const task = getTaskById(taskId);
+      const task = await getTaskById(taskId);
       if (task && task.status === "cancelled") {
         return {
           status: 200,
@@ -71,7 +71,7 @@ async function handleRequest(req: {
     }
 
     // Return all recently cancelled tasks for agent
-    const cancelledTasks = getRecentlyCancelledTasksForAgent(myAgentId);
+    const cancelledTasks = await getRecentlyCancelledTasksForAgent(myAgentId);
     return { status: 200, body: { cancelled: cancelledTasks } };
   }
 
@@ -111,7 +111,7 @@ describe("Task Cancellation", () => {
     }
 
     // Initialize test database
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     // Start test server
     server = createTestServer();
@@ -142,29 +142,29 @@ describe("Task Cancellation", () => {
   });
 
   describe("cancelTask database function", () => {
-    test("should cancel a pending task", () => {
-      const leadAgent = createAgent({
+    test("should cancel a pending task", async () => {
+      const leadAgent = await createAgent({
         id: "lead-agent-cancel",
         name: "Lead Agent",
         isLead: true,
         status: "idle",
       });
 
-      const workerAgent = createAgent({
+      const workerAgent = await createAgent({
         id: "worker-agent-cancel",
         name: "Worker Agent",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task to cancel", {
+      const task = await createTaskExtended("Task to cancel", {
         creatorAgentId: leadAgent.id,
         agentId: workerAgent.id,
       });
 
       expect(task.status).toBe("pending");
 
-      const cancelled = cancelTask(task.id, "Test cancellation reason");
+      const cancelled = await cancelTask(task.id, "Test cancellation reason");
 
       expect(cancelled).not.toBeNull();
       expect(cancelled?.status).toBe("cancelled");
@@ -172,103 +172,103 @@ describe("Task Cancellation", () => {
       expect(cancelled?.finishedAt).toBeTruthy();
     });
 
-    test("should cancel an in_progress task", () => {
-      const workerAgent = createAgent({
+    test("should cancel an in_progress task", async () => {
+      const workerAgent = await createAgent({
         id: "worker-in-progress",
         name: "Worker In Progress",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task in progress to cancel", {
+      const task = await createTaskExtended("Task in progress to cancel", {
         creatorAgentId: "lead-agent-cancel",
         agentId: workerAgent.id,
       });
 
       // Start the task
-      startTask(task.id, workerAgent.id);
-      const startedTask = getTaskById(task.id);
+      await startTask(task.id, workerAgent.id);
+      const startedTask = await getTaskById(task.id);
       expect(startedTask?.status).toBe("in_progress");
 
-      const cancelled = cancelTask(task.id, "Cancelled while in progress");
+      const cancelled = await cancelTask(task.id, "Cancelled while in progress");
 
       expect(cancelled).not.toBeNull();
       expect(cancelled?.status).toBe("cancelled");
     });
 
-    test("should not cancel a completed task", () => {
-      const task = createTaskExtended("Completed task", {
+    test("should not cancel a completed task", async () => {
+      const task = await createTaskExtended("Completed task", {
         creatorAgentId: "lead-agent-cancel",
       });
 
       // Manually mark as completed via SQL
-      getDb().run("UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?", [
-        new Date().toISOString(),
-        task.id,
-      ]);
+      (await getDb()).run(
+        "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+        [new Date().toISOString(), task.id],
+      );
 
-      const completedTask = getTaskById(task.id);
+      const completedTask = await getTaskById(task.id);
       expect(completedTask?.status).toBe("completed");
 
-      const result = cancelTask(task.id, "Try to cancel completed");
+      const result = await cancelTask(task.id, "Try to cancel completed");
       expect(result).toBeNull();
     });
 
-    test("should not cancel a failed task", () => {
-      const task = createTaskExtended("Failed task", {
+    test("should not cancel a failed task", async () => {
+      const task = await createTaskExtended("Failed task", {
         creatorAgentId: "lead-agent-cancel",
       });
 
       // Manually mark as failed via SQL
-      getDb().run("UPDATE agent_tasks SET status = 'failed', finishedAt = ? WHERE id = ?", [
+      (await getDb()).run("UPDATE agent_tasks SET status = 'failed', finishedAt = ? WHERE id = ?", [
         new Date().toISOString(),
         task.id,
       ]);
 
-      const failedTask = getTaskById(task.id);
+      const failedTask = await getTaskById(task.id);
       expect(failedTask?.status).toBe("failed");
 
-      const result = cancelTask(task.id, "Try to cancel failed");
+      const result = await cancelTask(task.id, "Try to cancel failed");
       expect(result).toBeNull();
     });
 
-    test("should return null for non-existent task", () => {
-      const result = cancelTask("non-existent-task-id", "Reason");
+    test("should return null for non-existent task", async () => {
+      const result = await cancelTask("non-existent-task-id", "Reason");
       expect(result).toBeNull();
     });
 
-    test("should cancel an unassigned task", () => {
+    test("should cancel an unassigned task", async () => {
       // Tasks without an agentId have status "unassigned" — still cancellable
-      const task = createTaskExtended("Unassigned task", {
+      const task = await createTaskExtended("Unassigned task", {
         creatorAgentId: "lead-agent-cancel",
         // No agentId - so it's unassigned
       });
 
       expect(task.status).toBe("unassigned");
 
-      const result = cancelTask(task.id, "Cancel unassigned task");
+      const result = await cancelTask(task.id, "Cancel unassigned task");
       expect(result).not.toBeNull();
       expect(result!.status).toBe("cancelled");
       expect(result!.failureReason).toContain("Cancel unassigned task");
     });
 
-    test("should use default cancellation reason if none provided", () => {
+    test("should use default cancellation reason if none provided", async () => {
       const agentId = "worker-default-reason";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Default Reason",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task without reason", {
+      const task = await createTaskExtended("Task without reason", {
         creatorAgentId: "lead-agent-cancel",
         agentId: agentId, // Assign to agent so status is "pending" (cancellable)
       });
 
       expect(task.status).toBe("pending");
 
-      const cancelled = cancelTask(task.id);
+      const cancelled = await cancelTask(task.id);
 
       expect(cancelled).not.toBeNull();
       expect(cancelled?.failureReason).toBe("Cancelled by user");
@@ -276,28 +276,28 @@ describe("Task Cancellation", () => {
   });
 
   describe("getRecentlyCancelledTasksForAgent", () => {
-    test("should return cancelled tasks for an agent", () => {
+    test("should return cancelled tasks for an agent", async () => {
       const agentId = "worker-recent-cancelled";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Recent Cancelled",
         isLead: false,
         status: "idle",
       });
 
-      const task1 = createTaskExtended("Recent cancelled task 1", {
+      const task1 = await createTaskExtended("Recent cancelled task 1", {
         creatorAgentId: "lead-agent-cancel",
         agentId: agentId,
       });
-      const task2 = createTaskExtended("Recent cancelled task 2", {
+      const task2 = await createTaskExtended("Recent cancelled task 2", {
         creatorAgentId: "lead-agent-cancel",
         agentId: agentId,
       });
 
-      cancelTask(task1.id, "Reason 1");
-      cancelTask(task2.id, "Reason 2");
+      await cancelTask(task1.id, "Reason 1");
+      await cancelTask(task2.id, "Reason 2");
 
-      const cancelledTasks = getRecentlyCancelledTasksForAgent(agentId);
+      const cancelledTasks = await getRecentlyCancelledTasksForAgent(agentId);
 
       expect(cancelledTasks.length).toBeGreaterThanOrEqual(2);
       const taskIds = cancelledTasks.map((t) => t.id);
@@ -305,36 +305,36 @@ describe("Task Cancellation", () => {
       expect(taskIds).toContain(task2.id);
     });
 
-    test("should not return cancelled tasks from other agents", () => {
+    test("should not return cancelled tasks from other agents", async () => {
       const agentA = "agent-a-isolated";
       const agentB = "agent-b-isolated";
 
-      createAgent({
+      await createAgent({
         id: agentA,
         name: "Agent A",
         isLead: false,
         status: "idle",
       });
-      createAgent({
+      await createAgent({
         id: agentB,
         name: "Agent B",
         isLead: false,
         status: "idle",
       });
 
-      const taskA = createTaskExtended("Task for Agent A", {
+      const taskA = await createTaskExtended("Task for Agent A", {
         creatorAgentId: "lead-agent-cancel",
         agentId: agentA,
       });
-      const taskB = createTaskExtended("Task for Agent B", {
+      const taskB = await createTaskExtended("Task for Agent B", {
         creatorAgentId: "lead-agent-cancel",
         agentId: agentB,
       });
 
-      cancelTask(taskA.id, "Cancelled A");
-      cancelTask(taskB.id, "Cancelled B");
+      await cancelTask(taskA.id, "Cancelled A");
+      await cancelTask(taskB.id, "Cancelled B");
 
-      const cancelledForA = getRecentlyCancelledTasksForAgent(agentA);
+      const cancelledForA = await getRecentlyCancelledTasksForAgent(agentA);
       const taskIdsA = cancelledForA.map((t) => t.id);
       expect(taskIdsA).toContain(taskA.id);
       expect(taskIdsA).not.toContain(taskB.id);
@@ -342,9 +342,9 @@ describe("Task Cancellation", () => {
   });
 
   describe("updateAgentStatusFromCapacity after cancellation", () => {
-    test("should update agent status to idle after task cancellation", () => {
+    test("should update agent status to idle after task cancellation", async () => {
       const agentId = "worker-capacity-update";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Capacity",
         isLead: false,
@@ -352,24 +352,24 @@ describe("Task Cancellation", () => {
         maxTasks: 1,
       });
 
-      const task = createTaskExtended("Task for capacity test", {
+      const task = await createTaskExtended("Task for capacity test", {
         creatorAgentId: "lead-agent-cancel",
         agentId: agentId,
       });
 
       // Start the task - agent should be busy
-      startTask(task.id, agentId);
-      let agent = getAgentById(agentId);
+      await startTask(task.id, agentId);
+      let agent = await getAgentById(agentId);
       expect(agent?.status).toBe("busy");
 
       // Cancel the task
-      const cancelled = cancelTask(task.id, "Test cancellation");
+      const cancelled = await cancelTask(task.id, "Test cancellation");
       expect(cancelled).not.toBeNull();
 
       // Update agent status based on capacity
-      updateAgentStatusFromCapacity(agentId);
+      await updateAgentStatusFromCapacity(agentId);
 
-      agent = getAgentById(agentId);
+      agent = await getAgentById(agentId);
       expect(agent?.status).toBe("idle");
     });
   });
@@ -391,7 +391,7 @@ describe("Task Cancellation", () => {
 
     test("should return empty array when no cancelled tasks", async () => {
       const agentId = "worker-no-cancelled";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker No Cancelled",
         isLead: false,
@@ -409,19 +409,19 @@ describe("Task Cancellation", () => {
 
     test("should return cancelled tasks for agent", async () => {
       const agentId = "worker-with-cancelled";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker With Cancelled",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task to be cancelled for endpoint test", {
+      const task = await createTaskExtended("Task to be cancelled for endpoint test", {
         creatorAgentId: "lead-agent-cancel",
         agentId: agentId,
       });
 
-      cancelTask(task.id, "Endpoint test reason");
+      await cancelTask(task.id, "Endpoint test reason");
 
       const response = await fetch(`${baseUrl}/cancelled-tasks`, {
         headers: { "X-Agent-ID": agentId },
@@ -440,19 +440,19 @@ describe("Task Cancellation", () => {
 
     test("should check specific task with ?taskId= query param", async () => {
       const agentId = "worker-specific-task";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Specific Task",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Specific task to check", {
+      const task = await createTaskExtended("Specific task to check", {
         creatorAgentId: "lead-agent-cancel",
         agentId: agentId,
       });
 
-      cancelTask(task.id, "Specific task cancelled");
+      await cancelTask(task.id, "Specific task cancelled");
 
       // Check the specific cancelled task
       const response = await fetch(`${baseUrl}/cancelled-tasks?taskId=${task.id}`, {
@@ -470,14 +470,14 @@ describe("Task Cancellation", () => {
 
     test("should return empty when ?taskId= points to non-cancelled task", async () => {
       const agentId = "worker-not-cancelled-task";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Not Cancelled Task",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task not cancelled", {
+      const task = await createTaskExtended("Task not cancelled", {
         creatorAgentId: "lead-agent-cancel",
         agentId: agentId,
       });
@@ -494,7 +494,7 @@ describe("Task Cancellation", () => {
 
     test("should return empty when ?taskId= points to non-existent task", async () => {
       const agentId = "worker-nonexistent-task";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Non-existent Task",
         isLead: false,

@@ -35,12 +35,12 @@ const SWARM_MARKER_FILE = ".swarm-managed";
  * For simple skills (content in DB): writes SKILL.md to ~/.claude/skills/<name>/
  * For complex skills (isComplex=true): skipped here (handled by npx in entrypoint)
  */
-export function syncSkillsToFilesystem(
+export async function syncSkillsToFilesystem(
   agentId: string,
   harnessType: "claude" | "pi" | "codex" | "all" = "all",
   homeOverride?: string,
-): SkillSyncResult {
-  const skills = getAgentSkills(agentId);
+): Promise<SkillSyncResult> {
+  const skills = await getAgentSkills(agentId);
   const home = homeOverride ?? homedir();
   const errors: string[] = [];
   let synced = 0;
@@ -136,8 +136,8 @@ export interface SkillsSignature {
  * uninstall, toggle, or skill-update mutates at least one of them. Output is
  * deterministic and contains no timestamps beyond per-row mutation fields.
  */
-export function computeAgentSkillsSignature(agentId: string): SkillsSignature {
-  const skills = getAgentSkills(agentId);
+export async function computeAgentSkillsSignature(agentId: string): Promise<SkillsSignature> {
+  const skills = await getAgentSkills(agentId);
   const sorted = [...skills].sort((a, b) => a.id.localeCompare(b.id));
   const canonical = JSON.stringify(
     sorted.map((s) => [

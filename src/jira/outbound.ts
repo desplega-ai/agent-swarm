@@ -100,7 +100,7 @@ async function postLifecycleComment(
   eventName: string,
   body: string,
 ): Promise<void> {
-  const sync = getTrackerSync("jira", "task", taskId);
+  const sync = await getTrackerSync("jira", "task", taskId);
   if (!sync) return;
 
   if (shouldSkipForLoopPrevention(sync)) {
@@ -131,7 +131,7 @@ async function postLifecycleComment(
       return;
     }
 
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "swarm",
       lastSyncedAt: new Date().toISOString(),
     });

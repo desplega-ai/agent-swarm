@@ -50,24 +50,28 @@ describe("Phase 4 — credential-status HTTP endpoints", () => {
     } catch {
       // first run
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     // Seed two agents — one will stay idle, one will be flipped to
     // waiting_for_credentials via the PUT endpoint below.
-    readyAgentId = createAgent({
-      name: readyAgentName,
-      isLead: false,
-      status: "idle",
-      capabilities: [],
-      maxTasks: 1,
-    }).id;
-    blockedAgentId = createAgent({
-      name: blockedAgentName,
-      isLead: false,
-      status: "idle",
-      capabilities: [],
-      maxTasks: 1,
-    }).id;
+    readyAgentId = (
+      await createAgent({
+        name: readyAgentName,
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+        maxTasks: 1,
+      })
+    ).id;
+    blockedAgentId = (
+      await createAgent({
+        name: blockedAgentName,
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+        maxTasks: 1,
+      })
+    ).id;
 
     server = createTestServer();
     await new Promise<void>((resolve) => server.listen(TEST_PORT, () => resolve()));

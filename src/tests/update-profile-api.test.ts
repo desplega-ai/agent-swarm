@@ -87,7 +87,7 @@ async function handleRequest(
       return { status: 400, body: { error: "identityMd must be 64KB or less" } };
     }
 
-    const agent = updateAgentProfile(agentId, {
+    const agent = await updateAgentProfile(agentId, {
       role: body.role,
       description: body.description,
       capabilities: body.capabilities,
@@ -137,7 +137,7 @@ describe("PUT /api/agents/:id/profile", () => {
     }
 
     // Initialize test database
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     // Start test server
     server = createTestServer();
@@ -234,7 +234,7 @@ describe("PUT /api/agents/:id/profile", () => {
   describe("Update Role", () => {
     test("should update agent role successfully", async () => {
       const agentId = "test-agent-role-update";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Role Update",
         isLead: false,
@@ -253,13 +253,13 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(data.role).toBe("Frontend Developer");
 
       // Verify in database
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.role).toBe("Frontend Developer");
     });
 
     test("should allow role at exactly 100 characters", async () => {
       const agentId = "test-agent-role-100";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Role 100",
         isLead: false,
@@ -280,7 +280,7 @@ describe("PUT /api/agents/:id/profile", () => {
 
     test("should allow clearing role by setting empty string", async () => {
       const agentId = "test-agent-role-clear";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Role Clear",
         isLead: false,
@@ -310,7 +310,7 @@ describe("PUT /api/agents/:id/profile", () => {
   describe("Update Description", () => {
     test("should update agent description successfully", async () => {
       const agentId = "test-agent-desc-update";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Desc Update",
         isLead: false,
@@ -329,7 +329,7 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(data.description).toBe("This is a test agent for development tasks");
 
       // Verify in database
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.description).toBe("This is a test agent for development tasks");
     });
   });
@@ -337,7 +337,7 @@ describe("PUT /api/agents/:id/profile", () => {
   describe("Update Capabilities", () => {
     test("should update agent capabilities successfully", async () => {
       const agentId = "test-agent-caps-update";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Caps Update",
         isLead: false,
@@ -356,13 +356,13 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(data.capabilities).toEqual(["typescript", "react", "node"]);
 
       // Verify in database
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.capabilities).toEqual(["typescript", "react", "node"]);
     });
 
     test("should allow empty capabilities array", async () => {
       const agentId = "test-agent-caps-empty";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Caps Empty",
         isLead: false,
@@ -384,7 +384,7 @@ describe("PUT /api/agents/:id/profile", () => {
   describe("Update Multiple Fields", () => {
     test("should update all profile fields at once", async () => {
       const agentId = "test-agent-all-fields";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent All Fields",
         isLead: false,
@@ -414,7 +414,7 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(data.capabilities).toEqual(["python", "docker", "kubernetes"]);
 
       // Verify in database
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.role).toBe("Senior Engineer");
       expect(agent?.description).toBe("Handles complex tasks");
       expect(agent?.capabilities).toEqual(["python", "docker", "kubernetes"]);
@@ -422,7 +422,7 @@ describe("PUT /api/agents/:id/profile", () => {
 
     test("should preserve existing fields when updating only some fields", async () => {
       const agentId = "test-agent-partial-update";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Partial Update",
         isLead: false,
@@ -463,7 +463,7 @@ describe("PUT /api/agents/:id/profile", () => {
   describe("Update claudeMd", () => {
     test("should update agent claudeMd successfully", async () => {
       const agentId = "test-agent-claudemd-update";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent ClaudeMd Update",
         isLead: false,
@@ -483,7 +483,7 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(data.claudeMd).toBe(claudeMdContent);
 
       // Verify in database
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.claudeMd).toBe(claudeMdContent);
     });
 
@@ -502,7 +502,7 @@ describe("PUT /api/agents/:id/profile", () => {
 
     test("should allow claudeMd at exactly 64KB", async () => {
       const agentId = "test-agent-claudemd-64kb";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent ClaudeMd 64KB",
         isLead: false,
@@ -523,7 +523,7 @@ describe("PUT /api/agents/:id/profile", () => {
 
     test("should allow clearing claudeMd by setting empty string", async () => {
       const agentId = "test-agent-claudemd-clear";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent ClaudeMd Clear",
         isLead: false,
@@ -551,7 +551,7 @@ describe("PUT /api/agents/:id/profile", () => {
 
     test("should preserve claudeMd when updating other fields", async () => {
       const agentId = "test-agent-claudemd-preserve";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent ClaudeMd Preserve",
         isLead: false,
@@ -583,7 +583,7 @@ describe("PUT /api/agents/:id/profile", () => {
   describe("Update soulMd", () => {
     test("should update agent soulMd successfully", async () => {
       const agentId = "test-agent-soulmd-update";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent SoulMd Update",
         isLead: false,
@@ -603,7 +603,7 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(data.soulMd).toBe(soulContent);
 
       // Verify in database
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.soulMd).toBe(soulContent);
     });
 
@@ -624,7 +624,7 @@ describe("PUT /api/agents/:id/profile", () => {
   describe("Update identityMd", () => {
     test("should update agent identityMd successfully", async () => {
       const agentId = "test-agent-identitymd-update";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent IdentityMd Update",
         isLead: false,
@@ -644,7 +644,7 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(data.identityMd).toBe(identityContent);
 
       // Verify in database
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.identityMd).toBe(identityContent);
     });
 
@@ -663,7 +663,7 @@ describe("PUT /api/agents/:id/profile", () => {
 
     test("should preserve soulMd and identityMd when updating other fields", async () => {
       const agentId = "test-agent-identity-preserve";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Identity Preserve",
         isLead: false,

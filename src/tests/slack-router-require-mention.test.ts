@@ -12,10 +12,15 @@ const TEST_DB_PATH = "./test-slack-router-require-mention.sqlite";
 let leadAgent: Agent;
 let workerAgent: Agent;
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
-  leadAgent = createAgent({ name: "lead", isLead: true, status: "idle", capabilities: [] });
-  workerAgent = createAgent({ name: "worker", isLead: false, status: "idle", capabilities: [] });
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
+  leadAgent = await createAgent({ name: "lead", isLead: true, status: "idle", capabilities: [] });
+  workerAgent = await createAgent({
+    name: "worker",
+    isLead: false,
+    status: "idle",
+    capabilities: [],
+  });
 });
 
 afterAll(() => {
@@ -36,11 +41,11 @@ afterAll(() => {
 });
 
 describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
-  test("non-mention thread message returns no matches (silently dropped)", () => {
+  test("non-mention thread message returns no matches (silently dropped)", async () => {
     const channelId = "C_REQ_MENTION_1";
     const threadTs = "1000.0001";
 
-    createTaskExtended("active task", {
+    await createTaskExtended("active task", {
       agentId: workerAgent.id,
       source: "slack",
       slackChannelId: channelId,
@@ -48,7 +53,7 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage("just a follow-up comment", "BOT123", false, {
+    const matches = await routeMessage("just a follow-up comment", "BOT123", false, {
       channelId,
       threadTs,
     });
@@ -56,11 +61,11 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
     expect(matches).toHaveLength(0);
   });
 
-  test("@mention thread message still routes to working agent", () => {
+  test("@mention thread message still routes to working agent", async () => {
     const channelId = "C_REQ_MENTION_2";
     const threadTs = "2000.0001";
 
-    createTaskExtended("active task", {
+    await createTaskExtended("active task", {
       agentId: workerAgent.id,
       source: "slack",
       slackChannelId: channelId,
@@ -68,7 +73,7 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage("<@BOT123> please check this", "BOT123", true, {
+    const matches = await routeMessage("<@BOT123> please check this", "BOT123", true, {
       channelId,
       threadTs,
     });
@@ -78,11 +83,11 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
     expect(matches[0].matchedText).toBe("thread follow-up");
   });
 
-  test("explicit swarm#<uuid> still works without mention", () => {
+  test("explicit swarm#<uuid> still works without mention", async () => {
     const channelId = "C_REQ_MENTION_3";
     const threadTs = "3000.0001";
 
-    createTaskExtended("active task", {
+    await createTaskExtended("active task", {
       agentId: workerAgent.id,
       source: "slack",
       slackChannelId: channelId,
@@ -90,7 +95,7 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage(`swarm#${workerAgent.id} do this`, "BOT123", false, {
+    const matches = await routeMessage(`swarm#${workerAgent.id} do this`, "BOT123", false, {
       channelId,
       threadTs,
     });
@@ -100,18 +105,18 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
     expect(matches[0].matchedText).toBe(`swarm#${workerAgent.id}`);
   });
 
-  test("@mention in thread with offline worker routes to lead", () => {
+  test("@mention in thread with offline worker routes to lead", async () => {
     const channelId = "C_REQ_MENTION_4";
     const threadTs = "4000.0001";
 
-    const offlineWorker = createAgent({
+    const offlineWorker = await createAgent({
       name: "offline-worker-rm",
       isLead: false,
       status: "offline",
       capabilities: [],
     });
 
-    createTaskExtended("task for offline", {
+    await createTaskExtended("task for offline", {
       agentId: offlineWorker.id,
       source: "slack",
       slackChannelId: channelId,
@@ -119,7 +124,7 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage("<@BOT123> follow up", "BOT123", true, {
+    const matches = await routeMessage("<@BOT123> follow up", "BOT123", true, {
       channelId,
       threadTs,
     });
@@ -129,11 +134,11 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
     expect(matches[0].matchedText).toBe("thread follow-up (lead fallback)");
   });
 
-  test("non-mention in thread with offline worker returns no matches", () => {
+  test("non-mention in thread with offline worker returns no matches", async () => {
     const channelId = "C_REQ_MENTION_4"; // same thread as above
     const threadTs = "4000.0001";
 
-    const matches = routeMessage("just chatting", "BOT123", false, {
+    const matches = await routeMessage("just chatting", "BOT123", false, {
       channelId,
       threadTs,
     });

@@ -6,9 +6,9 @@ import {
   findCompletedTaskInThread,
   getActiveTaskCount,
   getAgentById,
-  getDb,
   getTaskById,
   hasCapacity,
+  runDbTransaction,
 } from "@/be/db";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
@@ -132,7 +132,7 @@ export async function sendTaskHandler(
 
   const creatorAgentId = ctx.kind === "owner" ? ctx.agentId : undefined;
   const sourceTaskId = ctx.kind === "owner" ? ctx.sourceTaskId : undefined;
-  const callerTask = sourceTaskId ? getTaskById(sourceTaskId) : null;
+  const callerTask = sourceTaskId ? await getTaskById(sourceTaskId) : null;
   const requestedByUserId =
     ctx.kind === "user"
       ? ctx.userId
@@ -162,7 +162,7 @@ export async function sendTaskHandler(
   // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
   let effectiveAgentId = agentId;
   if (effectiveParentTaskId && !agentId) {
-    const parentTask = getTaskById(effectiveParentTaskId);
+    const parentTask = await getTaskById(effectiveParentTaskId);
     if (parentTask?.agentId) {
       effectiveAgentId = parentTask.agentId;
     }
@@ -170,7 +170,7 @@ export async function sendTaskHandler(
 
   // Dedup guard: check for similar recent tasks
   if (!allowDuplicate && creatorAgentId) {
-    const duplicate = findDuplicateTask({
+    const duplicate = await findDuplicateTask({
       taskDescription: task,
       creatorAgentId,
       targetAgentId: effectiveAgentId ?? undefined,
@@ -193,13 +193,13 @@ export async function sendTaskHandler(
   // check if there are completed tasks in the same Slack thread recently.
   // This prevents the cycle: worker completes → follow-up → Lead re-delegates → repeat.
   if (sourceTaskId) {
-    const sourceTask = getTaskById(sourceTaskId);
+    const sourceTask = await getTaskById(sourceTaskId);
     if (
       sourceTask?.taskType === "follow-up" &&
       sourceTask.slackThreadTs &&
       sourceTask.slackChannelId
     ) {
-      const recentCompleted = findCompletedTaskInThread(
+      const recentCompleted = await findCompletedTaskInThread(
         sourceTask.slackChannelId,
         sourceTask.slackThreadTs,
         2880, // 48 hours in minutes
@@ -218,12 +218,12 @@ export async function sendTaskHandler(
     }
   }
 
-  const txn = getDb().transaction(() => {
+  const result = await runDbTransaction(async () => {
     const finalTags = tags;
 
     // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
     if (!effectiveAgentId) {
-      const newTask = createTaskExtended(task, {
+      const newTask = await createTaskExtended(task, {
         creatorAgentId,
         requestedByUserId,
         sourceTaskId,
@@ -247,7 +247,7 @@ export async function sendTaskHandler(
       };
     }
 
-    const agent = getAgentById(effectiveAgentId);
+    const agent = await getAgentById(effectiveAgentId);
 
     if (!agent) {
       return {
@@ -264,8 +264,8 @@ export async function sendTaskHandler(
     }
 
     // For direct assignment (not offer), check if agent has capacity
-    if (!offerMode && !hasCapacity(effectiveAgentId)) {
-      const activeCount = getActiveTaskCount(effectiveAgentId);
+    if (!offerMode && !(await hasCapacity(effectiveAgentId))) {
+      const activeCount = await getActiveTaskCount(effectiveAgentId);
       return {
         success: false,
         message: `Agent "${agent.name}" is at capacity (${activeCount}/${agent.maxTasks ?? 1} tasks). Use offerMode: true to offer the task instead, or wait for a task to complete.`,
@@ -274,7 +274,7 @@ export async function sendTaskHandler(
 
     if (offerMode) {
       // Offer the task to the agent (they must accept/reject)
-      const newTask = createTaskExtended(task, {
+      const newTask = await createTaskExtended(task, {
         offeredTo: effectiveAgentId,
         creatorAgentId,
         requestedByUserId,
@@ -300,7 +300,7 @@ export async function sendTaskHandler(
     }
 
     // Direct assignment
-    const newTask = createTaskExtended(task, {
+    const newTask = await createTaskExtended(task, {
       agentId: effectiveAgentId,
       creatorAgentId,
       requestedByUserId,
@@ -325,7 +325,6 @@ export async function sendTaskHandler(
     };
   });
 
-  const result = txn();
   const structuredContent = {
     yourAgentId: creatorAgentId,
     ...result,

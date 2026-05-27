@@ -9,11 +9,13 @@ import { isSensitiveKey } from "../utils/secret-scrubber";
  *   - `secret.NAME` -> look up in DB config store (global scope, isSecret=true)
  *   - literal string -> pass through
  */
-export function resolveInputs(input: Record<string, string>): Record<string, string> {
+export async function resolveInputs(
+  input: Record<string, string>,
+): Promise<Record<string, string>> {
   const resolved: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(input)) {
-    resolved[key] = resolveInputValue(value);
+    resolved[key] = await resolveInputValue(value);
   }
 
   return resolved;
@@ -24,7 +26,7 @@ export function resolveInputs(input: Record<string, string>): Record<string, str
  * references. A plain string is returned unchanged. Throws if a referenced
  * env var or swarm secret cannot be found.
  */
-export function resolveInputValue(value: string): string {
+export async function resolveInputValue(value: string): Promise<string> {
   // Env var reference: ${MY_VAR}
   const envMatch = /^\$\{(.+)\}$/.exec(value);
   if (envMatch?.[1]) {
@@ -39,7 +41,7 @@ export function resolveInputValue(value: string): string {
   // Secret reference: secret.NAME
   if (value.startsWith("secret.")) {
     const secretName = value.slice("secret.".length);
-    const configs = getSwarmConfigs({ scope: "global", key: secretName });
+    const configs = await getSwarmConfigs({ scope: "global", key: secretName });
     const secretConfig = configs.find((c) => c.isSecret);
     if (!secretConfig) {
       throw new Error(`Secret "${secretName}" not found in config store`);

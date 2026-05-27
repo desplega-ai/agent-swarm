@@ -45,7 +45,7 @@ describe("GET /p/:id — JSON page redirect", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
     // Pin APP_URL so the redirect is deterministic across hosts.
     process.env.APP_URL = "http://localhost:5274";
     server = createTestServer();

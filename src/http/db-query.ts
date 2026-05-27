@@ -15,12 +15,12 @@ export interface DbQueryResult {
  * Execute a read-only SQL query against the swarm database.
  * Detects write statements via bun:sqlite's columnNames (empty for INSERT/UPDATE/DELETE/DROP).
  */
-export function executeReadOnlyQuery(
+export async function executeReadOnlyQuery(
   sql: string,
   params: unknown[] = [],
   maxRows?: number,
-): DbQueryResult {
-  const stmt = getDb().prepare(sql);
+): Promise<DbQueryResult> {
+  const stmt = (await getDb()).prepare(sql);
 
   // bun:sqlite: columnNames is empty for write statements, populated for SELECT/PRAGMA/EXPLAIN
   if (stmt.columnNames.length === 0) {
@@ -80,7 +80,7 @@ export async function handleDbQuery(
   if (!parsed) return true;
 
   try {
-    const result = executeReadOnlyQuery(parsed.body.sql, parsed.body.params);
+    const result = await executeReadOnlyQuery(parsed.body.sql, parsed.body.params);
     json(res, result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

@@ -20,14 +20,14 @@ function normalizeOAuthTokens(row: OAuthTokens): OAuthTokens {
   };
 }
 
-export function getOAuthApp(provider: string): OAuthApp | null {
-  const row = getDb()
+export async function getOAuthApp(provider: string): Promise<OAuthApp | null> {
+  const row = (await getDb())
     .query("SELECT * FROM oauth_apps WHERE provider = ?")
     .get(provider) as OAuthApp | null;
   return row ? normalizeOAuthApp(row) : null;
 }
 
-export function upsertOAuthApp(
+export async function upsertOAuthApp(
   provider: string,
   data: {
     clientId: string;
@@ -38,7 +38,7 @@ export function upsertOAuthApp(
     scopes: string;
     metadata?: string;
   },
-): void {
+): Promise<void> {
   // metadata is treated as a runtime-owned column (cloudId, webhookIds, etc.
   // are written by OAuth callback + webhook-register flows). On INSERT we
   // seed it with whatever the caller passed (or "{}"); on UPDATE we ONLY
@@ -68,7 +68,7 @@ export function upsertOAuthApp(
          scopes = excluded.scopes,
          updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`;
   if (metadataProvided) {
-    getDb()
+    (await getDb())
       .query(sql)
       .run(
         provider,
@@ -81,7 +81,7 @@ export function upsertOAuthApp(
         data.metadata as string,
       );
   } else {
-    getDb()
+    (await getDb())
       .query(sql)
       .run(
         provider,
@@ -97,14 +97,14 @@ export function upsertOAuthApp(
 
 // ── OAuth Tokens ──
 
-export function getOAuthTokens(provider: string): OAuthTokens | null {
-  const row = getDb()
+export async function getOAuthTokens(provider: string): Promise<OAuthTokens | null> {
+  const row = (await getDb())
     .query("SELECT * FROM oauth_tokens WHERE provider = ?")
     .get(provider) as OAuthTokens | null;
   return row ? normalizeOAuthTokens(row) : null;
 }
 
-export function storeOAuthTokens(
+export async function storeOAuthTokens(
   provider: string,
   data: {
     accessToken: string;
@@ -112,8 +112,8 @@ export function storeOAuthTokens(
     expiresAt: string;
     scope?: string | null;
   },
-): void {
-  getDb()
+): Promise<void> {
+  (await getDb())
     .query(
       `INSERT INTO oauth_tokens (provider, accessToken, refreshToken, expiresAt, scope)
        VALUES (?, ?, ?, ?, ?)
@@ -127,7 +127,7 @@ export function storeOAuthTokens(
     .run(provider, data.accessToken, data.refreshToken ?? null, data.expiresAt, data.scope ?? null);
 }
 
-export function updateOAuthTokensAfterRefresh(
+export async function updateOAuthTokensAfterRefresh(
   provider: string,
   expectedRefreshToken: string,
   data: {
@@ -136,8 +136,8 @@ export function updateOAuthTokensAfterRefresh(
     expiresAt: string;
     scope?: string | null;
   },
-): void {
-  const result = getDb()
+): Promise<void> {
+  const result = (await getDb())
     .query(
       `UPDATE oauth_tokens
        SET accessToken = ?,
@@ -158,7 +158,7 @@ export function updateOAuthTokensAfterRefresh(
 
   if (result.changes === 1) return;
 
-  const current = getOAuthTokens(provider);
+  const current = await getOAuthTokens(provider);
   if (!current) {
     throw new Error(`OAuth token refresh persistence failed for ${provider}: token row missing`);
   }
@@ -170,12 +170,15 @@ export function updateOAuthTokensAfterRefresh(
   throw new Error(`OAuth token refresh persistence failed for ${provider}: no rows updated`);
 }
 
-export function deleteOAuthTokens(provider: string): void {
-  getDb().query("DELETE FROM oauth_tokens WHERE provider = ?").run(provider);
+export async function deleteOAuthTokens(provider: string): Promise<void> {
+  (await getDb()).query("DELETE FROM oauth_tokens WHERE provider = ?").run(provider);
 }
 
-export function isTokenExpiringSoon(provider: string, bufferMs = 5 * 60 * 1000): boolean {
-  const tokens = getOAuthTokens(provider);
+export async function isTokenExpiringSoon(
+  provider: string,
+  bufferMs = 5 * 60 * 1000,
+): Promise<boolean> {
+  const tokens = await getOAuthTokens(provider);
   if (!tokens) return true;
   const expiresAt = new Date(tokens.expiresAt).getTime();
   return expiresAt - Date.now() < bufferMs;

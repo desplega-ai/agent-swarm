@@ -42,7 +42,7 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
       }
 
       // Only leads can install global/swarm remote skills
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent?.isLead) {
         return {
           content: [{ type: "text", text: "Only lead agents can install remote skills." }],
@@ -101,7 +101,7 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
           description = `Complex skill from ${args.sourceRepo}`;
         }
 
-        const skill = createSkill({
+        const skill = await createSkill({
           name,
           description,
           content,

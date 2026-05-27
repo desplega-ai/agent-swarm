@@ -15,7 +15,7 @@ let server: Server;
 const originalFetch = globalThis.fetch;
 
 beforeAll(async () => {
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url || "";
     const pathEnd = url.indexOf("?");
@@ -65,22 +65,22 @@ async function agentMcpServers(
 
 describe("resolveSecrets integration — OAuth Authorization injection", () => {
   test("OAuth server with connected token gets Bearer header", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent",
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-ok",
       transport: "http",
       url: "https://mcp.example.com",
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await installMcpServer(agent.id, mcp.id);
+    await setMcpServerAuthMethod(mcp.id, "oauth");
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "bearer-live-123",
       refreshToken: null,
@@ -106,22 +106,22 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     // `token_type: "bearer"`. Some resource servers then reject the lowercase
     // prefix with 401. The fix in src/http/mcp-servers.ts normalizes the
     // scheme to capital "Bearer". See GitHub issue #368.
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-lowercase",
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-lowercase-bearer",
       transport: "http",
       url: "https://mcp.example.com",
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await installMcpServer(agent.id, mcp.id);
+    await setMcpServerAuthMethod(mcp.id, "oauth");
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "lowercase-token-xyz",
       refreshToken: null,
@@ -145,22 +145,22 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
   test("non-bearer tokenType (e.g. 'MAC') is preserved verbatim in Authorization header", async () => {
     // RFC 6749 allows non-bearer token types. The normalization must only
     // touch the bearer scheme and leave others alone.
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-mac",
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-mac",
       transport: "http",
       url: "https://mcp.example.com",
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await installMcpServer(agent.id, mcp.id);
+    await setMcpServerAuthMethod(mcp.id, "oauth");
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "mac-token-xyz",
       refreshToken: null,
@@ -181,21 +181,21 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
   });
 
   test("OAuth server without token row surfaces authError", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-missing",
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-no-token",
       transport: "http",
       url: "https://mcp.example.com",
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
+    await installMcpServer(agent.id, mcp.id);
+    await setMcpServerAuthMethod(mcp.id, "oauth");
 
     const result = await agentMcpServers(agent.id);
     const match = result.servers.find((s) => s.id === mcp.id);
@@ -205,22 +205,22 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
   });
 
   test("OAuth server with expired token (no refresh) reports lastErrorMessage", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-expired",
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-expired",
       transport: "http",
       url: "https://mcp.example.com",
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await installMcpServer(agent.id, mcp.id);
+    await setMcpServerAuthMethod(mcp.id, "oauth");
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "stale",
       refreshToken: null, // no refresh available → ensureMcpToken flips to 'expired'
@@ -244,13 +244,13 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     // Seed a server that sets a static "Authorization" header via headerConfigKeys,
     // then flip it to authMethod=oauth with a connected token. The oauth branch
     // should OVERRIDE the static header even if the config key resolves.
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-strip",
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-strip",
       transport: "http",
       url: "https://mcp.example.com",
@@ -258,9 +258,9 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       ownerAgentId: agent.id,
       headerConfigKeys: JSON.stringify({ Authorization: "STATIC_BEARER" }),
     });
-    installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await installMcpServer(agent.id, mcp.id);
+    await setMcpServerAuthMethod(mcp.id, "oauth");
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "new-bearer",
       refreshToken: null,
@@ -279,20 +279,20 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
   });
 
   test("static server retains default authError=null in the response shape", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "static-agent",
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-static",
       transport: "http",
       url: "https://mcp.example.com",
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
+    await installMcpServer(agent.id, mcp.id);
 
     const result = await agentMcpServers(agent.id);
     const match = result.servers.find((s) => s.id === mcp.id);

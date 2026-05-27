@@ -3,7 +3,7 @@ import { createServer } from "@/server";
 import { closeDb } from "./be/db";
 
 async function main() {
-  const server = createServer();
+  const server = await createServer();
   const transport = new StdioServerTransport();
 
   await server.connect(transport);

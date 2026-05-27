@@ -56,9 +56,9 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
 
       // Find the schedule
       const schedule = scheduleId
-        ? getScheduledTaskById(scheduleId)
+        ? await getScheduledTaskById(scheduleId)
         : name
-          ? getScheduledTaskByName(name)
+          ? await getScheduledTaskByName(name)
           : null;
 
       if (!schedule) {
@@ -72,7 +72,7 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
       }
 
       // Check authorization (creator or lead)
-      const caller = getAgentById(requestInfo.agentId);
+      const caller = await getAgentById(requestInfo.agentId);
       const isCreator = schedule.createdByAgentId === requestInfo.agentId;
       const isLead = caller?.isLead === true;
 
@@ -87,7 +87,7 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
       }
 
       try {
-        const deleted = deleteScheduledTask(schedule.id);
+        const deleted = await deleteScheduledTask(schedule.id);
 
         if (!deleted) {
           return {

@@ -101,9 +101,12 @@ function createTestRegistry(): ExecutorRegistry {
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(def: WorkflowDefinition, overrides?: Partial<Workflow>): Workflow {
+async function makeWorkflow(
+  def: WorkflowDefinition,
+  overrides?: Partial<Workflow>,
+): Promise<Workflow> {
   workflowCounter++;
-  const workflow = createWorkflow({
+  const workflow = await createWorkflow({
     name: overrides?.name || `test-io-schemas-${workflowCounter}-${Date.now()}`,
     definition: def,
     triggers: overrides?.triggers,
@@ -123,13 +126,13 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
     } catch {
       // File doesn't exist
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }
@@ -301,9 +304,9 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { source: "test" }, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -324,9 +327,9 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { source: "webhook" }, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -352,9 +355,9 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { val: "hi" }, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -384,9 +387,9 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { message: "hello" }, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
     });
 
@@ -408,10 +411,10 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       // Pass a string instead of a number
       const runId = await startWorkflowExecution(workflow, { count: "not-a-number" }, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("Input schema validation failed");
     });
@@ -433,9 +436,9 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("name");
     });
@@ -464,9 +467,9 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
     });
 
@@ -488,9 +491,9 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("Output schema validation failed");
     });
@@ -518,13 +521,13 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
       };
 
       // First run completes normally
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       // Now manually corrupt the stored output by updating the DB
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const step1 = steps.find((s) => s.nodeId === "step1");
       expect(step1).toBeDefined();
 
@@ -610,9 +613,9 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;

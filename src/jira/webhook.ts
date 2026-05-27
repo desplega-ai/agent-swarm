@@ -57,13 +57,13 @@ export function synthesizeDeliveryId(body: Record<string, unknown>, rawBody: str
 }
 
 /** Public form so callers (and tests) can poke the same path. */
-export function isDuplicateDelivery(deliveryId: string): boolean {
-  return hasTrackerDelivery("jira", deliveryId);
+export async function isDuplicateDelivery(deliveryId: string): Promise<boolean> {
+  return await hasTrackerDelivery("jira", deliveryId);
 }
 
 /** Mark a delivery as processed for the given Jira entity. */
-export function markDelivery(externalId: string, deliveryId: string): void {
-  markTrackerDelivery("jira", "task", externalId, deliveryId);
+export async function markDelivery(externalId: string, deliveryId: string): Promise<void> {
+  await markTrackerDelivery("jira", "task", externalId, deliveryId);
 }
 
 // ─── Top-level dispatcher ──────────────────────────────────────────────────
@@ -110,7 +110,7 @@ export async function handleJiraWebhook(
   }
 
   const deliveryId = synthesizeDeliveryId(parsed, rawBody);
-  if (isDuplicateDelivery(deliveryId)) {
+  if (await isDuplicateDelivery(deliveryId)) {
     return { status: 200, body: { status: "duplicate" } };
   }
 
@@ -154,6 +154,6 @@ async function dispatchAndRecord(
   // Best-effort: stamp the delivery on whichever sync row exists for this
   // entity. No-op when the handler decided not to create one.
   if (externalId) {
-    markDelivery(externalId, deliveryId);
+    await markDelivery(externalId, deliveryId);
   }
 }

@@ -372,7 +372,7 @@ export async function handleWorkflows(
   if (getWorkflowVersionRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowVersionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const version = getWorkflowVersion(parsed.params.id, parsed.params.version);
+    const version = await getWorkflowVersion(parsed.params.id, parsed.params.version);
     if (!version) {
       res.writeHead(404);
       res.end();
@@ -385,13 +385,13 @@ export async function handleWorkflows(
   if (listWorkflowVersionsRoute.match(req.method, pathSegments)) {
     const parsed = await listWorkflowVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const versions = getWorkflowVersions(parsed.params.id);
+    const versions = await getWorkflowVersions(parsed.params.id);
     json(res, { versions });
     return true;
   }
@@ -401,7 +401,9 @@ export async function handleWorkflows(
     if (!parsed) return true;
     // List responses default to slim (no `definition`); `?fields=full` restores it.
     const workflows =
-      parsed.query.fields === "full" ? listWorkflows() : listWorkflows(undefined, { slim: true });
+      parsed.query.fields === "full"
+        ? await listWorkflows()
+        : await listWorkflows(undefined, { slim: true });
     json(res, workflows);
     return true;
   }
@@ -417,7 +419,7 @@ export async function handleWorkflows(
       return true;
     }
 
-    const workflow = createWorkflow({
+    const workflow = await createWorkflow({
       name: parsed.body.name,
       description: parsed.body.description,
       definition: parsed.body.definition,
@@ -436,7 +438,7 @@ export async function handleWorkflows(
   if (getWorkflowRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -454,7 +456,7 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id, nodeId } = parsed.params;
 
-    const existing = getWorkflow(id);
+    const existing = await getWorkflow(id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -477,12 +479,12 @@ export async function handleWorkflows(
     }
 
     try {
-      snapshotWorkflow(id, myAgentId);
+      await snapshotWorkflow(id, myAgentId);
     } catch {
       // Snapshot failure should not block the update
     }
 
-    const workflow = updateWorkflow(id, { definition: patchResult.definition });
+    const workflow = await updateWorkflow(id, { definition: patchResult.definition });
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -497,7 +499,7 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id } = parsed.params;
 
-    const existing = getWorkflow(id);
+    const existing = await getWorkflow(id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -517,7 +519,7 @@ export async function handleWorkflows(
     }
 
     try {
-      snapshotWorkflow(id, myAgentId);
+      await snapshotWorkflow(id, myAgentId);
     } catch {
       // Snapshot failure should not block the update
     }
@@ -528,7 +530,7 @@ export async function handleWorkflows(
     if (parsed.body.triggerSchema !== undefined) {
       updateArgs.triggerSchema = parsed.body.triggerSchema;
     }
-    const workflow = updateWorkflow(id, updateArgs);
+    const workflow = await updateWorkflow(id, updateArgs);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -545,7 +547,7 @@ export async function handleWorkflows(
     const body = parsed.body;
 
     // Check workflow exists before snapshotting
-    const existing = getWorkflow(id);
+    const existing = await getWorkflow(id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -563,12 +565,12 @@ export async function handleWorkflows(
 
     // Create version snapshot before applying update
     try {
-      snapshotWorkflow(id, myAgentId);
+      await snapshotWorkflow(id, myAgentId);
     } catch {
       // Snapshot failure should not block the update — log and continue
     }
 
-    const workflow = updateWorkflow(id, {
+    const workflow = await updateWorkflow(id, {
       name: body.name,
       description: body.description,
       definition: body.definition,
@@ -593,7 +595,7 @@ export async function handleWorkflows(
     const parsed = await deleteWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      const deleted = deleteWorkflow(parsed.params.id);
+      const deleted = await deleteWorkflow(parsed.params.id);
       res.writeHead(deleted ? 204 : 404);
     } catch (err) {
       jsonError(res, String(err), 500);
@@ -606,7 +608,7 @@ export async function handleWorkflows(
   if (validateTriggerRoute.match(req.method, pathSegments)) {
     const parsed = await validateTriggerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -634,7 +636,7 @@ export async function handleWorkflows(
   if (triggerWorkflowRoute.match(req.method, pathSegments)) {
     const parsed = await triggerWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -658,7 +660,7 @@ export async function handleWorkflows(
     }
 
     // Check if skipped due to cooldown
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     const skipped = run?.status === "skipped";
 
     json(res, { runId, skipped }, 201);
@@ -668,7 +670,7 @@ export async function handleWorkflows(
   if (listWorkflowRunsRoute.match(req.method, pathSegments)) {
     const parsed = await listWorkflowRunsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    let runs = listWorkflowRuns(parsed.params.id);
+    let runs = await listWorkflowRuns(parsed.params.id);
     // Apply optional status filter
     if (parsed.query?.status) {
       runs = runs.filter((r) => r.status === parsed.query.status);
@@ -680,13 +682,13 @@ export async function handleWorkflows(
   if (getWorkflowRunRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getWorkflowRun(parsed.params.id);
+    const run = await getWorkflowRun(parsed.params.id);
     if (!run) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const steps = getWorkflowRunStepsByRunId(parsed.params.id);
+    const steps = await getWorkflowRunStepsByRunId(parsed.params.id);
     json(res, { run, steps });
     return true;
   }
@@ -707,7 +709,7 @@ export async function handleWorkflows(
     const parsed = await cancelWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      cancelWorkflowRun(parsed.params.id, parsed.body?.reason);
+      await cancelWorkflowRun(parsed.params.id, parsed.body?.reason);
       json(res, { success: true });
     } catch (err) {
       jsonError(res, String(err), 400);

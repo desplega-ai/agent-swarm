@@ -17,8 +17,8 @@ import {
 
 const TEST_DB_PATH = "./test-concurrency.sqlite";
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(() => {
@@ -34,8 +34,8 @@ afterAll(() => {
 
 describe("Concurrency Integration Tests", () => {
   describe("Backwards Compatibility", () => {
-    test("agent without maxTasks defaults to 1", () => {
-      const agent = createAgent({
+    test("agent without maxTasks defaults to 1", async () => {
+      const agent = await createAgent({
         name: "compat-agent",
         isLead: false,
         status: "idle",
@@ -46,18 +46,18 @@ describe("Concurrency Integration Tests", () => {
       expect(agent.maxTasks).toBe(1);
 
       // Can start one task
-      const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-      startTask(task1.id);
+      const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+      await startTask(task1.id);
 
       // Should be at capacity after one task
-      expect(hasCapacity(agent.id)).toBe(false);
-      expect(getActiveTaskCount(agent.id)).toBe(1);
+      expect(await hasCapacity(agent.id)).toBe(false);
+      expect(await getActiveTaskCount(agent.id)).toBe(1);
     });
   });
 
   describe("Concurrent Execution Simulation", () => {
-    test("agent with maxTasks=3 can have 3 in-progress tasks", () => {
-      const agent = createAgent({
+    test("agent with maxTasks=3 can have 3 in-progress tasks", async () => {
+      const agent = await createAgent({
         name: "concurrent-agent",
         isLead: false,
         status: "idle",
@@ -66,28 +66,28 @@ describe("Concurrency Integration Tests", () => {
       });
 
       // Create and start 3 tasks
-      const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-      const task2 = createTaskExtended("Task 2", { agentId: agent.id });
-      const task3 = createTaskExtended("Task 3", { agentId: agent.id });
+      const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+      const task2 = await createTaskExtended("Task 2", { agentId: agent.id });
+      const task3 = await createTaskExtended("Task 3", { agentId: agent.id });
 
-      startTask(task1.id);
-      expect(getActiveTaskCount(agent.id)).toBe(1);
-      expect(hasCapacity(agent.id)).toBe(true);
+      await startTask(task1.id);
+      expect(await getActiveTaskCount(agent.id)).toBe(1);
+      expect(await hasCapacity(agent.id)).toBe(true);
 
-      startTask(task2.id);
-      expect(getActiveTaskCount(agent.id)).toBe(2);
-      expect(hasCapacity(agent.id)).toBe(true);
+      await startTask(task2.id);
+      expect(await getActiveTaskCount(agent.id)).toBe(2);
+      expect(await hasCapacity(agent.id)).toBe(true);
 
-      startTask(task3.id);
-      expect(getActiveTaskCount(agent.id)).toBe(3);
-      expect(hasCapacity(agent.id)).toBe(false);
+      await startTask(task3.id);
+      expect(await getActiveTaskCount(agent.id)).toBe(3);
+      expect(await hasCapacity(agent.id)).toBe(false);
 
       // Can't start more
-      expect(getRemainingCapacity(agent.id)).toBe(0);
+      expect(await getRemainingCapacity(agent.id)).toBe(0);
     });
 
-    test("queued tasks wait in pending until capacity opens", () => {
-      const agent = createAgent({
+    test("queued tasks wait in pending until capacity opens", async () => {
+      const agent = await createAgent({
         name: "queue-agent",
         isLead: false,
         status: "idle",
@@ -96,35 +96,35 @@ describe("Concurrency Integration Tests", () => {
       });
 
       // Create and start 2 tasks
-      const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-      const task2 = createTaskExtended("Task 2", { agentId: agent.id });
-      const task3 = createTaskExtended("Task 3", { agentId: agent.id });
+      const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+      const task2 = await createTaskExtended("Task 2", { agentId: agent.id });
+      const task3 = await createTaskExtended("Task 3", { agentId: agent.id });
 
-      startTask(task1.id);
-      startTask(task2.id);
+      await startTask(task1.id);
+      await startTask(task2.id);
 
       // At capacity
-      expect(hasCapacity(agent.id)).toBe(false);
+      expect(await hasCapacity(agent.id)).toBe(false);
 
       // task3 stays pending - can't start
       expect(task3.status).toBe("pending");
 
       // Complete task1
-      completeTask(task1.id, "done");
+      await completeTask(task1.id, "done");
 
       // Now have capacity for task3
-      expect(hasCapacity(agent.id)).toBe(true);
-      expect(getRemainingCapacity(agent.id)).toBe(1);
+      expect(await hasCapacity(agent.id)).toBe(true);
+      expect(await getRemainingCapacity(agent.id)).toBe(1);
 
       // Can now start task3
-      startTask(task3.id);
-      expect(getActiveTaskCount(agent.id)).toBe(2);
+      await startTask(task3.id);
+      expect(await getActiveTaskCount(agent.id)).toBe(2);
     });
   });
 
   describe("Status Accuracy", () => {
-    test("status reflects busy when any tasks in progress", () => {
-      const agent = createAgent({
+    test("status reflects busy when any tasks in progress", async () => {
+      const agent = await createAgent({
         name: "status-agent",
         isLead: false,
         status: "idle",
@@ -132,37 +132,37 @@ describe("Concurrency Integration Tests", () => {
         maxTasks: 3,
       });
 
-      expect(getAgentById(agent.id)?.status).toBe("idle");
+      expect((await getAgentById(agent.id))?.status).toBe("idle");
 
       // Start first task
-      const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-      startTask(task1.id);
-      updateAgentStatusFromCapacity(agent.id);
+      const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+      await startTask(task1.id);
+      await updateAgentStatusFromCapacity(agent.id);
 
-      expect(getAgentById(agent.id)?.status).toBe("busy");
+      expect((await getAgentById(agent.id))?.status).toBe("busy");
 
       // Start second task - still busy
-      const task2 = createTaskExtended("Task 2", { agentId: agent.id });
-      startTask(task2.id);
-      updateAgentStatusFromCapacity(agent.id);
+      const task2 = await createTaskExtended("Task 2", { agentId: agent.id });
+      await startTask(task2.id);
+      await updateAgentStatusFromCapacity(agent.id);
 
-      expect(getAgentById(agent.id)?.status).toBe("busy");
+      expect((await getAgentById(agent.id))?.status).toBe("busy");
 
       // Complete first task - still busy (task2 running)
-      completeTask(task1.id, "done");
-      updateAgentStatusFromCapacity(agent.id);
+      await completeTask(task1.id, "done");
+      await updateAgentStatusFromCapacity(agent.id);
 
-      expect(getAgentById(agent.id)?.status).toBe("busy");
+      expect((await getAgentById(agent.id))?.status).toBe("busy");
 
       // Complete second task - now idle
-      completeTask(task2.id, "done");
-      updateAgentStatusFromCapacity(agent.id);
+      await completeTask(task2.id, "done");
+      await updateAgentStatusFromCapacity(agent.id);
 
-      expect(getAgentById(agent.id)?.status).toBe("idle");
+      expect((await getAgentById(agent.id))?.status).toBe("idle");
     });
 
-    test("failed tasks also free capacity", () => {
-      const agent = createAgent({
+    test("failed tasks also free capacity", async () => {
+      const agent = await createAgent({
         name: "fail-agent",
         isLead: false,
         status: "idle",
@@ -170,35 +170,35 @@ describe("Concurrency Integration Tests", () => {
         maxTasks: 2,
       });
 
-      const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-      const task2 = createTaskExtended("Task 2", { agentId: agent.id });
+      const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+      const task2 = await createTaskExtended("Task 2", { agentId: agent.id });
 
-      startTask(task1.id);
-      startTask(task2.id);
+      await startTask(task1.id);
+      await startTask(task2.id);
 
-      expect(hasCapacity(agent.id)).toBe(false);
+      expect(await hasCapacity(agent.id)).toBe(false);
 
       // Fail task1
-      failTask(task1.id, "error");
+      await failTask(task1.id, "error");
 
       // Capacity restored
-      expect(hasCapacity(agent.id)).toBe(true);
-      expect(getRemainingCapacity(agent.id)).toBe(1);
+      expect(await hasCapacity(agent.id)).toBe(true);
+      expect(await getRemainingCapacity(agent.id)).toBe(1);
     });
   });
 
   describe("Edge Cases", () => {
-    test("capacity functions handle non-existent agent", () => {
+    test("capacity functions handle non-existent agent", async () => {
       const fakeId = "00000000-0000-0000-0000-000000000000";
 
-      expect(getActiveTaskCount(fakeId)).toBe(0);
-      expect(hasCapacity(fakeId)).toBe(false);
-      expect(getRemainingCapacity(fakeId)).toBe(0);
+      expect(await getActiveTaskCount(fakeId)).toBe(0);
+      expect(await hasCapacity(fakeId)).toBe(false);
+      expect(await getRemainingCapacity(fakeId)).toBe(0);
     });
 
-    test("agent maxTasks respects schema limits", () => {
+    test("agent maxTasks respects schema limits", async () => {
       // maxTasks should be at least 1 (validated at creation)
-      const agent = createAgent({
+      const agent = await createAgent({
         name: "limits-agent",
         isLead: false,
         status: "idle",
@@ -207,7 +207,7 @@ describe("Concurrency Integration Tests", () => {
       });
 
       expect(agent.maxTasks).toBe(100);
-      expect(getRemainingCapacity(agent.id)).toBe(100);
+      expect(await getRemainingCapacity(agent.id)).toBe(100);
     });
   });
 });

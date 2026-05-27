@@ -56,8 +56,8 @@ let testAgent: { id: string };
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
-  initDb(TEST_DB_PATH);
-  testAgent = createAgent({ name: "recompute-all-test", isLead: false, status: "idle" });
+  await initDb(TEST_DB_PATH);
+  testAgent = await createAgent({ name: "recompute-all-test", isLead: false, status: "idle" });
   server = createTestServer(API_KEY);
   port = await listen(server);
 });
@@ -68,8 +68,8 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  const db = getDb();
+afterEach(async () => {
+  const db = await getDb();
   db.prepare("DELETE FROM session_costs").run();
   // Wipe everything we explicitly inserted (effective_from > 0); leave the
   // migration-046 codex seeds alone.
@@ -95,15 +95,15 @@ interface CostResponse {
   };
 }
 
-function seedTwoClassRates(provider: string, model: string, inputRate = 1, outputRate = 10) {
-  insertPricingRow({
+async function seedTwoClassRates(provider: string, model: string, inputRate = 1, outputRate = 10) {
+  await insertPricingRow({
     provider: provider as Parameters<typeof insertPricingRow>[0]["provider"],
     model,
     tokenClass: "input",
     effectiveFrom: 1,
     pricePerMillionUsd: inputRate,
   });
-  insertPricingRow({
+  await insertPricingRow({
     provider: provider as Parameters<typeof insertPricingRow>[0]["provider"],
     model,
     tokenClass: "output",
@@ -123,7 +123,7 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
     "gemini",
   ] as const) {
     test(`provider=${provider} with seeded rows → costSource='pricing-table'`, async () => {
-      seedTwoClassRates(provider, `${provider}-test-model`, 2, 10);
+      await seedTwoClassRates(provider, `${provider}-test-model`, 2, 10);
 
       const res = await authedFetch(`/api/session-costs`, {
         method: "POST",

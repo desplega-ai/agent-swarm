@@ -1,18 +1,18 @@
-import { getDb, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
+import { runDbTransaction, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
 import type { RetryPolicy } from "../types";
 
 /**
  * Checkpoint a successful step — atomic DB write of step result + run context.
  */
-export function checkpointStep(
+export async function checkpointStep(
   runId: string,
   stepId: string,
   nodeId: string,
   result: { output?: unknown; nextPort?: string },
   ctx: Record<string, unknown>,
-): void {
-  const txn = getDb().transaction(() => {
-    updateWorkflowRunStep(stepId, {
+): Promise<void> {
+  await runDbTransaction(async () => {
+    await updateWorkflowRunStep(stepId, {
       status: "completed",
       output: result.output,
       nextPort: result.nextPort || undefined,
@@ -21,31 +21,30 @@ export function checkpointStep(
 
     // Merge step output into run context
     ctx[nodeId] = result.output;
-    updateWorkflowRun(runId, {
+    await updateWorkflowRun(runId, {
       context: ctx,
     });
   });
-  txn();
 }
 
 /**
  * Checkpoint a step failure — marks step failed, calculates retry if applicable.
  */
-export function checkpointStepFailure(
+export async function checkpointStepFailure(
   runId: string,
   stepId: string,
   error: string,
   retryCount: number,
   retryPolicy?: RetryPolicy,
   options?: { markRunFailed?: boolean },
-): { shouldRetry: boolean } {
+): Promise<{ shouldRetry: boolean }> {
   const now = new Date().toISOString();
 
   if (retryPolicy && retryCount < retryPolicy.maxRetries) {
     const delay = calculateBackoff(retryPolicy, retryCount);
     const nextRetryAt = new Date(Date.now() + delay).toISOString();
 
-    updateWorkflowRunStep(stepId, {
+    await updateWorkflowRunStep(stepId, {
       status: "failed",
       error,
       retryCount: retryCount + 1,
@@ -58,7 +57,7 @@ export function checkpointStepFailure(
 
   // No retries left — mark step failed, and optionally the run too
   // Clear nextRetryAt so the poller stops picking this step up
-  updateWorkflowRunStep(stepId, {
+  await updateWorkflowRunStep(stepId, {
     status: "failed",
     error,
     finishedAt: now,
@@ -67,7 +66,7 @@ export function checkpointStepFailure(
 
   const markRunFailed = options?.markRunFailed ?? true;
   if (markRunFailed) {
-    updateWorkflowRun(runId, {
+    await updateWorkflowRun(runId, {
       status: "failed",
       error: `Step failed: ${error}`,
       finishedAt: now,
@@ -80,22 +79,21 @@ export function checkpointStepFailure(
 /**
  * Checkpoint a step entering waiting state (async executor).
  */
-export function checkpointStepWaiting(
+export async function checkpointStepWaiting(
   runId: string,
   stepId: string,
   ctx: Record<string, unknown>,
-): void {
-  const txn = getDb().transaction(() => {
-    updateWorkflowRunStep(stepId, {
+): Promise<void> {
+  await runDbTransaction(async () => {
+    await updateWorkflowRunStep(stepId, {
       status: "waiting",
     });
 
-    updateWorkflowRun(runId, {
+    await updateWorkflowRun(runId, {
       status: "waiting",
       context: ctx,
     });
   });
-  txn();
 }
 
 /**

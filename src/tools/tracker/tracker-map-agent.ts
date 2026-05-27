@@ -25,7 +25,7 @@ export const registerTrackerMapAgentTool = (server: McpServer) => {
     },
     async (args, _requestInfo, _meta) => {
       try {
-        const mapping = createTrackerAgentMapping({
+        const mapping = await createTrackerAgentMapping({
           provider: args.provider,
           agentId: args.agentId,
           externalUserId: args.externalUserId,

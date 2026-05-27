@@ -85,7 +85,7 @@ export const registerManageUserTool = (server: McpServer) => {
       inputSchema: InputSchema,
     },
     async (input, requestInfo) => {
-      const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
+      const callerAgent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
       if (!callerAgent?.isLead) {
         return {
           content: [
@@ -102,7 +102,7 @@ export const registerManageUserTool = (server: McpServer) => {
 
       switch (input.action) {
         case "list": {
-          const users = getAllUsers();
+          const users = await getAllUsers();
           return {
             content: [{ type: "text" as const, text: JSON.stringify(users, null, 2) }],
           };
@@ -114,7 +114,7 @@ export const registerManageUserTool = (server: McpServer) => {
               content: [{ type: "text" as const, text: "userId is required for get action." }],
             };
           }
-          const user = getUserById(input.userId);
+          const user = await getUserById(input.userId);
           if (!user) {
             return {
               content: [{ type: "text" as const, text: `User ${input.userId} not found.` }],
@@ -132,7 +132,7 @@ export const registerManageUserTool = (server: McpServer) => {
             };
           }
           try {
-            const user = createUser({
+            const user = await createUser({
               name: input.name,
               email: input.email,
               role: input.role,
@@ -145,7 +145,7 @@ export const registerManageUserTool = (server: McpServer) => {
               metadata: input.metadata ?? undefined,
             });
             for (const ident of input.identities ?? []) {
-              linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
+              await linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
             }
             return {
               content: [
@@ -170,14 +170,14 @@ export const registerManageUserTool = (server: McpServer) => {
             };
           }
           try {
-            const before = getUserById(input.userId);
+            const before = await getUserById(input.userId);
             if (!before) {
               return {
                 content: [{ type: "text" as const, text: `User ${input.userId} not found.` }],
               };
             }
 
-            const user = updateUser(input.userId, {
+            const user = await updateUser(input.userId, {
               name: input.name,
               email: input.email,
               role: input.role,
@@ -197,18 +197,18 @@ export const registerManageUserTool = (server: McpServer) => {
 
             // Identity diff — pass the desired set, helper emits the deltas.
             if (input.identities !== undefined) {
-              const current = getUserIdentities(input.userId);
+              const current = await getUserIdentities(input.userId);
               const currentSet = new Set(current.map((i) => `${i.kind}:${i.externalId}`));
               const desiredSet = new Set(input.identities.map((i) => `${i.kind}:${i.externalId}`));
 
               for (const ident of input.identities) {
                 if (!currentSet.has(`${ident.kind}:${ident.externalId}`)) {
-                  linkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
+                  await linkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
                 }
               }
               for (const ident of current) {
                 if (!desiredSet.has(`${ident.kind}:${ident.externalId}`)) {
-                  unlinkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
+                  await unlinkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
                 }
               }
             }
@@ -217,10 +217,18 @@ export const registerManageUserTool = (server: McpServer) => {
             if (input.emailAliases !== undefined) {
               const { added, removed } = diffAliases(before.emailAliases, input.emailAliases);
               for (const alias of added) {
-                recordIdentityEvent(input.userId, "email_added", operatorActor, null, { alias });
+                await recordIdentityEvent(input.userId, "email_added", operatorActor, null, {
+                  alias,
+                });
               }
               for (const alias of removed) {
-                recordIdentityEvent(input.userId, "email_removed", operatorActor, { alias }, null);
+                await recordIdentityEvent(
+                  input.userId,
+                  "email_removed",
+                  operatorActor,
+                  { alias },
+                  null,
+                );
               }
             }
 
@@ -246,7 +254,7 @@ export const registerManageUserTool = (server: McpServer) => {
               content: [{ type: "text" as const, text: "userId is required for delete action." }],
             };
           }
-          const deleted = deleteUser(input.userId);
+          const deleted = await deleteUser(input.userId);
           return {
             content: [
               {

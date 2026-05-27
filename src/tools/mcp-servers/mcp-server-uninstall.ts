@@ -32,7 +32,7 @@ export const registerMcpServerUninstallTool = (server: McpServer) => {
       const targetAgentId = args.agentId ?? requestInfo.agentId;
 
       if (targetAgentId !== requestInfo.agentId) {
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         if (!agent?.isLead) {
           return {
             content: [
@@ -50,7 +50,7 @@ export const registerMcpServerUninstallTool = (server: McpServer) => {
         }
       }
 
-      const removed = uninstallMcpServer(targetAgentId, args.mcpServerId);
+      const removed = await uninstallMcpServer(targetAgentId, args.mcpServerId);
       return {
         content: [
           {

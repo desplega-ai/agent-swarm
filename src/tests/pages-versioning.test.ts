@@ -55,7 +55,7 @@ describe("Pages versioning (PUT /api/pages/:id)", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
     server = createTestServer();
     await new Promise<void>((resolve) => server.listen(TEST_PORT, () => resolve()));
   });

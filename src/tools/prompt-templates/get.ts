@@ -42,7 +42,7 @@ export const registerGetPromptTemplateTool = (server: McpServer) => {
       }
 
       try {
-        const template = getPromptTemplateById(id);
+        const template = await getPromptTemplateById(id);
         if (!template) {
           return {
             content: [{ type: "text", text: `Prompt template "${id}" not found.` }],
@@ -54,7 +54,7 @@ export const registerGetPromptTemplateTool = (server: McpServer) => {
           };
         }
 
-        const history = getPromptTemplateHistory(id);
+        const history = await getPromptTemplateHistory(id);
         const definition = getTemplateDefinition(template.eventType);
 
         return {

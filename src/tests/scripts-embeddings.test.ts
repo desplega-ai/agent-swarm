@@ -64,9 +64,9 @@ class FakeEmbeddingProvider implements EmbeddingProvider {
 
 let provider: FakeEmbeddingProvider;
 
-function embeddingCount(scriptId: string): number {
+async function embeddingCount(scriptId: string): Promise<number> {
   return (
-    getDb()
+    (await getDb())
       .prepare<{ count: number }, [string]>(
         "SELECT COUNT(*) as count FROM script_embeddings WHERE scriptId = ?",
       )
@@ -74,9 +74,9 @@ function embeddingCount(scriptId: string): number {
   );
 }
 
-function embeddedText(scriptId: string): string | null {
+async function embeddedText(scriptId: string): Promise<string | null> {
   return (
-    getDb()
+    (await getDb())
       .prepare<{ embeddedText: string }, [string]>(
         "SELECT embeddedText FROM script_embeddings WHERE scriptId = ?",
       )
@@ -107,7 +107,7 @@ async function upsertFixture(args: {
 
 beforeAll(async () => {
   await clearDb();
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
@@ -116,15 +116,15 @@ afterAll(async () => {
   await clearDb();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM scripts");
+beforeEach(async () => {
+  (await getDb()).run("DELETE FROM scripts");
   provider = new FakeEmbeddingProvider();
   setScriptEmbeddingProviderForTests(provider);
 });
 
 describe("script embeddings", () => {
-  test("migration applies and creates script_embeddings storage", () => {
-    const schema = getDb()
+  test("migration applies and creates script_embeddings storage", async () => {
+    const schema = (await getDb())
       .prepare<{ sql: string }, []>(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'script_embeddings'",
       )
@@ -138,7 +138,7 @@ describe("script embeddings", () => {
       name: "linear-parser",
       description: "Parse Linear issue payloads",
     });
-    expect(embeddingCount(explicit.script.id)).toBe(1);
+    expect(await embeddingCount(explicit.script.id)).toBe(1);
 
     provider.reset();
     const scratch = await upsertFixture({
@@ -146,7 +146,7 @@ describe("script embeddings", () => {
       description: "Scratch Linear issue payloads",
       isScratch: true,
     });
-    expect(embeddingCount(scratch.script.id)).toBe(0);
+    expect(await embeddingCount(scratch.script.id)).toBe(0);
     expect(provider.calls).toHaveLength(0);
   });
 
@@ -173,7 +173,7 @@ describe("script embeddings", () => {
       description: "Summarize pull request review feedback",
     });
     expect(provider.calls).toHaveLength(1);
-    expect(embeddedText(first.script.id)).toContain("Summarize pull request review feedback");
+    expect(await embeddedText(first.script.id)).toContain("Summarize pull request review feedback");
 
     provider.reset();
     await upsertFixture({
@@ -190,14 +190,14 @@ describe("script embeddings", () => {
       description: "Parse Slack channel messages",
       isScratch: true,
     });
-    expect(embeddingCount(scratch.script.id)).toBe(0);
+    expect(await embeddingCount(scratch.script.id)).toBe(0);
 
-    getDb().run("UPDATE scripts SET isScratch = 0 WHERE id = ?", [scratch.script.id]);
+    (await getDb()).run("UPDATE scripts SET isScratch = 0 WHERE id = ?", [scratch.script.id]);
     provider.reset();
     await runScriptsMaintenanceCommand(["reembed"]);
 
     expect(provider.calls).toHaveLength(1);
-    expect(embeddingCount(scratch.script.id)).toBe(1);
+    expect(await embeddingCount(scratch.script.id)).toBe(1);
   });
 
   test("semantic search outranks name-substring-only matches", async () => {
@@ -282,10 +282,12 @@ describe("script embeddings", () => {
       name: "delete-embedding",
       description: "Memory search helper",
     });
-    expect(embeddingCount(created.script.id)).toBe(1);
+    expect(await embeddingCount(created.script.id)).toBe(1);
 
-    getDb().run("DELETE FROM scripts WHERE id = ?", [created.script.id]);
-    expect(getScript({ name: "delete-embedding", scope: "agent", scopeId: "agent-1" })).toBeNull();
-    expect(embeddingCount(created.script.id)).toBe(0);
+    (await getDb()).run("DELETE FROM scripts WHERE id = ?", [created.script.id]);
+    expect(
+      await getScript({ name: "delete-embedding", scope: "agent", scopeId: "agent-1" }),
+    ).toBeNull();
+    expect(await embeddingCount(created.script.id)).toBe(0);
   });
 });

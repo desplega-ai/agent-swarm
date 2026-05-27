@@ -128,7 +128,7 @@ export async function handlePricing(
   if (listAllPricing.match(req.method, pathSegments)) {
     const parsed = await listAllPricing.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    json(res, { rows: getAllPricingRows() });
+    json(res, { rows: await getAllPricingRows() });
     return true;
   }
 
@@ -137,7 +137,7 @@ export async function handlePricing(
   if (getActivePricing.match(req.method, pathSegments)) {
     const parsed = await getActivePricing.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const row = getActivePricingRow(
+    const row = await getActivePricingRow(
       parsed.params.provider,
       parsed.params.model,
       parsed.params.tokenClass,
@@ -157,7 +157,7 @@ export async function handlePricing(
     const parsed = await deletePricing.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const effectiveFrom = Number.parseInt(parsed.params.effectiveFrom, 10);
-    const deleted = deletePricingRow(
+    const deleted = await deletePricingRow(
       parsed.params.provider,
       parsed.params.model,
       parsed.params.tokenClass,
@@ -168,7 +168,7 @@ export async function handlePricing(
       return true;
     }
 
-    createLogEntry({
+    await createLogEntry({
       eventType: "pricing.deleted",
       metadata: {
         provider: parsed.params.provider,
@@ -188,7 +188,7 @@ export async function handlePricing(
   if (listPricingForTriple.match(req.method, pathSegments)) {
     const parsed = await listPricingForTriple.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const rows = getPricingRows(
+    const rows = await getPricingRows(
       parsed.params.provider,
       parsed.params.model,
       parsed.params.tokenClass,
@@ -204,7 +204,7 @@ export async function handlePricing(
     const effectiveFrom = parsed.body.effectiveFrom ?? Date.now();
 
     try {
-      const row = insertPricingRow({
+      const row = await insertPricingRow({
         provider: parsed.params.provider,
         model: parsed.params.model,
         tokenClass: parsed.params.tokenClass,
@@ -212,7 +212,7 @@ export async function handlePricing(
         pricePerMillionUsd: parsed.body.pricePerMillionUsd,
       });
 
-      createLogEntry({
+      await createLogEntry({
         eventType: "pricing.inserted",
         metadata: {
           provider: parsed.params.provider,

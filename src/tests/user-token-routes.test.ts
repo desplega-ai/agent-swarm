@@ -60,7 +60,7 @@ let port: number;
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   server = createTestServer(API_KEY);
   port = await listen(server);
@@ -77,8 +77,8 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  const db = getDb();
+beforeEach(async () => {
+  const db = await getDb();
   db.run("DELETE FROM user_identity_events");
   db.run("DELETE FROM user_tokens");
   db.run("DELETE FROM users");
@@ -109,7 +109,7 @@ type TokenSummary = {
 
 describe("operator MCP token routes", () => {
   test("POST mints an aswt_ plaintext once and persists only hash + preview", async () => {
-    const user = createUser({ name: "Token User", email: "token@example.com" });
+    const user = await createUser({ name: "Token User", email: "token@example.com" });
 
     const response = await authedFetch(`/api/users/${user.id}/mcp-tokens`, {
       method: "POST",
@@ -129,7 +129,7 @@ describe("operator MCP token routes", () => {
     expect(body.user.tokens).toContainEqual(body.token);
     expect(body.user.recentEvents.map((event) => event.eventType)).toContain("token_minted");
 
-    const stored = getDb()
+    const stored = (await getDb())
       .prepare<{ tokenHash: string; tokenPreview: string }, string>(
         "SELECT tokenHash, tokenPreview FROM user_tokens WHERE id = ?",
       )
@@ -148,7 +148,7 @@ describe("operator MCP token routes", () => {
   });
 
   test("DELETE revokes a token and records token_revoked", async () => {
-    const user = createUser({ name: "Revoked User" });
+    const user = await createUser({ name: "Revoked User" });
     const mintResponse = await authedFetch(`/api/users/${user.id}/mcp-tokens`, {
       method: "POST",
       body: JSON.stringify({ label: null }),
@@ -172,7 +172,7 @@ describe("operator MCP token routes", () => {
   });
 
   test("POST and DELETE reject without the swarm key", async () => {
-    const user = createUser({ name: "Auth User" });
+    const user = await createUser({ name: "Auth User" });
 
     const post = await fetch(url(`/api/users/${user.id}/mcp-tokens`), {
       method: "POST",
@@ -188,7 +188,7 @@ describe("operator MCP token routes", () => {
   });
 
   test("DELETE unknown token returns 404", async () => {
-    const user = createUser({ name: "Unknown Token User" });
+    const user = await createUser({ name: "Unknown Token User" });
     const response = await authedFetch(`/api/users/${user.id}/mcp-tokens/not-a-token`, {
       method: "DELETE",
     });
@@ -204,14 +204,14 @@ describe("operator MCP token routes", () => {
   });
 
   test("operator events are tagged with the API-key fingerprint", async () => {
-    const user = createUser({ name: "Actor User" });
+    const user = await createUser({ name: "Actor User" });
     const response = await authedFetch(`/api/users/${user.id}/mcp-tokens`, {
       method: "POST",
       body: JSON.stringify({ label: "actor" }),
     });
     expect(response.status).toBe(200);
 
-    const row = getDb()
+    const row = (await getDb())
       .prepare<{ actor: string }, string>(
         "SELECT actor FROM user_identity_events WHERE userId = ? AND eventType = 'token_minted'",
       )

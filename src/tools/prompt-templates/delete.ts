@@ -33,7 +33,7 @@ export const registerDeletePromptTemplateTool = (server: McpServer) => {
       }
 
       try {
-        const existing = getPromptTemplateById(id);
+        const existing = await getPromptTemplateById(id);
         if (!existing) {
           return {
             content: [{ type: "text", text: `Prompt template "${id}" not found.` }],
@@ -45,7 +45,7 @@ export const registerDeletePromptTemplateTool = (server: McpServer) => {
           };
         }
 
-        const deleted = deletePromptTemplate(id);
+        const deleted = await deletePromptTemplate(id);
         if (!deleted) {
           return {
             content: [{ type: "text", text: `Failed to delete prompt template "${id}".` }],

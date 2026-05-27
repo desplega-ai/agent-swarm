@@ -57,7 +57,7 @@ async function postAgentActivity(
     | { type: "action"; action: string; parameter?: string; result?: string },
 ): Promise<boolean> {
   await ensureToken("linear");
-  const tokens = getOAuthTokens("linear");
+  const tokens = await getOAuthTokens("linear");
   if (!tokens) {
     console.log("[Linear Sync] No OAuth tokens, cannot post AgentSession activity");
     return false;
@@ -108,7 +108,7 @@ async function updateAgentSession(
   input: Record<string, unknown>,
 ): Promise<boolean> {
   await ensureToken("linear");
-  const tokens = getOAuthTokens("linear");
+  const tokens = await getOAuthTokens("linear");
   if (!tokens) {
     console.log("[Linear Sync] No OAuth tokens, cannot update AgentSession");
     return false;
@@ -292,7 +292,7 @@ const ISSUE_GATE_QUERY = `
  */
 export async function _fetchIssueGatingInfo(issueId: string): Promise<LinearGateInput> {
   await ensureToken("linear");
-  const tokens = getOAuthTokens("linear");
+  const tokens = await getOAuthTokens("linear");
   if (!tokens) {
     console.log(
       `[Linear Sync] No OAuth tokens; cannot fetch issue ${issueId} gating info — defaulting to allow.`,
@@ -337,8 +337,8 @@ export async function _fetchIssueGatingInfo(issueId: string): Promise<LinearGate
  * Find the lead agent to receive Linear tasks.
  * Returns null if no lead is available (task will go to pool).
  */
-function findLeadAgent() {
-  const agents = getAllAgents();
+async function findLeadAgent() {
+  const agents = await getAllAgents();
   const onlineLead = agents.find((a) => a.isLead && a.status !== "offline");
   if (onlineLead) return onlineLead;
   return agents.find((a) => a.isLead) ?? null;
@@ -363,9 +363,9 @@ const APP_USER_ID_NAMESPACE = "integration:linear:bot-app-user-id";
  * Read the bot's persisted appUserId for the given workspace (or the default
  * slot). Returns null when not yet captured (early OAuth installs).
  */
-function getStoredAppUserId(workspaceId: string | null): string | null {
+async function getStoredAppUserId(workspaceId: string | null): Promise<string | null> {
   const key = workspaceId && workspaceId !== "" ? workspaceId : "default";
-  const entry = getKv(APP_USER_ID_NAMESPACE, key);
+  const entry = await getKv(APP_USER_ID_NAMESPACE, key);
   if (!entry) return null;
   return typeof entry.value === "string" ? entry.value : null;
 }
@@ -383,14 +383,14 @@ function getStoredAppUserId(workspaceId: string | null): string | null {
  * Returns `undefined` when no mapping could be established — callers pass
  * that straight to `requestedByUserId`.
  */
-function resolveLinearActor(
+async function resolveLinearActor(
   linearUserId: string,
   email: string,
   name: string,
   workspaceId: string | null,
   sampleEventType: string,
   sampleContext: string | null,
-): string | undefined {
+): Promise<string | undefined> {
   if (!linearUserId) {
     // No identifier — nothing to map. We don't even know what to track as
     // unmapped, so just return undefined.
@@ -398,7 +398,7 @@ function resolveLinearActor(
   }
 
   // Q21.C bot-self-link guard.
-  const storedAppUserId = getStoredAppUserId(workspaceId);
+  const storedAppUserId = await getStoredAppUserId(workspaceId);
   if (storedAppUserId && linearUserId === storedAppUserId) {
     return undefined;
   }
@@ -408,22 +408,22 @@ function resolveLinearActor(
     console.warn("[linear] appUserId not yet stored; bot-self-link guard disabled");
   }
 
-  const existing = findUserByExternalId("linear", linearUserId);
+  const existing = await findUserByExternalId("linear", linearUserId);
   if (existing) return existing.id;
 
   const trimmedEmail = typeof email === "string" ? email.trim() : "";
   if (trimmedEmail !== "") {
-    const { user: linked } = findOrCreateUserByEmail(
+    const { user: linked } = await findOrCreateUserByEmail(
       trimmedEmail,
       { name: name?.trim() || undefined },
       LINEAR_WEBHOOK_ACTOR,
     );
-    linkIdentity(linked.id, "linear", linearUserId, LINEAR_WEBHOOK_ACTOR);
+    await linkIdentity(linked.id, "linear", linearUserId, LINEAR_WEBHOOK_ACTOR);
     return linked.id;
   }
 
   // No mapping + no inline email → unmapped tracker (Q14/Q17.D).
-  upsertKv({
+  await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${linearUserId}:meta`,
     value: {
@@ -434,7 +434,7 @@ function resolveLinearActor(
     valueType: "json",
     expiresAt: Date.now() + UNMAPPED_TTL_MS,
   });
-  incrKv(UNMAPPED_NAMESPACE, `${linearUserId}:count`, 1);
+  await incrKv(UNMAPPED_NAMESPACE, `${linearUserId}:count`, 1);
   return undefined;
 }
 
@@ -482,7 +482,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   const workspaceId = (event.organizationId ?? event.workspaceId) as string | undefined;
   const sampleContext =
     (session?.comment as { body?: string } | undefined)?.body ?? issueTitle ?? null;
-  const requestedByUserId = resolveLinearActor(
+  const requestedByUserId = await resolveLinearActor(
     linearUserId,
     actorEmail,
     actorName,
@@ -492,11 +492,11 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   );
 
   // Check if we already track this issue
-  const existing = getTrackerSyncByExternalId("linear", "task", issueId);
+  const existing = await getTrackerSyncByExternalId("linear", "task", issueId);
   const sessionId = agentSession ? String(agentSession.id ?? "") : "";
 
   if (existing) {
-    const existingTask = getTaskById(existing.swarmId);
+    const existingTask = await getTaskById(existing.swarmId);
 
     // If the task is still active, post a user-visible response on the new
     // session explaining that a sibling is already in flight and the new
@@ -553,12 +553,12 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     return;
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   const sessionSection = sessionUrl ? `\nSession: ${sessionUrl}` : "";
   const descriptionSection = issueDescription ? `\nDescription:\n${issueDescription}\n` : "";
   const templateName = existing ? "linear.issue.reassigned" : "linear.issue.assigned";
-  const templateResult = resolveTemplate(templateName, {
+  const templateResult = await resolveTemplate(templateName, {
     issue_identifier: issueIdentifier,
     issue_title: issueTitle,
     issue_url: issueUrl,
@@ -570,7 +570,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     return;
   }
 
-  const task = createTaskWithSiblingAwareness(templateResult.text, {
+  const task = await createTaskWithSiblingAwareness(templateResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
@@ -580,10 +580,10 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
 
   // Delete old tracker_sync before creating new one (UNIQUE constraint)
   if (existing) {
-    deleteTrackerSync(existing.id);
+    await deleteTrackerSync(existing.id);
   }
 
-  createTrackerSync({
+  await createTrackerSync({
     provider: "linear",
     entityType: "task",
     providerEntityType: "Issue",
@@ -638,7 +638,7 @@ export async function handleIssueUpdate(
   const issueId = String(data.id ?? "");
   if (!issueId) return;
 
-  const sync = getTrackerSyncByExternalId("linear", "task", issueId);
+  const sync = await getTrackerSyncByExternalId("linear", "task", issueId);
   if (!sync) {
     // We don't track this issue — ignore
     return;
@@ -662,7 +662,7 @@ export async function handleIssueUpdate(
   }
 
   // Update tracker_sync metadata
-  updateTrackerSync(sync.id, {
+  await updateTrackerSync(sync.id, {
     lastSyncOrigin: "external",
     lastSyncedAt: new Date().toISOString(),
     lastDeliveryId: deliveryId ?? null,
@@ -670,9 +670,9 @@ export async function handleIssueUpdate(
 
   // Map status to swarm actions
   if (swarmStatus === "cancelled") {
-    const task = getTaskById(sync.swarmId);
+    const task = await getTaskById(sync.swarmId);
     if (task && !["completed", "failed", "cancelled"].includes(task.status)) {
-      cancelTask(sync.swarmId, `Linear issue cancelled`);
+      await cancelTask(sync.swarmId, `Linear issue cancelled`);
       console.log(
         `[Linear Sync] Cancelled task ${sync.swarmId} (Linear issue ${data.identifier ?? issueId} cancelled)`,
       );
@@ -705,12 +705,12 @@ export async function handleIssueDelete(event: Record<string, unknown>): Promise
   const issueId = String(data.id ?? "");
   if (!issueId) return;
 
-  const sync = getTrackerSyncByExternalId("linear", "task", issueId);
+  const sync = await getTrackerSyncByExternalId("linear", "task", issueId);
   if (!sync) return;
 
-  const task = getTaskById(sync.swarmId);
+  const task = await getTaskById(sync.swarmId);
   if (task && !["completed", "failed", "cancelled"].includes(task.status)) {
-    cancelTask(sync.swarmId, "Linear issue deleted");
+    await cancelTask(sync.swarmId, "Linear issue deleted");
     console.log(`[Linear Sync] Cancelled task ${sync.swarmId} (Linear issue ${issueId} deleted)`);
   }
 }
@@ -747,11 +747,11 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
 
   // Handle stop signal — cancel the active task
   if (activitySignal === "stop") {
-    const existing = getTrackerSyncByExternalId("linear", "task", issueId);
+    const existing = await getTrackerSyncByExternalId("linear", "task", issueId);
     if (existing) {
-      const existingTask = getTaskById(existing.swarmId);
+      const existingTask = await getTaskById(existing.swarmId);
       if (existingTask && !["completed", "failed", "cancelled"].includes(existingTask.status)) {
-        cancelTask(existing.swarmId, "Stopped by user from Linear");
+        await cancelTask(existing.swarmId, "Stopped by user from Linear");
         console.log(`[Linear Sync] Cancelled task ${existing.swarmId} (stop signal from Linear)`);
       }
     }
@@ -769,10 +769,10 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   }
 
   // Look up existing tracker_sync for this issue
-  const existing = getTrackerSyncByExternalId("linear", "task", issueId);
+  const existing = await getTrackerSyncByExternalId("linear", "task", issueId);
 
   if (existing) {
-    const existingTask = getTaskById(existing.swarmId);
+    const existingTask = await getTaskById(existing.swarmId);
 
     // If the task is still in progress, acknowledge but don't create a new one
     if (existingTask && !["completed", "failed", "cancelled"].includes(existingTask.status)) {
@@ -790,7 +790,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   }
 
   // Task is completed/failed/cancelled or doesn't exist — create a new follow-up task
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Extract actor identity from Linear webhook payload (Q21.A bug fix).
   // For `prompted` action, the human is at `event.agentActivity.user`.
@@ -802,7 +802,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   const promptedWorkspaceId = (event.organizationId ?? event.workspaceId) as string | undefined;
   const promptedSampleContext =
     (activity?.content as { body?: string } | undefined)?.body ?? userMessage ?? null;
-  const promptedRequestedByUserId = resolveLinearActor(
+  const promptedRequestedByUserId = await resolveLinearActor(
     promptedActorLinearId,
     promptedActorEmail,
     promptedActorName,
@@ -811,7 +811,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     promptedSampleContext,
   );
 
-  const followupResult = resolveTemplate("linear.issue.followup", {
+  const followupResult = await resolveTemplate("linear.issue.followup", {
     issue_identifier: issueIdentifier,
     issue_title: issueTitle,
     issue_url: issueUrl,
@@ -822,7 +822,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     return;
   }
 
-  const task = createTaskWithSiblingAwareness(followupResult.text, {
+  const task = await createTaskWithSiblingAwareness(followupResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
@@ -833,9 +833,9 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   // Repoint the existing tracker_sync to the new follow-up task (can't create a
   // duplicate due to UNIQUE(provider, entityType, externalId) constraint)
   if (existing) {
-    deleteTrackerSync(existing.id);
+    await deleteTrackerSync(existing.id);
   }
-  createTrackerSync({
+  await createTrackerSync({
     provider: "linear",
     entityType: "task",
     providerEntityType: "Issue",

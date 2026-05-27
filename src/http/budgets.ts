@@ -128,7 +128,7 @@ export async function handleBudgets(
   if (listBudgets.match(req.method, pathSegments)) {
     const parsed = await listBudgets.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    json(res, { budgets: getBudgets() });
+    json(res, { budgets: await getBudgets() });
     return true;
   }
 
@@ -139,7 +139,7 @@ export async function handleBudgets(
     const parsed = await listBudgetRefusals.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const limit = parsed.query.limit ?? 50;
-    json(res, { refusals: getRecentBudgetRefusalNotifications(limit) });
+    json(res, { refusals: await getRecentBudgetRefusalNotifications(limit) });
     return true;
   }
 
@@ -156,7 +156,7 @@ export async function handleBudgets(
     const parsed = await getBudgetByScope.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const scopeId = parsed.params.scopeId === "_global" ? "" : parsed.params.scopeId;
-    const row = getBudget(parsed.params.scope, scopeId);
+    const row = await getBudget(parsed.params.scope, scopeId);
     if (!row) {
       jsonError(res, "Budget not configured", 404);
       return true;
@@ -170,10 +170,10 @@ export async function handleBudgets(
     if (!parsed) return true;
     const scopeId = parsed.params.scopeId === "_global" ? "" : parsed.params.scopeId;
 
-    const before = getBudget(parsed.params.scope, scopeId);
-    const updated = upsertBudget(parsed.params.scope, scopeId, parsed.body.dailyBudgetUsd);
+    const before = await getBudget(parsed.params.scope, scopeId);
+    const updated = await upsertBudget(parsed.params.scope, scopeId, parsed.body.dailyBudgetUsd);
 
-    createLogEntry({
+    await createLogEntry({
       eventType: "budget.upserted",
       metadata: {
         scope: parsed.params.scope,
@@ -193,14 +193,14 @@ export async function handleBudgets(
     if (!parsed) return true;
     const scopeId = parsed.params.scopeId === "_global" ? "" : parsed.params.scopeId;
 
-    const before = getBudget(parsed.params.scope, scopeId);
-    const deleted = deleteBudget(parsed.params.scope, scopeId);
+    const before = await getBudget(parsed.params.scope, scopeId);
+    const deleted = await deleteBudget(parsed.params.scope, scopeId);
     if (!deleted) {
       jsonError(res, "Budget not configured", 404);
       return true;
     }
 
-    createLogEntry({
+    await createLogEntry({
       eventType: "budget.deleted",
       metadata: {
         scope: parsed.params.scope,

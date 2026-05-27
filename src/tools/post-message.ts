@@ -39,9 +39,9 @@ export const registerPostMessageTool = (server: McpServer) => {
       }
 
       // Find channel by name or ID
-      let targetChannel = getChannelByName(channel);
+      let targetChannel = await getChannelByName(channel);
       if (!targetChannel) {
-        targetChannel = getChannelById(channel);
+        targetChannel = await getChannelById(channel);
       }
 
       if (!targetChannel) {
@@ -56,13 +56,13 @@ export const registerPostMessageTool = (server: McpServer) => {
       }
 
       try {
-        const posted = postMessage(targetChannel.id, requestInfo.agentId, content, {
+        const posted = await postMessage(targetChannel.id, requestInfo.agentId, content, {
           replyToId: replyTo,
           mentions,
         });
 
         // Auto-mark channel as read after posting (so you don't see your own message as unread)
-        updateReadState(requestInfo.agentId, targetChannel.id);
+        await updateReadState(requestInfo.agentId, targetChannel.id);
 
         return {
           content: [{ type: "text", text: `Posted message to #${targetChannel.name}.` }],

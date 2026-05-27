@@ -22,12 +22,15 @@ function cooldownToMs(cooldown: CooldownConfig): number {
  * (e.g. due to rate limits): without it, a failed run would never satisfy
  * the "last completed run" check, so the cooldown would never engage.
  */
-export function shouldSkipCooldown(workflowId: string, cooldown: CooldownConfig): boolean {
+export async function shouldSkipCooldown(
+  workflowId: string,
+  cooldown: CooldownConfig,
+): Promise<boolean> {
   const cooldownMs = cooldownToMs(cooldown);
   const now = Date.now();
 
   // Skip if last successful run finished within the cooldown window
-  const lastSuccess = getLastSuccessfulRun(workflowId);
+  const lastSuccess = await getLastSuccessfulRun(workflowId);
   if (lastSuccess?.finishedAt) {
     const lastFinished = new Date(lastSuccess.finishedAt).getTime();
     if (now - lastFinished < cooldownMs) return true;
@@ -35,7 +38,7 @@ export function shouldSkipCooldown(workflowId: string, cooldown: CooldownConfig)
 
   // Skip if any run (failed or running) started within the cooldown window.
   // Prevents unlimited re-triggering when every run fails before completing.
-  const lastAttempt = getLastRunStart(workflowId);
+  const lastAttempt = await getLastRunStart(workflowId);
   if (lastAttempt?.startedAt) {
     const lastStarted = new Date(lastAttempt.startedAt).getTime();
     if (now - lastStarted < cooldownMs) return true;

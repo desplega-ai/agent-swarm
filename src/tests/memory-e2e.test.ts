@@ -17,9 +17,9 @@ describe("Memory E2E Lifecycle", () => {
         await unlink(TEST_DB_PATH + suffix);
       } catch {}
     }
-    initDb(TEST_DB_PATH);
-    createAgent({ id: agentA, name: "E2E Agent A", isLead: false, status: "idle" });
-    createAgent({ id: agentB, name: "E2E Agent B", isLead: true, status: "idle" });
+    await initDb(TEST_DB_PATH);
+    await createAgent({ id: agentA, name: "E2E Agent A", isLead: false, status: "idle" });
+    await createAgent({ id: agentB, name: "E2E Agent B", isLead: true, status: "idle" });
     store = new SqliteMemoryStore();
   });
 
@@ -39,8 +39,8 @@ describe("Memory E2E Lifecycle", () => {
   describe("store → search → get → delete lifecycle", () => {
     let memoryId: string;
 
-    test("store creates a memory with correct fields", () => {
-      const memory = store.store({
+    test("store creates a memory with correct fields", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "deployment info",
@@ -54,20 +54,20 @@ describe("Memory E2E Lifecycle", () => {
       expect(memory.content).toContain("GitHub Actions");
     });
 
-    test("updateEmbedding stores vector and model name", () => {
+    test("updateEmbedding stores vector and model name", async () => {
       const embedding = new Float32Array([0.8, 0.2, 0.1]);
-      store.updateEmbedding(memoryId, embedding, "test-model-v1");
+      await store.updateEmbedding(memoryId, embedding, "test-model-v1");
 
       // Verify via raw SQL
-      const row = getDb()
+      const row = (await getDb())
         .prepare("SELECT embeddingModel FROM agent_memory WHERE id = ?")
         .get(memoryId) as { embeddingModel: string | null };
       expect(row.embeddingModel).toBe("test-model-v1");
     });
 
-    test("search returns the memory with similarity score", () => {
+    test("search returns the memory with similarity score", async () => {
       const query = new Float32Array([0.8, 0.2, 0.1]); // same as stored
-      const results = store.search(query, agentA, { limit: 5 });
+      const results = await store.search(query, agentA, { limit: 5 });
       expect(results.length).toBeGreaterThan(0);
 
       const found = results.find((r) => r.id === memoryId);
@@ -75,44 +75,44 @@ describe("Memory E2E Lifecycle", () => {
       expect(found!.similarity).toBeCloseTo(1.0, 3);
     });
 
-    test("get retrieves memory and increments accessCount", () => {
-      const mem1 = store.get(memoryId);
+    test("get retrieves memory and increments accessCount", async () => {
+      const mem1 = await store.get(memoryId);
       expect(mem1).not.toBeNull();
       expect(mem1!.name).toBe("deployment info");
 
       // Access count should increment on each get
-      const row1 = getDb()
+      const row1 = (await getDb())
         .prepare("SELECT accessCount FROM agent_memory WHERE id = ?")
         .get(memoryId) as { accessCount: number };
       const count1 = row1.accessCount;
 
-      store.get(memoryId);
-      const row2 = getDb()
+      await store.get(memoryId);
+      const row2 = (await getDb())
         .prepare("SELECT accessCount FROM agent_memory WHERE id = ?")
         .get(memoryId) as { accessCount: number };
       expect(row2.accessCount).toBe(count1 + 1);
     });
 
-    test("peek reads without incrementing accessCount", () => {
-      const rowBefore = getDb()
+    test("peek reads without incrementing accessCount", async () => {
+      const rowBefore = (await getDb())
         .prepare("SELECT accessCount FROM agent_memory WHERE id = ?")
         .get(memoryId) as { accessCount: number };
 
-      const mem = store.peek(memoryId);
+      const mem = await store.peek(memoryId);
       expect(mem).not.toBeNull();
       expect(mem!.name).toBe("deployment info");
 
-      const rowAfter = getDb()
+      const rowAfter = (await getDb())
         .prepare("SELECT accessCount FROM agent_memory WHERE id = ?")
         .get(memoryId) as { accessCount: number };
       expect(rowAfter.accessCount).toBe(rowBefore.accessCount);
     });
 
-    test("delete removes the memory", () => {
-      const deleted = store.delete(memoryId);
+    test("delete removes the memory", async () => {
+      const deleted = await store.delete(memoryId);
       expect(deleted).toBe(true);
 
-      const found = store.get(memoryId);
+      const found = await store.get(memoryId);
       expect(found).toBeNull();
     });
   });
@@ -122,34 +122,34 @@ describe("Memory E2E Lifecycle", () => {
   // ==========================================================================
 
   describe("reranking affects result order", () => {
-    test("newer memory with same embedding ranks higher", () => {
+    test("newer memory with same embedding ranks higher", async () => {
       // Create old memory
-      const old = store.store({
+      const old = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "old knowledge",
         content: "Old deployment docs",
         source: "manual",
       });
-      store.updateEmbedding(old.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
+      await store.updateEmbedding(old.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
       // Backdate the old memory's createdAt
-      getDb()
+      (await getDb())
         .prepare("UPDATE agent_memory SET createdAt = datetime('now', '-30 days') WHERE id = ?")
         .run(old.id);
 
       // Create fresh memory with similar embedding
-      const fresh = store.store({
+      const fresh = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "fresh knowledge",
         content: "New deployment docs",
         source: "manual",
       });
-      store.updateEmbedding(fresh.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
+      await store.updateEmbedding(fresh.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
       // Search with matching query
-      const candidates = store.search(new Float32Array([0.5, 0.5, 0.0]), agentA, {
+      const candidates = await store.search(new Float32Array([0.5, 0.5, 0.0]), agentA, {
         limit: 20,
       });
       const ranked = rerank(candidates, { limit: 10 });
@@ -162,8 +162,8 @@ describe("Memory E2E Lifecycle", () => {
       expect(freshIdx).toBeLessThan(oldIdx); // fresh ranks higher
 
       // Cleanup
-      store.delete(old.id);
-      store.delete(fresh.id);
+      await store.delete(old.id);
+      await store.delete(fresh.id);
     });
   });
 
@@ -172,8 +172,8 @@ describe("Memory E2E Lifecycle", () => {
   // ==========================================================================
 
   describe("TTL expiry filtering", () => {
-    test("task_completion has ~7d TTL", () => {
-      const memory = store.store({
+    test("task_completion has ~7d TTL", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "task result",
@@ -181,7 +181,7 @@ describe("Memory E2E Lifecycle", () => {
         source: "task_completion",
       });
 
-      const row = getDb()
+      const row = (await getDb())
         .prepare("SELECT expiresAt FROM agent_memory WHERE id = ?")
         .get(memory.id) as { expiresAt: string | null };
       expect(row.expiresAt).not.toBeNull();
@@ -192,11 +192,11 @@ describe("Memory E2E Lifecycle", () => {
       expect(expiresAt).toBeGreaterThan(expectedMin);
       expect(expiresAt).toBeLessThan(expectedMax);
 
-      store.delete(memory.id);
+      await store.delete(memory.id);
     });
 
-    test("manual source has no TTL (null expiresAt)", () => {
-      const memory = store.store({
+    test("manual source has no TTL (null expiresAt)", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "permanent note",
@@ -204,48 +204,48 @@ describe("Memory E2E Lifecycle", () => {
         source: "manual",
       });
 
-      const row = getDb()
+      const row = (await getDb())
         .prepare("SELECT expiresAt FROM agent_memory WHERE id = ?")
         .get(memory.id) as { expiresAt: string | null };
       expect(row.expiresAt).toBeNull();
 
-      store.delete(memory.id);
+      await store.delete(memory.id);
     });
 
-    test("expired memories are excluded from search", () => {
-      const memory = store.store({
+    test("expired memories are excluded from search", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "expired item",
         content: "This should be hidden from search",
         source: "session_summary",
       });
-      store.updateEmbedding(memory.id, new Float32Array([0.9, 0.1, 0.0]), "test-model");
+      await store.updateEmbedding(memory.id, new Float32Array([0.9, 0.1, 0.0]), "test-model");
 
       // Force expiry by backdating expiresAt
-      getDb()
+      (await getDb())
         .prepare("UPDATE agent_memory SET expiresAt = datetime('now', '-1 day') WHERE id = ?")
         .run(memory.id);
 
       // Search should NOT return expired memory
-      const results = store.search(new Float32Array([0.9, 0.1, 0.0]), agentA, { limit: 20 });
+      const results = await store.search(new Float32Array([0.9, 0.1, 0.0]), agentA, { limit: 20 });
       const found = results.find((r) => r.id === memory.id);
       expect(found).toBeUndefined();
 
       // But get() still returns it (lazy expiry — no hard delete)
-      const direct = store.get(memory.id);
+      const direct = await store.get(memory.id);
       expect(direct).not.toBeNull();
       expect(direct!.name).toBe("expired item");
 
       // includeExpired: true should return it in search
-      const withExpired = store.search(new Float32Array([0.9, 0.1, 0.0]), agentA, {
+      const withExpired = await store.search(new Float32Array([0.9, 0.1, 0.0]), agentA, {
         limit: 20,
         includeExpired: true,
       });
       const foundExpired = withExpired.find((r) => r.id === memory.id);
       expect(foundExpired).toBeDefined();
 
-      store.delete(memory.id);
+      await store.delete(memory.id);
     });
   });
 
@@ -254,14 +254,14 @@ describe("Memory E2E Lifecycle", () => {
   // ==========================================================================
 
   describe("storeBatch atomicity", () => {
-    test("stores multiple chunks atomically", () => {
+    test("stores multiple chunks atomically", async () => {
       const chunks = [
         { content: "Chunk 0 content", chunkIndex: 0, totalChunks: 3 },
         { content: "Chunk 1 content", chunkIndex: 1, totalChunks: 3 },
         { content: "Chunk 2 content", chunkIndex: 2, totalChunks: 3 },
       ];
 
-      const memories = store.storeBatch(
+      const memories = await store.storeBatch(
         chunks.map((c) => ({
           agentId: agentA,
           scope: "agent" as const,
@@ -281,7 +281,7 @@ describe("Memory E2E Lifecycle", () => {
       }
 
       // Cleanup
-      store.deleteBySourcePath("/test/batch.md", agentA);
+      await store.deleteBySourcePath("/test/batch.md", agentA);
     });
   });
 
@@ -294,54 +294,54 @@ describe("Memory E2E Lifecycle", () => {
     let swarmMemId: string;
     let otherAgentMemId: string;
 
-    beforeAll(() => {
-      const m1 = store.store({
+    beforeAll(async () => {
+      const m1 = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "A's private",
         content: "Agent A only",
         source: "manual",
       });
-      store.updateEmbedding(m1.id, new Float32Array([1, 0, 0]), "test-model");
+      await store.updateEmbedding(m1.id, new Float32Array([1, 0, 0]), "test-model");
       agentMemId = m1.id;
 
-      const m2 = store.store({
+      const m2 = await store.store({
         agentId: agentA,
         scope: "swarm",
         name: "shared knowledge",
         content: "Visible to all",
         source: "manual",
       });
-      store.updateEmbedding(m2.id, new Float32Array([0, 1, 0]), "test-model");
+      await store.updateEmbedding(m2.id, new Float32Array([0, 1, 0]), "test-model");
       swarmMemId = m2.id;
 
-      const m3 = store.store({
+      const m3 = await store.store({
         agentId: agentB,
         scope: "agent",
         name: "B's private",
         content: "Agent B only",
         source: "manual",
       });
-      store.updateEmbedding(m3.id, new Float32Array([0, 0, 1]), "test-model");
+      await store.updateEmbedding(m3.id, new Float32Array([0, 0, 1]), "test-model");
       otherAgentMemId = m3.id;
     });
 
-    afterAll(() => {
-      store.delete(agentMemId);
-      store.delete(swarmMemId);
-      store.delete(otherAgentMemId);
+    afterAll(async () => {
+      await store.delete(agentMemId);
+      await store.delete(swarmMemId);
+      await store.delete(otherAgentMemId);
     });
 
-    test("worker sees own agent-scoped + swarm memories", () => {
-      const results = store.search(new Float32Array([1, 1, 1]), agentA, { isLead: false });
+    test("worker sees own agent-scoped + swarm memories", async () => {
+      const results = await store.search(new Float32Array([1, 1, 1]), agentA, { isLead: false });
       const names = results.map((r) => r.name);
       expect(names).toContain("A's private");
       expect(names).toContain("shared knowledge");
       expect(names).not.toContain("B's private");
     });
 
-    test("lead sees all memories", () => {
-      const results = store.search(new Float32Array([1, 1, 1]), agentA, { isLead: true });
+    test("lead sees all memories", async () => {
+      const results = await store.search(new Float32Array([1, 1, 1]), agentA, { isLead: true });
       const names = results.map((r) => r.name);
       expect(names).toContain("A's private");
       expect(names).toContain("shared knowledge");
@@ -354,8 +354,8 @@ describe("Memory E2E Lifecycle", () => {
   // ==========================================================================
 
   describe("getStats includes expired count", () => {
-    test("reports expired memories", () => {
-      const mem = store.store({
+    test("reports expired memories", async () => {
+      const mem = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "stats-expired",
@@ -364,14 +364,14 @@ describe("Memory E2E Lifecycle", () => {
       });
 
       // Force expiry
-      getDb()
+      (await getDb())
         .prepare("UPDATE agent_memory SET expiresAt = datetime('now', '-1 hour') WHERE id = ?")
         .run(mem.id);
 
-      const stats = store.getStats(agentA);
+      const stats = await store.getStats(agentA);
       expect(stats.expired).toBeGreaterThanOrEqual(1);
 
-      store.delete(mem.id);
+      await store.delete(mem.id);
     });
   });
 
@@ -380,8 +380,8 @@ describe("Memory E2E Lifecycle", () => {
   // ==========================================================================
 
   describe("updateEmbedding tracks model", () => {
-    test("re-embedding updates embeddingModel column", () => {
-      const mem = store.store({
+    test("re-embedding updates embeddingModel column", async () => {
+      const mem = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "model-track",
@@ -390,20 +390,22 @@ describe("Memory E2E Lifecycle", () => {
       });
 
       // First embed
-      store.updateEmbedding(mem.id, new Float32Array([0.1, 0.2, 0.3]), "model-v1");
-      let row = getDb()
+      await store.updateEmbedding(mem.id, new Float32Array([0.1, 0.2, 0.3]), "model-v1");
+      let row = (await getDb())
         .prepare("SELECT embeddingModel FROM agent_memory WHERE id = ?")
         .get(mem.id) as { embeddingModel: string | null };
       expect(row.embeddingModel).toBe("model-v1");
 
       // Re-embed with new model
-      store.updateEmbedding(mem.id, new Float32Array([0.3, 0.2, 0.1]), "model-v2");
-      row = getDb().prepare("SELECT embeddingModel FROM agent_memory WHERE id = ?").get(mem.id) as {
+      await store.updateEmbedding(mem.id, new Float32Array([0.3, 0.2, 0.1]), "model-v2");
+      row = (await getDb())
+        .prepare("SELECT embeddingModel FROM agent_memory WHERE id = ?")
+        .get(mem.id) as {
         embeddingModel: string | null;
       };
       expect(row.embeddingModel).toBe("model-v2");
 
-      store.delete(mem.id);
+      await store.delete(mem.id);
     });
   });
 
@@ -412,8 +414,8 @@ describe("Memory E2E Lifecycle", () => {
   // ==========================================================================
 
   describe("listForReembedding", () => {
-    test("returns id and content for all memories", () => {
-      const mem = store.store({
+    test("returns id and content for all memories", async () => {
+      const mem = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "reembed-list",
@@ -421,18 +423,18 @@ describe("Memory E2E Lifecycle", () => {
         source: "manual",
       });
 
-      const list = store.listForReembedding();
+      const list = await store.listForReembedding();
       expect(list.length).toBeGreaterThan(0);
 
       const found = list.find((item) => item.id === mem.id);
       expect(found).toBeDefined();
       expect(found!.content).toBe("Content for re-embedding");
 
-      store.delete(mem.id);
+      await store.delete(mem.id);
     });
 
-    test("filters by agentId", () => {
-      const mem = store.store({
+    test("filters by agentId", async () => {
+      const mem = await store.store({
         agentId: agentB,
         scope: "agent",
         name: "reembed-filtered",
@@ -440,14 +442,14 @@ describe("Memory E2E Lifecycle", () => {
         source: "manual",
       });
 
-      const listAll = store.listForReembedding();
-      const listB = store.listForReembedding({ agentId: agentB });
+      const listAll = await store.listForReembedding();
+      const listB = await store.listForReembedding({ agentId: agentB });
       expect(listB.length).toBeLessThanOrEqual(listAll.length);
 
       const found = listB.find((item) => item.id === mem.id);
       expect(found).toBeDefined();
 
-      store.delete(mem.id);
+      await store.delete(mem.id);
     });
   });
 });

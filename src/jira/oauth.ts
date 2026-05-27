@@ -15,8 +15,8 @@ const ACCESSIBLE_RESOURCES_URL = "https://api.atlassian.com/oauth/token/accessib
  * - `scopeSeparator: " "` is critical — Atlassian wants space-separated scopes
  *   per RFC 6749, unlike Linear which requires commas.
  */
-export function getJiraOAuthConfig(): OAuthProviderConfig | null {
-  const app = getOAuthApp("jira");
+export async function getJiraOAuthConfig(): Promise<OAuthProviderConfig | null> {
+  const app = await getOAuthApp("jira");
   if (!app) return null;
 
   return {
@@ -34,7 +34,7 @@ export function getJiraOAuthConfig(): OAuthProviderConfig | null {
 }
 
 export async function getJiraAuthorizationUrl(): Promise<string | null> {
-  const config = getJiraOAuthConfig();
+  const config = await getJiraOAuthConfig();
   if (!config) return null;
   const result = await buildAuthorizationUrl(config);
   return result.url;
@@ -60,7 +60,7 @@ export async function handleJiraCallback(
   cloudId: string;
   siteUrl: string;
 }> {
-  const config = getJiraOAuthConfig();
+  const config = await getJiraOAuthConfig();
   if (!config) throw new Error("Jira OAuth not configured");
 
   const tokens = await exchangeCode(config, code, state);
@@ -89,7 +89,7 @@ export async function handleJiraCallback(
     throw new Error("Jira accessible-resources returned malformed entry (missing id/url)");
   }
 
-  updateJiraMetadata({ cloudId: first.id, siteUrl: first.url });
+  await updateJiraMetadata({ cloudId: first.id, siteUrl: first.url });
 
   return {
     ...tokens,

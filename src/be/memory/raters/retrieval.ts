@@ -24,15 +24,15 @@ export type RetrievalRecord = {
   similarity: number;
 };
 
-export function recordRetrievals(
+export async function recordRetrievals(
   taskId: string | undefined,
   agentId: string,
   results: RetrievalRecord[],
   sessionId?: string,
-): void {
+): Promise<void> {
   if (!taskId || results.length === 0) return;
 
-  const db = getDb();
+  const db = await getDb();
   const insert = db.prepare(
     `INSERT INTO memory_retrieval
        (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
@@ -77,10 +77,10 @@ export function recordRetrievals(
   });
 }
 
-export function getRetrievalsForTask(
+export async function getRetrievalsForTask(
   taskId: string,
-): { memoryId: string; similarity: number | null }[] {
-  return getDb()
+): Promise<{ memoryId: string; similarity: number | null }[]> {
+  return (await getDb())
     .prepare<{ memoryId: string; similarity: number | null }, [string]>(
       "SELECT memoryId, similarity FROM memory_retrieval WHERE taskId = ?",
     )

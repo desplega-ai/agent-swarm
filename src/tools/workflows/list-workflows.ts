@@ -30,8 +30,8 @@ export const registerListWorkflowsTool = (server: McpServer) => {
       try {
         const filters = enabled !== undefined ? { enabled } : undefined;
         const workflows = includeFull
-          ? listWorkflows(filters)
-          : listWorkflows(filters, { slim: true });
+          ? await listWorkflows(filters)
+          : await listWorkflows(filters, { slim: true });
         return {
           content: [{ type: "text" as const, text: `Found ${workflows.length} workflow(s).` }],
           structuredContent: {

@@ -13,7 +13,7 @@ beforeAll(async () => {
       await unlink(`${TEST_DB_PATH}${suffix}`);
     } catch {}
   }
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
@@ -27,7 +27,7 @@ afterAll(async () => {
 
 describe("task tool ctx", () => {
   test("sendTaskHandler with user ctx writes requestedByUserId", async () => {
-    const user = createUser({ name: "MCP User" });
+    const user = await createUser({ name: "MCP User" });
 
     const result = await sendTaskHandler(userCtx(user), {
       task: "user requested task",
@@ -42,19 +42,19 @@ describe("task tool ctx", () => {
     expect(structured.success).toBe(true);
     expect(structured.task.requestedByUserId).toBe(user.id);
 
-    const stored = getTaskById(structured.task.id);
+    const stored = await getTaskById(structured.task.id);
     expect(stored?.creatorAgentId).toBeUndefined();
     expect(stored?.requestedByUserId).toBe(user.id);
   });
 
   test("getTasksHandler with user ctx only returns that user's tasks", async () => {
-    const userA = createUser({ name: "List User A" });
-    const userB = createUser({ name: "List User B" });
+    const userA = await createUser({ name: "List User A" });
+    const userB = await createUser({ name: "List User B" });
 
-    const a1 = createTaskExtended("owned task one", { requestedByUserId: userA.id });
-    const a2 = createTaskExtended("owned task two", { requestedByUserId: userA.id });
-    const b1 = createTaskExtended("foreign task", { requestedByUserId: userB.id });
-    createTaskExtended("owner-only task");
+    const a1 = await createTaskExtended("owned task one", { requestedByUserId: userA.id });
+    const a2 = await createTaskExtended("owned task two", { requestedByUserId: userA.id });
+    const b1 = await createTaskExtended("foreign task", { requestedByUserId: userB.id });
+    await createTaskExtended("owner-only task");
 
     const result = await getTasksHandler(userCtx(userA), {
       includeFull: true,
@@ -74,10 +74,10 @@ describe("task tool ctx", () => {
     expect(structured.tasks.every((task) => task.task?.startsWith("owned task"))).toBe(true);
   });
 
-  test("assertOwnsTask gates user tasks and allows owned or owner ctx", () => {
-    const owner = createUser({ name: "Task Owner" });
-    const foreignUser = createUser({ name: "Foreign User" });
-    const ownedTask = createTaskExtended("owned", { requestedByUserId: owner.id });
+  test("assertOwnsTask gates user tasks and allows owned or owner ctx", async () => {
+    const owner = await createUser({ name: "Task Owner" });
+    const foreignUser = await createUser({ name: "Foreign User" });
+    const ownedTask = await createTaskExtended("owned", { requestedByUserId: owner.id });
 
     expect(assertOwnsTask(userCtx(owner), ownedTask)).toBeNull();
     expect(

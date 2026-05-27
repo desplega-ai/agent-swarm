@@ -37,15 +37,16 @@ export const registerSkillGetTool = (server: McpServer) => {
       let skill = null;
 
       if (args.skillId) {
-        skill = getSkillById(args.skillId);
+        skill = await getSkillById(args.skillId);
       } else if (args.name && requestInfo.agentId) {
         // Precedence: agent (personal) → swarm → global
         skill =
-          getSkillByName(args.name, "agent", requestInfo.agentId) ||
-          getSkillByName(args.name, "swarm") ||
-          getSkillByName(args.name, "global");
+          (await getSkillByName(args.name, "agent", requestInfo.agentId)) ||
+          (await getSkillByName(args.name, "swarm")) ||
+          (await getSkillByName(args.name, "global"));
       } else if (args.name) {
-        skill = getSkillByName(args.name, "swarm") || getSkillByName(args.name, "global");
+        skill =
+          (await getSkillByName(args.name, "swarm")) || (await getSkillByName(args.name, "global"));
       }
 
       if (!skill) {

@@ -69,15 +69,15 @@ function fakeReqRes(rawBody: string, headers: Record<string, string>) {
 
 const KAPSO_PATH = ["api", "integrations", "kapso", "webhook"];
 
-beforeAll(() => {
+beforeAll(async () => {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       require("node:fs").unlinkSync(`${TEST_DB_PATH}${suffix}`);
     } catch {}
   }
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   process.env.KAPSO_WEBHOOK_HMAC_SECRET = HMAC_SECRET;
-  const agent = createAgent({ name: "KapsoWorker", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "KapsoWorker", isLead: false, status: "idle" });
   agentId = agent.id;
 });
 
@@ -92,32 +92,32 @@ afterAll(() => {
 });
 
 describe("routeKapsoInbound", () => {
-  test("mapping hit → dispatches a kapso-inbound task to the mapped agent", () => {
-    putKapsoNumberMapping({
+  test("mapping hit → dispatches a kapso-inbound task to the mapped agent", async () => {
+    await putKapsoNumberMapping({
       phoneNumberId: "pn-task",
       agentId,
       createdAt: new Date().toISOString(),
     });
-    const routing = routeKapsoInbound(makePayload({ phoneNumberId: "pn-task" }));
+    const routing = await routeKapsoInbound(makePayload({ phoneNumberId: "pn-task" }));
     expect(routing.kind).toBe("task");
     if (routing.kind !== "task") throw new Error("expected task");
-    const task = getTaskById(routing.taskId);
+    const task = await getTaskById(routing.taskId);
     expect(task).not.toBeNull();
     expect(task!.taskType).toBe("kapso-inbound");
     expect(task!.agentId).toBe(agentId);
     expect(task!.task).toContain("## Source: WhatsApp (Kapso)");
   });
 
-  test("known Kapso sender → populates requestedByUserId and skips unmapped tracker", () => {
-    putKapsoNumberMapping({
+  test("known Kapso sender → populates requestedByUserId and skips unmapped tracker", async () => {
+    await putKapsoNumberMapping({
       phoneNumberId: "pn-known-sender",
       agentId,
       createdAt: new Date().toISOString(),
     });
-    const user = createUser({ name: "Known WhatsApp Sender" });
-    linkIdentity(user.id, "kapso", "34679077778", { kind: "system", id: "test-fixture" });
+    const user = await createUser({ name: "Known WhatsApp Sender" });
+    await linkIdentity(user.id, "kapso", "34679077778", { kind: "system", id: "test-fixture" });
 
-    const routing = routeKapsoInbound(
+    const routing = await routeKapsoInbound(
       makePayload({
         phoneNumberId: "pn-known-sender",
         messageId: "wamid.KNOWN_SENDER",
@@ -128,20 +128,20 @@ describe("routeKapsoInbound", () => {
 
     expect(routing.kind).toBe("task");
     if (routing.kind !== "task") throw new Error("expected task");
-    const task = getTaskById(routing.taskId);
+    const task = await getTaskById(routing.taskId);
     expect(task!.requestedByUserId).toBe(user.id);
-    expect(getKv("integration:unmapped:kapso", "34679077778:meta")).toBeNull();
+    expect(await getKv("integration:unmapped:kapso", "34679077778:meta")).toBeNull();
   });
 
-  test("unknown Kapso sender → records unmapped identity and leaves task unowned", () => {
-    putKapsoNumberMapping({
+  test("unknown Kapso sender → records unmapped identity and leaves task unowned", async () => {
+    await putKapsoNumberMapping({
       phoneNumberId: "pn-unknown-sender",
       agentId,
       createdAt: new Date().toISOString(),
     });
-    expect(findUserByExternalId("kapso", "34679077779")).toBeNull();
+    expect(await findUserByExternalId("kapso", "34679077779")).toBeNull();
 
-    const routing = routeKapsoInbound(
+    const routing = await routeKapsoInbound(
       makePayload({
         phoneNumberId: "pn-unknown-sender",
         messageId: "wamid.UNKNOWN_SENDER",
@@ -152,61 +152,61 @@ describe("routeKapsoInbound", () => {
 
     expect(routing.kind).toBe("task");
     if (routing.kind !== "task") throw new Error("expected task");
-    const task = getTaskById(routing.taskId);
+    const task = await getTaskById(routing.taskId);
     expect(task!.requestedByUserId).toBeUndefined();
 
-    const meta = getKv("integration:unmapped:kapso", "34679077779:meta");
+    const meta = await getKv("integration:unmapped:kapso", "34679077779:meta");
     expect(meta?.valueType).toBe("json");
     expect(meta?.value).toMatchObject({
       sampleEventType: "kapso.message.received",
     });
     expect(String(meta?.value.sampleContext)).toContain("contact=Taras");
     expect(String(meta?.value.sampleContext)).toContain("message=wamid.UNKNOWN_SENDER");
-    const count = getKv("integration:unmapped:kapso", "34679077779:count");
+    const count = await getKv("integration:unmapped:kapso", "34679077779:count");
     expect(count?.value).toBe(1);
   });
 
-  test("no mapping → no_mapping (does not break, no task)", () => {
-    const routing = routeKapsoInbound(makePayload({ phoneNumberId: "pn-unregistered" }));
+  test("no mapping → no_mapping (does not break, no task)", async () => {
+    const routing = await routeKapsoInbound(makePayload({ phoneNumberId: "pn-unregistered" }));
     expect(routing.kind).toBe("no_mapping");
   });
 
-  test("workflow mapping → signals workflow dispatch", () => {
-    putKapsoNumberMapping({
+  test("workflow mapping → signals workflow dispatch", async () => {
+    await putKapsoNumberMapping({
       phoneNumberId: "pn-wf",
       workflowId: "11111111-1111-4111-8111-111111111111",
       createdAt: new Date().toISOString(),
     });
-    const routing = routeKapsoInbound(makePayload({ phoneNumberId: "pn-wf" }));
+    const routing = await routeKapsoInbound(makePayload({ phoneNumberId: "pn-wf" }));
     expect(routing.kind).toBe("workflow");
     if (routing.kind !== "workflow") throw new Error("expected workflow");
     expect(routing.workflowId).toBe("11111111-1111-4111-8111-111111111111");
   });
 
-  test("non-inbound (outbound/status) → skip", () => {
-    const routing = routeKapsoInbound(
+  test("non-inbound (outbound/status) → skip", async () => {
+    const routing = await routeKapsoInbound(
       makePayload({ phoneNumberId: "pn-task", direction: "outbound" }),
     );
     expect(routing.kind).toBe("skip");
   });
 
-  test("duplicate delivery of the same message id → second is deduped", () => {
-    putKapsoNumberMapping({
+  test("duplicate delivery of the same message id → second is deduped", async () => {
+    await putKapsoNumberMapping({
       phoneNumberId: "pn-dup",
       agentId,
       createdAt: new Date().toISOString(),
     });
     const messageId = "wamid.DUPLICATE_TEST";
-    const first = routeKapsoInbound(makePayload({ phoneNumberId: "pn-dup", messageId }));
+    const first = await routeKapsoInbound(makePayload({ phoneNumberId: "pn-dup", messageId }));
     expect(first.kind).toBe("task");
-    const second = routeKapsoInbound(makePayload({ phoneNumberId: "pn-dup", messageId }));
+    const second = await routeKapsoInbound(makePayload({ phoneNumberId: "pn-dup", messageId }));
     expect(second.kind).toBe("duplicate");
   });
 });
 
 describe("handleWebhooks — Kapso HMAC gate", () => {
   test("valid HMAC + mapping hit → 200 and task routing", async () => {
-    putKapsoNumberMapping({
+    await putKapsoNumberMapping({
       phoneNumberId: "pn-http",
       agentId,
       createdAt: new Date().toISOString(),

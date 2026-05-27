@@ -61,7 +61,7 @@ const baseUrl = `http://localhost:${TEST_PORT}`;
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   server = makeTestServer();
   await new Promise<void>((resolve) => {
     server.listen(TEST_PORT, () => resolve());
@@ -76,9 +76,9 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  getDb().prepare("DELETE FROM swarm_config").run();
-  getDb().prepare("DELETE FROM agents").run();
+beforeEach(async () => {
+  (await getDb()).prepare("DELETE FROM swarm_config").run();
+  (await getDb()).prepare("DELETE FROM agents").run();
 });
 
 // ─── resolveHarnessProvider ──────────────────────────────────────────────────
@@ -143,44 +143,44 @@ describe("validateConfigValue", () => {
 // ─── getResolvedConfig — scope precedence for HARNESS_PROVIDER ───────────────
 
 describe("getResolvedConfig precedence for HARNESS_PROVIDER", () => {
-  test("agent scope wins over global scope", () => {
-    const a = createAgent({
+  test("agent scope wins over global scope", async () => {
+    const a = await createAgent({
       name: "scope-test-1",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    upsertSwarmConfig({ scope: "global", key: "HARNESS_PROVIDER", value: "claude" });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({ scope: "global", key: "HARNESS_PROVIDER", value: "claude" });
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: a.id,
       key: "HARNESS_PROVIDER",
       value: "codex",
     });
 
-    const resolved = getResolvedConfig(a.id);
+    const resolved = await getResolvedConfig(a.id);
     const harness = resolved.find((c) => c.key === "HARNESS_PROVIDER");
     expect(harness?.value).toBe("codex");
   });
 
-  test("global scope applies when no agent-scoped row exists", () => {
-    const a = createAgent({
+  test("global scope applies when no agent-scoped row exists", async () => {
+    const a = await createAgent({
       name: "scope-test-2",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    upsertSwarmConfig({ scope: "global", key: "HARNESS_PROVIDER", value: "pi" });
+    await upsertSwarmConfig({ scope: "global", key: "HARNESS_PROVIDER", value: "pi" });
 
-    const resolved = getResolvedConfig(a.id);
+    const resolved = await getResolvedConfig(a.id);
     const harness = resolved.find((c) => c.key === "HARNESS_PROVIDER");
     expect(harness?.value).toBe("pi");
   });
 
-  test("nothing resolved when no rows exist (env fallback handled by runner)", () => {
-    const resolved = getResolvedConfig("agent-nonexistent");
+  test("nothing resolved when no rows exist (env fallback handled by runner)", async () => {
+    const resolved = await getResolvedConfig("agent-nonexistent");
     expect(resolved.find((c) => c.key === "HARNESS_PROVIDER")).toBeUndefined();
   });
 });
@@ -215,13 +215,13 @@ describe("PUT /api/config rejects invalid HARNESS_PROVIDER", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = getResolvedConfig();
+    const rows = await getResolvedConfig();
     const harness = rows.find((c) => c.key === "HARNESS_PROVIDER");
     expect(harness?.value).toBe("codex");
   });
 
   test("400 still rejects via PUT when scope=agent", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "scope-test-3",
       isLead: false,
       status: "idle",

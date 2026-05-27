@@ -20,7 +20,7 @@ export const registerDeleteWorkflowTool = (server: McpServer) => {
     },
     async ({ id }) => {
       try {
-        const deleted = deleteWorkflow(id);
+        const deleted = await deleteWorkflow(id);
         if (!deleted) {
           return {
             content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],

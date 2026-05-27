@@ -38,7 +38,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
     return false;
   }
 
-  const agent = getAgentById(task.agentId);
+  const agent = await getAgentById(task.agentId);
   if (!agent) {
     console.error(`[Slack] Agent not found for task ${task.id}`);
     return false;
@@ -51,7 +51,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
     if (task.status === "completed") {
       const output = task.output || "Task completed.";
       const slackOutput = markdownToSlack(output);
-      const attachmentsBlock = formatAttachmentsBlockForSlack(getTaskAttachments(task.id));
+      const attachmentsBlock = formatAttachmentsBlockForSlack(await getTaskAttachments(task.id));
       const body = slackOutput + attachmentsBlock;
       const duration =
         task.finishedAt && task.createdAt
@@ -113,7 +113,7 @@ export async function sendProgressUpdate(
 
   if (!task.agentId) return undefined;
 
-  const agent = getAgentById(task.agentId);
+  const agent = await getAgentById(task.agentId);
   if (!agent) return undefined;
 
   const blocks = buildProgressBlocks({ agentName: agent.name, taskId: task.id, progress });
@@ -144,7 +144,7 @@ export async function updateProgressInPlace(
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.agentId) return false;
 
-  const agent = getAgentById(task.agentId);
+  const agent = await getAgentById(task.agentId);
   if (!agent) return false;
 
   const blocks = buildProgressBlocks({ agentName: agent.name, taskId: task.id, progress });
@@ -172,7 +172,7 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.agentId) return false;
 
-  const agent = getAgentById(task.agentId);
+  const agent = await getAgentById(task.agentId);
   if (!agent) return false;
 
   const agentName = agent.name;
@@ -182,7 +182,7 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
   if (task.status === "completed") {
     const output = task.output || "Task completed.";
     const slackOutput = markdownToSlack(output);
-    const attachmentsBlock = formatAttachmentsBlockForSlack(getTaskAttachments(task.id));
+    const attachmentsBlock = formatAttachmentsBlockForSlack(await getTaskAttachments(task.id));
     const body = slackOutput + attachmentsBlock;
     const duration =
       task.finishedAt && task.createdAt

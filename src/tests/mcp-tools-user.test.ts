@@ -45,8 +45,10 @@ function textOf(result: CallToolResult): string {
   return "";
 }
 
-function eventsFor(userId: string): Array<{ eventType: string; afterJson: string | null }> {
-  return getDb()
+async function eventsFor(
+  userId: string,
+): Promise<Array<{ eventType: string; afterJson: string | null }>> {
+  return (await getDb())
     .prepare<{ eventType: string; afterJson: string | null }, string>(
       "SELECT eventType, afterJson FROM user_identity_events WHERE userId = ? ORDER BY createdAt ASC, rowid ASC",
     )
@@ -60,9 +62,9 @@ beforeAll(async () => {
     } catch {}
   }
   closeDb();
-  initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
+  await initDb(TEST_DB_PATH);
+  await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {
@@ -79,8 +81,8 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
   registerResolveUserTool(server);
 
   test("matches by (kind, externalId) → findUserByExternalId hit", async () => {
-    const user = createUser({ name: "Slack User One", email: "one@example.com" });
-    linkIdentity(user.id, "slack", "U_SLACK_ONE", SYSTEM_ACTOR);
+    const user = await createUser({ name: "Slack User One", email: "one@example.com" });
+    await linkIdentity(user.id, "slack", "U_SLACK_ONE", SYSTEM_ACTOR);
 
     const result = await callTool(server, "resolve-user", {
       kind: "slack",
@@ -93,7 +95,7 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
   });
 
   test("matches by email → findUserByEmail hit (primary + alias)", async () => {
-    const user = createUser({
+    const user = await createUser({
       name: "Email User",
       email: "primary@example.com",
       emailAliases: ["alias@example.com"],
@@ -165,9 +167,9 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
   });
 
   test("response includes externalIds populated from user_external_ids rows", async () => {
-    const user = createUser({ name: "External ID User", email: "extid@example.com" });
-    linkIdentity(user.id, "github", "extid-gh-handle", SYSTEM_ACTOR);
-    linkIdentity(user.id, "slack", "U_EXTID", SYSTEM_ACTOR);
+    const user = await createUser({ name: "External ID User", email: "extid@example.com" });
+    await linkIdentity(user.id, "github", "extid-gh-handle", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "slack", "U_EXTID", SYSTEM_ACTOR);
 
     const result = await callTool(server, "resolve-user", {
       kind: "github",
@@ -181,7 +183,7 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
   });
 
   test("externalIds is empty array when user has no identities", async () => {
-    const user = createUser({ name: "No Identities User", email: "noid@example.com" });
+    const user = await createUser({ name: "No Identities User", email: "noid@example.com" });
 
     const result = await callTool(server, "resolve-user", { email: "noid@example.com" });
     const parsed = JSON.parse(textOf(result));
@@ -190,8 +192,8 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
   });
 
   test("userId lookup returns user profile with externalIds", async () => {
-    const user = createUser({ name: "User ID Lookup", email: "uidlookup@example.com" });
-    linkIdentity(user.id, "linear", "L_UIDLOOKUP", SYSTEM_ACTOR);
+    const user = await createUser({ name: "User ID Lookup", email: "uidlookup@example.com" });
+    await linkIdentity(user.id, "linear", "L_UIDLOOKUP", SYSTEM_ACTOR);
 
     const result = await callTool(server, "resolve-user", { userId: user.id });
     const parsed = JSON.parse(textOf(result));
@@ -229,13 +231,13 @@ describe("manage-user MCP tool (identities array)", () => {
     const userId = match![1];
 
     // Verify identities are linked.
-    const idents = getUserIdentities(userId);
+    const idents = await getUserIdentities(userId);
     expect(idents).toHaveLength(2);
     const kinds = idents.map((i) => `${i.kind}:${i.externalId}`).sort();
     expect(kinds).toEqual(["linear:L_IC", "slack:U_IC"]);
 
     // Two `identity_added` events were emitted via linkIdentity().
-    const events = eventsFor(userId);
+    const events = await eventsFor(userId);
     const added = events.filter((e) => e.eventType === "identity_added");
     expect(added).toHaveLength(2);
   });
@@ -247,7 +249,7 @@ describe("manage-user MCP tool (identities array)", () => {
       identities: [{ kind: "slack", externalId: "U_DIFF" }],
     });
     const userId = textOf(created).match(/"id":\s*"([^"]+)"/)![1];
-    const baselineEventCount = eventsFor(userId).length;
+    const baselineEventCount = (await eventsFor(userId)).length;
 
     // Now update: keep slack, drop nothing yet — desired set has slack + add github.
     await callTool(server, "manage-user", {
@@ -258,7 +260,7 @@ describe("manage-user MCP tool (identities array)", () => {
         { kind: "github", externalId: "gh_diff" },
       ],
     });
-    let idents = getUserIdentities(userId);
+    let idents = await getUserIdentities(userId);
     expect(idents.map((i) => `${i.kind}:${i.externalId}`).sort()).toEqual([
       "github:gh_diff",
       "slack:U_DIFF",
@@ -270,10 +272,10 @@ describe("manage-user MCP tool (identities array)", () => {
       userId,
       identities: [{ kind: "github", externalId: "gh_diff" }],
     });
-    idents = getUserIdentities(userId);
+    idents = await getUserIdentities(userId);
     expect(idents.map((i) => `${i.kind}:${i.externalId}`)).toEqual(["github:gh_diff"]);
 
-    const events = eventsFor(userId).slice(baselineEventCount);
+    const events = (await eventsFor(userId)).slice(baselineEventCount);
     const added = events.filter((e) => e.eventType === "identity_added");
     const removed = events.filter((e) => e.eventType === "identity_removed");
     // First update: added github. Second update: removed slack.
@@ -291,7 +293,7 @@ describe("manage-user MCP tool (identities array)", () => {
       emailAliases: ["a@example.com"],
     });
     const userId = textOf(created).match(/"id":\s*"([^"]+)"/)![1];
-    const baselineEventCount = eventsFor(userId).length;
+    const baselineEventCount = (await eventsFor(userId)).length;
 
     // Update aliases: remove a@, add b@.
     await callTool(server, "manage-user", {
@@ -300,7 +302,7 @@ describe("manage-user MCP tool (identities array)", () => {
       emailAliases: ["b@example.com"],
     });
 
-    const events = eventsFor(userId).slice(baselineEventCount);
+    const events = (await eventsFor(userId)).slice(baselineEventCount);
     const added = events.filter((e) => e.eventType === "email_added");
     const removed = events.filter((e) => e.eventType === "email_removed");
     expect(added).toHaveLength(1);
@@ -333,7 +335,7 @@ describe("manage-user MCP tool (identities array)", () => {
 
     // None of the legacy fields should have been turned into linked identities
     // — the new shape REQUIRES `identities` array to link.
-    const idents = getUserIdentities(userId);
+    const idents = await getUserIdentities(userId);
     expect(idents).toHaveLength(0);
   });
 });

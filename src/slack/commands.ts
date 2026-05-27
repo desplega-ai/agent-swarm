@@ -5,8 +5,8 @@ export function registerCommandHandler(app: App): void {
   app.command("/agent-swarm-status", async ({ ack, respond }) => {
     await ack();
 
-    const agents = getAllAgents();
-    const tasks = getAllTasks({ status: "in_progress" });
+    const agents = await getAllAgents();
+    const tasks = await getAllTasks({ status: "in_progress" });
 
     const statusEmoji: Record<string, string> = {
       idle: ":white_circle:",

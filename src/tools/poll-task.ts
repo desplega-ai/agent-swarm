@@ -3,13 +3,13 @@ import { addMinutes } from "date-fns";
 import * as z from "zod";
 import {
   getAgentById,
-  getDb,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getUnassignedTasksCount,
   incrementEmptyPollCount,
   MAX_EMPTY_POLLS,
   resetEmptyPollCount,
+  runDbTransaction,
   startTask,
   updateAgentStatus,
 } from "@/be/db";
@@ -75,7 +75,7 @@ export const registerPollTaskTool = (server: McpServer) => {
       // touching the bookkeeping path below.
       const wasBudgetRefused: boolean = false;
 
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       if (!agent) {
         return {
           content: [
@@ -96,8 +96,8 @@ export const registerPollTaskTool = (server: McpServer) => {
       }
 
       // Check for offered tasks first - these need immediate attention
-      const offeredTasks = getOfferedTasksForAgent(agentId);
-      const availableCount = getUnassignedTasksCount();
+      const offeredTasks = await getOfferedTasksForAgent(agentId);
+      const availableCount = await getUnassignedTasksCount();
 
       if (offeredTasks.length > 0) {
         return {
@@ -121,29 +121,30 @@ export const registerPollTaskTool = (server: McpServer) => {
       // Poll for pending tasks
       while (new Date() < maxTime) {
         // Fetch and update in a single transaction to avoid race conditions
-        const startedTask = getDb().transaction(() => {
-          const agentNow = getAgentById(agentId)!;
+        const startedTask = await runDbTransaction(async () => {
+          const agentNow = await getAgentById(agentId);
+          if (!agentNow) return null;
 
           if (agentNow.status !== "busy") {
-            updateAgentStatus(agentId, "idle");
+            await updateAgentStatus(agentId, "idle");
           }
 
-          const pendingTask = getPendingTaskForAgent(agentId);
+          const pendingTask = await getPendingTaskForAgent(agentId);
           if (!pendingTask) return null;
 
-          const maybeTask = startTask(pendingTask.id);
+          const maybeTask = await startTask(pendingTask.id);
 
           if (maybeTask) {
             // Update automatically in case the agent forgets xd
-            updateAgentStatus(agentId, "busy");
+            await updateAgentStatus(agentId, "busy");
           }
 
           return maybeTask;
-        })();
+        });
 
         if (startedTask) {
           // Reset empty poll count when task is assigned
-          resetEmptyPollCount(agentId);
+          await resetEmptyPollCount(agentId);
 
           const waitedFor = Math.round((Date.now() - now.getTime()) / 1000);
 
@@ -160,7 +161,7 @@ export const registerPollTaskTool = (server: McpServer) => {
               message: `Task "${startedTask.id}" assigned and started.`,
               task: startedTask,
               offeredTasks: [],
-              availableCount: getUnassignedTasksCount(),
+              availableCount: await getUnassignedTasksCount(),
               waitedForSeconds: waitedFor,
               emptyPollCount: 0,
             },
@@ -185,8 +186,8 @@ export const registerPollTaskTool = (server: McpServer) => {
       // Refused ≠ empty (D-R3) — skip bookkeeping when a budget refusal
       // occurred during this poll window.
       const newCount = wasBudgetRefused
-        ? (getAgentById(agentId)?.emptyPollCount ?? 0)
-        : incrementEmptyPollCount(agentId);
+        ? ((await getAgentById(agentId))?.emptyPollCount ?? 0)
+        : await incrementEmptyPollCount(agentId);
       const shouldExit = newCount >= MAX_EMPTY_POLLS;
 
       // If no task was found within the time limit
@@ -196,7 +197,7 @@ export const registerPollTaskTool = (server: McpServer) => {
             type: "text",
             text: shouldExit
               ? `No task assigned after ${newCount} polling attempts. EXIT NOW - do not poll again.`
-              : `No task assigned within the polling duration (${waitedForSeconds}s). ${getUnassignedTasksCount()} unassigned task(s) available in pool.`,
+              : `No task assigned within the polling duration (${waitedForSeconds}s). ${await getUnassignedTasksCount()} unassigned task(s) available in pool.`,
           },
         ],
         structuredContent: {
@@ -206,7 +207,7 @@ export const registerPollTaskTool = (server: McpServer) => {
             ? `Polling limit reached (${newCount}/${MAX_EMPTY_POLLS}). You must exit now.`
             : `No task assigned within the polling duration.`,
           offeredTasks: [],
-          availableCount: getUnassignedTasksCount(),
+          availableCount: await getUnassignedTasksCount(),
           waitedForSeconds,
           shouldExit,
           emptyPollCount: newCount,

@@ -60,7 +60,7 @@ export async function enrichSlackUserEmail(
   slackUserId: string,
 ): Promise<string | null> {
   // Cache hit — return the persisted email straight through.
-  const cached = getKv(ENRICHMENT_NAMESPACE, slackUserId);
+  const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);
   if (cached !== null) {
     const payload = cached.value as EnrichedSlackUser;
     if (payload?.email) {
@@ -87,7 +87,7 @@ export async function enrichSlackUserEmail(
     return null;
   }
 
-  upsertKv({
+  await upsertKv({
     namespace: ENRICHMENT_NAMESPACE,
     key: slackUserId,
     value: {
@@ -127,7 +127,7 @@ export async function resolveSlackUserId(
   eventContext: { sampleEventType: string; sampleContext: string },
 ): Promise<string | undefined> {
   // 1. Fast path — existing alias.
-  const existing = findUserByExternalId("slack", slackUserId);
+  const existing = await findUserByExternalId("slack", slackUserId);
   if (existing) return existing.id;
 
   // 2. Enrich → auto-link by email.
@@ -135,17 +135,17 @@ export async function resolveSlackUserId(
   if (email) {
     // Pull the cached name back out for the user-row hints. The kv read is
     // cheap (single primary-key lookup) and avoids a second `users.info`.
-    const cached = getKv(ENRICHMENT_NAMESPACE, slackUserId);
+    const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);
     const name = (cached?.value as EnrichedSlackUser | undefined)?.name ?? undefined;
 
-    const { user } = findOrCreateUserByEmail(email, { name }, SLACK_WEBHOOK_ACTOR);
+    const { user } = await findOrCreateUserByEmail(email, { name }, SLACK_WEBHOOK_ACTOR);
 
     // Link the Slack identity to whichever user we resolved to. PK collision
     // on `(slack, <id>)` shouldn't happen — we just confirmed no existing
     // mapping in step 1 — but guard defensively so a race doesn't 500 the
     // webhook.
     try {
-      linkIdentity(user.id, "slack", slackUserId, SLACK_WEBHOOK_ACTOR);
+      await linkIdentity(user.id, "slack", slackUserId, SLACK_WEBHOOK_ACTOR);
     } catch (error) {
       console.warn(
         `[Slack] linkIdentity('slack', ${slackUserId}) failed — likely a concurrent enroll`,
@@ -157,6 +157,6 @@ export async function resolveSlackUserId(
   }
 
   // 3. No email — track as unmapped.
-  recordUnmappedIdentity("slack", slackUserId, eventContext);
+  await recordUnmappedIdentity("slack", slackUserId, eventContext);
   return undefined;
 }

@@ -29,8 +29,11 @@ const deps: ExecutorDependencies = {
 
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(name: string, def: WorkflowDefinition): Workflow {
-  const wf = createWorkflow({ name: `${name}-${Date.now()}-${Math.random()}`, definition: def });
+async function makeWorkflow(name: string, def: WorkflowDefinition): Promise<Workflow> {
+  const wf = await createWorkflow({
+    name: `${name}-${Date.now()}-${Math.random()}`,
+    definition: def,
+  });
   createdWorkflowIds.push(wf.id);
   return wf;
 }
@@ -41,13 +44,13 @@ beforeAll(async () => {
   } catch {
     // ignore
   }
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
   for (const id of createdWorkflowIds) {
     try {
-      deleteWorkflow(id);
+      await deleteWorkflow(id);
     } catch {
       // already deleted
     }
@@ -80,19 +83,19 @@ describe("WaitExecutor — time mode end-to-end", () => {
         },
       ],
     };
-    const wf = makeWorkflow("wait-time-end-to-end", def);
+    const wf = await makeWorkflow("wait-time-end-to-end", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
     // Wait should be paused — run + step both 'waiting'.
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run?.status).toBe("waiting");
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const w1Step = steps.find((s) => s.nodeId === "w1");
     expect(w1Step?.status).toBe("waiting");
     expect(w1Step?.nodeType).toBe("wait"); // recovery query uses this
 
     // The wait_state row exists and is pending.
-    const waitState = getWaitStateByStepId(w1Step!.id);
+    const waitState = await getWaitStateByStepId(w1Step!.id);
     expect(waitState).not.toBeNull();
     expect(waitState?.status).toBe("pending");
     expect(waitState?.mode).toBe("time");
@@ -101,21 +104,21 @@ describe("WaitExecutor — time mode end-to-end", () => {
     // resume path the poller would use.
     await new Promise((r) => setTimeout(r, 80));
 
-    const due = getDueWaitStates();
+    const due = await getDueWaitStates();
     expect(due.find((d) => d.id === waitState!.id)).toBeDefined();
 
     await resumeWaitState(waitState!.id, "fired", undefined, registry);
 
     // After resume: wait_state fired, step completed via 'default' port,
     // notify ran, run completed.
-    const afterWait = getWaitStateByStepId(w1Step!.id);
+    const afterWait = await getWaitStateByStepId(w1Step!.id);
     expect(afterWait?.status).toBe("fired");
     expect(afterWait?.resolvedAt).not.toBeNull();
 
-    const afterRun = getWorkflowRun(runId);
+    const afterRun = await getWorkflowRun(runId);
     expect(afterRun?.status).toBe("completed");
 
-    const afterSteps = getWorkflowRunStepsByRunId(runId);
+    const afterSteps = await getWorkflowRunStepsByRunId(runId);
     const w1After = afterSteps.find((s) => s.nodeId === "w1");
     expect(w1After?.status).toBe("completed");
     expect(w1After?.nextPort).toBe("default");
@@ -138,23 +141,23 @@ describe("WaitExecutor — time mode end-to-end", () => {
         { id: "done", type: "notify", config: { channel: "swarm", template: "ok" } },
       ],
     };
-    const wf = makeWorkflow("wait-time-idempotent", def);
+    const wf = await makeWorkflow("wait-time-idempotent", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const w1Step = steps.find((s) => s.nodeId === "w1");
-    const waitState = getWaitStateByStepId(w1Step!.id);
+    const waitState = await getWaitStateByStepId(w1Step!.id);
 
     await new Promise((r) => setTimeout(r, 50));
 
     // First resume — should advance the run.
     await resumeWaitState(waitState!.id, "fired", undefined, registry);
-    let run = getWorkflowRun(runId);
+    let run = await getWorkflowRun(runId);
     expect(run?.status).toBe("completed");
 
     // Second resume — must NOT throw, must NOT undo state.
     await resumeWaitState(waitState!.id, "fired", undefined, registry);
-    run = getWorkflowRun(runId);
+    run = await getWorkflowRun(runId);
     expect(run?.status).toBe("completed");
   });
 
@@ -178,7 +181,7 @@ describe("WaitExecutor — time mode end-to-end", () => {
     expect(r1.status).toBe("success");
     expect((r1 as unknown as { async?: boolean }).async).toBe(true);
 
-    const stateAfter1 = getWaitStateByStepId(meta.stepId);
+    const stateAfter1 = await getWaitStateByStepId(meta.stepId);
     expect(stateAfter1).not.toBeNull();
 
     const r2 = await waitExecutor.run({ config, context: {}, meta });
@@ -186,7 +189,7 @@ describe("WaitExecutor — time mode end-to-end", () => {
     expect((r2 as unknown as { async?: boolean }).async).toBe(true);
 
     // Still exactly one wait_state row — second execute didn't insert.
-    const stateAfter2 = getWaitStateByStepId(meta.stepId);
+    const stateAfter2 = await getWaitStateByStepId(meta.stepId);
     expect(stateAfter2?.id).toBe(stateAfter1!.id);
   });
 
@@ -247,7 +250,7 @@ describe("WaitExecutor — time mode end-to-end", () => {
     expect(result.status).toBe("success");
     expect((result as unknown as { async?: boolean }).async).toBe(true);
 
-    const persisted = getWaitStateByStepId(meta.stepId);
+    const persisted = await getWaitStateByStepId(meta.stepId);
     expect(persisted?.mode).toBe("event");
     expect(persisted?.eventName).toBe("demo.signal");
     expect(persisted?.eventScope).toBe("run");

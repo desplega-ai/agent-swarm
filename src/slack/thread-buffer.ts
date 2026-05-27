@@ -140,14 +140,14 @@ async function slackFlush(
   const description = `[Thread follow-up — ${items.length} message(s) buffered]\n\n${combinedText}`;
 
   // Find the latest active task in this thread for dependency chaining
-  const latestActiveTask = getLatestActiveTaskInThread(channelId, threadTs);
+  const latestActiveTask = await getLatestActiveTaskInThread(channelId, threadTs);
   if (latestActiveTask) {
     console.log(
       `[Slack] Dependency chaining: latest active task ${latestActiveTask.id} (status: ${latestActiveTask.status})`,
     );
   }
 
-  const lead = getLeadAgent();
+  const lead = await getLeadAgent();
 
   // Thread context for the task
   const threadContext = await getThreadContextForBuffer(channelId, threadTs);
@@ -159,8 +159,8 @@ async function slackFlush(
   // Otherwise, depend on the latest active task so it queues naturally.
   const dependsOn = !immediate && latestActiveTask ? [latestActiveTask.id] : undefined;
 
-  const mostRecentTask = getMostRecentTaskInThread(channelId, threadTs);
-  const task = createTaskWithSiblingAwareness(fullDescription, {
+  const mostRecentTask = await getMostRecentTaskInThread(channelId, threadTs);
+  const task = await createTaskWithSiblingAwareness(fullDescription, {
     agentId: lead?.id,
     source: "slack",
     slackChannelId: channelId,

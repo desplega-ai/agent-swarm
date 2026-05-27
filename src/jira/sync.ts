@@ -75,7 +75,7 @@ export async function resolveBotAccountId(): Promise<string | null> {
 
   try {
     await ensureToken("jira");
-    let tokens = getOAuthTokens("jira");
+    let tokens = await getOAuthTokens("jira");
     if (!tokens?.accessToken) {
       console.warn("[Jira Sync] No Jira access token; cannot resolve bot accountId");
       return null;
@@ -92,7 +92,7 @@ export async function resolveBotAccountId(): Promise<string | null> {
     // proactive ensureToken call and the request reaching Atlassian.
     if (res.status === 401) {
       await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
-      tokens = getOAuthTokens("jira");
+      tokens = await getOAuthTokens("jira");
       if (!tokens?.accessToken) {
         console.warn("[Jira Sync] /me returned 401 and refresh produced no token");
         return null;
@@ -129,8 +129,8 @@ export function _setBotAccountIdForTesting(id: string | null): void {
 
 // ─── Lead-agent picker (mirrors Linear) ────────────────────────────────────
 
-function findLeadAgent(): Agent | null {
-  const agents = getAllAgents();
+async function findLeadAgent(): Promise<Agent | null> {
+  const agents = await getAllAgents();
   const onlineLead = agents.find((a) => a.isLead && a.status !== "offline");
   if (onlineLead) return onlineLead;
   return agents.find((a) => a.isLead) ?? null;
@@ -138,8 +138,8 @@ function findLeadAgent(): Agent | null {
 
 // ─── URL helpers ───────────────────────────────────────────────────────────
 
-function buildIssueUrl(issueKey: string): string {
-  const meta = getJiraMetadata();
+async function buildIssueUrl(issueKey: string): Promise<string> {
+  const meta = await getJiraMetadata();
   const siteUrl = (meta.siteUrl ?? "").replace(/\/+$/, "");
   if (!siteUrl) return "";
   return `${siteUrl}/browse/${issueKey}`;
@@ -220,11 +220,11 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
   const summary = issue.fields?.summary ?? "(no summary)";
   const reporterName = issue.fields?.reporter?.displayName ?? "";
   const descriptionText = extractText(issue.fields?.description);
-  const issueUrl = buildIssueUrl(issueKey);
+  const issueUrl = await buildIssueUrl(issueKey);
 
   // Step 1: claim the sync row UNIQUE-gated. Pass empty swarmId placeholder;
   // we update it once the task is created.
-  const claim = createTrackerSyncIfAbsent({
+  const claim = await createTrackerSyncIfAbsent({
     provider: "jira",
     entityType: "task",
     providerEntityType: "Issue",
@@ -251,7 +251,7 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
   }
 
   // Pre-existing — branch on prior task state.
-  const priorTask = claim.sync.swarmId ? getTaskById(claim.sync.swarmId) : null;
+  const priorTask = claim.sync.swarmId ? await getTaskById(claim.sync.swarmId) : null;
   if (priorTask && !["completed", "failed", "cancelled"].includes(priorTask.status)) {
     // In-progress: do not duplicate. Match Linear's behavior of acknowledging
     // and continuing with the existing task.
@@ -323,7 +323,7 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
   }
 
   // 2. Outbound-echo skip (race window).
-  const existing = getTrackerSyncByExternalId("jira", "task", issue.id);
+  const existing = await getTrackerSyncByExternalId("jira", "task", issue.id);
   if (
     existing &&
     existing.lastSyncOrigin === "swarm" &&
@@ -346,11 +346,11 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
   const descriptionText = extractText(issue.fields?.description);
   const commentText = extractText(comment.body);
   const commentAuthor = comment.author?.displayName ?? "";
-  const issueUrl = buildIssueUrl(issueKey);
+  const issueUrl = await buildIssueUrl(issueKey);
 
   if (!existing) {
     // Comment-mention into existence.
-    const claim = createTrackerSyncIfAbsent({
+    const claim = await createTrackerSyncIfAbsent({
       provider: "jira",
       entityType: "task",
       providerEntityType: "Issue",
@@ -407,7 +407,7 @@ async function routeCommentOnExistingSync(input: {
   commentAuthor: string;
   syncRow: { id: string; swarmId: string };
 }): Promise<void> {
-  const priorTask = input.syncRow.swarmId ? getTaskById(input.syncRow.swarmId) : null;
+  const priorTask = input.syncRow.swarmId ? await getTaskById(input.syncRow.swarmId) : null;
   if (priorTask && !["completed", "failed", "cancelled"].includes(priorTask.status)) {
     // In-progress: log and ignore (mirrors Linear's prompted-on-active path).
     console.log(
@@ -436,12 +436,12 @@ export async function handleIssueDeleteEvent(event: Record<string, unknown>): Pr
   const issue = event.issue as IssueShape | undefined;
   if (!issue?.id) return;
 
-  const sync = getTrackerSyncByExternalId("jira", "task", issue.id);
+  const sync = await getTrackerSyncByExternalId("jira", "task", issue.id);
   if (!sync) return;
 
-  const task = sync.swarmId ? getTaskById(sync.swarmId) : null;
+  const task = sync.swarmId ? await getTaskById(sync.swarmId) : null;
   if (task && !["completed", "failed", "cancelled"].includes(task.status)) {
-    cancelTask(sync.swarmId, "Jira issue deleted");
+    await cancelTask(sync.swarmId, "Jira issue deleted");
     console.log(
       `[Jira Sync] Cancelled task ${sync.swarmId} (Jira issue ${issue.key ?? issue.id} deleted)`,
     );
@@ -461,7 +461,7 @@ async function createInitialJiraTask(input: {
   followupTrigger?: string;
   followupMessage?: string;
 }): Promise<void> {
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
   const descriptionSection = input.descriptionText
     ? `\nDescription:\n${input.descriptionText}\n`
     : "";
@@ -483,20 +483,20 @@ async function createInitialJiraTask(input: {
         description_section: descriptionSection,
       };
 
-  const result = resolveTemplate(tmplName, variables);
+  const result = await resolveTemplate(tmplName, variables);
   if (result.skipped) {
     console.log(`[Jira Sync] Template ${tmplName} resolved as skipped — not creating task`);
     return;
   }
 
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "jira",
     taskType: "jira-issue",
     contextKey: buildJiraContextKey(input.issueKey),
   });
 
-  updateTrackerSyncSwarmId(input.syncRowId, task.id);
+  await updateTrackerSyncSwarmId(input.syncRowId, task.id);
 
   const action = input.followup ? "follow-up" : "new";
   console.log(
@@ -513,12 +513,12 @@ async function createCommentMentionTask(input: {
   issueUrl: string;
   syncRowId: string;
 }): Promise<void> {
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
   const descriptionSection = input.descriptionText
     ? `\nDescription:\n${input.descriptionText}\n`
     : "";
 
-  const result = resolveTemplate("jira.issue.commented", {
+  const result = await resolveTemplate("jira.issue.commented", {
     issue_key: input.issueKey,
     issue_summary: input.summary,
     issue_url: input.issueUrl,
@@ -532,14 +532,14 @@ async function createCommentMentionTask(input: {
     return;
   }
 
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "jira",
     taskType: "jira-issue",
     contextKey: buildJiraContextKey(input.issueKey),
   });
 
-  updateTrackerSyncSwarmId(input.syncRowId, task.id);
+  await updateTrackerSyncSwarmId(input.syncRowId, task.id);
 
   console.log(
     `[Jira Sync] Created comment-mention task ${task.id} for ${input.issueKey} -> ${lead?.name ?? "unassigned"}`,

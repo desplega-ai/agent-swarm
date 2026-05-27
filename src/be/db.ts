@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
 import { addEyesReactionOnTaskStart } from "../github/task-reactions";
@@ -98,11 +99,16 @@ import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 let db: Database | null = null;
 let sqliteVecAvailable = false;
 
+type DbTransactionContext = { depth: number };
+const dbTransactionContext = new AsyncLocalStorage<DbTransactionContext>();
+let transactionLock: Promise<void> = Promise.resolve();
+let activeTransactionDone: Promise<void> | null = null;
+
 export function isSqliteVecAvailable(): boolean {
   return sqliteVecAvailable;
 }
 
-export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
+export async function initDb(dbPath = "./agent-swarm-db.sqlite"): Promise<Database> {
   if (db) {
     return db;
   }
@@ -282,13 +288,13 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   }
 
   // Backfill: Seed v1 for existing agents that don't have any context versions yet
-  seedContextVersions();
+  await seedContextVersions();
 
   // Inject DB resolver into the prompt template resolver (DI to avoid worker/API boundary violation)
   configureDbResolver(resolvePromptTemplate);
 
   // Seed default prompt templates from the in-memory code registry
-  seedDefaultTemplates();
+  await seedDefaultTemplates();
 
   const hasExistingEncryptedSecrets =
     (database
@@ -324,11 +330,77 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   return db;
 }
 
-export function getDb(path?: string): Database {
+export async function getDb(path?: string): Promise<Database> {
+  while (activeTransactionDone && !dbTransactionContext.getStore()) {
+    await activeTransactionDone;
+  }
   if (!db) {
-    return initDb(path ?? process.env.DATABASE_PATH);
+    return await initDb(path ?? process.env.DATABASE_PATH);
   }
   return db;
+}
+
+export async function runDbTransaction<T>(fn: () => T | Promise<T>): Promise<T> {
+  const context = dbTransactionContext.getStore();
+  if (context) {
+    const nestedContext = { depth: context.depth + 1 };
+    return await dbTransactionContext.run(nestedContext, () =>
+      executeDbTransaction(nestedContext.depth, fn),
+    );
+  }
+
+  const releaseSlot = await acquireTransactionSlot();
+  let releaseActiveTransaction!: () => void;
+  activeTransactionDone = new Promise<void>((resolve) => {
+    releaseActiveTransaction = resolve;
+  });
+
+  try {
+    return await dbTransactionContext.run({ depth: 0 }, () => executeDbTransaction(0, fn));
+  } finally {
+    activeTransactionDone = null;
+    releaseActiveTransaction();
+    releaseSlot();
+  }
+}
+
+async function acquireTransactionSlot(): Promise<() => void> {
+  let release!: () => void;
+  const previous = transactionLock;
+  transactionLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  return release;
+}
+
+async function executeDbTransaction<T>(depth: number, fn: () => T | Promise<T>): Promise<T> {
+  const database = await getDb();
+  const savepoint = depth > 0 ? `async_tx_${depth}` : null;
+
+  if (savepoint) {
+    database.run(`SAVEPOINT ${savepoint}`);
+  } else {
+    database.run("BEGIN IMMEDIATE");
+  }
+
+  try {
+    const result = await fn();
+    if (savepoint) {
+      database.run(`RELEASE SAVEPOINT ${savepoint}`);
+    } else {
+      database.run("COMMIT");
+    }
+    return result;
+  } catch (error) {
+    if (savepoint) {
+      database.run(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      database.run(`RELEASE SAVEPOINT ${savepoint}`);
+    } else {
+      database.run("ROLLBACK");
+    }
+    throw error;
+  }
 }
 
 export function closeDb(): void {
@@ -407,7 +479,7 @@ function rowToContextVersion(row: ContextVersionRow): ContextVersion {
   };
 }
 
-export function createContextVersion(params: {
+export async function createContextVersion(params: {
   agentId: string;
   field: VersionableField;
   content: string;
@@ -417,11 +489,11 @@ export function createContextVersion(params: {
   changeReason?: string | null;
   contentHash: string;
   previousVersionId?: string | null;
-}): ContextVersion {
+}): Promise<ContextVersion> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<
       ContextVersionRow,
       [
@@ -459,11 +531,11 @@ export function createContextVersion(params: {
   return rowToContextVersion(row);
 }
 
-export function getLatestContextVersion(
+export async function getLatestContextVersion(
   agentId: string,
   field: VersionableField,
-): ContextVersion | null {
-  const row = getDb()
+): Promise<ContextVersion | null> {
+  const row = (await getDb())
     .prepare<ContextVersionRow, [string, string]>(
       `SELECT * FROM context_versions WHERE agentId = ? AND field = ? ORDER BY version DESC LIMIT 1`,
     )
@@ -472,23 +544,23 @@ export function getLatestContextVersion(
   return row ? rowToContextVersion(row) : null;
 }
 
-export function getContextVersion(id: string): ContextVersion | null {
-  const row = getDb()
+export async function getContextVersion(id: string): Promise<ContextVersion | null> {
+  const row = (await getDb())
     .prepare<ContextVersionRow, [string]>(`SELECT * FROM context_versions WHERE id = ?`)
     .get(id);
 
   return row ? rowToContextVersion(row) : null;
 }
 
-export function getContextVersionHistory(params: {
+export async function getContextVersionHistory(params: {
   agentId: string;
   field?: VersionableField;
   limit?: number;
-}): ContextVersion[] {
+}): Promise<ContextVersion[]> {
   const limit = params.limit ?? 10;
 
   if (params.field) {
-    const rows = getDb()
+    const rows = (await getDb())
       .prepare<ContextVersionRow, [string, string, number]>(
         `SELECT * FROM context_versions WHERE agentId = ? AND field = ? ORDER BY version DESC LIMIT ?`,
       )
@@ -496,7 +568,7 @@ export function getContextVersionHistory(params: {
     return rows.map(rowToContextVersion);
   }
 
-  const rows = getDb()
+  const rows = (await getDb())
     .prepare<ContextVersionRow, [string, number]>(
       `SELECT * FROM context_versions WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?`,
     )
@@ -508,8 +580,8 @@ export function getContextVersionHistory(params: {
  * Seed v1 context versions for existing agents that don't have any versions yet.
  * Called during migration.
  */
-function seedContextVersions(): void {
-  const database = getDb();
+async function seedContextVersions(): Promise<void> {
+  const database = await getDb();
   const agents = database
     .prepare<
       {
@@ -625,29 +697,30 @@ function rowToAgent(row: AgentRow, slim = false): Agent {
 }
 
 export const agentQueries = {
-  insert: () =>
-    getDb().prepare<
+  insert: async () =>
+    (await getDb()).prepare<
       AgentRow,
       [string, string, number, AgentStatus, number, string | null, string | null]
     >(
       "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, harness_provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
     ),
 
-  getById: () => getDb().prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?"),
+  getById: async () =>
+    (await getDb()).prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?"),
 
-  getAll: () => getDb().prepare<AgentRow, []>("SELECT * FROM agents ORDER BY name"),
+  getAll: async () => (await getDb()).prepare<AgentRow, []>("SELECT * FROM agents ORDER BY name"),
 
-  updateStatus: () =>
-    getDb().prepare<AgentRow, [AgentStatus, string]>(
+  updateStatus: async () =>
+    (await getDb()).prepare<AgentRow, [AgentStatus, string]>(
       "UPDATE agents SET status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
     ),
 
-  updateCredentialState: () =>
-    getDb().prepare<AgentRow, [AgentStatus, string | null, string]>(
+  updateCredentialState: async () =>
+    (await getDb()).prepare<AgentRow, [AgentStatus, string | null, string]>(
       "UPDATE agents SET status = ?, credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
     ),
 
-  delete: () => getDb().prepare<null, [string]>("DELETE FROM agents WHERE id = ?"),
+  delete: async () => (await getDb()).prepare<null, [string]>("DELETE FROM agents WHERE id = ?"),
 };
 
 /**
@@ -661,63 +734,58 @@ export const agentQueries = {
  * `status === 'idle'` so the new value is implicitly excluded with no other
  * code change.
  */
-export function updateAgentCredentialState(
+export async function updateAgentCredentialState(
   agentId: string,
   ready: boolean,
   missing: string[] | null,
-): Agent | null {
+): Promise<Agent | null> {
   const status: AgentStatus = ready ? "idle" : "waiting_for_credentials";
   const missingJson = ready ? null : missing && missing.length > 0 ? JSON.stringify(missing) : null;
-  const row = agentQueries.updateCredentialState().get(status, missingJson, agentId);
+  const row = (await agentQueries.updateCredentialState()).get(status, missingJson, agentId);
   return row ? rowToAgent(row) : null;
 }
 
-export function createAgent(
+export async function createAgent(
   agent: Omit<Agent, "id" | "createdAt" | "lastUpdatedAt"> & { id?: string },
-): Agent {
+): Promise<Agent> {
   const id = agent.id ?? crypto.randomUUID();
   const maxTasks = agent.maxTasks ?? 1;
-  const row = agentQueries
-    .insert()
-    .get(
-      id,
-      agent.name,
-      agent.isLead ? 1 : 0,
-      agent.status,
-      maxTasks,
-      agent.provider ?? null,
-      agent.harnessProvider ?? null,
-    );
+  const row = (await agentQueries.insert()).get(
+    id,
+    agent.name,
+    agent.isLead ? 1 : 0,
+    agent.status,
+    maxTasks,
+    agent.provider ?? null,
+    agent.harnessProvider ?? null,
+  );
   if (!row) throw new Error("Failed to create agent");
   try {
-    createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
+    await createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
   } catch {}
   return rowToAgent(row);
 }
 
-export function getAgentById(id: string): Agent | null {
-  const row = agentQueries.getById().get(id);
+export async function getAgentById(id: string): Promise<Agent | null> {
+  const row = (await agentQueries.getById()).get(id);
   return row ? rowToAgent(row) : null;
 }
 
-export function getAllAgents(opts?: { slim?: boolean }): Agent[] {
-  return agentQueries
-    .getAll()
-    .all()
-    .map((row) => rowToAgent(row, opts?.slim ?? false));
+export async function getAllAgents(opts?: { slim?: boolean }): Promise<Agent[]> {
+  return (await agentQueries.getAll()).all().map((row) => rowToAgent(row, opts?.slim ?? false));
 }
 
-export function getLeadAgent(): Agent | null {
-  const agents = getAllAgents();
+export async function getLeadAgent(): Promise<Agent | null> {
+  const agents = await getAllAgents();
   return agents.find((a) => a.isLead) ?? null;
 }
 
-export function updateAgentStatus(id: string, status: AgentStatus): Agent | null {
-  const oldAgent = getAgentById(id);
-  const row = agentQueries.updateStatus().get(status, id);
+export async function updateAgentStatus(id: string, status: AgentStatus): Promise<Agent | null> {
+  const oldAgent = await getAgentById(id);
+  const row = (await agentQueries.updateStatus()).get(status, id);
   if (row && oldAgent) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "agent_status_change",
         agentId: id,
         oldValue: oldAgent.status,
@@ -728,8 +796,8 @@ export function updateAgentStatus(id: string, status: AgentStatus): Agent | null
   return row ? rowToAgent(row) : null;
 }
 
-export function updateAgentMaxTasks(id: string, maxTasks: number): Agent | null {
-  const row = getDb()
+export async function updateAgentMaxTasks(id: string, maxTasks: number): Promise<Agent | null> {
+  const row = (await getDb())
     .prepare<AgentRow, [number, string]>(
       `UPDATE agents SET maxTasks = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
@@ -738,8 +806,11 @@ export function updateAgentMaxTasks(id: string, maxTasks: number): Agent | null 
   return row ? rowToAgent(row) : null;
 }
 
-export function updateAgentProvider(id: string, provider: ProviderName): Agent | null {
-  const row = getDb()
+export async function updateAgentProvider(
+  id: string,
+  provider: ProviderName,
+): Promise<Agent | null> {
+  const row = (await getDb())
     .prepare<AgentRow, [string, string]>(
       `UPDATE agents SET provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
@@ -755,8 +826,11 @@ export function updateAgentProvider(id: string, provider: ProviderName): Agent |
  *
  * Returns the updated row, or null if the agent does not exist.
  */
-export function setAgentHarnessProvider(id: string, provider: ProviderName | null): Agent | null {
-  const row = getDb()
+export async function setAgentHarnessProvider(
+  id: string,
+  provider: ProviderName | null,
+): Promise<Agent | null> {
+  const row = (await getDb())
     .prepare<AgentRow, [string | null, string]>(
       `UPDATE agents SET harness_provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
@@ -775,12 +849,12 @@ export function setAgentHarnessProvider(id: string, provider: ProviderName | nul
  * one-row-one-fact, and the PATCH handler can choose which to call based
  * on which fields the request body carried.
  */
-export function updateAgentCredStatus(
+export async function updateAgentCredStatus(
   id: string,
   credStatus: AgentCredStatus | null,
-): Agent | null {
+): Promise<Agent | null> {
   const json = credStatus ? JSON.stringify(credStatus) : null;
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentRow, [string | null, string]>(
       `UPDATE agents SET cred_status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
@@ -797,8 +871,8 @@ export function updateAgentCredStatus(
  * Agents with NULL `cred_status` (never reported, or CRED_CHECK_DISABLE=1)
  * are still returned — the caller surfaces them as "unreported".
  */
-export function listAgentsWithCredStatusByProvider(provider: string): Agent[] {
-  const rows = getDb()
+export async function listAgentsWithCredStatusByProvider(provider: string): Promise<Agent[]> {
+  const rows = (await getDb())
     .prepare<AgentRow, [string]>(`SELECT * FROM agents WHERE harness_provider = ? ORDER BY name`)
     .all(provider);
   return rows.map((row) => rowToAgent(row));
@@ -812,8 +886,10 @@ export function listAgentsWithCredStatusByProvider(provider: string): Agent[] {
  *
  * Used by future fleet displays. Not consumed in this phase.
  */
-export function getAgentHarnessProviders(): Array<{ provider: string; count: number }> {
-  const rows = getDb()
+export async function getAgentHarnessProviders(): Promise<
+  Array<{ provider: string; count: number }>
+> {
+  const rows = (await getDb())
     .prepare<{ provider: string; count: number }, []>(
       `SELECT harness_provider AS provider, COUNT(*) AS count
        FROM agents
@@ -825,8 +901,8 @@ export function getAgentHarnessProviders(): Array<{ provider: string; count: num
   return rows.map((r) => ({ provider: r.provider, count: r.count }));
 }
 
-export function updateAgentActivity(id: string): void {
-  getDb()
+export async function updateAgentActivity(id: string): Promise<void> {
+  (await getDb())
     .prepare<null, [string]>(
       `UPDATE agents SET lastActivityAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`,
     )
@@ -844,8 +920,8 @@ export const MAX_EMPTY_POLLS = 2;
  * Increment the empty poll count for an agent.
  * Returns the new count after incrementing.
  */
-export function incrementEmptyPollCount(agentId: string): number {
-  const row = getDb()
+export async function incrementEmptyPollCount(agentId: string): Promise<number> {
+  const row = (await getDb())
     .prepare<{ emptyPollCount: number }, [string]>(
       `UPDATE agents
        SET emptyPollCount = emptyPollCount + 1,
@@ -861,8 +937,8 @@ export function incrementEmptyPollCount(agentId: string): number {
  * Reset the empty poll count for an agent to zero.
  * Called when a task is assigned or agent re-registers.
  */
-export function resetEmptyPollCount(agentId: string): void {
-  getDb().run(
+export async function resetEmptyPollCount(agentId: string): Promise<void> {
+  (await getDb()).run(
     `UPDATE agents
      SET emptyPollCount = 0,
          lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -874,19 +950,19 @@ export function resetEmptyPollCount(agentId: string): void {
 /**
  * Check if an agent has exceeded the maximum empty poll count.
  */
-export function shouldBlockPolling(agentId: string): boolean {
-  const agent = getAgentById(agentId);
+export async function shouldBlockPolling(agentId: string): Promise<boolean> {
+  const agent = await getAgentById(agentId);
   return (agent?.emptyPollCount ?? 0) >= MAX_EMPTY_POLLS;
 }
 
-export function deleteAgent(id: string): boolean {
-  const agent = getAgentById(id);
+export async function deleteAgent(id: string): Promise<boolean> {
+  const agent = await getAgentById(id);
   if (agent) {
     try {
-      createLogEntry({ eventType: "agent_left", agentId: id, oldValue: agent.status });
+      await createLogEntry({ eventType: "agent_left", agentId: id, oldValue: agent.status });
     } catch {}
   }
-  const result = getDb().run("DELETE FROM agents WHERE id = ?", [id]);
+  const result = (await getDb()).run("DELETE FROM agents WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -898,8 +974,8 @@ export function deleteAgent(id: string): boolean {
  * Get the count of active (in_progress) tasks for an agent.
  * Used to determine current capacity usage.
  */
-export function getActiveTaskCount(agentId: string): number {
-  const result = getDb()
+export async function getActiveTaskCount(agentId: string): Promise<number> {
+  const result = (await getDb())
     .prepare<{ count: number }, [string]>(
       "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
     )
@@ -910,20 +986,20 @@ export function getActiveTaskCount(agentId: string): number {
 /**
  * Check if an agent has capacity to accept more tasks.
  */
-export function hasCapacity(agentId: string): boolean {
-  const agent = getAgentById(agentId);
+export async function hasCapacity(agentId: string): Promise<boolean> {
+  const agent = await getAgentById(agentId);
   if (!agent) return false;
-  const activeCount = getActiveTaskCount(agentId);
+  const activeCount = await getActiveTaskCount(agentId);
   return activeCount < (agent.maxTasks ?? 1);
 }
 
 /**
  * Get remaining capacity (available task slots) for an agent.
  */
-export function getRemainingCapacity(agentId: string): number {
-  const agent = getAgentById(agentId);
+export async function getRemainingCapacity(agentId: string): Promise<number> {
+  const agent = await getAgentById(agentId);
   if (!agent) return 0;
-  const activeCount = getActiveTaskCount(agentId);
+  const activeCount = await getActiveTaskCount(agentId);
   return Math.max(0, (agent.maxTasks ?? 1) - activeCount);
 }
 
@@ -932,19 +1008,19 @@ export function getRemainingCapacity(agentId: string): number {
  * Agent is 'busy' when any tasks are in progress, 'idle' when none.
  * Does not modify 'offline' status.
  */
-export function updateAgentStatusFromCapacity(agentId: string): void {
-  const agent = getAgentById(agentId);
+export async function updateAgentStatusFromCapacity(agentId: string): Promise<void> {
+  const agent = await getAgentById(agentId);
   if (!agent || agent.status === "offline") return;
   // `waiting_for_credentials` is owned by the worker's credential-wait
   // tick — task-completion shouldn't accidentally promote a blocked agent
   // back to idle.
   if (agent.status === "waiting_for_credentials") return;
 
-  const activeCount = getActiveTaskCount(agentId);
+  const activeCount = await getActiveTaskCount(agentId);
   const newStatus = activeCount > 0 ? "busy" : "idle";
 
   if (agent.status !== newStatus) {
-    updateAgentStatus(agentId, newStatus);
+    await updateAgentStatus(agentId, newStatus);
   }
 }
 
@@ -1117,8 +1193,8 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
 }
 
 export const taskQueries = {
-  insert: () =>
-    getDb().prepare<
+  insert: async () =>
+    (await getDb()).prepare<
       AgentTaskRow,
       [
         string,
@@ -1136,52 +1212,54 @@ export const taskQueries = {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
     ),
 
-  getById: () => getDb().prepare<AgentTaskRow, [string]>("SELECT * FROM agent_tasks WHERE id = ?"),
+  getById: async () =>
+    (await getDb()).prepare<AgentTaskRow, [string]>("SELECT * FROM agent_tasks WHERE id = ?"),
 
-  getByAgentId: () =>
-    getDb().prepare<AgentTaskRow, [string]>(
+  getByAgentId: async () =>
+    (await getDb()).prepare<AgentTaskRow, [string]>(
       "SELECT * FROM agent_tasks WHERE agentId = ? ORDER BY createdAt DESC",
     ),
 
-  getByStatus: () =>
-    getDb().prepare<AgentTaskRow, [AgentTaskStatus]>(
+  getByStatus: async () =>
+    (await getDb()).prepare<AgentTaskRow, [AgentTaskStatus]>(
       "SELECT * FROM agent_tasks WHERE status = ? ORDER BY createdAt DESC",
     ),
 
-  updateStatus: () =>
-    getDb().prepare<AgentTaskRow, [AgentTaskStatus, string | null, string]>(
+  updateStatus: async () =>
+    (await getDb()).prepare<AgentTaskRow, [AgentTaskStatus, string | null, string]>(
       `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`,
     ),
 
-  setOutput: () =>
-    getDb().prepare<AgentTaskRow, [string, string]>(
+  setOutput: async () =>
+    (await getDb()).prepare<AgentTaskRow, [string, string]>(
       "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
     ),
 
-  setFailure: () =>
-    getDb().prepare<AgentTaskRow, [string, string, string]>(
+  setFailure: async () =>
+    (await getDb()).prepare<AgentTaskRow, [string, string, string]>(
       `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
     ),
 
-  setCancelled: () =>
-    getDb().prepare<AgentTaskRow, [string, string, string]>(
+  setCancelled: async () =>
+    (await getDb()).prepare<AgentTaskRow, [string, string, string]>(
       `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
     ),
 
-  setProgress: () =>
-    getDb().prepare<AgentTaskRow, [string, string]>(
+  setProgress: async () =>
+    (await getDb()).prepare<AgentTaskRow, [string, string]>(
       `UPDATE agent_tasks SET progress = ?,
        status = CASE WHEN status IN ('completed', 'failed', 'cancelled') THEN status ELSE 'in_progress' END,
        lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
     ),
 
-  delete: () => getDb().prepare<null, [string]>("DELETE FROM agent_tasks WHERE id = ?"),
+  delete: async () =>
+    (await getDb()).prepare<null, [string]>("DELETE FROM agent_tasks WHERE id = ?"),
 };
 
-export function createTask(
+export async function createTask(
   agentId: string,
   task: string,
   options?: {
@@ -1190,25 +1268,23 @@ export function createTask(
     slackThreadTs?: string;
     slackUserId?: string;
   },
-): AgentTask {
+): Promise<AgentTask> {
   const id = crypto.randomUUID();
   const source = options?.source ?? "mcp";
-  const row = taskQueries
-    .insert()
-    .get(
-      id,
-      agentId,
-      task,
-      "pending",
-      source,
-      options?.slackChannelId ?? null,
-      options?.slackThreadTs ?? null,
-      options?.slackUserId ?? null,
-      pkg.version,
-    );
+  const row = (await taskQueries.insert()).get(
+    id,
+    agentId,
+    task,
+    "pending",
+    source,
+    options?.slackChannelId ?? null,
+    options?.slackThreadTs ?? null,
+    options?.slackUserId ?? null,
+    pkg.version,
+  );
   if (!row) throw new Error("Failed to create task");
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "task_created",
       agentId,
       taskId: id,
@@ -1219,9 +1295,9 @@ export function createTask(
   return rowToAgentTask(row);
 }
 
-export function getPendingTaskForAgent(agentId: string): AgentTask | null {
+export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask | null> {
   // Get all pending tasks for this agent, ordered by priority (desc) then creation time (asc)
-  const rows = getDb()
+  const rows = (await getDb())
     .prepare<AgentTaskRow, [string]>(
       "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY priority DESC, createdAt ASC",
     )
@@ -1230,7 +1306,7 @@ export function getPendingTaskForAgent(agentId: string): AgentTask | null {
   // Find the first task whose dependencies are met
   for (const row of rows) {
     const task = rowToAgentTask(row);
-    const { ready } = checkDependencies(task.id);
+    const { ready } = await checkDependencies(task.id);
     if (ready) {
       return task;
     }
@@ -1239,8 +1315,8 @@ export function getPendingTaskForAgent(agentId: string): AgentTask | null {
   return null;
 }
 
-export function startTask(taskId: string): AgentTask | null {
-  const oldTask = getTaskById(taskId);
+export async function startTask(taskId: string): Promise<AgentTask | null> {
+  const oldTask = await getTaskById(taskId);
   if (!oldTask) return null;
 
   // Guard: never revive tasks that are already in a terminal state
@@ -1248,7 +1324,7 @@ export function startTask(taskId: string): AgentTask | null {
     return null;
   }
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled') RETURNING *`,
@@ -1256,7 +1332,7 @@ export function startTask(taskId: string): AgentTask | null {
     .get(taskId);
   if (row && oldTask) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         agentId: row.agentId ?? undefined,
@@ -1273,17 +1349,17 @@ export function startTask(taskId: string): AgentTask | null {
   return result;
 }
 
-export function getTaskById(id: string): AgentTask | null {
-  const row = taskQueries.getById().get(id);
+export async function getTaskById(id: string): Promise<AgentTask | null> {
+  const row = (await taskQueries.getById()).get(id);
   return row ? rowToAgentTask(row) : null;
 }
 
-export function markTaskSlackReplySent(taskId: string): void {
-  getDb().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
+export async function markTaskSlackReplySent(taskId: string): Promise<void> {
+  (await getDb()).run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
 }
 
-export function getChildTasks(parentTaskId: string): AgentTask[] {
-  return getDb()
+export async function getChildTasks(parentTaskId: string): Promise<AgentTask[]> {
+  return (await getDb())
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks WHERE parentTaskId = ? ORDER BY createdAt ASC, rowid ASC`,
     )
@@ -1291,13 +1367,13 @@ export function getChildTasks(parentTaskId: string): AgentTask[] {
     .map(rowToAgentTask);
 }
 
-export function updateTaskClaudeSessionId(
+export async function updateTaskClaudeSessionId(
   taskId: string,
   claudeSessionId: string,
   provider?: ProviderName,
   providerMeta?: Record<string, unknown>,
   model?: string,
-): AgentTask | null {
+): Promise<AgentTask | null> {
   const setClauses = ["claudeSessionId = ?", "lastUpdatedAt = ?"];
   const params: (string | null)[] = [claudeSessionId, new Date().toISOString()];
 
@@ -1316,7 +1392,7 @@ export function updateTaskClaudeSessionId(
 
   params.push(taskId);
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, (string | null)[]>(
       `UPDATE agent_tasks SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -1324,7 +1400,7 @@ export function updateTaskClaudeSessionId(
   return row ? rowToAgentTask(row) : null;
 }
 
-export function updateTaskVcs(
+export async function updateTaskVcs(
   taskId: string,
   vcs: {
     vcsProvider: "github" | "gitlab";
@@ -1332,8 +1408,8 @@ export function updateTaskVcs(
     vcsNumber: number;
     vcsUrl: string;
   },
-): AgentTask | null {
-  const row = getDb()
+): Promise<AgentTask | null> {
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string, number, string, string, string]>(
       `UPDATE agent_tasks
        SET vcsProvider = ?, vcsRepo = ?, vcsNumber = ?, vcsUrl = ?, lastUpdatedAt = ?
@@ -1343,8 +1419,8 @@ export function updateTaskVcs(
   return row ? rowToAgentTask(row) : null;
 }
 
-export function getTasksByAgentId(agentId: string): AgentTask[] {
-  return taskQueries.getByAgentId().all(agentId).map(rowToAgentTask);
+export async function getTasksByAgentId(agentId: string): Promise<AgentTask[]> {
+  return (await taskQueries.getByAgentId()).all(agentId).map(rowToAgentTask);
 }
 
 /**
@@ -1355,8 +1431,8 @@ export function getTasksByAgentId(agentId: string): AgentTask[] {
  * updated one. This is a best-effort fallback — the X-Source-Task-Id header
  * is the authoritative source when available.
  */
-export function getAgentCurrentTask(agentId: string): AgentTask | null {
-  const row = getDb()
+export async function getAgentCurrentTask(agentId: string): Promise<AgentTask | null> {
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string]>(
       "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'in_progress' ORDER BY lastUpdatedAt DESC LIMIT 1",
     )
@@ -1364,16 +1440,16 @@ export function getAgentCurrentTask(agentId: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
-  return taskQueries.getByStatus().all(status).map(rowToAgentTask);
+export async function getTasksByStatus(status: AgentTaskStatus): Promise<AgentTask[]> {
+  return (await taskQueries.getByStatus()).all(status).map(rowToAgentTask);
 }
 
 /**
  * Find a task by VCS repo and issue/PR/MR number.
  * Returns the most recent non-completed/failed task for this VCS entity.
  */
-export function findTaskByVcs(vcsRepo: string, vcsNumber: number): AgentTask | null {
-  const row = getDb()
+export async function findTaskByVcs(vcsRepo: string, vcsNumber: number): Promise<AgentTask | null> {
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, number]>(
       `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ?
@@ -1411,15 +1487,15 @@ export interface TaskFilters {
   includeHeartbeat?: boolean;
 }
 
-export function getAllTasks(filters?: TaskFilters): AgentTask[];
+export function getAllTasks(filters?: TaskFilters): Promise<AgentTask[]>;
 export function getAllTasks(
   filters: TaskFilters | undefined,
   opts: { slim: true },
-): AgentTaskSummary[];
-export function getAllTasks(
+): Promise<AgentTaskSummary[]>;
+export async function getAllTasks(
   filters?: TaskFilters,
   opts?: { slim?: boolean },
-): AgentTask[] | AgentTaskSummary[] {
+): Promise<AgentTask[] | AgentTaskSummary[]> {
   const conditions: string[] = [];
   const params: (string | AgentTaskStatus)[] = [];
 
@@ -1512,15 +1588,15 @@ export function getAllTasks(
     FROM agent_tasks ${whereClause}
     ORDER BY lastUpdatedAt DESC, priority DESC LIMIT ${limit} OFFSET ${offset}`;
 
-  const rows = getDb()
+  const rows = (await getDb())
     .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(query)
     .all(...params);
 
   // Filter for ready tasks (dependencies met) if requested. Both the full and
   // the slim row shapes carry `id` + `dependsOn`, so the same predicate works.
-  const isReady = (task: { id: string; dependsOn: string[] }): boolean => {
+  const isReady = async (task: { id: string; dependsOn: string[] }): Promise<boolean> => {
     if (!task.dependsOn || task.dependsOn.length === 0) return true;
-    return checkDependencies(task.id).ready;
+    return (await checkDependencies(task.id)).ready;
   };
 
   if (opts?.slim) {
@@ -1538,7 +1614,9 @@ export function getAllTasks(
  * Get total count of tasks matching the given filters (ignoring limit).
  * Used alongside getAllTasks to display accurate total counts in UI.
  */
-export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">): number {
+export async function getTasksCount(
+  filters?: Omit<TaskFilters, "limit" | "readyOnly">,
+): Promise<number> {
   const conditions: string[] = [];
   const params: (string | AgentTaskStatus)[] = [];
 
@@ -1619,7 +1697,7 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `SELECT COUNT(*) as count FROM agent_tasks ${whereClause}`;
 
-  const result = getDb()
+  const result = (await getDb())
     .prepare<{ count: number }, (string | AgentTaskStatus)[]>(query)
     .get(...params);
 
@@ -1630,7 +1708,7 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
  * Get task statistics (counts by status) without any limit.
  * This is more efficient than fetching all tasks for stats purposes.
  */
-export function getTaskStats(): {
+export async function getTaskStats(): Promise<{
   total: number;
   unassigned: number;
   offered: number;
@@ -1640,8 +1718,8 @@ export function getTaskStats(): {
   paused: number;
   completed: number;
   failed: number;
-} {
-  const row = getDb()
+}> {
+  const row = (await getDb())
     .prepare<
       {
         total: number;
@@ -1685,8 +1763,8 @@ export function getTaskStats(): {
   );
 }
 
-export function getCompletedSlackTasks(): AgentTask[] {
-  return getDb()
+export async function getCompletedSlackTasks(): Promise<AgentTask[]> {
+  return (await getDb())
     .prepare<AgentTaskRow, []>(
       `SELECT * FROM agent_tasks
        WHERE slackChannelId IS NOT NULL
@@ -1702,9 +1780,9 @@ export function getCompletedSlackTasks(): AgentTask[] {
  * Get tasks that were recently finished (completed/failed) by workers (non-lead agents).
  * Used by leads to know when workers complete tasks.
  */
-export function getRecentlyFinishedWorkerTasks(): AgentTask[] {
+export async function getRecentlyFinishedWorkerTasks(): Promise<AgentTask[]> {
   // Query for finished tasks that haven't been notified yet
-  return getDb()
+  return (await getDb())
     .prepare<AgentTaskRow, []>(
       `SELECT t.* FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
@@ -1722,13 +1800,13 @@ export function getRecentlyFinishedWorkerTasks(): AgentTask[] {
  * Atomically mark finished tasks as notified.
  * Sets notifiedAt timestamp to prevent returning them in future polls.
  */
-export function markTasksNotified(taskIds: string[]): number {
+export async function markTasksNotified(taskIds: string[]): Promise<number> {
   if (taskIds.length === 0) return 0;
 
   const now = new Date().toISOString();
   const placeholders = taskIds.map(() => "?").join(",");
 
-  const result = getDb().run(
+  const result = (await getDb()).run(
     `UPDATE agent_tasks SET notifiedAt = ?
      WHERE id IN (${placeholders}) AND notifiedAt IS NULL`,
     [now, ...taskIds],
@@ -1742,12 +1820,12 @@ export function markTasksNotified(taskIds: string[]): number {
  * Used when a trigger was consumed but the session that should process it failed.
  * This prevents permanent notification loss from the mark-before-process race.
  */
-export function resetTasksNotified(taskIds: string[]): number {
+export async function resetTasksNotified(taskIds: string[]): Promise<number> {
   if (taskIds.length === 0) return 0;
 
   const placeholders = taskIds.map(() => "?").join(",");
 
-  const result = getDb().run(
+  const result = (await getDb()).run(
     `UPDATE agent_tasks SET notifiedAt = NULL
      WHERE id IN (${placeholders}) AND notifiedAt IS NOT NULL`,
     taskIds,
@@ -1756,8 +1834,8 @@ export function resetTasksNotified(taskIds: string[]): number {
   return result.changes;
 }
 
-export function getInProgressSlackTasks(): AgentTask[] {
-  return getDb()
+export async function getInProgressSlackTasks(): Promise<AgentTask[]> {
+  return (await getDb())
     .prepare<AgentTaskRow, []>(
       `SELECT * FROM agent_tasks
        WHERE slackChannelId IS NOT NULL
@@ -1776,13 +1854,13 @@ export function getInProgressSlackTasks(): AgentTask[] {
  *
  * See src/tasks/context-key.ts for the key schema.
  */
-export function getInProgressTasksByContextKey(
+export async function getInProgressTasksByContextKey(
   contextKey: string,
   statuses: AgentTaskStatus[] = ["pending", "in_progress", "offered", "paused"],
-): AgentTask[] {
+): Promise<AgentTask[]> {
   if (!contextKey || statuses.length === 0) return [];
   const placeholders = statuses.map(() => "?").join(",");
-  return getDb()
+  return (await getDb())
     .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(
       `SELECT * FROM agent_tasks
        WHERE contextKey = ?
@@ -1800,8 +1878,11 @@ export function getInProgressTasksByContextKey(
  * This is intentional: follow-up messages should route to the same agent even after task completion.
  * Callers (e.g. assistant.ts) apply their own status checks (e.g. agent.status !== "offline").
  */
-export function getAgentWorkingOnThread(channelId: string, threadTs: string): Agent | null {
-  const taskRow = getDb()
+export async function getAgentWorkingOnThread(
+  channelId: string,
+  threadTs: string,
+): Promise<Agent | null> {
+  const taskRow = (await getDb())
     .prepare<AgentTaskRow, [string, string]>(
       `SELECT * FROM agent_tasks
        WHERE source = 'slack'
@@ -1812,7 +1893,7 @@ export function getAgentWorkingOnThread(channelId: string, threadTs: string): Ag
     )
     .get(channelId, threadTs);
 
-  if (taskRow?.agentId) return getAgentById(taskRow.agentId);
+  if (taskRow?.agentId) return await getAgentById(taskRow.agentId);
 
   return null;
 }
@@ -1821,8 +1902,11 @@ export function getAgentWorkingOnThread(channelId: string, threadTs: string): Ag
  * Find the latest active (in_progress or pending) task in a specific Slack thread.
  * Used for dependency chaining in additive Slack buffer.
  */
-export function getLatestActiveTaskInThread(channelId: string, threadTs: string): AgentTask | null {
-  const row = getDb()
+export async function getLatestActiveTaskInThread(
+  channelId: string,
+  threadTs: string,
+): Promise<AgentTask | null> {
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string]>(
       `SELECT * FROM agent_tasks
        WHERE source = 'slack'
@@ -1842,8 +1926,11 @@ export function getLatestActiveTaskInThread(channelId: string, threadTs: string)
  * Unlike getAgentWorkingOnThread (which filters source='slack'), this finds ALL tasks
  * including worker tasks that inherited Slack metadata via parentTaskId.
  */
-export function getMostRecentTaskInThread(channelId: string, threadTs: string): AgentTask | null {
-  const row = getDb()
+export async function getMostRecentTaskInThread(
+  channelId: string,
+  threadTs: string,
+): Promise<AgentTask | null> {
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string]>(
       `SELECT * FROM agent_tasks
        WHERE slackChannelId = ?
@@ -1855,13 +1942,13 @@ export function getMostRecentTaskInThread(channelId: string, threadTs: string): 
   return row ? rowToAgentTask(row) : null;
 }
 
-export function findCompletedTaskInThread(
+export async function findCompletedTaskInThread(
   channelId: string,
   threadTs: string,
   windowMinutes: number,
-): AgentTask | null {
+): Promise<AgentTask | null> {
   const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string, string]>(
       `SELECT * FROM agent_tasks
        WHERE slackChannelId = ?
@@ -1875,8 +1962,8 @@ export function findCompletedTaskInThread(
   return row ? rowToAgentTask(row) : null;
 }
 
-export function completeTask(id: string, output?: string): AgentTask | null {
-  const oldTask = getTaskById(id);
+export async function completeTask(id: string, output?: string): Promise<AgentTask | null> {
+  const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
   // Idempotency guard: don't re-complete a task already in a terminal state.
@@ -1887,16 +1974,16 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   }
 
   const finishedAt = new Date().toISOString();
-  let row = taskQueries.updateStatus().get("completed", finishedAt, id);
+  let row = (await taskQueries.updateStatus()).get("completed", finishedAt, id);
   if (!row) return null;
 
   if (output) {
-    row = taskQueries.setOutput().get(output, id);
+    row = (await taskQueries.setOutput()).get(output, id);
   }
 
   if (row && oldTask) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -1920,8 +2007,8 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function failTask(id: string, reason: string): AgentTask | null {
-  const oldTask = getTaskById(id);
+export async function failTask(id: string, reason: string): Promise<AgentTask | null> {
+  const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
   // Idempotency guard: don't re-fail a task already in a terminal state.
@@ -1932,10 +2019,10 @@ export function failTask(id: string, reason: string): AgentTask | null {
   }
 
   const finishedAt = new Date().toISOString();
-  const row = taskQueries.setFailure().get(reason, finishedAt, id);
+  const row = (await taskQueries.setFailure()).get(reason, finishedAt, id);
   if (row && oldTask) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -1959,8 +2046,8 @@ export function failTask(id: string, reason: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function cancelTask(id: string, reason?: string): AgentTask | null {
-  const oldTask = getTaskById(id);
+export async function cancelTask(id: string, reason?: string): Promise<AgentTask | null> {
+  const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
   // Only cancel tasks that are not already in a terminal state
@@ -1971,11 +2058,11 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
 
   const finishedAt = new Date().toISOString();
   const cancelReason = reason ?? "Cancelled by user";
-  const row = taskQueries.setCancelled().get(cancelReason, finishedAt, id);
+  const row = (await taskQueries.setCancelled()).get(cancelReason, finishedAt, id);
 
   if (row && oldTask) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -2004,8 +2091,8 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
  * Used during graceful shutdown to allow tasks to resume after container restart.
  * Unlike failTask, paused tasks retain their agent assignment and can be resumed.
  */
-export function pauseTask(id: string): AgentTask | null {
-  const oldTask = getTaskById(id);
+export async function pauseTask(id: string): Promise<AgentTask | null> {
+  const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
   // Only pause tasks that are in progress
@@ -2013,7 +2100,7 @@ export function pauseTask(id: string): AgentTask | null {
     return null;
   }
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks
        SET status = 'paused',
@@ -2026,7 +2113,7 @@ export function pauseTask(id: string): AgentTask | null {
 
   if (row && oldTask) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -2044,11 +2131,11 @@ export function pauseTask(id: string): AgentTask | null {
  * Resume a paused task - transitions it back to in_progress.
  * Called when worker restarts and picks up paused work.
  */
-export function resumeTask(taskId: string): AgentTask | null {
-  const oldTask = getTaskById(taskId);
+export async function resumeTask(taskId: string): Promise<AgentTask | null> {
+  const oldTask = await getTaskById(taskId);
   if (!oldTask || oldTask.status !== "paused") return null;
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks
        SET status = 'in_progress',
@@ -2061,7 +2148,7 @@ export function resumeTask(taskId: string): AgentTask | null {
 
   if (row && oldTask) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         agentId: row.agentId ?? undefined,
@@ -2080,8 +2167,8 @@ export function resumeTask(taskId: string): AgentTask | null {
  * Used on startup to resume tasks that were interrupted by deployment.
  * Returns tasks ordered by creation time (oldest first for FIFO).
  */
-export function getPausedTasksForAgent(agentId: string): AgentTask[] {
-  const rows = getDb()
+export async function getPausedTasksForAgent(agentId: string): Promise<AgentTask[]> {
+  const rows = (await getDb())
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks
        WHERE agentId = ? AND status = 'paused'
@@ -2096,9 +2183,9 @@ export function getPausedTasksForAgent(agentId: string): AgentTask[] {
  * Used by hooks to detect task cancellation and stop the worker loop.
  * Returns tasks cancelled within the last 5 minutes.
  */
-export function getRecentlyCancelledTasksForAgent(agentId: string): AgentTask[] {
+export async function getRecentlyCancelledTasksForAgent(agentId: string): Promise<AgentTask[]> {
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const rows = getDb()
+  const rows = (await getDb())
     .prepare<AgentTaskRow, [string, string]>(
       `SELECT * FROM agent_tasks
        WHERE agentId = ?
@@ -2110,16 +2197,16 @@ export function getRecentlyCancelledTasksForAgent(agentId: string): AgentTask[] 
   return rows.map(rowToAgentTask);
 }
 
-export function deleteTask(id: string): boolean {
-  const result = getDb().run("DELETE FROM agent_tasks WHERE id = ?", [id]);
+export async function deleteTask(id: string): Promise<boolean> {
+  const result = (await getDb()).run("DELETE FROM agent_tasks WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
-export function updateTaskProgress(id: string, progress: string): AgentTask | null {
-  const row = taskQueries.setProgress().get(progress, id);
+export async function updateTaskProgress(id: string, progress: string): Promise<AgentTask | null> {
+  const row = (await taskQueries.setProgress()).get(progress, id);
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_progress",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -2220,8 +2307,10 @@ export interface InsertTaskAttachmentInput {
  *     (kind, path|url|page_id, name) tuple.
  * Returns the stored attachment (newly inserted or pre-existing duplicate).
  */
-export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAttachment {
-  const db = getDb();
+export async function insertTaskAttachment(
+  input: InsertTaskAttachmentInput,
+): Promise<TaskAttachment> {
+  const db = await getDb();
 
   if (input.sha256) {
     const existing = db
@@ -2309,8 +2398,8 @@ export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAtta
   return rowToTaskAttachment(row);
 }
 
-export function getTaskAttachments(taskId: string): TaskAttachment[] {
-  return getDb()
+export async function getTaskAttachments(taskId: string): Promise<TaskAttachment[]> {
+  return (await getDb())
     .prepare<TaskAttachmentRow, [string]>(
       "SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at ASC, rowid ASC",
     )
@@ -2322,28 +2411,26 @@ export function getTaskAttachments(taskId: string): TaskAttachment[] {
 // Combined Queries (Agent with Tasks)
 // ============================================================================
 
-export function getAgentWithTasks(id: string): AgentWithTasks | null {
-  const txn = getDb().transaction(() => {
-    const agent = getAgentById(id);
+export async function getAgentWithTasks(id: string): Promise<AgentWithTasks | null> {
+  return await runDbTransaction(async () => {
+    const agent = await getAgentById(id);
     if (!agent) return null;
 
-    const tasks = getTasksByAgentId(id);
+    const tasks = await getTasksByAgentId(id);
     return { ...agent, tasks };
   });
-
-  return txn();
 }
 
-export function getAllAgentsWithTasks(opts?: { slim?: boolean }): AgentWithTasks[] {
-  const txn = getDb().transaction(() => {
-    const agents = getAllAgents({ slim: opts?.slim ?? false });
-    return agents.map((agent) => ({
-      ...agent,
-      tasks: getTasksByAgentId(agent.id),
-    }));
+export async function getAllAgentsWithTasks(opts?: { slim?: boolean }): Promise<AgentWithTasks[]> {
+  return await runDbTransaction(async () => {
+    const agents = await getAllAgents({ slim: opts?.slim ?? false });
+    return await Promise.all(
+      agents.map(async (agent) => ({
+        ...agent,
+        tasks: await getTasksByAgentId(agent.id),
+      })),
+    );
   });
-
-  return txn();
 }
 
 // ============================================================================
@@ -2375,8 +2462,8 @@ function rowToAgentLog(row: AgentLogRow): AgentLog {
 }
 
 export const logQueries = {
-  insert: () =>
-    getDb().prepare<
+  insert: async () =>
+    (await getDb()).prepare<
       AgentLogRow,
       [string, string, string | null, string | null, string | null, string | null, string | null]
     >(
@@ -2384,54 +2471,53 @@ export const logQueries = {
        VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
     ),
 
-  getByAgentId: () =>
-    getDb().prepare<AgentLogRow, [string]>(
+  getByAgentId: async () =>
+    (await getDb()).prepare<AgentLogRow, [string]>(
       "SELECT * FROM agent_log WHERE agentId = ? ORDER BY createdAt DESC",
     ),
 
-  getByTaskId: () =>
-    getDb().prepare<AgentLogRow, [string]>(
+  getByTaskId: async () =>
+    (await getDb()).prepare<AgentLogRow, [string]>(
       "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC",
     ),
 
-  getByEventType: () =>
-    getDb().prepare<AgentLogRow, [string]>(
+  getByEventType: async () =>
+    (await getDb()).prepare<AgentLogRow, [string]>(
       "SELECT * FROM agent_log WHERE eventType = ? ORDER BY createdAt DESC",
     ),
 
-  getAll: () => getDb().prepare<AgentLogRow, []>("SELECT * FROM agent_log ORDER BY createdAt DESC"),
+  getAll: async () =>
+    (await getDb()).prepare<AgentLogRow, []>("SELECT * FROM agent_log ORDER BY createdAt DESC"),
 };
 
-export function createLogEntry(entry: {
+export async function createLogEntry(entry: {
   eventType: AgentLogEventType;
   agentId?: string;
   taskId?: string;
   oldValue?: string;
   newValue?: string;
   metadata?: Record<string, unknown>;
-}): AgentLog {
+}): Promise<AgentLog> {
   const id = crypto.randomUUID();
-  const row = logQueries
-    .insert()
-    .get(
-      id,
-      entry.eventType,
-      entry.agentId ?? null,
-      entry.taskId ?? null,
-      entry.oldValue ?? null,
-      entry.newValue ?? null,
-      entry.metadata ? JSON.stringify(entry.metadata) : null,
-    );
+  const row = (await logQueries.insert()).get(
+    id,
+    entry.eventType,
+    entry.agentId ?? null,
+    entry.taskId ?? null,
+    entry.oldValue ?? null,
+    entry.newValue ?? null,
+    entry.metadata ? JSON.stringify(entry.metadata) : null,
+  );
   if (!row) throw new Error("Failed to create log entry");
   return rowToAgentLog(row);
 }
 
-export function getLogsByAgentId(agentId: string): AgentLog[] {
-  return logQueries.getByAgentId().all(agentId).map(rowToAgentLog);
+export async function getLogsByAgentId(agentId: string): Promise<AgentLog[]> {
+  return (await logQueries.getByAgentId()).all(agentId).map(rowToAgentLog);
 }
 
-export function getLogsByTaskId(taskId: string, limit = 200): AgentLog[] {
-  return getDb()
+export async function getLogsByTaskId(taskId: string, limit = 200): Promise<AgentLog[]> {
+  return (await getDb())
     .prepare<AgentLogRow, [string, number]>(
       "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
     )
@@ -2439,8 +2525,8 @@ export function getLogsByTaskId(taskId: string, limit = 200): AgentLog[] {
     .map(rowToAgentLog);
 }
 
-export function getLogsByTaskIdChronological(taskId: string): AgentLog[] {
-  return getDb()
+export async function getLogsByTaskIdChronological(taskId: string): Promise<AgentLog[]> {
+  return (await getDb())
     .prepare<AgentLogRow, [string]>(
       "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt ASC",
     )
@@ -2452,20 +2538,20 @@ export function getLogsByTaskIdChronological(taskId: string): AgentLog[] {
  * Phase 6: list all log rows of a given eventType, newest first. Used by the
  * REST audit-log tests to assert mutation rows landed.
  */
-export function getLogsByEventType(eventType: AgentLogEventType): AgentLog[] {
-  return logQueries.getByEventType().all(eventType).map(rowToAgentLog);
+export async function getLogsByEventType(eventType: AgentLogEventType): Promise<AgentLog[]> {
+  return (await logQueries.getByEventType()).all(eventType).map(rowToAgentLog);
 }
 
-export function getAllLogs(limit?: number): AgentLog[] {
+export async function getAllLogs(limit?: number): Promise<AgentLog[]> {
   if (limit) {
-    return getDb()
+    return (await getDb())
       .prepare<AgentLogRow, [number]>(
         "SELECT * FROM agent_log WHERE eventType != 'agent_status_change' ORDER BY createdAt DESC LIMIT ?",
       )
       .all(limit)
       .map(rowToAgentLog);
   }
-  return logQueries.getAll().all().map(rowToAgentLog);
+  return (await logQueries.getAll()).all().map(rowToAgentLog);
 }
 
 // ============================================================================
@@ -2524,12 +2610,12 @@ export interface CreateTaskOptions {
  * Find recent tasks within a time window for deduplication checks.
  * Returns tasks created in the last N minutes, optionally filtered by creator or target agent.
  */
-export function findRecentSimilarTasks(opts: {
+export async function findRecentSimilarTasks(opts: {
   windowMinutes?: number;
   creatorAgentId?: string;
   agentId?: string;
   limit?: number;
-}): AgentTask[] {
+}): Promise<AgentTask[]> {
   const since = new Date(Date.now() - (opts.windowMinutes ?? 10) * 60 * 1000).toISOString();
   const conditions: string[] = ["createdAt > ?"];
   const params: (string | number)[] = [since];
@@ -2549,13 +2635,16 @@ export function findRecentSimilarTasks(opts: {
   const limit = opts.limit ?? 50;
   const query = `SELECT * FROM agent_tasks WHERE ${conditions.join(" AND ")} ORDER BY createdAt DESC LIMIT ${limit}`;
 
-  return getDb()
+  return (await getDb())
     .prepare<AgentTaskRow, (string | number)[]>(query)
     .all(...params)
     .map(rowToAgentTask);
 }
 
-export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
+export async function createTaskExtended(
+  task: string,
+  options?: CreateTaskOptions,
+): Promise<AgentTask> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const status: AgentTaskStatus = options?.offeredTo
@@ -2568,7 +2657,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
 
   // Inherit Slack/AgentMail metadata from parent task (unless explicitly overridden)
   if (options?.parentTaskId) {
-    const parent = getTaskById(options.parentTaskId);
+    const parent = await getTaskById(options.parentTaskId);
     if (parent) {
       if (parent.slackChannelId && !options.slackChannelId) {
         options.slackChannelId = parent.slackChannelId;
@@ -2598,7 +2687,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup
   // sourceTaskId is set by the adapter's X-Source-Task-Id header — each adapter carries its taskId natively
   if (options?.creatorAgentId && !options.slackChannelId && options.sourceTaskId) {
-    const sourceTask = getTaskById(options.sourceTaskId);
+    const sourceTask = await getTaskById(options.sourceTaskId);
     if (sourceTask?.slackChannelId) {
       options.slackChannelId = sourceTask.slackChannelId;
       options.slackThreadTs = sourceTask.slackThreadTs;
@@ -2606,7 +2695,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     }
   }
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, (string | number | null)[]>(
       `INSERT INTO agent_tasks (
         id, agentId, creatorAgentId, task, status, source,
@@ -2666,7 +2755,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   if (!row) throw new Error("Failed to create task");
 
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: status === "offered" ? "task_offered" : "task_created",
       agentId: options?.creatorAgentId,
       taskId: id,
@@ -2692,13 +2781,13 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   return rowToAgentTask(row);
 }
 
-export function claimTask(taskId: string, agentId: string): AgentTask | null {
+export async function claimTask(taskId: string, agentId: string): Promise<AgentTask | null> {
   // Atomic claim: single UPDATE with WHERE guard ensures exactly-once claiming.
   // No pre-read needed — the WHERE clause handles the race condition.
   // Status goes directly to 'in_progress' because the claiming session is
   // already working on the task (prevents duplicate task_assigned triggers).
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string, string]>(
       `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', lastUpdatedAt = ?
        WHERE id = ? AND status = 'unassigned' RETURNING *`,
@@ -2707,7 +2796,7 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_claimed",
         agentId,
         taskId,
@@ -2725,14 +2814,14 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
   return result;
 }
 
-export function releaseTask(taskId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function releaseTask(taskId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   // Allow releasing both 'pending' (directly assigned) and 'in_progress' (pool-claimed) tasks
   if (task.status !== "pending" && task.status !== "in_progress") return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string]>(
       `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?
        WHERE id = ? AND status IN ('pending', 'in_progress') RETURNING *`,
@@ -2741,7 +2830,7 @@ export function releaseTask(taskId: string): AgentTask | null {
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_released",
         agentId: task.agentId ?? undefined,
         taskId,
@@ -2754,15 +2843,15 @@ export function releaseTask(taskId: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function acceptTask(taskId: string, agentId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function acceptTask(taskId: string, agentId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   // Accept both 'offered' and 'reviewing' statuses
   if (!(task.status === "offered" || task.status === "reviewing") || task.offeredTo !== agentId)
     return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string, string, string]>(
       `UPDATE agent_tasks SET agentId = ?, status = 'pending', acceptedAt = ?, lastUpdatedAt = ?
        WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
@@ -2771,7 +2860,7 @@ export function acceptTask(taskId: string, agentId: string): AgentTask | null {
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_accepted",
         agentId,
         taskId,
@@ -2784,15 +2873,19 @@ export function acceptTask(taskId: string, agentId: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function rejectTask(taskId: string, agentId: string, reason?: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function rejectTask(
+  taskId: string,
+  agentId: string,
+  reason?: string,
+): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   // Reject both 'offered' and 'reviewing' statuses
   if (!(task.status === "offered" || task.status === "reviewing") || task.offeredTo !== agentId)
     return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string | null, string, string]>(
       `UPDATE agent_tasks SET
         status = 'unassigned', offeredTo = NULL, offeredAt = NULL,
@@ -2803,7 +2896,7 @@ export function rejectTask(taskId: string, agentId: string, reason?: string): Ag
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_rejected",
         agentId,
         taskId,
@@ -2821,13 +2914,13 @@ export function rejectTask(taskId: string, agentId: string, reason?: string): Ag
  * Move a task to backlog status. Task must be unassigned (in pool).
  * Backlog tasks are not returned by pool queries.
  */
-export function moveTaskToBacklog(taskId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function moveTaskToBacklog(taskId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   if (task.status !== "unassigned") return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string]>(
       `UPDATE agent_tasks SET status = 'backlog', lastUpdatedAt = ?
        WHERE id = ? AND status = 'unassigned' RETURNING *`,
@@ -2836,7 +2929,7 @@ export function moveTaskToBacklog(taskId: string): AgentTask | null {
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         oldValue: "unassigned",
@@ -2851,13 +2944,13 @@ export function moveTaskToBacklog(taskId: string): AgentTask | null {
 /**
  * Move a task from backlog to unassigned (pool). Task must be in backlog status.
  */
-export function moveTaskFromBacklog(taskId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   if (task.status !== "backlog") return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string]>(
       `UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ?
        WHERE id = ? AND status = 'backlog' RETURNING *`,
@@ -2866,7 +2959,7 @@ export function moveTaskFromBacklog(taskId: string): AgentTask | null {
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         oldValue: "backlog",
@@ -2882,11 +2975,11 @@ export function moveTaskFromBacklog(taskId: string): AgentTask | null {
  * Release tasks that have been in 'reviewing' status for too long.
  * Returns them to 'offered' status for retry.
  */
-export function releaseStaleReviewingTasks(timeoutMinutes: number = 30): number {
+export async function releaseStaleReviewingTasks(timeoutMinutes: number = 30): Promise<number> {
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = getDb().run(
+  const result = (await getDb()).run(
     `UPDATE agent_tasks SET status = 'offered', lastUpdatedAt = ?
      WHERE status = 'reviewing' AND lastUpdatedAt < ?`,
     [now, cutoffTime],
@@ -2895,8 +2988,8 @@ export function releaseStaleReviewingTasks(timeoutMinutes: number = 30): number 
   return result.changes;
 }
 
-export function getOfferedTasksForAgent(agentId: string): AgentTask[] {
-  return getDb()
+export async function getOfferedTasksForAgent(agentId: string): Promise<AgentTask[]> {
+  return (await getDb())
     .prepare<AgentTaskRow, [string]>(
       "SELECT * FROM agent_tasks WHERE offeredTo = ? AND status = 'offered' ORDER BY createdAt ASC, rowid ASC",
     )
@@ -2909,13 +3002,13 @@ export function getOfferedTasksForAgent(agentId: string): AgentTask[] {
  * Marks it as 'reviewing' to prevent duplicate polling.
  * Returns null if task is not offered to this agent or already claimed.
  */
-export function claimOfferedTask(taskId: string, agentId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function claimOfferedTask(taskId: string, agentId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   if (task.status !== "offered" || task.offeredTo !== agentId) return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string, string]>(
       `UPDATE agent_tasks SET status = 'reviewing', lastUpdatedAt = ?
        WHERE id = ? AND status = 'offered' RETURNING *`,
@@ -2924,7 +3017,7 @@ export function claimOfferedTask(taskId: string, agentId: string): AgentTask | n
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         agentId,
@@ -2938,8 +3031,8 @@ export function claimOfferedTask(taskId: string, agentId: string): AgentTask | n
   return row ? rowToAgentTask(row) : null;
 }
 
-export function getUnassignedTasksCount(): number {
-  const result = getDb()
+export async function getUnassignedTasksCount(): Promise<number> {
+  const result = (await getDb())
     .prepare<{ count: number }, []>(
       "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
     )
@@ -2948,8 +3041,8 @@ export function getUnassignedTasksCount(): number {
 }
 
 /** Get unassigned task IDs, ordered by priority (highest first) then creation time */
-export function getUnassignedTaskIds(limit = 10): string[] {
-  const rows = getDb()
+export async function getUnassignedTaskIds(limit = 10): Promise<string[]> {
+  const rows = (await getDb())
     .prepare<{ id: string }, [number]>(
       "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ?",
     )
@@ -2961,18 +3054,18 @@ export function getUnassignedTaskIds(limit = 10): string[] {
 // Dependency Checking
 // ============================================================================
 
-export function checkDependencies(taskId: string): {
+export async function checkDependencies(taskId: string): Promise<{
   ready: boolean;
   blockedBy: string[];
-} {
-  const task = getTaskById(taskId);
+}> {
+  const task = await getTaskById(taskId);
   if (!task || !task.dependsOn || task.dependsOn.length === 0) {
     return { ready: true, blockedBy: [] };
   }
 
   const blockedBy: string[] = [];
   for (const depId of task.dependsOn) {
-    const depTask = getTaskById(depId);
+    const depTask = await getTaskById(depId);
     if (!depTask || depTask.status !== "completed") {
       blockedBy.push(depId);
     }
@@ -2994,7 +3087,7 @@ export {
   generateDefaultToolsMd,
 } from "../prompts/defaults.ts";
 
-export function updateAgentProfile(
+export async function updateAgentProfile(
   id: string,
   updates: {
     description?: string;
@@ -3008,10 +3101,10 @@ export function updateAgentProfile(
     heartbeatMd?: string;
   },
   meta?: VersionMeta,
-): Agent | null {
-  const database = getDb();
+): Promise<Agent | null> {
+  const database = await getDb();
 
-  return database.transaction(() => {
+  return await runDbTransaction(async () => {
     // Get current agent state for version comparison
     const current = database
       .prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?")
@@ -3029,10 +3122,10 @@ export function updateAgentProfile(
 
       if (newHash === currentHash) continue; // No actual change
 
-      const latestVersion = getLatestContextVersion(id, field);
+      const latestVersion = await getLatestContextVersion(id, field);
       const version = (latestVersion?.version ?? 0) + 1;
 
-      createContextVersion({
+      await createContextVersion({
         agentId: id,
         field,
         content: newValue,
@@ -3092,12 +3185,12 @@ export function updateAgentProfile(
       );
 
     return row ? rowToAgent(row) : null;
-  })();
+  });
 }
 
-export function updateAgentName(id: string, newName: string): Agent | null {
+export async function updateAgentName(id: string, newName: string): Promise<Agent | null> {
   // Check if another agent already has this name
-  const existingAgent = getDb()
+  const existingAgent = (await getDb())
     .prepare<AgentRow, [string, string]>("SELECT * FROM agents WHERE name = ? AND id != ?")
     .get(newName, id);
 
@@ -3106,7 +3199,7 @@ export function updateAgentName(id: string, newName: string): Agent | null {
   }
 
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentRow, [string, string, string]>(
       "UPDATE agents SET name = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *",
     )
@@ -3164,7 +3257,7 @@ function rowToChannelMessage(row: ChannelMessageRow, agentName?: string): Channe
   };
 }
 
-export function createChannel(
+export async function createChannel(
   name: string,
   options?: {
     description?: string;
@@ -3172,11 +3265,11 @@ export function createChannel(
     createdBy?: string;
     participants?: string[];
   },
-): Channel {
+): Promise<Channel> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<
       ChannelRow,
       [string, string, string | null, ChannelType, string | null, string, string]
@@ -3198,40 +3291,42 @@ export function createChannel(
   return rowToChannel(row);
 }
 
-export function getMessageById(id: string): ChannelMessage | null {
-  const row = getDb()
+export async function getMessageById(id: string): Promise<ChannelMessage | null> {
+  const row = (await getDb())
     .prepare<ChannelMessageRow, [string]>("SELECT * FROM channel_messages WHERE id = ?")
     .get(id);
   if (!row) return null;
-  const agent = row.agentId ? getAgentById(row.agentId) : null;
+  const agent = row.agentId ? await getAgentById(row.agentId) : null;
   return rowToChannelMessage(row, agent?.name);
 }
 
-export function getChannelById(id: string): Channel | null {
-  const row = getDb().prepare<ChannelRow, [string]>("SELECT * FROM channels WHERE id = ?").get(id);
+export async function getChannelById(id: string): Promise<Channel | null> {
+  const row = (await getDb())
+    .prepare<ChannelRow, [string]>("SELECT * FROM channels WHERE id = ?")
+    .get(id);
   return row ? rowToChannel(row) : null;
 }
 
-export function getChannelByName(name: string): Channel | null {
-  const row = getDb()
+export async function getChannelByName(name: string): Promise<Channel | null> {
+  const row = (await getDb())
     .prepare<ChannelRow, [string]>("SELECT * FROM channels WHERE name = ?")
     .get(name);
   return row ? rowToChannel(row) : null;
 }
 
-export function getAllChannels(): Channel[] {
-  return getDb()
+export async function getAllChannels(): Promise<Channel[]> {
+  return (await getDb())
     .prepare<ChannelRow, []>("SELECT * FROM channels ORDER BY name")
     .all()
     .map(rowToChannel);
 }
 
-export function deleteChannel(id: string): boolean {
-  const result = getDb().prepare("DELETE FROM channels WHERE id = ?").run(id);
+export async function deleteChannel(id: string): Promise<boolean> {
+  const result = (await getDb()).prepare("DELETE FROM channels WHERE id = ?").run(id);
   return result.changes > 0;
 }
 
-export function postMessage(
+export async function postMessage(
   channelId: string,
   agentId: string | null,
   content: string,
@@ -3239,7 +3334,7 @@ export function postMessage(
     replyToId?: string;
     mentions?: string[];
   },
-): ChannelMessage {
+): Promise<ChannelMessage> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -3247,7 +3342,7 @@ export function postMessage(
   const isTaskMessage = content.trimStart().startsWith("/task ");
   const messageContent = isTaskMessage ? content.replace(/^\s*\/task\s+/, "") : content;
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<
       ChannelMessageRow,
       [string, string, string | null, string, string | null, string, string]
@@ -3268,7 +3363,7 @@ export function postMessage(
   if (!row) throw new Error("Failed to post message");
 
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "channel_message",
       agentId: agentId ?? undefined,
       metadata: { channelId, messageId: id },
@@ -3281,7 +3376,7 @@ export function postMessage(
   // Thread follow-up: If no explicit mentions and this is a reply, inherit from parent message
   // Note: Only for notifications, not for task creation (requires explicit /task)
   if (targetMentions.length === 0 && options?.replyToId) {
-    const parentMessage = getMessageById(options.replyToId);
+    const parentMessage = await getMessageById(options.replyToId);
     if (parentMessage?.mentions && parentMessage.mentions.length > 0) {
       targetMentions = parentMessage.mentions;
     }
@@ -3289,8 +3384,8 @@ export function postMessage(
 
   // Only create tasks when /task prefix is used
   if (isTaskMessage && targetMentions.length > 0) {
-    const sender = agentId ? getAgentById(agentId) : null;
-    const channel = getChannelById(channelId);
+    const sender = agentId ? await getAgentById(agentId) : null;
+    const channel = await getChannelById(channelId);
     const senderName = sender?.name ?? "Human";
     const channelName = channel?.name ?? "unknown";
     const truncated =
@@ -3302,12 +3397,12 @@ export function postMessage(
 
     for (const mentionedAgentId of uniqueMentions) {
       // Skip if agent doesn't exist
-      const mentionedAgent = getAgentById(mentionedAgentId);
+      const mentionedAgent = await getAgentById(mentionedAgentId);
       if (!mentionedAgent) continue;
 
       const taskDescription = `Task from ${senderName} in #${channelName}: "${truncated}"`;
 
-      const task = createTaskExtended(taskDescription, {
+      const task = await createTaskExtended(taskDescription, {
         agentId: mentionedAgentId, // Direct assignment
         creatorAgentId: agentId ?? undefined,
         source: "mcp",
@@ -3325,15 +3420,15 @@ export function postMessage(
         .map((taskId) => `[#${taskId.slice(0, 8)}](task:${taskId})`)
         .join(" ");
       const updatedContent = `${messageContent}\n\n→ Created: ${taskLinks}`;
-      getDb()
+      (await getDb())
         .prepare(`UPDATE channel_messages SET content = ? WHERE id = ?`)
         .run(updatedContent, id);
     }
   }
 
   // Get agent name for the response - re-fetch to get updated content
-  const agent = agentId ? getAgentById(agentId) : null;
-  const updatedRow = getDb()
+  const agent = agentId ? await getAgentById(agentId) : null;
+  const updatedRow = (await getDb())
     .prepare<ChannelMessageRow, [string]>(
       `SELECT m.*, a.name as agentName FROM channel_messages m
        LEFT JOIN agents a ON m.agentId = a.id WHERE m.id = ?`,
@@ -3342,14 +3437,14 @@ export function postMessage(
   return rowToChannelMessage(updatedRow ?? row, agent?.name);
 }
 
-export function getChannelMessages(
+export async function getChannelMessages(
   channelId: string,
   options?: {
     limit?: number;
     since?: string;
     before?: string;
   },
-): ChannelMessage[] {
+): Promise<ChannelMessage[]> {
   let query =
     "SELECT m.*, a.name as agentName FROM channel_messages m LEFT JOIN agents a ON m.agentId = a.id WHERE m.channelId = ?";
   const params: (string | number)[] = [channelId];
@@ -3373,16 +3468,16 @@ export function getChannelMessages(
 
   type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
 
-  return getDb()
+  return (await getDb())
     .prepare<MessageWithAgentRow, (string | number)[]>(query)
     .all(...params)
     .map((row) => rowToChannelMessage(row, row.agentName ?? undefined))
     .reverse(); // Return in chronological order
 }
 
-export function updateReadState(agentId: string, channelId: string): void {
+export async function updateReadState(agentId: string, channelId: string): Promise<void> {
   const now = new Date().toISOString();
-  getDb().run(
+  (await getDb()).run(
     `INSERT INTO channel_read_state (agentId, channelId, lastReadAt)
      VALUES (?, ?, ?)
      ON CONFLICT(agentId, channelId) DO UPDATE SET lastReadAt = ?`,
@@ -3390,8 +3485,8 @@ export function updateReadState(agentId: string, channelId: string): void {
   );
 }
 
-export function getLastReadAt(agentId: string, channelId: string): string | null {
-  const result = getDb()
+export async function getLastReadAt(agentId: string, channelId: string): Promise<string | null> {
+  const result = (await getDb())
     .prepare<{ lastReadAt: string }, [string, string]>(
       "SELECT lastReadAt FROM channel_read_state WHERE agentId = ? AND channelId = ?",
     )
@@ -3399,8 +3494,11 @@ export function getLastReadAt(agentId: string, channelId: string): string | null
   return result?.lastReadAt ?? null;
 }
 
-export function getUnreadMessages(agentId: string, channelId: string): ChannelMessage[] {
-  const lastReadAt = getLastReadAt(agentId, channelId);
+export async function getUnreadMessages(
+  agentId: string,
+  channelId: string,
+): Promise<ChannelMessage[]> {
+  const lastReadAt = await getLastReadAt(agentId, channelId);
 
   let query = `SELECT m.*, a.name as agentName FROM channel_messages m
                LEFT JOIN agents a ON m.agentId = a.id
@@ -3416,16 +3514,16 @@ export function getUnreadMessages(agentId: string, channelId: string): ChannelMe
 
   type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
 
-  return getDb()
+  return (await getDb())
     .prepare<MessageWithAgentRow, string[]>(query)
     .all(...params)
     .map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
 }
 
-export function getMentionsForAgent(
+export async function getMentionsForAgent(
   agentId: string,
   options?: { unreadOnly?: boolean; channelId?: string },
-): ChannelMessage[] {
+): Promise<ChannelMessage[]> {
   let query = `SELECT m.*, a.name as agentName FROM channel_messages m
                LEFT JOIN agents a ON m.agentId = a.id
                WHERE m.mentions LIKE ?`;
@@ -3436,7 +3534,7 @@ export function getMentionsForAgent(
     params.push(options.channelId);
 
     if (options?.unreadOnly) {
-      const lastReadAt = getLastReadAt(agentId, options.channelId);
+      const lastReadAt = await getLastReadAt(agentId, options.channelId);
       if (lastReadAt) {
         query += " AND m.createdAt > ?";
         params.push(lastReadAt);
@@ -3448,7 +3546,7 @@ export function getMentionsForAgent(
 
   type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
 
-  return getDb()
+  return (await getDb())
     .prepare<MessageWithAgentRow, string[]>(query)
     .all(...params)
     .map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
@@ -3474,9 +3572,9 @@ export interface InboxSummary {
   recentMentions: MentionPreview[]; // Up to 3 recent @mentions
 }
 
-export function getInboxSummary(agentId: string): InboxSummary {
-  const db = getDb();
-  const channels = getAllChannels();
+export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
+  const db = await getDb();
+  const channels = await getAllChannels();
   let unreadCount = 0;
   let mentionsCount = 0;
 
@@ -3539,20 +3637,20 @@ export function getInboxSummary(agentId: string): InboxSummary {
 
   // Get recent unread @mentions (up to 3)
   const recentMentions: MentionPreview[] = [];
-  const mentionMessages = getMentionsForAgent(agentId, { unreadOnly: false });
+  const mentionMessages = await getMentionsForAgent(agentId, { unreadOnly: false });
 
   // Filter to only unread mentions and limit to 3
   for (const msg of mentionMessages) {
     if (recentMentions.length >= 3) break;
 
     // Check if message is unread (by checking against read state per channel)
-    const lastReadAt = getLastReadAt(agentId, msg.channelId);
+    const lastReadAt = await getLastReadAt(agentId, msg.channelId);
     if (lastReadAt && new Date(msg.createdAt) <= new Date(lastReadAt)) {
       continue; // Already read
     }
 
     // Get channel name
-    const channel = getChannelById(msg.channelId);
+    const channel = await getChannelById(msg.channelId);
 
     recentMentions.push({
       channelName: channel?.name ?? "unknown",
@@ -3577,14 +3675,16 @@ export function getInboxSummary(agentId: string): InboxSummary {
  * Sets processing_since to prevent duplicate polling.
  * Returns channels with unread mentions, or empty array if none/already claimed.
  */
-export function claimMentions(agentId: string): { channelId: string; lastReadAt: string | null }[] {
+export async function claimMentions(
+  agentId: string,
+): Promise<{ channelId: string; lastReadAt: string | null }[]> {
   const now = new Date().toISOString();
-  const channels = getAllChannels();
+  const channels = await getAllChannels();
   const claimedChannels: { channelId: string; lastReadAt: string | null }[] = [];
 
   for (const channel of channels) {
     // Check if this channel is already being processed
-    const readState = getDb()
+    const readState = (await getDb())
       .prepare<{ lastReadAt: string | null; processing_since: string | null }, [string, string]>(
         "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
       )
@@ -3600,7 +3700,7 @@ export function claimMentions(agentId: string): { channelId: string; lastReadAt:
     const baseCondition = lastReadAt ? `AND m.createdAt > '${lastReadAt}'` : "";
 
     // Check if there are unread mentions
-    const mentionCountRow = getDb()
+    const mentionCountRow = (await getDb())
       .prepare<{ count: number }, [string, string]>(
         `SELECT COUNT(*) as count FROM channel_messages m
          WHERE m.channelId = ? AND m.mentions LIKE ? ${baseCondition}`,
@@ -3609,7 +3709,7 @@ export function claimMentions(agentId: string): { channelId: string; lastReadAt:
 
     if (mentionCountRow && mentionCountRow.count > 0) {
       // Atomically claim mentions for this channel
-      const result = getDb().run(
+      const result = (await getDb()).run(
         `INSERT INTO channel_read_state (agentId, channelId, lastReadAt, processing_since)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(agentId, channelId) DO UPDATE SET
@@ -3635,11 +3735,14 @@ export function claimMentions(agentId: string): { channelId: string; lastReadAt:
  * Release mention processing for specific channels.
  * Clears processing_since to allow future polling.
  */
-export function releaseMentionProcessing(agentId: string, channelIds: string[]): void {
+export async function releaseMentionProcessing(
+  agentId: string,
+  channelIds: string[],
+): Promise<void> {
   if (channelIds.length === 0) return;
 
   const placeholders = channelIds.map(() => "?").join(",");
-  getDb().run(
+  (await getDb()).run(
     `UPDATE channel_read_state SET processing_since = NULL
      WHERE agentId = ? AND channelId IN (${placeholders})`,
     [agentId, ...channelIds],
@@ -3649,10 +3752,10 @@ export function releaseMentionProcessing(agentId: string, channelIds: string[]):
 /**
  * Auto-release stale mention processing (for crashed Claude processes).
  */
-export function releaseStaleMentionProcessing(timeoutMinutes: number = 30): number {
+export async function releaseStaleMentionProcessing(timeoutMinutes: number = 30): Promise<number> {
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
 
-  const result = getDb().run(
+  const result = (await getDb()).run(
     `UPDATE channel_read_state SET processing_since = NULL
      WHERE processing_since IS NOT NULL AND processing_since < ?`,
     [cutoffTime],
@@ -3721,15 +3824,15 @@ export interface CreateServiceOptions {
   metadata?: Record<string, unknown>;
 }
 
-export function createService(
+export async function createService(
   agentId: string,
   name: string,
   options: CreateServiceOptions,
-): Service {
+): Promise<Service> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<ServiceRow, (string | number | null)[]>(
       `INSERT INTO services (id, agentId, name, port, description, url, healthCheckPath, status, script, cwd, interpreter, args, env, metadata, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
@@ -3755,7 +3858,7 @@ export function createService(
   if (!row) throw new Error("Failed to create service");
 
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "service_registered",
       agentId,
       newValue: name,
@@ -3766,20 +3869,25 @@ export function createService(
   return rowToService(row);
 }
 
-export function getServiceById(id: string): Service | null {
-  const row = getDb().prepare<ServiceRow, [string]>("SELECT * FROM services WHERE id = ?").get(id);
+export async function getServiceById(id: string): Promise<Service | null> {
+  const row = (await getDb())
+    .prepare<ServiceRow, [string]>("SELECT * FROM services WHERE id = ?")
+    .get(id);
   return row ? rowToService(row) : null;
 }
 
-export function getServiceByAgentAndName(agentId: string, name: string): Service | null {
-  const row = getDb()
+export async function getServiceByAgentAndName(
+  agentId: string,
+  name: string,
+): Promise<Service | null> {
+  const row = (await getDb())
     .prepare<ServiceRow, [string, string]>("SELECT * FROM services WHERE agentId = ? AND name = ?")
     .get(agentId, name);
   return row ? rowToService(row) : null;
 }
 
-export function getServicesByAgentId(agentId: string): Service[] {
-  return getDb()
+export async function getServicesByAgentId(agentId: string): Promise<Service[]> {
+  return (await getDb())
     .prepare<ServiceRow, [string]>("SELECT * FROM services WHERE agentId = ? ORDER BY name")
     .all(agentId)
     .map(rowToService);
@@ -3791,7 +3899,7 @@ export interface ServiceFilters {
   status?: ServiceStatus;
 }
 
-export function getAllServices(filters?: ServiceFilters): Service[] {
+export async function getAllServices(filters?: ServiceFilters): Promise<Service[]> {
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -3819,18 +3927,21 @@ export function getAllServices(filters?: ServiceFilters): Service[] {
       WHEN 'stopped' THEN 4
     END, name`;
 
-  return getDb()
+  return (await getDb())
     .prepare<ServiceRow, string[]>(query)
     .all(...params)
     .map(rowToService);
 }
 
-export function updateServiceStatus(id: string, status: ServiceStatus): Service | null {
-  const oldService = getServiceById(id);
+export async function updateServiceStatus(
+  id: string,
+  status: ServiceStatus,
+): Promise<Service | null> {
+  const oldService = await getServiceById(id);
   if (!oldService) return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<ServiceRow, [ServiceStatus, string, string]>(
       `UPDATE services SET status = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *`,
     )
@@ -3838,7 +3949,7 @@ export function updateServiceStatus(id: string, status: ServiceStatus): Service 
 
   if (row && oldService.status !== status) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "service_status_change",
         agentId: oldService.agentId,
         oldValue: oldService.status,
@@ -3851,11 +3962,11 @@ export function updateServiceStatus(id: string, status: ServiceStatus): Service 
   return row ? rowToService(row) : null;
 }
 
-export function deleteService(id: string): boolean {
-  const service = getServiceById(id);
+export async function deleteService(id: string): Promise<boolean> {
+  const service = await getServiceById(id);
   if (service) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "service_unregistered",
         agentId: service.agentId,
         oldValue: service.name,
@@ -3864,22 +3975,22 @@ export function deleteService(id: string): boolean {
     } catch {}
   }
 
-  const result = getDb().run("DELETE FROM services WHERE id = ?", [id]);
+  const result = (await getDb()).run("DELETE FROM services WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
 /** Upsert a service - update if exists (by agentId + name), create if not */
-export function upsertService(
+export async function upsertService(
   agentId: string,
   name: string,
   options: CreateServiceOptions,
-): Service {
-  const existing = getServiceByAgentAndName(agentId, name);
+): Promise<Service> {
+  const existing = await getServiceByAgentAndName(agentId, name);
 
   if (existing) {
     // Update existing service
     const now = new Date().toISOString();
-    const row = getDb()
+    const row = (await getDb())
       .prepare<ServiceRow, (string | number | null)[]>(
         `UPDATE services SET
           port = ?, description = ?, url = ?, healthCheckPath = ?,
@@ -3907,14 +4018,14 @@ export function upsertService(
   }
 
   // Create new service
-  return createService(agentId, name, options);
+  return await createService(agentId, name, options);
 }
 
-export function deleteServicesByAgentId(agentId: string): number {
-  const services = getServicesByAgentId(agentId);
+export async function deleteServicesByAgentId(agentId: string): Promise<number> {
+  const services = await getServicesByAgentId(agentId);
   for (const service of services) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "service_unregistered",
         agentId,
         oldValue: service.name,
@@ -3923,7 +4034,7 @@ export function deleteServicesByAgentId(agentId: string): number {
     } catch {}
   }
 
-  const result = getDb().run("DELETE FROM services WHERE agentId = ?", [agentId]);
+  const result = (await getDb()).run("DELETE FROM services WHERE agentId = ?", [agentId]);
   return result.changes;
 }
 
@@ -3956,38 +4067,41 @@ function rowToSessionLog(row: SessionLogRow): SessionLog {
 }
 
 export const sessionLogQueries = {
-  insert: () =>
-    getDb().prepare<SessionLogRow, [string, string | null, string, number, string, string, number]>(
+  insert: async () =>
+    (await getDb()).prepare<
+      SessionLogRow,
+      [string, string | null, string, number, string, string, number]
+    >(
       `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
     ),
 
-  insertBatch: () =>
-    getDb().prepare<null, [string, string | null, string, number, string, string, number]>(
+  insertBatch: async () =>
+    (await getDb()).prepare<null, [string, string | null, string, number, string, string, number]>(
       `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     ),
 
-  getByTaskId: () =>
-    getDb().prepare<SessionLogRow, [string]>(
+  getByTaskId: async () =>
+    (await getDb()).prepare<SessionLogRow, [string]>(
       "SELECT * FROM session_logs WHERE taskId = ? ORDER BY iteration ASC, lineNumber ASC",
     ),
 
-  getBySessionId: () =>
-    getDb().prepare<SessionLogRow, [string, number]>(
+  getBySessionId: async () =>
+    (await getDb()).prepare<SessionLogRow, [string, number]>(
       "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY lineNumber ASC",
     ),
 };
 
-export function createSessionLogs(logs: {
+export async function createSessionLogs(logs: {
   taskId?: string;
   sessionId: string;
   iteration: number;
   cli: string;
   lines: string[];
-}): void {
-  const stmt = sessionLogQueries.insertBatch();
-  getDb().transaction(() => {
+}): Promise<void> {
+  const stmt = await sessionLogQueries.insertBatch();
+  (await getDb()).transaction(() => {
     for (let i = 0; i < logs.lines.length; i++) {
       const line = logs.lines[i];
       if (line === undefined) continue;
@@ -4008,12 +4122,15 @@ export function createSessionLogs(logs: {
   })();
 }
 
-export function getSessionLogsByTaskId(taskId: string): SessionLog[] {
-  return sessionLogQueries.getByTaskId().all(taskId).map(rowToSessionLog);
+export async function getSessionLogsByTaskId(taskId: string): Promise<SessionLog[]> {
+  return (await sessionLogQueries.getByTaskId()).all(taskId).map(rowToSessionLog);
 }
 
-export function getSessionLogsBySession(sessionId: string, iteration: number): SessionLog[] {
-  return sessionLogQueries.getBySessionId().all(sessionId, iteration).map(rowToSessionLog);
+export async function getSessionLogsBySession(
+  sessionId: string,
+  iteration: number,
+): Promise<SessionLog[]> {
+  return (await sessionLogQueries.getBySessionId()).all(sessionId, iteration).map(rowToSessionLog);
 }
 
 // ============================================================================
@@ -4064,8 +4181,8 @@ function rowToSessionCost(row: SessionCostRow): SessionCost {
 }
 
 const sessionCostQueries = {
-  insert: () =>
-    getDb().prepare<
+  insert: async () =>
+    (await getDb()).prepare<
       null,
       [
         string,
@@ -4097,18 +4214,18 @@ const sessionCostQueries = {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     ),
 
-  getByTaskId: () =>
-    getDb().prepare<SessionCostRow, [string, number]>(
+  getByTaskId: async () =>
+    (await getDb()).prepare<SessionCostRow, [string, number]>(
       "SELECT * FROM session_costs WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
     ),
 
-  getByAgentId: () =>
-    getDb().prepare<SessionCostRow, [string, number]>(
+  getByAgentId: async () =>
+    (await getDb()).prepare<SessionCostRow, [string, number]>(
       "SELECT * FROM session_costs WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?",
     ),
 
-  getAll: () =>
-    getDb().prepare<SessionCostRow, [number]>(
+  getAll: async () =>
+    (await getDb()).prepare<SessionCostRow, [number]>(
       "SELECT * FROM session_costs ORDER BY createdAt DESC LIMIT ?",
     ),
 };
@@ -4142,31 +4259,29 @@ export interface CreateSessionCostInput {
   costSource?: SessionCostSource;
 }
 
-export function createSessionCost(input: CreateSessionCostInput): SessionCost {
+export async function createSessionCost(input: CreateSessionCostInput): Promise<SessionCost> {
   const id = crypto.randomUUID();
   const costSource: SessionCostSource = input.costSource ?? "harness";
   const reasoningOutputTokens = input.reasoningOutputTokens ?? 0;
   const thinkingTokens = input.thinkingTokens ?? 0;
-  sessionCostQueries
-    .insert()
-    .run(
-      id,
-      input.sessionId,
-      input.taskId ?? null,
-      input.agentId,
-      input.totalCostUsd,
-      input.inputTokens ?? 0,
-      input.outputTokens ?? 0,
-      input.cacheReadTokens ?? 0,
-      input.cacheWriteTokens ?? 0,
-      reasoningOutputTokens,
-      thinkingTokens,
-      input.durationMs,
-      input.numTurns,
-      input.model,
-      input.isError ? 1 : 0,
-      costSource,
-    );
+  (await sessionCostQueries.insert()).run(
+    id,
+    input.sessionId,
+    input.taskId ?? null,
+    input.agentId,
+    input.totalCostUsd,
+    input.inputTokens ?? 0,
+    input.outputTokens ?? 0,
+    input.cacheReadTokens ?? 0,
+    input.cacheWriteTokens ?? 0,
+    reasoningOutputTokens,
+    thinkingTokens,
+    input.durationMs,
+    input.numTurns,
+    input.model,
+    input.isError ? 1 : 0,
+    costSource,
+  );
 
   return {
     id,
@@ -4189,26 +4304,29 @@ export function createSessionCost(input: CreateSessionCostInput): SessionCost {
   };
 }
 
-export function getSessionCostsByTaskId(taskId: string, limit = 500): SessionCost[] {
-  return sessionCostQueries.getByTaskId().all(taskId, limit).map(rowToSessionCost);
+export async function getSessionCostsByTaskId(taskId: string, limit = 500): Promise<SessionCost[]> {
+  return (await sessionCostQueries.getByTaskId()).all(taskId, limit).map(rowToSessionCost);
 }
 
-export function getSessionCostsByAgentId(agentId: string, limit = 100): SessionCost[] {
-  return sessionCostQueries.getByAgentId().all(agentId, limit).map(rowToSessionCost);
+export async function getSessionCostsByAgentId(
+  agentId: string,
+  limit = 100,
+): Promise<SessionCost[]> {
+  return (await sessionCostQueries.getByAgentId()).all(agentId, limit).map(rowToSessionCost);
 }
 
-export function getAllSessionCosts(limit = 100): SessionCost[] {
-  return sessionCostQueries.getAll().all(limit).map(rowToSessionCost);
+export async function getAllSessionCosts(limit = 100): Promise<SessionCost[]> {
+  return (await sessionCostQueries.getAll()).all(limit).map(rowToSessionCost);
 }
 
 // --- Date-filtered session costs (P1) ---
 
-export function getSessionCostsFiltered(opts: {
+export async function getSessionCostsFiltered(opts: {
   agentId?: string;
   startDate?: string;
   endDate?: string;
   limit?: number;
-}): SessionCost[] {
+}): Promise<SessionCost[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -4229,7 +4347,7 @@ export function getSessionCostsFiltered(opts: {
   const limit = opts.limit ?? 100;
   params.push(limit);
 
-  return getDb()
+  return (await getDb())
     .prepare<SessionCostRow, (string | number)[]>(
       `SELECT * FROM session_costs ${where} ORDER BY createdAt DESC LIMIT ?`,
     )
@@ -4267,16 +4385,16 @@ export interface SessionCostByAgentRow {
   durationMs: number;
 }
 
-export function getSessionCostSummary(opts: {
+export async function getSessionCostSummary(opts: {
   startDate?: string;
   endDate?: string;
   agentId?: string;
   groupBy?: "day" | "agent" | "both";
-}): {
+}): Promise<{
   totals: SessionCostSummaryTotals;
   daily: SessionCostDailyRow[];
   byAgent: SessionCostByAgentRow[];
-} {
+}> {
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -4306,7 +4424,7 @@ export function getSessionCostSummary(opts: {
     totalSessions: number;
   };
 
-  const totalsRow = getDb()
+  const totalsRow = (await getDb())
     .prepare<TotalsRow, string[]>(
       `SELECT
         COALESCE(SUM(totalCostUsd), 0) as totalCostUsd,
@@ -4341,7 +4459,7 @@ export function getSessionCostSummary(opts: {
   const groupBy = opts.groupBy ?? "both";
   let daily: SessionCostDailyRow[] = [];
   if (groupBy === "day" || groupBy === "both") {
-    daily = getDb()
+    daily = (await getDb())
       .prepare<
         {
           date: string;
@@ -4368,7 +4486,7 @@ export function getSessionCostSummary(opts: {
   // Per-agent breakdown
   let byAgent: SessionCostByAgentRow[] = [];
   if (groupBy === "agent" || groupBy === "both") {
-    byAgent = getDb()
+    byAgent = (await getDb())
       .prepare<
         {
           agentId: string;
@@ -4404,7 +4522,7 @@ export interface DashboardCostSummary {
   costMtd: number;
 }
 
-export function getDashboardCostSummary(): DashboardCostSummary {
+export async function getDashboardCostSummary(): Promise<DashboardCostSummary> {
   // Phase 13: compute the date boundaries in TS and pass them as ISO 8601
   // strings. `session_costs.createdAt` is a TEXT ISO 8601 column; lexicographic
   // comparison on ISO 8601 sorts correctly, so the comparison works as long
@@ -4423,7 +4541,7 @@ export function getDashboardCostSummary(): DashboardCostSummary {
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
   ).toISOString();
   type CostRow = { costToday: number; costMtd: number };
-  const row = getDb()
+  const row = (await getDb())
     .prepare<CostRow, [string, string]>(
       `SELECT
         COALESCE(SUM(CASE WHEN createdAt >= ? THEN totalCostUsd ELSE 0 END), 0) as costToday,
@@ -4482,15 +4600,15 @@ export interface CreateInboxMessageOptions {
   matchedText?: string;
 }
 
-export function createInboxMessage(
+export async function createInboxMessage(
   agentId: string,
   content: string,
   options?: CreateInboxMessageOptions,
-): InboxMessage {
+): Promise<InboxMessage> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<InboxMessageRow, (string | null)[]>(
       `INSERT INTO inbox_messages (id, agentId, content, source, status, slackChannelId, slackThreadTs, slackUserId, matchedText, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?) RETURNING *`,
@@ -4512,15 +4630,15 @@ export function createInboxMessage(
   return rowToInboxMessage(row);
 }
 
-export function getInboxMessageById(id: string): InboxMessage | null {
-  const row = getDb()
+export async function getInboxMessageById(id: string): Promise<InboxMessage | null> {
+  const row = (await getDb())
     .prepare<InboxMessageRow, [string]>("SELECT * FROM inbox_messages WHERE id = ?")
     .get(id);
   return row ? rowToInboxMessage(row) : null;
 }
 
-export function getUnreadInboxMessages(agentId: string): InboxMessage[] {
-  return getDb()
+export async function getUnreadInboxMessages(agentId: string): Promise<InboxMessage[]> {
+  return (await getDb())
     .prepare<InboxMessageRow, [string]>(
       "SELECT * FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC",
     )
@@ -4533,11 +4651,14 @@ export function getUnreadInboxMessages(agentId: string): InboxMessage[] {
  * Marks them as 'processing' to prevent duplicate polling.
  * Returns empty array if no unread messages available.
  */
-export function claimInboxMessages(agentId: string, limit: number = 5): InboxMessage[] {
+export async function claimInboxMessages(
+  agentId: string,
+  limit: number = 5,
+): Promise<InboxMessage[]> {
   const now = new Date().toISOString();
 
   // Get IDs of unread messages to claim
-  const unreadIds = getDb()
+  const unreadIds = (await getDb())
     .prepare<{ id: string }, [string, number]>(
       "SELECT id FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC LIMIT ?",
     )
@@ -4550,7 +4671,7 @@ export function claimInboxMessages(agentId: string, limit: number = 5): InboxMes
 
   // Atomically update status to 'processing' for these specific IDs
   const placeholders = unreadIds.map(() => "?").join(",");
-  const rows = getDb()
+  const rows = (await getDb())
     .prepare<InboxMessageRow, (string | number)[]>(
       `UPDATE inbox_messages SET status = 'processing', lastUpdatedAt = ?
        WHERE id IN (${placeholders}) AND status = 'unread' RETURNING *`,
@@ -4560,9 +4681,9 @@ export function claimInboxMessages(agentId: string, limit: number = 5): InboxMes
   return rows.map(rowToInboxMessage);
 }
 
-export function markInboxMessageRead(id: string): InboxMessage | null {
+export async function markInboxMessageRead(id: string): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<InboxMessageRow, [string, string]>(
       "UPDATE inbox_messages SET status = 'read', lastUpdatedAt = ? WHERE id = ? RETURNING *",
     )
@@ -4570,9 +4691,12 @@ export function markInboxMessageRead(id: string): InboxMessage | null {
   return row ? rowToInboxMessage(row) : null;
 }
 
-export function markInboxMessageResponded(id: string, responseText: string): InboxMessage | null {
+export async function markInboxMessageResponded(
+  id: string,
+  responseText: string,
+): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<InboxMessageRow, [string, string, string]>(
       "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
     )
@@ -4580,9 +4704,12 @@ export function markInboxMessageResponded(id: string, responseText: string): Inb
   return row ? rowToInboxMessage(row) : null;
 }
 
-export function markInboxMessageDelegated(id: string, taskId: string): InboxMessage | null {
+export async function markInboxMessageDelegated(
+  id: string,
+  taskId: string,
+): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<InboxMessageRow, [string, string, string]>(
       "UPDATE inbox_messages SET status = 'delegated', delegatedToTaskId = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
     )
@@ -4595,11 +4722,11 @@ export function markInboxMessageDelegated(id: string, taskId: string): InboxMess
  * This handles cases where Claude process crashes or fails to respond/delegate.
  * Call this periodically from the runner or add a database trigger.
  */
-export function releaseStaleProcessingInbox(timeoutMinutes: number = 30): number {
+export async function releaseStaleProcessingInbox(timeoutMinutes: number = 30): Promise<number> {
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = getDb().run(
+  const result = (await getDb()).run(
     `UPDATE inbox_messages SET status = 'unread', lastUpdatedAt = ?
      WHERE status = 'processing' AND lastUpdatedAt < ?`,
     [now, cutoffTime],
@@ -4646,9 +4773,9 @@ export interface ConcurrentContext {
  * Returns processing inbox messages, recent task delegations by leads,
  * and currently active (in-progress) tasks across the swarm.
  */
-export function getConcurrentContext(): ConcurrentContext {
+export async function getConcurrentContext(): Promise<ConcurrentContext> {
   // 1. Inbox messages currently being processed (status = 'processing')
-  const processingInboxMessages = getDb()
+  const processingInboxMessages = (await getDb())
     .prepare<
       {
         id: string;
@@ -4666,7 +4793,7 @@ export function getConcurrentContext(): ConcurrentContext {
 
   // 2. Tasks created in the last 5 minutes by lead agents
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const recentTaskDelegations = getDb()
+  const recentTaskDelegations = (await getDb())
     .prepare<
       {
         id: string;
@@ -4689,7 +4816,7 @@ export function getConcurrentContext(): ConcurrentContext {
     .all(fiveMinutesAgo);
 
   // 3. Currently in-progress tasks across the swarm
-  const activeSwarmTasks = getDb()
+  const activeSwarmTasks = (await getDb())
     .prepare<
       {
         id: string;
@@ -4808,15 +4935,15 @@ function rowToScheduledTaskSummary(row: ScheduledTaskRow): ScheduledTaskSummary 
   };
 }
 
-export function getScheduledTasks(filters?: ScheduledTaskFilters): ScheduledTask[];
+export function getScheduledTasks(filters?: ScheduledTaskFilters): Promise<ScheduledTask[]>;
 export function getScheduledTasks(
   filters: ScheduledTaskFilters | undefined,
   opts: { slim: true },
-): ScheduledTaskSummary[];
-export function getScheduledTasks(
+): Promise<ScheduledTaskSummary[]>;
+export async function getScheduledTasks(
   filters?: ScheduledTaskFilters,
   opts?: { slim?: boolean },
-): ScheduledTask[] | ScheduledTaskSummary[] {
+): Promise<ScheduledTask[] | ScheduledTaskSummary[]> {
   let query = "SELECT * FROM scheduled_tasks WHERE 1=1";
   const params: (string | number)[] = [];
 
@@ -4841,21 +4968,19 @@ export function getScheduledTasks(
 
   query += " ORDER BY name ASC";
 
-  const rows = getDb()
-    .prepare<ScheduledTaskRow, (string | number)[]>(query)
-    .all(...params);
+  const rows = (await getDb()).prepare<ScheduledTaskRow, (string | number)[]>(query).all(...params);
   return opts?.slim ? rows.map(rowToScheduledTaskSummary) : rows.map(rowToScheduledTask);
 }
 
-export function getScheduledTaskById(id: string): ScheduledTask | null {
-  const row = getDb()
+export async function getScheduledTaskById(id: string): Promise<ScheduledTask | null> {
+  const row = (await getDb())
     .prepare<ScheduledTaskRow, [string]>("SELECT * FROM scheduled_tasks WHERE id = ?")
     .get(id);
   return row ? rowToScheduledTask(row) : null;
 }
 
-export function getScheduledTaskByName(name: string): ScheduledTask | null {
-  const row = getDb()
+export async function getScheduledTaskByName(name: string): Promise<ScheduledTask | null> {
+  const row = (await getDb())
     .prepare<ScheduledTaskRow, [string]>("SELECT * FROM scheduled_tasks WHERE name = ?")
     .get(name);
   return row ? rowToScheduledTask(row) : null;
@@ -4879,11 +5004,11 @@ export interface CreateScheduledTaskData {
   scheduleType?: "recurring" | "one_time";
 }
 
-export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTask {
+export async function createScheduledTask(data: CreateScheduledTaskData): Promise<ScheduledTask> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<ScheduledTaskRow, (string | number | null)[]>(
       `INSERT INTO scheduled_tasks (
         id, name, description, cronExpression, intervalMs, taskTemplate,
@@ -4938,10 +5063,10 @@ export interface UpdateScheduledTaskData {
   lastUpdatedAt?: string;
 }
 
-export function updateScheduledTask(
+export async function updateScheduledTask(
   id: string,
   data: UpdateScheduledTaskData,
-): ScheduledTask | null {
+): Promise<ScheduledTask | null> {
   const updates: string[] = [];
   const params: (string | number | null)[] = [];
 
@@ -5019,7 +5144,7 @@ export function updateScheduledTask(
   }
 
   if (updates.length === 0) {
-    return getScheduledTaskById(id);
+    return await getScheduledTaskById(id);
   }
 
   updates.push("lastUpdatedAt = ?");
@@ -5027,7 +5152,7 @@ export function updateScheduledTask(
 
   params.push(id);
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<ScheduledTaskRow, (string | number | null)[]>(
       `UPDATE scheduled_tasks SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -5036,8 +5161,8 @@ export function updateScheduledTask(
   return row ? rowToScheduledTask(row) : null;
 }
 
-export function deleteScheduledTask(id: string): boolean {
-  const result = getDb().run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
+export async function deleteScheduledTask(id: string): Promise<boolean> {
+  const result = (await getDb()).run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -5045,9 +5170,9 @@ export function deleteScheduledTask(id: string): boolean {
  * Get all enabled scheduled tasks that are due for execution.
  * A task is due when its nextRunAt time is <= now.
  */
-export function getDueScheduledTasks(): ScheduledTask[] {
+export async function getDueScheduledTasks(): Promise<ScheduledTask[]> {
   const now = new Date().toISOString();
-  return getDb()
+  return (await getDb())
     .prepare<ScheduledTaskRow, [string]>(
       `SELECT * FROM scheduled_tasks
        WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ?
@@ -5244,11 +5369,11 @@ function writeEnvFile(configs: SwarmConfig[]): void {
 /**
  * List config entries with optional filters.
  */
-export function getSwarmConfigs(filters?: {
+export async function getSwarmConfigs(filters?: {
   scope?: string;
   scopeId?: string;
   key?: string;
-}): SwarmConfig[] {
+}): Promise<SwarmConfig[]> {
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -5268,7 +5393,7 @@ export function getSwarmConfigs(filters?: {
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `SELECT * FROM swarm_config ${whereClause} ORDER BY key ASC`;
 
-  return getDb()
+  return (await getDb())
     .prepare<SwarmConfigRow, string[]>(query)
     .all(...params)
     .map(rowToSwarmConfig);
@@ -5279,8 +5404,8 @@ export function getSwarmConfigs(filters?: {
  * Reserved env-only keys are filtered in SQL before decryption so a corrupted
  * legacy reserved row cannot block startup or reload.
  */
-export function getInjectableGlobalConfigs(): SwarmConfig[] {
-  return getDb()
+export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
+  return (await getDb())
     .prepare<SwarmConfigRow, []>(
       `SELECT * FROM swarm_config
        WHERE scope = 'global'
@@ -5294,8 +5419,8 @@ export function getInjectableGlobalConfigs(): SwarmConfig[] {
 /**
  * Get a single config entry by ID.
  */
-export function getSwarmConfigById(id: string): SwarmConfig | null {
-  const row = getDb()
+export async function getSwarmConfigById(id: string): Promise<SwarmConfig | null> {
+  const row = (await getDb())
     .prepare<SwarmConfigRow, [string]>("SELECT * FROM swarm_config WHERE id = ?")
     .get(id);
   return row ? rowToSwarmConfig(row) : null;
@@ -5305,15 +5430,15 @@ export function getSwarmConfigById(id: string): SwarmConfig | null {
  * Get config metadata by ID without decrypting the value. Used by cleanup
  * paths so unreadable secret rows can still be inspected and removed.
  */
-export function getSwarmConfigLookupById(id: string): {
+export async function getSwarmConfigLookupById(id: string): Promise<{
   id: string;
   scope: "global" | "agent" | "repo";
   scopeId: string | null;
   key: string;
   isSecret: boolean;
   encrypted: boolean;
-} | null {
-  const row = getDb()
+} | null> {
+  const row = (await getDb())
     .prepare<SwarmConfigLookupRow, [string]>(
       "SELECT id, scope, scopeId, key, isSecret, encrypted FROM swarm_config WHERE id = ?",
     )
@@ -5332,7 +5457,7 @@ export function getSwarmConfigLookupById(id: string): {
 /**
  * Upsert a config entry. Inserts or updates by (scope, scopeId, key) unique constraint.
  */
-export function upsertSwarmConfig(data: {
+export async function upsertSwarmConfig(data: {
   scope: "global" | "agent" | "repo";
   scopeId?: string | null;
   key: string;
@@ -5340,7 +5465,7 @@ export function upsertSwarmConfig(data: {
   isSecret?: boolean;
   envPath?: string | null;
   description?: string | null;
-}): SwarmConfig {
+}): Promise<SwarmConfig> {
   if (isReservedConfigKey(data.key)) {
     throw reservedKeyError(data.key);
   }
@@ -5360,12 +5485,12 @@ export function upsertSwarmConfig(data: {
   // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
   const existing =
     scopeId === null
-      ? getDb()
+      ? (await getDb())
           .prepare<{ id: string }, [string, string]>(
             "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
           )
           .get(data.scope, data.key)
-      : getDb()
+      : (await getDb())
           .prepare<{ id: string }, [string, string, string]>(
             "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
           )
@@ -5374,7 +5499,7 @@ export function upsertSwarmConfig(data: {
   let row: SwarmConfigRow | null;
 
   if (existing) {
-    row = getDb()
+    row = (await getDb())
       .prepare<
         SwarmConfigRow,
         [string, number, string | null, string | null, number, string, string]
@@ -5385,7 +5510,7 @@ export function upsertSwarmConfig(data: {
       .get(storedValue, isSecret, envPath, description, encryptedFlag, now, existing.id);
   } else {
     const id = crypto.randomUUID();
-    row = getDb()
+    row = (await getDb())
       .prepare<
         SwarmConfigRow,
         [
@@ -5444,8 +5569,8 @@ export function upsertSwarmConfig(data: {
  * Intentionally does not decrypt or block reserved keys. Legacy rows that
  * predate hardening must remain removable through remediation paths.
  */
-export function deleteSwarmConfig(id: string): boolean {
-  const result = getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
+export async function deleteSwarmConfig(id: string): Promise<boolean> {
+  const result = (await getDb()).run("DELETE FROM swarm_config WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -5454,18 +5579,18 @@ export function deleteSwarmConfig(id: string): boolean {
  * Scope resolution: repo > agent > global (most-specific wins).
  * Returns one entry per unique key with the most-specific scope winning.
  */
-export function getResolvedConfig(agentId?: string, repoId?: string): SwarmConfig[] {
+export async function getResolvedConfig(agentId?: string, repoId?: string): Promise<SwarmConfig[]> {
   // Start with global configs
   const configMap = new Map<string, SwarmConfig>();
 
-  const globalConfigs = getSwarmConfigs({ scope: "global" });
+  const globalConfigs = await getSwarmConfigs({ scope: "global" });
   for (const config of globalConfigs) {
     configMap.set(config.key, config);
   }
 
   // Overlay agent configs (agent wins over global)
   if (agentId) {
-    const agentConfigs = getSwarmConfigs({ scope: "agent", scopeId: agentId });
+    const agentConfigs = await getSwarmConfigs({ scope: "agent", scopeId: agentId });
     for (const config of agentConfigs) {
       configMap.set(config.key, config);
     }
@@ -5473,7 +5598,7 @@ export function getResolvedConfig(agentId?: string, repoId?: string): SwarmConfi
 
   // Overlay repo configs (repo wins over agent and global)
   if (repoId) {
-    const repoConfigs = getSwarmConfigs({ scope: "repo", scopeId: repoId });
+    const repoConfigs = await getSwarmConfigs({ scope: "repo", scopeId: repoId });
     for (const config of repoConfigs) {
       configMap.set(config.key, config);
     }
@@ -5512,7 +5637,10 @@ function rowToSwarmRepo(row: SwarmRepoRow): SwarmRepo {
   };
 }
 
-export function getSwarmRepos(filters?: { autoClone?: boolean; name?: string }): SwarmRepo[] {
+export async function getSwarmRepos(filters?: {
+  autoClone?: boolean;
+  name?: string;
+}): Promise<SwarmRepo[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -5528,47 +5656,47 @@ export function getSwarmRepos(filters?: { autoClone?: boolean; name?: string }):
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `SELECT * FROM swarm_repos ${whereClause} ORDER BY name ASC`;
 
-  return getDb()
+  return (await getDb())
     .prepare<SwarmRepoRow, (string | number)[]>(query)
     .all(...params)
     .map(rowToSwarmRepo);
 }
 
-export function getSwarmRepoById(id: string): SwarmRepo | null {
-  const row = getDb()
+export async function getSwarmRepoById(id: string): Promise<SwarmRepo | null> {
+  const row = (await getDb())
     .prepare<SwarmRepoRow, [string]>("SELECT * FROM swarm_repos WHERE id = ?")
     .get(id);
   return row ? rowToSwarmRepo(row) : null;
 }
 
-export function getSwarmRepoByName(name: string): SwarmRepo | null {
-  const row = getDb()
+export async function getSwarmRepoByName(name: string): Promise<SwarmRepo | null> {
+  const row = (await getDb())
     .prepare<SwarmRepoRow, [string]>("SELECT * FROM swarm_repos WHERE name = ?")
     .get(name);
   return row ? rowToSwarmRepo(row) : null;
 }
 
-export function getSwarmRepoByUrl(url: string): SwarmRepo | null {
-  const row = getDb()
+export async function getSwarmRepoByUrl(url: string): Promise<SwarmRepo | null> {
+  const row = (await getDb())
     .prepare<SwarmRepoRow, [string]>("SELECT * FROM swarm_repos WHERE url = ?")
     .get(url);
   return row ? rowToSwarmRepo(row) : null;
 }
 
-export function createSwarmRepo(data: {
+export async function createSwarmRepo(data: {
   url: string;
   name: string;
   clonePath?: string;
   defaultBranch?: string;
   autoClone?: boolean;
   guidelines?: RepoGuidelines | null;
-}): SwarmRepo {
+}): Promise<SwarmRepo> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const clonePath = data.clonePath || `/workspace/repos/${data.name}`;
   const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<
       SwarmRepoRow,
       [string, string, string, string, string, number, string | null, string, string]
@@ -5592,7 +5720,7 @@ export function createSwarmRepo(data: {
   return rowToSwarmRepo(row);
 }
 
-export function updateSwarmRepo(
+export async function updateSwarmRepo(
   id: string,
   updates: Partial<{
     url: string;
@@ -5602,7 +5730,7 @@ export function updateSwarmRepo(
     autoClone: boolean;
     guidelines: RepoGuidelines | null;
   }>,
-): SwarmRepo | null {
+): Promise<SwarmRepo | null> {
   const setClauses: string[] = [];
   const params: (string | number | null)[] = [];
 
@@ -5622,13 +5750,13 @@ export function updateSwarmRepo(
     params.push(updates.guidelines ? JSON.stringify(updates.guidelines) : null);
   }
 
-  if (setClauses.length === 0) return getSwarmRepoById(id);
+  if (setClauses.length === 0) return await getSwarmRepoById(id);
 
   setClauses.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<SwarmRepoRow, (string | number | null)[]>(
       `UPDATE swarm_repos SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -5637,8 +5765,8 @@ export function updateSwarmRepo(
   return row ? rowToSwarmRepo(row) : null;
 }
 
-export function deleteSwarmRepo(id: string): boolean {
-  const result = getDb().run("DELETE FROM swarm_repos WHERE id = ?", [id]);
+export async function deleteSwarmRepo(id: string): Promise<boolean> {
+  const result = (await getDb()).run("DELETE FROM swarm_repos WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -5654,9 +5782,11 @@ export interface AgentMailInboxMapping {
   createdAt: string;
 }
 
-export function getAgentMailInboxMapping(inboxId: string): AgentMailInboxMapping | null {
+export async function getAgentMailInboxMapping(
+  inboxId: string,
+): Promise<AgentMailInboxMapping | null> {
   return (
-    getDb()
+    (await getDb())
       .prepare<AgentMailInboxMapping, [string]>(
         "SELECT * FROM agentmail_inbox_mappings WHERE inboxId = ?",
       )
@@ -5664,31 +5794,33 @@ export function getAgentMailInboxMapping(inboxId: string): AgentMailInboxMapping
   );
 }
 
-export function getAgentMailInboxMappingsByAgent(agentId: string): AgentMailInboxMapping[] {
-  return getDb()
+export async function getAgentMailInboxMappingsByAgent(
+  agentId: string,
+): Promise<AgentMailInboxMapping[]> {
+  return (await getDb())
     .prepare<AgentMailInboxMapping, [string]>(
       "SELECT * FROM agentmail_inbox_mappings WHERE agentId = ? ORDER BY createdAt DESC",
     )
     .all(agentId);
 }
 
-export function getAllAgentMailInboxMappings(): AgentMailInboxMapping[] {
-  return getDb()
+export async function getAllAgentMailInboxMappings(): Promise<AgentMailInboxMapping[]> {
+  return (await getDb())
     .prepare<AgentMailInboxMapping, []>(
       "SELECT * FROM agentmail_inbox_mappings ORDER BY createdAt DESC",
     )
     .all();
 }
 
-export function createAgentMailInboxMapping(
+export async function createAgentMailInboxMapping(
   inboxId: string,
   agentId: string,
   inboxEmail?: string,
-): AgentMailInboxMapping {
+): Promise<AgentMailInboxMapping> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentMailInboxMapping, [string, string, string, string | null, string]>(
       `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
        VALUES (?, ?, ?, ?, ?)
@@ -5701,8 +5833,8 @@ export function createAgentMailInboxMapping(
   return row;
 }
 
-export function deleteAgentMailInboxMapping(inboxId: string): boolean {
-  const result = getDb()
+export async function deleteAgentMailInboxMapping(inboxId: string): Promise<boolean> {
+  const result = (await getDb())
     .prepare("DELETE FROM agentmail_inbox_mappings WHERE inboxId = ?")
     .run(inboxId);
   return result.changes > 0;
@@ -5712,8 +5844,10 @@ export function deleteAgentMailInboxMapping(inboxId: string): boolean {
  * Find the most recent task by AgentMail thread ID
  * Includes completed/failed tasks to maintain thread continuity via parentTaskId
  */
-export function findTaskByAgentMailThread(agentmailThreadId: string): AgentTask | null {
-  const row = getDb()
+export async function findTaskByAgentMailThread(
+  agentmailThreadId: string,
+): Promise<AgentTask | null> {
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks
        WHERE agentmailThreadId = ?
@@ -5728,18 +5862,18 @@ export function findTaskByAgentMailThread(agentmailThreadId: string): AgentTask 
 // Active Sessions (runner session tracking for concurrency awareness)
 // ============================================================================
 
-export function insertActiveSession(session: {
+export async function insertActiveSession(session: {
   agentId: string;
   taskId?: string;
   triggerType: string;
   inboxMessageId?: string;
   taskDescription?: string;
   runnerSessionId?: string;
-}): ActiveSession {
+}): Promise<ActiveSession> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<
       ActiveSession,
       [
@@ -5774,56 +5908,60 @@ export function insertActiveSession(session: {
   return row;
 }
 
-export function deleteActiveSession(taskId: string): boolean {
-  const result = getDb().prepare("DELETE FROM active_sessions WHERE taskId = ?").run(taskId);
+export async function deleteActiveSession(taskId: string): Promise<boolean> {
+  const result = (await getDb())
+    .prepare("DELETE FROM active_sessions WHERE taskId = ?")
+    .run(taskId);
   return result.changes > 0;
 }
 
-export function deleteActiveSessionById(id: string): boolean {
-  const result = getDb().prepare("DELETE FROM active_sessions WHERE id = ?").run(id);
+export async function deleteActiveSessionById(id: string): Promise<boolean> {
+  const result = (await getDb()).prepare("DELETE FROM active_sessions WHERE id = ?").run(id);
   return result.changes > 0;
 }
 
-export function getActiveSessions(agentId?: string): ActiveSession[] {
+export async function getActiveSessions(agentId?: string): Promise<ActiveSession[]> {
   if (agentId) {
-    return getDb()
+    return (await getDb())
       .prepare<ActiveSession, [string]>(
         "SELECT * FROM active_sessions WHERE agentId = ? ORDER BY startedAt DESC",
       )
       .all(agentId);
   }
-  return getDb()
+  return (await getDb())
     .prepare<ActiveSession, []>("SELECT * FROM active_sessions ORDER BY startedAt DESC")
     .all();
 }
 
-export function heartbeatActiveSession(taskId: string): boolean {
+export async function heartbeatActiveSession(taskId: string): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = getDb()
+  const result = (await getDb())
     .prepare("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?")
     .run(now, taskId);
   return result.changes > 0;
 }
 
-export function cleanupStaleSessions(maxAgeMinutes = 30): number {
+export async function cleanupStaleSessions(maxAgeMinutes = 30): Promise<number> {
   const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
-  const result = getDb()
+  const result = (await getDb())
     .prepare("DELETE FROM active_sessions WHERE lastHeartbeatAt < ?")
     .run(cutoff);
   return result.changes;
 }
 
-export function cleanupAgentSessions(agentId: string): number {
-  const result = getDb().prepare("DELETE FROM active_sessions WHERE agentId = ?").run(agentId);
+export async function cleanupAgentSessions(agentId: string): Promise<number> {
+  const result = (await getDb())
+    .prepare("DELETE FROM active_sessions WHERE agentId = ?")
+    .run(agentId);
   return result.changes;
 }
 
 /** Update providerSessionId on an active session identified by taskId */
-export function updateActiveSessionProviderSessionId(
+export async function updateActiveSessionProviderSessionId(
   taskId: string,
   providerSessionId: string,
-): boolean {
-  const result = getDb()
+): Promise<boolean> {
+  const result = (await getDb())
     .prepare("UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?")
     .run(providerSessionId, taskId);
   return result.changes > 0;
@@ -5833,9 +5971,9 @@ export function updateActiveSessionProviderSessionId(
  * Get the active session for a specific task.
  * Used by the heartbeat to cross-reference stalled tasks with worker sessions.
  */
-export function getActiveSessionForTask(taskId: string): ActiveSession | null {
+export async function getActiveSessionForTask(taskId: string): Promise<ActiveSession | null> {
   return (
-    getDb()
+    (await getDb())
       .prepare<ActiveSession, [string]>("SELECT * FROM active_sessions WHERE taskId = ? LIMIT 1")
       .get(taskId) ?? null
   );
@@ -5847,8 +5985,11 @@ export function getActiveSessionForTask(taskId: string): ActiveSession | null {
  * this updates them to use the real task ID.
  * Idempotent — safe to call multiple times.
  */
-export function reassociateSessionLogs(runnerSessionId: string, realTaskId: string): number {
-  const result = getDb()
+export async function reassociateSessionLogs(
+  runnerSessionId: string,
+  realTaskId: string,
+): Promise<number> {
+  const result = (await getDb())
     .prepare("UPDATE session_logs SET taskId = ? WHERE sessionId = ? AND taskId != ?")
     .run(realTaskId, runnerSessionId, realTaskId);
   return result.changes;
@@ -5862,9 +6003,11 @@ export function reassociateSessionLogs(runnerSessionId: string, realTaskId: stri
  * Get in_progress tasks that haven't been updated within the given threshold.
  * Used by the heartbeat to detect potentially stalled tasks.
  */
-export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentTask[] {
+export async function getStalledInProgressTasks(
+  thresholdMinutes: number = 30,
+): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000).toISOString();
-  return getDb()
+  return (await getDb())
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks
        WHERE status = 'in_progress' AND lastUpdatedAt < ?
@@ -5878,8 +6021,8 @@ export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentT
  * Get idle, non-lead, non-offline agents that have capacity for more tasks.
  * Used by the heartbeat for auto-assignment of pool tasks.
  */
-export function getIdleWorkersWithCapacity(): Agent[] {
-  const agents = getDb()
+export async function getIdleWorkersWithCapacity(): Promise<Agent[]> {
+  const agents = (await getDb())
     .prepare<AgentRow, []>(
       `SELECT * FROM agents
        WHERE status = 'idle' AND isLead = 0`,
@@ -5887,18 +6030,22 @@ export function getIdleWorkersWithCapacity(): Agent[] {
     .all()
     .map((row) => rowToAgent(row));
 
-  return agents.filter((agent) => {
-    const activeCount = getActiveTaskCount(agent.id);
-    return activeCount < (agent.maxTasks ?? 1);
-  });
+  const workersWithCapacity: Agent[] = [];
+  for (const agent of agents) {
+    const activeCount = await getActiveTaskCount(agent.id);
+    if (activeCount < (agent.maxTasks ?? 1)) {
+      workersWithCapacity.push(agent);
+    }
+  }
+  return workersWithCapacity;
 }
 
 /**
  * Get unassigned pool tasks ordered by priority (DESC) then creation time (ASC).
  * Used by the heartbeat for auto-assignment.
  */
-export function getUnassignedPoolTasks(limit: number = 10): AgentTask[] {
-  return getDb()
+export async function getUnassignedPoolTasks(limit: number = 10): Promise<AgentTask[]> {
+  return (await getDb())
     .prepare<AgentTaskRow, [number]>(
       `SELECT * FROM agent_tasks
        WHERE status = 'unassigned'
@@ -5909,9 +6056,9 @@ export function getUnassignedPoolTasks(limit: number = 10): AgentTask[] {
     .map(rowToAgentTask);
 }
 
-export function getRecentFailedTasks(hours: number = 6): AgentTask[] {
+export async function getRecentFailedTasks(hours: number = 6): Promise<AgentTask[]> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  return getDb()
+  return (await getDb())
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks
        WHERE status = 'failed'
@@ -5923,9 +6070,9 @@ export function getRecentFailedTasks(hours: number = 6): AgentTask[] {
     .map(rowToAgentTask);
 }
 
-export function getRecentCompletedCount(hours: number = 24): number {
+export async function getRecentCompletedCount(hours: number = 24): Promise<number> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<{ count: number }, [string]>(
       `SELECT COUNT(*) as count FROM agent_tasks
        WHERE status = 'completed' AND finishedAt > ?`,
@@ -5934,9 +6081,9 @@ export function getRecentCompletedCount(hours: number = 24): number {
   return row?.count ?? 0;
 }
 
-export function getRecentFailedCount(hours: number = 24): number {
+export async function getRecentFailedCount(hours: number = 24): Promise<number> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<{ count: number }, [string]>(
       `SELECT COUNT(*) as count FROM agent_tasks
        WHERE status = 'failed' AND finishedAt > ?`,
@@ -5987,7 +6134,7 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
   };
 }
 
-export function createWorkflow(data: {
+export async function createWorkflow(data: {
   name: string;
   description?: string;
   definition: WorkflowDefinition;
@@ -5998,9 +6145,9 @@ export function createWorkflow(data: {
   dir?: string;
   vcsRepo?: string;
   createdByAgentId?: string;
-}): Workflow {
+}): Promise<Workflow> {
   const id = crypto.randomUUID();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<
       WorkflowRow,
       [
@@ -6037,8 +6184,8 @@ export function createWorkflow(data: {
   return rowToWorkflow(row);
 }
 
-export function getWorkflow(id: string): Workflow | null {
-  const row = getDb()
+export async function getWorkflow(id: string): Promise<Workflow | null> {
+  const row = (await getDb())
     .prepare<WorkflowRow, [string]>("SELECT * FROM workflows WHERE id = ?")
     .get(id);
   return row ? rowToWorkflow(row) : null;
@@ -6072,15 +6219,15 @@ function rowToWorkflowSummary(row: WorkflowRow): WorkflowSummary {
   };
 }
 
-export function listWorkflows(filters?: { enabled?: boolean }): Workflow[];
+export function listWorkflows(filters?: { enabled?: boolean }): Promise<Workflow[]>;
 export function listWorkflows(
   filters: { enabled?: boolean } | undefined,
   opts: { slim: true },
-): WorkflowSummary[];
-export function listWorkflows(
+): Promise<WorkflowSummary[]>;
+export async function listWorkflows(
   filters?: { enabled?: boolean },
   opts?: { slim?: boolean },
-): Workflow[] | WorkflowSummary[] {
+): Promise<Workflow[] | WorkflowSummary[]> {
   let query = "SELECT * FROM workflows WHERE 1=1";
   const params: (string | number)[] = [];
   if (filters?.enabled !== undefined) {
@@ -6088,13 +6235,11 @@ export function listWorkflows(
     params.push(filters.enabled ? 1 : 0);
   }
   query += " ORDER BY name ASC";
-  const rows = getDb()
-    .prepare<WorkflowRow, (string | number)[]>(query)
-    .all(...params);
+  const rows = (await getDb()).prepare<WorkflowRow, (string | number)[]>(query).all(...params);
   return opts?.slim ? rows.map(rowToWorkflowSummary) : rows.map(rowToWorkflow);
 }
 
-export function updateWorkflow(
+export async function updateWorkflow(
   id: string,
   data: {
     name?: string;
@@ -6108,7 +6253,7 @@ export function updateWorkflow(
     dir?: string | null;
     vcsRepo?: string | null;
   },
-): Workflow | null {
+): Promise<Workflow | null> {
   const updates: string[] = [];
   const params: (string | number | null)[] = [];
   if (data.name !== undefined) {
@@ -6151,11 +6296,11 @@ export function updateWorkflow(
     updates.push("vcs_repo = ?");
     params.push(data.vcsRepo ?? null);
   }
-  if (updates.length === 0) return getWorkflow(id);
+  if (updates.length === 0) return await getWorkflow(id);
   updates.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
-  const row = getDb()
+  const row = (await getDb())
     .prepare<WorkflowRow, (string | number | null)[]>(
       `UPDATE workflows SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -6163,8 +6308,8 @@ export function updateWorkflow(
   return row ? rowToWorkflow(row) : null;
 }
 
-export function deleteWorkflow(id: string): boolean {
-  const db = getDb();
+export async function deleteWorkflow(id: string): Promise<boolean> {
+  const db = await getDb();
   // Cascade delete in FK-safe order:
   // 1. Unlink agent_tasks (they reference steps and runs)
   db.run(
@@ -6187,8 +6332,8 @@ export function deleteWorkflow(id: string): boolean {
  * Find enabled workflows that have a schedule trigger matching the given scheduleId.
  * Uses SQLite JSON functions to query into the triggers JSON array.
  */
-export function getWorkflowsByScheduleId(scheduleId: string): Workflow[] {
-  const rows = getDb()
+export async function getWorkflowsByScheduleId(scheduleId: string): Promise<Workflow[]> {
+  const rows = (await getDb())
     .prepare<WorkflowRow, [string]>(
       `SELECT w.* FROM workflows w, json_each(w.triggers) AS t
        WHERE w.enabled = 1
@@ -6229,13 +6374,13 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
   };
 }
 
-export function createWorkflowRun(data: {
+export async function createWorkflowRun(data: {
   id: string;
   workflowId: string;
   triggerData?: unknown;
-}): WorkflowRun {
+}): Promise<WorkflowRun> {
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<WorkflowRunRow, [string, string, string, string | null]>(
       `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData) VALUES (?, ?, ?, ?) RETURNING *`,
     )
@@ -6244,14 +6389,14 @@ export function createWorkflowRun(data: {
   return rowToWorkflowRun(row);
 }
 
-export function getWorkflowRun(id: string): WorkflowRun | null {
-  const row = getDb()
+export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
+  const row = (await getDb())
     .prepare<WorkflowRunRow, [string]>("SELECT * FROM workflow_runs WHERE id = ?")
     .get(id);
   return row ? rowToWorkflowRun(row) : null;
 }
 
-export function updateWorkflowRun(
+export async function updateWorkflowRun(
   id: string,
   data: {
     status?: WorkflowRunStatus;
@@ -6259,7 +6404,7 @@ export function updateWorkflowRun(
     error?: string;
     finishedAt?: string;
   },
-): WorkflowRun | null {
+): Promise<WorkflowRun | null> {
   const updates: string[] = [];
   const params: (string | null)[] = [];
   if (data.status !== undefined) {
@@ -6278,11 +6423,11 @@ export function updateWorkflowRun(
     updates.push("finishedAt = ?");
     params.push(data.finishedAt);
   }
-  if (updates.length === 0) return getWorkflowRun(id);
+  if (updates.length === 0) return await getWorkflowRun(id);
   updates.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
-  const row = getDb()
+  const row = (await getDb())
     .prepare<WorkflowRunRow, (string | null)[]>(
       `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -6290,8 +6435,8 @@ export function updateWorkflowRun(
   return row ? rowToWorkflowRun(row) : null;
 }
 
-export function listWorkflowRuns(workflowId: string): WorkflowRun[] {
-  return getDb()
+export async function listWorkflowRuns(workflowId: string): Promise<WorkflowRun[]> {
+  return (await getDb())
     .prepare<WorkflowRunRow, [string]>(
       "SELECT * FROM workflow_runs WHERE workflowId = ? ORDER BY startedAt DESC",
     )
@@ -6343,15 +6488,15 @@ function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
   };
 }
 
-export function createWorkflowRunStep(data: {
+export async function createWorkflowRunStep(data: {
   id: string;
   runId: string;
   nodeId: string;
   nodeType: string;
   input?: unknown;
-}): WorkflowRunStep {
+}): Promise<WorkflowRunStep> {
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<WorkflowRunStepRow, [string, string, string, string, string, string | null]>(
       `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input)
        VALUES (?, ?, ?, ?, 'running', ?, ?) RETURNING *`,
@@ -6368,14 +6513,14 @@ export function createWorkflowRunStep(data: {
   return rowToWorkflowRunStep(row);
 }
 
-export function getWorkflowRunStep(id: string): WorkflowRunStep | null {
-  const row = getDb()
+export async function getWorkflowRunStep(id: string): Promise<WorkflowRunStep | null> {
+  const row = (await getDb())
     .prepare<WorkflowRunStepRow, [string]>("SELECT * FROM workflow_run_steps WHERE id = ?")
     .get(id);
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
-export function updateWorkflowRunStep(
+export async function updateWorkflowRunStep(
   id: string,
   data: {
     status?: WorkflowRunStepStatus;
@@ -6389,7 +6534,7 @@ export function updateWorkflowRunStep(
     diagnostics?: string;
     nextPort?: string;
   },
-): WorkflowRunStep | null {
+): Promise<WorkflowRunStep | null> {
   const updates: string[] = [];
   const params: (string | number | null)[] = [];
   if (data.status !== undefined) {
@@ -6432,9 +6577,9 @@ export function updateWorkflowRunStep(
     updates.push("nextPort = ?");
     params.push(data.nextPort);
   }
-  if (updates.length === 0) return getWorkflowRunStep(id);
+  if (updates.length === 0) return await getWorkflowRunStep(id);
   params.push(id);
-  const row = getDb()
+  const row = (await getDb())
     .prepare<WorkflowRunStepRow, (string | number | null)[]>(
       `UPDATE workflow_run_steps SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -6442,8 +6587,8 @@ export function updateWorkflowRunStep(
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
-export function getWorkflowRunStepsByRunId(runId: string): WorkflowRunStep[] {
-  return getDb()
+export async function getWorkflowRunStepsByRunId(runId: string): Promise<WorkflowRunStep[]> {
+  return (await getDb())
     .prepare<WorkflowRunStepRow, [string]>(
       "SELECT * FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC",
     )
@@ -6462,8 +6607,8 @@ export interface StuckWorkflowRun {
   workflowId: string;
 }
 
-export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
-  return getDb()
+export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
+  return (await getDb())
     .prepare<StuckWorkflowRun, []>(
       `SELECT
         wr.id as runId,
@@ -6483,8 +6628,8 @@ export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
 
 // --- New Workflow Query Functions ---
 
-export function getLastSuccessfulRun(workflowId: string): WorkflowRun | null {
-  const row = getDb()
+export async function getLastSuccessfulRun(workflowId: string): Promise<WorkflowRun | null> {
+  const row = (await getDb())
     .prepare<WorkflowRunRow, [string]>(
       `SELECT * FROM workflow_runs
        WHERE workflowId = ? AND status = 'completed'
@@ -6494,8 +6639,8 @@ export function getLastSuccessfulRun(workflowId: string): WorkflowRun | null {
   return row ? rowToWorkflowRun(row) : null;
 }
 
-export function getLastRunStart(workflowId: string): WorkflowRun | null {
-  const row = getDb()
+export async function getLastRunStart(workflowId: string): Promise<WorkflowRun | null> {
+  const row = (await getDb())
     .prepare<WorkflowRunRow, [string]>(
       `SELECT * FROM workflow_runs
        WHERE workflowId = ? AND status NOT IN ('skipped')
@@ -6505,9 +6650,9 @@ export function getLastRunStart(workflowId: string): WorkflowRun | null {
   return row ? rowToWorkflowRun(row) : null;
 }
 
-export function getRetryableSteps(): WorkflowRunStep[] {
+export async function getRetryableSteps(): Promise<WorkflowRunStep[]> {
   const now = new Date().toISOString();
-  return getDb()
+  return (await getDb())
     .prepare<WorkflowRunStepRow, [string]>(
       `SELECT * FROM workflow_run_steps
        WHERE status = 'failed'
@@ -6519,8 +6664,8 @@ export function getRetryableSteps(): WorkflowRunStep[] {
     .map(rowToWorkflowRunStep);
 }
 
-export function getCompletedStepNodeIds(runId: string): string[] {
-  const rows = getDb()
+export async function getCompletedStepNodeIds(runId: string): Promise<string[]> {
+  const rows = (await getDb())
     .prepare<{ nodeId: string }, [string]>(
       `SELECT nodeId FROM workflow_run_steps
        WHERE runId = ? AND status = 'completed'`,
@@ -6529,8 +6674,8 @@ export function getCompletedStepNodeIds(runId: string): string[] {
   return rows.map((r) => r.nodeId);
 }
 
-export function getTaskByWorkflowRunStepId(stepId: string): AgentTask | null {
-  const row = getDb()
+export async function getTaskByWorkflowRunStepId(stepId: string): Promise<AgentTask | null> {
+  const row = (await getDb())
     .prepare<AgentTaskRow, [string]>(
       "SELECT * FROM agent_tasks WHERE workflowRunStepId = ? LIMIT 1",
     )
@@ -6538,8 +6683,8 @@ export function getTaskByWorkflowRunStepId(stepId: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function getStepByIdempotencyKey(key: string): WorkflowRunStep | null {
-  const row = getDb()
+export async function getStepByIdempotencyKey(key: string): Promise<WorkflowRunStep | null> {
+  const row = (await getDb())
     .prepare<WorkflowRunStepRow, [string]>(
       "SELECT * FROM workflow_run_steps WHERE idempotencyKey = ?",
     )
@@ -6547,8 +6692,8 @@ export function getStepByIdempotencyKey(key: string): WorkflowRunStep | null {
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
-export function getStepCountForNode(runId: string, nodeId: string): number {
-  const row = getDb()
+export async function getStepCountForNode(runId: string, nodeId: string): Promise<number> {
+  const row = (await getDb())
     .prepare<{ cnt: number }, [string, string]>(
       "SELECT COUNT(*) as cnt FROM workflow_run_steps WHERE runId = ? AND nodeId = ?",
     )
@@ -6556,8 +6701,11 @@ export function getStepCountForNode(runId: string, nodeId: string): number {
   return row?.cnt ?? 0;
 }
 
-export function getLatestStepForNode(runId: string, nodeId: string): WorkflowRunStep | null {
-  const row = getDb()
+export async function getLatestStepForNode(
+  runId: string,
+  nodeId: string,
+): Promise<WorkflowRunStep | null> {
+  const row = (await getDb())
     .prepare<WorkflowRunStepRow, [string, string]>(
       "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC LIMIT 1",
     )
@@ -6587,14 +6735,14 @@ function rowToWorkflowVersion(row: WorkflowVersionRow): WorkflowVersion {
   };
 }
 
-export function createWorkflowVersion(data: {
+export async function createWorkflowVersion(data: {
   workflowId: string;
   version: number;
   snapshot: WorkflowSnapshot;
   changedByAgentId?: string;
-}): WorkflowVersion {
+}): Promise<WorkflowVersion> {
   const id = crypto.randomUUID();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<WorkflowVersionRow, [string, string, number, string, string | null]>(
       `INSERT INTO workflow_versions (id, workflowId, version, snapshot, changedByAgentId)
        VALUES (?, ?, ?, ?, ?) RETURNING *`,
@@ -6610,8 +6758,8 @@ export function createWorkflowVersion(data: {
   return rowToWorkflowVersion(row);
 }
 
-export function getWorkflowVersions(workflowId: string): WorkflowVersion[] {
-  return getDb()
+export async function getWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {
+  return (await getDb())
     .prepare<WorkflowVersionRow, [string]>(
       "SELECT * FROM workflow_versions WHERE workflowId = ? ORDER BY version DESC",
     )
@@ -6619,8 +6767,11 @@ export function getWorkflowVersions(workflowId: string): WorkflowVersion[] {
     .map(rowToWorkflowVersion);
 }
 
-export function getWorkflowVersion(workflowId: string, version: number): WorkflowVersion | null {
-  const row = getDb()
+export async function getWorkflowVersion(
+  workflowId: string,
+  version: number,
+): Promise<WorkflowVersion | null> {
+  const row = (await getDb())
     .prepare<WorkflowVersionRow, [string, number]>(
       "SELECT * FROM workflow_versions WHERE workflowId = ? AND version = ?",
     )
@@ -6673,7 +6824,7 @@ function rowToPage(row: PageRow): Page {
   };
 }
 
-export function createPage(data: {
+export async function createPage(data: {
   agentId: string;
   slug: string;
   title: string;
@@ -6683,8 +6834,8 @@ export function createPage(data: {
   passwordHash?: string;
   body: string;
   needsCredentials?: string[];
-}): Page {
-  const row = getDb()
+}): Promise<Page> {
+  const row = (await getDb())
     .prepare<
       PageRow,
       [string, string, string, string | null, string, string, string | null, string, string | null]
@@ -6707,13 +6858,15 @@ export function createPage(data: {
   return rowToPage(row);
 }
 
-export function getPage(id: string): Page | null {
-  const row = getDb().prepare<PageRow, [string]>("SELECT * FROM pages WHERE id = ?").get(id);
+export async function getPage(id: string): Promise<Page | null> {
+  const row = (await getDb())
+    .prepare<PageRow, [string]>("SELECT * FROM pages WHERE id = ?")
+    .get(id);
   return row ? rowToPage(row) : null;
 }
 
-export function getPageBySlug(agentId: string, slug: string): Page | null {
-  const row = getDb()
+export async function getPageBySlug(agentId: string, slug: string): Promise<Page | null> {
+  const row = (await getDb())
     .prepare<PageRow, [string, string]>("SELECT * FROM pages WHERE agentId = ? AND slug = ?")
     .get(agentId, slug);
   return row ? rowToPage(row) : null;
@@ -6742,20 +6895,20 @@ function rowToPageSummary(row: PageRow): PageSummary {
   };
 }
 
-export function listPagesByAgent(agentId: string, limit?: number, offset?: number): Page[];
+export function listPagesByAgent(agentId: string, limit?: number, offset?: number): Promise<Page[]>;
 export function listPagesByAgent(
   agentId: string,
   limit: number | undefined,
   offset: number | undefined,
   opts: { slim: true },
-): PageSummary[];
-export function listPagesByAgent(
+): Promise<PageSummary[]>;
+export async function listPagesByAgent(
   agentId: string,
   limit = 100,
   offset = 0,
   opts?: { slim?: boolean },
-): Page[] | PageSummary[] {
-  const rows = getDb()
+): Promise<Page[] | PageSummary[]> {
+  const rows = (await getDb())
     .prepare<PageRow, [string, number, number]>(
       "SELECT * FROM pages WHERE agentId = ? ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
     )
@@ -6763,18 +6916,18 @@ export function listPagesByAgent(
   return opts?.slim ? rows.map(rowToPageSummary) : rows.map(rowToPage);
 }
 
-export function listAllPages(limit?: number, offset?: number): Page[];
+export function listAllPages(limit?: number, offset?: number): Promise<Page[]>;
 export function listAllPages(
   limit: number | undefined,
   offset: number | undefined,
   opts: { slim: true },
-): PageSummary[];
-export function listAllPages(
+): Promise<PageSummary[]>;
+export async function listAllPages(
   limit = 100,
   offset = 0,
   opts?: { slim?: boolean },
-): Page[] | PageSummary[] {
-  const rows = getDb()
+): Promise<Page[] | PageSummary[]> {
+  const rows = (await getDb())
     .prepare<PageRow, [number, number]>(
       "SELECT * FROM pages ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
     )
@@ -6786,14 +6939,16 @@ export function listAllPages(
  * Total page count — used to back a filter-aware `total` in the `/api/pages`
  * pager so the UI shows the real count, not just the current page's length.
  */
-export function countAllPages(): number {
-  const row = getDb().prepare<{ count: number }, []>("SELECT COUNT(*) AS count FROM pages").get();
+export async function countAllPages(): Promise<number> {
+  const row = (await getDb())
+    .prepare<{ count: number }, []>("SELECT COUNT(*) AS count FROM pages")
+    .get();
   return row?.count ?? 0;
 }
 
 /** Page count scoped to a single agent — companion to `listPagesByAgent`. */
-export function countPagesByAgent(agentId: string): number {
-  const row = getDb()
+export async function countPagesByAgent(agentId: string): Promise<number> {
+  const row = (await getDb())
     .prepare<{ count: number }, [string]>("SELECT COUNT(*) AS count FROM pages WHERE agentId = ?")
     .get(agentId);
   return row?.count ?? 0;
@@ -6807,7 +6962,7 @@ export function countPagesByAgent(agentId: string): number {
  * Always bumps `updatedAt` even if no other field changed (keeps the index
  * useful for list ordering).
  */
-export function updatePage(
+export async function updatePage(
   id: string,
   data: {
     title?: string;
@@ -6819,7 +6974,7 @@ export function updatePage(
     needsCredentials?: string[] | null;
     slug?: string;
   },
-): Page | null {
+): Promise<Page | null> {
   const updates: string[] = [];
   const params: (string | number | null)[] = [];
   if (data.title !== undefined) {
@@ -6854,11 +7009,11 @@ export function updatePage(
     updates.push("slug = ?");
     params.push(data.slug);
   }
-  if (updates.length === 0) return getPage(id);
+  if (updates.length === 0) return await getPage(id);
   updates.push("updatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
-  const row = getDb()
+  const row = (await getDb())
     .prepare<PageRow, (string | number | null)[]>(
       `UPDATE pages SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -6866,9 +7021,9 @@ export function updatePage(
   return row ? rowToPage(row) : null;
 }
 
-export function deletePage(id: string): boolean {
+export async function deletePage(id: string): Promise<boolean> {
   // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
-  const result = getDb().run("DELETE FROM pages WHERE id = ?", [id]);
+  const result = (await getDb()).run("DELETE FROM pages WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -6880,8 +7035,10 @@ export function deletePage(id: string): boolean {
  * path, so this only fires for valid ids. Wrapped in try/catch by the
  * caller so an unexpected DB error never breaks page serving.
  */
-export function incrementPageViewCount(id: string): boolean {
-  const result = getDb().run("UPDATE pages SET view_count = view_count + 1 WHERE id = ?", [id]);
+export async function incrementPageViewCount(id: string): Promise<boolean> {
+  const result = (await getDb()).run("UPDATE pages SET view_count = view_count + 1 WHERE id = ?", [
+    id,
+  ]);
   return result.changes > 0;
 }
 
@@ -6905,13 +7062,13 @@ function rowToPageVersion(row: PageVersionRow): PageVersion {
   };
 }
 
-export function createPageVersion(data: {
+export async function createPageVersion(data: {
   pageId: string;
   version: number;
   snapshot: PageSnapshot;
   changedByAgentId?: string;
-}): PageVersion {
-  const row = getDb()
+}): Promise<PageVersion> {
+  const row = (await getDb())
     .prepare<PageVersionRow, [string, number, string, string | null]>(
       `INSERT INTO page_versions (pageId, version, snapshot, changedByAgentId)
        VALUES (?, ?, ?, ?) RETURNING *`,
@@ -6921,8 +7078,8 @@ export function createPageVersion(data: {
   return rowToPageVersion(row);
 }
 
-export function getPageVersions(pageId: string): PageVersion[] {
-  return getDb()
+export async function getPageVersions(pageId: string): Promise<PageVersion[]> {
+  return (await getDb())
     .prepare<PageVersionRow, [string]>(
       "SELECT * FROM page_versions WHERE pageId = ? ORDER BY version DESC",
     )
@@ -6930,8 +7087,8 @@ export function getPageVersions(pageId: string): PageVersion[] {
     .map(rowToPageVersion);
 }
 
-export function getPageVersion(pageId: string, version: number): PageVersion | null {
-  const row = getDb()
+export async function getPageVersion(pageId: string, version: number): Promise<PageVersion | null> {
+  const row = (await getDb())
     .prepare<PageVersionRow, [string, number]>(
       "SELECT * FROM page_versions WHERE pageId = ? AND version = ?",
     )
@@ -7000,12 +7157,12 @@ function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTempla
 /**
  * List prompt templates with optional filters.
  */
-export function getPromptTemplates(filters?: {
+export async function getPromptTemplates(filters?: {
   eventType?: string;
   scope?: string;
   scopeId?: string;
   isDefault?: boolean;
-}): PromptTemplate[] {
+}): Promise<PromptTemplate[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -7029,7 +7186,7 @@ export function getPromptTemplates(filters?: {
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `SELECT * FROM prompt_templates ${whereClause} ORDER BY eventType ASC`;
 
-  return getDb()
+  return (await getDb())
     .prepare<PromptTemplateRow, (string | number)[]>(query)
     .all(...params)
     .map(rowToPromptTemplate);
@@ -7038,8 +7195,8 @@ export function getPromptTemplates(filters?: {
 /**
  * Get a single prompt template by ID.
  */
-export function getPromptTemplateById(id: string): PromptTemplate | null {
-  const row = getDb()
+export async function getPromptTemplateById(id: string): Promise<PromptTemplate | null> {
+  const row = (await getDb())
     .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
     .get(id);
   return row ? rowToPromptTemplate(row) : null;
@@ -7049,7 +7206,7 @@ export function getPromptTemplateById(id: string): PromptTemplate | null {
  * Upsert a prompt template. Inserts or updates by (eventType, scope, scopeId) unique constraint.
  * Creates a history entry on both insert and update.
  */
-export function upsertPromptTemplate(data: {
+export async function upsertPromptTemplate(data: {
   eventType: string;
   scope: "global" | "agent" | "repo";
   scopeId?: string | null;
@@ -7059,7 +7216,7 @@ export function upsertPromptTemplate(data: {
   changedBy?: string | null;
   changeReason?: string | null;
   isDefault?: boolean;
-}): PromptTemplate {
+}): Promise<PromptTemplate> {
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
   const state = data.state ?? "enabled";
@@ -7071,12 +7228,12 @@ export function upsertPromptTemplate(data: {
   // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
   const existing =
     scopeId === null
-      ? getDb()
+      ? (await getDb())
           .prepare<PromptTemplateRow, [string, string]>(
             "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
           )
           .get(data.eventType, data.scope)
-      : getDb()
+      : (await getDb())
           .prepare<PromptTemplateRow, [string, string, string]>(
             "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
           )
@@ -7090,7 +7247,7 @@ export function upsertPromptTemplate(data: {
       data.scope === "global" && existing.isDefault === 1 ? 0 : existing.isDefault;
     const newVersion = existing.version + 1;
 
-    row = getDb()
+    row = (await getDb())
       .prepare<PromptTemplateRow, [string, string, number, number, string, string]>(
         `UPDATE prompt_templates SET body = ?, state = ?, isDefault = ?, version = ?, updatedAt = ?
          WHERE id = ? RETURNING *`,
@@ -7098,7 +7255,7 @@ export function upsertPromptTemplate(data: {
       .get(data.body, state, newIsDefault, newVersion, now, existing.id);
 
     // Create history entry for the update
-    getDb()
+    (await getDb())
       .prepare(
         `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -7115,7 +7272,7 @@ export function upsertPromptTemplate(data: {
       );
   } else {
     const id = crypto.randomUUID();
-    row = getDb()
+    row = (await getDb())
       .prepare<
         PromptTemplateRow,
         [
@@ -7150,7 +7307,7 @@ export function upsertPromptTemplate(data: {
       );
 
     // Create history entry for the insert
-    getDb()
+    (await getDb())
       .prepare(
         `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -7175,8 +7332,8 @@ export function upsertPromptTemplate(data: {
  * Delete a prompt template by ID. Guards against deleting default templates.
  * Does NOT delete history rows (intentional for audit trail).
  */
-export function deletePromptTemplate(id: string): boolean {
-  const existing = getDb()
+export async function deletePromptTemplate(id: string): Promise<boolean> {
+  const existing = (await getDb())
     .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
     .get(id);
 
@@ -7187,7 +7344,7 @@ export function deletePromptTemplate(id: string): boolean {
     );
   }
 
-  const result = getDb().run("DELETE FROM prompt_templates WHERE id = ?", [id]);
+  const result = (await getDb()).run("DELETE FROM prompt_templates WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -7195,9 +7352,12 @@ export function deletePromptTemplate(id: string): boolean {
  * Reset a prompt template to its default state.
  * Sets body to defaultBody, isDefault=true, state='enabled', bumps version.
  */
-export function resetPromptTemplateToDefault(id: string, defaultBody: string): PromptTemplate {
+export async function resetPromptTemplateToDefault(
+  id: string,
+  defaultBody: string,
+): Promise<PromptTemplate> {
   const now = new Date().toISOString();
-  const existing = getDb()
+  const existing = (await getDb())
     .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
     .get(id);
 
@@ -7205,7 +7365,7 @@ export function resetPromptTemplateToDefault(id: string, defaultBody: string): P
 
   const newVersion = existing.version + 1;
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<PromptTemplateRow, [string, number, string, string]>(
       `UPDATE prompt_templates SET body = ?, state = 'enabled', isDefault = 1, version = ?, updatedAt = ?
        WHERE id = ? RETURNING *`,
@@ -7215,7 +7375,7 @@ export function resetPromptTemplateToDefault(id: string, defaultBody: string): P
   if (!row) throw new Error("Failed to reset prompt template to default");
 
   // Create history entry
-  getDb()
+  (await getDb())
     .prepare(
       `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -7237,8 +7397,10 @@ export function resetPromptTemplateToDefault(id: string, defaultBody: string): P
 /**
  * Get version history for a prompt template, ordered by version DESC.
  */
-export function getPromptTemplateHistory(templateId: string): PromptTemplateHistory[] {
-  return getDb()
+export async function getPromptTemplateHistory(
+  templateId: string,
+): Promise<PromptTemplateHistory[]> {
+  return (await getDb())
     .prepare<PromptTemplateHistoryRow, [string]>(
       "SELECT * FROM prompt_template_history WHERE templateId = ? ORDER BY version DESC",
     )
@@ -7261,20 +7423,20 @@ export function getPromptTemplateHistory(templateId: string): PromptTemplateHist
  *   - 'skip_event': return { skip: true }
  *   - 'default_prompt_fallback': continue to next scope level
  */
-export function resolvePromptTemplate(
+export async function resolvePromptTemplate(
   eventType: string,
   agentId?: string,
   repoId?: string,
-): { template: PromptTemplate } | { skip: true } | null {
+): Promise<{ template: PromptTemplate } | { skip: true } | null> {
   // Helper to look up a template at a specific scope
-  const lookupAtScope = (
+  const lookupAtScope = async (
     et: string,
     scope: "global" | "agent" | "repo",
     scopeId: string | null,
-  ): PromptTemplateRow | undefined => {
+  ): Promise<PromptTemplateRow | undefined> => {
     if (scopeId === null) {
       return (
-        getDb()
+        (await getDb())
           .prepare<PromptTemplateRow, [string, string]>(
             "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
           )
@@ -7282,7 +7444,7 @@ export function resolvePromptTemplate(
       );
     }
     return (
-      getDb()
+      (await getDb())
         .prepare<PromptTemplateRow, [string, string, string]>(
           "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
         )
@@ -7291,7 +7453,9 @@ export function resolvePromptTemplate(
   };
 
   // Try resolution at the scope chain for a given eventType string
-  const tryResolve = (et: string): { template: PromptTemplate } | { skip: true } | "continue" => {
+  const tryResolve = async (
+    et: string,
+  ): Promise<{ template: PromptTemplate } | { skip: true } | "continue"> => {
     // Build scope chain: agent → repo → global
     const scopeChain: Array<{ scope: "global" | "agent" | "repo"; scopeId: string | null }> = [];
     if (agentId) scopeChain.push({ scope: "agent", scopeId: agentId });
@@ -7299,7 +7463,7 @@ export function resolvePromptTemplate(
     scopeChain.push({ scope: "global", scopeId: null });
 
     for (const { scope, scopeId } of scopeChain) {
-      const row = lookupAtScope(et, scope, scopeId);
+      const row = await lookupAtScope(et, scope, scopeId);
       if (!row) continue;
 
       if (row.state === "enabled") {
@@ -7315,7 +7479,7 @@ export function resolvePromptTemplate(
   };
 
   // Pass 1: exact match
-  const exactResult = tryResolve(eventType);
+  const exactResult = await tryResolve(eventType);
   if (exactResult !== "continue") return exactResult;
 
   // Pass 2: wildcard matching
@@ -7327,7 +7491,7 @@ export function resolvePromptTemplate(
   }
 
   for (const wildcard of wildcards) {
-    const wildcardResult = tryResolve(wildcard);
+    const wildcardResult = await tryResolve(wildcard);
     if (wildcardResult !== "continue") return wildcardResult;
   }
 
@@ -7338,15 +7502,18 @@ export function resolvePromptTemplate(
  * Checkout a prompt template to a specific version from history.
  * Copies body and state from the history entry into the live record, bumps version.
  */
-export function checkoutPromptTemplate(id: string, targetVersion: number): PromptTemplate {
+export async function checkoutPromptTemplate(
+  id: string,
+  targetVersion: number,
+): Promise<PromptTemplate> {
   const now = new Date().toISOString();
 
-  const existing = getDb()
+  const existing = (await getDb())
     .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
     .get(id);
   if (!existing) throw new Error(`Prompt template ${id} not found`);
 
-  const historyEntry = getDb()
+  const historyEntry = (await getDb())
     .prepare<PromptTemplateHistoryRow, [string, number]>(
       "SELECT * FROM prompt_template_history WHERE templateId = ? AND version = ?",
     )
@@ -7356,7 +7523,7 @@ export function checkoutPromptTemplate(id: string, targetVersion: number): Promp
 
   const newVersion = existing.version + 1;
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<PromptTemplateRow, [string, string, number, string, string]>(
       `UPDATE prompt_templates SET body = ?, state = ?, version = ?, updatedAt = ?
        WHERE id = ? RETURNING *`,
@@ -7366,7 +7533,7 @@ export function checkoutPromptTemplate(id: string, targetVersion: number): Promp
   if (!row) throw new Error("Failed to checkout prompt template");
 
   // Create history entry for the checkout
-  getDb()
+  (await getDb())
     .prepare(
       `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -7407,15 +7574,17 @@ function rowToChannelActivityCursor(row: ChannelActivityCursorRow): ChannelActiv
   };
 }
 
-export function getAllChannelActivityCursors(): ChannelActivityCursor[] {
-  return getDb()
+export async function getAllChannelActivityCursors(): Promise<ChannelActivityCursor[]> {
+  return (await getDb())
     .prepare<ChannelActivityCursorRow, []>("SELECT * FROM channel_activity_cursors")
     .all()
     .map(rowToChannelActivityCursor);
 }
 
-export function getChannelActivityCursor(channelId: string): ChannelActivityCursor | null {
-  const row = getDb()
+export async function getChannelActivityCursor(
+  channelId: string,
+): Promise<ChannelActivityCursor | null> {
+  const row = (await getDb())
     .prepare<ChannelActivityCursorRow, [string]>(
       "SELECT * FROM channel_activity_cursors WHERE channelId = ?",
     )
@@ -7423,8 +7592,11 @@ export function getChannelActivityCursor(channelId: string): ChannelActivityCurs
   return row ? rowToChannelActivityCursor(row) : null;
 }
 
-export function upsertChannelActivityCursor(channelId: string, lastSeenTs: string): void {
-  getDb()
+export async function upsertChannelActivityCursor(
+  channelId: string,
+  lastSeenTs: string,
+): Promise<void> {
+  (await getDb())
     .prepare(
       `INSERT INTO channel_activity_cursors (channelId, lastSeenTs, updatedAt)
        VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -7496,7 +7668,7 @@ function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
   };
 }
 
-export function createApprovalRequest(data: {
+export async function createApprovalRequest(data: {
   id: string;
   title: string;
   questions: unknown[];
@@ -7506,13 +7678,13 @@ export function createApprovalRequest(data: {
   sourceTaskId?: string;
   timeoutSeconds?: number;
   notificationChannels?: unknown[];
-}): ApprovalRequest {
+}): Promise<ApprovalRequest> {
   const now = new Date().toISOString();
   const expiresAt = data.timeoutSeconds
     ? new Date(Date.now() + data.timeoutSeconds * 1000).toISOString()
     : null;
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<
       ApprovalRequestRow,
       [
@@ -7552,23 +7724,23 @@ export function createApprovalRequest(data: {
   return rowToApprovalRequest(row!);
 }
 
-export function getApprovalRequestById(id: string): ApprovalRequest | null {
-  const row = getDb()
+export async function getApprovalRequestById(id: string): Promise<ApprovalRequest | null> {
+  const row = (await getDb())
     .prepare<ApprovalRequestRow, [string]>("SELECT * FROM approval_requests WHERE id = ?")
     .get(id);
   return row ? rowToApprovalRequest(row) : null;
 }
 
-export function resolveApprovalRequest(
+export async function resolveApprovalRequest(
   id: string,
   data: {
     status: "approved" | "rejected" | "timeout";
     responses?: unknown;
     resolvedBy?: string;
   },
-): ApprovalRequest | null {
+): Promise<ApprovalRequest | null> {
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<ApprovalRequestRow, [string, string | null, string | null, string, string, string]>(
       `UPDATE approval_requests
        SET status = ?, responses = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
@@ -7586,21 +7758,21 @@ export function resolveApprovalRequest(
   return row ? rowToApprovalRequest(row) : null;
 }
 
-export function updateApprovalRequestNotifications(
+export async function updateApprovalRequestNotifications(
   id: string,
   notificationChannels: Array<{ channel: string; target: string; messageTs?: string }>,
-): void {
+): Promise<void> {
   const now = new Date().toISOString();
-  getDb()
+  (await getDb())
     .prepare("UPDATE approval_requests SET notificationChannels = ?, updatedAt = ? WHERE id = ?")
     .run(JSON.stringify(notificationChannels), now, id);
 }
 
-export function listApprovalRequests(filters?: {
+export async function listApprovalRequests(filters?: {
   status?: string;
   workflowRunId?: string;
   limit?: number;
-}): ApprovalRequest[] {
+}): Promise<ApprovalRequest[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -7617,7 +7789,7 @@ export function listApprovalRequests(filters?: {
   const limit = filters?.limit ?? 100;
   params.push(limit);
 
-  const stmt = getDb().prepare(
+  const stmt = (await getDb()).prepare(
     `SELECT * FROM approval_requests ${where} ORDER BY createdAt DESC LIMIT ?`,
   );
   const rows = stmt.all(...params) as ApprovalRequestRow[];
@@ -7636,8 +7808,8 @@ export interface StuckApprovalRun {
   expiresAt: string | null;
 }
 
-export function getStuckApprovalRuns(): StuckApprovalRun[] {
-  return getDb()
+export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
+  return (await getDb())
     .prepare<StuckApprovalRun, []>(
       `SELECT
         wr.id as runId,
@@ -7658,8 +7830,8 @@ export function getStuckApprovalRuns(): StuckApprovalRun[] {
     .all();
 }
 
-export function getApprovalRequestByStepId(stepId: string): ApprovalRequest | null {
-  const row = getDb()
+export async function getApprovalRequestByStepId(stepId: string): Promise<ApprovalRequest | null> {
+  const row = (await getDb())
     .prepare<ApprovalRequestRow, [string]>(
       "SELECT * FROM approval_requests WHERE workflowRunStepId = ?",
     )
@@ -7668,8 +7840,8 @@ export function getApprovalRequestByStepId(stepId: string): ApprovalRequest | nu
 }
 
 // TODO: Wire into a periodic cron/sweep to auto-timeout expired approval requests (Phase 2)
-export function getExpiredPendingApprovals(): ApprovalRequest[] {
-  const rows = getDb()
+export async function getExpiredPendingApprovals(): Promise<ApprovalRequest[]> {
+  const rows = (await getDb())
     .prepare<ApprovalRequestRow, []>(
       `SELECT * FROM approval_requests
        WHERE status = 'pending'
@@ -7751,9 +7923,9 @@ export interface CreateWaitStateInput {
   scope?: "run" | "global";
 }
 
-export function createWaitState(input: CreateWaitStateInput): WaitStateRow {
+export async function createWaitState(input: CreateWaitStateInput): Promise<WaitStateRow> {
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<
       WaitStateRowDb,
       [
@@ -7793,8 +7965,8 @@ export function createWaitState(input: CreateWaitStateInput): WaitStateRow {
   return rowToWaitState(row!);
 }
 
-export function getWaitStateById(id: string): WaitStateRow | null {
-  const row = getDb()
+export async function getWaitStateById(id: string): Promise<WaitStateRow | null> {
+  const row = (await getDb())
     .prepare<WaitStateRowDb, [string]>("SELECT * FROM wait_states WHERE id = ?")
     .get(id);
   return row ? rowToWaitState(row) : null;
@@ -7804,8 +7976,8 @@ export function getWaitStateById(id: string): WaitStateRow | null {
  * Idempotency lookup — mirrors `getApprovalRequestByStepId`. A re-execution of
  * the same wait node finds its existing row instead of inserting a duplicate.
  */
-export function getWaitStateByStepId(stepId: string): WaitStateRow | null {
-  const row = getDb()
+export async function getWaitStateByStepId(stepId: string): Promise<WaitStateRow | null> {
+  const row = (await getDb())
     .prepare<WaitStateRowDb, [string]>("SELECT * FROM wait_states WHERE workflowRunStepId = ?")
     .get(stepId);
   return row ? rowToWaitState(row) : null;
@@ -7816,8 +7988,8 @@ export function getWaitStateByStepId(stepId: string): WaitStateRow | null {
  *   - mode='time' with `wakeUpAt <= now`, OR
  *   - mode='event' with non-null `expiresAt <= now` (timeout branch).
  */
-export function getDueWaitStates(): WaitStateRow[] {
-  const rows = getDb()
+export async function getDueWaitStates(): Promise<WaitStateRow[]> {
+  const rows = (await getDb())
     .prepare<WaitStateRowDb, []>(
       `SELECT * FROM wait_states
        WHERE status = 'pending'
@@ -7837,8 +8009,8 @@ export function getDueWaitStates(): WaitStateRow[] {
  * Distinct `eventName` values across pending event-mode waits. Used at boot
  * by the wait-bus subscription system to register one listener per event name.
  */
-export function getPendingEventWaitNames(): string[] {
-  const rows = getDb()
+export async function getPendingEventWaitNames(): Promise<string[]> {
+  const rows = (await getDb())
     .prepare<{ eventName: string }, []>(
       `SELECT DISTINCT eventName FROM wait_states
        WHERE status = 'pending' AND eventName IS NOT NULL`,
@@ -7852,9 +8024,12 @@ export function getPendingEventWaitNames(): string[] {
  * to a single run for run-scoped signals. The Phase 3 listener applies the
  * declarative/JS filter on top of this; the DB query is the cheap pre-filter.
  */
-export function getPendingWaitsByEvent(eventName: string, runId?: string): WaitStateRow[] {
+export async function getPendingWaitsByEvent(
+  eventName: string,
+  runId?: string,
+): Promise<WaitStateRow[]> {
   if (runId !== undefined) {
-    const rows = getDb()
+    const rows = (await getDb())
       .prepare<WaitStateRowDb, [string, string]>(
         `SELECT * FROM wait_states
          WHERE status = 'pending' AND mode = 'event' AND eventName = ? AND workflowRunId = ?`,
@@ -7862,7 +8037,7 @@ export function getPendingWaitsByEvent(eventName: string, runId?: string): WaitS
       .all(eventName, runId);
     return rows.map(rowToWaitState);
   }
-  const rows = getDb()
+  const rows = (await getDb())
     .prepare<WaitStateRowDb, [string]>(
       `SELECT * FROM wait_states
        WHERE status = 'pending' AND mode = 'event' AND eventName = ?`,
@@ -7876,12 +8051,12 @@ export function getPendingWaitsByEvent(eventName: string, runId?: string): WaitS
  * iff the caller won the race (UPDATE matched a pending row). Concurrent
  * callers see `{updated: false}` and should bail without further side effects.
  */
-export function resolveWaitState(
+export async function resolveWaitState(
   id: string,
   data: { status: Exclude<WaitStateStatus, "pending">; firedPayload?: unknown },
-): { updated: boolean; row: WaitStateRow | null } {
+): Promise<{ updated: boolean; row: WaitStateRow | null }> {
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<WaitStateRowDb, [string, string | null, string, string, string]>(
       `UPDATE wait_states
        SET status = ?, firedPayload = ?, resolvedAt = ?, updatedAt = ?
@@ -7920,8 +8095,8 @@ export interface StuckWaitRun {
  * Case (b) overlaps with the wait-poller's first tick after boot, but explicit
  * recovery avoids the up-to-5s startup latency window for stuck runs.
  */
-export function getStuckWaitRuns(): StuckWaitRun[] {
-  return getDb()
+export async function getStuckWaitRuns(): Promise<StuckWaitRun[]> {
+  return (await getDb())
     .prepare<StuckWaitRun, []>(
       `SELECT
         wr.id as runId,
@@ -8067,11 +8242,11 @@ export interface SkillInsert {
   userInvocable?: boolean;
 }
 
-export function createSkill(data: SkillInsert): Skill {
+export async function createSkill(data: SkillInsert): Promise<Skill> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<SkillRow, (string | number | null)[]>(
       `INSERT INTO skills (
         id, name, description, content, type, scope, ownerAgentId,
@@ -8109,11 +8284,11 @@ export function createSkill(data: SkillInsert): Skill {
   return rowToSkill(row);
 }
 
-export function updateSkill(
+export async function updateSkill(
   id: string,
   updates: Partial<SkillInsert> & { isEnabled?: boolean; lastFetchedAt?: string },
-): Skill | null {
-  const existing = getSkillById(id);
+): Promise<Skill | null> {
+  const existing = await getSkillById(id);
   if (!existing) return null;
 
   const now = new Date().toISOString();
@@ -8203,7 +8378,7 @@ export function updateSkill(
   }
 
   params.push(id);
-  const row = getDb()
+  const row = (await getDb())
     .prepare<SkillRow, (string | number | null)[]>(
       `UPDATE skills SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -8212,22 +8387,24 @@ export function updateSkill(
   return row ? rowToSkill(row) : null;
 }
 
-export function deleteSkill(id: string): boolean {
-  const result = getDb().prepare("DELETE FROM skills WHERE id = ?").run(id);
+export async function deleteSkill(id: string): Promise<boolean> {
+  const result = (await getDb()).prepare("DELETE FROM skills WHERE id = ?").run(id);
   return result.changes > 0;
 }
 
-export function getSkillById(id: string): Skill | null {
-  const row = getDb().prepare<SkillRow, [string]>("SELECT * FROM skills WHERE id = ?").get(id);
+export async function getSkillById(id: string): Promise<Skill | null> {
+  const row = (await getDb())
+    .prepare<SkillRow, [string]>("SELECT * FROM skills WHERE id = ?")
+    .get(id);
   return row ? rowToSkill(row) : null;
 }
 
-export function getSkillByName(
+export async function getSkillByName(
   name: string,
   scope: SkillScope,
   ownerAgentId?: string,
-): Skill | null {
-  const row = getDb()
+): Promise<Skill | null> {
+  const row = (await getDb())
     .prepare<SkillRow, [string, string, string]>(
       "SELECT * FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
     )
@@ -8253,7 +8430,7 @@ export interface SkillFilters {
 const SKILL_SLIM_COLUMNS =
   "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
 
-export function listSkills(filters?: SkillFilters): Skill[] {
+export async function listSkills(filters?: SkillFilters): Promise<Skill[]> {
   const columns = filters?.includeContent === false ? SKILL_SLIM_COLUMNS : "*";
   let query = `SELECT ${columns} FROM skills WHERE 1=1`;
   const params: (string | number)[] = [];
@@ -8287,16 +8464,20 @@ export function listSkills(filters?: SkillFilters): Skill[] {
     params.push(filters.limit);
   }
 
-  return getDb()
+  return (await getDb())
     .prepare<SkillRow, (string | number)[]>(query)
     .all(...params)
     .map(rowToSkill);
 }
 
-export function searchSkills(query: string, limit = 20, includeContent = true): Skill[] {
+export async function searchSkills(
+  query: string,
+  limit = 20,
+  includeContent = true,
+): Promise<Skill[]> {
   const term = `%${query}%`;
   const columns = includeContent === false ? SKILL_SLIM_COLUMNS : "*";
-  return getDb()
+  return (await getDb())
     .prepare<SkillRow, [string, string, number]>(
       `SELECT ${columns} FROM skills WHERE (name LIKE ? OR description LIKE ?) AND isEnabled = 1 ORDER BY name ASC LIMIT ?`,
     )
@@ -8304,11 +8485,11 @@ export function searchSkills(query: string, limit = 20, includeContent = true): 
     .map(rowToSkill);
 }
 
-export function installSkill(agentId: string, skillId: string): AgentSkill {
+export async function installSkill(agentId: string, skillId: string): Promise<AgentSkill> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentSkillRow, [string, string, string, string]>(
       `INSERT INTO agent_skills (id, agentId, skillId, isActive, installedAt)
        VALUES (?, ?, ?, 1, ?)
@@ -8321,14 +8502,17 @@ export function installSkill(agentId: string, skillId: string): AgentSkill {
   return rowToAgentSkill(row);
 }
 
-export function uninstallSkill(agentId: string, skillId: string): boolean {
-  const result = getDb()
+export async function uninstallSkill(agentId: string, skillId: string): Promise<boolean> {
+  const result = (await getDb())
     .prepare("DELETE FROM agent_skills WHERE agentId = ? AND skillId = ?")
     .run(agentId, skillId);
   return result.changes > 0;
 }
 
-export function getAgentSkills(agentId: string, activeOnly = true): SkillWithInstallInfo[] {
+export async function getAgentSkills(
+  agentId: string,
+  activeOnly = true,
+): Promise<SkillWithInstallInfo[]> {
   const query = `
     SELECT s.*, as2.isActive, as2.installedAt
     FROM skills s
@@ -8341,7 +8525,7 @@ export function getAgentSkills(agentId: string, activeOnly = true): SkillWithIns
       s.name
   `;
 
-  const rows = getDb().prepare<SkillWithInstallRow, [string]>(query).all(agentId);
+  const rows = (await getDb()).prepare<SkillWithInstallRow, [string]>(query).all(agentId);
 
   // Deduplicate by name — personal skills take precedence (already sorted first)
   const seen = new Set<string>();
@@ -8354,8 +8538,12 @@ export function getAgentSkills(agentId: string, activeOnly = true): SkillWithIns
     .map(rowToSkillWithInstall);
 }
 
-export function toggleAgentSkill(agentId: string, skillId: string, isActive: boolean): boolean {
-  const result = getDb()
+export async function toggleAgentSkill(
+  agentId: string,
+  skillId: string,
+  isActive: boolean,
+): Promise<boolean> {
+  const result = (await getDb())
     .prepare("UPDATE agent_skills SET isActive = ? WHERE agentId = ? AND skillId = ?")
     .run(isActive ? 1 : 0, agentId, skillId);
   return result.changes > 0;
@@ -8447,11 +8635,11 @@ export interface McpServerInsert {
   headerConfigKeys?: string;
 }
 
-export function createMcpServer(data: McpServerInsert): McpServer {
+export async function createMcpServer(data: McpServerInsert): Promise<McpServer> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<McpServerRow, (string | number | null)[]>(
       `INSERT INTO mcp_servers (
         id, name, description, scope, ownerAgentId, transport,
@@ -8481,14 +8669,14 @@ export function createMcpServer(data: McpServerInsert): McpServer {
   return rowToMcpServer(row);
 }
 
-export function updateMcpServer(
+export async function updateMcpServer(
   id: string,
   updates: Partial<McpServerInsert> & {
     isEnabled?: boolean;
     authMethod?: McpServer["authMethod"];
   },
-): McpServer | null {
-  const existing = getMcpServerById(id);
+): Promise<McpServer | null> {
+  const existing = await getMcpServerById(id);
   if (!existing) return null;
 
   const now = new Date().toISOString();
@@ -8563,7 +8751,7 @@ export function updateMcpServer(
   }
 
   params.push(id);
-  const row = getDb()
+  const row = (await getDb())
     .prepare<McpServerRow, (string | number | null)[]>(
       `UPDATE mcp_servers SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -8572,24 +8760,24 @@ export function updateMcpServer(
   return row ? rowToMcpServer(row) : null;
 }
 
-export function deleteMcpServer(id: string): boolean {
-  const result = getDb().prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
+export async function deleteMcpServer(id: string): Promise<boolean> {
+  const result = (await getDb()).prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
   return result.changes > 0;
 }
 
-export function getMcpServerById(id: string): McpServer | null {
-  const row = getDb()
+export async function getMcpServerById(id: string): Promise<McpServer | null> {
+  const row = (await getDb())
     .prepare<McpServerRow, [string]>("SELECT * FROM mcp_servers WHERE id = ?")
     .get(id);
   return row ? rowToMcpServer(row) : null;
 }
 
-export function getMcpServerByName(
+export async function getMcpServerByName(
   name: string,
   scope: McpServerScope,
   ownerAgentId: string | null,
-): McpServer | null {
-  const row = getDb()
+): Promise<McpServer | null> {
+  const row = (await getDb())
     .prepare<McpServerRow, [string, string, string]>(
       "SELECT * FROM mcp_servers WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
     )
@@ -8605,7 +8793,7 @@ export interface McpServerFilters {
   search?: string;
 }
 
-export function listMcpServers(filters?: McpServerFilters): McpServer[] {
+export async function listMcpServers(filters?: McpServerFilters): Promise<McpServer[]> {
   let query = "SELECT * FROM mcp_servers WHERE 1=1";
   const params: (string | number)[] = [];
 
@@ -8633,17 +8821,20 @@ export function listMcpServers(filters?: McpServerFilters): McpServer[] {
 
   query += " ORDER BY name ASC";
 
-  return getDb()
+  return (await getDb())
     .prepare<McpServerRow, (string | number)[]>(query)
     .all(...params)
     .map(rowToMcpServer);
 }
 
-export function installMcpServer(agentId: string, mcpServerId: string): AgentMcpServer {
+export async function installMcpServer(
+  agentId: string,
+  mcpServerId: string,
+): Promise<AgentMcpServer> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<AgentMcpServerRow, [string, string, string, string]>(
       `INSERT INTO agent_mcp_servers (id, agentId, mcpServerId, isActive, installedAt)
        VALUES (?, ?, ?, 1, ?)
@@ -8656,14 +8847,17 @@ export function installMcpServer(agentId: string, mcpServerId: string): AgentMcp
   return rowToAgentMcpServer(row);
 }
 
-export function uninstallMcpServer(agentId: string, mcpServerId: string): boolean {
-  const result = getDb()
+export async function uninstallMcpServer(agentId: string, mcpServerId: string): Promise<boolean> {
+  const result = (await getDb())
     .prepare("DELETE FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?")
     .run(agentId, mcpServerId);
   return result.changes > 0;
 }
 
-export function getAgentMcpServers(agentId: string, activeOnly = true): McpServerWithInstallInfo[] {
+export async function getAgentMcpServers(
+  agentId: string,
+  activeOnly = true,
+): Promise<McpServerWithInstallInfo[]> {
   const query = `
     SELECT ms.*, ams.isActive, ams.installedAt
     FROM mcp_servers ms
@@ -8674,7 +8868,7 @@ export function getAgentMcpServers(agentId: string, activeOnly = true): McpServe
     ORDER BY ms.name ASC
   `;
 
-  return getDb()
+  return (await getDb())
     .prepare<McpServerWithInstallRow, [string]>(query)
     .all(agentId)
     .map(rowToMcpServerWithInstall);
@@ -8722,8 +8916,8 @@ function rowToContextSnapshot(row: ContextSnapshotRow): ContextSnapshot {
 }
 
 const contextSnapshotQueries = {
-  insert: () =>
-    getDb().prepare<
+  insert: async () =>
+    (await getDb()).prepare<
       ContextSnapshotRow,
       [
         string,
@@ -8746,13 +8940,13 @@ const contextSnapshotQueries = {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
 
-  getByTaskId: () =>
-    getDb().prepare<ContextSnapshotRow, [string, number]>(
+  getByTaskId: async () =>
+    (await getDb()).prepare<ContextSnapshotRow, [string, number]>(
       "SELECT * FROM task_context_snapshots WHERE taskId = ? ORDER BY createdAt ASC LIMIT ?",
     ),
 
-  getBySessionId: () =>
-    getDb().prepare<ContextSnapshotRow, [string, number]>(
+  getBySessionId: async () =>
+    (await getDb()).prepare<ContextSnapshotRow, [string, number]>(
       "SELECT * FROM task_context_snapshots WHERE sessionId = ? ORDER BY createdAt ASC LIMIT ?",
     ),
 };
@@ -8773,32 +8967,32 @@ export interface CreateContextSnapshotInput {
   contextFormula?: ContextSnapshot["contextFormula"];
 }
 
-export function createContextSnapshot(input: CreateContextSnapshotInput): ContextSnapshot {
+export async function createContextSnapshot(
+  input: CreateContextSnapshotInput,
+): Promise<ContextSnapshot> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  contextSnapshotQueries
-    .insert()
-    .run(
-      id,
-      input.taskId,
-      input.agentId,
-      input.sessionId,
-      input.contextUsedTokens ?? null,
-      input.contextTotalTokens ?? null,
-      input.contextPercent ?? null,
-      input.eventType,
-      input.compactTrigger ?? null,
-      input.preCompactTokens ?? null,
-      input.cumulativeInputTokens ?? 0,
-      input.cumulativeOutputTokens ?? 0,
-      input.contextFormula ?? null,
-      now,
-    );
+  (await contextSnapshotQueries.insert()).run(
+    id,
+    input.taskId,
+    input.agentId,
+    input.sessionId,
+    input.contextUsedTokens ?? null,
+    input.contextTotalTokens ?? null,
+    input.contextPercent ?? null,
+    input.eventType,
+    input.compactTrigger ?? null,
+    input.preCompactTokens ?? null,
+    input.cumulativeInputTokens ?? 0,
+    input.cumulativeOutputTokens ?? 0,
+    input.contextFormula ?? null,
+    now,
+  );
 
   // Update aggregate columns on agent_tasks
   if (input.contextPercent != null) {
-    getDb()
+    (await getDb())
       .prepare(
         `UPDATE agent_tasks SET peakContextPercent = MAX(COALESCE(peakContextPercent, 0), ?)
          WHERE id = ?`,
@@ -8809,7 +9003,7 @@ export function createContextSnapshot(input: CreateContextSnapshotInput): Contex
   // Migration 063: peakContextTokens is monotonic-max across snapshots, not a
   // rolling latest. Mirrors Claude Code's status-line "peak context" semantic.
   if (input.contextUsedTokens != null) {
-    getDb()
+    (await getDb())
       .prepare(
         `UPDATE agent_tasks
          SET peakContextTokens = MAX(COALESCE(peakContextTokens, 0), ?)
@@ -8819,7 +9013,7 @@ export function createContextSnapshot(input: CreateContextSnapshotInput): Contex
   }
 
   if (input.eventType === "compaction") {
-    getDb()
+    (await getDb())
       .prepare(
         "UPDATE agent_tasks SET compactionCount = COALESCE(compactionCount, 0) + 1 WHERE id = ?",
       )
@@ -8831,7 +9025,7 @@ export function createContextSnapshot(input: CreateContextSnapshotInput): Contex
   // NULL throughout running tasks). Subsequent snapshots leave it alone — the
   // window doesn't change mid-session.
   if (input.contextTotalTokens != null) {
-    getDb()
+    (await getDb())
       .prepare(
         `UPDATE agent_tasks
          SET contextWindowSize = ?
@@ -8858,12 +9052,20 @@ export function createContextSnapshot(input: CreateContextSnapshotInput): Contex
   };
 }
 
-export function getContextSnapshotsByTaskId(taskId: string, limit = 500): ContextSnapshot[] {
-  return contextSnapshotQueries.getByTaskId().all(taskId, limit).map(rowToContextSnapshot);
+export async function getContextSnapshotsByTaskId(
+  taskId: string,
+  limit = 500,
+): Promise<ContextSnapshot[]> {
+  return (await contextSnapshotQueries.getByTaskId()).all(taskId, limit).map(rowToContextSnapshot);
 }
 
-export function getContextSnapshotsBySessionId(sessionId: string, limit = 500): ContextSnapshot[] {
-  return contextSnapshotQueries.getBySessionId().all(sessionId, limit).map(rowToContextSnapshot);
+export async function getContextSnapshotsBySessionId(
+  sessionId: string,
+  limit = 500,
+): Promise<ContextSnapshot[]> {
+  return (await contextSnapshotQueries.getBySessionId())
+    .all(sessionId, limit)
+    .map(rowToContextSnapshot);
 }
 
 export interface ContextSummary {
@@ -8875,9 +9077,9 @@ export interface ContextSummary {
   snapshotCount: number;
 }
 
-export function getContextSummaryByTaskId(taskId: string): ContextSummary {
-  const task = getTaskById(taskId);
-  const countRow = getDb()
+export async function getContextSummaryByTaskId(taskId: string): Promise<ContextSummary> {
+  const task = await getTaskById(taskId);
+  const countRow = (await getDb())
     .prepare<{ cnt: number }, [string]>(
       "SELECT COUNT(*) as cnt FROM task_context_snapshots WHERE taskId = ?",
     )
@@ -8919,14 +9121,14 @@ export interface ApiKeyStatus {
  * Get available (non-rate-limited) key indices for a credential type.
  * Automatically clears expired rate limits before returning.
  */
-export function getAvailableKeyIndices(
+export async function getAvailableKeyIndices(
   keyType: string,
   totalKeys: number,
   scope = "global",
   scopeId: string | null = null,
-): number[] {
+): Promise<number[]> {
   const now = new Date().toISOString();
-  const db = getDb();
+  const db = await getDb();
   const effectiveScopeId = scopeId ?? "";
 
   // Auto-clear expired rate limits
@@ -8957,16 +9159,16 @@ export function getAvailableKeyIndices(
 /**
  * Record that a key was used for a task (upsert key status + update task).
  */
-export function recordKeyUsage(
+export async function recordKeyUsage(
   keyType: string,
   keySuffix: string,
   keyIndex: number,
   taskId: string | null,
   scope = "global",
   scopeId: string | null = null,
-): void {
+): Promise<void> {
   const now = new Date().toISOString();
-  const db = getDb();
+  const db = await getDb();
   const effectiveScopeId = scopeId ?? "";
 
   // Upsert key status record. Sets `provider` on insert (auto-derived from
@@ -8996,18 +9198,18 @@ export function recordKeyUsage(
 /**
  * Mark a key as rate-limited with a retry-after timestamp.
  */
-export function markKeyRateLimited(
+export async function markKeyRateLimited(
   keyType: string,
   keySuffix: string,
   keyIndex: number,
   rateLimitedUntil: string,
   scope = "global",
   scopeId: string | null = null,
-): void {
+): Promise<void> {
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  getDb()
+  (await getDb())
     .prepare(
       `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, rateLimitedUntil, lastRateLimitAt, rateLimitCount, provider, updatedAt)
        VALUES (?, ?, ?, ?, ?, 'rate_limited', ?, ?, 1, ?, ?)
@@ -9038,14 +9240,14 @@ export function markKeyRateLimited(
  * Identified by the natural key (keyType + keySuffix + scope + scopeId).
  * Returns true if a row was updated, false if no matching key exists.
  */
-export function setApiKeyName(
+export async function setApiKeyName(
   keyType: string,
   keySuffix: string,
   name: string | null,
   scope = "global",
   scopeId: string | null = null,
-): boolean {
-  const result = getDb()
+): Promise<boolean> {
+  const result = (await getDb())
     .prepare(
       `UPDATE api_key_status
        SET name = ?, updatedAt = ?
@@ -9058,12 +9260,12 @@ export function setApiKeyName(
 /**
  * Get all key status records for a credential type.
  */
-export function getKeyStatuses(
+export async function getKeyStatuses(
   keyType?: string,
   scope?: string,
   scopeId?: string | null,
-): ApiKeyStatus[] {
-  const db = getDb();
+): Promise<ApiKeyStatus[]> {
+  const db = await getDb();
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -9098,8 +9300,8 @@ export interface KeyCostSummary {
 /**
  * Aggregate cost data per API key by joining session_costs through agent_tasks.
  */
-export function getKeyCostSummary(keyType?: string): KeyCostSummary[] {
-  const db = getDb();
+export async function getKeyCostSummary(keyType?: string): Promise<KeyCostSummary[]> {
+  const db = await getDb();
   const conditions = ["t.credentialKeySuffix IS NOT NULL"];
   const params: string[] = [];
 
@@ -9171,16 +9373,19 @@ function rowToUser(row: UserRow): User {
   };
 }
 
-export function getUserById(id: string): User | null {
-  const row = getDb().prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
+export async function getUserById(id: string): Promise<User | null> {
+  const row = (await getDb()).prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
   return row ? rowToUser(row) : null;
 }
 
-export function getAllUsers(): User[] {
-  return getDb().prepare<UserRow, []>("SELECT * FROM users ORDER BY name").all().map(rowToUser);
+export async function getAllUsers(): Promise<User[]> {
+  return (await getDb())
+    .prepare<UserRow, []>("SELECT * FROM users ORDER BY name")
+    .all()
+    .map(rowToUser);
 }
 
-export function createUser(data: {
+export async function createUser(data: {
   name: string;
   email?: string;
   role?: string;
@@ -9191,10 +9396,10 @@ export function createUser(data: {
   metadata?: Record<string, unknown>;
   dailyBudgetUsd?: number | null;
   status?: "invited" | "active" | "suspended";
-}): User {
+}): Promise<User> {
   const id = crypto.randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<UserRow, (string | number | null)[]>(
       `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
@@ -9218,7 +9423,7 @@ export function createUser(data: {
   return rowToUser(row);
 }
 
-export function updateUser(
+export async function updateUser(
   id: string,
   data: Partial<{
     name: string;
@@ -9232,7 +9437,7 @@ export function updateUser(
     dailyBudgetUsd: number | null;
     status: "invited" | "active" | "suspended";
   }>,
-): User | null {
+): Promise<User | null> {
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
 
@@ -9277,13 +9482,13 @@ export function updateUser(
     params.push(data.status);
   }
 
-  if (sets.length === 0) return getUserById(id);
+  if (sets.length === 0) return await getUserById(id);
 
   sets.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<UserRow, (string | number | null)[]>(
       `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
     )
@@ -9291,12 +9496,12 @@ export function updateUser(
   return row ? rowToUser(row) : null;
 }
 
-export function deleteUser(id: string): boolean {
+export async function deleteUser(id: string): Promise<boolean> {
   // Clear any task references before deleting
-  getDb()
+  (await getDb())
     .prepare("UPDATE agent_tasks SET requestedByUserId = NULL WHERE requestedByUserId = ?")
     .run(id);
-  const result = getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
+  const result = (await getDb()).prepare("DELETE FROM users WHERE id = ?").run(id);
   return result.changes > 0;
 }
 
@@ -9332,11 +9537,11 @@ function rowToInboxItemState(row: InboxItemStateRow): InboxItemState {
   };
 }
 
-export function listInboxState(opts: {
+export async function listInboxState(opts: {
   userId: string;
   status?: InboxItemStatus;
   itemType?: InboxItemType;
-}): InboxItemState[] {
+}): Promise<InboxItemState[]> {
   const conditions: string[] = ["userId = ?"];
   const params: string[] = [opts.userId];
 
@@ -9350,7 +9555,7 @@ export function listInboxState(opts: {
   }
 
   const where = conditions.join(" AND ");
-  return getDb()
+  return (await getDb())
     .prepare<InboxItemStateRow, string[]>(
       `SELECT * FROM inbox_item_state WHERE ${where} ORDER BY lastUpdatedAt DESC`,
     )
@@ -9358,7 +9563,7 @@ export function listInboxState(opts: {
     .map(rowToInboxItemState);
 }
 
-export function upsertInboxState(opts: {
+export async function upsertInboxState(opts: {
   userId: string;
   itemType: InboxItemType;
   itemId: string;
@@ -9366,7 +9571,7 @@ export function upsertInboxState(opts: {
   snoozeUntil?: string;
   dismissedAt?: string;
   doneAt?: string;
-}): InboxItemState {
+}): Promise<InboxItemState> {
   const now = new Date().toISOString();
   // Auto-derive timestamps from status when not explicitly provided.
   const dismissedAt = opts.dismissedAt ?? (opts.status === "dismissed" ? now : null);
@@ -9374,7 +9579,7 @@ export function upsertInboxState(opts: {
   const snoozeUntil = opts.snoozeUntil ?? null;
 
   // SQLite upsert via UNIQUE(userId, itemType, itemId).
-  const row = getDb()
+  const row = (await getDb())
     .prepare<InboxItemStateRow, (string | null)[]>(
       `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -9439,11 +9644,11 @@ function rowToTaskTemplate(row: TaskTemplateRow): TaskTemplate {
   };
 }
 
-export function listTaskTemplates(opts?: {
+export async function listTaskTemplates(opts?: {
   category?: string;
   kind?: TaskTemplateKind;
   query?: string;
-}): TaskTemplate[] {
+}): Promise<TaskTemplate[]> {
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -9464,7 +9669,7 @@ export function listTaskTemplates(opts?: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return getDb()
+  return (await getDb())
     .prepare<TaskTemplateRow, string[]>(`SELECT * FROM task_templates ${where} ORDER BY createdAt`)
     .all(...params)
     .map(rowToTaskTemplate);
@@ -9479,8 +9684,8 @@ export function listTaskTemplates(opts?: {
  * Returns the chain ordered by `createdAt` (so the root is first; siblings
  * appear in creation order; grand-children after their parents).
  */
-export function getRootTaskChain(rootTaskId: string): AgentTask[] {
-  const rows = getDb()
+export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
+  const rows = (await getDb())
     .prepare<AgentTaskRow, string>(
       `WITH RECURSIVE chain(id) AS (
          SELECT id FROM agent_tasks WHERE id = ?
@@ -9541,13 +9746,13 @@ interface ListRecentSessionsOpts {
 
 export function listRecentSessions(
   opts?: ListRecentSessionsOpts & { slim?: false },
-): SessionListItem[];
+): Promise<SessionListItem[]>;
 export function listRecentSessions(
   opts: ListRecentSessionsOpts & { slim: true },
-): SessionListItemSummary[];
-export function listRecentSessions(
+): Promise<SessionListItemSummary[]>;
+export async function listRecentSessions(
   opts?: ListRecentSessionsOpts,
-): SessionListItem[] | SessionListItemSummary[] {
+): Promise<SessionListItem[] | SessionListItemSummary[]> {
   const limit = opts?.limit ?? 25;
   const offset = opts?.offset ?? 0;
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
@@ -9571,7 +9776,7 @@ export function listRecentSessions(
   }
   params.push(limit, offset);
 
-  const rootRows = getDb()
+  const rootRows = (await getDb())
     .prepare<
       AgentTaskRow & { __chainCount: number; __lastActivityAt: string; __latestStatus: string },
       typeof params
@@ -9641,9 +9846,9 @@ export function listRecentSessions(
  * `total` in the `/api/sessions` pager — a session is a root task, so this is
  * a plain count, no recursive chain walk needed.
  */
-export function countSessions(
+export async function countSessions(
   opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId">,
-): number {
+): Promise<number> {
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
   const q = opts?.q?.trim();
   const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
@@ -9664,7 +9869,7 @@ export function countSessions(
     params.push(requestedByUserId);
   }
 
-  const row = getDb()
+  const row = (await getDb())
     .prepare<{ count: number }, string[]>(
       `SELECT COUNT(*) AS count FROM agent_tasks WHERE ${conditions.join(" AND ")}`,
     )
@@ -9740,8 +9945,8 @@ function rowToBudgetRefusalNotification(
  * Look up a single budget row by (scope, scopeId). Returns `null` when no row
  * exists — callers treat that as "unlimited / no budget configured".
  */
-export function getBudget(scope: BudgetScope, scopeId: string): Budget | null {
-  const row = getDb()
+export async function getBudget(scope: BudgetScope, scopeId: string): Promise<Budget | null> {
+  const row = (await getDb())
     .prepare<BudgetRow, [string, string]>(
       "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets WHERE scope = ? AND scope_id = ?",
     )
@@ -9753,8 +9958,8 @@ export function getBudget(scope: BudgetScope, scopeId: string): Budget | null {
  * Phase 6: list every budget row in the system. Used by `GET /api/budgets`.
  * Order is `(scope, scope_id)` for stable output across calls.
  */
-export function getBudgets(): Budget[] {
-  return getDb()
+export async function getBudgets(): Promise<Budget[]> {
+  return (await getDb())
     .prepare<BudgetRow, []>(
       "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets ORDER BY scope, scope_id",
     )
@@ -9767,9 +9972,13 @@ export function getBudgets(): Budget[] {
  * exist, otherwise updates `daily_budget_usd` and `lastUpdatedAt`. Returns the
  * resulting row in both cases.
  */
-export function upsertBudget(scope: BudgetScope, scopeId: string, dailyBudgetUsd: number): Budget {
+export async function upsertBudget(
+  scope: BudgetScope,
+  scopeId: string,
+  dailyBudgetUsd: number,
+): Promise<Budget> {
   const now = Date.now();
-  getDb()
+  (await getDb())
     .prepare(
       `INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, ?)
@@ -9779,7 +9988,7 @@ export function upsertBudget(scope: BudgetScope, scopeId: string, dailyBudgetUsd
     )
     .run(scope, scopeId, dailyBudgetUsd, now, now);
 
-  const updated = getBudget(scope, scopeId);
+  const updated = await getBudget(scope, scopeId);
   if (!updated) {
     throw new Error(
       `upsertBudget: row missing after insert for (scope=${scope}, scopeId=${scopeId})`,
@@ -9792,8 +10001,8 @@ export function upsertBudget(scope: BudgetScope, scopeId: string, dailyBudgetUsd
  * Phase 6: delete a budget row. Returns `true` if a row was deleted, `false`
  * if `(scope, scopeId)` did not exist.
  */
-export function deleteBudget(scope: BudgetScope, scopeId: string): boolean {
-  const result = getDb()
+export async function deleteBudget(scope: BudgetScope, scopeId: string): Promise<boolean> {
+  const result = (await getDb())
     .prepare("DELETE FROM budgets WHERE scope = ? AND scope_id = ?")
     .run(scope, scopeId);
   return result.changes > 0;
@@ -9833,8 +10042,8 @@ function rowToPricingRow(row: PricingRowDb): PricingRow {
 }
 
 /** Phase 6: list every pricing row, latest-effective first. */
-export function getAllPricingRows(): PricingRow[] {
-  return getDb()
+export async function getAllPricingRows(): Promise<PricingRow[]> {
+  return (await getDb())
     .prepare<PricingRowDb, []>(
       "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing ORDER BY provider, model, token_class, effective_from DESC",
     )
@@ -9846,12 +10055,12 @@ export function getAllPricingRows(): PricingRow[] {
  * Phase 6: list every pricing row for a given (provider, model, tokenClass)
  * triple. Order is `effective_from DESC` so newest is first.
  */
-export function getPricingRows(
+export async function getPricingRows(
   provider: PricingProvider,
   model: string,
   tokenClass: PricingTokenClass,
-): PricingRow[] {
-  return getDb()
+): Promise<PricingRow[]> {
+  return (await getDb())
     .prepare<PricingRowDb, [string, string, string]>(
       "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? ORDER BY effective_from DESC",
     )
@@ -9865,13 +10074,13 @@ export function getPricingRows(
  * matches (model unseeded for that triple at that time). Backed by the
  * `idx_pricing_lookup` index from migration 044.
  */
-export function getActivePricingRow(
+export async function getActivePricingRow(
   provider: PricingProvider,
   model: string,
   tokenClass: PricingTokenClass,
   atEpochMs: number,
-): PricingRow | null {
-  const row = getDb()
+): Promise<PricingRow | null> {
+  const row = (await getDb())
     .prepare<PricingRowDb, [string, string, string, number]>(
       "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from <= ? ORDER BY effective_from DESC LIMIT 1",
     )
@@ -9892,9 +10101,9 @@ export interface InsertPricingRowInput {
  * `(provider, model, token_class, effective_from)` — caller (the HTTP route)
  * translates that into a 409.
  */
-export function insertPricingRow(input: InsertPricingRowInput): PricingRow {
+export async function insertPricingRow(input: InsertPricingRowInput): Promise<PricingRow> {
   const now = Date.now();
-  getDb()
+  (await getDb())
     .prepare(
       `INSERT INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -9924,13 +10133,13 @@ export function insertPricingRow(input: InsertPricingRowInput): PricingRow {
  * the row did not exist. Discouraged operationally — historical session_costs
  * are not retroactively recomputed — but allowed for typo correction.
  */
-export function deletePricingRow(
+export async function deletePricingRow(
   provider: PricingProvider,
   model: string,
   tokenClass: PricingTokenClass,
   effectiveFrom: number,
-): boolean {
-  const result = getDb()
+): Promise<boolean> {
+  const result = (await getDb())
     .prepare(
       "DELETE FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
     )
@@ -9951,8 +10160,8 @@ export function deletePricingRow(
  * `idx_session_costs_agent_createdAt` index (verified via EXPLAIN QUERY PLAN
  * in the test suite).
  */
-export function getDailySpendForAgent(agentId: string, dateUtc: string): number {
-  const row = getDb()
+export async function getDailySpendForAgent(agentId: string, dateUtc: string): Promise<number> {
+  const row = (await getDb())
     .prepare<CoalesceSumRow, [string, string]>(
       "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
     )
@@ -9972,8 +10181,8 @@ export function getDailySpendForAgent(agentId: string, dateUtc: string): number 
  * for V1 daily-spend volumes; if it ever becomes a hotspot, a covering
  * functional index on `substr(createdAt, 1, 10)` would be the fix.
  */
-export function getDailySpendGlobal(dateUtc: string): number {
-  const row = getDb()
+export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
+  const row = (await getDb())
     .prepare<CoalesceSumRow, [string]>(
       "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE substr(createdAt, 1, 10) = ?",
     )
@@ -9987,8 +10196,8 @@ export function getDailySpendGlobal(dateUtc: string): number {
  * `'YYYY-MM-DD'` (UTC). Costs are joined through `agent_tasks` deliberately;
  * `session_costs` stays task/session-scoped and does not grow a userId column.
  */
-export function getDailySpendForUser(userId: string, dateUtc: string): number {
-  const row = getDb()
+export async function getDailySpendForUser(userId: string, dateUtc: string): Promise<number> {
+  const row = (await getDb())
     .prepare<CoalesceSumRow, [string, string]>(
       `SELECT COALESCE(SUM(sc.totalCostUsd), 0) AS total
        FROM session_costs sc
@@ -10019,11 +10228,13 @@ export interface RecordBudgetRefusalNotificationInput {
  * calls — used by the notification path to dedup "the agent told me about
  * this task already" across retries within the same UTC day.
  */
-export function recordBudgetRefusalNotification(input: RecordBudgetRefusalNotificationInput): {
+export async function recordBudgetRefusalNotification(
+  input: RecordBudgetRefusalNotificationInput,
+): Promise<{
   inserted: boolean;
   row: BudgetRefusalNotification;
-} {
-  const db = getDb();
+}> {
+  const db = await getDb();
   const now = Date.now();
   const result = db
     .prepare(
@@ -10068,11 +10279,11 @@ export function recordBudgetRefusalNotification(input: RecordBudgetRefusalNotifi
 /**
  * Lookup helper used by tests and by the Phase 5 follow-up-task write-back.
  */
-export function getBudgetRefusalNotification(
+export async function getBudgetRefusalNotification(
   taskId: string,
   date: string,
-): BudgetRefusalNotification | null {
-  const row = getDb()
+): Promise<BudgetRefusalNotification | null> {
+  const row = (await getDb())
     .prepare<BudgetRefusalNotificationRow, [string, string]>(
       "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
     )
@@ -10085,8 +10296,10 @@ export function getBudgetRefusalNotification(
  * first. Used by the operator dashboard to surface refusals as an
  * actionable feed (parent task → follow-up task link).
  */
-export function getRecentBudgetRefusalNotifications(limit = 50): BudgetRefusalNotification[] {
-  const rows = getDb()
+export async function getRecentBudgetRefusalNotifications(
+  limit = 50,
+): Promise<BudgetRefusalNotification[]> {
+  const rows = (await getDb())
     .prepare<BudgetRefusalNotificationRow, [number]>(
       "SELECT * FROM budget_refusal_notifications ORDER BY createdAt DESC LIMIT ?",
     )
@@ -10098,8 +10311,11 @@ export function getRecentBudgetRefusalNotifications(limit = 50): BudgetRefusalNo
  * Boolean observability helper — returns true iff a refusal notification has
  * already been recorded for `(taskId, date)`.
  */
-export function hasBudgetRefusalNotificationToday(taskId: string, date: string): boolean {
-  const row = getDb()
+export async function hasBudgetRefusalNotificationToday(
+  taskId: string,
+  date: string,
+): Promise<boolean> {
+  const row = (await getDb())
     .prepare<{ one: number }, [string, string]>(
       "SELECT 1 as one FROM budget_refusal_notifications WHERE task_id = ? AND date = ? LIMIT 1",
     )
@@ -10116,12 +10332,12 @@ export function hasBudgetRefusalNotificationToday(taskId: string, date: string):
  * but only the first refusal per day creates a follow-up task in the first
  * place (see `recordBudgetRefusalNotification` for the dedup invariant).
  */
-export function setBudgetRefusalFollowUpTaskId(
+export async function setBudgetRefusalFollowUpTaskId(
   taskId: string,
   date: string,
   followUpTaskId: string,
-): void {
-  getDb()
+): Promise<void> {
+  (await getDb())
     .prepare(
       "UPDATE budget_refusal_notifications SET follow_up_task_id = ? WHERE task_id = ? AND date = ?",
     )
@@ -10142,11 +10358,11 @@ export function setBudgetRefusalFollowUpTaskId(
  * (`src/providers/swarm-events-shared.ts:48-49`) plus margin for missed
  * heartbeats. Agents with `status = 'offline'` are excluded.
  */
-export function getLiveAgentCounts(minutes: number = 5): {
+export async function getLiveAgentCounts(minutes: number = 5): Promise<{
   leads_alive: number;
   workers_alive: number;
-} {
-  const row = getDb()
+}> {
+  const row = (await getDb())
     .prepare<{ leads_alive: number | null; workers_alive: number | null }, [number]>(
       `SELECT
          SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads_alive,
@@ -10171,13 +10387,13 @@ export function getLiveAgentCounts(minutes: number = 5): {
  * `agents_online` reports total alive agents (leads + workers) so the home
  * page can show a single "online" stat without summing on the client.
  */
-export function getInstanceActivity(): {
+export async function getInstanceActivity(): Promise<{
   agents_online: number;
   leads_online: number;
   recent_tasks_count: number;
-} {
-  const { leads_alive, workers_alive } = getLiveAgentCounts(5);
-  const tasksRow = getDb()
+}> {
+  const { leads_alive, workers_alive } = await getLiveAgentCounts(5);
+  const tasksRow = (await getDb())
     .prepare<{ count: number }, []>(
       `SELECT COUNT(*) AS count FROM agent_tasks
        WHERE createdAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')`,
@@ -10205,8 +10421,8 @@ export interface SwarmMetrics {
  * count. Pure `COUNT(*)` / `GROUP BY` queries; the `agent_tasks` status
  * grouping rides the indexes added in migration 069.
  */
-export function getSwarmMetrics(): SwarmMetrics {
-  const db = getDb();
+export async function getSwarmMetrics(): Promise<SwarmMetrics> {
+  const db = await getDb();
 
   const groupCounts = (table: string): { total: number; by_status: Record<string, number> } => {
     const rows = db
@@ -10248,8 +10464,8 @@ export function getSwarmMetrics(): SwarmMetrics {
  * `first_task` milestone: true once any task has reached `status = 'completed'`.
  * Cheap LIMIT 1 probe; the row's contents don't matter, only existence.
  */
-export function hasFirstCompletedTask(): boolean {
-  const row = getDb()
+export async function hasFirstCompletedTask(): Promise<boolean> {
+  const row = (await getDb())
     .prepare<{ one: number }, []>(
       `SELECT 1 AS one FROM agent_tasks WHERE status = 'completed' LIMIT 1`,
     )
@@ -10339,8 +10555,8 @@ function encodeKvValue(value: unknown, valueType: KvValueType): string {
  * deleted inline (single-row DELETE WHERE) so the row count stays bounded over
  * time without a background sweeper.
  */
-export function getKv(namespace: string, key: string): KvEntry | null {
-  const row = getDb()
+export async function getKv(namespace: string, key: string): Promise<KvEntry | null> {
+  const row = (await getDb())
     .prepare<KvRow, [string, string]>(
       `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
          FROM kv_entries WHERE namespace = ? AND key = ?`,
@@ -10348,7 +10564,7 @@ export function getKv(namespace: string, key: string): KvEntry | null {
     .get(namespace, key);
   if (!row) return null;
   if (row.expires_at !== null && row.expires_at <= Date.now()) {
-    getDb()
+    (await getDb())
       .prepare<unknown, [string, string]>(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`)
       .run(namespace, key);
     return null;
@@ -10363,17 +10579,17 @@ export function getKv(namespace: string, key: string): KvEntry | null {
  * If the key already exists with a different `valueType` we still overwrite —
  * INCR is the only collision-sensitive op and it does its own check.
  */
-export function upsertKv(input: {
+export async function upsertKv(input: {
   namespace: string;
   key: string;
   value: unknown;
   valueType: KvValueType;
   expiresAt?: number | null;
-}): KvEntry {
+}): Promise<KvEntry> {
   const encoded = encodeKvValue(input.value, input.valueType);
   const expiresAt = input.expiresAt ?? null;
   const now = Date.now();
-  const row = getDb()
+  const row = (await getDb())
     .prepare<KvRow, [string, string, string, KvValueType, number | null, number, number]>(
       `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -10393,8 +10609,8 @@ export function upsertKv(input: {
  * Delete a KV entry. Returns true if a row was removed, false if nothing
  * existed. Does not differentiate expired-but-not-yet-swept from never-existed.
  */
-export function deleteKv(namespace: string, key: string): boolean {
-  const result = getDb()
+export async function deleteKv(namespace: string, key: string): Promise<boolean> {
+  const result = (await getDb())
     .prepare<unknown, [string, string]>(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`)
     .run(namespace, key);
   return result.changes > 0;
@@ -10415,11 +10631,11 @@ export class KvTypeCollisionError extends Error {
  * existing row's `value_type` is not 'integer' — the HTTP layer maps that to
  * 409.
  */
-export function incrKv(namespace: string, key: string, by: number): KvEntry {
+export async function incrKv(namespace: string, key: string, by: number): Promise<KvEntry> {
   if (!Number.isInteger(by) || !Number.isSafeInteger(by)) {
     throw new Error("INCR `by` must be a JS-safe integer");
   }
-  const database = getDb();
+  const database = await getDb();
   return database.transaction((): KvEntry => {
     const existing = database
       .prepare<KvRow, [string, string]>(
@@ -10487,15 +10703,15 @@ export function incrKv(namespace: string, key: string, by: number): KvEntry {
  * `limit` is capped by the caller (HTTP enforces ≤1000); helper does no extra
  * bounds-check beyond what SQL accepts.
  */
-export function listKv(
+export async function listKv(
   namespace: string,
   opts: { prefix?: string; limit: number; offset: number },
-): KvEntry[] {
+): Promise<KvEntry[]> {
   const now = Date.now();
   if (opts.prefix !== undefined && opts.prefix.length > 0) {
     // LIKE-escape `\` `%` `_` so a user-supplied prefix can't run wildcards.
     const escaped = opts.prefix.replace(/[\\%_]/g, "\\$&");
-    const rows = getDb()
+    const rows = (await getDb())
       .prepare<KvRow, [string, number, string, number, number]>(
         `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
            FROM kv_entries
@@ -10508,7 +10724,7 @@ export function listKv(
       .all(namespace, now, `${escaped}%`, opts.limit, opts.offset);
     return rows.map(decodeKvRow);
   }
-  const rows = getDb()
+  const rows = (await getDb())
     .prepare<KvRow, [string, number, number, number]>(
       `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
          FROM kv_entries
@@ -10525,11 +10741,11 @@ export function listKv(
  * Count entries in a namespace (optionally with a prefix filter). Expired
  * rows are excluded — same predicate as `listKv`.
  */
-export function countKv(namespace: string, opts: { prefix?: string }): number {
+export async function countKv(namespace: string, opts: { prefix?: string }): Promise<number> {
   const now = Date.now();
   if (opts.prefix !== undefined && opts.prefix.length > 0) {
     const escaped = opts.prefix.replace(/[\\%_]/g, "\\$&");
-    const row = getDb()
+    const row = (await getDb())
       .prepare<{ n: number }, [string, number, string]>(
         `SELECT COUNT(*) AS n FROM kv_entries
           WHERE namespace = ?
@@ -10539,7 +10755,7 @@ export function countKv(namespace: string, opts: { prefix?: string }): number {
       .get(namespace, now, `${escaped}%`);
     return row?.n ?? 0;
   }
-  const row = getDb()
+  const row = (await getDb())
     .prepare<{ n: number }, [string, number]>(
       `SELECT COUNT(*) AS n FROM kv_entries
         WHERE namespace = ?

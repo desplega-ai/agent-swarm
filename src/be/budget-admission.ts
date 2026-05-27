@@ -68,11 +68,11 @@ function nextUtcMidnight(now: Date): string {
  * Global is checked first by design: a tripped global budget halts the entire
  * swarm regardless of any single agent's spend.
  */
-export function canClaim(
+export async function canClaim(
   agentId: string,
   nowUtc: Date,
   requestedByUserId?: string,
-): BudgetAdmissionResult {
+): Promise<BudgetAdmissionResult> {
   if (process.env.BUDGET_ADMISSION_DISABLED === "true") {
     if (!killSwitchWarned) {
       killSwitchWarned = true;
@@ -87,9 +87,9 @@ export function canClaim(
   const resetAt = nextUtcMidnight(nowUtc);
 
   // 1. Global budget gate.
-  const globalBudget = getBudget("global", "");
+  const globalBudget = await getBudget("global", "");
   if (globalBudget !== null) {
-    const globalSpend = getDailySpendGlobal(dateUtc);
+    const globalSpend = await getDailySpendGlobal(dateUtc);
     if (globalSpend >= globalBudget.dailyBudgetUsd) {
       return {
         allowed: false,
@@ -102,9 +102,9 @@ export function canClaim(
   }
 
   // 2. Per-agent budget gate.
-  const agentBudget = getBudget("agent", agentId);
+  const agentBudget = await getBudget("agent", agentId);
   if (agentBudget !== null) {
-    const agentSpend = getDailySpendForAgent(agentId, dateUtc);
+    const agentSpend = await getDailySpendForAgent(agentId, dateUtc);
     if (agentSpend >= agentBudget.dailyBudgetUsd) {
       return {
         allowed: false,
@@ -118,9 +118,9 @@ export function canClaim(
 
   // 3. Per-user budget gate. Only applies to tasks tied to a canonical user.
   if (requestedByUserId) {
-    const userBudget = getBudget("user", requestedByUserId);
+    const userBudget = await getBudget("user", requestedByUserId);
     if (userBudget !== null) {
-      const userSpend = getDailySpendForUser(requestedByUserId, dateUtc);
+      const userSpend = await getDailySpendForUser(requestedByUserId, dateUtc);
       if (userSpend >= userBudget.dailyBudgetUsd) {
         return {
           allowed: false,

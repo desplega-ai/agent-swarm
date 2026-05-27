@@ -61,11 +61,11 @@ describe("update-profile authorization", () => {
     }
 
     closeDb();
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
-    createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
-    createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
-    createAgent({ id: OTHER_WORKER_ID, name: "Other Worker", isLead: false, status: "idle" });
+    await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
+    await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
+    await createAgent({ id: OTHER_WORKER_ID, name: "Other Worker", isLead: false, status: "idle" });
 
     server = new McpServer({ name: "test-update-profile-auth", version: "1.0.0" });
     registerUpdateProfileTool(server);
@@ -96,7 +96,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.agent?.role).toBe("Senior Developer");
 
     // Verify DB was updated
-    const agent = getAgentById(WORKER_ID);
+    const agent = await getAgentById(WORKER_ID);
     expect(agent?.role).toBe("Senior Developer");
   });
 
@@ -113,7 +113,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.message).toContain("Only lead agents");
 
     // Verify DB was NOT updated
-    const agent = getAgentById(OTHER_WORKER_ID);
+    const agent = await getAgentById(OTHER_WORKER_ID);
     expect(agent?.role).not.toBe("Hacked Role");
   });
 
@@ -130,7 +130,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.message).toContain("own");
 
     // Verify DB was updated
-    const agent = getAgentById(OTHER_WORKER_ID);
+    const agent = await getAgentById(OTHER_WORKER_ID);
     expect(agent?.description).toBe("I updated myself");
   });
 
@@ -160,7 +160,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.success).toBe(true);
 
     // Verify the context version has the correct changeSource
-    const version = getLatestContextVersion(WORKER_ID, "soulMd");
+    const version = await getLatestContextVersion(WORKER_ID, "soulMd");
     expect(version).not.toBeNull();
     expect(version!.changeSource).toBe("lead_coaching");
     expect(version!.changedByAgentId).toBe(LEAD_ID);
@@ -174,7 +174,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.success).toBe(true);
 
     // Verify the context version has the correct changeSource
-    const version = getLatestContextVersion(WORKER_ID, "soulMd");
+    const version = await getLatestContextVersion(WORKER_ID, "soulMd");
     expect(version).not.toBeNull();
     expect(version!.changeSource).toBe("self_edit");
     expect(version!.changedByAgentId).toBe(WORKER_ID);
@@ -189,7 +189,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toContain("own");
 
-    const version = getLatestContextVersion(WORKER_ID, "identityMd");
+    const version = await getLatestContextVersion(WORKER_ID, "identityMd");
     expect(version).not.toBeNull();
     expect(version!.changeSource).toBe("self_edit");
   });

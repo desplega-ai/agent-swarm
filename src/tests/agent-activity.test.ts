@@ -14,7 +14,10 @@ const TEST_DB_PATH = "./test-agent-activity.sqlite";
 const TEST_PORT = 13025;
 
 // Minimal HTTP handler for activity endpoint
-function handleRequest(req: { method: string; url: string }): { status: number; body: unknown } {
+async function handleRequest(req: {
+  method: string;
+  url: string;
+}): Promise<{ status: number; body: unknown }> {
   const pathEnd = req.url.indexOf("?");
   const path = pathEnd === -1 ? req.url : req.url.slice(0, pathEnd);
   const pathSegments = path.split("/").filter(Boolean);
@@ -28,13 +31,13 @@ function handleRequest(req: { method: string; url: string }): { status: number; 
     pathSegments[3] === "activity"
   ) {
     const agentId = pathSegments[2];
-    updateAgentActivity(agentId);
+    await updateAgentActivity(agentId);
     return { status: 204, body: null };
   }
 
   // GET /api/agents — list agents (for verifying lastActivityAt in response)
   if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "agents") {
-    const agents = getAllAgents();
+    const agents = await getAllAgents();
     return { status: 200, body: { agents } };
   }
 
@@ -43,7 +46,7 @@ function handleRequest(req: { method: string; url: string }): { status: number; 
 
 function createTestServer(): Server {
   return createHttpServer(async (req, res) => {
-    const result = handleRequest({ method: req.method || "GET", url: req.url || "/" });
+    const result = await handleRequest({ method: req.method || "GET", url: req.url || "/" });
 
     if (result.body === null) {
       res.writeHead(result.status);
@@ -67,7 +70,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
       // File doesn't exist, that's fine
     }
 
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     server = createTestServer();
     await new Promise<void>((resolve) => {
@@ -95,8 +98,8 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
   });
 
   describe("DB: updateAgentActivity()", () => {
-    test("should update lastActivityAt timestamp for an existing agent", () => {
-      const agent = createAgent({
+    test("should update lastActivityAt timestamp for an existing agent", async () => {
+      const agent = await createAgent({
         name: "activity-test-agent-1",
         isLead: false,
         status: "idle",
@@ -104,15 +107,15 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
       });
 
       // Initially, lastActivityAt should be undefined
-      const before = getAgentById(agent.id);
+      const before = await getAgentById(agent.id);
       expect(before).not.toBeNull();
       expect(before!.lastActivityAt).toBeUndefined();
 
       // Update activity
-      updateAgentActivity(agent.id);
+      await updateAgentActivity(agent.id);
 
       // Now lastActivityAt should be set
-      const after = getAgentById(agent.id);
+      const after = await getAgentById(agent.id);
       expect(after).not.toBeNull();
       expect(after!.lastActivityAt).toBeDefined();
       expect(typeof after!.lastActivityAt).toBe("string");
@@ -123,22 +126,22 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
     });
 
     test("should update lastActivityAt to a newer timestamp on subsequent calls", async () => {
-      const agent = createAgent({
+      const agent = await createAgent({
         name: "activity-test-agent-2",
         isLead: false,
         status: "busy",
         capabilities: [],
       });
 
-      updateAgentActivity(agent.id);
-      const first = getAgentById(agent.id);
+      await updateAgentActivity(agent.id);
+      const first = await getAgentById(agent.id);
       expect(first!.lastActivityAt).toBeDefined();
 
       // Small delay to ensure timestamp differs
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      updateAgentActivity(agent.id);
-      const second = getAgentById(agent.id);
+      await updateAgentActivity(agent.id);
+      const second = await getAgentById(agent.id);
       expect(second!.lastActivityAt).toBeDefined();
 
       // Second timestamp should be >= first
@@ -149,31 +152,31 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
 
     test("should not throw for non-existent agent ID", () => {
       // Should not throw — just silently does nothing
-      expect(() => updateAgentActivity("non-existent-agent-id")).not.toThrow();
+      expect(async () => await updateAgentActivity("non-existent-agent-id")).not.toThrow();
     });
 
-    test("should not modify lastUpdatedAt when updating activity", () => {
-      const agent = createAgent({
+    test("should not modify lastUpdatedAt when updating activity", async () => {
+      const agent = await createAgent({
         name: "activity-test-agent-3",
         isLead: false,
         status: "idle",
         capabilities: [],
       });
 
-      const before = getAgentById(agent.id);
+      const before = await getAgentById(agent.id);
       expect(before).not.toBeNull();
       const originalLastUpdatedAt = before!.lastUpdatedAt;
 
-      updateAgentActivity(agent.id);
+      await updateAgentActivity(agent.id);
 
-      const after = getAgentById(agent.id);
+      const after = await getAgentById(agent.id);
       expect(after!.lastUpdatedAt).toBe(originalLastUpdatedAt);
     });
   });
 
   describe("HTTP: PUT /api/agents/:id/activity", () => {
     test("should return 204 for valid agent", async () => {
-      const agent = createAgent({
+      const agent = await createAgent({
         name: "http-activity-test-1",
         isLead: false,
         status: "busy",
@@ -187,7 +190,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
       expect(response.status).toBe(204);
 
       // Verify timestamp was updated
-      const updated = getAgentById(agent.id);
+      const updated = await getAgentById(agent.id);
       expect(updated!.lastActivityAt).toBeDefined();
     });
 
@@ -202,7 +205,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
 
   describe("API: lastActivityAt in agent list", () => {
     test("should include lastActivityAt field in GET /api/agents response", async () => {
-      const agent = createAgent({
+      const agent = await createAgent({
         name: "list-activity-test-1",
         isLead: false,
         status: "idle",
@@ -210,7 +213,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
       });
 
       // Update activity so the field is set
-      updateAgentActivity(agent.id);
+      await updateAgentActivity(agent.id);
 
       const response = await fetch(`${baseUrl}/api/agents`);
       expect(response.status).toBe(200);
@@ -225,7 +228,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
     });
 
     test("should have lastActivityAt undefined for agent with no activity", async () => {
-      const agent = createAgent({
+      const agent = await createAgent({
         name: "list-activity-test-2",
         isLead: false,
         status: "idle",

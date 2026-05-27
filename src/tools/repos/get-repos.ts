@@ -25,7 +25,7 @@ export const registerGetReposTool = (server: McpServer) => {
     },
     async ({ name }) => {
       const filters = name ? { name } : undefined;
-      const repos = getSwarmRepos(filters);
+      const repos = await getSwarmRepos(filters);
       const count = repos.length;
 
       const repoList =

@@ -43,8 +43,8 @@ import { fetchChannelActivity } from "../slack/channel-activity";
 
 const TEST_DB_PATH = `./test-channel-activity-${process.pid}.sqlite`;
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(() => {
@@ -61,45 +61,47 @@ afterAll(() => {
 // ─── DB Functions ──────────────────────────────────────────────────────────────
 
 describe("Channel Activity Cursors — DB functions", () => {
-  test("getChannelActivityCursor returns null for non-existent channel", () => {
-    const cursor = getChannelActivityCursor("C_NONEXISTENT");
+  test("getChannelActivityCursor returns null for non-existent channel", async () => {
+    const cursor = await getChannelActivityCursor("C_NONEXISTENT");
     expect(cursor).toBeNull();
   });
 
-  test("getAllChannelActivityCursors returns an array", () => {
-    const cursors = getAllChannelActivityCursors();
+  test("getAllChannelActivityCursors returns an array", async () => {
+    const cursors = await getAllChannelActivityCursors();
     expect(Array.isArray(cursors)).toBe(true);
   });
 
-  test("upsertChannelActivityCursor inserts a new cursor", () => {
-    upsertChannelActivityCursor("C_INSERT_TEST", "1711111111.000001");
-    const cursor = getChannelActivityCursor("C_INSERT_TEST");
+  test("upsertChannelActivityCursor inserts a new cursor", async () => {
+    await upsertChannelActivityCursor("C_INSERT_TEST", "1711111111.000001");
+    const cursor = await getChannelActivityCursor("C_INSERT_TEST");
     expect(cursor).not.toBeNull();
     expect(cursor!.channelId).toBe("C_INSERT_TEST");
     expect(cursor!.lastSeenTs).toBe("1711111111.000001");
     expect(cursor!.updatedAt).toBeTruthy();
   });
 
-  test("upsertChannelActivityCursor updates existing cursor", () => {
-    upsertChannelActivityCursor("C_UPDATE_TEST", "1711111111.000001");
-    upsertChannelActivityCursor("C_UPDATE_TEST", "1711111111.000099");
-    const after = getChannelActivityCursor("C_UPDATE_TEST");
+  test("upsertChannelActivityCursor updates existing cursor", async () => {
+    await upsertChannelActivityCursor("C_UPDATE_TEST", "1711111111.000001");
+    await upsertChannelActivityCursor("C_UPDATE_TEST", "1711111111.000099");
+    const after = await getChannelActivityCursor("C_UPDATE_TEST");
     expect(after!.lastSeenTs).toBe("1711111111.000099");
   });
 
-  test("getAllChannelActivityCursors returns all inserted cursors", () => {
-    upsertChannelActivityCursor("C_ALL_1", "1711111111.000001");
-    upsertChannelActivityCursor("C_ALL_2", "1711111111.000002");
-    const ids = getAllChannelActivityCursors().map((c) => c.channelId);
+  test("getAllChannelActivityCursors returns all inserted cursors", async () => {
+    await upsertChannelActivityCursor("C_ALL_1", "1711111111.000001");
+    await upsertChannelActivityCursor("C_ALL_2", "1711111111.000002");
+    const ids = (await getAllChannelActivityCursors()).map((c) => c.channelId);
     expect(ids).toContain("C_ALL_1");
     expect(ids).toContain("C_ALL_2");
   });
 
-  test("channelId is primary key — no duplicates", () => {
-    upsertChannelActivityCursor("C_PK_TEST", "1711111111.000001");
-    upsertChannelActivityCursor("C_PK_TEST", "1711111111.000002");
-    upsertChannelActivityCursor("C_PK_TEST", "1711111111.000003");
-    const cursors = getAllChannelActivityCursors().filter((c) => c.channelId === "C_PK_TEST");
+  test("channelId is primary key — no duplicates", async () => {
+    await upsertChannelActivityCursor("C_PK_TEST", "1711111111.000001");
+    await upsertChannelActivityCursor("C_PK_TEST", "1711111111.000002");
+    await upsertChannelActivityCursor("C_PK_TEST", "1711111111.000003");
+    const cursors = (await getAllChannelActivityCursors()).filter(
+      (c) => c.channelId === "C_PK_TEST",
+    );
     expect(cursors.length).toBe(1);
     expect(cursors[0].lastSeenTs).toBe("1711111111.000003");
   });
@@ -135,7 +137,7 @@ describe("Channel Activity — cursor commit endpoint", () => {
 
           for (const { channelId, ts } of parsed.cursorUpdates) {
             if (channelId && ts) {
-              upsertChannelActivityCursor(channelId, ts);
+              await upsertChannelActivityCursor(channelId, ts);
             }
           }
 
@@ -178,8 +180,8 @@ describe("Channel Activity — cursor commit endpoint", () => {
     expect(data.success).toBe(true);
     expect(data.committed).toBe(2);
 
-    expect(getChannelActivityCursor("C_COMMIT_1")!.lastSeenTs).toBe("1711222222.000001");
-    expect(getChannelActivityCursor("C_COMMIT_2")!.lastSeenTs).toBe("1711222222.000002");
+    expect((await getChannelActivityCursor("C_COMMIT_1"))!.lastSeenTs).toBe("1711222222.000001");
+    expect((await getChannelActivityCursor("C_COMMIT_2"))!.lastSeenTs).toBe("1711222222.000002");
   });
 
   test("rejects request without cursorUpdates array", async () => {
@@ -214,8 +216,8 @@ describe("Channel Activity — cursor commit endpoint", () => {
     });
 
     expect(resp.status).toBe(200);
-    expect(getChannelActivityCursor("C_VALID")!.lastSeenTs).toBe("1711333333.000001");
-    expect(getChannelActivityCursor("C_NO_TS")).toBeNull();
+    expect((await getChannelActivityCursor("C_VALID"))!.lastSeenTs).toBe("1711333333.000001");
+    expect(await getChannelActivityCursor("C_NO_TS")).toBeNull();
   });
 });
 
@@ -345,19 +347,19 @@ describe("Channel Activity — fetchChannelActivity", () => {
 // ─── Migration ──────────────────────────────────────────────────────────────
 
 describe("Channel Activity — migration 015", () => {
-  test("channel_activity_cursors table exists and has correct schema", () => {
-    upsertChannelActivityCursor("C_SCHEMA_TEST", "1711999999.000001");
-    const cursor = getChannelActivityCursor("C_SCHEMA_TEST");
+  test("channel_activity_cursors table exists and has correct schema", async () => {
+    await upsertChannelActivityCursor("C_SCHEMA_TEST", "1711999999.000001");
+    const cursor = await getChannelActivityCursor("C_SCHEMA_TEST");
     expect(cursor).not.toBeNull();
     expect(cursor!.channelId).toBe("C_SCHEMA_TEST");
     expect(cursor!.lastSeenTs).toBe("1711999999.000001");
     expect(cursor!.updatedAt).toBeTruthy();
   });
 
-  test("channelId is PRIMARY KEY — duplicate insert updates instead of failing", () => {
-    upsertChannelActivityCursor("C_PK_MIG", "1711000000.000001");
-    upsertChannelActivityCursor("C_PK_MIG", "1711000000.000999");
-    const cursor = getChannelActivityCursor("C_PK_MIG");
+  test("channelId is PRIMARY KEY — duplicate insert updates instead of failing", async () => {
+    await upsertChannelActivityCursor("C_PK_MIG", "1711000000.000001");
+    await upsertChannelActivityCursor("C_PK_MIG", "1711000000.000999");
+    const cursor = await getChannelActivityCursor("C_PK_MIG");
     expect(cursor!.lastSeenTs).toBe("1711000000.000999");
   });
 });

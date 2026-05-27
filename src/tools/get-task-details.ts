@@ -39,7 +39,7 @@ export async function getTaskDetailsHandler(
   ctx: ToolCtx,
   { taskId }: GetTaskDetailsArgs,
 ): Promise<CallToolResult> {
-  const task = getTaskById(taskId);
+  const task = await getTaskById(taskId);
   const agentId = ctx.kind === "owner" ? ctx.agentId : undefined;
 
   if (!task) {
@@ -56,11 +56,13 @@ export async function getTaskDetailsHandler(
   const ownershipError = assertOwnsTask(ctx, task);
   if (ownershipError) return ownershipError;
 
-  const logs = getLogsByTaskIdChronological(taskId);
-  const attachments = getTaskAttachments(taskId);
+  const logs = await getLogsByTaskIdChronological(taskId);
+  const attachments = await getTaskAttachments(taskId);
 
   // Resolve requesting user details if available
-  const requestedByUser = task.requestedByUserId ? getUserById(task.requestedByUserId) : undefined;
+  const requestedByUser = task.requestedByUserId
+    ? await getUserById(task.requestedByUserId)
+    : undefined;
   const requestedBy = requestedByUser
     ? { name: requestedByUser.name, email: requestedByUser.email }
     : undefined;

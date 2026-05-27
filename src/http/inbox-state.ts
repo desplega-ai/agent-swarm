@@ -58,7 +58,7 @@ export async function handleInboxState(
   if (listState.match(req.method, pathSegments)) {
     const parsed = await listState.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const items = listInboxState({
+    const items = await listInboxState({
       userId: parsed.query.userId,
       status: parsed.query.status,
       itemType: parsed.query.itemType,
@@ -71,7 +71,7 @@ export async function handleInboxState(
     const parsed = await upsertState.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      const item = upsertInboxState({
+      const item = await upsertInboxState({
         userId: parsed.body.userId,
         itemType: parsed.body.itemType,
         itemId: parsed.body.itemId,

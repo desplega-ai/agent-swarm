@@ -81,7 +81,7 @@ async function sendAndFormat(
   contextMessageId: string | undefined,
 ) {
   try {
-    const config = getKapsoConfig();
+    const config = await getKapsoConfig();
     if (!config.apiKey) {
       const msg = "KAPSO_API_KEY is not configured in swarm config.";
       return {

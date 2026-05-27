@@ -85,14 +85,14 @@ async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
   throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
 
-function makeMemory(
+async function makeMemory(
   name: string,
   agentId = agentA,
   scope: "agent" | "swarm" = "agent",
-): {
+): Promise<{
   id: string;
-} {
-  return store.store({
+}> {
+  return await store.store({
     agentId,
     scope,
     name,
@@ -101,8 +101,8 @@ function makeMemory(
   });
 }
 
-function insertRetrieval(taskId: string, agentId: string, memoryId: string): void {
-  getDb()
+async function insertRetrieval(taskId: string, agentId: string, memoryId: string): Promise<void> {
+  (await getDb())
     .prepare(
       `INSERT INTO memory_retrieval (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
        VALUES (?, ?, ?, NULL, ?, 0.85, ?)`,
@@ -110,8 +110,8 @@ function insertRetrieval(taskId: string, agentId: string, memoryId: string): voi
     .run(randomUUID(), taskId, agentId, memoryId, new Date().toISOString());
 }
 
-function readPosterior(id: string): { alpha: number; beta: number } {
-  const row = getDb()
+async function readPosterior(id: string): Promise<{ alpha: number; beta: number }> {
+  const row = (await getDb())
     .prepare<{ alpha: number; beta: number }, [string]>(
       "SELECT alpha, beta FROM agent_memory WHERE id = ?",
     )
@@ -120,10 +120,10 @@ function readPosterior(id: string): { alpha: number; beta: number } {
   return { alpha: row.alpha, beta: row.beta };
 }
 
-function readEdges(
+async function readEdges(
   memoryId: string,
-): { to_id: string; type: string; alpha: number; beta: number }[] {
-  return getDb()
+): Promise<{ to_id: string; type: string; alpha: number; beta: number }[]> {
+  return (await getDb())
     .prepare<{ to_id: string; type: string; alpha: number; beta: number }, [string]>(
       "SELECT to_id, type, alpha, beta FROM agent_memory_edge WHERE from_id = ? ORDER BY to_id",
     )
@@ -153,6 +153,9 @@ beforeAll(async () => {
       HEARTBEAT_DISABLE: "true",
       OAUTH_KEEPALIVE_DISABLE: "true",
       ANONYMIZED_TELEMETRY: "false",
+      OPENAI_API_KEY: "",
+      EMBEDDING_API_KEY: "",
+      EMBEDDING_API_BASE_URL: "",
     },
     stdout: "ignore",
     stderr: "ignore",
@@ -168,11 +171,11 @@ beforeAll(async () => {
   // spawned server reads from TEST_DB_PATH — cross-process WAL visibility
   // breaks and `applied=0` / 400 / empty edge lists ensue.
   closeDb();
-  initDb(TEST_DB_PATH);
-  createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
-  createAgent({ id: agentB, name: "Agent B", isLead: false, status: "idle" });
+  await initDb(TEST_DB_PATH);
+  await createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
+  await createAgent({ id: agentB, name: "Agent B", isLead: false, status: "idle" });
 
-  const insertTask = getDb().prepare(
+  const insertTask = (await getDb()).prepare(
     `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
      VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
   );
@@ -200,17 +203,17 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM memory_rating");
-  getDb().run("DELETE FROM memory_retrieval");
-  getDb().run("DELETE FROM agent_memory_edge");
-  getDb().run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
+beforeEach(async () => {
+  (await getDb()).run("DELETE FROM memory_rating");
+  (await getDb()).run("DELETE FROM memory_retrieval");
+  (await getDb()).run("DELETE FROM agent_memory_edge");
+  (await getDb()).run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
 });
 
 describe("applyRating + agent_memory_edge UPSERT", () => {
-  test("first event creates the edge row with deltas matching the memory row", () => {
-    const m = makeMemory("ref-1");
-    const result = applyRating([
+  test("first event creates the edge row with deltas matching the memory row", async () => {
+    const m = await makeMemory("ref-1");
+    const result = await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -220,9 +223,9 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
       },
     ]);
     expect(result.applied).toBe(1);
-    expect(readPosterior(m.id)).toEqual({ alpha: 2, beta: 1 });
+    expect(await readPosterior(m.id)).toEqual({ alpha: 2, beta: 1 });
 
-    const edges = readEdges(m.id);
+    const edges = await readEdges(m.id);
     expect(edges).toHaveLength(1);
     expect(edges[0]).toMatchObject({
       to_id: "github:foo/bar#1",
@@ -232,9 +235,9 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
     });
   });
 
-  test("repeated event with the same referencesSource updates the existing row in place", () => {
-    const m = makeMemory("ref-rep");
-    applyRating([
+  test("repeated event with the same referencesSource updates the existing row in place", async () => {
+    const m = await makeMemory("ref-rep");
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -243,7 +246,7 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
         referencesSource: "github:foo/bar#1",
       },
     ]);
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -252,15 +255,15 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
         referencesSource: "github:foo/bar#1",
       },
     ]);
-    const edges = readEdges(m.id);
+    const edges = await readEdges(m.id);
     expect(edges).toHaveLength(1);
     expect(edges[0]!.alpha).toBeCloseTo(1 + 0.5 + 0.25, 5);
     expect(edges[0]!.beta).toBe(1);
   });
 
-  test("different referencesSource for the same memory creates two distinct edge rows", () => {
-    const m = makeMemory("ref-distinct");
-    applyRating([
+  test("different referencesSource for the same memory creates two distinct edge rows", async () => {
+    const m = await makeMemory("ref-distinct");
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -269,7 +272,7 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
         referencesSource: "github:foo/bar#1",
       },
     ]);
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -278,17 +281,17 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
         referencesSource: "linear:DES-187",
       },
     ]);
-    const edges = readEdges(m.id);
+    const edges = await readEdges(m.id);
     expect(edges).toHaveLength(2);
     const ids = edges.map((e) => e.to_id).sort();
     expect(ids).toEqual(["github:foo/bar#1", "linear:DES-187"]);
   });
 
-  test("Q2 free-form: linear, customer, and arbitrary prefixes all accepted", () => {
-    const m = makeMemory("ref-freeform");
+  test("Q2 free-form: linear, customer, and arbitrary prefixes all accepted", async () => {
+    const m = await makeMemory("ref-freeform");
     const sources = ["linear:DES-187", "customer:crabi", "anything:goes-12345"];
     for (const referencesSource of sources) {
-      applyRating([
+      await applyRating([
         {
           memoryId: m.id,
           signal: 1,
@@ -298,23 +301,23 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
         },
       ]);
     }
-    const edges = readEdges(m.id);
+    const edges = await readEdges(m.id);
     expect(edges).toHaveLength(3);
     const ids = edges.map((e) => e.to_id).sort();
     expect(ids).toEqual(sources.slice().sort());
   });
 
-  test("event without referencesSource → memory updated, no edge row", () => {
-    const m = makeMemory("ref-none");
-    const result = applyRating([{ memoryId: m.id, signal: 1, weight: 1, source: "llm" }]);
+  test("event without referencesSource → memory updated, no edge row", async () => {
+    const m = await makeMemory("ref-none");
+    const result = await applyRating([{ memoryId: m.id, signal: 1, weight: 1, source: "llm" }]);
     expect(result.applied).toBe(1);
-    expect(readPosterior(m.id)).toEqual({ alpha: 2, beta: 1 });
-    expect(readEdges(m.id)).toEqual([]);
+    expect(await readPosterior(m.id)).toEqual({ alpha: 2, beta: 1 });
+    expect(await readEdges(m.id)).toEqual([]);
   });
 
-  test("over-cap referencesSource (513 chars) → applyRating rejects, no edge or memory mutation", () => {
-    const m = makeMemory("ref-overcap");
-    const result = applyRating([
+  test("over-cap referencesSource (513 chars) → applyRating rejects, no edge or memory mutation", async () => {
+    const m = await makeMemory("ref-overcap");
+    const result = await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -326,13 +329,13 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
     expect(result.applied).toBe(0);
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]!.reason).toMatch(/exceeds/);
-    expect(readPosterior(m.id)).toEqual({ alpha: 1, beta: 1 });
-    expect(readEdges(m.id)).toEqual([]);
+    expect(await readPosterior(m.id)).toEqual({ alpha: 1, beta: 1 });
+    expect(await readEdges(m.id)).toEqual([]);
   });
 
-  test("referencesSource with embedded NUL → applyRating rejects", () => {
-    const m = makeMemory("ref-nul");
-    const result = applyRating([
+  test("referencesSource with embedded NUL → applyRating rejects", async () => {
+    const m = await makeMemory("ref-nul");
+    const result = await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -344,15 +347,15 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
     expect(result.applied).toBe(0);
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]!.reason).toMatch(/NUL/);
-    expect(readEdges(m.id)).toEqual([]);
+    expect(await readEdges(m.id)).toEqual([]);
   });
 });
 
 describe("DB CHECK constraint", () => {
-  test("INSERT with type='supersedes' raises SQLITE_CONSTRAINT (v2 guardrail)", () => {
-    const m = makeMemory("check-supersedes");
-    expect(() => {
-      getDb().run(
+  test("INSERT with type='supersedes' raises SQLITE_CONSTRAINT (v2 guardrail)", async () => {
+    const m = await makeMemory("check-supersedes");
+    expect(async () => {
+      (await getDb()).run(
         `INSERT INTO agent_memory_edge (from_id, to_id, type, alpha, beta, createdAt)
          VALUES (?, ?, 'supersedes', 1, 1, ?)`,
         [m.id, "memory:other", new Date().toISOString()],
@@ -362,24 +365,24 @@ describe("DB CHECK constraint", () => {
 });
 
 describe("sanitizeReferencesSource (Q2)", () => {
-  test("strips control characters, preserves printable ASCII", () => {
+  test("strips control characters, preserves printable ASCII", async () => {
     const cleaned = sanitizeReferencesSource(
       `github:foo/bar#1${String.fromCharCode(7)}${String.fromCharCode(127)}`,
     );
     expect(cleaned).toBe("github:foo/bar#1");
   });
 
-  test("rejects strings containing a NUL byte", () => {
+  test("rejects strings containing a NUL byte", async () => {
     expect(sanitizeReferencesSource(`a${String.fromCharCode(0)}b`)).toBeNull();
   });
 
-  test("rejects strings that strip to empty", () => {
+  test("rejects strings that strip to empty", async () => {
     expect(sanitizeReferencesSource(String.fromCharCode(7).repeat(5))).toBeNull();
   });
 });
 
 describe("buildRatingsFromLlm propagation (step-6 §6)", () => {
-  test("propagates valid referencesSource through to RatingEvent", () => {
+  test("propagates valid referencesSource through to RatingEvent", async () => {
     const events = buildRatingsFromLlm(
       [
         {
@@ -395,7 +398,7 @@ describe("buildRatingsFromLlm propagation (step-6 §6)", () => {
     expect(events[0]!.referencesSource).toBe("linear:DES-187");
   });
 
-  test("drops referencesSource when it sanitizes to null (NUL byte) but keeps the rating", () => {
+  test("drops referencesSource when it sanitizes to null (NUL byte) but keeps the rating", async () => {
     const events = buildRatingsFromLlm(
       [
         {
@@ -412,7 +415,7 @@ describe("buildRatingsFromLlm propagation (step-6 §6)", () => {
     expect(events[0]!.signal).toBeCloseTo(2 * 0.8 - 1, 5);
   });
 
-  test("omits referencesSource when not provided (default behaviour)", () => {
+  test("omits referencesSource when not provided (default behaviour)", async () => {
     const events = buildRatingsFromLlm(
       [{ id: "m-1", score: 1, reasoning: "useful" }],
       [{ id: "m-1" }],
@@ -424,7 +427,7 @@ describe("buildRatingsFromLlm propagation (step-6 §6)", () => {
 
 describe("POST /api/memory/rate with referencesSource (step-6 §4)", () => {
   test("happy path: referencesSource accepted → edge row created", async () => {
-    const m = makeMemory("http-rate-1");
+    const m = await makeMemory("http-rate-1");
     const r = await api("POST", "/api/memory/rate", {
       agentId: agentA,
       body: {
@@ -442,13 +445,13 @@ describe("POST /api/memory/rate with referencesSource (step-6 §4)", () => {
     });
     expect(r.status).toBe(200);
     expect(r.body.applied).toBe(1);
-    const edges = readEdges(m.id);
+    const edges = await readEdges(m.id);
     expect(edges).toHaveLength(1);
     expect(edges[0]!.to_id).toBe("github:desplega-ai/agent-swarm#377");
   });
 
   test("Q2 free-form positives (linear/customer/anything) all accepted via HTTP", async () => {
-    const m = makeMemory("http-rate-freeform");
+    const m = await makeMemory("http-rate-freeform");
     for (const referencesSource of ["linear:DES-187", "customer:crabi", "anything:goes-12345"]) {
       const r = await api("POST", "/api/memory/rate", {
         agentId: agentA,
@@ -468,12 +471,12 @@ describe("POST /api/memory/rate with referencesSource (step-6 §4)", () => {
       expect(r.status).toBe(200);
       expect(r.body.applied).toBe(1);
     }
-    const edges = readEdges(m.id);
+    const edges = await readEdges(m.id);
     expect(edges).toHaveLength(3);
   });
 
   test("513-char referencesSource → 400 (Zod cap)", async () => {
-    const m = makeMemory("http-rate-overcap");
+    const m = await makeMemory("http-rate-overcap");
     const r = await api("POST", "/api/memory/rate", {
       agentId: agentA,
       body: {
@@ -490,11 +493,11 @@ describe("POST /api/memory/rate with referencesSource (step-6 §4)", () => {
       },
     });
     expect(r.status).toBe(400);
-    expect(readEdges(m.id)).toEqual([]);
+    expect(await readEdges(m.id)).toEqual([]);
   });
 
   test("embedded NUL → 400 (Zod transform rejects)", async () => {
-    const m = makeMemory("http-rate-nul");
+    const m = await makeMemory("http-rate-nul");
     const r = await api("POST", "/api/memory/rate", {
       agentId: agentA,
       body: {
@@ -511,14 +514,14 @@ describe("POST /api/memory/rate with referencesSource (step-6 §4)", () => {
       },
     });
     expect(r.status).toBe(400);
-    expect(readEdges(m.id)).toEqual([]);
+    expect(await readEdges(m.id)).toEqual([]);
   });
 });
 
 describe("GET /api/memory/edges (step-6 §7)", () => {
   test("returns edges with computed usefulness", async () => {
-    const m = makeMemory("get-edges-1");
-    applyRating([
+    const m = await makeMemory("get-edges-1");
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -544,7 +547,7 @@ describe("GET /api/memory/edges (step-6 §7)", () => {
   });
 
   test("returns empty array when memory has no edges", async () => {
-    const m = makeMemory("get-edges-empty");
+    const m = await makeMemory("get-edges-empty");
     const r = await api("GET", `/api/memory/edges?memoryId=${m.id}`, { agentId: agentA });
     expect(r.status).toBe(200);
     expect(r.body.edges).toEqual([]);
@@ -556,14 +559,14 @@ describe("GET /api/memory/edges (step-6 §7)", () => {
   });
 
   test("missing X-Agent-ID → 400", async () => {
-    const m = makeMemory("get-edges-noauth");
+    const m = await makeMemory("get-edges-noauth");
     const r = await api("GET", `/api/memory/edges?memoryId=${m.id}`);
     expect(r.status).toBe(400);
   });
 
   test("agent-scope memory owned by another agent → empty (defence-in-depth)", async () => {
-    const m = makeMemory("get-edges-other-owner", agentB);
-    applyRating([
+    const m = await makeMemory("get-edges-other-owner", agentB);
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -578,8 +581,8 @@ describe("GET /api/memory/edges (step-6 §7)", () => {
   });
 
   test("swarm-scope memory is visible to any agent", async () => {
-    const m = makeMemory("get-edges-swarm", agentB, "swarm");
-    applyRating([
+    const m = await makeMemory("get-edges-swarm", agentB, "swarm");
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -596,13 +599,13 @@ describe("GET /api/memory/edges (step-6 §7)", () => {
 });
 
 describe("listEdgesForAgent (in-process)", () => {
-  test("returns empty for unknown memory id", () => {
-    expect(listEdgesForAgent(agentA, randomUUID())).toEqual([]);
+  test("returns empty for unknown memory id", async () => {
+    expect(await listEdgesForAgent(agentA, randomUUID())).toEqual([]);
   });
 
-  test("clamps usefulness to [1.0, 2.0]", () => {
-    const m = makeMemory("usefulness-clamp");
-    applyRating([
+  test("clamps usefulness to [1.0, 2.0]", async () => {
+    const m = await makeMemory("usefulness-clamp");
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -611,7 +614,7 @@ describe("listEdgesForAgent (in-process)", () => {
         referencesSource: "github:foo/bar#1",
       },
     ]);
-    const edges = listEdgesForAgent(agentA, m.id);
+    const edges = await listEdgesForAgent(agentA, m.id);
     expect(edges).toHaveLength(1);
     expect(edges[0]!.usefulness).toBeGreaterThanOrEqual(1.0);
     expect(edges[0]!.usefulness).toBeLessThanOrEqual(2.0);
@@ -697,8 +700,8 @@ describe("memory_rate MCP tool with referencesSource (step-6 §5)", () => {
   });
 
   test("end-to-end: rate + retrieval row → 200 + edge row exists", async () => {
-    const m = makeMemory("mcp-roundtrip");
-    insertRetrieval(taskA, agentA, m.id);
+    const m = await makeMemory("mcp-roundtrip");
+    await insertRetrieval(taskA, agentA, m.id);
 
     const r = await api("POST", "/api/memory/rate", {
       agentId: agentA,
@@ -717,6 +720,6 @@ describe("memory_rate MCP tool with referencesSource (step-6 §5)", () => {
     });
     expect(r.status).toBe(200);
     expect(r.body.applied).toBe(1);
-    expect(readEdges(m.id)).toHaveLength(1);
+    expect(await readEdges(m.id)).toHaveLength(1);
   });
 });

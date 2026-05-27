@@ -38,7 +38,7 @@ export async function handleTaskTemplates(
   if (listTemplates.match(req.method, pathSegments)) {
     const parsed = await listTemplates.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const templates = listTaskTemplates({
+    const templates = await listTaskTemplates({
       category: parsed.query.category,
       kind: parsed.query.kind,
       query: parsed.query.query,

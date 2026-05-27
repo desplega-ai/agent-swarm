@@ -68,8 +68,8 @@ const mcpUserConfigRoute = route({
  *
  * Returns the trimmed value or `null` if unset/empty.
  */
-function resolveConfigValue(key: string): string | null {
-  const configs = getResolvedConfig();
+async function resolveConfigValue(key: string): Promise<string | null> {
+  const configs = await getResolvedConfig();
   // The setup CLI persists keys in lowercase (e.g. `managed_agent_id`) while
   // the docker-entrypoint hydrates env vars in uppercase (`MANAGED_AGENT_ID`).
   // Look up both variants so this endpoint works against either shape.
@@ -87,8 +87,8 @@ function resolveConfigValue(key: string): string | null {
   return null;
 }
 
-function resolveMcpBaseUrl(): string {
-  const configured = resolveConfigValue("MCP_BASE_URL");
+async function resolveMcpBaseUrl(): Promise<string> {
+  const configured = await resolveConfigValue("MCP_BASE_URL");
   const fallback = `http://localhost:${process.env.PORT || "3013"}`;
   return (configured || fallback).replace(/\/+$/, "");
 }
@@ -110,14 +110,14 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
     pathSegments: string[],
   ): Promise<boolean> {
     if (mcpUserConfigRoute.match(req.method, pathSegments)) {
-      const mcpBaseUrl = resolveMcpBaseUrl();
+      const mcpBaseUrl = await resolveMcpBaseUrl();
       json(res, { mcpBaseUrl, mcpUserUrl: `${mcpBaseUrl}/mcp-user` });
       return true;
     }
 
     if (claudeManagedTestRoute.match(req.method, pathSegments)) {
-      const apiKey = resolveConfigValue("ANTHROPIC_API_KEY");
-      const agentId = resolveConfigValue("MANAGED_AGENT_ID");
+      const apiKey = await resolveConfigValue("ANTHROPIC_API_KEY");
+      const agentId = await resolveConfigValue("MANAGED_AGENT_ID");
 
       if (!apiKey || !agentId) {
         const missing: string[] = [];

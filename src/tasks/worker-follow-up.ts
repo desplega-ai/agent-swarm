@@ -27,20 +27,20 @@ function formatAttachmentsBlock(attachments: TaskAttachment[]): string {
   return `\n\nAttachments (${attachments.length}):\n${lines.join("\n")}`;
 }
 
-export function createWorkerTaskFollowUp(args: {
+export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
   status: "completed" | "failed";
   output?: string;
   failureReason?: string;
-}): AgentTask | null {
+}): Promise<AgentTask | null> {
   const { task, status, output, failureReason } = args;
 
   if (task.workflowRunId) return null;
 
-  const taskAgent = getAgentById(task.agentId ?? "");
+  const taskAgent = await getAgentById(task.agentId ?? "");
   if (!taskAgent || taskAgent.isLead) return null;
 
-  const leadAgent = getLeadAgent();
+  const leadAgent = await getLeadAgent();
   if (!leadAgent) return null;
 
   const agentName = taskAgent.name || task.agentId?.slice(0, 8) || "Unknown";
@@ -48,11 +48,11 @@ export function createWorkerTaskFollowUp(args: {
 
   let followUpDescription: string;
   if (status === "completed") {
-    const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(task.id));
+    const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(task.id));
     const outputSummary = output
       ? `${output.slice(0, 500)}${output.length > 500 ? "..." : ""}${attachmentsBlock}`
       : `(no output)${attachmentsBlock}`;
-    const completedResult = resolveTemplate("task.worker.completed", {
+    const completedResult = await resolveTemplate("task.worker.completed", {
       agent_name: agentName,
       task_desc: taskDesc,
       output_summary: outputSummary,
@@ -61,7 +61,7 @@ export function createWorkerTaskFollowUp(args: {
     followUpDescription = completedResult.text;
   } else {
     const reason = failureReason || "(no reason given)";
-    const failedResult = resolveTemplate("task.worker.failed", {
+    const failedResult = await resolveTemplate("task.worker.failed", {
       agent_name: agentName,
       task_desc: taskDesc,
       failure_reason: reason,
@@ -70,7 +70,7 @@ export function createWorkerTaskFollowUp(args: {
     followUpDescription = failedResult.text;
   }
 
-  return createTaskExtended(followUpDescription, {
+  return await createTaskExtended(followUpDescription, {
     agentId: leadAgent.id,
     source: "system",
     taskType: "follow-up",

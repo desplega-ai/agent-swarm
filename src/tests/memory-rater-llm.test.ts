@@ -41,7 +41,7 @@ import { MockLlmRaterClient } from "./mocks/mock-llm-rater-client";
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("SummaryWithRatingsSchema", () => {
-  test("accepts a well-formed response", () => {
+  test("accepts a well-formed response", async () => {
     const r = SummaryWithRatingsSchema.safeParse({
       summary: "key learnings",
       ratings: [
@@ -53,13 +53,13 @@ describe("SummaryWithRatingsSchema", () => {
     if (r.success) expect(r.data.ratings).toHaveLength(2);
   });
 
-  test("defaults `ratings` to [] when omitted", () => {
+  test("defaults `ratings` to [] when omitted", async () => {
     const r = SummaryWithRatingsSchema.safeParse({ summary: "no retrievals" });
     expect(r.success).toBe(true);
     if (r.success) expect(r.data.ratings).toEqual([]);
   });
 
-  test("rejects score > 1", () => {
+  test("rejects score > 1", async () => {
     const r = SummaryWithRatingsSchema.safeParse({
       summary: "x",
       ratings: [{ id: "m", score: 1.2, reasoning: "n/a" }],
@@ -67,7 +67,7 @@ describe("SummaryWithRatingsSchema", () => {
     expect(r.success).toBe(false);
   });
 
-  test("rejects score < 0", () => {
+  test("rejects score < 0", async () => {
     const r = SummaryWithRatingsSchema.safeParse({
       summary: "x",
       ratings: [{ id: "m", score: -0.1, reasoning: "n/a" }],
@@ -75,7 +75,7 @@ describe("SummaryWithRatingsSchema", () => {
     expect(r.success).toBe(false);
   });
 
-  test("rejects empty reasoning", () => {
+  test("rejects empty reasoning", async () => {
     const r = SummaryWithRatingsSchema.safeParse({
       summary: "x",
       ratings: [{ id: "m", score: 0.5, reasoning: "" }],
@@ -83,7 +83,7 @@ describe("SummaryWithRatingsSchema", () => {
     expect(r.success).toBe(false);
   });
 
-  test("rejects reasoning > 500 chars", () => {
+  test("rejects reasoning > 500 chars", async () => {
     const r = SummaryWithRatingsSchema.safeParse({
       summary: "x",
       ratings: [{ id: "m", score: 0.5, reasoning: "a".repeat(501) }],
@@ -91,7 +91,7 @@ describe("SummaryWithRatingsSchema", () => {
     expect(r.success).toBe(false);
   });
 
-  test("rejects missing reasoning", () => {
+  test("rejects missing reasoning", async () => {
     const r = SummaryWithRatingsSchema.safeParse({
       summary: "x",
       ratings: [{ id: "m", score: 0.5 }],
@@ -99,7 +99,7 @@ describe("SummaryWithRatingsSchema", () => {
     expect(r.success).toBe(false);
   });
 
-  test("rejects non-string id", () => {
+  test("rejects non-string id", async () => {
     const r = SummaryWithRatingsSchema.safeParse({
       summary: "x",
       ratings: [{ id: 42, score: 0.5, reasoning: "ok" }],
@@ -115,7 +115,7 @@ describe("buildRatingsFromLlm", () => {
     { id: "mem-C", name: "c", content: "" },
   ];
 
-  test("score=0 → signal=-1, score=0.5 → signal=0, score=1 → signal=+1", () => {
+  test("score=0 → signal=-1, score=0.5 → signal=0, score=1 → signal=+1", async () => {
     const events = buildRatingsFromLlm(
       [
         { id: "mem-A", score: 0, reasoning: "useless" },
@@ -133,7 +133,7 @@ describe("buildRatingsFromLlm", () => {
     expect(c.signal).toBeCloseTo(1, 6);
   });
 
-  test("weight is exactly 0.8 for every event (research-doc constant)", () => {
+  test("weight is exactly 0.8 for every event (research-doc constant)", async () => {
     const events = buildRatingsFromLlm(
       [
         { id: "mem-A", score: 0.2, reasoning: "x" },
@@ -147,12 +147,12 @@ describe("buildRatingsFromLlm", () => {
     expect(LLM_RATER_WEIGHT).toBe(0.8);
   });
 
-  test("source is set to 'llm' (the HTTP rate endpoint enums it)", () => {
+  test("source is set to 'llm' (the HTTP rate endpoint enums it)", async () => {
     const events = buildRatingsFromLlm([{ id: "mem-A", score: 0.5, reasoning: "x" }], retrievals);
     expect(events[0]!.source).toBe("llm");
   });
 
-  test("reasoning is preserved on each event", () => {
+  test("reasoning is preserved on each event", async () => {
     const events = buildRatingsFromLlm(
       [{ id: "mem-A", score: 0.7, reasoning: "directly answered the question" }],
       retrievals,
@@ -160,7 +160,7 @@ describe("buildRatingsFromLlm", () => {
     expect(events[0]!.reasoning).toBe("directly answered the question");
   });
 
-  test("drops ratings whose id is not in the retrieval set (anti-hallucination)", () => {
+  test("drops ratings whose id is not in the retrieval set (anti-hallucination)", async () => {
     const events = buildRatingsFromLlm(
       [
         { id: "mem-A", score: 0.9, reasoning: "real" },
@@ -172,19 +172,19 @@ describe("buildRatingsFromLlm", () => {
     expect(events[0]!.memoryId).toBe("mem-A");
   });
 
-  test("empty ratings array → empty events", () => {
+  test("empty ratings array → empty events", async () => {
     const events = buildRatingsFromLlm([], retrievals);
     expect(events).toEqual([]);
   });
 });
 
 describe("buildSummaryWithRatingsPrompt", () => {
-  test("returns base prompt unchanged when retrievals is empty", () => {
+  test("returns base prompt unchanged when retrievals is empty", async () => {
     const base = "BASE_PROMPT";
     expect(buildSummaryWithRatingsPrompt(base, [])).toBe(base);
   });
 
-  test("appends schema instruction + memory list when retrievals is non-empty", () => {
+  test("appends schema instruction + memory list when retrievals is non-empty", async () => {
     const out = buildSummaryWithRatingsPrompt("BASE", [
       { id: "mem-1", name: "first", content: "alpha content" },
       { id: "mem-2", name: "second", content: "beta content" },
@@ -200,7 +200,7 @@ describe("buildSummaryWithRatingsPrompt", () => {
     expect(out).toContain("second");
   });
 
-  test("truncates long memory content into the prompt", () => {
+  test("truncates long memory content into the prompt", async () => {
     const longContent = "x".repeat(5000);
     const out = buildSummaryWithRatingsPrompt("BASE", [
       { id: "mem-long", name: "L", content: longContent },
@@ -219,7 +219,7 @@ describe("dedupeRetrievalsForRater", () => {
   // from the same scheduled job collapse; distinct one-shot tasks pass
   // through even when their truncated 80-char names collide.
 
-  test("happy path: 5 cron memories sharing scheduleId + 1 distinct → 2 rows", () => {
+  test("happy path: 5 cron memories sharing scheduleId + 1 distinct → 2 rows", async () => {
     const cronName = "Task: Claude Code Changelog Monitor — check for new entries";
     const cronScheduleId = "sched-claude-code-changelog";
     const rows: RetrievalRow[] = [
@@ -276,7 +276,7 @@ describe("dedupeRetrievalsForRater", () => {
     expect(out.map((r) => r.id)).toEqual(["cron-5", "distinct"]);
   });
 
-  test("two distinct one-shot tasks sharing the truncated 80-char name prefix → both kept", () => {
+  test("two distinct one-shot tasks sharing the truncated 80-char name prefix → both kept", async () => {
     // Reviewer's flagged false-positive: `Task: ${task.task.slice(0, 80)}`
     // collapses two distinct tasks whose first 80 chars happen to match. With
     // scheduleId-keyed dedup, both have `null` scheduleId and pass through.
@@ -304,7 +304,7 @@ describe("dedupeRetrievalsForRater", () => {
     expect(out.map((r) => r.id)).toEqual(["task-a", "task-b"]);
   });
 
-  test("Task: vs Session: with the same prefix → both kept (different memory types)", () => {
+  test("Task: vs Session: with the same prefix → both kept (different memory types)", async () => {
     // Both names share their first 80 chars after the type prefix; both have
     // null scheduleId (one-shot work). Must pass through.
     const sharedSuffix = "Refactor MCP tool list to use deferred discovery";
@@ -333,7 +333,7 @@ describe("dedupeRetrievalsForRater", () => {
     expect(out.map((r) => r.id)).toEqual(["task", "session"]);
   });
 
-  test("two different scheduled jobs surface in the same set → both representatives kept", () => {
+  test("two different scheduled jobs surface in the same set → both representatives kept", async () => {
     const rows: RetrievalRow[] = [
       { id: "j1-r2", name: "Task: Job One", content: "", scheduleId: "sched-1" },
       { id: "j1-r1", name: "Task: Job One", content: "", scheduleId: "sched-1" },
@@ -347,7 +347,7 @@ describe("dedupeRetrievalsForRater", () => {
     expect(out.map((r) => r.id)).toEqual(["j1-r2", "j2-r2"]);
   });
 
-  test("rows without scheduleId pass through unchanged (manual / file_index memories)", () => {
+  test("rows without scheduleId pass through unchanged (manual / file_index memories)", async () => {
     const rows: RetrievalRow[] = [
       { id: "m1", name: "Manual note", content: "", source: "manual" },
       { id: "m2", name: "Manual note", content: "", source: "manual" },
@@ -356,13 +356,13 @@ describe("dedupeRetrievalsForRater", () => {
     expect(dedupeRetrievalsForRater(rows)).toEqual(rows);
   });
 
-  test("empty input → empty output", () => {
+  test("empty input → empty output", async () => {
     expect(dedupeRetrievalsForRater([])).toEqual([]);
   });
 });
 
 describe("isLlmRaterEnabled", () => {
-  test("false when MEMORY_RATERS unset", () => {
+  test("false when MEMORY_RATERS unset", async () => {
     const prev = process.env.MEMORY_RATERS;
     delete process.env.MEMORY_RATERS;
     try {
@@ -372,7 +372,7 @@ describe("isLlmRaterEnabled", () => {
     }
   });
 
-  test("false when MEMORY_RATERS lacks 'llm'", () => {
+  test("false when MEMORY_RATERS lacks 'llm'", async () => {
     const prev = process.env.MEMORY_RATERS;
     process.env.MEMORY_RATERS = "implicit-citation,noop";
     try {
@@ -383,7 +383,7 @@ describe("isLlmRaterEnabled", () => {
     }
   });
 
-  test("true when MEMORY_RATERS includes 'llm'", () => {
+  test("true when MEMORY_RATERS includes 'llm'", async () => {
     const prev = process.env.MEMORY_RATERS;
     process.env.MEMORY_RATERS = "implicit-citation,llm";
     try {
@@ -396,7 +396,7 @@ describe("isLlmRaterEnabled", () => {
 });
 
 describe("registry: 'llm' is registered but not in SERVER_RATERS", () => {
-  test("getRegisteredRaters() with MEMORY_RATERS='llm' yields LlmRater", () => {
+  test("getRegisteredRaters() with MEMORY_RATERS='llm' yields LlmRater", async () => {
     const prev = process.env.MEMORY_RATERS;
     process.env.MEMORY_RATERS = "llm";
     try {
@@ -408,7 +408,7 @@ describe("registry: 'llm' is registered but not in SERVER_RATERS", () => {
     }
   });
 
-  test("'llm' is NOT in SERVER_RATERS — only worker-driven", () => {
+  test("'llm' is NOT in SERVER_RATERS — only worker-driven", async () => {
     expect(SERVER_RATERS.has("llm")).toBe(false);
   });
 });
@@ -418,7 +418,7 @@ describe("registry: 'llm' is registered but not in SERVER_RATERS", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("LlmRater.rate(ctx) — per-memory path with MockLlmRaterClient", () => {
-  test("name is 'llm'", () => {
+  test("name is 'llm'", async () => {
     const rater = new LlmRater(new MockLlmRaterClient({}));
     expect(rater.name).toBe("llm");
   });
@@ -546,8 +546,8 @@ async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
   throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
 
-function makeMemory(name: string): { id: string } {
-  return store.store({
+async function makeMemory(name: string): Promise<{ id: string }> {
+  return await store.store({
     agentId: agentA,
     scope: "agent",
     name,
@@ -556,8 +556,8 @@ function makeMemory(name: string): { id: string } {
   });
 }
 
-function insertRetrieval(taskId: string, memoryId: string): void {
-  getDb()
+async function insertRetrieval(taskId: string, memoryId: string): Promise<void> {
+  (await getDb())
     .prepare(
       `INSERT INTO memory_retrieval (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
        VALUES (?, ?, ?, NULL, ?, 0.85, ?)`,
@@ -565,8 +565,8 @@ function insertRetrieval(taskId: string, memoryId: string): void {
     .run(randomUUID(), taskId, agentA, memoryId, new Date().toISOString());
 }
 
-function readPosterior(id: string): { alpha: number; beta: number } {
-  const row = getDb()
+async function readPosterior(id: string): Promise<{ alpha: number; beta: number }> {
+  const row = (await getDb())
     .prepare<{ alpha: number; beta: number }, [string]>(
       "SELECT alpha, beta FROM agent_memory WHERE id = ?",
     )
@@ -575,8 +575,8 @@ function readPosterior(id: string): { alpha: number; beta: number } {
   return { alpha: row.alpha, beta: row.beta };
 }
 
-function getRatings(taskId: string) {
-  return getDb()
+async function getRatings(taskId: string) {
+  return (await getDb())
     .prepare<
       {
         memoryId: string;
@@ -614,6 +614,9 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
         HEARTBEAT_DISABLE: "true",
         OAUTH_KEEPALIVE_DISABLE: "true",
         ANONYMIZED_TELEMETRY: "false",
+        OPENAI_API_KEY: "",
+        EMBEDDING_API_KEY: "",
+        EMBEDDING_API_BASE_URL: "",
       },
       stdout: "ignore",
       stderr: "ignore",
@@ -629,10 +632,10 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     // spawned server reads from TEST_DB_PATH — defensive even if today's CI
     // ordering happens to leave `db` null here.
     closeDb();
-    initDb(TEST_DB_PATH);
-    createAgent({ id: agentA, name: "Rater LLM Test", isLead: false, status: "idle" });
+    await initDb(TEST_DB_PATH);
+    await createAgent({ id: agentA, name: "Rater LLM Test", isLead: false, status: "idle" });
 
-    const insertTask = getDb().prepare(
+    const insertTask = (await getDb()).prepare(
       `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
     );
@@ -661,15 +664,15 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     }
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM memory_rating");
-    getDb().run("DELETE FROM memory_retrieval");
-    getDb().run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
+  beforeEach(async () => {
+    (await getDb()).run("DELETE FROM memory_rating");
+    (await getDb()).run("DELETE FROM memory_retrieval");
+    (await getDb()).run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
   });
 
   test("fetchRetrievalsForTask returns rows for the requesting agent", async () => {
-    const m = makeMemory("retr-fetch-1");
-    insertRetrieval(taskA, m.id);
+    const m = await makeMemory("retr-fetch-1");
+    await insertRetrieval(taskA, m.id);
     const rows = await fetchRetrievalsForTask({
       apiUrl: BASE,
       apiKey: API_KEY,
@@ -691,14 +694,14 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
   });
 
   test("postRatings → applies events; alpha/beta posteriors move per mocked generateObject result", async () => {
-    const useful = makeMemory("piggyback-useful");
-    const misleading = makeMemory("piggyback-misleading");
-    const neutral = makeMemory("piggyback-neutral");
+    const useful = await makeMemory("piggyback-useful");
+    const misleading = await makeMemory("piggyback-misleading");
+    const neutral = await makeMemory("piggyback-neutral");
 
     // Worker has retrieved these three.
-    insertRetrieval(taskA, useful.id);
-    insertRetrieval(taskA, misleading.id);
-    insertRetrieval(taskA, neutral.id);
+    await insertRetrieval(taskA, useful.id);
+    await insertRetrieval(taskA, misleading.id);
+    await insertRetrieval(taskA, neutral.id);
 
     // Simulate hook flow: fetch retrievals, run schema validation against a
     // mocked `generateObject` result (object — not stringified envelope —
@@ -747,11 +750,11 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     // useful: signal=+1 → alpha += 0.8
     // misleading: signal=-1 → beta += 0.8
     // neutral: signal=0 → no shift
-    expect(readPosterior(useful.id)).toEqual({ alpha: 1.8, beta: 1.0 });
-    expect(readPosterior(misleading.id)).toEqual({ alpha: 1.0, beta: 1.8 });
-    expect(readPosterior(neutral.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+    expect(await readPosterior(useful.id)).toEqual({ alpha: 1.8, beta: 1.0 });
+    expect(await readPosterior(misleading.id)).toEqual({ alpha: 1.0, beta: 1.8 });
+    expect(await readPosterior(neutral.id)).toEqual({ alpha: 1.0, beta: 1.0 });
 
-    const ratings = getRatings(taskA);
+    const ratings = await getRatings(taskA);
     expect(ratings).toHaveLength(3);
     for (const row of ratings) {
       expect(row.source).toBe("llm");
@@ -762,8 +765,8 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
   });
 
   test("hallucinated memoryId is dropped before POST (defence-in-depth)", async () => {
-    const real = makeMemory("piggyback-real");
-    insertRetrieval(taskB, real.id);
+    const real = await makeMemory("piggyback-real");
+    await insertRetrieval(taskB, real.id);
     const retrievals = await fetchRetrievalsForTask({
       apiUrl: BASE,
       apiKey: API_KEY,
@@ -788,12 +791,12 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
       events,
     });
     expect(r.ok).toBe(true);
-    expect(getRatings(taskB)).toHaveLength(1);
+    expect(await getRatings(taskB)).toHaveLength(1);
   });
 
   test("negative path: simulated hook with MEMORY_RATERS unset → no /api/memory/rate call", async () => {
-    const m = makeMemory("piggyback-negative");
-    insertRetrieval(taskA, m.id);
+    const m = await makeMemory("piggyback-negative");
+    await insertRetrieval(taskA, m.id);
 
     const prev = process.env.MEMORY_RATERS;
     delete process.env.MEMORY_RATERS;
@@ -826,13 +829,13 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     }
 
     // No memory_rating rows for taskA in this test.
-    expect(getRatings(taskA)).toHaveLength(0);
-    expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+    expect(await getRatings(taskA)).toHaveLength(0);
+    expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
   });
 
   test("postRatings logs but does not throw on 4xx (best-effort)", async () => {
-    const m = makeMemory("piggyback-4xx");
-    insertRetrieval(taskA, m.id);
+    const m = await makeMemory("piggyback-4xx");
+    await insertRetrieval(taskA, m.id);
 
     const evt: RatingEvent = {
       memoryId: m.id,
@@ -852,12 +855,12 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     expect(r.ok).toBe(false);
     expect(r.status).toBeGreaterThanOrEqual(400);
     // Posterior unchanged — 400 means nothing was applied.
-    expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+    expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
   });
 
   test("OPENROUTER_API_KEY unset → hook is a no-op (no fetch, no index, no rate POST)", async () => {
-    const m = makeMemory("piggyback-openrouter-unset");
-    insertRetrieval(taskA, m.id);
+    const m = await makeMemory("piggyback-openrouter-unset");
+    await insertRetrieval(taskA, m.id);
 
     // Mirror the hook's outer gate exactly: when OPENROUTER_API_KEY is unset,
     // the entire summary + rating block must early-return. No call to
@@ -893,16 +896,16 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     }
 
     // No memory_rating rows for taskA, posterior unchanged.
-    expect(getRatings(taskA)).toHaveLength(0);
-    expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+    expect(await getRatings(taskA)).toHaveLength(0);
+    expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
   });
 
   test("happy path: mocked generateObject result → postRatings called with expected events", async () => {
-    const useful = makeMemory("happy-useful");
-    const misleading = makeMemory("happy-misleading");
+    const useful = await makeMemory("happy-useful");
+    const misleading = await makeMemory("happy-misleading");
 
-    insertRetrieval(taskB, useful.id);
-    insertRetrieval(taskB, misleading.id);
+    await insertRetrieval(taskB, useful.id);
+    await insertRetrieval(taskB, misleading.id);
 
     const retrievals = await fetchRetrievalsForTask({
       apiUrl: BASE,

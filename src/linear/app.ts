@@ -16,7 +16,7 @@ export function resetLinear(): void {
   initialized = false;
 }
 
-export function initLinear(): boolean {
+export async function initLinear(): Promise<boolean> {
   if (initialized) return isLinearEnabled();
   initialized = true;
 
@@ -37,7 +37,7 @@ export function initLinear(): boolean {
   const redirectUri =
     process.env.LINEAR_REDIRECT_URI ?? `${apiBaseUrl}/api/trackers/linear/callback`;
 
-  upsertOAuthApp("linear", {
+  await upsertOAuthApp("linear", {
     clientId,
     clientSecret,
     authorizeUrl: "https://linear.app/oauth/authorize",

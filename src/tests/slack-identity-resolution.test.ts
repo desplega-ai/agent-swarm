@@ -80,9 +80,9 @@ function cleanupDb() {
   }
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   cleanupDb();
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(() => {
@@ -90,30 +90,34 @@ afterAll(() => {
   cleanupDb();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Wipe state between tests — full isolation. Identity-related tables only;
   // leave the schema and seeded singletons untouched.
-  const db = getDb();
+  const db = await getDb();
   db.exec("DELETE FROM user_identity_events");
   db.exec("DELETE FROM user_external_ids");
   db.exec("DELETE FROM users");
   db.exec("DELETE FROM kv_entries WHERE namespace LIKE 'integration:%'");
 });
 
-function countUsers(): number {
-  return getDb().prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM users").get()?.n ?? 0;
+async function countUsers(): Promise<number> {
+  return (
+    (await getDb()).prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM users").get()?.n ?? 0
+  );
 }
 
-function externalIdRows(): Array<{ kind: string; externalId: string; userId: string }> {
-  return getDb()
+async function externalIdRows(): Promise<
+  Array<{ kind: string; externalId: string; userId: string }>
+> {
+  return (await getDb())
     .prepare<{ kind: string; externalId: string; userId: string }, []>(
       "SELECT kind, externalId, userId FROM user_external_ids ORDER BY kind, externalId",
     )
     .all();
 }
 
-function identityEventTypes(userId: string): string[] {
-  return getDb()
+async function identityEventTypes(userId: string): Promise<string[]> {
+  return (await getDb())
     .prepare<{ eventType: string }, string>(
       "SELECT eventType FROM user_identity_events WHERE userId = ? ORDER BY createdAt ASC, rowid ASC",
     )
@@ -142,13 +146,13 @@ describe("resolveSlackUserId — three-step cascade", () => {
     });
 
     expect(userId).toBeDefined();
-    expect(countUsers()).toBe(1);
+    expect(await countUsers()).toBe(1);
 
-    const ext = externalIdRows();
+    const ext = await externalIdRows();
     expect(ext).toHaveLength(1);
     expect(ext[0]).toMatchObject({ kind: "slack", externalId: "U_HUMAN", userId });
 
-    const events = identityEventTypes(userId!);
+    const events = await identityEventTypes(userId!);
     // Brand-new email triggers two `identity_added` events:
     //   * `findOrCreateUserByEmail` creates the user → `identity_added`
     //   * `linkIdentity('slack', ...)` adds the alias → `identity_added`
@@ -175,8 +179,8 @@ describe("resolveSlackUserId — three-step cascade", () => {
     });
 
     expect(second).toBe(first);
-    expect(countUsers()).toBe(1);
-    expect(externalIdRows()).toHaveLength(1);
+    expect(await countUsers()).toBe(1);
+    expect(await externalIdRows()).toHaveLength(1);
     // The second call must hit the alias fast path — `client.users.info` was
     // called exactly once (on the first lookup).
     expect(callCounts.U_HUMAN).toBe(1);
@@ -198,10 +202,10 @@ describe("resolveSlackUserId — three-step cascade", () => {
     });
 
     expect(userId).toBeUndefined();
-    expect(countUsers()).toBe(0);
-    expect(externalIdRows()).toHaveLength(0);
+    expect(await countUsers()).toBe(0);
+    expect(await externalIdRows()).toHaveLength(0);
 
-    const meta = getKv("integration:unmapped:slack", "U_BOT:meta");
+    const meta = await getKv("integration:unmapped:slack", "U_BOT:meta");
     expect(meta).not.toBeNull();
     expect(meta!.valueType).toBe("json");
     const metaValue = meta!.value as {
@@ -214,7 +218,7 @@ describe("resolveSlackUserId — three-step cascade", () => {
     expect(metaValue.lastSeenAt).toBeTruthy();
     expect(meta!.expiresAt).not.toBeNull();
 
-    const count = getKv("integration:unmapped:slack", "U_BOT:count");
+    const count = await getKv("integration:unmapped:slack", "U_BOT:count");
     expect(count).not.toBeNull();
     expect(count!.valueType).toBe("integer");
     expect(count!.value).toBe(1);
@@ -235,10 +239,10 @@ describe("resolveSlackUserId — three-step cascade", () => {
       sampleContext: "second",
     });
 
-    const meta = getKv("integration:unmapped:slack", "U_BOT:meta");
+    const meta = await getKv("integration:unmapped:slack", "U_BOT:meta");
     expect((meta!.value as { sampleContext: string }).sampleContext).toBe("second");
 
-    const count = getKv("integration:unmapped:slack", "U_BOT:count");
+    const count = await getKv("integration:unmapped:slack", "U_BOT:count");
     expect(count!.value).toBe(2);
   });
 
@@ -250,7 +254,7 @@ describe("resolveSlackUserId — three-step cascade", () => {
     });
 
     // Seed an existing user with the same email — no slack alias yet.
-    const db = getDb();
+    const db = await getDb();
     db.prepare(
       `INSERT INTO users (id, name, email, emailAliases, status, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, 'active', ?, ?)`,
@@ -270,14 +274,14 @@ describe("resolveSlackUserId — three-step cascade", () => {
 
     // Auto-merge: cascade lands on the existing row, no new `users` insert.
     expect(userId).toBe("existing-id");
-    expect(countUsers()).toBe(1);
+    expect(await countUsers()).toBe(1);
 
     // One slack alias linked to the pre-existing user.
-    const identities = getUserIdentities("existing-id");
+    const identities = await getUserIdentities("existing-id");
     expect(identities).toEqual([{ kind: "slack", externalId: "U_HUMAN" }]);
 
     // Audit trail: auto_merge (by email) + identity_added (alias link).
-    expect(identityEventTypes("existing-id")).toEqual(["auto_merge", "identity_added"]);
+    expect(await identityEventTypes("existing-id")).toEqual(["auto_merge", "identity_added"]);
   });
 });
 
@@ -295,7 +299,7 @@ describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
     expect(callCounts.U_OK).toBe(1);
 
     // Cached row carries the 24h TTL anchor.
-    const cached = getKv("integration:user-enrichment:slack", "U_OK");
+    const cached = await getKv("integration:user-enrichment:slack", "U_OK");
     expect(cached).not.toBeNull();
     expect(cached!.expiresAt).not.toBeNull();
     expect(cached!.expiresAt! - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1000);
@@ -313,7 +317,7 @@ describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
     expect(callCounts.U_ERR).toBe(2);
 
     // Nothing persisted.
-    expect(getKv("integration:user-enrichment:slack", "U_ERR")).toBeNull();
+    expect(await getKv("integration:user-enrichment:slack", "U_ERR")).toBeNull();
   });
 
   test("no-email profile → no cache, second call still calls the API", async () => {
@@ -328,7 +332,7 @@ describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
     expect(second).toBeNull();
     expect(callCounts.U_NOEMAIL).toBe(2);
 
-    expect(getKv("integration:user-enrichment:slack", "U_NOEMAIL")).toBeNull();
+    expect(await getKv("integration:user-enrichment:slack", "U_NOEMAIL")).toBeNull();
   });
 });
 
@@ -342,7 +346,7 @@ describe("findUserByExternalId — sanity check after cascade", () => {
       sampleEventType: "message",
       sampleContext: "test",
     });
-    const looked = findUserByExternalId("slack", "U_HUMAN");
+    const looked = await findUserByExternalId("slack", "U_HUMAN");
     expect(looked).not.toBeNull();
     expect(looked!.id).toBe(id);
   });

@@ -148,7 +148,7 @@ export async function handleConfig(
     const parsed = await getResolvedConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const configs = getResolvedConfig(
+    const configs = await getResolvedConfig(
       parsed.query.agentId || undefined,
       parsed.query.repoId || undefined,
     );
@@ -194,7 +194,7 @@ export async function handleConfig(
     const parsed = await getConfigById.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const config = getSwarmConfigById(parsed.params.id);
+    const config = await getSwarmConfigById(parsed.params.id);
     if (!config) {
       jsonError(res, "Config not found", 404);
       return true;
@@ -208,7 +208,7 @@ export async function handleConfig(
     const parsed = await listConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const configs = getSwarmConfigs({
+    const configs = await getSwarmConfigs({
       scope: parsed.query.scope || undefined,
       scopeId: parsed.query.scopeId || undefined,
     });
@@ -244,7 +244,7 @@ export async function handleConfig(
 
     try {
       const includeSecrets = queryParams.get("includeSecrets") === "true";
-      const config = upsertSwarmConfig({
+      const config = await upsertSwarmConfig({
         scope,
         scopeId: scopeId || null,
         key,
@@ -271,12 +271,12 @@ export async function handleConfig(
   if (deleteConfig.match(req.method, pathSegments)) {
     const parsed = await deleteConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const existing = getSwarmConfigLookupById(parsed.params.id);
+    const existing = await getSwarmConfigLookupById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Config not found", 404);
       return true;
     }
-    const deleted = deleteSwarmConfig(parsed.params.id);
+    const deleted = await deleteSwarmConfig(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Config not found", 404);
       return true;

@@ -28,7 +28,7 @@ export const registerGetSwarmTool = (server: McpServer) => {
       }),
     },
     async ({ includeFull }, requestInfo, _meta) => {
-      const agents = getAllAgents({ slim: !includeFull });
+      const agents = await getAllAgents({ slim: !includeFull });
 
       return {
         content: [

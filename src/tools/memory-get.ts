@@ -24,7 +24,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
       }),
     },
     async ({ memoryId }, requestInfo, _meta) => {
-      const memory = getMemoryStore().get(memoryId);
+      const memory = await getMemoryStore().get(memoryId);
 
       if (!memory) {
         return {

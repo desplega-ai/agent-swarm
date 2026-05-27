@@ -33,11 +33,11 @@ const issueDeleteHandler = spyOn(syncModule, "handleIssueDeleteEvent").mockResol
 const { handleJiraWebhook, isDuplicateDelivery, synthesizeDeliveryId, verifyJiraWebhookToken } =
   await import("../jira/webhook");
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
   process.env.JIRA_WEBHOOK_TOKEN = TEST_TOKEN;
   // Seed an oauth app so any nested calls don't blow up.
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("jira", {
     clientId: "client-id",
     clientSecret: "client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",
@@ -56,12 +56,12 @@ afterAll(async () => {
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   issueHandler.mockClear();
   commentHandler.mockClear();
   issueDeleteHandler.mockClear();
   // Reset tracker_sync rows
-  getDb().query("DELETE FROM tracker_sync").run();
+  (await getDb()).query("DELETE FROM tracker_sync").run();
 });
 
 afterEach(() => {
@@ -117,45 +117,45 @@ describe("synthesizeDeliveryId", () => {
 });
 
 describe("DB-persisted dedup (hasTrackerDelivery + markTrackerDelivery)", () => {
-  test("round-trip: marked delivery is found, unknown delivery is not", () => {
-    createTrackerSync({
+  test("round-trip: marked delivery is found, unknown delivery is not", async () => {
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "task-1",
       externalId: "10001",
       externalIdentifier: "KAN-1",
     });
-    expect(hasTrackerDelivery("jira", "delivery-abc")).toBe(false);
-    markTrackerDelivery("jira", "task", "10001", "delivery-abc");
-    expect(hasTrackerDelivery("jira", "delivery-abc")).toBe(true);
+    expect(await hasTrackerDelivery("jira", "delivery-abc")).toBe(false);
+    await markTrackerDelivery("jira", "task", "10001", "delivery-abc");
+    expect(await hasTrackerDelivery("jira", "delivery-abc")).toBe(true);
   });
 
-  test("hasTrackerDelivery returns false for empty/null deliveryId", () => {
-    expect(hasTrackerDelivery("jira", null)).toBe(false);
-    expect(hasTrackerDelivery("jira", "")).toBe(false);
-    expect(hasTrackerDelivery("jira", undefined)).toBe(false);
+  test("hasTrackerDelivery returns false for empty/null deliveryId", async () => {
+    expect(await hasTrackerDelivery("jira", null)).toBe(false);
+    expect(await hasTrackerDelivery("jira", "")).toBe(false);
+    expect(await hasTrackerDelivery("jira", undefined)).toBe(false);
   });
 
-  test("dedup state is durable: marked deliveries survive any number of subsequent reads", () => {
+  test("dedup state is durable: marked deliveries survive any number of subsequent reads", async () => {
     // We can't fully simulate a process restart in-process (the test harness
     // uses a deserialized in-memory template), but the storage is the
     // tracker_sync table — so as long as the row stays, dedup works. Verify
     // the data persists across many independent reads (the same property a
     // restart would test against the underlying store).
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "task-restart",
       externalId: "10099",
       externalIdentifier: "KAN-99",
     });
-    markTrackerDelivery("jira", "task", "10099", "persistent-id");
+    await markTrackerDelivery("jira", "task", "10099", "persistent-id");
     for (let i = 0; i < 5; i++) {
-      expect(hasTrackerDelivery("jira", "persistent-id")).toBe(true);
+      expect(await hasTrackerDelivery("jira", "persistent-id")).toBe(true);
     }
     // And the row exists in the underlying SQL store (proves it's not just a
     // process-local Map).
-    const row = getDb()
+    const row = (await getDb())
       .query("SELECT lastDeliveryId FROM tracker_sync WHERE externalId = '10099'")
       .get() as { lastDeliveryId: string };
     expect(row.lastDeliveryId).toBe("persistent-id");
@@ -251,7 +251,7 @@ describe("handleJiraWebhook — dispatcher routing", () => {
 
   test("duplicate delivery short-circuits (200 + 'duplicate')", async () => {
     // Pre-stamp the delivery on a tracker_sync row.
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "task-dup",
@@ -261,9 +261,9 @@ describe("handleJiraWebhook — dispatcher routing", () => {
     const body = { webhookEvent: "jira:issue_updated", timestamp: 6, issue: { id: "10006" } };
     const raw = JSON.stringify(body);
     const did = synthesizeDeliveryId(body, raw);
-    markTrackerDelivery("jira", "task", "10006", did);
+    await markTrackerDelivery("jira", "task", "10006", did);
 
-    expect(isDuplicateDelivery(did)).toBe(true);
+    expect(await isDuplicateDelivery(did)).toBe(true);
 
     const result = await handleJiraWebhook(TEST_TOKEN, raw);
     expect(result.status).toBe(200);

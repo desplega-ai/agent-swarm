@@ -44,7 +44,7 @@ async function handleRequest(req: {
       return { status: 400, body: { error: "Missing or invalid 'claudeSessionId' field" } };
     }
 
-    const task = updateTaskClaudeSessionId(taskId, reqBody.claudeSessionId);
+    const task = await updateTaskClaudeSessionId(taskId, reqBody.claudeSessionId);
     if (!task) {
       return { status: 404, body: { error: "Task not found" } };
     }
@@ -60,7 +60,7 @@ async function handleRequest(req: {
     pathSegments[2]
   ) {
     const taskId = pathSegments[2];
-    const task = getTaskById(taskId);
+    const task = await getTaskById(taskId);
     if (!task) {
       return { status: 404, body: { error: "Task not found" } };
     }
@@ -78,7 +78,7 @@ async function handleRequest(req: {
     if (!reqBody.task) {
       return { status: 400, body: { error: "Missing 'task' field" } };
     }
-    const task = createTaskExtended(reqBody.task, {
+    const task = await createTaskExtended(reqBody.task, {
       agentId: reqBody.agentId || undefined,
       parentTaskId: reqBody.parentTaskId || undefined,
       source: "api",
@@ -126,22 +126,22 @@ describe("Session Attachment", () => {
       // File doesn't exist
     }
 
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     // Create shared agents for tests
-    createAgent({
+    await createAgent({
       id: "lead-session-test",
       name: "Lead Agent",
       isLead: true,
       status: "idle",
     });
-    createAgent({
+    await createAgent({
       id: "worker-a-session",
       name: "Worker A",
       isLead: false,
       status: "idle",
     });
-    createAgent({
+    await createAgent({
       id: "worker-b-session",
       name: "Worker B",
       isLead: false,
@@ -169,11 +169,11 @@ describe("Session Attachment", () => {
   });
 
   describe("DB Layer — Migration", () => {
-    test("parentTaskId and claudeSessionId columns exist after initDb", () => {
-      const task = createTaskExtended("Test migration columns", {
+    test("parentTaskId and claudeSessionId columns exist after initDb", async () => {
+      const task = await createTaskExtended("Test migration columns", {
         creatorAgentId: "lead-session-test",
       });
-      const fetched = getTaskById(task.id);
+      const fetched = await getTaskById(task.id);
       expect(fetched).not.toBeNull();
       // Fields exist (undefined since not set)
       expect(fetched?.parentTaskId).toBeUndefined();
@@ -182,60 +182,60 @@ describe("Session Attachment", () => {
   });
 
   describe("DB Layer — createTaskExtended with parentTaskId", () => {
-    test("should persist parentTaskId when provided", () => {
-      const parentTask = createTaskExtended("Parent task", {
+    test("should persist parentTaskId when provided", async () => {
+      const parentTask = await createTaskExtended("Parent task", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
       });
 
-      const childTask = createTaskExtended("Child task", {
+      const childTask = await createTaskExtended("Child task", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
         parentTaskId: parentTask.id,
       });
 
-      const fetched = getTaskById(childTask.id);
+      const fetched = await getTaskById(childTask.id);
       expect(fetched).not.toBeNull();
       expect(fetched?.parentTaskId).toBe(parentTask.id);
     });
 
-    test("claudeSessionId should NOT be set at creation time", () => {
-      const task = createTaskExtended("Task without session", {
+    test("claudeSessionId should NOT be set at creation time", async () => {
+      const task = await createTaskExtended("Task without session", {
         creatorAgentId: "lead-session-test",
       });
 
-      const fetched = getTaskById(task.id);
+      const fetched = await getTaskById(task.id);
       expect(fetched?.claudeSessionId).toBeUndefined();
     });
   });
 
   describe("DB Layer — updateTaskClaudeSessionId", () => {
-    test("should set claudeSessionId on existing task", () => {
-      const task = createTaskExtended("Task for session ID", {
+    test("should set claudeSessionId on existing task", async () => {
+      const task = await createTaskExtended("Task for session ID", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
       });
 
       const sessionId = "test-session-id-12345";
-      const updated = updateTaskClaudeSessionId(task.id, sessionId);
+      const updated = await updateTaskClaudeSessionId(task.id, sessionId);
 
       expect(updated).not.toBeNull();
       expect(updated?.claudeSessionId).toBe(sessionId);
 
       // Verify via getTaskById
-      const fetched = getTaskById(task.id);
+      const fetched = await getTaskById(task.id);
       expect(fetched?.claudeSessionId).toBe(sessionId);
     });
 
-    test("should return null for non-existent task", () => {
-      const result = updateTaskClaudeSessionId("non-existent-id", "some-session");
+    test("should return null for non-existent task", async () => {
+      const result = await updateTaskClaudeSessionId("non-existent-id", "some-session");
       expect(result).toBeNull();
     });
   });
 
   describe("API Layer — PUT /api/tasks/:id/claude-session", () => {
     test("should update claudeSessionId and return 200", async () => {
-      const task = createTaskExtended("Task for API session update", {
+      const task = await createTaskExtended("Task for API session update", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
       });
@@ -263,7 +263,7 @@ describe("Session Attachment", () => {
     });
 
     test("should return 400 for missing claudeSessionId", async () => {
-      const task = createTaskExtended("Task for bad request", {
+      const task = await createTaskExtended("Task for bad request", {
         creatorAgentId: "lead-session-test",
       });
 
@@ -279,7 +279,7 @@ describe("Session Attachment", () => {
 
   describe("API Layer — POST /api/tasks with parentTaskId", () => {
     test("should create task with parentTaskId via API", async () => {
-      const parentTask = createTaskExtended("API parent task", {
+      const parentTask = await createTaskExtended("API parent task", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
       });
@@ -302,19 +302,19 @@ describe("Session Attachment", () => {
 
   describe("API Layer — GET /api/tasks/:id returns new fields", () => {
     test("should return parentTaskId and claudeSessionId", async () => {
-      const parentTask = createTaskExtended("Parent for GET test", {
+      const parentTask = await createTaskExtended("Parent for GET test", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
       });
 
-      const childTask = createTaskExtended("Child for GET test", {
+      const childTask = await createTaskExtended("Child for GET test", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
         parentTaskId: parentTask.id,
       });
 
       // Set session ID on parent
-      updateTaskClaudeSessionId(parentTask.id, "parent-session-123");
+      await updateTaskClaudeSessionId(parentTask.id, "parent-session-123");
 
       // GET child task
       const childResponse = await fetch(`${baseUrl}/api/tasks/${childTask.id}`);
@@ -334,9 +334,9 @@ describe("Session Attachment", () => {
   });
 
   describe("Auto-Routing — send-task logic simulation", () => {
-    test("should auto-route to parent's worker when no agentId", () => {
+    test("should auto-route to parent's worker when no agentId", async () => {
       // Simulate send-task auto-routing: parent assigned to worker A
-      const parentTask = createTaskExtended("Parent for routing", {
+      const parentTask = await createTaskExtended("Parent for routing", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
       });
@@ -347,7 +347,7 @@ describe("Session Attachment", () => {
       const agentId = undefined; // No explicit agentId
 
       if (parentTaskId && !agentId) {
-        const parent = getTaskById(parentTaskId);
+        const parent = await getTaskById(parentTaskId);
         if (parent?.agentId) {
           effectiveAgentId = parent.agentId;
         }
@@ -356,19 +356,19 @@ describe("Session Attachment", () => {
       expect(effectiveAgentId).toBe("worker-a-session");
 
       // Create child with auto-routed agentId
-      const childTask = createTaskExtended("Child routed task", {
+      const childTask = await createTaskExtended("Child routed task", {
         creatorAgentId: "lead-session-test",
         agentId: effectiveAgentId,
         parentTaskId: parentTask.id,
       });
 
-      const fetched = getTaskById(childTask.id);
+      const fetched = await getTaskById(childTask.id);
       expect(fetched?.agentId).toBe("worker-a-session");
       expect(fetched?.parentTaskId).toBe(parentTask.id);
     });
 
-    test("should use explicit agentId over auto-routing", () => {
-      const parentTask = createTaskExtended("Parent for override", {
+    test("should use explicit agentId over auto-routing", async () => {
+      const parentTask = await createTaskExtended("Parent for override", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
       });
@@ -379,7 +379,7 @@ describe("Session Attachment", () => {
       const agentId: string | undefined = "worker-b-session";
 
       if (parentTaskId && !agentId) {
-        const parent = getTaskById(parentTaskId);
+        const parent = await getTaskById(parentTaskId);
         if (parent?.agentId) {
           effectiveAgentId = parent.agentId;
         }
@@ -387,19 +387,19 @@ describe("Session Attachment", () => {
 
       expect(effectiveAgentId).toBe("worker-b-session");
 
-      const childTask = createTaskExtended("Child override task", {
+      const childTask = await createTaskExtended("Child override task", {
         creatorAgentId: "lead-session-test",
         agentId: effectiveAgentId,
         parentTaskId: parentTask.id,
       });
 
-      const fetched = getTaskById(childTask.id);
+      const fetched = await getTaskById(childTask.id);
       expect(fetched?.agentId).toBe("worker-b-session");
     });
 
-    test("should not auto-route when parent has no agentId", () => {
+    test("should not auto-route when parent has no agentId", async () => {
       // Parent is unassigned (pool task)
-      const parentTask = createTaskExtended("Unassigned parent", {
+      const parentTask = await createTaskExtended("Unassigned parent", {
         creatorAgentId: "lead-session-test",
       });
 
@@ -408,7 +408,7 @@ describe("Session Attachment", () => {
       const agentId = undefined;
 
       if (parentTaskId && !agentId) {
-        const parent = getTaskById(parentTaskId);
+        const parent = await getTaskById(parentTaskId);
         if (parent?.agentId) {
           effectiveAgentId = parent.agentId;
         }
@@ -420,20 +420,20 @@ describe("Session Attachment", () => {
   });
 
   describe("Edge Cases", () => {
-    test("parent with no claudeSessionId returns null gracefully", () => {
-      const parentTask = createTaskExtended("Parent without session", {
+    test("parent with no claudeSessionId returns null gracefully", async () => {
+      const parentTask = await createTaskExtended("Parent without session", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
       });
 
-      const fetched = getTaskById(parentTask.id);
+      const fetched = await getTaskById(parentTask.id);
       expect(fetched).not.toBeNull();
       expect(fetched?.claudeSessionId).toBeUndefined();
     });
 
-    test("parentTaskId referencing non-existent task still creates task", () => {
+    test("parentTaskId referencing non-existent task still creates task", async () => {
       const bogusParentId = "00000000-0000-0000-0000-000000000000";
-      const childTask = createTaskExtended("Child with bogus parent", {
+      const childTask = await createTaskExtended("Child with bogus parent", {
         creatorAgentId: "lead-session-test",
         parentTaskId: bogusParentId,
       });
@@ -442,7 +442,7 @@ describe("Session Attachment", () => {
       expect(childTask.parentTaskId).toBe(bogusParentId);
 
       // Verify the parent doesn't exist
-      const parent = getTaskById(bogusParentId);
+      const parent = await getTaskById(bogusParentId);
       expect(parent).toBeNull();
     });
   });
@@ -502,18 +502,18 @@ describe("Session Attachment", () => {
       expect(tracker.isSessionNotFound()).toBe(true);
     });
 
-    test("stale session ID in DB should be detectable for retry", () => {
+    test("stale session ID in DB should be detectable for retry", async () => {
       // Simulate: parent has session ID in DB but session data is gone from disk
-      const parentTask = createTaskExtended("Parent with stale session", {
+      const parentTask = await createTaskExtended("Parent with stale session", {
         creatorAgentId: "lead-session-test",
         agentId: "worker-a-session",
       });
 
       const staleSessionId = "stale-session-00000000";
-      updateTaskClaudeSessionId(parentTask.id, staleSessionId);
+      await updateTaskClaudeSessionId(parentTask.id, staleSessionId);
 
       // Verify the stale session ID is in DB
-      const fetched = getTaskById(parentTask.id);
+      const fetched = await getTaskById(parentTask.id);
       expect(fetched?.claudeSessionId).toBe(staleSessionId);
 
       // Simulate the error that Claude CLI would produce

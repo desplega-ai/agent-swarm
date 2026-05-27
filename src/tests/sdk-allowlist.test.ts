@@ -23,8 +23,8 @@ describe("script SDK allowlist", () => {
 
   beforeAll(async () => {
     await removeDbFiles(TEST_DB_PATH);
-    initDb(TEST_DB_PATH);
-    const server = createServer();
+    await initDb(TEST_DB_PATH);
+    const server = await createServer();
     registeredTools = (server as unknown as { _registeredTools: Record<string, unknown> })
       ._registeredTools;
   });

@@ -55,7 +55,7 @@ export const registerGetConfigTool = (server: McpServer) => {
       }
 
       try {
-        let configs = getResolvedConfig(agentId, repoId);
+        let configs = await getResolvedConfig(agentId, repoId);
 
         if (key) {
           configs = configs.filter((c) => c.key === key);

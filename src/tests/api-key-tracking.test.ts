@@ -122,9 +122,9 @@ describe("resolveCredentialPools", () => {
 const TEST_DB = `./test-api-key-tracking-${Date.now()}.sqlite`;
 
 describe("API key tracking DB queries", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.DB_PATH = TEST_DB;
-    initDb(TEST_DB);
+    await initDb(TEST_DB);
   });
 
   afterAll(async () => {
@@ -134,67 +134,67 @@ describe("API key tracking DB queries", () => {
     await unlink(`${TEST_DB}-shm`).catch(() => {});
   });
 
-  test("recordKeyUsage creates key status record", () => {
-    recordKeyUsage("ANTHROPIC_API_KEY", "aaa11", 0, null);
-    const statuses = getKeyStatuses("ANTHROPIC_API_KEY");
+  test("recordKeyUsage creates key status record", async () => {
+    await recordKeyUsage("ANTHROPIC_API_KEY", "aaa11", 0, null);
+    const statuses = await getKeyStatuses("ANTHROPIC_API_KEY");
     expect(statuses.length).toBe(1);
     expect(statuses[0]!.keySuffix).toBe("aaa11");
     expect(statuses[0]!.totalUsageCount).toBe(1);
     expect(statuses[0]!.status).toBe("available");
   });
 
-  test("recordKeyUsage increments usage count on repeated calls", () => {
-    recordKeyUsage("ANTHROPIC_API_KEY", "aaa11", 0, null);
-    recordKeyUsage("ANTHROPIC_API_KEY", "aaa11", 0, null);
-    const statuses = getKeyStatuses("ANTHROPIC_API_KEY");
+  test("recordKeyUsage increments usage count on repeated calls", async () => {
+    await recordKeyUsage("ANTHROPIC_API_KEY", "aaa11", 0, null);
+    await recordKeyUsage("ANTHROPIC_API_KEY", "aaa11", 0, null);
+    const statuses = await getKeyStatuses("ANTHROPIC_API_KEY");
     expect(statuses[0]!.totalUsageCount).toBe(3); // 1 from first test + 2
   });
 
-  test("markKeyRateLimited sets status and timestamp", () => {
+  test("markKeyRateLimited sets status and timestamp", async () => {
     const until = new Date(Date.now() + 300_000).toISOString();
-    markKeyRateLimited("ANTHROPIC_API_KEY", "aaa11", 0, until);
-    const statuses = getKeyStatuses("ANTHROPIC_API_KEY");
+    await markKeyRateLimited("ANTHROPIC_API_KEY", "aaa11", 0, until);
+    const statuses = await getKeyStatuses("ANTHROPIC_API_KEY");
     expect(statuses[0]!.status).toBe("rate_limited");
     expect(statuses[0]!.rateLimitedUntil).toBe(until);
     expect(statuses[0]!.rateLimitCount).toBe(1);
   });
 
-  test("getAvailableKeyIndices excludes rate-limited keys", () => {
+  test("getAvailableKeyIndices excludes rate-limited keys", async () => {
     // Key 0 is rate-limited from above, add key 1 as available
-    recordKeyUsage("ANTHROPIC_API_KEY", "bbb22", 1, null);
-    const available = getAvailableKeyIndices("ANTHROPIC_API_KEY", 3);
+    await recordKeyUsage("ANTHROPIC_API_KEY", "bbb22", 1, null);
+    const available = await getAvailableKeyIndices("ANTHROPIC_API_KEY", 3);
     expect(available).toContain(1);
     expect(available).toContain(2); // Never tracked, so available
     expect(available).not.toContain(0); // Rate-limited
   });
 
-  test("getAvailableKeyIndices auto-clears expired rate limits", () => {
+  test("getAvailableKeyIndices auto-clears expired rate limits", async () => {
     // Mark key as rate-limited until the past
     const pastDate = new Date(Date.now() - 1000).toISOString();
-    markKeyRateLimited("ANTHROPIC_API_KEY", "ccc33", 2, pastDate);
+    await markKeyRateLimited("ANTHROPIC_API_KEY", "ccc33", 2, pastDate);
 
     // Should auto-clear and return as available
-    const available = getAvailableKeyIndices("ANTHROPIC_API_KEY", 3);
+    const available = await getAvailableKeyIndices("ANTHROPIC_API_KEY", 3);
     expect(available).toContain(2);
   });
 
-  test("getKeyStatuses filters by keyType", () => {
-    recordKeyUsage("CLAUDE_CODE_OAUTH_TOKEN", "ooo11", 0, null);
-    const anthStatuses = getKeyStatuses("ANTHROPIC_API_KEY");
-    const oauthStatuses = getKeyStatuses("CLAUDE_CODE_OAUTH_TOKEN");
+  test("getKeyStatuses filters by keyType", async () => {
+    await recordKeyUsage("CLAUDE_CODE_OAUTH_TOKEN", "ooo11", 0, null);
+    const anthStatuses = await getKeyStatuses("ANTHROPIC_API_KEY");
+    const oauthStatuses = await getKeyStatuses("CLAUDE_CODE_OAUTH_TOKEN");
     expect(anthStatuses.every((s) => s.keyType === "ANTHROPIC_API_KEY")).toBe(true);
     expect(oauthStatuses.every((s) => s.keyType === "CLAUDE_CODE_OAUTH_TOKEN")).toBe(true);
   });
 
-  test("markKeyRateLimited increments rateLimitCount", () => {
+  test("markKeyRateLimited increments rateLimitCount", async () => {
     const until = new Date(Date.now() + 600_000).toISOString();
-    markKeyRateLimited("ANTHROPIC_API_KEY", "bbb22", 1, until);
-    const statuses = getKeyStatuses("ANTHROPIC_API_KEY");
+    await markKeyRateLimited("ANTHROPIC_API_KEY", "bbb22", 1, until);
+    const statuses = await getKeyStatuses("ANTHROPIC_API_KEY");
     const key1 = statuses.find((s) => s.keySuffix === "bbb22");
     expect(key1!.rateLimitCount).toBe(1);
 
-    markKeyRateLimited("ANTHROPIC_API_KEY", "bbb22", 1, until);
-    const statuses2 = getKeyStatuses("ANTHROPIC_API_KEY");
+    await markKeyRateLimited("ANTHROPIC_API_KEY", "bbb22", 1, until);
+    const statuses2 = await getKeyStatuses("ANTHROPIC_API_KEY");
     const key1b = statuses2.find((s) => s.keySuffix === "bbb22");
     expect(key1b!.rateLimitCount).toBe(2);
   });

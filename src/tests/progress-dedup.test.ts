@@ -15,10 +15,10 @@ describe("progress deduplication", () => {
   let agentId: string;
   let taskId: string;
 
-  beforeAll(() => {
-    initDb(TEST_DB_PATH);
+  beforeAll(async () => {
+    await initDb(TEST_DB_PATH);
 
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "Dedup Test Worker",
       description: "Test agent for progress deduplication",
       role: "worker",
@@ -29,7 +29,7 @@ describe("progress deduplication", () => {
     });
     agentId = agent.id;
 
-    const task = createTaskExtended("Test dedup task", {
+    const task = await createTaskExtended("Test dedup task", {
       agentId,
       source: "mcp",
       priority: 50,
@@ -48,17 +48,17 @@ describe("progress deduplication", () => {
     }
   });
 
-  test("updateTaskProgress stores progress and updates lastUpdatedAt", () => {
-    const result = updateTaskProgress(taskId, "Working on step 1");
+  test("updateTaskProgress stores progress and updates lastUpdatedAt", async () => {
+    const result = await updateTaskProgress(taskId, "Working on step 1");
     expect(result).not.toBeNull();
     expect(result!.progress).toBe("Working on step 1");
     expect(result!.lastUpdatedAt).toBeDefined();
   });
 
-  test("can detect duplicate progress by comparing task fields", () => {
+  test("can detect duplicate progress by comparing task fields", async () => {
     // First update
-    updateTaskProgress(taskId, "Working on step 2");
-    const task1 = getTaskById(taskId);
+    await updateTaskProgress(taskId, "Working on step 2");
+    const task1 = await getTaskById(taskId);
 
     // Simulate dedup logic (same as store-progress.ts)
     const progress = "Working on step 2";
@@ -70,9 +70,9 @@ describe("progress deduplication", () => {
     expect(isDuplicate).toBe(true);
   });
 
-  test("not a duplicate when progress text differs", () => {
-    updateTaskProgress(taskId, "Working on step 3");
-    const task1 = getTaskById(taskId);
+  test("not a duplicate when progress text differs", async () => {
+    await updateTaskProgress(taskId, "Working on step 3");
+    const task1 = await getTaskById(taskId);
 
     const isDuplicate =
       task1!.progress === "Different progress text" &&
@@ -82,9 +82,9 @@ describe("progress deduplication", () => {
     expect(isDuplicate).toBe(false);
   });
 
-  test("not a duplicate when lastUpdatedAt is old (>5 min)", () => {
-    updateTaskProgress(taskId, "Working on step 4");
-    const task1 = getTaskById(taskId);
+  test("not a duplicate when lastUpdatedAt is old (>5 min)", async () => {
+    await updateTaskProgress(taskId, "Working on step 4");
+    const task1 = await getTaskById(taskId);
 
     // Simulate old timestamp (6 minutes ago)
     const sixMinAgo = new Date(Date.now() - 6 * 60 * 1000).toISOString();

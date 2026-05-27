@@ -15,9 +15,9 @@ beforeAll(async () => {
   try {
     await unlink(TEST_DB_PATH);
   } catch {}
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 
-  createAgent({
+  await createAgent({
     id: "vcs-lead-001",
     name: "VcsTestLead",
     status: "idle",
@@ -39,8 +39,8 @@ afterAll(async () => {
 // ═══════════════════════════════════════════════════════
 
 describe("VCS columns in tasks", () => {
-  test("creates task with vcsProvider=github", () => {
-    const task = createTaskExtended("GitHub task", {
+  test("creates task with vcsProvider=github", async () => {
+    const task = await createTaskExtended("GitHub task", {
       source: "github",
       vcsProvider: "github",
       vcsRepo: "org/repo",
@@ -55,12 +55,12 @@ describe("VCS columns in tasks", () => {
     expect(task.vcsRepo).toBe("org/repo");
     expect(task.vcsNumber).toBe(42);
 
-    const retrieved = getTaskById(task.id);
+    const retrieved = await getTaskById(task.id);
     expect(retrieved?.vcsProvider).toBe("github");
   });
 
-  test("creates task with vcsProvider=gitlab", () => {
-    const task = createTaskExtended("GitLab task", {
+  test("creates task with vcsProvider=gitlab", async () => {
+    const task = await createTaskExtended("GitLab task", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
@@ -76,8 +76,8 @@ describe("VCS columns in tasks", () => {
     expect(task.vcsNumber).toBe(10);
   });
 
-  test("creates task without vcsProvider (null)", () => {
-    const task = createTaskExtended("Non-VCS task", {
+  test("creates task without vcsProvider (null)", async () => {
+    const task = await createTaskExtended("Non-VCS task", {
       source: "mcp",
     });
 
@@ -91,8 +91,8 @@ describe("VCS columns in tasks", () => {
 // ═══════════════════════════════════════════════════════
 
 describe("findTaskByVcs", () => {
-  test("finds github task by repo and number", () => {
-    createTaskExtended("GH findable", {
+  test("finds github task by repo and number", async () => {
+    await createTaskExtended("GH findable", {
       source: "github",
       vcsProvider: "github",
       vcsRepo: "findme/gh-repo",
@@ -100,13 +100,13 @@ describe("findTaskByVcs", () => {
       agentId: "vcs-lead-001",
     });
 
-    const found = findTaskByVcs("findme/gh-repo", 100);
+    const found = await findTaskByVcs("findme/gh-repo", 100);
     expect(found).not.toBeNull();
     expect(found?.vcsProvider).toBe("github");
   });
 
-  test("finds gitlab task by repo and number", () => {
-    createTaskExtended("GL findable", {
+  test("finds gitlab task by repo and number", async () => {
+    await createTaskExtended("GL findable", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "findme/gl-project",
@@ -114,13 +114,13 @@ describe("findTaskByVcs", () => {
       agentId: "vcs-lead-001",
     });
 
-    const found = findTaskByVcs("findme/gl-project", 200);
+    const found = await findTaskByVcs("findme/gl-project", 200);
     expect(found).not.toBeNull();
     expect(found?.vcsProvider).toBe("gitlab");
   });
 
-  test("does not find completed tasks", () => {
-    const task = createTaskExtended("To be completed", {
+  test("does not find completed tasks", async () => {
+    const task = await createTaskExtended("To be completed", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "findme/completed",
@@ -129,16 +129,16 @@ describe("findTaskByVcs", () => {
     });
 
     // Complete the task
-    const db = require("../be/db");
-    db.startTask(task.id);
-    db.completeTask(task.id, "Done");
+    const db = await import("../be/db");
+    await db.startTask(task.id);
+    await db.completeTask(task.id, "Done");
 
-    const found = findTaskByVcs("findme/completed", 300);
+    const found = await findTaskByVcs("findme/completed", 300);
     expect(found).toBeNull();
   });
 
-  test("returns null for non-existent repo/number", () => {
-    const found = findTaskByVcs("nonexistent/repo", 9999);
+  test("returns null for non-existent repo/number", async () => {
+    const found = await findTaskByVcs("nonexistent/repo", 9999);
     expect(found).toBeNull();
   });
 });

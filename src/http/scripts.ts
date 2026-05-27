@@ -132,12 +132,12 @@ const typesRoute = route({
   },
 });
 
-function requireAgent(res: ServerResponse, agentId: string | undefined) {
+async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   if (!agentId) {
     jsonError(res, "X-Agent-ID required for scripts API", 400);
     return null;
   }
-  const agent = getAgentById(agentId);
+  const agent = await getAgentById(agentId);
   if (!agent) {
     jsonError(res, "Agent not found", 404);
     return null;
@@ -149,11 +149,16 @@ function signatureJsonFor(source: string): string {
   return JSON.stringify(extractScriptSignature(source));
 }
 
-function resolveScript(name: string, agentId: string, scope?: ScriptScope): ScriptRecord | null {
-  if (scope === "global") return getScript({ name, scope: "global" });
-  if (scope === "agent") return getScript({ name, scope: "agent", scopeId: agentId });
+async function resolveScript(
+  name: string,
+  agentId: string,
+  scope?: ScriptScope,
+): Promise<ScriptRecord | null> {
+  if (scope === "global") return await getScript({ name, scope: "global" });
+  if (scope === "agent") return await getScript({ name, scope: "agent", scopeId: agentId });
   return (
-    getScript({ name, scope: "agent", scopeId: agentId }) ?? getScript({ name, scope: "global" })
+    (await getScript({ name, scope: "agent", scopeId: agentId })) ??
+    (await getScript({ name, scope: "global" }))
   );
 }
 
@@ -167,13 +172,13 @@ function scratchSlug(intent: string, source: string): string {
   return `scratch-${base || "inline-script"}-${hash}`;
 }
 
-function emitGlobalUpsertEvent(args: {
+async function emitGlobalUpsertEvent(args: {
   agentId: string;
   script: ScriptRecord;
   isNew: boolean;
   isPromotion: boolean;
 }) {
-  createEvent({
+  await createEvent({
     category: "system",
     event: "script.global_upsert",
     source: "api",
@@ -200,7 +205,7 @@ export async function handleScripts(
   if (upsertRoute.match(req.method, pathSegments)) {
     const parsed = await upsertRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     if (parsed.body.scope === "global" && !agent.isLead) {
@@ -224,7 +229,7 @@ export async function handleScripts(
 
     const existingAgentScript =
       parsed.body.scope === "global"
-        ? getScript({ name: parsed.body.name, scope: "agent", scopeId: agent.id })
+        ? await getScript({ name: parsed.body.name, scope: "agent", scopeId: agent.id })
         : null;
     const argsJsonSchema = await extractArgsJsonSchema(parsed.body.source);
     const result = await upsertScriptByName({
@@ -243,7 +248,7 @@ export async function handleScripts(
     });
 
     if (parsed.body.scope === "global" && !result.contentDeduped) {
-      emitGlobalUpsertEvent({
+      await emitGlobalUpsertEvent({
         agentId: agent.id,
         script: result.script,
         isNew: result.isNew,
@@ -262,13 +267,13 @@ export async function handleScripts(
   if (runRoute.match(req.method, pathSegments)) {
     const parsed = await runRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     let source = parsed.body.source;
     let fsMode = parsed.body.fsMode;
     if (parsed.body.name) {
-      const script = resolveScript(parsed.body.name, agent.id, parsed.body.scope);
+      const script = await resolveScript(parsed.body.name, agent.id, parsed.body.scope);
       if (!script) {
         jsonError(res, "Script not found", 404);
         return true;
@@ -329,7 +334,7 @@ export async function handleScripts(
   if (searchRoute.match(req.method, pathSegments)) {
     const parsed = await searchRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     const matches = await searchScripts({
@@ -356,10 +361,10 @@ export async function handleScripts(
   if (typesRoute.match(req.method, pathSegments)) {
     const parsed = await typesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
-    const script = resolveScript(parsed.params.name, agent.id, parsed.query.scope);
+    const script = await resolveScript(parsed.params.name, agent.id, parsed.query.scope);
     if (!script) {
       jsonError(res, "Script not found", 404);
       return true;
@@ -376,7 +381,7 @@ export async function handleScripts(
   if (deleteRoute.match(req.method, pathSegments)) {
     const parsed = await deleteRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     if (parsed.query.scope === "global" && !agent.isLead) {
@@ -384,7 +389,7 @@ export async function handleScripts(
       return true;
     }
 
-    const deleted = deleteScript({
+    const deleted = await deleteScript({
       name: parsed.params.name,
       scope: parsed.query.scope,
       scopeId: parsed.query.scope === "agent" ? agent.id : null,

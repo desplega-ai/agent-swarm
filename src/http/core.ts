@@ -2,11 +2,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
   getAgentById,
-  getDb,
   getInboxSummary,
   getInjectableGlobalConfigs,
   getRecentlyCancelledTasksForAgent,
   getTaskById,
+  runDbTransaction,
   shouldBlockPolling,
   updateAgentStatus,
 } from "../be/db";
@@ -28,8 +28,8 @@ import { agentWithCapacity, getPathSegments, parseQueryParams } from "./utils";
  * environment-only, even if legacy rows still exist in the DB.
  * Returns the list of keys that were set/updated.
  */
-export function loadGlobalConfigsIntoEnv(override = false): string[] {
-  const globalConfigs = getInjectableGlobalConfigs();
+export async function loadGlobalConfigsIntoEnv(override = false): Promise<string[]> {
+  const globalConfigs = await getInjectableGlobalConfigs();
   const updated: string[] = [];
   for (const config of globalConfigs) {
     if (override || !process.env[config.key]) {
@@ -57,21 +57,21 @@ export type ReloadConfigResult = {
  * pick up the new values without requiring a process restart.
  */
 export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfigResult> {
-  const updated = loadGlobalConfigsIntoEnv(true);
+  const updated = await loadGlobalConfigsIntoEnv(true);
 
   const integrations: string[] = [];
 
   resetAgentMail();
-  if (initAgentMail()) integrations.push("agentmail");
+  if (await initAgentMail()) integrations.push("agentmail");
 
   resetGitHub();
-  if (initGitHub()) integrations.push("github");
+  if (await initGitHub()) integrations.push("github");
 
   resetLinear();
-  if (initLinear()) integrations.push("linear");
+  if (await initLinear()) integrations.push("linear");
 
   resetJira();
-  if (initJira()) integrations.push("jira");
+  if (await initJira()) integrations.push("jira");
 
   await stopSlackApp();
   await startSlackApp();
@@ -280,7 +280,7 @@ export async function handleCore(
       return true;
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
 
     if (!agent) {
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -293,12 +293,12 @@ export async function handleCore(
 
     // Add capacity info and polling limit check to agent response
     const agentResponse = {
-      ...agentWithCapacity(agent),
-      shouldBlockPolling: shouldBlockPolling(myAgentId),
+      ...(await agentWithCapacity(agent)),
+      shouldBlockPolling: await shouldBlockPolling(myAgentId),
     };
 
     if (includeInbox) {
-      const inbox = getInboxSummary(myAgentId);
+      const inbox = await getInboxSummary(myAgentId);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ...agentResponse, inbox }));
       return true;
@@ -321,7 +321,7 @@ export async function handleCore(
       return true;
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
     if (!agent) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Agent not found" }));
@@ -334,7 +334,7 @@ export async function handleCore(
 
     if (taskId) {
       // Check if specific task is cancelled
-      const task = getTaskById(taskId);
+      const task = await getTaskById(taskId);
       if (task && task.status === "cancelled") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
@@ -357,7 +357,7 @@ export async function handleCore(
     }
 
     // No taskId - return all recently cancelled tasks for this agent
-    const cancelledTasks = getRecentlyCancelledTasksForAgent(myAgentId);
+    const cancelledTasks = await getRecentlyCancelledTasksForAgent(myAgentId);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ cancelled: cancelledTasks }));
     return true;
@@ -370,8 +370,8 @@ export async function handleCore(
       return true;
     }
 
-    const tx = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const ok = await runDbTransaction(async () => {
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
         res.writeHead(404, { "Content-Type": "application/json" });
@@ -390,12 +390,12 @@ export async function handleCore(
         status = "waiting_for_credentials";
       }
 
-      updateAgentStatus(agent.id, status);
+      await updateAgentStatus(agent.id, status);
 
       return true;
     });
 
-    if (!tx()) {
+    if (!ok) {
       return true;
     }
 
@@ -411,8 +411,8 @@ export async function handleCore(
       return true;
     }
 
-    const tx = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const ok = await runDbTransaction(async () => {
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
         res.writeHead(404, { "Content-Type": "application/json" });
@@ -420,12 +420,12 @@ export async function handleCore(
         return false;
       }
 
-      updateAgentStatus(agent.id, "offline");
+      await updateAgentStatus(agent.id, "offline");
 
       return true;
     });
 
-    if (!tx()) {
+    if (!ok) {
       return true;
     }
 

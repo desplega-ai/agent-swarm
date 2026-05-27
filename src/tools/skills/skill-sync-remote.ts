@@ -40,11 +40,11 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
     async (args, requestInfo, _meta) => {
       try {
         const skills = args.skillId
-          ? (() => {
-              const skill = getSkillById(args.skillId!);
+          ? await (async () => {
+              const skill = await getSkillById(args.skillId!);
               return skill && skill.type === "remote" ? [skill] : [];
             })()
-          : listSkills({ type: "remote" });
+          : await listSkills({ type: "remote" });
 
         let updated = 0;
         const errors: string[] = [];
@@ -69,7 +69,7 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
 
             if (args.force || newHash !== skill.sourceHash) {
               const parsed = parseSkillContent(newContent);
-              updateSkill(skill.id, {
+              await updateSkill(skill.id, {
                 content: newContent,
                 name: parsed.name,
                 description: parsed.description,
@@ -86,7 +86,7 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
               updated++;
             } else {
               // Content unchanged — still update lastFetchedAt
-              updateSkill(skill.id, { lastFetchedAt: now });
+              await updateSkill(skill.id, { lastFetchedAt: now });
             }
           } catch (err) {
             errors.push(`${skill.name}: ${err instanceof Error ? err.message : "Unknown error"}`);

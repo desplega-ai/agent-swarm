@@ -58,11 +58,11 @@ beforeAll(async () => {
     } catch {}
   }
   closeDb();
-  initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
-  userAId = createUser({ name: "User A", email: "user-a@example.com" }).id;
-  userBId = createUser({ name: "User B", email: "user-b@example.com" }).id;
+  await initDb(TEST_DB_PATH);
+  await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
+  userAId = (await createUser({ name: "User A", email: "user-a@example.com" })).id;
+  userBId = (await createUser({ name: "User B", email: "user-b@example.com" })).id;
 });
 
 afterAll(async () => {
@@ -80,7 +80,7 @@ describe("send-task: requestedByUserId inheritance", () => {
 
   test("child pool task inherits requestedByUserId from caller's sourceTaskId", async () => {
     // Parent task has no agentId so the auto-route won't force a lead assignment.
-    const parentTask = createTaskExtended("parent pool task", {
+    const parentTask = await createTaskExtended("parent pool task", {
       requestedByUserId: userAId,
     });
 
@@ -94,12 +94,12 @@ describe("send-task: requestedByUserId inheritance", () => {
     const s = structuredOf(result);
     expect(s.success).toBe(true);
     expect(s.task).toBeDefined();
-    const created = getTaskById(s.task!.id);
+    const created = await getTaskById(s.task!.id);
     expect(created?.requestedByUserId).toBe(userAId);
   });
 
   test("explicit requestedByUserId in args wins over inherited value", async () => {
-    const parentTask = createTaskExtended("parent with user A", {
+    const parentTask = await createTaskExtended("parent with user A", {
       requestedByUserId: userAId,
     });
 
@@ -112,7 +112,7 @@ describe("send-task: requestedByUserId inheritance", () => {
 
     const s = structuredOf(result);
     expect(s.success).toBe(true);
-    const created = getTaskById(s.task!.id);
+    const created = await getTaskById(s.task!.id);
     expect(created?.requestedByUserId).toBe(userBId);
   });
 
@@ -125,13 +125,13 @@ describe("send-task: requestedByUserId inheritance", () => {
 
     const s = structuredOf(result);
     expect(s.success).toBe(true);
-    const created = getTaskById(s.task!.id);
+    const created = await getTaskById(s.task!.id);
     expect(created?.requestedByUserId).toBeFalsy();
   });
 
   test("direct assignment to worker inherits requestedByUserId from caller's sourceTaskId", async () => {
     // Parent assigned to WORKER so auto-route would pick WORKER, but we pass agentId explicitly.
-    const parentTask = createTaskExtended("parent for direct assign", {
+    const parentTask = await createTaskExtended("parent for direct assign", {
       requestedByUserId: userAId,
     });
 
@@ -148,7 +148,7 @@ describe("send-task: requestedByUserId inheritance", () => {
 
     const s = structuredOf(result);
     expect(s.success).toBe(true);
-    const created = getTaskById(s.task!.id);
+    const created = await getTaskById(s.task!.id);
     expect(created?.requestedByUserId).toBe(userAId);
   });
 });

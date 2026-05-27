@@ -47,22 +47,22 @@ function uniqueKey(prefix: string): string {
 }
 
 describe("swarm_config encryption (Phase 4) — template fast-path", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     // Ensure the fixture key is available (preload.ts already set it, but
     // tests may run in any order and cache state may have been cleared).
     if (!process.env.SECRETS_ENCRYPTION_KEY) {
       process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
     }
-    initDb(":memory:");
+    await initDb(":memory:");
   });
 
   afterAll(() => {
     closeDb();
   });
 
-  test("write path: secret upsert produces ciphertext row with encrypted=1", () => {
+  test("write path: secret upsert produces ciphertext row with encrypted=1", async () => {
     const key = uniqueKey("OPENAI_API_KEY");
-    const config = upsertSwarmConfig({
+    const config = await upsertSwarmConfig({
       scope: "global",
       key,
       value: "sk-abc-123",
@@ -72,7 +72,7 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect(config.encrypted).toBe(true);
     expect(config.value).toBe("sk-abc-123");
 
-    const raw = getDb()
+    const raw = (await getDb())
       .prepare<{ value: string; encrypted: number }, [string]>(
         "SELECT value, encrypted FROM swarm_config WHERE id = ?",
       )
@@ -83,29 +83,29 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect((raw?.value ?? "").length).toBeGreaterThan(20);
   });
 
-  test("read path: getSwarmConfigById decrypts transparently", () => {
+  test("read path: getSwarmConfigById decrypts transparently", async () => {
     const key = uniqueKey("ANTHROPIC_API_KEY");
-    const written = upsertSwarmConfig({
+    const written = await upsertSwarmConfig({
       scope: "global",
       key,
       value: "claude-secret-xyz",
       isSecret: true,
     });
-    const read = getSwarmConfigById(written.id);
+    const read = await getSwarmConfigById(written.id);
     expect(read).not.toBeNull();
     expect(read?.value).toBe("claude-secret-xyz");
     expect(read?.encrypted).toBe(true);
   });
 
-  test("non-secret path: value unchanged and encrypted=0", () => {
+  test("non-secret path: value unchanged and encrypted=0", async () => {
     const key = uniqueKey("MODEL");
-    const config = upsertSwarmConfig({
+    const config = await upsertSwarmConfig({
       scope: "global",
       key,
       value: "gpt-4o",
       isSecret: false,
     });
-    const raw = getDb()
+    const raw = (await getDb())
       .prepare<{ value: string; encrypted: number }, [string]>(
         "SELECT value, encrypted FROM swarm_config WHERE id = ?",
       )
@@ -116,19 +116,19 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect(config.encrypted).toBe(false);
   });
 
-  test("roundtrip via getResolvedConfig", () => {
+  test("roundtrip via getResolvedConfig", async () => {
     const key = uniqueKey("RESOLVED_SECRET");
-    upsertSwarmConfig({ scope: "global", key, value: "resolved-plaintext", isSecret: true });
-    const resolved = getResolvedConfig();
+    await upsertSwarmConfig({ scope: "global", key, value: "resolved-plaintext", isSecret: true });
+    const resolved = await getResolvedConfig();
     const found = resolved.find((c) => c.key === key);
     expect(found).toBeDefined();
     expect(found?.value).toBe("resolved-plaintext");
     expect(found?.encrypted).toBe(true);
   });
 
-  test("maskSecrets still masks after decryption", () => {
+  test("maskSecrets still masks after decryption", async () => {
     const key = uniqueKey("MASKED_SECRET");
-    const config = upsertSwarmConfig({
+    const config = await upsertSwarmConfig({
       scope: "global",
       key,
       value: "should-be-hidden",
@@ -138,15 +138,15 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect(masked?.value).toBe("********");
   });
 
-  test("update path: non-secret -> secret re-encrypts stored value", () => {
+  test("update path: non-secret -> secret re-encrypts stored value", async () => {
     const key = uniqueKey("UPGRADED_SECRET");
-    const initial = upsertSwarmConfig({
+    const initial = await upsertSwarmConfig({
       scope: "global",
       key,
       value: "plain-value",
       isSecret: false,
     });
-    let raw = getDb()
+    let raw = (await getDb())
       .prepare<{ value: string; encrypted: number }, [string]>(
         "SELECT value, encrypted FROM swarm_config WHERE id = ?",
       )
@@ -154,7 +154,7 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect(raw?.value).toBe("plain-value");
     expect(raw?.encrypted).toBe(0);
 
-    const upgraded = upsertSwarmConfig({
+    const upgraded = await upsertSwarmConfig({
       scope: "global",
       key,
       value: "now-secret",
@@ -164,7 +164,7 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect(upgraded.value).toBe("now-secret");
     expect(upgraded.encrypted).toBe(true);
 
-    raw = getDb()
+    raw = (await getDb())
       .prepare<{ value: string; encrypted: number }, [string]>(
         "SELECT value, encrypted FROM swarm_config WHERE id = ?",
       )
@@ -173,12 +173,12 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect(raw?.value).not.toBe("now-secret");
   });
 
-  test("writeEnvFile writes plaintext to disk, not ciphertext", () => {
+  test("writeEnvFile writes plaintext to disk, not ciphertext", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "swarm-config-encryption-"));
     const envPath = join(tmpDir, "test.env");
     try {
       const key = uniqueKey("ENV_FILE_SECRET");
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key,
         value: "env-file-plaintext",
@@ -195,16 +195,16 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     }
   });
 
-  test("loadGlobalConfigsIntoEnv-style roundtrip injects plaintext into process.env", () => {
+  test("loadGlobalConfigsIntoEnv-style roundtrip injects plaintext into process.env", async () => {
     const key = uniqueKey("ENV_INJECT_SECRET");
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key,
       value: "env-inject-plaintext",
       isSecret: true,
     });
     // Mirror of loadGlobalConfigsIntoEnv in src/http/core.ts
-    const resolved = getResolvedConfig();
+    const resolved = await getResolvedConfig();
     for (const c of resolved) {
       if (c.key === key) {
         process.env[c.key] = c.value;
@@ -225,7 +225,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     // Temporarily hide the template so the main-path initDb runs.
     testTemplateGlobals.__savedTemplate = testTemplateGlobals.__testMigrationTemplate;
     testTemplateGlobals.__testMigrationTemplate = undefined;
-    initDb(FILE_DB_PATH);
+    await initDb(FILE_DB_PATH);
   });
 
   afterAll(async () => {
@@ -239,18 +239,18 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     await cleanupFileDb(FILE_DB_PATH);
   });
 
-  test("auto-migrate: legacy plaintext secret is encrypted on next boot", () => {
+  test("auto-migrate: legacy plaintext secret is encrypted on next boot", async () => {
     // Insert a row that looks like pre-encryption legacy data.
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    getDb().run(
+    (await getDb()).run(
       `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
        VALUES (?, 'global', NULL, 'LEGACY_PLAINTEXT_SECRET', 'legacy-plain', 1, NULL, NULL, ?, ?, 0)`,
       [id, now, now],
     );
 
     // Sanity: row is plaintext right now.
-    const preRow = getDb()
+    const preRow = (await getDb())
       .prepare<{ value: string; encrypted: number }, [string]>(
         "SELECT value, encrypted FROM swarm_config WHERE id = ?",
       )
@@ -259,9 +259,9 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     expect(preRow?.encrypted).toBe(0);
 
     // Run the auto-migrate hook directly (simulates the second boot).
-    autoEncryptLegacyPlaintextSecrets(getDb());
+    autoEncryptLegacyPlaintextSecrets(await getDb());
 
-    const postRow = getDb()
+    const postRow = (await getDb())
       .prepare<{ value: string; encrypted: number }, [string]>(
         "SELECT value, encrypted FROM swarm_config WHERE id = ?",
       )
@@ -270,14 +270,14 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     expect(postRow?.value).not.toBe("legacy-plain");
 
     // Transparent decrypt returns the original plaintext.
-    const decrypted = getSwarmConfigById(id);
+    const decrypted = await getSwarmConfigById(id);
     expect(decrypted?.value).toBe("legacy-plain");
   });
 
-  test("auto-migrate is idempotent (no-op on already-encrypted rows)", () => {
+  test("auto-migrate is idempotent (no-op on already-encrypted rows)", async () => {
     // Run again — should not throw, no rows to encrypt.
-    autoEncryptLegacyPlaintextSecrets(getDb());
-    const rowsStillPlain = getDb()
+    autoEncryptLegacyPlaintextSecrets(await getDb());
+    const rowsStillPlain = (await getDb())
       .prepare<{ c: number }, []>(
         "SELECT COUNT(*) as c FROM swarm_config WHERE isSecret = 1 AND encrypted = 0",
       )
@@ -285,8 +285,8 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     expect(rowsStillPlain?.c).toBe(0);
   });
 
-  test("tamper: corrupting a ciphertext byte produces a clear, key-named error", () => {
-    const config = upsertSwarmConfig({
+  test("tamper: corrupting a ciphertext byte produces a clear, key-named error", async () => {
+    const config = await upsertSwarmConfig({
       scope: "global",
       key: "TAMPER_TARGET",
       value: "tamper-plaintext",
@@ -294,30 +294,32 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     });
 
     // Mangle one character in the stored ciphertext by flipping a base64 char.
-    const raw = getDb()
+    const raw = (await getDb())
       .prepare<{ value: string }, [string]>("SELECT value FROM swarm_config WHERE id = ?")
       .get(config.id);
     expect(raw).not.toBeNull();
     const original = raw?.value ?? "";
     // Flip the char at position 10 to guarantee auth-tag verification failure.
     const flipped = original.slice(0, 10) + (original[10] === "A" ? "B" : "A") + original.slice(11);
-    getDb().run("UPDATE swarm_config SET value = ? WHERE id = ?", [flipped, config.id]);
+    (await getDb()).run("UPDATE swarm_config SET value = ? WHERE id = ?", [flipped, config.id]);
 
-    expect(() => getSwarmConfigById(config.id)).toThrow(/Failed to decrypt config 'TAMPER_TARGET'/);
+    expect(async () => await getSwarmConfigById(config.id)).toThrow(
+      /Failed to decrypt config 'TAMPER_TARGET'/,
+    );
 
     // Clean up so subsequent tests don't trip over this row.
-    deleteSwarmConfig(config.id);
+    await deleteSwarmConfig(config.id);
   });
 
-  test("wrong key: rotating key without re-encryption produces clear error on read", () => {
+  test("wrong key: rotating key without re-encryption produces clear error on read", async () => {
     // Encrypt with the fixture key.
-    const config = upsertSwarmConfig({
+    const config = await upsertSwarmConfig({
       scope: "global",
       key: "ROTATED_KEY_TEST",
       value: "rotated-plaintext",
       isSecret: true,
     });
-    expect(getSwarmConfigById(config.id)?.value).toBe("rotated-plaintext");
+    expect((await getSwarmConfigById(config.id))?.value).toBe("rotated-plaintext");
 
     // Rotate: reset cache, swap env var to a different valid 32-byte key,
     // and re-resolve. The DB path is irrelevant here because the env var wins.
@@ -327,7 +329,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     resolveEncryptionKey(FILE_DB_PATH);
 
     try {
-      expect(() => getSwarmConfigById(config.id)).toThrow(
+      expect(async () => await getSwarmConfigById(config.id)).toThrow(
         /Failed to decrypt config 'ROTATED_KEY_TEST'/,
       );
     } finally {
@@ -337,7 +339,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
       resolveEncryptionKey(FILE_DB_PATH);
 
       // Clean up the now-unreadable row so it doesn't pollute further tests.
-      getDb().run("DELETE FROM swarm_config WHERE id = ?", [config.id]);
+      (await getDb()).run("DELETE FROM swarm_config WHERE id = ?", [config.id]);
     }
   });
 
@@ -350,9 +352,9 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
       closeDb();
       __resetEncryptionKeyForTests();
       process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
-      initDb(dbPath);
+      await initDb(dbPath);
 
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "EXISTING_SECRET_BEFORE_RESTART",
         value: "should-require-original-key",
@@ -364,7 +366,9 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
       delete process.env.SECRETS_ENCRYPTION_KEY;
       delete process.env.SECRETS_ENCRYPTION_KEY_FILE;
 
-      expect(() => initDb(dbPath)).toThrow(/existing database with encrypted secret rows/i);
+      expect(async () => await initDb(dbPath)).toThrow(
+        /existing database with encrypted secret rows/i,
+      );
       expect(existsSync(keyFilePath)).toBe(false);
     } finally {
       closeDb();
@@ -374,7 +378,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     }
   });
 
-  test("initDb auto-generates a key and migrates legacy plaintext secret rows on first upgrade boot", () => {
+  test("initDb auto-generates a key and migrates legacy plaintext secret rows on first upgrade boot", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "swarm-config-legacy-plaintext-"));
     const dbPath = join(tmpDir, "legacy.sqlite");
     const keyFilePath = join(tmpDir, ".encryption-key");
@@ -383,11 +387,11 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
       closeDb();
       __resetEncryptionKeyForTests();
       process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
-      initDb(dbPath);
+      await initDb(dbPath);
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
-      getDb().run(
+      (await getDb()).run(
         `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
          VALUES (?, 'global', NULL, 'LEGACY_SECRET_FIRST_UPGRADE', 'legacy-plain', 1, NULL, NULL, ?, ?, 0)`,
         [id, now, now],
@@ -398,17 +402,17 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
       delete process.env.SECRETS_ENCRYPTION_KEY;
       delete process.env.SECRETS_ENCRYPTION_KEY_FILE;
 
-      initDb(dbPath);
+      await initDb(dbPath);
 
       expect(existsSync(keyFilePath)).toBe(true);
-      const migrated = getDb()
+      const migrated = (await getDb())
         .prepare<{ value: string; encrypted: number }, [string]>(
           "SELECT value, encrypted FROM swarm_config WHERE id = ?",
         )
         .get(id);
       expect(migrated?.encrypted).toBe(1);
       expect(migrated?.value).not.toBe("legacy-plain");
-      expect(getSwarmConfigById(id)?.value).toBe("legacy-plain");
+      expect((await getSwarmConfigById(id))?.value).toBe("legacy-plain");
     } finally {
       closeDb();
       __resetEncryptionKeyForTests();

@@ -25,7 +25,7 @@ import "../tools/templates";
  * - If a global default (isDefault=true) exists and its body differs from code, update it
  * - Never touch records where isDefault=false (user customizations)
  */
-export function seedDefaultTemplates(): void {
+export async function seedDefaultTemplates(): Promise<void> {
   const definitions = getAllTemplateDefinitions();
 
   if (definitions.length === 0) {
@@ -34,7 +34,7 @@ export function seedDefaultTemplates(): void {
 
   for (const def of definitions) {
     // Look for ALL existing global records for this eventType (both default and customized)
-    const allGlobal = getPromptTemplates({
+    const allGlobal = await getPromptTemplates({
       eventType: def.eventType,
       scope: "global",
     });
@@ -43,7 +43,7 @@ export function seedDefaultTemplates(): void {
 
     if (!globalRecord) {
       // No global record at all — seed one with isDefault=true directly.
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: def.eventType,
         scope: "global",
         body: def.defaultBody,
@@ -54,7 +54,7 @@ export function seedDefaultTemplates(): void {
     } else if (globalRecord.isDefault && globalRecord.body !== def.defaultBody) {
       // Global default exists but body has drifted from code — update it.
       // Only update if the record is still marked as default (not user-customized).
-      resetPromptTemplateToDefault(globalRecord.id, def.defaultBody);
+      await resetPromptTemplateToDefault(globalRecord.id, def.defaultBody);
     }
     // If record exists with isDefault=false (user customization): leave it alone
     // If record exists with isDefault=true and body matches: leave it alone

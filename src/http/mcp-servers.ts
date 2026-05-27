@@ -164,11 +164,11 @@ export async function handleMcpServers(
     const parsed = await getAgentMcpServersRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const servers = getAgentMcpServers(parsed.params.id);
+    const servers = await getAgentMcpServers(parsed.params.id);
     const resolveSecrets = parsed.query.resolveSecrets === "true";
 
     if (resolveSecrets) {
-      const configs = getResolvedConfig(parsed.params.id);
+      const configs = await getResolvedConfig(parsed.params.id);
       const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
       const serversWithSecrets = await Promise.all(
@@ -276,14 +276,14 @@ export async function handleMcpServers(
     const parsed = await installMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpServerById(parsed.params.id);
+    const server = await getMcpServerById(parsed.params.id);
     if (!server) {
       jsonError(res, "MCP server not found", 404);
       return true;
     }
 
     try {
-      const agentMcpServer = installMcpServer(parsed.body.agentId, parsed.params.id);
+      const agentMcpServer = await installMcpServer(parsed.body.agentId, parsed.params.id);
       json(res, { agentMcpServer });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Install failed", 400);
@@ -296,7 +296,7 @@ export async function handleMcpServers(
     const parsed = await uninstallMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const removed = uninstallMcpServer(parsed.params.agentId, parsed.params.id);
+    const removed = await uninstallMcpServer(parsed.params.agentId, parsed.params.id);
     json(res, { success: removed });
     return true;
   }
@@ -306,7 +306,7 @@ export async function handleMcpServers(
     const parsed = await listMcpServersRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const servers = listMcpServers({
+    const servers = await listMcpServers({
       scope: parsed.query.scope as "global" | "swarm" | "agent" | undefined,
       transport: parsed.query.transport as "stdio" | "http" | "sse" | undefined,
       ownerAgentId: parsed.query.ownerAgentId,
@@ -323,7 +323,7 @@ export async function handleMcpServers(
     const parsed = await getMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpServerById(parsed.params.id);
+    const server = await getMcpServerById(parsed.params.id);
     if (!server) {
       jsonError(res, "MCP server not found", 404);
       return true;
@@ -348,7 +348,7 @@ export async function handleMcpServers(
     }
 
     try {
-      const server = createMcpServer({
+      const server = await createMcpServer({
         name: parsed.body.name,
         transport: parsed.body.transport,
         description: parsed.body.description,
@@ -377,21 +377,21 @@ export async function handleMcpServers(
     const transport = parsed.body.transport as string | undefined;
     if (transport === "stdio" && parsed.body.command === undefined) {
       // Check if existing server already has a command
-      const existing = getMcpServerById(parsed.params.id);
+      const existing = await getMcpServerById(parsed.params.id);
       if (existing && !existing.command && !parsed.body.command) {
         jsonError(res, "command is required for stdio transport", 400);
         return true;
       }
     }
     if ((transport === "http" || transport === "sse") && parsed.body.url === undefined) {
-      const existing = getMcpServerById(parsed.params.id);
+      const existing = await getMcpServerById(parsed.params.id);
       if (existing && !existing.url && !parsed.body.url) {
         jsonError(res, "url is required for http/sse transport", 400);
         return true;
       }
     }
 
-    const server = updateMcpServer(
+    const server = await updateMcpServer(
       parsed.params.id,
       parsed.body as Parameters<typeof updateMcpServer>[1],
     );
@@ -408,7 +408,7 @@ export async function handleMcpServers(
     const parsed = await deleteMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const deleted = deleteMcpServer(parsed.params.id);
+    const deleted = await deleteMcpServer(parsed.params.id);
     if (!deleted) {
       jsonError(res, "MCP server not found", 404);
       return true;

@@ -27,7 +27,7 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         };
       }
 
-      const existing = getMcpServerById(args.id);
+      const existing = await getMcpServerById(args.id);
       if (!existing) {
         return {
           content: [{ type: "text", text: "MCP server not found." }],
@@ -39,7 +39,7 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         };
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (existing.ownerAgentId !== requestInfo.agentId && !agent?.isLead) {
         return {
           content: [
@@ -53,7 +53,7 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         };
       }
 
-      const deleted = deleteMcpServer(args.id);
+      const deleted = await deleteMcpServer(args.id);
       return {
         content: [
           {

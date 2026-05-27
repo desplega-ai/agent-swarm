@@ -318,8 +318,8 @@ function withShareUrls<T extends { id: string }>(
  * value is 2 (one snapshot row → version 1 → counter becomes 2). This is the
  * value POST and PUT return as `version` on the wire.
  */
-function pageEditCounter(pageId: string): number {
-  const versions = getPageVersions(pageId);
+async function pageEditCounter(pageId: string): Promise<number> {
+  const versions = await getPageVersions(pageId);
   return versions.length > 0 ? versions[0]!.version + 1 : 1;
 }
 
@@ -367,7 +367,7 @@ export async function handlePages(
     }
 
     try {
-      const page = createPage({
+      const page = await createPage({
         agentId: myAgentId,
         slug,
         title: parsed.body.title,
@@ -441,12 +441,14 @@ export async function handlePages(
     let total: number;
     if (parsed.query.agentId) {
       pages = full
-        ? listPagesByAgent(parsed.query.agentId, limit, offset)
-        : listPagesByAgent(parsed.query.agentId, limit, offset, { slim: true });
-      total = countPagesByAgent(parsed.query.agentId);
+        ? await listPagesByAgent(parsed.query.agentId, limit, offset)
+        : await listPagesByAgent(parsed.query.agentId, limit, offset, { slim: true });
+      total = await countPagesByAgent(parsed.query.agentId);
     } else {
-      pages = full ? listAllPages(limit, offset) : listAllPages(limit, offset, { slim: true });
-      total = countAllPages();
+      pages = full
+        ? await listAllPages(limit, offset)
+        : await listAllPages(limit, offset, { slim: true });
+      total = await countAllPages();
     }
     json(res, {
       pages: pages.map(withShareUrls),
@@ -464,13 +466,13 @@ export async function handlePages(
   if (getPageVersionRoute.match(req.method, pathSegments)) {
     const parsed = await getPageVersionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const page = getPage(parsed.params.id);
+    const page = await getPage(parsed.params.id);
     if (!page) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const version = getPageVersion(parsed.params.id, parsed.params.version);
+    const version = await getPageVersion(parsed.params.id, parsed.params.version);
     if (!version) {
       res.writeHead(404);
       res.end();
@@ -484,13 +486,13 @@ export async function handlePages(
   if (listPageVersionsRoute.match(req.method, pathSegments)) {
     const parsed = await listPageVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const page = getPage(parsed.params.id);
+    const page = await getPage(parsed.params.id);
     if (!page) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const versions = getPageVersions(parsed.params.id);
+    const versions = await getPageVersions(parsed.params.id);
     json(res, { versions });
     return true;
   }
@@ -498,7 +500,7 @@ export async function handlePages(
   if (getPageRoute.match(req.method, pathSegments)) {
     const parsed = await getPageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const page = getPage(parsed.params.id);
+    const page = await getPage(parsed.params.id);
     if (!page) {
       res.writeHead(404);
       res.end();
@@ -514,7 +516,7 @@ export async function handlePages(
     const parsed = await updatePageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const existing = getPage(parsed.params.id);
+    const existing = await getPage(parsed.params.id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -531,12 +533,12 @@ export async function handlePages(
 
     // Snapshot first — failure must NOT block the update (mirrors workflows.ts).
     try {
-      snapshotPage(parsed.params.id, myAgentId);
+      await snapshotPage(parsed.params.id, myAgentId);
     } catch {
       // intentional empty
     }
 
-    const updated = updatePage(parsed.params.id, {
+    const updated = await updatePage(parsed.params.id, {
       title: parsed.body.title,
       description: parsed.body.description ?? undefined,
       contentType: parsed.body.contentType,
@@ -550,7 +552,7 @@ export async function handlePages(
       res.end();
       return true;
     }
-    json(res, { id: updated.id, version: pageEditCounter(updated.id) });
+    json(res, { id: updated.id, version: await pageEditCounter(updated.id) });
     return true;
   }
 
@@ -558,7 +560,7 @@ export async function handlePages(
   if (deletePageRoute.match(req.method, pathSegments)) {
     const parsed = await deletePageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const ok = deletePage(parsed.params.id);
+    const ok = await deletePage(parsed.params.id);
     if (!ok) {
       res.writeHead(404);
       res.end();
@@ -589,7 +591,7 @@ export async function handlePages(
     const parsed = await launchPageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const page = getPage(parsed.params.id);
+    const page = await getPage(parsed.params.id);
     if (!page) {
       applyLaunchCors(req, res);
       res.writeHead(404);

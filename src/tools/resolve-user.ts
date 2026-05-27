@@ -60,11 +60,11 @@ export const registerResolveUserTool = (server: McpServer) => {
     async ({ kind, externalId, email, userId }) => {
       let user = null;
       if (kind && externalId) {
-        user = findUserByExternalId(kind, externalId);
+        user = await findUserByExternalId(kind, externalId);
       } else if (email) {
-        user = findUserByEmail(email);
+        user = await findUserByEmail(email);
       } else if (userId) {
-        user = findUserById(userId);
+        user = await findUserById(userId);
       }
 
       if (!user) {
@@ -73,7 +73,7 @@ export const registerResolveUserTool = (server: McpServer) => {
         };
       }
 
-      const externalIds = getUserIdentities(user.id);
+      const externalIds = await getUserIdentities(user.id);
       return {
         content: [
           { type: "text" as const, text: JSON.stringify({ ...user, externalIds }, null, 2) },

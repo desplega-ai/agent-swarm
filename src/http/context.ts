@@ -76,13 +76,13 @@ export async function handleContext(
     const parsed = await postContext.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
     }
 
-    const snapshot = createContextSnapshot({
+    const snapshot = await createContextSnapshot({
       taskId: parsed.params.id,
       agentId: myAgentId,
       sessionId: parsed.body.sessionId,
@@ -105,14 +105,14 @@ export async function handleContext(
     const parsed = await getContext.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
     }
 
-    const snapshots = getContextSnapshotsByTaskId(parsed.params.id, parsed.query.limit);
-    const summary = getContextSummaryByTaskId(parsed.params.id);
+    const snapshots = await getContextSnapshotsByTaskId(parsed.params.id, parsed.query.limit);
+    const summary = await getContextSummaryByTaskId(parsed.params.id);
 
     json(res, { snapshots, summary });
     return true;

@@ -96,7 +96,7 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
     } catch {
       // File doesn't exist, that's fine
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
@@ -452,7 +452,7 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
       const db = await import("../be/db");
       // biome-ignore lint/suspicious/noTemplateCurlyInString: testing env var input syntax
       const envVarRef = "${API_KEY}";
-      const workflow = db.createWorkflow({
+      const workflow = await db.createWorkflow({
         name: "test-workflow-registry",
         description: "Test workflow for registry",
         definition: {
@@ -473,13 +473,13 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
       expect(workflow.input).toEqual({ apiKey: envVarRef });
 
       // Retrieve and verify
-      const fetched = db.getWorkflow(workflow.id);
+      const fetched = await db.getWorkflow(workflow.id);
       expect(fetched).not.toBeNull();
       expect(fetched!.triggers).toHaveLength(1);
       expect(fetched!.definition.nodes).toHaveLength(2);
 
       // Update with new fields
-      const updated = db.updateWorkflow(workflow.id, {
+      const updated = await db.updateWorkflow(workflow.id, {
         cooldown: { minutes: 30 },
         triggers: [],
       });
@@ -487,12 +487,12 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
       expect(updated!.triggers).toEqual([]);
 
       // Clean up
-      db.deleteWorkflow(workflow.id);
+      await db.deleteWorkflow(workflow.id);
     });
 
     test("creates and retrieves workflow versions", async () => {
       const db = await import("../be/db");
-      const workflow = db.createWorkflow({
+      const workflow = await db.createWorkflow({
         name: "test-versioned-workflow",
         definition: {
           nodes: [{ id: "a", type: "test", config: {} }],
@@ -500,7 +500,7 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
       });
 
       // Create version snapshot
-      const version = db.createWorkflowVersion({
+      const version = await db.createWorkflowVersion({
         workflowId: workflow.id,
         version: 1,
         snapshot: {
@@ -514,7 +514,7 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
       expect(version.snapshot.name).toBe("test-versioned-workflow");
 
       // Create another version
-      db.createWorkflowVersion({
+      await db.createWorkflowVersion({
         workflowId: workflow.id,
         version: 2,
         snapshot: {
@@ -526,34 +526,34 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
       });
 
       // List versions
-      const versions = db.getWorkflowVersions(workflow.id);
+      const versions = await db.getWorkflowVersions(workflow.id);
       expect(versions).toHaveLength(2);
       expect(versions[0].version).toBe(2); // DESC order
 
       // Get specific version
-      const v1 = db.getWorkflowVersion(workflow.id, 1);
+      const v1 = await db.getWorkflowVersion(workflow.id, 1);
       expect(v1).not.toBeNull();
       expect(v1!.snapshot.name).toBe("test-versioned-workflow");
 
       // Clean up
-      db.deleteWorkflow(workflow.id);
+      await db.deleteWorkflow(workflow.id);
     });
 
     test("retry-related step queries work", async () => {
       const db = await import("../be/db");
-      const workflow = db.createWorkflow({
+      const workflow = await db.createWorkflow({
         name: "test-retry-queries",
         definition: {
           nodes: [{ id: "a", type: "test", config: {} }],
         },
       });
 
-      const run = db.createWorkflowRun({
+      const run = await db.createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: workflow.id,
       });
 
-      const step = db.createWorkflowRunStep({
+      const step = await db.createWorkflowRunStep({
         id: crypto.randomUUID(),
         runId: run.id,
         nodeId: "a",
@@ -561,32 +561,32 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
       });
 
       // Update with retry fields
-      db.updateWorkflowRunStep(step.id, {
+      await db.updateWorkflowRunStep(step.id, {
         status: "completed",
         idempotencyKey: `${run.id}:a`,
         finishedAt: new Date().toISOString(),
       });
 
       // Test getCompletedStepNodeIds
-      const completed = db.getCompletedStepNodeIds(run.id);
+      const completed = await db.getCompletedStepNodeIds(run.id);
       expect(completed).toContain("a");
 
       // Test getStepByIdempotencyKey
-      const found = db.getStepByIdempotencyKey(`${run.id}:a`);
+      const found = await db.getStepByIdempotencyKey(`${run.id}:a`);
       expect(found).not.toBeNull();
       expect(found!.nodeId).toBe("a");
 
       // Test getLastSuccessfulRun
-      db.updateWorkflowRun(run.id, {
+      await db.updateWorkflowRun(run.id, {
         status: "completed",
         finishedAt: new Date().toISOString(),
       });
-      const lastSuccess = db.getLastSuccessfulRun(workflow.id);
+      const lastSuccess = await db.getLastSuccessfulRun(workflow.id);
       expect(lastSuccess).not.toBeNull();
       expect(lastSuccess!.id).toBe(run.id);
 
       // Clean up
-      db.deleteWorkflow(workflow.id);
+      await db.deleteWorkflow(workflow.id);
     });
   });
 });

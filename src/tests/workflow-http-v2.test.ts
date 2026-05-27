@@ -106,7 +106,7 @@ describe("Workflow HTTP API v2", () => {
     } catch {
       // ignore
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
     initWorkflows();
 
     server = createTestServer();
@@ -306,7 +306,7 @@ describe("Workflow HTTP API v2", () => {
       expect(res2.status).toBe(200);
 
       // Verify versions were created
-      const versions = getWorkflowVersions(workflow.id);
+      const versions = await getWorkflowVersions(workflow.id);
       expect(versions.length).toBe(2);
       // Version 1 should have original description (undefined)
       expect(versions.find((v) => v.version === 1)?.snapshot.description).toBeUndefined();
@@ -625,10 +625,10 @@ describe("Workflow HTTP API v2", () => {
 
       // Create a run directly in 'running' state (notify executor completes instantly)
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       // Create a step in 'running' state
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: crypto.randomUUID(),
         runId,
         nodeId: "n1",
@@ -691,7 +691,7 @@ describe("Workflow HTTP API v2", () => {
 
       // Create a run directly in 'running' state
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
         method: "POST",
@@ -711,10 +711,10 @@ describe("Workflow HTTP API v2", () => {
 
       // Create a run with steps in various states
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       // Running step — should be cancelled
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: crypto.randomUUID(),
         runId,
         nodeId: "n1",

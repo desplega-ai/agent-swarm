@@ -114,17 +114,17 @@ export async function handleStats(
     const agentId = parsed.query.agentId;
     let logs: AgentLog[] = [];
     if (agentId) {
-      logs = getLogsByAgentId(agentId).slice(0, limit);
+      logs = (await getLogsByAgentId(agentId)).slice(0, limit);
     } else {
-      logs = getAllLogs(limit);
+      logs = await getAllLogs(limit);
     }
     json(res, { logs });
     return true;
   }
 
   if (getStats.match(req.method, pathSegments)) {
-    const agents = getAllAgents();
-    const taskStats = getTaskStats();
+    const agents = await getAllAgents();
+    const taskStats = await getTaskStats();
 
     const stats = {
       agents: {
@@ -151,14 +151,14 @@ export async function handleStats(
   }
 
   if (getMetrics.match(req.method, pathSegments)) {
-    json(res, getSwarmMetrics());
+    json(res, await getSwarmMetrics());
     return true;
   }
 
   if (listServices.match(req.method, pathSegments)) {
     const parsed = await listServices.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const services = getAllServices({
+    const services = await getAllServices({
       status: (parsed.query.status as import("../types").ServiceStatus) || undefined,
       agentId: parsed.query.agentId || undefined,
       name: parsed.query.name || undefined,
@@ -170,7 +170,7 @@ export async function handleStats(
   if (listScheduledTasks.match(req.method, pathSegments)) {
     const parsed = await listScheduledTasks.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const scheduledTasks = getScheduledTasks({
+    const scheduledTasks = await getScheduledTasks({
       enabled: parsed.query.enabled !== undefined ? parsed.query.enabled === "true" : undefined,
       name: parsed.query.name || undefined,
       scheduleType: (parsed.query.scheduleType as "recurring" | "one_time") || undefined,
@@ -184,7 +184,7 @@ export async function handleStats(
   }
 
   if (getConcurrentContextRoute.match(req.method, pathSegments)) {
-    const context = getConcurrentContext();
+    const context = await getConcurrentContext();
     json(res, context);
     return true;
   }

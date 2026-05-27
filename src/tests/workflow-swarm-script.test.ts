@@ -74,8 +74,8 @@ async function removeDbFiles(): Promise<void> {
   }
 }
 
-function makeWorkflow(def: WorkflowDefinition): Workflow {
-  const wf = createWorkflow({
+async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
+  const wf = await createWorkflow({
     name: `swarm-script-test-${crypto.randomUUID()}`,
     definition: def,
     createdByAgentId: agentId,
@@ -100,12 +100,12 @@ async function saveScript(name: string, source: string) {
 beforeAll(async () => {
   savedEnv = { ...process.env };
   await removeDbFiles();
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   delete process.env.API_KEY;
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
 
-  const agent = createAgent({ name: "workflow-script-agent", isLead: true, status: "idle" });
+  const agent = await createAgent({ name: "workflow-script-agent", isLead: true, status: "idle" });
   agentId = agent.id;
 
   const eventBus = new InProcessEventBus();
@@ -133,11 +133,11 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM workflow_run_steps");
-  getDb().run("DELETE FROM workflow_runs");
-  getDb().run("DELETE FROM scripts");
-  getDb().run("DELETE FROM workflows");
+beforeEach(async () => {
+  (await getDb()).run("DELETE FROM workflow_run_steps");
+  (await getDb()).run("DELETE FROM workflow_runs");
+  (await getDb()).run("DELETE FROM scripts");
+  (await getDb()).run("DELETE FROM workflows");
 });
 
 describe("SwarmScriptExecutor", () => {
@@ -148,7 +148,7 @@ describe("SwarmScriptExecutor", () => {
     );
 
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "add-one", args: { value: 6 } },
       context: {},
@@ -171,7 +171,7 @@ describe("SwarmScriptExecutor", () => {
     await saveScript("versioned", `export default async () => ({ version: "new" });`);
 
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "versioned", pinHash: first.script.contentHash },
       context: {},
@@ -195,7 +195,7 @@ describe("SwarmScriptExecutor", () => {
       "from-input",
       `export default async (args: { value: string }) => ({ seen: args.value });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         { id: "source", type: "echo", config: { value: "mapped-value" }, next: "script" },
         {
@@ -208,8 +208,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, {}, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -220,7 +220,7 @@ describe("SwarmScriptExecutor", () => {
   test("fsMode workspace-rw is rejected at config validation with a clear error message", async () => {
     await saveScript("noop", `export default async () => ({ ok: true });`);
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "noop", fsMode: "workspace-rw" },
       context: {},
@@ -253,7 +253,7 @@ describe("SwarmScriptExecutor", () => {
   test("Failure in the script surfaces as a workflow-node failure", async () => {
     await saveScript("throws", `export default async () => { throw new Error("boom"); };`);
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "throws" },
       context: {},

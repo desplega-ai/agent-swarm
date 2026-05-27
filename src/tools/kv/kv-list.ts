@@ -38,7 +38,7 @@ export const registerKvListTool = (server: McpServer) => {
       }),
     },
     async ({ prefix, limit, offset, namespace }, requestInfo) => {
-      const resolved = resolveNamespace(namespace, requestInfo);
+      const resolved = await resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return {
           content: [{ type: "text", text: resolved.error }],
@@ -51,12 +51,12 @@ export const registerKvListTool = (server: McpServer) => {
       }
       const effectiveLimit = Math.min(limit ?? 100, MAX_KV_LIST_LIMIT);
       const effectivePrefix = prefix && prefix.length > 0 ? prefix : undefined;
-      const entries = listKv(resolved.namespace, {
+      const entries = await listKv(resolved.namespace, {
         prefix: effectivePrefix,
         limit: effectiveLimit,
         offset: offset ?? 0,
       });
-      const total = countKv(resolved.namespace, { prefix: effectivePrefix });
+      const total = await countKv(resolved.namespace, { prefix: effectivePrefix });
       return {
         content: [
           {

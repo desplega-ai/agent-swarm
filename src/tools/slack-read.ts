@@ -82,7 +82,7 @@ export const registerSlackReadTool = (server: McpServer) => {
         };
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return {
           content: [{ type: "text", text: "Agent not found." }],
@@ -95,7 +95,7 @@ export const registerSlackReadTool = (server: McpServer) => {
 
       // Determine Slack context from inbox message or task
       if (inboxMessageId) {
-        const inboxMsg = getInboxMessageById(inboxMessageId);
+        const inboxMsg = await getInboxMessageById(inboxMessageId);
         if (!inboxMsg) {
           return {
             content: [{ type: "text", text: "Inbox message not found." }],
@@ -119,7 +119,7 @@ export const registerSlackReadTool = (server: McpServer) => {
         slackChannelId = inboxMsg.slackChannelId;
         slackThreadTs = inboxMsg.slackThreadTs;
       } else if (taskId) {
-        const task = getTaskById(taskId);
+        const task = await getTaskById(taskId);
         if (!task) {
           return {
             content: [{ type: "text", text: "Task not found." }],

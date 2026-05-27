@@ -1,5 +1,5 @@
 import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "../types";
-import { getDb } from "./db";
+import { getDb, runDbTransaction } from "./db";
 
 // -- Events --
 
@@ -38,8 +38,8 @@ function rowToSwarmEvent(row: EventRow): SwarmEvent {
 }
 
 const eventQueries = {
-  insert: () =>
-    getDb().prepare<
+  insert: async () =>
+    (await getDb()).prepare<
       null,
       [
         string,
@@ -61,41 +61,43 @@ const eventQueries = {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     ),
 
-  getByCategory: () =>
-    getDb().prepare<EventRow, [string, number]>(
+  getByCategory: async () =>
+    (await getDb()).prepare<EventRow, [string, number]>(
       "SELECT * FROM events WHERE category = ? ORDER BY createdAt DESC LIMIT ?",
     ),
 
-  getByEvent: () =>
-    getDb().prepare<EventRow, [string, number]>(
+  getByEvent: async () =>
+    (await getDb()).prepare<EventRow, [string, number]>(
       "SELECT * FROM events WHERE event = ? ORDER BY createdAt DESC LIMIT ?",
     ),
 
-  getByAgentId: () =>
-    getDb().prepare<EventRow, [string, number]>(
+  getByAgentId: async () =>
+    (await getDb()).prepare<EventRow, [string, number]>(
       "SELECT * FROM events WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?",
     ),
 
-  getByTaskId: () =>
-    getDb().prepare<EventRow, [string, number]>(
+  getByTaskId: async () =>
+    (await getDb()).prepare<EventRow, [string, number]>(
       "SELECT * FROM events WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
     ),
 
-  getBySessionId: () =>
-    getDb().prepare<EventRow, [string, number]>(
+  getBySessionId: async () =>
+    (await getDb()).prepare<EventRow, [string, number]>(
       "SELECT * FROM events WHERE sessionId = ? ORDER BY createdAt DESC LIMIT ?",
     ),
 
-  getAll: () =>
-    getDb().prepare<EventRow, [number]>("SELECT * FROM events ORDER BY createdAt DESC LIMIT ?"),
+  getAll: async () =>
+    (await getDb()).prepare<EventRow, [number]>(
+      "SELECT * FROM events ORDER BY createdAt DESC LIMIT ?",
+    ),
 
-  countByEvent: () =>
-    getDb().prepare<{ event: string; count: number }, []>(
+  countByEvent: async () =>
+    (await getDb()).prepare<{ event: string; count: number }, []>(
       "SELECT event, COUNT(*) as count FROM events GROUP BY event ORDER BY count DESC",
     ),
 
-  countByEventForAgent: () =>
-    getDb().prepare<{ event: string; count: number }, [string]>(
+  countByEventForAgent: async () =>
+    (await getDb()).prepare<{ event: string; count: number }, [string]>(
       "SELECT event, COUNT(*) as count FROM events WHERE agentId = ? GROUP BY event ORDER BY count DESC",
     ),
 };
@@ -116,24 +118,22 @@ export interface CreateEventInput {
   data?: Record<string, unknown>;
 }
 
-export function createEvent(input: CreateEventInput): SwarmEvent {
+export async function createEvent(input: CreateEventInput): Promise<SwarmEvent> {
   const id = crypto.randomUUID();
-  eventQueries
-    .insert()
-    .run(
-      id,
-      input.category,
-      input.event,
-      input.status ?? "ok",
-      input.source,
-      input.agentId ?? null,
-      input.taskId ?? null,
-      input.sessionId ?? null,
-      input.parentEventId ?? null,
-      input.numericValue ?? null,
-      input.durationMs ?? null,
-      input.data ? JSON.stringify(input.data) : null,
-    );
+  (await eventQueries.insert()).run(
+    id,
+    input.category,
+    input.event,
+    input.status ?? "ok",
+    input.source,
+    input.agentId ?? null,
+    input.taskId ?? null,
+    input.sessionId ?? null,
+    input.parentEventId ?? null,
+    input.numericValue ?? null,
+    input.durationMs ?? null,
+    input.data ? JSON.stringify(input.data) : null,
+  );
   return {
     id,
     category: input.category,
@@ -151,9 +151,9 @@ export function createEvent(input: CreateEventInput): SwarmEvent {
   };
 }
 
-export function createEventsBatch(inputs: CreateEventInput[]): number {
-  const insert = eventQueries.insert();
-  const tx = getDb().transaction(() => {
+export async function createEventsBatch(inputs: CreateEventInput[]): Promise<number> {
+  const insert = await eventQueries.insert();
+  await runDbTransaction(() => {
     for (const input of inputs) {
       const id = crypto.randomUUID();
       insert.run(
@@ -172,45 +172,49 @@ export function createEventsBatch(inputs: CreateEventInput[]): number {
       );
     }
   });
-  tx();
   return inputs.length;
 }
 
 // ─── Query ──────────────────────────────────────────────────────────────────
 
-export function getEventsByCategory(category: EventCategory, limit = 100): SwarmEvent[] {
-  return eventQueries.getByCategory().all(category, limit).map(rowToSwarmEvent);
+export async function getEventsByCategory(
+  category: EventCategory,
+  limit = 100,
+): Promise<SwarmEvent[]> {
+  return (await eventQueries.getByCategory()).all(category, limit).map(rowToSwarmEvent);
 }
 
-export function getEventsByEvent(event: EventName, limit = 100): SwarmEvent[] {
-  return eventQueries.getByEvent().all(event, limit).map(rowToSwarmEvent);
+export async function getEventsByEvent(event: EventName, limit = 100): Promise<SwarmEvent[]> {
+  return (await eventQueries.getByEvent()).all(event, limit).map(rowToSwarmEvent);
 }
 
-export function getEventsByAgentId(agentId: string, limit = 100): SwarmEvent[] {
-  return eventQueries.getByAgentId().all(agentId, limit).map(rowToSwarmEvent);
+export async function getEventsByAgentId(agentId: string, limit = 100): Promise<SwarmEvent[]> {
+  return (await eventQueries.getByAgentId()).all(agentId, limit).map(rowToSwarmEvent);
 }
 
-export function getEventsByTaskId(taskId: string, limit = 100): SwarmEvent[] {
-  return eventQueries.getByTaskId().all(taskId, limit).map(rowToSwarmEvent);
+export async function getEventsByTaskId(taskId: string, limit = 100): Promise<SwarmEvent[]> {
+  return (await eventQueries.getByTaskId()).all(taskId, limit).map(rowToSwarmEvent);
 }
 
-export function getEventsBySessionId(sessionId: string, limit = 100): SwarmEvent[] {
-  return eventQueries.getBySessionId().all(sessionId, limit).map(rowToSwarmEvent);
+export async function getEventsBySessionId(sessionId: string, limit = 100): Promise<SwarmEvent[]> {
+  return (await eventQueries.getBySessionId()).all(sessionId, limit).map(rowToSwarmEvent);
 }
 
-export function getAllEvents(limit = 100): SwarmEvent[] {
-  return eventQueries.getAll().all(limit).map(rowToSwarmEvent);
+export async function getAllEvents(limit = 100): Promise<SwarmEvent[]> {
+  return (await eventQueries.getAll()).all(limit).map(rowToSwarmEvent);
 }
 
-export function getEventCounts(): Array<{ event: string; count: number }> {
-  return eventQueries.countByEvent().all();
+export async function getEventCounts(): Promise<Array<{ event: string; count: number }>> {
+  return (await eventQueries.countByEvent()).all();
 }
 
-export function getEventCountsForAgent(agentId: string): Array<{ event: string; count: number }> {
-  return eventQueries.countByEventForAgent().all(agentId);
+export async function getEventCountsForAgent(
+  agentId: string,
+): Promise<Array<{ event: string; count: number }>> {
+  return (await eventQueries.countByEventForAgent()).all(agentId);
 }
 
-export function getEventCountsFiltered(filters: {
+export async function getEventCountsFiltered(filters: {
   category?: EventCategory;
   source?: EventSource;
   agentId?: string;
@@ -218,7 +222,7 @@ export function getEventCountsFiltered(filters: {
   sessionId?: string;
   since?: string;
   until?: string;
-}): Array<{ event: string; count: number }> {
+}): Promise<Array<{ event: string; count: number }>> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -253,12 +257,12 @@ export function getEventCountsFiltered(filters: {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const sql = `SELECT event, COUNT(*) as count FROM events ${where} GROUP BY event ORDER BY count DESC`;
-  return getDb()
+  return (await getDb())
     .prepare<{ event: string; count: number }, (string | number)[]>(sql)
     .all(...params);
 }
 
-export function getEventsFiltered(filters: {
+export async function getEventsFiltered(filters: {
   category?: EventCategory;
   event?: EventName;
   status?: EventStatus;
@@ -269,7 +273,7 @@ export function getEventsFiltered(filters: {
   since?: string;
   until?: string;
   limit?: number;
-}): SwarmEvent[] {
+}): Promise<SwarmEvent[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -315,7 +319,7 @@ export function getEventsFiltered(filters: {
   params.push(limit);
 
   const sql = `SELECT * FROM events ${where} ORDER BY createdAt DESC LIMIT ?`;
-  return getDb()
+  return (await getDb())
     .prepare<EventRow, (string | number)[]>(sql)
     .all(...params)
     .map(rowToSwarmEvent);

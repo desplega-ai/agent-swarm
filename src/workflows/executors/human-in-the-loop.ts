@@ -108,7 +108,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
     const { db } = this.deps;
 
     // 1. Idempotency: check if an approval request was already created for this step
-    const existing = db.getApprovalRequestByStepId(meta.stepId);
+    const existing = await db.getApprovalRequestByStepId(meta.stepId);
     if (existing) {
       if (existing.status !== "pending") {
         // Already resolved — return result
@@ -139,7 +139,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
 
     // 2. Create the approval request
     const requestId = crypto.randomUUID();
-    db.createApprovalRequest({
+    await db.createApprovalRequest({
       id: requestId,
       title: config.title,
       questions: config.questions,
@@ -257,7 +257,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
     // Persist messageTs values back to DB
     if (updated) {
       try {
-        db.updateApprovalRequestNotifications(requestId, updatedChannels);
+        await db.updateApprovalRequestNotifications(requestId, updatedChannels);
       } catch (err) {
         console.error("[HITL] Failed to update notification channels in DB:", err);
       }

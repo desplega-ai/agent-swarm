@@ -252,11 +252,11 @@ function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] {
  * Phase 2 entrypoint. Idempotent — safe to call on every boot. Logs a one-line
  * summary so operators can tell whether the boot picked up new rates.
  */
-export function seedPricingFromModelsDev(opts?: { quiet?: boolean }): {
+export async function seedPricingFromModelsDev(opts?: { quiet?: boolean }): Promise<{
   inserted: number;
   modelsdevFound: boolean;
-} {
-  const db = getDb();
+}> {
+  const db = await getDb();
   const cache = loadModelsDevCache();
   const modelsdevRows = cache ? buildModelsDevSeedRows(cache) : [];
   const manualRows = MANUAL_PRICING_OVERRIDES.map((o) => ({

@@ -244,7 +244,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       }
 
       // Check for duplicate name
-      const existing = getScheduledTaskByName(name);
+      const existing = await getScheduledTaskByName(name);
       if (existing) {
         return {
           content: [{ type: "text", text: `Schedule with name "${name}" already exists.` }],
@@ -257,7 +257,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
 
       // Validate targetAgentId if provided
       if (targetAgentId) {
-        const agent = getAgentById(targetAgentId);
+        const agent = await getAgentById(targetAgentId);
         if (!agent) {
           return {
             content: [{ type: "text", text: `Target agent not found: ${targetAgentId}` }],
@@ -285,7 +285,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           nextRunAt = calculateNextRun(tempSchedule, new Date());
         }
 
-        const schedule = createScheduledTask({
+        const schedule = await createScheduledTask({
           name,
           taskTemplate,
           cronExpression,

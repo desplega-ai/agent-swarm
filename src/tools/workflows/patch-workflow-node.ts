@@ -30,7 +30,7 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
     },
     async ({ id, nodeId, ...nodeFields }, requestInfo) => {
       try {
-        const existing = getWorkflow(id);
+        const existing = await getWorkflow(id);
         if (!existing) {
           return {
             content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
@@ -58,9 +58,9 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
           };
         }
 
-        const version = snapshotWorkflow(id, requestInfo.agentId);
+        const version = await snapshotWorkflow(id, requestInfo.agentId);
 
-        const workflow = updateWorkflow(id, { definition: patchResult.definition });
+        const workflow = await updateWorkflow(id, { definition: patchResult.definition });
         if (!workflow) {
           return {
             content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],

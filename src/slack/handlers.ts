@@ -459,7 +459,7 @@ export function registerMessageHandler(app: App): void {
         return;
       }
       // Check if this thread has any swarm activity (existing tasks)
-      const hasSwarmActivity = getAgentWorkingOnThread(msg.channel, msg.thread_ts) !== null;
+      const hasSwarmActivity = (await getAgentWorkingOnThread(msg.channel, msg.thread_ts)) !== null;
 
       if (hasSwarmActivity) {
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
@@ -489,7 +489,7 @@ export function registerMessageHandler(app: App): void {
     const routingThreadContext = msg.thread_ts
       ? { channelId: msg.channel, threadTs: msg.thread_ts }
       : undefined;
-    const matches = routeMessage(
+    const matches = await routeMessage(
       routingText,
       botUserId,
       botMentioned || isImplicitMention,
@@ -531,7 +531,7 @@ export function registerMessageHandler(app: App): void {
       );
       let fullTaskDescription: string;
       if (threadContext) {
-        const ctxResult = resolveTemplate("slack.message.thread_context", {
+        const ctxResult = await resolveTemplate("slack.message.thread_context", {
           thread_messages: threadContext,
         });
         fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
@@ -539,8 +539,8 @@ export function registerMessageHandler(app: App): void {
         fullTaskDescription = taskDescription;
       }
 
-      const lead = getLeadAgent();
-      createTaskWithSiblingAwareness(fullTaskDescription, {
+      const lead = await getLeadAgent();
+      await createTaskWithSiblingAwareness(fullTaskDescription, {
         agentId: lead?.id,
         source: "slack",
         slackChannelId: msg.channel,
@@ -589,7 +589,7 @@ export function registerMessageHandler(app: App): void {
     );
     let fullTaskDescription: string;
     if (threadContext) {
-      const ctxResult = resolveTemplate("slack.message.thread_context", {
+      const ctxResult = await resolveTemplate("slack.message.thread_context", {
         thread_messages: threadContext,
       });
       fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
@@ -603,7 +603,7 @@ export function registerMessageHandler(app: App): void {
     } = { assigned: [], queued: [], failed: [] };
 
     for (const match of matches) {
-      const agent = getAgentById(match.agent.id);
+      const agent = await getAgentById(match.agent.id);
 
       if (!agent) {
         results.failed.push({ agentName: match.agent.name, reason: "not found" });
@@ -611,9 +611,9 @@ export function registerMessageHandler(app: App): void {
       }
 
       try {
-        const latestTask = getMostRecentTaskInThread(msg.channel, threadTs);
+        const latestTask = await getMostRecentTaskInThread(msg.channel, threadTs);
         if (agent.isLead) {
-          const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+          const task = await createTaskWithSiblingAwareness(fullTaskDescription, {
             agentId: agent.id,
             source: "slack",
             slackChannelId: msg.channel,
@@ -628,7 +628,7 @@ export function registerMessageHandler(app: App): void {
         }
 
         // Workers receive tasks as before
-        const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+        const task = await createTaskWithSiblingAwareness(fullTaskDescription, {
           agentId: agent.id,
           source: "slack",
           slackChannelId: msg.channel,
@@ -639,7 +639,7 @@ export function registerMessageHandler(app: App): void {
         });
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
-        const agentTasks = getTasksByAgentId(agent.id);
+        const agentTasks = await getTasksByAgentId(agent.id);
         const inProgressInThread = agentTasks.find(
           (t) => t.id !== task.id && t.status === "in_progress" && t.slackThreadTs === threadTs,
         );

@@ -24,8 +24,8 @@ mock.module("../jira/client", () => ({
   getJiraCloudId: () => "test-cloud-id",
 }));
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
@@ -49,7 +49,7 @@ describe("Jira Outbound Sync", () => {
     // Already inited in beforeEach, init again — should be no-op.
     initJiraOutboundSync();
 
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-idempotent",
@@ -66,7 +66,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("task.created posts plaintext comment with rocket emoji + summary", async () => {
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-created",
@@ -93,7 +93,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("task.completed truncates output to 4000 chars and ellipsizes", async () => {
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-completed-long",
@@ -119,7 +119,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("task.completed without output uses bare completion message", async () => {
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-completed-empty",
@@ -137,7 +137,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("task.failed renders cross emoji + reason; falls back when reason missing", async () => {
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-failed-with-reason",
@@ -145,7 +145,7 @@ describe("Jira Outbound Sync", () => {
       externalIdentifier: "KAN-5",
       syncDirection: "bidirectional",
     });
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-failed-no-reason",
@@ -174,7 +174,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("task.cancelled posts stop emoji message", async () => {
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-cancelled",
@@ -193,7 +193,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("flips lastSyncOrigin → 'swarm' on successful post", async () => {
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-origin-flip",
@@ -208,7 +208,7 @@ describe("Jira Outbound Sync", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    const updated = getTrackerSync("jira", "task", "jira-out-origin-flip");
+    const updated = await getTrackerSync("jira", "task", "jira-out-origin-flip");
     expect(updated?.lastSyncOrigin).toBe("swarm");
   });
 
@@ -223,7 +223,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("loop prevention: skips when lastSyncOrigin='external' within 5s", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-loop",
@@ -231,7 +231,7 @@ describe("Jira Outbound Sync", () => {
       externalIdentifier: "KAN-9",
       syncDirection: "bidirectional",
     });
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "external",
       lastSyncedAt: new Date().toISOString(),
     });
@@ -246,7 +246,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("allows sync when lastSyncOrigin='external' but older than 5s", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-loop-old",
@@ -254,7 +254,7 @@ describe("Jira Outbound Sync", () => {
       externalIdentifier: "KAN-10",
       syncDirection: "bidirectional",
     });
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "external",
       lastSyncedAt: new Date(Date.now() - 10_000).toISOString(),
     });
@@ -269,7 +269,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("falls back to externalId when externalIdentifier is null", async () => {
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-no-key",
@@ -287,7 +287,7 @@ describe("Jira Outbound Sync", () => {
 
   test("teardown removes listeners — events fire no posts after teardown", async () => {
     teardownJiraOutboundSync();
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-teardown",
@@ -306,7 +306,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("does NOT flip lastSyncOrigin on HTTP error from Jira", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-error",
@@ -314,7 +314,7 @@ describe("Jira Outbound Sync", () => {
       externalIdentifier: "KAN-13",
       syncDirection: "bidirectional",
     });
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "external",
       lastSyncedAt: new Date(Date.now() - 10_000).toISOString(), // outside loop window
     });
@@ -327,7 +327,7 @@ describe("Jira Outbound Sync", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockJiraFetch).toHaveBeenCalledTimes(1);
-    const after = getTrackerSync("jira", "task", "jira-out-error");
+    const after = await getTrackerSync("jira", "task", "jira-out-error");
     // Origin should remain 'external' — we did not write swarm-origin on failed POST.
     expect(after?.lastSyncOrigin).toBe("external");
   });

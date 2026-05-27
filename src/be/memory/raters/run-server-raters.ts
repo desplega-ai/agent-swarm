@@ -89,7 +89,7 @@ export async function runServerRaters(
       source: rater.name,
       weight: Math.max(0, Math.min(1, e.weight * multiplier)),
     }));
-    const applied = applyFn(stamped, { taskId: input.taskId });
+    const applied = await applyFn(stamped, { taskId: input.taskId });
     result.ratersFired += 1;
     result.outcomes.push({ rater: rater.name, events: stamped, result: applied });
   }

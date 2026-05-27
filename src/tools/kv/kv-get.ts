@@ -29,7 +29,7 @@ export const registerKvGetTool = (server: McpServer) => {
       }),
     },
     async ({ key, namespace }, requestInfo) => {
-      const resolved = resolveNamespace(namespace, requestInfo);
+      const resolved = await resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return {
           content: [{ type: "text", text: resolved.error }],
@@ -41,7 +41,7 @@ export const registerKvGetTool = (server: McpServer) => {
         };
       }
 
-      const entry = getKv(resolved.namespace, key);
+      const entry = await getKv(resolved.namespace, key);
       return {
         content: [
           {

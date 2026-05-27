@@ -59,7 +59,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         };
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const isLead = agent?.isLead ?? false;
 
       // Try vector search first
@@ -69,7 +69,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
 
       if (queryEmbedding) {
         const candidateLimit = limit * CANDIDATE_SET_MULTIPLIER;
-        const candidates = store.search(queryEmbedding, requestInfo.agentId, {
+        const candidates = await store.search(queryEmbedding, requestInfo.agentId, {
           scope: scope as "agent" | "swarm" | "all",
           limit: candidateLimit,
           source,
@@ -83,7 +83,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         // Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-2.md §3
         if (requestInfo.sourceTaskId) {
           try {
-            recordRetrievals(
+            await recordRetrievals(
               requestInfo.sourceTaskId,
               requestInfo.agentId,
               ranked.map((r) => ({ memoryId: r.id, similarity: r.similarity })),
@@ -121,7 +121,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
       }
 
       // Fallback: list recent memories (no OPENAI_API_KEY)
-      const recent = store.list(requestInfo.agentId, {
+      const recent = await store.list(requestInfo.agentId, {
         scope: scope as "agent" | "swarm" | "all",
         limit,
         isLead,

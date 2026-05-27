@@ -17,7 +17,7 @@ export function createAssistant(): Assistant {
       try {
         await saveThreadContext();
 
-        const greetingResult = resolveTemplate("slack.assistant.greeting", {});
+        const greetingResult = await resolveTemplate("slack.assistant.greeting", {});
         await say(greetingResult.text);
 
         await setSuggestedPrompts({
@@ -83,7 +83,7 @@ export function createAssistant(): Assistant {
           : undefined;
 
         // 1. Check if an agent is already working in this thread
-        const workingAgent = getAgentWorkingOnThread(channelId, threadTs);
+        const workingAgent = await getAgentWorkingOnThread(channelId, threadTs);
 
         if (workingAgent && workingAgent.status !== "offline") {
           // Follow-up message → route to the same agent
@@ -94,8 +94,8 @@ export function createAssistant(): Assistant {
           }
 
           // Otherwise, create a follow-up task for the working agent
-          const latestTask = getMostRecentTaskInThread(channelId, threadTs);
-          createTaskWithSiblingAwareness(messageText, {
+          const latestTask = await getMostRecentTaskInThread(channelId, threadTs);
+          await createTaskWithSiblingAwareness(messageText, {
             agentId: workingAgent.id,
             source: "slack",
             slackChannelId: channelId,
@@ -125,10 +125,10 @@ export function createAssistant(): Assistant {
             ? `\n\n[User is viewing channel <#${ctx.channel_id}>]`
             : "";
 
-        const lead = getLeadAgent();
+        const lead = await getLeadAgent();
         if (!lead) {
           // No lead — still queue the task
-          createTaskWithSiblingAwareness(messageText + channelContext, {
+          await createTaskWithSiblingAwareness(messageText + channelContext, {
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,
@@ -136,12 +136,12 @@ export function createAssistant(): Assistant {
             requestedByUserId,
             contextKey: slackContextKey({ channelId, threadTs }),
           });
-          const offlineResult = resolveTemplate("slack.assistant.offline", {});
+          const offlineResult = await resolveTemplate("slack.assistant.offline", {});
           await say(offlineResult.text);
           return;
         }
 
-        createTaskWithSiblingAwareness(messageText + channelContext, {
+        await createTaskWithSiblingAwareness(messageText + channelContext, {
           agentId: lead.id,
           source: "slack",
           slackChannelId: channelId,

@@ -49,8 +49,8 @@ export type ApplySiblingAwarenessResult = {
   siblings: SiblingTaskInfo[];
 };
 
-function toSiblingTaskInfo(task: AgentTask): SiblingTaskInfo {
-  const agent = task.agentId ? getAgentById(task.agentId) : null;
+async function toSiblingTaskInfo(task: AgentTask): Promise<SiblingTaskInfo> {
+  const agent = task.agentId ? await getAgentById(task.agentId) : null;
   return {
     id: task.id,
     status: task.status,
@@ -71,20 +71,20 @@ function toSiblingTaskInfo(task: AgentTask): SiblingTaskInfo {
  * the returned value already takes precedence. (If both are passed, callers
  * are responsible for deciding which one wins.)
  */
-export function applySiblingAwareness(
+export async function applySiblingAwareness(
   input: ApplySiblingAwarenessInput,
-): ApplySiblingAwarenessResult {
+): Promise<ApplySiblingAwarenessResult> {
   const { description, contextKey, currentAgentId } = input;
   if (!contextKey) {
     return { description, siblings: [] };
   }
 
-  const tasks = getInProgressTasksByContextKey(contextKey);
+  const tasks = await getInProgressTasksByContextKey(contextKey);
   if (tasks.length === 0) {
     return { description, siblings: [] };
   }
 
-  const siblings = tasks.map(toSiblingTaskInfo);
+  const siblings = await Promise.all(tasks.map(toSiblingTaskInfo));
   const parent = pickResumeParent(siblings, currentAgentId ?? null);
   const newDescription = prependSiblingBlock(description, contextKey, siblings, input.now);
 
@@ -108,15 +108,15 @@ export function applySiblingAwareness(
  *   - The returned `options` object is a shallow copy; callers may pass it
  *     directly to `createTaskExtended`.
  */
-export function withSiblingAwareness(
+export async function withSiblingAwareness(
   description: string,
   options: CreateTaskOptions,
-): { description: string; options: CreateTaskOptions } {
+): Promise<{ description: string; options: CreateTaskOptions }> {
   const contextKey = options.contextKey;
   if (!contextKey) {
     return { description, options };
   }
-  const result = applySiblingAwareness({
+  const result = await applySiblingAwareness({
     description,
     contextKey,
     currentAgentId: options.agentId ?? null,
@@ -135,10 +135,10 @@ export function withSiblingAwareness(
  * first. Use this from every ingress that has a `contextKey` so cross-ingress
  * sibling coordination is uniform without duplicating the wrapper boilerplate.
  */
-export function createTaskWithSiblingAwareness(
+export async function createTaskWithSiblingAwareness(
   description: string,
   options: CreateTaskOptions,
-): AgentTask {
-  const { description: d, options: o } = withSiblingAwareness(description, options);
-  return createTaskExtended(d, o);
+): Promise<AgentTask> {
+  const { description: d, options: o } = await withSiblingAwareness(description, options);
+  return await createTaskExtended(d, o);
 }

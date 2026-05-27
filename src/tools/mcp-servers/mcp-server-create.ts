@@ -78,7 +78,7 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
         // Swarm/global scope requires lead
         const scope = args.scope ?? "agent";
         if (scope === "swarm" || scope === "global") {
-          const agent = getAgentById(requestInfo.agentId);
+          const agent = await getAgentById(requestInfo.agentId);
           if (!agent?.isLead) {
             return {
               content: [
@@ -96,7 +96,7 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
           }
         }
 
-        const created = createMcpServer({
+        const created = await createMcpServer({
           name: args.name,
           description: args.description,
           transport: args.transport,
@@ -111,7 +111,7 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
         });
 
         // Auto-install for the creating agent
-        installMcpServer(requestInfo.agentId, created.id);
+        await installMcpServer(requestInfo.agentId, created.id);
 
         return {
           content: [{ type: "text", text: `Created MCP server "${created.name}" (${created.id})` }],

@@ -13,8 +13,8 @@ import {
 
 const TEST_DB_PATH = "./test-db-queries-oauth.sqlite";
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
@@ -25,13 +25,13 @@ afterAll(async () => {
 });
 
 describe("OAuth Apps CRUD", () => {
-  test("getOAuthApp returns null for unknown provider", () => {
-    const result = getOAuthApp("nonexistent");
+  test("getOAuthApp returns null for unknown provider", async () => {
+    const result = await getOAuthApp("nonexistent");
     expect(result).toBeNull();
   });
 
-  test("upsertOAuthApp creates a new app", () => {
-    upsertOAuthApp("test-provider", {
+  test("upsertOAuthApp creates a new app", async () => {
+    await upsertOAuthApp("test-provider", {
       clientId: "client-123",
       clientSecret: "secret-456",
       authorizeUrl: "https://example.com/authorize",
@@ -40,7 +40,7 @@ describe("OAuth Apps CRUD", () => {
       scopes: "read,write",
     });
 
-    const app = getOAuthApp("test-provider");
+    const app = await getOAuthApp("test-provider");
     expect(app).not.toBeNull();
     expect(app!.provider).toBe("test-provider");
     expect(app!.clientId).toBe("client-123");
@@ -52,8 +52,8 @@ describe("OAuth Apps CRUD", () => {
     expect(app!.metadata).toBe("{}");
   });
 
-  test("upsertOAuthApp updates existing app on conflict", () => {
-    upsertOAuthApp("test-provider", {
+  test("upsertOAuthApp updates existing app on conflict", async () => {
+    await upsertOAuthApp("test-provider", {
       clientId: "client-updated",
       clientSecret: "secret-updated",
       authorizeUrl: "https://example.com/authorize-v2",
@@ -63,15 +63,15 @@ describe("OAuth Apps CRUD", () => {
       metadata: '{"key": "value"}',
     });
 
-    const app = getOAuthApp("test-provider");
+    const app = await getOAuthApp("test-provider");
     expect(app).not.toBeNull();
     expect(app!.clientId).toBe("client-updated");
     expect(app!.scopes).toBe("read,write,admin");
     expect(app!.metadata).toBe('{"key": "value"}');
   });
 
-  test("multiple providers can coexist", () => {
-    upsertOAuthApp("provider-a", {
+  test("multiple providers can coexist", async () => {
+    await upsertOAuthApp("provider-a", {
       clientId: "a-client",
       clientSecret: "a-secret",
       authorizeUrl: "https://a.com/authorize",
@@ -79,7 +79,7 @@ describe("OAuth Apps CRUD", () => {
       redirectUri: "https://a.com/callback",
       scopes: "read",
     });
-    upsertOAuthApp("provider-b", {
+    await upsertOAuthApp("provider-b", {
       clientId: "b-client",
       clientSecret: "b-secret",
       authorizeUrl: "https://b.com/authorize",
@@ -88,22 +88,22 @@ describe("OAuth Apps CRUD", () => {
       scopes: "write",
     });
 
-    const a = getOAuthApp("provider-a");
-    const b = getOAuthApp("provider-b");
+    const a = await getOAuthApp("provider-a");
+    const b = await getOAuthApp("provider-b");
     expect(a!.clientId).toBe("a-client");
     expect(b!.clientId).toBe("b-client");
   });
 });
 
 describe("OAuth Tokens CRUD", () => {
-  test("getOAuthTokens returns null for unknown provider", () => {
-    const result = getOAuthTokens("nonexistent-tokens");
+  test("getOAuthTokens returns null for unknown provider", async () => {
+    const result = await getOAuthTokens("nonexistent-tokens");
     expect(result).toBeNull();
   });
 
-  test("storeOAuthTokens creates tokens", () => {
+  test("storeOAuthTokens creates tokens", async () => {
     // Need an oauth_app first (FK constraint)
-    upsertOAuthApp("token-test", {
+    await upsertOAuthApp("token-test", {
       clientId: "c",
       clientSecret: "s",
       authorizeUrl: "https://x.com/auth",
@@ -113,14 +113,14 @@ describe("OAuth Tokens CRUD", () => {
     });
 
     const futureDate = new Date(Date.now() + 3600000).toISOString();
-    storeOAuthTokens("token-test", {
+    await storeOAuthTokens("token-test", {
       accessToken: "access-abc",
       refreshToken: "refresh-xyz",
       expiresAt: futureDate,
       scope: "read,write",
     });
 
-    const tokens = getOAuthTokens("token-test");
+    const tokens = await getOAuthTokens("token-test");
     expect(tokens).not.toBeNull();
     expect(tokens!.provider).toBe("token-test");
     expect(tokens!.accessToken).toBe("access-abc");
@@ -128,75 +128,76 @@ describe("OAuth Tokens CRUD", () => {
     expect(tokens!.scope).toBe("read,write");
   });
 
-  test("storeOAuthTokens updates existing tokens (upsert)", () => {
+  test("storeOAuthTokens updates existing tokens (upsert)", async () => {
     const futureDate = new Date(Date.now() + 7200000).toISOString();
-    storeOAuthTokens("token-test", {
+    await storeOAuthTokens("token-test", {
       accessToken: "access-updated",
       expiresAt: futureDate,
     });
 
-    const tokens = getOAuthTokens("token-test");
+    const tokens = await getOAuthTokens("token-test");
     expect(tokens!.accessToken).toBe("access-updated");
     // refreshToken should be preserved (COALESCE)
     expect(tokens!.refreshToken).toBe("refresh-xyz");
   });
 
-  test("updateOAuthTokensAfterRefresh replaces the rotated refresh token atomically", () => {
+  test("updateOAuthTokensAfterRefresh replaces the rotated refresh token atomically", async () => {
     const futureDate = new Date(Date.now() + 7200000).toISOString();
-    storeOAuthTokens("token-test", {
+    await storeOAuthTokens("token-test", {
       accessToken: "access-before-refresh",
       refreshToken: "refresh-before-refresh",
       expiresAt: new Date(Date.now() + 60000).toISOString(),
     });
 
-    updateOAuthTokensAfterRefresh("token-test", "refresh-before-refresh", {
+    await updateOAuthTokensAfterRefresh("token-test", "refresh-before-refresh", {
       accessToken: "access-after-refresh",
       refreshToken: "refresh-after-refresh",
       expiresAt: futureDate,
       scope: "read,write",
     });
 
-    const tokens = getOAuthTokens("token-test");
+    const tokens = await getOAuthTokens("token-test");
     expect(tokens!.accessToken).toBe("access-after-refresh");
     expect(tokens!.refreshToken).toBe("refresh-after-refresh");
     expect(tokens!.expiresAt).toBe(futureDate);
     expect(tokens!.scope).toBe("read,write");
   });
 
-  test("updateOAuthTokensAfterRefresh refuses to overwrite a concurrently rotated token", () => {
-    storeOAuthTokens("token-test", {
+  test("updateOAuthTokensAfterRefresh refuses to overwrite a concurrently rotated token", async () => {
+    await storeOAuthTokens("token-test", {
       accessToken: "access-current",
       refreshToken: "refresh-current",
       expiresAt: new Date(Date.now() + 60000).toISOString(),
     });
 
-    expect(() =>
-      updateOAuthTokensAfterRefresh("token-test", "refresh-stale", {
-        accessToken: "access-stale-result",
-        refreshToken: "refresh-stale-result",
-        expiresAt: new Date(Date.now() + 7200000).toISOString(),
-      }),
+    expect(
+      async () =>
+        await updateOAuthTokensAfterRefresh("token-test", "refresh-stale", {
+          accessToken: "access-stale-result",
+          refreshToken: "refresh-stale-result",
+          expiresAt: new Date(Date.now() + 7200000).toISOString(),
+        }),
     ).toThrow(/stored refresh token changed during refresh/);
 
-    const tokens = getOAuthTokens("token-test");
+    const tokens = await getOAuthTokens("token-test");
     expect(tokens!.accessToken).toBe("access-current");
     expect(tokens!.refreshToken).toBe("refresh-current");
   });
 
-  test("deleteOAuthTokens removes tokens", () => {
-    deleteOAuthTokens("token-test");
-    const tokens = getOAuthTokens("token-test");
+  test("deleteOAuthTokens removes tokens", async () => {
+    await deleteOAuthTokens("token-test");
+    const tokens = await getOAuthTokens("token-test");
     expect(tokens).toBeNull();
   });
 });
 
 describe("isTokenExpiringSoon", () => {
-  test("returns true when no tokens exist", () => {
-    expect(isTokenExpiringSoon("nonexistent")).toBe(true);
+  test("returns true when no tokens exist", async () => {
+    expect(await isTokenExpiringSoon("nonexistent")).toBe(true);
   });
 
-  test("returns false for tokens expiring far in the future", () => {
-    upsertOAuthApp("expiry-test", {
+  test("returns false for tokens expiring far in the future", async () => {
+    await upsertOAuthApp("expiry-test", {
       clientId: "c",
       clientSecret: "s",
       authorizeUrl: "https://x.com/auth",
@@ -206,35 +207,35 @@ describe("isTokenExpiringSoon", () => {
     });
 
     const farFuture = new Date(Date.now() + 24 * 3600000).toISOString();
-    storeOAuthTokens("expiry-test", {
+    await storeOAuthTokens("expiry-test", {
       accessToken: "a",
       expiresAt: farFuture,
     });
 
-    expect(isTokenExpiringSoon("expiry-test")).toBe(false);
+    expect(await isTokenExpiringSoon("expiry-test")).toBe(false);
   });
 
-  test("returns true for tokens expiring within buffer", () => {
+  test("returns true for tokens expiring within buffer", async () => {
     const almostExpired = new Date(Date.now() + 60000).toISOString(); // 1 minute from now
-    storeOAuthTokens("expiry-test", {
+    await storeOAuthTokens("expiry-test", {
       accessToken: "a",
       expiresAt: almostExpired,
     });
 
     // Default buffer is 5 minutes, token expires in 1 minute → expiring soon
-    expect(isTokenExpiringSoon("expiry-test")).toBe(true);
+    expect(await isTokenExpiringSoon("expiry-test")).toBe(true);
   });
 
-  test("respects custom buffer", () => {
+  test("respects custom buffer", async () => {
     const twoMinutes = new Date(Date.now() + 120000).toISOString();
-    storeOAuthTokens("expiry-test", {
+    await storeOAuthTokens("expiry-test", {
       accessToken: "a",
       expiresAt: twoMinutes,
     });
 
     // With 1-minute buffer, 2-minute token is fine
-    expect(isTokenExpiringSoon("expiry-test", 60000)).toBe(false);
+    expect(await isTokenExpiringSoon("expiry-test", 60000)).toBe(false);
     // With 3-minute buffer, 2-minute token is expiring soon
-    expect(isTokenExpiringSoon("expiry-test", 180000)).toBe(true);
+    expect(await isTokenExpiringSoon("expiry-test", 180000)).toBe(true);
   });
 });

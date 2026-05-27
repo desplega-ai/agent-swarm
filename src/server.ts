@@ -158,15 +158,15 @@ export function getEnabledCapabilities(): string[] {
   return Array.from(CAPABILITIES);
 }
 
-export function createServer() {
+export async function createServer() {
   // Initialize database with WAL mode
   // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
-  initDb(process.env.DATABASE_PATH);
+  await initDb(process.env.DATABASE_PATH);
   // Phase 2: project the vendored models.dev snapshot into the pricing table.
   // Idempotent (INSERT OR IGNORE keyed on PK with effective_from=0); safe to
   // call on every boot. See src/be/seed-pricing.ts for the projection logic
   // and the manual-override constants for runtime-fee / ACU pricing.
-  seedPricingFromModelsDev();
+  await seedPricingFromModelsDev();
 
   const server = new McpServer(
     {

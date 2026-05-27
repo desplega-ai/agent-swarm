@@ -203,8 +203,8 @@ export async function handlePromptTemplates(
       return true;
     }
 
-    const result = resolveTemplate(eventType, {}, { agentId, repoId });
-    const dbResult = resolvePromptTemplate(eventType, agentId, repoId);
+    const result = await resolveTemplate(eventType, {}, { agentId, repoId });
+    const dbResult = await resolvePromptTemplate(eventType, agentId, repoId);
     const definition = getTemplateDefinition(eventType);
 
     json(res, {
@@ -263,7 +263,7 @@ export async function handlePromptTemplates(
     if (!parsed) return true;
 
     const { eventType, variables, agentId, repoId } = parsed.body;
-    const result = resolveTemplate(eventType, variables ?? {}, { agentId, repoId });
+    const result = await resolveTemplate(eventType, variables ?? {}, { agentId, repoId });
     json(res, result);
     return true;
   }
@@ -274,7 +274,7 @@ export async function handlePromptTemplates(
     if (!parsed) return true;
 
     try {
-      const template = checkoutPromptTemplate(parsed.params.id, parsed.body.version);
+      const template = await checkoutPromptTemplate(parsed.params.id, parsed.body.version);
       json(res, { template });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -292,7 +292,7 @@ export async function handlePromptTemplates(
     const parsed = await resetRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const existing = getPromptTemplateById(parsed.params.id);
+    const existing = await getPromptTemplateById(parsed.params.id);
     if (!existing) {
       jsonError(res, `Prompt template ${parsed.params.id} not found`, 404);
       return true;
@@ -305,7 +305,7 @@ export async function handlePromptTemplates(
     }
 
     try {
-      const template = resetPromptTemplateToDefault(parsed.params.id, definition.defaultBody);
+      const template = await resetPromptTemplateToDefault(parsed.params.id, definition.defaultBody);
       json(res, { template });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -319,13 +319,13 @@ export async function handlePromptTemplates(
     const parsed = await getByIdRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const template = getPromptTemplateById(parsed.params.id);
+    const template = await getPromptTemplateById(parsed.params.id);
     if (!template) {
       jsonError(res, "Prompt template not found", 404);
       return true;
     }
 
-    const history = getPromptTemplateHistory(parsed.params.id);
+    const history = await getPromptTemplateHistory(parsed.params.id);
     json(res, { template, history });
     return true;
   }
@@ -336,7 +336,7 @@ export async function handlePromptTemplates(
     if (!parsed) return true;
 
     try {
-      const deleted = deletePromptTemplate(parsed.params.id);
+      const deleted = await deletePromptTemplate(parsed.params.id);
       if (!deleted) {
         jsonError(res, "Prompt template not found", 404);
         return true;
@@ -354,7 +354,7 @@ export async function handlePromptTemplates(
     const parsed = await listRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const templates = getPromptTemplates({
+    const templates = await getPromptTemplates({
       eventType: parsed.query.eventType || undefined,
       scope: parsed.query.scope || undefined,
       scopeId: parsed.query.scopeId || undefined,
@@ -391,7 +391,7 @@ export async function handlePromptTemplates(
     }
 
     try {
-      const template = upsertPromptTemplate({
+      const template = await upsertPromptTemplate({
         eventType,
         scope,
         scopeId: scopeId || null,

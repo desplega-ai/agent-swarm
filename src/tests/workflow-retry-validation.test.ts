@@ -118,9 +118,12 @@ function createTestRegistry(): ExecutorRegistry {
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(def: WorkflowDefinition, overrides?: Partial<Workflow>): Workflow {
+async function makeWorkflow(
+  def: WorkflowDefinition,
+  overrides?: Partial<Workflow>,
+): Promise<Workflow> {
   workflowCounter++;
-  const workflow = createWorkflow({
+  const workflow = await createWorkflow({
     name: `test-retry-val-${workflowCounter}-${Date.now()}`,
     definition: def,
   });
@@ -136,7 +139,7 @@ beforeAll(async () => {
   try {
     await unlink(TEST_DB_PATH);
   } catch {}
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   registry = createTestRegistry();
 });
 
@@ -158,7 +161,7 @@ describe("Retry Poller — Validation on Retry", () => {
     validateAlwaysPass = false;
 
     // Node produces value=10 (always < 50, so validation always fails)
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "n1",
@@ -182,7 +185,7 @@ describe("Retry Poller — Validation on Retry", () => {
     const runId = await startWorkflowExecution(workflow, {}, registry);
 
     // First execution: step succeeds, but validation fails → retry scheduled
-    const steps1 = getWorkflowRunStepsByRunId(runId);
+    const steps1 = await getWorkflowRunStepsByRunId(runId);
     const step1 = steps1.find((s) => s.nodeId === "n1")!;
     expect(step1.status).toBe("failed");
     expect(step1.nextRetryAt).toBeTruthy();
@@ -202,7 +205,7 @@ describe("Retry Poller — Validation on Retry", () => {
     expect(validateCallCount).toBeGreaterThan(validationCountAfterInitial);
 
     // Run should be failed (validation always fails, retries exhausted)
-    const finalRun = getWorkflowRun(runId);
+    const finalRun = await getWorkflowRun(runId);
     expect(finalRun!.status).toBe("failed");
   });
 
@@ -213,7 +216,7 @@ describe("Retry Poller — Validation on Retry", () => {
     validateAlwaysPass = false;
 
     // Node produces value=100 (>50, so validation passes)
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "n1",
@@ -241,7 +244,7 @@ describe("Retry Poller — Validation on Retry", () => {
     const runId = await startWorkflowExecution(workflow, {}, registry);
 
     // Should complete immediately since validation passes
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
     expect(validateCallCount).toBeGreaterThanOrEqual(1);
   });
@@ -252,7 +255,7 @@ describe("Retry Poller — Validation on Retry", () => {
 
     // Node produces value=10 (< 50), validation fails.
     // mustPass=true but NO retry config → halt
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "n1",
@@ -271,10 +274,10 @@ describe("Retry Poller — Validation on Retry", () => {
     const runId = await startWorkflowExecution(workflow, {}, registry);
 
     // Should fail immediately (halt, no retry)
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("failed");
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const step = steps.find((s) => s.nodeId === "n1")!;
     expect(step.status).toBe("failed");
     expect(step.nextRetryAt).toBeFalsy();

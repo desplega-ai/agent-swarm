@@ -44,7 +44,7 @@ function source(multiplier: number) {
 describe("scripts DB helpers", () => {
   beforeAll(async () => {
     await clearDb();
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
     setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
   });
 
@@ -54,12 +54,12 @@ describe("scripts DB helpers", () => {
     await clearDb();
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM scripts");
+  beforeEach(async () => {
+    (await getDb()).run("DELETE FROM scripts");
   });
 
-  test("insertScript stores a live row and initial version", () => {
-    const script = insertScript({
+  test("insertScript stores a live row and initial version", async () => {
+    const script = await insertScript({
       name: "double",
       scope: "agent",
       scopeId: "agent-1",
@@ -79,7 +79,7 @@ describe("scripts DB helpers", () => {
     expect(script.typeChecked).toBe(true);
     expect(script.fsMode).toBe("none");
 
-    const version = getScriptVersion({ scriptId: script.id, version: 1 });
+    const version = await getScriptVersion({ scriptId: script.id, version: 1 });
     expect(version?.source).toBe(source(2));
     expect(version?.changedByAgentId).toBe("agent-1");
     expect(version?.changeReason).toBe("Initial creation");
@@ -113,7 +113,7 @@ describe("scripts DB helpers", () => {
     expect(second.script.version).toBe(1);
     expect(second.script.description).toBe("Changed metadata should update without version bump");
     expect(
-      getDb()
+      (await getDb())
         .prepare<{ count: number }, [string]>(
           "SELECT COUNT(*) as count FROM script_versions WHERE scriptId = ?",
         )
@@ -152,19 +152,23 @@ describe("scripts DB helpers", () => {
     expect(second.script.version).toBe(2);
     expect(second.script.typeChecked).toBe(true);
 
-    const v1 = getScriptVersion({ scriptId: first.script.id, version: 1 });
-    const v2 = getScriptVersion({ scriptId: first.script.id, version: 2 });
+    const v1 = await getScriptVersion({ scriptId: first.script.id, version: 1 });
+    const v2 = await getScriptVersion({ scriptId: first.script.id, version: 2 });
     expect(v1?.source).toBe(source(2));
     expect(v2?.source).toBe(source(3));
     expect(v2?.changeReason).toBe("Use triple");
     expect(
-      getScriptVersion({ scriptId: first.script.id, contentHash: second.script.contentHash })
-        ?.version,
+      (
+        await getScriptVersion({
+          scriptId: first.script.id,
+          contentHash: second.script.contentHash,
+        })
+      )?.version,
     ).toBe(2);
   });
 
-  test("scope uniqueness treats global null scopeId as one scope and isolates agent scopes", () => {
-    insertScript({
+  test("scope uniqueness treats global null scopeId as one scope and isolates agent scopes", async () => {
+    await insertScript({
       name: "shared-name",
       scope: "global",
       source: source(2),
@@ -173,18 +177,19 @@ describe("scripts DB helpers", () => {
       signatureJson,
     });
 
-    expect(() =>
-      insertScript({
-        name: "shared-name",
-        scope: "global",
-        source: source(3),
-        description: "Duplicate global",
-        intent: "Should fail",
-        signatureJson,
-      }),
+    expect(
+      async () =>
+        await insertScript({
+          name: "shared-name",
+          scope: "global",
+          source: source(3),
+          description: "Duplicate global",
+          intent: "Should fail",
+          signatureJson,
+        }),
     ).toThrow();
 
-    const agentOne = insertScript({
+    const agentOne = await insertScript({
       name: "shared-name",
       scope: "agent",
       scopeId: "agent-1",
@@ -193,7 +198,7 @@ describe("scripts DB helpers", () => {
       intent: "Agent script",
       signatureJson,
     });
-    const agentTwo = insertScript({
+    const agentTwo = await insertScript({
       name: "shared-name",
       scope: "agent",
       scopeId: "agent-2",
@@ -204,20 +209,21 @@ describe("scripts DB helpers", () => {
     });
 
     expect(agentOne.id).not.toBe(agentTwo.id);
-    expect(() =>
-      insertScript({
-        name: "missing-scope",
-        scope: "agent",
-        source: source(2),
-        description: "No scopeId",
-        intent: "Should fail",
-        signatureJson,
-      }),
+    expect(
+      async () =>
+        await insertScript({
+          name: "missing-scope",
+          scope: "agent",
+          source: source(2),
+          description: "No scopeId",
+          intent: "Should fail",
+          signatureJson,
+        }),
     ).toThrow("scopeId is required");
   });
 
-  test("listScripts filters scratch scripts by default", () => {
-    insertScript({
+  test("listScripts filters scratch scripts by default", async () => {
+    await insertScript({
       name: "explicit",
       scope: "agent",
       scopeId: "agent-1",
@@ -226,7 +232,7 @@ describe("scripts DB helpers", () => {
       intent: "Explicit script",
       signatureJson,
     });
-    insertScript({
+    await insertScript({
       name: "scratch",
       scope: "agent",
       scopeId: "agent-1",
@@ -238,10 +244,10 @@ describe("scripts DB helpers", () => {
     });
 
     expect(
-      listScripts({ scope: "agent", scopeId: "agent-1" }).map((script) => script.name),
+      (await listScripts({ scope: "agent", scopeId: "agent-1" })).map((script) => script.name),
     ).toEqual(["explicit"]);
     expect(
-      listScripts({ scope: "agent", scopeId: "agent-1", includeScratch: true }).map(
+      (await listScripts({ scope: "agent", scopeId: "agent-1", includeScratch: true })).map(
         (script) => script.name,
       ),
     ).toEqual(["explicit", "scratch"]);
@@ -265,11 +271,11 @@ describe("scripts DB helpers", () => {
       signatureJson,
     });
 
-    expect(deleteScript({ name: "delete-me", scope: "global" })).toBe(true);
-    expect(deleteScript({ name: "delete-me", scope: "global" })).toBe(false);
-    expect(getScript({ name: "delete-me", scope: "global" })).toBeNull();
+    expect(await deleteScript({ name: "delete-me", scope: "global" })).toBe(true);
+    expect(await deleteScript({ name: "delete-me", scope: "global" })).toBe(false);
+    expect(await getScript({ name: "delete-me", scope: "global" })).toBeNull();
     expect(
-      getDb()
+      (await getDb())
         .prepare<{ count: number }, [string]>(
           "SELECT COUNT(*) as count FROM script_versions WHERE scriptId = ?",
         )
@@ -313,13 +319,19 @@ describe("scripts DB helpers", () => {
     expect(deduped.contentDeduped).toBe(true);
     expect(deduped.script.version).toBe(1);
     expect(updated.script.version).toBe(2);
-    expect(getScriptVersion({ scriptId: created.script.id, version: 1 })?.source).toBe(source(2));
-    expect(getScriptVersion({ scriptId: created.script.id, version: 2 })?.source).toBe(source(5));
+    expect((await getScriptVersion({ scriptId: created.script.id, version: 1 }))?.source).toBe(
+      source(2),
+    );
+    expect((await getScriptVersion({ scriptId: created.script.id, version: 2 }))?.source).toBe(
+      source(5),
+    );
 
-    expect(deleteScript({ name: "lifecycle", scope: "agent", scopeId: "agent-1" })).toBe(true);
-    expect(getScript({ name: "lifecycle", scope: "agent", scopeId: "agent-1" })).toBeNull();
+    expect(await deleteScript({ name: "lifecycle", scope: "agent", scopeId: "agent-1" })).toBe(
+      true,
+    );
+    expect(await getScript({ name: "lifecycle", scope: "agent", scopeId: "agent-1" })).toBeNull();
     expect(
-      getDb()
+      (await getDb())
         .prepare<{ count: number }, [string]>(
           "SELECT COUNT(*) as count FROM script_versions WHERE scriptId = ?",
         )

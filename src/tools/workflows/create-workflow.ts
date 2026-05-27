@@ -106,7 +106,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           };
         }
 
-        const workflow = createWorkflow({
+        const workflow = await createWorkflow({
           name,
           description,
           definition,

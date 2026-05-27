@@ -37,7 +37,7 @@ async function removeDbFiles(path: string): Promise<void> {
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   setScriptEmbeddingProviderForTests(fakeEmbeddingProvider);
 });
 
@@ -94,7 +94,7 @@ describe("seed-scripts catalog", () => {
     expect(result.failed).toEqual([]);
     expect(result.created).toBe(SEED_SCRIPTS.length);
 
-    const globals = listScripts({ scope: "global" });
+    const globals = await listScripts({ scope: "global" });
     for (const s of SEED_SCRIPTS) {
       const row = globals.find((g) => g.name === s.name);
       expect(row, `${s.name} was not seeded`).toBeDefined();
@@ -140,7 +140,7 @@ describe("seed-scripts catalog", () => {
     expect(result.skippedUnchanged).toBe(SEED_SCRIPTS.length - 1);
 
     // The user's edit survived — the seed did not clobber it.
-    const row = getScript({ name: target.name, scope: "global" });
+    const row = await getScript({ name: target.name, scope: "global" });
     expect(row?.source).toBe(userSource);
   });
 });

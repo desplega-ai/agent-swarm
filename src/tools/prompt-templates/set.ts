@@ -77,7 +77,7 @@ export const registerSetPromptTemplateTool = (server: McpServer) => {
       }
 
       try {
-        const template = upsertPromptTemplate({
+        const template = await upsertPromptTemplate({
           eventType,
           scope,
           scopeId: scope === "global" ? null : scopeId,

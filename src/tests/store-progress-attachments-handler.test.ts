@@ -71,8 +71,8 @@ describe("store-progress handler — attachments insert path", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
-    initDb(TEST_DB_PATH);
-    const agent = createAgent({
+    await initDb(TEST_DB_PATH);
+    const agent = await createAgent({
       name: "Handler Attachments Worker",
       description: "Agent for handler-level attachment tests",
       role: "worker",
@@ -101,12 +101,12 @@ describe("store-progress handler — attachments insert path", () => {
   }
 
   test("inserts attachment row on an in-progress task (baseline)", async () => {
-    const task = createTaskExtended("handler in-progress baseline", {
+    const task = await createTaskExtended("handler in-progress baseline", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    await startTask(task.id, agentId);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -119,20 +119,20 @@ describe("store-progress handler — attachments insert path", () => {
     )) as StoreProgressResult;
 
     expect(result.structuredContent.success).toBe(true);
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].kind).toBe("url");
     expect(rows[0].url).toBe("https://example.com/baseline");
   });
 
   test("inserts attachment row on an ALREADY-COMPLETED task (PR #542 regression)", async () => {
-    const task = createTaskExtended("handler post-completion attachment", {
+    const task = await createTaskExtended("handler post-completion attachment", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
-    const completed = completeTask(task.id, "done");
+    await startTask(task.id, agentId);
+    const completed = await completeTask(task.id, "done");
     expect(completed?.status).toBe("completed");
 
     // Lead's smoke shape: just a minimal URL attachment, no status field, no
@@ -148,19 +148,19 @@ describe("store-progress handler — attachments insert path", () => {
     )) as StoreProgressResult;
 
     expect(result.structuredContent.success).toBe(true);
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].kind).toBe("url");
     expect(rows[0].name).toBe("post-completion link");
   });
 
   test("agent-fs attachment with optional orgId + driveId round-trips through the handler", async () => {
-    const task = createTaskExtended("handler agent-fs with org/drive", {
+    const task = await createTaskExtended("handler agent-fs with org/drive", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    await startTask(task.id, agentId);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -181,7 +181,7 @@ describe("store-progress handler — attachments insert path", () => {
     )) as StoreProgressResult;
 
     expect(result.structuredContent.success).toBe(true);
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].kind).toBe("agent-fs");
     expect(rows[0].path).toBe("/thoughts/doc.md");
@@ -190,12 +190,12 @@ describe("store-progress handler — attachments insert path", () => {
   });
 
   test("agent-fs attachment WITHOUT orgId / driveId still inserts (legacy shape)", async () => {
-    const task = createTaskExtended("handler agent-fs without org/drive", {
+    const task = await createTaskExtended("handler agent-fs without org/drive", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    await startTask(task.id, agentId);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -213,7 +213,7 @@ describe("store-progress handler — attachments insert path", () => {
     )) as StoreProgressResult;
 
     expect(result.structuredContent.success).toBe(true);
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].kind).toBe("agent-fs");
     expect(rows[0].path).toBe("/thoughts/legacy.md");
@@ -223,29 +223,29 @@ describe("store-progress handler — attachments insert path", () => {
 
   describe("agent-fs orgId/driveId auto-resolve from swarm config", () => {
     // Per-test cleanup so config rows from one case don't leak into the next.
-    function clearSwarmConfig() {
-      getDb().run("DELETE FROM swarm_config");
+    async function clearSwarmConfig() {
+      (await getDb()).run("DELETE FROM swarm_config");
     }
 
     test("missing orgId/driveId fills in from global swarm config", async () => {
-      clearSwarmConfig();
-      upsertSwarmConfig({
+      await clearSwarmConfig();
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "global-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
         value: "global-drive",
       });
 
-      const task = createTaskExtended("handler agent-fs auto-resolve global", {
+      const task = await createTaskExtended("handler agent-fs auto-resolve global", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      await startTask(task.id, agentId);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -263,7 +263,7 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].kind).toBe("agent-fs");
       expect(rows[0].orgId).toBe("global-org");
@@ -271,36 +271,36 @@ describe("store-progress handler — attachments insert path", () => {
     });
 
     test("agent-scoped config wins over global (scope precedence)", async () => {
-      clearSwarmConfig();
-      upsertSwarmConfig({
+      await clearSwarmConfig();
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "global-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
         value: "global-drive",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "agent",
         scopeId: agentId,
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "agent-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "agent",
         scopeId: agentId,
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
         value: "agent-drive",
       });
 
-      const task = createTaskExtended("handler agent-fs auto-resolve agent-scope", {
+      const task = await createTaskExtended("handler agent-fs auto-resolve agent-scope", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      await startTask(task.id, agentId);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -318,21 +318,21 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].orgId).toBe("agent-org");
       expect(rows[0].driveId).toBe("agent-drive");
     });
 
     test("missing config + missing row IDs leaves null IDs (no throw, renderer falls back)", async () => {
-      clearSwarmConfig();
+      await clearSwarmConfig();
 
-      const task = createTaskExtended("handler agent-fs no config no ids", {
+      const task = await createTaskExtended("handler agent-fs no config no ids", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      await startTask(task.id, agentId);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -350,31 +350,31 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].orgId).toBeUndefined();
       expect(rows[0].driveId).toBeUndefined();
     });
 
     test("per-row IDs always win — config defaults never overwrite explicit values", async () => {
-      clearSwarmConfig();
-      upsertSwarmConfig({
+      await clearSwarmConfig();
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "global-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
         value: "global-drive",
       });
 
-      const task = createTaskExtended("handler agent-fs per-row wins", {
+      const task = await createTaskExtended("handler agent-fs per-row wins", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      await startTask(task.id, agentId);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -394,31 +394,31 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].orgId).toBe("row-org");
       expect(rows[0].driveId).toBe("row-drive");
     });
 
     test("partial row IDs — only the missing one is filled from config", async () => {
-      clearSwarmConfig();
-      upsertSwarmConfig({
+      await clearSwarmConfig();
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "global-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
         value: "global-drive",
       });
 
-      const task = createTaskExtended("handler agent-fs partial fill", {
+      const task = await createTaskExtended("handler agent-fs partial fill", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      await startTask(task.id, agentId);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -438,7 +438,7 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].orgId).toBe("row-org");
       expect(rows[0].driveId).toBe("global-drive");
@@ -450,13 +450,13 @@ describe("store-progress handler — attachments insert path", () => {
     // The no-op short-circuit must still fire for the status write (no
     // duplicate completion / follow-up), but attachments are append-only and
     // dedup-safe so they land.
-    const task = createTaskExtended("handler retry completion with attachments", {
+    const task = await createTaskExtended("handler retry completion with attachments", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
-    completeTask(task.id, "first");
+    await startTask(task.id, agentId);
+    await completeTask(task.id, "first");
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -473,7 +473,7 @@ describe("store-progress handler — attachments insert path", () => {
 
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.wasNoOp).toBe(true);
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].url).toBe("https://example.com/retry");
   });

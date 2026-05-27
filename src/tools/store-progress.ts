@@ -5,11 +5,11 @@ import {
   completeTask,
   failTask,
   getAgentById,
-  getDb,
   getResolvedConfig,
   getSessionLogsByTaskId,
   getTaskById,
   insertTaskAttachment,
+  runDbTransaction,
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
@@ -95,8 +95,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
         };
       }
 
-      const txn = getDb().transaction(() => {
-        const agent = getAgentById(requestInfo.agentId ?? "");
+      const result = await runDbTransaction(async () => {
+        const agent = await getAgentById(requestInfo.agentId ?? "");
 
         if (!agent) {
           return {
@@ -105,7 +105,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           };
         }
 
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
 
         if (!existingTask) {
           return {
@@ -136,9 +136,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
           // Env-var fallback in `constants.ts` remains the secondary path for
           // self-hosters who deploy without a config DB.
           let agentFsDefaults: { orgId?: string; driveId?: string } | null = null;
-          const resolveAgentFsDefaults = (): { orgId?: string; driveId?: string } => {
+          const resolveAgentFsDefaults = async (): Promise<{
+            orgId?: string;
+            driveId?: string;
+          }> => {
             if (agentFsDefaults !== null) return agentFsDefaults;
-            const configs = getResolvedConfig(requestInfo.agentId ?? undefined);
+            const configs = await getResolvedConfig(requestInfo.agentId ?? undefined);
             const orgId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_ORG_ID")?.value;
             const driveId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_DRIVE_ID")?.value;
             agentFsDefaults = {
@@ -152,12 +155,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
             let orgId = a.kind === "agent-fs" ? a.orgId : undefined;
             let driveId = a.kind === "agent-fs" ? a.driveId : undefined;
             if (a.kind === "agent-fs" && (!orgId || !driveId)) {
-              const defaults = resolveAgentFsDefaults();
+              const defaults = await resolveAgentFsDefaults();
               orgId = orgId || defaults.orgId;
               driveId = driveId || defaults.driveId;
             }
 
-            insertTaskAttachment({
+            await insertTaskAttachment({
               taskId,
               agentId: requestInfo.agentId ?? null,
               name: a.name,
@@ -203,7 +206,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             Date.now() - new Date(existingTask.lastUpdatedAt).getTime() < 5 * 60 * 1000;
 
           if (!isDuplicate) {
-            const result = updateTaskProgress(taskId, progress);
+            const result = await updateTaskProgress(taskId, progress);
             if (result) updatedTask = result;
           }
         }
@@ -243,7 +246,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         // Handle status change
         if (status === "completed") {
-          const result = completeTask(taskId, output);
+          const result = await completeTask(taskId, output);
           if (result) {
             updatedTask = result;
 
@@ -266,11 +269,11 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
             if (existingTask.agentId) {
               // Derive status from capacity instead of always setting idle
-              updateAgentStatusFromCapacity(existingTask.agentId);
+              await updateAgentStatusFromCapacity(existingTask.agentId);
             }
           }
         } else if (status === "failed") {
-          const result = failTask(taskId, failureReason ?? "Unknown failure");
+          const result = await failTask(taskId, failureReason ?? "Unknown failure");
           if (result) {
             updatedTask = result;
 
@@ -293,13 +296,13 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
             if (existingTask.agentId) {
               // Derive status from capacity instead of always setting idle
-              updateAgentStatusFromCapacity(existingTask.agentId);
+              await updateAgentStatusFromCapacity(existingTask.agentId);
             }
           }
         } else {
           // Progress update - ensure status reflects current load
           if (existingTask.agentId) {
-            updateAgentStatusFromCapacity(existingTask.agentId);
+            await updateAgentStatusFromCapacity(existingTask.agentId);
           }
         }
 
@@ -317,8 +320,6 @@ export const registerStoreProgressTool = (server: McpServer) => {
           task: updatedTask,
         };
       });
-
-      const result = txn();
 
       // Index completed and failed tasks as memory (async, non-blocking).
       // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate
@@ -342,7 +343,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             const store = getMemoryStore();
             const provider = getEmbeddingProvider();
 
-            const memory = store.store({
+            const memory = await store.store({
               agentId: requestInfo.agentId ?? null,
               content: taskContent,
               name: `Task: ${result.task!.task.slice(0, 80)}`,
@@ -352,7 +353,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             });
             const embedding = await provider.embed(taskContent);
             if (embedding) {
-              store.updateEmbedding(memory.id, embedding, provider.name);
+              await store.updateEmbedding(memory.id, embedding, provider.name);
             }
 
             // Auto-promote high-value completions to swarm memory (P3)
@@ -364,7 +365,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
             if (shouldShareWithSwarm) {
               try {
-                const swarmMemory = store.store({
+                const swarmMemory = await store.store({
                   agentId: requestInfo.agentId ?? null,
                   scope: "swarm",
                   name: `Shared: ${result.task!.task.slice(0, 80)}`,
@@ -374,7 +375,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
                 });
                 const swarmEmbedding = await provider.embed(taskContent);
                 if (swarmEmbedding) {
-                  store.updateEmbedding(swarmMemory.id, swarmEmbedding, provider.name);
+                  await store.updateEmbedding(swarmMemory.id, swarmEmbedding, provider.name);
                 }
               } catch {
                 // Non-blocking — swarm memory promotion failure is not critical
@@ -398,11 +399,11 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // Fire-and-forget: rater failure must NEVER affect task status.
         (async () => {
           try {
-            const retrievals = getRetrievalsForTask(taskId);
+            const retrievals = await getRetrievalsForTask(taskId);
             if (retrievals.length === 0) return;
 
             const retrievedMemoryIds = retrievals.map((r) => r.memoryId);
-            const logs = getSessionLogsByTaskId(taskId);
+            const logs = await getSessionLogsByTaskId(taskId);
             const evidence = logs.map((l) => l.content).join("\n");
 
             await runServerRaters({
@@ -432,7 +433,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         !("wasNoOp" in result && result.wasNoOp)
       ) {
         try {
-          const followUp = createWorkerTaskFollowUp({
+          const followUp = await createWorkerTaskFollowUp({
             task: result.task,
             status,
             output,

@@ -25,7 +25,7 @@ export const registerListWorkflowRunsTool = (server: McpServer) => {
     },
     async ({ workflowId, status }) => {
       try {
-        let runs = listWorkflowRuns(workflowId);
+        let runs = await listWorkflowRuns(workflowId);
         if (status) {
           runs = runs.filter((r) => r.status === status);
         }

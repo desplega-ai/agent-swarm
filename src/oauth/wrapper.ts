@@ -144,7 +144,7 @@ export async function exchangeCode(
     ? new Date(Date.now() + data.expires_in * 1000).toISOString()
     : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // default 24h
 
-  storeOAuthTokens(config.provider, {
+  await storeOAuthTokens(config.provider, {
     accessToken: data.access_token,
     refreshToken: data.refresh_token ?? null,
     expiresAt,
@@ -212,7 +212,7 @@ export async function refreshAccessToken(
 
   const nextRefreshToken = data.refresh_token ?? refreshToken;
   try {
-    updateOAuthTokensAfterRefresh(config.provider, refreshToken, {
+    await updateOAuthTokensAfterRefresh(config.provider, refreshToken, {
       accessToken: data.access_token,
       refreshToken: nextRefreshToken,
       expiresAt,

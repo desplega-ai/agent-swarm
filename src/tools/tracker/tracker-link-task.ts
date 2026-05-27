@@ -29,7 +29,7 @@ export const registerTrackerLinkTaskTool = (server: McpServer) => {
     },
     async (args, _requestInfo, _meta) => {
       try {
-        const sync = createTrackerSync({
+        const sync = await createTrackerSync({
           provider: args.provider,
           entityType: "task",
           swarmId: args.swarmTaskId,

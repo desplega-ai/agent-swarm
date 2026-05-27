@@ -16,17 +16,21 @@ export interface EmbeddingProvider {
 // ============================================================================
 
 export interface MemoryStore {
-  store(input: MemoryInput): AgentMemory;
-  storeBatch(inputs: MemoryInput[]): AgentMemory[];
-  get(id: string): AgentMemory | null;
-  peek(id: string): AgentMemory | null;
-  search(embedding: Float32Array, agentId: string, options: MemorySearchOptions): MemoryCandidate[];
-  list(agentId: string, options: MemoryListOptions): AgentMemory[];
-  listForReembedding(options?: { agentId?: string }): { id: string; content: string }[];
-  delete(id: string): boolean;
-  deleteBySourcePath(sourcePath: string, agentId: string): number;
-  updateEmbedding(id: string, embedding: Float32Array, model: string): void;
-  getStats(agentId: string): MemoryStats;
+  store(input: MemoryInput): Promise<AgentMemory>;
+  storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]>;
+  get(id: string): Promise<AgentMemory | null>;
+  peek(id: string): Promise<AgentMemory | null>;
+  search(
+    embedding: Float32Array,
+    agentId: string,
+    options: MemorySearchOptions,
+  ): Promise<MemoryCandidate[]>;
+  list(agentId: string, options: MemoryListOptions): Promise<AgentMemory[]>;
+  listForReembedding(options?: { agentId?: string }): Promise<{ id: string; content: string }[]>;
+  delete(id: string): Promise<boolean>;
+  deleteBySourcePath(sourcePath: string, agentId: string): Promise<number>;
+  updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void>;
+  getStats(agentId: string): Promise<MemoryStats>;
 }
 
 // ============================================================================

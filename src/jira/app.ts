@@ -25,7 +25,7 @@ export function resetJira(): void {
   initialized = false;
 }
 
-export function initJira(): boolean {
+export async function initJira(): Promise<boolean> {
   if (initialized) return isJiraEnabled();
   initialized = true;
 
@@ -46,7 +46,7 @@ export function initJira(): boolean {
     `http://localhost:${process.env.PORT || "3013"}`;
   const redirectUri = process.env.JIRA_REDIRECT_URI ?? `${apiBaseUrl}/api/trackers/jira/callback`;
 
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("jira", {
     clientId,
     clientSecret,
     authorizeUrl: "https://auth.atlassian.com/authorize",

@@ -48,9 +48,9 @@ export class SwarmScriptExecutor extends BaseExecutor<
       };
     }
 
-    const workflow = this.deps.db.getWorkflow(meta.workflowId);
+    const workflow = await this.deps.db.getWorkflow(meta.workflowId);
     const agentId = workflow?.createdByAgentId ?? agentIdFromContext(context);
-    const resolved = resolveScriptSource(config, agentId);
+    const resolved = await resolveScriptSource(config, agentId);
 
     if (!resolved.ok) {
       return { status: "failed", error: resolved.error };
@@ -104,18 +104,19 @@ function agentIdFromContext(context: Readonly<Record<string, unknown>>): string 
   return undefined;
 }
 
-function resolveScriptSource(
+async function resolveScriptSource(
   config: SwarmScriptConfig,
   agentId: string | undefined,
-):
+): Promise<
   | {
       ok: true;
-      script: NonNullable<ReturnType<typeof getScript>>;
+      script: NonNullable<Awaited<ReturnType<typeof getScript>>>;
       source: string;
       contentHash: string;
       version: number;
     }
-  | { ok: false; error: string } {
+  | { ok: false; error: string }
+> {
   if (config.scope === "agent" && !agentId) {
     return {
       ok: false,
@@ -126,13 +127,13 @@ function resolveScriptSource(
 
   const script =
     config.scope === "global"
-      ? getScript({ name: config.scriptName, scope: "global" })
+      ? await getScript({ name: config.scriptName, scope: "global" })
       : config.scope === "agent"
-        ? getScript({ name: config.scriptName, scope: "agent", scopeId: agentId })
+        ? await getScript({ name: config.scriptName, scope: "agent", scopeId: agentId })
         : agentId
-          ? (getScript({ name: config.scriptName, scope: "agent", scopeId: agentId }) ??
-            getScript({ name: config.scriptName, scope: "global" }))
-          : getScript({ name: config.scriptName, scope: "global" });
+          ? ((await getScript({ name: config.scriptName, scope: "agent", scopeId: agentId })) ??
+            (await getScript({ name: config.scriptName, scope: "global" })))
+          : await getScript({ name: config.scriptName, scope: "global" });
 
   if (!script) {
     const scopeHint = config.scope ? ` in ${config.scope} scope` : "";
@@ -152,7 +153,7 @@ function resolveScriptSource(
     };
   }
 
-  const version = getScriptVersion({ scriptId: script.id, contentHash: config.pinHash });
+  const version = await getScriptVersion({ scriptId: script.id, contentHash: config.pinHash });
   if (!version) {
     return {
       ok: false,

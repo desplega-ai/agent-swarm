@@ -25,7 +25,7 @@ const TEST_DB_PATH = "./test-heartbeat-checklist.sqlite";
 
 describe("Heartbeat Checklist", () => {
   beforeAll(async () => {
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
@@ -36,8 +36,8 @@ describe("Heartbeat Checklist", () => {
   });
 
   beforeEach(async () => {
-    getDb().run("DELETE FROM agent_tasks");
-    getDb().run("DELETE FROM agents");
+    (await getDb()).run("DELETE FROM agent_tasks");
+    (await getDb()).run("DELETE FROM agents");
     // Re-register heartbeat templates — other test files (prompt-template-resolver,
     // prompt-template-session) call clearTemplateDefinitions() in parallel
     await import(`../heartbeat/templates?t=${Date.now()}`);
@@ -116,50 +116,53 @@ describe("Heartbeat Checklist", () => {
   // ==========================================================================
 
   describe("gatherSystemStatus", () => {
-    test("returns markdown string", () => {
-      const status = gatherSystemStatus();
+    test("returns markdown string", async () => {
+      const status = await gatherSystemStatus();
       expect(typeof status).toBe("string");
       expect(status.length).toBeGreaterThan(0);
     });
 
-    test("includes task stats section with [auto-generated] label", () => {
-      const status = gatherSystemStatus();
+    test("includes task stats section with [auto-generated] label", async () => {
+      const status = await gatherSystemStatus();
       expect(status).toContain("## Task Overview [auto-generated]");
     });
 
-    test("includes agent status section with [auto-generated] label", () => {
-      const status = gatherSystemStatus();
+    test("includes agent status section with [auto-generated] label", async () => {
+      const status = await gatherSystemStatus();
       expect(status).toContain("## Agent Status [auto-generated]");
     });
 
-    test("handles empty DB gracefully", () => {
-      const status = gatherSystemStatus();
+    test("handles empty DB gracefully", async () => {
+      const status = await gatherSystemStatus();
       expect(status).toContain("In Progress: 0");
       expect(status).toContain("Offline: 0");
     });
 
-    test("reflects actual task and agent counts", () => {
-      const agent = createAgent({ name: "test-worker", isLead: false, status: "busy" });
-      createTaskExtended("Test task 1", { agentId: agent.id });
-      createTaskExtended("Test task 2");
+    test("reflects actual task and agent counts", async () => {
+      const agent = await createAgent({ name: "test-worker", isLead: false, status: "busy" });
+      await createTaskExtended("Test task 1", { agentId: agent.id });
+      await createTaskExtended("Test task 2");
 
-      const status = gatherSystemStatus();
+      const status = await gatherSystemStatus();
       // One task assigned (pending), one unassigned
       expect(status).toContain("Pending: 1");
       expect(status).toContain("Unassigned: 1");
       expect(status).toContain("1 busy");
     });
 
-    test("shows stalled tasks section when stalled tasks exist", () => {
-      const agent = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Stalled task", { agentId: agent.id });
-      startTask(task.id);
+    test("shows stalled tasks section when stalled tasks exist", async () => {
+      const agent = await createAgent({ name: "stall-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Stalled task", { agentId: agent.id });
+      await startTask(task.id);
 
       // Make task stale (45 min)
       const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      (await getDb()).run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        oldTime,
+        task.id,
+      ]);
 
-      const status = gatherSystemStatus();
+      const status = await gatherSystemStatus();
       expect(status).toContain("## Stalled Tasks [auto-generated]");
     });
   });
@@ -170,50 +173,50 @@ describe("Heartbeat Checklist", () => {
 
   describe("checkHeartbeatChecklist", () => {
     test("skips when no lead agent registered", async () => {
-      createAgent({ name: "worker", isLead: false, status: "idle" });
+      await createAgent({ name: "worker", isLead: false, status: "idle" });
 
       await checkHeartbeatChecklist();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT * FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
         .all();
       expect(tasks.length).toBe(0);
     });
 
     test("skips when heartbeatMd is NULL", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await checkHeartbeatChecklist();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT * FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
         .all();
       expect(tasks.length).toBe(0);
     });
 
     test("skips when heartbeatMd is effectively empty (all comments/headers)", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "# Heartbeat Checklist\n\n<!-- No items yet -->\n",
       });
 
       await checkHeartbeatChecklist();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT * FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
         .all();
       expect(tasks.length).toBe(0);
     });
 
     test("creates task when heartbeatMd has real content", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "# Heartbeat Checklist\n\n- Check if any tasks are stuck\n",
       });
 
       await checkHeartbeatChecklist();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT * FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
         .all() as Array<{ id: string; task: string; agentId: string; priority: number }>;
       expect(tasks.length).toBe(1);
@@ -222,8 +225,8 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("dedup: skips when active heartbeat-checklist task exists for lead", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
 
@@ -233,21 +236,21 @@ describe("Heartbeat Checklist", () => {
       // Second call — should skip (dedup)
       await checkHeartbeatChecklist();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT * FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
         .all();
       expect(tasks.length).toBe(1);
     });
 
     test("created task includes system status with [auto-generated] labels", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Review stalled tasks\n",
       });
 
       await checkHeartbeatChecklist();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT task FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
         .all() as Array<{ task: string }>;
       expect(tasks.length).toBe(1);
@@ -256,14 +259,14 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("created task includes HEARTBEAT.md content", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check Slack for unaddressed requests\n- Review blocked tasks\n",
       });
 
       await checkHeartbeatChecklist();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT task FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
         .all() as Array<{ task: string }>;
       expect(tasks.length).toBe(1);
@@ -272,14 +275,14 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("created task has correct tags", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
 
       await checkHeartbeatChecklist();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT tags FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
         .all() as Array<{ tags: string }>;
       expect(tasks.length).toBe(1);
@@ -297,20 +300,22 @@ describe("Heartbeat Checklist", () => {
 
   describe("createBootTriageTask", () => {
     test("skips when no lead agent registered", async () => {
-      createAgent({ name: "worker", isLead: false, status: "idle" });
+      await createAgent({ name: "worker", isLead: false, status: "idle" });
 
       await createBootTriageTask();
 
-      const tasks = getDb().query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'").all();
+      const tasks = (await getDb())
+        .query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'")
+        .all();
       expect(tasks.length).toBe(0);
     });
 
     test("creates boot-triage task for lead", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'")
         .all() as Array<{ id: string; agentId: string; priority: number; task: string }>;
       expect(tasks.length).toBe(1);
@@ -319,11 +324,11 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("boot-triage task includes reboot context", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT task FROM agent_tasks WHERE taskType = 'boot-triage'")
         .all() as Array<{ task: string }>;
       expect(tasks.length).toBe(1);
@@ -333,11 +338,11 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("boot-triage task includes system status", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT task FROM agent_tasks WHERE taskType = 'boot-triage'")
         .all() as Array<{ task: string }>;
       expect(tasks[0]!.task).toContain("Task Overview [auto-generated]");
@@ -345,49 +350,51 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("shows fallback text when heartbeatMd is empty", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT task FROM agent_tasks WHERE taskType = 'boot-triage'")
         .all() as Array<{ task: string }>;
       expect(tasks[0]!.task).toContain("No standing orders configured");
     });
 
     test("includes heartbeatMd content when available", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check Slack for unaddressed requests\n",
       });
 
       await createBootTriageTask();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT task FROM agent_tasks WHERE taskType = 'boot-triage'")
         .all() as Array<{ task: string }>;
       expect(tasks[0]!.task).toContain("Check Slack for unaddressed requests");
     });
 
     test("dedup: skips when active boot-triage task exists", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
 
       await createBootTriageTask();
       await createBootTriageTask();
 
-      const tasks = getDb().query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'").all();
+      const tasks = (await getDb())
+        .query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'")
+        .all();
       expect(tasks.length).toBe(1);
     });
 
     test("boot-triage has correct tags", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
-      const tasks = getDb()
+      const tasks = (await getDb())
         .query("SELECT tags FROM agent_tasks WHERE taskType = 'boot-triage'")
         .all() as Array<{ tags: string }>;
       const tags = JSON.parse(tasks[0]!.tags);
@@ -397,18 +404,18 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("boot-triage and heartbeat-checklist are independent (different taskTypes)", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
 
       await createBootTriageTask();
       await checkHeartbeatChecklist();
 
-      const bootTasks = getDb()
+      const bootTasks = (await getDb())
         .query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'")
         .all();
-      const checklistTasks = getDb()
+      const checklistTasks = (await getDb())
         .query("SELECT * FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
         .all();
       expect(bootTasks.length).toBe(1);
@@ -422,107 +429,107 @@ describe("Heartbeat Checklist", () => {
 
   describe("gatherSystemStatus boot triage", () => {
     test("isBootTriage includes Reboot-Interrupted Work section after reboot sweep", async () => {
-      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Important feature work", { agentId: agent.id });
-      startTask(task.id);
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Important feature work", { agentId: agent.id });
+      await startTask(task.id);
 
       // Backdate so reboot sweep picks it up
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      (await getDb()).run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
       await runRebootSweep();
 
-      const status = gatherSystemStatus({ isBootTriage: true });
+      const status = await gatherSystemStatus({ isBootTriage: true });
       expect(status).toContain("## Reboot-Interrupted Work [auto-generated, ACTION REQUIRED]");
       expect(status).toContain("auto-failed and a retry task created");
       expect(status).toContain("You MUST triage each task above");
     });
 
     test("isBootTriage shows full task IDs (not truncated)", async () => {
-      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Test task for ID check", { agentId: agent.id });
-      startTask(task.id);
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Test task for ID check", { agentId: agent.id });
+      await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      (await getDb()).run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
       await runRebootSweep();
 
-      const status = gatherSystemStatus({ isBootTriage: true });
+      const status = await gatherSystemStatus({ isBootTriage: true });
       // Full UUID (36 chars) should appear, not truncated to 8 chars
       expect(status).toContain(task.id);
     });
 
     test("isBootTriage shows retry task ID when retry was created", async () => {
-      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Retryable task", { agentId: agent.id });
-      startTask(task.id);
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Retryable task", { agentId: agent.id });
+      await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      (await getDb()).run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
       await runRebootSweep();
 
-      const status = gatherSystemStatus({ isBootTriage: true });
+      const status = await gatherSystemStatus({ isBootTriage: true });
       expect(status).toContain("→ retry created:");
     });
 
     test("isBootTriage shows 'no retry (system task)' for system tasks", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
-      const task = createTaskExtended("Heartbeat check", {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "busy" });
+      const task = await createTaskExtended("Heartbeat check", {
         agentId: lead.id,
         taskType: "heartbeat-checklist",
       });
-      startTask(task.id);
+      await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      (await getDb()).run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
       await runRebootSweep();
 
-      const status = gatherSystemStatus({ isBootTriage: true });
+      const status = await gatherSystemStatus({ isBootTriage: true });
       expect(status).toContain("→ no retry (system task)");
     });
 
-    test("isBootTriage includes Orphaned Tasks for pending tasks on offline agents", () => {
-      const offlineAgent = createAgent({
+    test("isBootTriage includes Orphaned Tasks for pending tasks on offline agents", async () => {
+      const offlineAgent = await createAgent({
         name: "offline-worker",
         isLead: false,
         status: "offline",
       });
-      createTaskExtended("Orphaned pending task", { agentId: offlineAgent.id });
+      await createTaskExtended("Orphaned pending task", { agentId: offlineAgent.id });
 
-      const status = gatherSystemStatus({ isBootTriage: true });
+      const status = await gatherSystemStatus({ isBootTriage: true });
       expect(status).toContain("## Orphaned Tasks [auto-generated, NEEDS ATTENTION]");
       expect(status).toContain("Orphaned pending task");
       expect(status).toContain("offline-worker");
     });
 
     test("non-boot mode does NOT include reboot or orphan sections", async () => {
-      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Some task", { agentId: agent.id });
-      startTask(task.id);
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Some task", { agentId: agent.id });
+      await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      (await getDb()).run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
       await runRebootSweep();
 
       // Regular status (no isBootTriage flag)
-      const status = gatherSystemStatus();
+      const status = await gatherSystemStatus();
       expect(status).not.toContain("Reboot-Interrupted Work");
       expect(status).not.toContain("Orphaned Tasks");
     });
 
-    test("orphaned tasks note about re-registering workers is included", () => {
-      const offlineAgent = createAgent({
+    test("orphaned tasks note about re-registering workers is included", async () => {
+      const offlineAgent = await createAgent({
         name: "recovering-worker",
         isLead: false,
         status: "offline",
       });
-      createTaskExtended("Waiting task", { agentId: offlineAgent.id });
+      await createTaskExtended("Waiting task", { agentId: offlineAgent.id });
 
-      const status = gatherSystemStatus({ isBootTriage: true });
+      const status = await gatherSystemStatus({ isBootTriage: true });
       expect(status).toContain("Some workers may appear offline briefly while re-registering");
     });
   });

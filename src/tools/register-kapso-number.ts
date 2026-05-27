@@ -69,7 +69,7 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
       try {
         // Lead-only: provisioning a number rewires inbound routing for the
         // whole swarm, so restrict it to the lead agent.
-        const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
+        const callerAgent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
         if (!callerAgent?.isLead) {
           const msg = "Permission denied. Only the lead can register a Kapso number.";
           return {
@@ -79,9 +79,9 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
         }
 
         // Default the routing target to the lead when no agent/workflow is given.
-        const ownerAgentId = agentId ?? (workflowId ? undefined : getLeadAgent()?.id);
+        const ownerAgentId = agentId ?? (workflowId ? undefined : (await getLeadAgent())?.id);
 
-        const config = getKapsoConfig();
+        const config = await getKapsoConfig();
         const webhookUrl = nativeWebhookUrl();
 
         // Best-effort: point the Kapso webhook at our native handler. The KV
@@ -115,7 +115,7 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
           ...(name ? { name } : {}),
           createdAt: new Date().toISOString(),
         };
-        putKapsoNumberMapping(mapping);
+        await putKapsoNumberMapping(mapping);
 
         const text = `Registered Kapso number ${phoneNumberId} → ${
           workflowId
@@ -172,7 +172,7 @@ export const registerUnregisterKapsoNumberTool = (server: McpServer) => {
     },
     async ({ phoneNumberId }, requestInfo) => {
       try {
-        const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
+        const callerAgent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
         if (!callerAgent?.isLead) {
           const msg = "Permission denied. Only the lead can unregister a Kapso number.";
           return {
@@ -181,8 +181,8 @@ export const registerUnregisterKapsoNumberTool = (server: McpServer) => {
           };
         }
 
-        const existing = getKapsoNumberMapping(phoneNumberId);
-        const deleted = deleteKapsoNumberMapping(phoneNumberId);
+        const existing = await getKapsoNumberMapping(phoneNumberId);
+        const deleted = await deleteKapsoNumberMapping(phoneNumberId);
         const text = existing
           ? `Unregistered Kapso number ${phoneNumberId}`
           : `No mapping found for Kapso number ${phoneNumberId}`;

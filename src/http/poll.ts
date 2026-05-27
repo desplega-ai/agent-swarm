@@ -12,7 +12,6 @@ import {
   claimTask,
   getAgentById,
   getAllChannelActivityCursors,
-  getDb,
   getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
@@ -21,6 +20,7 @@ import {
   getUserById,
   hasCapacity,
   recordBudgetRefusalNotification,
+  runDbTransaction,
   startTask,
   upsertChannelActivityCursor,
 } from "../be/db";
@@ -124,7 +124,7 @@ export async function handlePoll(
     if (!parsed) return true;
     for (const { channelId, ts } of parsed.body.cursorUpdates) {
       if (channelId && ts) {
-        upsertChannelActivityCursor(channelId, ts);
+        await upsertChannelActivityCursor(channelId, ts);
       }
     }
     json(res, { success: true, committed: parsed.body.cursorUpdates.length });
@@ -152,18 +152,18 @@ export async function handlePoll(
         };
     let result: PollTxnResult;
     try {
-      result = getDb().transaction(() => {
-        const agent = getAgentById(myAgentId);
+      result = await runDbTransaction(async () => {
+        const agent = await getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
         }
 
         // Check for offered tasks first (highest priority for both workers and leads)
         // Atomically claim the task for review to prevent duplicate processing
-        const offeredTasks = getOfferedTasksForAgent(myAgentId);
+        const offeredTasks = await getOfferedTasksForAgent(myAgentId);
         const firstOfferedTask = offeredTasks[0];
         if (firstOfferedTask) {
-          const claimedTask = claimOfferedTask(firstOfferedTask.id, myAgentId);
+          const claimedTask = await claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
             return {
               trigger: {
@@ -177,17 +177,17 @@ export async function handlePoll(
 
         // Check for pending tasks (assigned directly to this agent)
         // Only return a task if agent has capacity (server-side enforcement)
-        if (hasCapacity(myAgentId)) {
-          const pendingTask = getPendingTaskForAgent(myAgentId);
+        if (await hasCapacity(myAgentId)) {
+          const pendingTask = await getPendingTaskForAgent(myAgentId);
           if (pendingTask) {
             // Budget admission gate (Phase 3). Runs in the same transaction as
             // the capacity check so capacity AND budget gates share atomicity.
             // Phase 5 also records the dedup row + captures the side-effect
             // context here so the after-commit step can notify the lead.
-            const admission = canClaim(myAgentId, new Date(), pendingTask.requestedByUserId);
+            const admission = await canClaim(myAgentId, new Date(), pendingTask.requestedByUserId);
             if (!admission.allowed) {
               const utcDate = new Date().toISOString().slice(0, 10);
-              const dedup = recordBudgetRefusalNotification({
+              const dedup = await recordBudgetRefusalNotification({
                 taskId: pendingTask.id,
                 date: utcDate,
                 agentId: myAgentId,
@@ -228,7 +228,7 @@ export async function handlePoll(
             }
 
             // Mark task as in_progress immediately to prevent duplicate polling
-            startTask(pendingTask.id);
+            await startTask(pendingTask.id);
 
             ensure({
               id: "started",
@@ -254,7 +254,7 @@ export async function handlePoll(
 
             // Resolve requesting user if available
             const requestedByUser = pendingTask.requestedByUserId
-              ? getUserById(pendingTask.requestedByUserId)
+              ? await getUserById(pendingTask.requestedByUserId)
               : undefined;
 
             return {
@@ -273,10 +273,10 @@ export async function handlePoll(
         // Check for unread mentions (internal chat) - all agents can be woken by @mentions
         // Uses atomic claiming via processing_since to prevent duplicate processing.
         // Only idle agents poll, so busy workers won't be interrupted.
-        const claimedChannels = claimMentions(myAgentId);
+        const claimedChannels = await claimMentions(myAgentId);
         if (claimedChannels.length > 0) {
           // Recalculate inbox summary now that we've claimed
-          const inbox = getInboxSummary(myAgentId);
+          const inbox = await getInboxSummary(myAgentId);
           return {
             trigger: {
               type: "unread_mentions",
@@ -301,8 +301,8 @@ export async function handlePoll(
           // one worker wins if multiple poll simultaneously.
           // This ensures session logs are correctly associated with the real task ID
           // from the start (no reassociation needed).
-          if (hasCapacity(myAgentId)) {
-            const unassignedIds = getUnassignedTaskIds(5);
+          if (await hasCapacity(myAgentId)) {
+            const unassignedIds = await getUnassignedTaskIds(5);
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.
             // Only run the gate when there's at least one candidate task; an
@@ -313,11 +313,15 @@ export async function handlePoll(
             // refusals on the same lead-candidate are suppressed.
             if (unassignedIds.length > 0) {
               const candidateId = unassignedIds[0]!;
-              const candidateTask = getTaskById(candidateId);
-              const admission = canClaim(myAgentId, new Date(), candidateTask?.requestedByUserId);
+              const candidateTask = await getTaskById(candidateId);
+              const admission = await canClaim(
+                myAgentId,
+                new Date(),
+                candidateTask?.requestedByUserId,
+              );
               if (!admission.allowed) {
                 const utcDate = new Date().toISOString().slice(0, 10);
-                const dedup = recordBudgetRefusalNotification({
+                const dedup = await recordBudgetRefusalNotification({
                   taskId: candidateId,
                   date: utcDate,
                   agentId: myAgentId,
@@ -360,7 +364,7 @@ export async function handlePoll(
               }
             }
             for (const candidateId of unassignedIds) {
-              const claimed = claimTask(candidateId, myAgentId);
+              const claimed = await claimTask(candidateId, myAgentId);
               if (claimed) {
                 telemetry.taskEvent("claimed", {
                   taskId: claimed.id,
@@ -382,7 +386,7 @@ export async function handlePoll(
 
         // No trigger found
         return { trigger: null };
-      })();
+      });
     } catch (error) {
       console.error("[/api/poll] Database error:", error);
       jsonError(
@@ -403,7 +407,7 @@ export async function handlePoll(
     // follow-up + workflow event bus). Errors here are logged inside the
     // helper; we never let them affect the response the worker sees.
     if (result.refusalSideEffects) {
-      emitBudgetRefusalSideEffects(
+      await emitBudgetRefusalSideEffects(
         result.refusalSideEffects.context,
         result.refusalSideEffects.inserted,
       );
@@ -418,11 +422,11 @@ export async function handlePoll(
       process.env.LEAD_MONITOR_CHANNELS === "true" &&
       Date.now() - lastChannelActivityCheckAt >= CHANNEL_ACTIVITY_INTERVAL_MS
     ) {
-      const agent = getAgentById(myAgentId);
+      const agent = await getAgentById(myAgentId);
       if (agent?.isLead) {
         lastChannelActivityCheckAt = Date.now();
         try {
-          const cursors = getAllChannelActivityCursors();
+          const cursors = await getAllChannelActivityCursors();
           const cursorMap = new Map(cursors.map((c) => [c.channelId, c.lastSeenTs]));
 
           // Parse optional channel allowlist from env
@@ -436,7 +440,7 @@ export async function handlePoll(
 
           // Commit seed cursors immediately (cold-start initialization, no trigger)
           for (const [channelId, ts] of seedCursors) {
-            upsertChannelActivityCursor(channelId, ts);
+            await upsertChannelActivityCursor(channelId, ts);
           }
 
           if (messages.length > 0) {

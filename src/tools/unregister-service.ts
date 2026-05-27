@@ -49,9 +49,9 @@ export const registerUnregisterServiceTool = (server: McpServer) => {
 
       try {
         // Find the service
-        let service = serviceId ? getServiceById(serviceId) : null;
+        let service = serviceId ? await getServiceById(serviceId) : null;
         if (!service && name) {
-          service = getServiceByAgentAndName(requestInfo.agentId, name);
+          service = await getServiceByAgentAndName(requestInfo.agentId, name);
         }
 
         if (!service) {
@@ -77,7 +77,7 @@ export const registerUnregisterServiceTool = (server: McpServer) => {
           };
         }
 
-        const deleted = deleteService(service.id);
+        const deleted = await deleteService(service.id);
         if (!deleted) {
           return {
             content: [{ type: "text", text: "Failed to unregister service." }],

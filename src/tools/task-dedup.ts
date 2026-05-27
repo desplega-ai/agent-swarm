@@ -43,15 +43,15 @@ export interface DedupMatch {
  * Check for duplicate tasks created recently.
  * Returns the first matching duplicate, or null if none found.
  */
-export function findDuplicateTask(opts: {
+export async function findDuplicateTask(opts: {
   taskDescription: string;
   creatorAgentId: string;
   targetAgentId?: string;
   slackChannelId?: string;
   slackThreadTs?: string;
   windowMinutes?: number;
-}): DedupMatch | null {
-  const recentTasks = findRecentSimilarTasks({
+}): Promise<DedupMatch | null> {
+  const recentTasks = await findRecentSimilarTasks({
     creatorAgentId: opts.creatorAgentId,
     windowMinutes: opts.windowMinutes ?? 10,
   });

@@ -111,9 +111,12 @@ function createTestRegistry(): ExecutorRegistry {
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(def: WorkflowDefinition, overrides?: Partial<Workflow>): Workflow {
+async function makeWorkflow(
+  def: WorkflowDefinition,
+  overrides?: Partial<Workflow>,
+): Promise<Workflow> {
   workflowCounter++;
-  const workflow = createWorkflow({
+  const workflow = await createWorkflow({
     name: overrides?.name || `test-retry-${workflowCounter}-${Date.now()}`,
     definition: def,
   });
@@ -125,8 +128,8 @@ function makeWorkflow(def: WorkflowDefinition, overrides?: Partial<Workflow>): W
 
 let registry: ExecutorRegistry;
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
   registry = createTestRegistry();
 });
 
@@ -134,7 +137,7 @@ afterAll(async () => {
   stopRetryPoller();
   for (const id of createdWorkflowIds) {
     try {
-      deleteWorkflow(id);
+      await deleteWorkflow(id);
     } catch {}
   }
   closeDb();
@@ -223,7 +226,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       // Reset fail counter so the executor succeeds on the "retry" attempt
       failCounter = 0;
 
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "n1",
@@ -244,7 +247,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
       // Check step is failed with a nextRetryAt
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const step = steps.find((s) => s.nodeId === "n1")!;
       expect(step.status).toBe("failed");
       expect(step.nextRetryAt).toBeTruthy();
@@ -254,14 +257,14 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Verify getRetryableSteps finds it
-      const retryable = getRetryableSteps();
+      const retryable = await getRetryableSteps();
       expect(retryable.length).toBeGreaterThanOrEqual(1);
       const ourStep = retryable.find((s) => s.runId === runId);
       expect(ourStep).toBeTruthy();
     });
 
     test("retry limit respected (does not retry past maxRetries)", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "n1",
@@ -281,7 +284,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
       // Step should be failed after first attempt (retryCount=1, maxRetries=1)
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       // With maxRetries=1, the first failure increments to retryCount=1.
       // Since retryCount(1) >= maxRetries(1), no more retries — run should be failed.
       // Actually: checkpoint checks retryCount < maxRetries. After first failure, retryCount=1 and
@@ -289,7 +292,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       // Wait, let me re-check: the engine passes currentRetryCount (from existing step, which is 0
       // on first attempt), and checkpoint does retryCount + 1 = 1, then checks 0 < 1 = true,
       // so it DOES retry once.
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const step = steps.find((s) => s.nodeId === "n1")!;
 
       if (step.status === "failed" && step.nextRetryAt) {
@@ -302,7 +305,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
         stopRetryPoller();
 
         // After retry, the second failure should be terminal (retryCount >= maxRetries)
-        const updatedRun = getWorkflowRun(runId);
+        const updatedRun = await getWorkflowRun(runId);
         expect(updatedRun!.status).toBe("failed");
       } else {
         // Already terminal
@@ -314,7 +317,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
   describe("Recovery", () => {
     test("running run with completed steps resumes correctly", async () => {
       // Create a workflow with 2 nodes
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           { id: "s1", type: "echo", config: { message: "step1" }, next: "s2" },
           { id: "s2", type: "echo", config: { message: "step2" } },
@@ -323,18 +326,18 @@ describe("Workflow Retry v2 (Phase 4)", () => {
 
       // Simulate a run that was interrupted after s1 completed
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData: {} });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData: {} });
 
       // Create a completed step for s1
       const step1Id = crypto.randomUUID();
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: step1Id,
         runId,
         nodeId: "s1",
         nodeType: "echo",
         input: {},
       });
-      updateWorkflowRunStep(step1Id, {
+      await updateWorkflowRunStep(step1Id, {
         status: "completed",
         output: { echo: "step1" },
         idempotencyKey: `${runId}:s1`,
@@ -342,15 +345,15 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       });
 
       // Update run context
-      updateWorkflowRun(runId, {
+      await updateWorkflowRun(runId, {
         context: { s1: { echo: "step1" } },
       });
 
       // Verify run is in 'running' state
-      expect(getWorkflowRun(runId)!.status).toBe("running");
+      expect((await getWorkflowRun(runId))!.status).toBe("running");
 
       // Verify s1 is completed
-      const completedIds = getCompletedStepNodeIds(runId);
+      const completedIds = await getCompletedStepNodeIds(runId);
       expect(completedIds).toContain("s1");
 
       // Run recovery
@@ -358,43 +361,43 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       expect(recovered).toBeGreaterThanOrEqual(1);
 
       // Run should now be completed (s2 was executed by recovery)
-      const updatedRun = getWorkflowRun(runId);
+      const updatedRun = await getWorkflowRun(runId);
       expect(updatedRun!.status).toBe("completed");
 
       // Both steps should be completed
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const completedSteps = steps.filter((s) => s.status === "completed");
       expect(completedSteps.length).toBe(2);
     });
 
     test("running run with all steps completed is marked completed", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [{ id: "s1", type: "echo", config: { message: "only" } }],
       });
 
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData: {} });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData: {} });
 
       const step1Id = crypto.randomUUID();
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: step1Id,
         runId,
         nodeId: "s1",
         nodeType: "echo",
         input: {},
       });
-      updateWorkflowRunStep(step1Id, {
+      await updateWorkflowRunStep(step1Id, {
         status: "completed",
         output: { echo: "only" },
         idempotencyKey: `${runId}:s1`,
         finishedAt: new Date().toISOString(),
       });
-      updateWorkflowRun(runId, { context: { s1: { echo: "only" } } });
+      await updateWorkflowRun(runId, { context: { s1: { echo: "only" } } });
 
       const recovered = await recoverIncompleteRuns(registry);
       expect(recovered).toBeGreaterThanOrEqual(1);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
     });
   });

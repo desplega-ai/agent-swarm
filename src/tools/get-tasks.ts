@@ -106,8 +106,8 @@ export async function getTasksHandler(
   };
   // Default to slim rows (full `task` text → ~300-char `taskPreview`).
   const tasks: Array<AgentTask | AgentTaskSummary> = includeFull
-    ? getAllTasks(taskFilters)
-    : getAllTasks(taskFilters, { slim: true });
+    ? await getAllTasks(taskFilters)
+    : await getAllTasks(taskFilters, { slim: true });
 
   // Slim rows carry a truncated `task`; surface it as `taskPreview` so the
   // agent knows it is truncated. `includeFull` returns the full `task`.

@@ -36,7 +36,7 @@ export const registerCreateChannelTool = (server: McpServer) => {
       }
 
       // Check if channel already exists
-      const existing = getChannelByName(name);
+      const existing = await getChannelByName(name);
       if (existing) {
         return {
           content: [{ type: "text", text: `Channel "${name}" already exists.` }],
@@ -50,7 +50,7 @@ export const registerCreateChannelTool = (server: McpServer) => {
       }
 
       try {
-        const channel = createChannel(name, {
+        const channel = await createChannel(name, {
           description,
           type: type ?? "public",
           createdBy: requestInfo.agentId,

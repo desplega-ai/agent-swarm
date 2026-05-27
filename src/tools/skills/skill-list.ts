@@ -36,8 +36,8 @@ export const registerSkillListTool = (server: McpServer) => {
       try {
         const skills =
           args.installedOnly && requestInfo.agentId
-            ? getAgentSkills(requestInfo.agentId)
-            : listSkills({
+            ? await getAgentSkills(requestInfo.agentId)
+            : await listSkills({
                 type: args.type,
                 scope: args.scope,
                 ownerAgentId: args.agentId,

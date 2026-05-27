@@ -10,6 +10,7 @@ import {
   getTaskAttachments,
   initDb,
   insertTaskAttachment,
+  runDbTransaction,
   updateAgentStatus,
 } from "../be/db";
 
@@ -43,7 +44,7 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
 
     if (!agent) {
       return { status: 404, body: { error: "Agent not found" } };
@@ -58,8 +59,8 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const tx = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const result = await runDbTransaction(async () => {
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
         return { error: true };
@@ -70,11 +71,10 @@ async function handleRequest(
         status = "busy";
       }
 
-      updateAgentStatus(agent.id, status);
+      await updateAgentStatus(agent.id, status);
       return { error: false };
     });
 
-    const result = tx();
     if (result.error) {
       return { status: 404, body: { error: "Agent not found" } };
     }
@@ -88,18 +88,17 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const tx = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const result = await runDbTransaction(async () => {
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
         return { error: true };
       }
 
-      updateAgentStatus(agent.id, "offline");
+      await updateAgentStatus(agent.id, "offline");
       return { error: false };
     });
 
-    const result = tx();
     if (result.error) {
       return { status: 404, body: { error: "Agent not found" } };
     }
@@ -115,7 +114,7 @@ async function handleRequest(
     pathSegments[2]
   ) {
     const agentId = pathSegments[2];
-    const agent = getAgentById(agentId);
+    const agent = await getAgentById(agentId);
 
     if (!agent) {
       return { status: 404, body: { error: "Agent not found" } };
@@ -133,7 +132,9 @@ async function handleRequest(
     !pathSegments[3]
   ) {
     const taskId = pathSegments[2];
-    const task = getDb().query("SELECT * FROM agent_tasks WHERE id = ?").get(taskId) as unknown;
+    const task = (await getDb())
+      .query("SELECT * FROM agent_tasks WHERE id = ?")
+      .get(taskId) as unknown;
 
     if (!task) {
       return { status: 404, body: { error: "Task not found" } };
@@ -142,14 +143,16 @@ async function handleRequest(
     // Mirror the real `GET /api/tasks/:id` handler in `src/http/tasks.ts`
     // by decorating the row with `attachments`. The mock omits `logs` since
     // those tests live elsewhere; attachments are cheap enough to inline.
-    const attachments = getTaskAttachments(taskId);
+    const attachments = await getTaskAttachments(taskId);
     return { status: 200, body: { ...(task as object), attachments } };
   }
 
   // GET /api/stats - Dashboard summary stats
   if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "stats") {
-    const agents = getDb().query("SELECT * FROM agents").all() as Array<{ status: string }>;
-    const tasks = getDb().query("SELECT * FROM agent_tasks").all() as Array<{ status: string }>;
+    const agents = (await getDb()).query("SELECT * FROM agents").all() as Array<{ status: string }>;
+    const tasks = (await getDb()).query("SELECT * FROM agent_tasks").all() as Array<{
+      status: string;
+    }>;
 
     const stats = {
       agents: {
@@ -214,7 +217,7 @@ describe("REST API Endpoints", () => {
     }
 
     // Initialize test database
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     // Start test server
     server = createTestServer();
@@ -280,7 +283,7 @@ describe("REST API Endpoints", () => {
 
     test("should return agent info for existing agent", async () => {
       const agentId = "test-agent-me";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Me",
         isLead: false,
@@ -337,7 +340,7 @@ describe("REST API Endpoints", () => {
 
     test("should update agent heartbeat for existing agent", async () => {
       const agentId = "test-agent-ping";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Ping",
         isLead: false,
@@ -354,13 +357,13 @@ describe("REST API Endpoints", () => {
       expect(response.status).toBe(204);
 
       // Verify agent status was updated to idle
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.status).toBe("idle");
     });
 
     test("should preserve busy status when pinging", async () => {
       const agentId = "test-agent-ping-busy";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Ping Busy",
         isLead: false,
@@ -377,7 +380,7 @@ describe("REST API Endpoints", () => {
       expect(response.status).toBe(204);
 
       // Verify agent status remains busy
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.status).toBe("busy");
     });
   });
@@ -412,7 +415,7 @@ describe("REST API Endpoints", () => {
 
     test("should mark agent as offline", async () => {
       const agentId = "test-agent-close";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Close",
         isLead: false,
@@ -429,7 +432,7 @@ describe("REST API Endpoints", () => {
       expect(response.status).toBe(204);
 
       // Verify agent status was updated to offline
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.status).toBe("offline");
     });
   });
@@ -451,7 +454,7 @@ describe("REST API Endpoints", () => {
 
     test("should return agent details for existing agent", async () => {
       const agentId = "test-agent-get";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Get",
         isLead: true,
@@ -478,7 +481,7 @@ describe("REST API Endpoints", () => {
       const agentId = "test-agent-with-profile";
 
       // First create agent, then update its profile
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Agent with Profile",
         isLead: false,
@@ -486,12 +489,10 @@ describe("REST API Endpoints", () => {
       });
 
       // Update profile fields via SQL since createAgent doesn't accept them
-      getDb().run("UPDATE agents SET description = ?, role = ?, capabilities = ? WHERE id = ?", [
-        "Test description",
-        "Test role",
-        JSON.stringify(["test-cap-1", "test-cap-2"]),
-        agentId,
-      ]);
+      (await getDb()).run(
+        "UPDATE agents SET description = ?, role = ?, capabilities = ? WHERE id = ?",
+        ["Test description", "Test role", JSON.stringify(["test-cap-1", "test-cap-2"]), agentId],
+      );
 
       const response = await fetch(`${baseUrl}/api/agents/${agentId}`);
 
@@ -526,7 +527,7 @@ describe("REST API Endpoints", () => {
     });
 
     test("should return task details for existing task", async () => {
-      const task = createTaskExtended("Test task for GET endpoint", {
+      const task = await createTaskExtended("Test task for GET endpoint", {
         creatorAgentId: "test-agent-get",
       });
 
@@ -546,10 +547,10 @@ describe("REST API Endpoints", () => {
     });
 
     test("should include attachments[] in the response", async () => {
-      const task = createTaskExtended("Task with attachments", {
+      const task = await createTaskExtended("Task with attachments", {
         creatorAgentId: "test-agent-attach",
       });
-      insertTaskAttachment({
+      await insertTaskAttachment({
         taskId: task.id,
         kind: "url",
         name: "report",
@@ -557,7 +558,7 @@ describe("REST API Endpoints", () => {
         intent: "primary deliverable",
         isPrimary: true,
       });
-      insertTaskAttachment({
+      await insertTaskAttachment({
         taskId: task.id,
         kind: "agent-fs",
         name: "doc",
@@ -579,7 +580,7 @@ describe("REST API Endpoints", () => {
     });
 
     test("should return an empty attachments[] when none are attached", async () => {
-      const task = createTaskExtended("Task without attachments", {
+      const task = await createTaskExtended("Task without attachments", {
         creatorAgentId: "test-agent-noattach",
       });
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}`);
@@ -593,33 +594,33 @@ describe("REST API Endpoints", () => {
   describe("GET /api/stats", () => {
     test("should return dashboard statistics", async () => {
       // Create some test data
-      createAgent({
+      await createAgent({
         id: "stats-agent-1",
         name: "Stats Agent 1",
         isLead: false,
         status: "idle",
       });
 
-      createAgent({
+      await createAgent({
         id: "stats-agent-2",
         name: "Stats Agent 2",
         isLead: false,
         status: "busy",
       });
 
-      createAgent({
+      await createAgent({
         id: "stats-agent-3",
         name: "Stats Agent 3",
         isLead: false,
         status: "offline",
       });
 
-      createTaskExtended("Stats task 1", {
+      await createTaskExtended("Stats task 1", {
         creatorAgentId: "stats-agent-1",
         agentId: "stats-agent-1",
       });
 
-      createTaskExtended("Stats task 2", {
+      await createTaskExtended("Stats task 2", {
         creatorAgentId: "stats-agent-1",
       });
 
@@ -652,7 +653,7 @@ describe("REST API Endpoints", () => {
       await unlink(TEST_DB_PATH).catch(() => {});
       await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
       await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
-      initDb(TEST_DB_PATH);
+      await initDb(TEST_DB_PATH);
 
       const response = await fetch(`${baseUrl}/api/stats`);
 

@@ -147,8 +147,8 @@ export const scriptsSeeder: Seeder<ScriptSeedItem> = {
     }));
   },
 
-  upstreamHash(item): string | null {
-    const existing = getScript({ name: item.key, scope: "global" });
+  async upstreamHash(item): Promise<string | null> {
+    const existing = await getScript({ name: item.key, scope: "global" });
     return existing ? existing.contentHash : null;
   },
 

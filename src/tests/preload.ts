@@ -19,6 +19,6 @@ process.env.SECRETS_ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 // initDb runs all migrations, ensureAgentProfileColumns, seedContextVersions,
 // seedDefaultTemplates, etc. We serialize the result so each test suite can
 // restore from it instantly — no per-suite migration or seeding work at all.
-initDb(":memory:");
-testTemplateGlobals.__testMigrationTemplate = getDb().serialize();
+await initDb(":memory:");
+testTemplateGlobals.__testMigrationTemplate = (await getDb()).serialize();
 closeDb();

@@ -20,7 +20,7 @@ export const registerListChannelsTool = (server: McpServer) => {
       }),
     },
     async (_input, requestInfo, _meta) => {
-      const channels = getAllChannels();
+      const channels = await getAllChannels();
 
       return {
         content: [

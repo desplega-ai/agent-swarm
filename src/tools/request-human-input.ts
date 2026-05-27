@@ -78,14 +78,14 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
       // created (e.g. .mcp.json not found, session resumed, or lead agent on a non-task trigger).
       let sourceTaskId = requestInfo.sourceTaskId;
       if (!sourceTaskId && requestInfo.agentId) {
-        const currentTask = getAgentCurrentTask(requestInfo.agentId);
+        const currentTask = await getAgentCurrentTask(requestInfo.agentId);
         if (currentTask) {
           sourceTaskId = currentTask.id;
         }
       }
 
       const id = crypto.randomUUID();
-      const request = createApprovalRequest({
+      const request = await createApprovalRequest({
         id,
         title,
         questions,

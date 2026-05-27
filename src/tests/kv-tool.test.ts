@@ -66,10 +66,10 @@ beforeAll(async () => {
       await unlink(`${TEST_DB_PATH}${suffix}`);
     } catch {}
   }
-  initDb(TEST_DB_PATH);
-  const a = createAgent({ name: "kv-tool-a", isLead: false, status: "idle" });
-  const b = createAgent({ name: "kv-tool-b", isLead: false, status: "idle" });
-  const l = createAgent({ name: "kv-tool-lead", isLead: true, status: "idle" });
+  await initDb(TEST_DB_PATH);
+  const a = await createAgent({ name: "kv-tool-a", isLead: false, status: "idle" });
+  const b = await createAgent({ name: "kv-tool-b", isLead: false, status: "idle" });
+  const l = await createAgent({ name: "kv-tool-lead", isLead: true, status: "idle" });
   agentA = a.id;
   agentB = b.id;
   lead = l.id;
@@ -84,8 +84,8 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries");
+beforeEach(async () => {
+  (await getDb()).run("DELETE FROM kv_entries");
 });
 
 describe("kv MCP tools", () => {

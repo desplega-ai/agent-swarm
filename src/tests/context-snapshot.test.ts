@@ -26,9 +26,9 @@ describe("Context Snapshots", () => {
       }
     }
 
-    initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Test Worker", isLead: false, status: "idle" });
-    const task = createTaskExtended("Test task for context snapshots", {
+    await initDb(TEST_DB_PATH);
+    await createAgent({ id: agentId, name: "Test Worker", isLead: false, status: "idle" });
+    const task = await createTaskExtended("Test task for context snapshots", {
       agentId,
       source: "mcp",
     });
@@ -46,9 +46,9 @@ describe("Context Snapshots", () => {
     }
   });
 
-  test("completion snapshot without contextUsedTokens preserves last known usage", () => {
+  test("completion snapshot without contextUsedTokens preserves last known usage", async () => {
     // Simulate progress snapshots during task execution
-    createContextSnapshot({
+    await createContextSnapshot({
       taskId,
       agentId,
       sessionId,
@@ -58,7 +58,7 @@ describe("Context Snapshots", () => {
       contextPercent: 25,
     });
 
-    createContextSnapshot({
+    await createContextSnapshot({
       taskId,
       agentId,
       sessionId,
@@ -69,7 +69,7 @@ describe("Context Snapshots", () => {
     });
 
     // Simulate completion snapshot — runner doesn't have contextUsedTokens at session end
-    createContextSnapshot({
+    await createContextSnapshot({
       taskId,
       agentId,
       sessionId,
@@ -81,17 +81,17 @@ describe("Context Snapshots", () => {
     });
 
     // The summary should preserve the last known context usage, not null/0
-    const summary = getContextSummaryByTaskId(taskId);
+    const summary = await getContextSummaryByTaskId(taskId);
     expect(summary.peakContextTokens).toBe(80000);
     expect(summary.contextWindowSize).toBe(200000);
     expect(summary.peakContextPercent).toBe(40);
   });
 
-  test("completion snapshot with contextUsedTokens uses provided value", () => {
+  test("completion snapshot with contextUsedTokens uses provided value", async () => {
     // Create a second task for an isolated test
-    const task2 = createTaskExtended("Test task 2", { agentId, source: "mcp" });
+    const task2 = await createTaskExtended("Test task 2", { agentId, source: "mcp" });
 
-    createContextSnapshot({
+    await createContextSnapshot({
       taskId: task2.id,
       agentId,
       sessionId,
@@ -102,7 +102,7 @@ describe("Context Snapshots", () => {
     });
 
     // Completion with explicit contextUsedTokens should use that value
-    createContextSnapshot({
+    await createContextSnapshot({
       taskId: task2.id,
       agentId,
       sessionId,
@@ -112,13 +112,13 @@ describe("Context Snapshots", () => {
       contextPercent: 30,
     });
 
-    const summary = getContextSummaryByTaskId(task2.id);
+    const summary = await getContextSummaryByTaskId(task2.id);
     expect(summary.peakContextTokens).toBe(60000);
     expect(summary.contextWindowSize).toBe(200000);
   });
 
-  test("snapshots are returned in chronological order", () => {
-    const snapshots = getContextSnapshotsByTaskId(taskId);
+  test("snapshots are returned in chronological order", async () => {
+    const snapshots = await getContextSnapshotsByTaskId(taskId);
     expect(snapshots.length).toBe(3);
     expect(snapshots[0].eventType).toBe("progress");
     expect(snapshots[1].eventType).toBe("progress");

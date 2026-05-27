@@ -117,7 +117,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
 
       if (!isUpdatingSelf) {
         // Only lead agents can update other agents' profiles
-        const callingAgent = getAgentById(requestInfo.agentId);
+        const callingAgent = await getAgentById(requestInfo.agentId);
         if (!callingAgent) {
           return {
             content: [{ type: "text", text: "Calling agent not found." }],
@@ -146,7 +146,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         }
 
         // Validate target agent exists before proceeding
-        const targetAgent = getAgentById(targetAgentId);
+        const targetAgent = await getAgentById(targetAgentId);
         if (!targetAgent) {
           return {
             content: [{ type: "text", text: `Target agent ${targetAgentId} not found.` }],
@@ -193,7 +193,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
 
         // Update name if provided
         if (name !== undefined) {
-          agent = updateAgentName(targetAgentId, name);
+          agent = await updateAgentName(targetAgentId, name);
           if (!agent) {
             return {
               content: [{ type: "text", text: "Target agent not found." }],
@@ -207,7 +207,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         }
 
         // Update profile fields if provided
-        agent = updateAgentProfile(
+        agent = await updateAgentProfile(
           targetAgentId,
           {
             description,

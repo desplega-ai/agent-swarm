@@ -4,8 +4,8 @@ import * as z from "zod";
 import {
   cancelTask,
   getAgentById,
-  getDb,
   getTaskById,
+  runDbTransaction,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
@@ -43,7 +43,7 @@ export async function cancelTaskHandler(
 
   const agentId = ctx.kind === "owner" ? ctx.agentId : undefined;
 
-  const txn = getDb().transaction(() => {
+  const result = (await runDbTransaction(async () => {
     if (ctx.kind === "owner") {
       const ownerAgentId = ctx.agentId;
       if (!ownerAgentId) {
@@ -52,7 +52,7 @@ export async function cancelTaskHandler(
           message: 'Agent ID not found. Set the "X-Agent-ID" header.',
         };
       }
-      const callerAgent = getAgentById(ownerAgentId);
+      const callerAgent = await getAgentById(ownerAgentId);
 
       if (!callerAgent) {
         return {
@@ -61,7 +61,7 @@ export async function cancelTaskHandler(
         };
       }
 
-      const existingTask = getTaskById(taskId);
+      const existingTask = await getTaskById(taskId);
 
       if (!existingTask) {
         return {
@@ -79,7 +79,7 @@ export async function cancelTaskHandler(
         };
       }
 
-      const cancelled = cancelTask(taskId, reason);
+      const cancelled = await cancelTask(taskId, reason);
 
       if (!cancelled) {
         return {
@@ -90,7 +90,7 @@ export async function cancelTaskHandler(
 
       // Update agent status based on capacity
       if (cancelled.agentId) {
-        updateAgentStatusFromCapacity(cancelled.agentId);
+        await updateAgentStatusFromCapacity(cancelled.agentId);
       }
 
       return {
@@ -100,7 +100,7 @@ export async function cancelTaskHandler(
       };
     }
 
-    const existingTask = getTaskById(taskId);
+    const existingTask = await getTaskById(taskId);
 
     if (!existingTask) {
       return {
@@ -112,7 +112,7 @@ export async function cancelTaskHandler(
     const ownershipError = assertOwnsTask(ctx, existingTask);
     if (ownershipError) return ownershipError;
 
-    const cancelled = cancelTask(taskId, reason);
+    const cancelled = await cancelTask(taskId, reason);
 
     if (!cancelled) {
       return {
@@ -122,7 +122,7 @@ export async function cancelTaskHandler(
     }
 
     if (cancelled.agentId) {
-      updateAgentStatusFromCapacity(cancelled.agentId);
+      await updateAgentStatusFromCapacity(cancelled.agentId);
     }
 
     return {
@@ -130,9 +130,7 @@ export async function cancelTaskHandler(
       message: `Task "${taskId}" has been cancelled.`,
       task: cancelled,
     };
-  });
-
-  const result = txn() as
+  })) as
     | {
         success: boolean;
         message: string;

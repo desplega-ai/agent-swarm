@@ -73,7 +73,7 @@ beforeAll(async () => {
   } catch {
     // File doesn't exist
   }
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {

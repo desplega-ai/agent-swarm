@@ -28,7 +28,7 @@ export const registerDbQueryTool = (server: McpServer) => {
     },
     async ({ sql, params }, _requestInfo, _meta) => {
       try {
-        const result = executeReadOnlyQuery(sql, params, MCP_MAX_ROWS);
+        const result = await executeReadOnlyQuery(sql, params, MCP_MAX_ROWS);
         const truncated = result.total > MCP_MAX_ROWS;
 
         // Build a simple text table for Claude

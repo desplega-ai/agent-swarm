@@ -111,7 +111,7 @@ export async function handleRepos(
   if (getRepo.match(req.method, pathSegments)) {
     const parsed = await getRepo.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const repo = getSwarmRepoById(parsed.params.id);
+    const repo = await getSwarmRepoById(parsed.params.id);
     if (!repo) {
       jsonError(res, "Repo not found", 404);
       return true;
@@ -126,7 +126,7 @@ export async function handleRepos(
     const filters: { autoClone?: boolean; name?: string } = {};
     if (parsed.query.autoClone !== undefined) filters.autoClone = parsed.query.autoClone;
     if (parsed.query.name) filters.name = parsed.query.name;
-    const repos = getSwarmRepos(Object.keys(filters).length > 0 ? filters : undefined);
+    const repos = await getSwarmRepos(Object.keys(filters).length > 0 ? filters : undefined);
     json(res, { repos });
     return true;
   }
@@ -135,7 +135,7 @@ export async function handleRepos(
     const parsed = await createRepo.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      const repo = createSwarmRepo({
+      const repo = await createSwarmRepo({
         url: parsed.body.url,
         name: parsed.body.name,
         clonePath: parsed.body.clonePath,
@@ -159,7 +159,7 @@ export async function handleRepos(
     const parsed = await updateRepo.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      const updated = updateSwarmRepo(parsed.params.id, {
+      const updated = await updateSwarmRepo(parsed.params.id, {
         url: parsed.body.url,
         name: parsed.body.name,
         clonePath: parsed.body.clonePath,
@@ -186,7 +186,7 @@ export async function handleRepos(
   if (deleteRepo.match(req.method, pathSegments)) {
     const parsed = await deleteRepo.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const deleted = deleteSwarmRepo(parsed.params.id);
+    const deleted = await deleteSwarmRepo(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Repo not found", 404);
       return true;

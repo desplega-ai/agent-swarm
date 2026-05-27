@@ -75,7 +75,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
     },
     async ({ id, update, delete: del, create, onNodeFailure, triggerSchema }, requestInfo) => {
       try {
-        const existing = getWorkflow(id);
+        const existing = await getWorkflow(id);
         if (!existing) {
           return {
             content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
@@ -106,7 +106,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
           };
         }
 
-        const version = snapshotWorkflow(id, requestInfo.agentId);
+        const version = await snapshotWorkflow(id, requestInfo.agentId);
 
         const updateArgs: Parameters<typeof updateWorkflow>[1] = {
           definition: patchResult.definition,
@@ -114,7 +114,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
         if (triggerSchema !== undefined) {
           updateArgs.triggerSchema = triggerSchema;
         }
-        const workflow = updateWorkflow(id, updateArgs);
+        const workflow = await updateWorkflow(id, updateArgs);
         if (!workflow) {
           return {
             content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],

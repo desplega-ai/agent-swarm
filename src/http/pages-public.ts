@@ -376,7 +376,7 @@ export async function handlePagesPublic(
     if (!parsed) return true;
   }
 
-  const page = getPage(id);
+  const page = await getPage(id);
   if (!page) {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Page not found" }));
@@ -462,7 +462,7 @@ export async function handlePagesPublic(
         body: page.body,
       }),
     );
-    bumpViewCount(page.id);
+    await bumpViewCount(page.id);
     return true;
   }
 
@@ -490,7 +490,7 @@ export async function handlePagesPublic(
   if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
   res.writeHead(200, headers);
   res.end(html);
-  bumpViewCount(page.id);
+  await bumpViewCount(page.id);
   return true;
 }
 
@@ -501,9 +501,9 @@ export async function handlePagesPublic(
  * 200 (HTML inline or JSON metadata fetch). 302/401/403/404 responses do
  * NOT bump.
  */
-function bumpViewCount(pageId: string): void {
+async function bumpViewCount(pageId: string): Promise<void> {
   try {
-    incrementPageViewCount(pageId);
+    await incrementPageViewCount(pageId);
   } catch {
     // intentional empty — analytics must never break page serving.
   }

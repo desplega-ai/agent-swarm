@@ -46,7 +46,7 @@ async function handleRequest(
     }
 
     try {
-      createSessionLogs({
+      await createSessionLogs({
         taskId: parsedBody.taskId || undefined,
         sessionId: parsedBody.sessionId,
         iteration: parsedBody.iteration,
@@ -70,13 +70,13 @@ async function handleRequest(
     pathSegments[3] === "session-logs"
   ) {
     const taskId = pathSegments[2];
-    const task = getTaskById(taskId);
+    const task = await getTaskById(taskId);
 
     if (!task) {
       return { status: 404, body: { error: "Task not found" } };
     }
 
-    const logs = getSessionLogsByTaskId(taskId);
+    const logs = await getSessionLogsByTaskId(taskId);
     return { status: 200, body: { logs } };
   }
 
@@ -114,7 +114,7 @@ describe("Session Logs API", () => {
     }
 
     // Initialize test database
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     // Start test server
     server = createTestServer();
@@ -146,12 +146,12 @@ describe("Session Logs API", () => {
   });
 
   describe("Database Functions", () => {
-    test("should create and retrieve session logs by taskId", () => {
+    test("should create and retrieve session logs by taskId", async () => {
       // Create a task first
-      const task = createTaskExtended("Test task for session logs");
+      const task = await createTaskExtended("Test task for session logs");
 
       // Create session logs for the task
-      createSessionLogs({
+      await createSessionLogs({
         taskId: task.id,
         sessionId: "test-session-1",
         iteration: 1,
@@ -160,7 +160,7 @@ describe("Session Logs API", () => {
       });
 
       // Retrieve logs
-      const logs = getSessionLogsByTaskId(task.id);
+      const logs = await getSessionLogsByTaskId(task.id);
 
       expect(logs.length).toBe(2);
       expect(logs[0]?.content).toBe('{"type":"system"}');
@@ -173,8 +173,8 @@ describe("Session Logs API", () => {
       expect(logs[1]?.lineNumber).toBe(1);
     });
 
-    test("should create session logs without taskId", () => {
-      createSessionLogs({
+    test("should create session logs without taskId", async () => {
+      await createSessionLogs({
         sessionId: "ai-loop-session",
         iteration: 1,
         cli: "claude",
@@ -182,18 +182,18 @@ describe("Session Logs API", () => {
       });
 
       // Retrieve by session
-      const logs = getSessionLogsBySession("ai-loop-session", 1);
+      const logs = await getSessionLogsBySession("ai-loop-session", 1);
 
       expect(logs.length).toBe(1);
       expect(logs[0]?.taskId).toBeUndefined();
       expect(logs[0]?.sessionId).toBe("ai-loop-session");
     });
 
-    test("should order logs by iteration and lineNumber", () => {
-      const task = createTaskExtended("Task for ordering test");
+    test("should order logs by iteration and lineNumber", async () => {
+      const task = await createTaskExtended("Task for ordering test");
 
       // Create logs for multiple iterations
-      createSessionLogs({
+      await createSessionLogs({
         taskId: task.id,
         sessionId: "order-session",
         iteration: 1,
@@ -201,7 +201,7 @@ describe("Session Logs API", () => {
         lines: ["line1-iter1", "line2-iter1"],
       });
 
-      createSessionLogs({
+      await createSessionLogs({
         taskId: task.id,
         sessionId: "order-session",
         iteration: 2,
@@ -209,7 +209,7 @@ describe("Session Logs API", () => {
         lines: ["line1-iter2", "line2-iter2"],
       });
 
-      const logs = getSessionLogsByTaskId(task.id);
+      const logs = await getSessionLogsByTaskId(task.id);
 
       expect(logs.length).toBe(4);
       // First iteration, first line
@@ -311,7 +311,7 @@ describe("Session Logs API", () => {
     });
 
     test("should store logs with taskId", async () => {
-      const task = createTaskExtended("API test task");
+      const task = await createTaskExtended("API test task");
 
       const response = await fetch(`${baseUrl}/api/session-logs`, {
         method: "POST",
@@ -328,7 +328,7 @@ describe("Session Logs API", () => {
       expect(response.status).toBe(201);
 
       // Verify it was stored correctly
-      const logs = getSessionLogsByTaskId(task.id);
+      const logs = await getSessionLogsByTaskId(task.id);
       expect(logs.length).toBe(1);
       expect(logs[0]?.taskId).toBe(task.id);
     });
@@ -344,7 +344,7 @@ describe("Session Logs API", () => {
     });
 
     test("should return empty logs array for task with no logs", async () => {
-      const task = createTaskExtended("Task without logs");
+      const task = await createTaskExtended("Task without logs");
 
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}/session-logs`);
 
@@ -354,10 +354,10 @@ describe("Session Logs API", () => {
     });
 
     test("should return session logs for a task", async () => {
-      const task = createTaskExtended("Task with logs for GET test");
+      const task = await createTaskExtended("Task with logs for GET test");
 
       // Create some logs
-      createSessionLogs({
+      await createSessionLogs({
         taskId: task.id,
         sessionId: "get-test-session",
         iteration: 1,

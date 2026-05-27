@@ -75,7 +75,7 @@ export async function handleWorkflowEvents(
     const parsed = await runScopedSignalRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const run = getWorkflowRun(parsed.params.runId);
+    const run = await getWorkflowRun(parsed.params.runId);
     if (!run) {
       jsonError(res, "Workflow run not found", 404);
       return true;

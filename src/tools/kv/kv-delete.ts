@@ -5,7 +5,10 @@ import { createToolRegistrar } from "@/tools/utils";
 import { KvKeySchema, KvNamespaceSchema } from "@/types";
 import { resolveNamespace } from "./resolve-namespace";
 
-function authError(namespace: string, info: { agentId: string | undefined }): string | null {
+async function authError(
+  namespace: string,
+  info: { agentId: string | undefined },
+): Promise<string | null> {
   if (namespace.startsWith("task:page:")) {
     return "task:page:* writes require a page-proxy request, not an MCP call";
   }
@@ -13,7 +16,7 @@ function authError(namespace: string, info: { agentId: string | undefined }): st
     const target = namespace.slice("task:agent:".length);
     if (info.agentId && target === info.agentId) return null;
     if (info.agentId) {
-      const agent = getAgentById(info.agentId);
+      const agent = await getAgentById(info.agentId);
       if (agent?.isLead) return null;
     }
     return "writes to another agent's namespace require lead";
@@ -43,7 +46,7 @@ export const registerKvDeleteTool = (server: McpServer) => {
       }),
     },
     async ({ key, namespace }, requestInfo) => {
-      const resolved = resolveNamespace(namespace, requestInfo);
+      const resolved = await resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return {
           content: [{ type: "text", text: resolved.error }],
@@ -54,7 +57,7 @@ export const registerKvDeleteTool = (server: McpServer) => {
           },
         };
       }
-      const authErr = authError(resolved.namespace, { agentId: requestInfo.agentId });
+      const authErr = await authError(resolved.namespace, { agentId: requestInfo.agentId });
       if (authErr) {
         return {
           content: [{ type: "text", text: authErr }],
@@ -66,7 +69,7 @@ export const registerKvDeleteTool = (server: McpServer) => {
           },
         };
       }
-      const deleted = deleteKv(resolved.namespace, key);
+      const deleted = await deleteKv(resolved.namespace, key);
       return {
         content: [
           {

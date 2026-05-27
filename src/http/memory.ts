@@ -267,11 +267,11 @@ export async function handleMemory(
 
     // Dedup — delete old chunks for this source path
     if (sourcePath && agentId) {
-      store.deleteBySourcePath(sourcePath, agentId);
+      await store.deleteBySourcePath(sourcePath, agentId);
     }
 
     // Atomic batch insert — all chunks or none
-    const memories = store.storeBatch(
+    const memories = await store.storeBatch(
       contentChunks.map((chunk) => ({
         agentId: agentId || null,
         content: chunk.content,
@@ -292,7 +292,7 @@ export async function handleMemory(
         const embeddings = await provider.embedBatch(contentChunks.map((c) => c.content));
         for (let i = 0; i < embeddings.length; i++) {
           if (embeddings[i]) {
-            store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);
+            await store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);
           }
         }
       } catch (err) {
@@ -326,7 +326,7 @@ export async function handleMemory(
       }
 
       const candidateLimit = Math.min(limit, 20) * CANDIDATE_SET_MULTIPLIER;
-      const candidates = store.search(queryEmbedding, myAgentId, {
+      const candidates = await store.search(queryEmbedding, myAgentId, {
         scope: "all",
         limit: candidateLimit,
         isLead: false,
@@ -344,7 +344,7 @@ export async function handleMemory(
         : sourceTaskIdHeader;
       if (sourceTaskId) {
         try {
-          recordRetrievals(
+          await recordRetrievals(
             sourceTaskId,
             myAgentId,
             ranked.map((r) => ({ memoryId: r.id, similarity: r.similarity })),
@@ -392,7 +392,7 @@ export async function handleMemory(
         }
 
         const candidateLimit = Math.min(limit, 100) * CANDIDATE_SET_MULTIPLIER;
-        let candidates = store.search(queryEmbedding, agentId ?? "", {
+        let candidates = await store.search(queryEmbedding, agentId ?? "", {
           scope,
           limit: candidateLimit,
           isLead: true,
@@ -437,7 +437,7 @@ export async function handleMemory(
       const fetchLimit = pathNeedle
         ? Math.min(500, Math.max(limit * 10, 100))
         : Math.min(limit, 100);
-      let rows = store.list(agentId ?? "", {
+      let rows = await store.list(agentId ?? "", {
         scope,
         limit: fetchLimit,
         offset,
@@ -488,7 +488,7 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const store = getMemoryStore();
-    const deleted = store.delete(parsed.params.id);
+    const deleted = await store.delete(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Memory not found", 404);
       return true;
@@ -504,7 +504,7 @@ export async function handleMemory(
     const { agentId, batchSize } = parsed.body;
     const store = getMemoryStore();
     const provider = getEmbeddingProvider();
-    const memories = store.listForReembedding(agentId ? { agentId } : undefined);
+    const memories = await store.listForReembedding(agentId ? { agentId } : undefined);
 
     json(res, { started: true, totalMemories: memories.length }, 202);
 
@@ -516,7 +516,7 @@ export async function handleMemory(
           const embeddings = await provider.embedBatch(batch.map((m) => m.content));
           for (let j = 0; j < embeddings.length; j++) {
             if (embeddings[j]) {
-              store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);
+              await store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);
             }
           }
           console.log(
@@ -551,7 +551,7 @@ export async function handleMemory(
         jsonError(res, `explicit-self rating for memoryId=${evt.memoryId} requires taskId`, 400);
         return true;
       }
-      if (!hasRetrievalForTask(evt.taskId, evt.memoryId)) {
+      if (!(await hasRetrievalForTask(evt.taskId, evt.memoryId))) {
         jsonError(
           res,
           `explicit-self rating rejected: memoryId=${evt.memoryId} not present in memory_retrieval for task=${evt.taskId}`,
@@ -582,7 +582,7 @@ export async function handleMemory(
           reasoning: e.reasoning,
           ...(e.referencesSource !== undefined ? { referencesSource: e.referencesSource } : {}),
         }));
-        const result = applyRating(ratingEvents, { taskId });
+        const result = await applyRating(ratingEvents, { taskId });
         applied += result.applied;
         for (const r of result.rejected) {
           rejected.push({ memoryId: r.event.memoryId, reason: r.reason });
@@ -611,7 +611,7 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const { taskId, sessionId } = parsed.query;
-    const rows = getRetrievalsForAgent(myAgentId, { taskId, sessionId });
+    const rows = await getRetrievalsForAgent(myAgentId, { taskId, sessionId });
     json(res, { results: rows });
     return true;
   }
@@ -627,7 +627,7 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const { memoryId } = parsed.query;
-    const edges = listEdgesForAgent(myAgentId, memoryId);
+    const edges = await listEdgesForAgent(myAgentId, memoryId);
     json(res, { edges });
     return true;
   }
@@ -636,7 +636,7 @@ export async function handleMemory(
     const parsed = await getMemoryById.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    const memory = getMemoryStore().get(parsed.params.id);
+    const memory = await getMemoryStore().get(parsed.params.id);
     if (!memory) {
       jsonError(res, "Memory not found", 404);
       return true;

@@ -64,17 +64,17 @@ export function registerActionHandlers(app: App): void {
 
     if (!taskId || !followUpText) return;
 
-    const originalTask = getTaskById(taskId);
+    const originalTask = await getTaskById(taskId);
     if (!originalTask || !originalTask.slackChannelId) return;
 
-    const lead = getLeadAgent();
+    const lead = await getLeadAgent();
     // Resolve via the shared cascade. Sample context = the modal callback ID
     // so operators can see *which* modal-submit triggered an unmapped entry.
     const requestedByUserId = await resolveSlackUserId(client, body.user.id, {
       sampleEventType: "view_submission",
       sampleContext: view.callback_id || "follow_up_submit",
     });
-    const followUpTask = createTaskWithSiblingAwareness(followUpText, {
+    const followUpTask = await createTaskWithSiblingAwareness(followUpText, {
       agentId: lead?.id,
       source: "slack",
       parentTaskId: taskId,
@@ -113,11 +113,11 @@ export function registerActionHandlers(app: App): void {
     const taskId = action.value;
     if (!taskId) return;
 
-    const task = getTaskById(taskId);
+    const task = await getTaskById(taskId);
     if (!task) return;
 
     // Cancel the task in DB
-    const cancelled = cancelTask(taskId, "Cancelled via Slack");
+    const cancelled = await cancelTask(taskId, "Cancelled via Slack");
     if (!cancelled) {
       // Task was already in a terminal state
       return;
@@ -125,7 +125,7 @@ export function registerActionHandlers(app: App): void {
 
     // Update the message to show cancelled state
     if (task.slackChannelId && task.agentId) {
-      const agent = getAgentById(task.agentId);
+      const agent = await getAgentById(task.agentId);
       const agentName = agent?.name || "Unknown";
       const blocks = buildCancelledBlocks({ agentName, taskId: task.id });
 

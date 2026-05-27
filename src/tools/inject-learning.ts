@@ -44,7 +44,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
       }
 
       // Validate caller is the lead agent
-      const callerAgent = getAgentById(requestInfo.agentId);
+      const callerAgent = await getAgentById(requestInfo.agentId);
       if (!callerAgent || !callerAgent.isLead) {
         return {
           content: [{ type: "text", text: "Only the lead agent can inject learnings." }],
@@ -56,7 +56,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
       }
 
       // Validate target agent exists
-      const targetAgent = getAgentById(targetAgentId);
+      const targetAgent = await getAgentById(targetAgentId);
       if (!targetAgent) {
         return {
           content: [{ type: "text", text: `Agent "${targetAgentId}" not found.` }],
@@ -70,7 +70,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
       // Create swarm-scoped memory — lead learnings are organizational knowledge visible to all workers
       const content = `[Lead Feedback — ${category}]\n\n${learning}`;
       const store = getMemoryStore();
-      const memory = store.store({
+      const memory = await store.store({
         agentId: targetAgentId,
         scope: "swarm",
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,
@@ -83,7 +83,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
         const provider = getEmbeddingProvider();
         const embedding = await provider.embed(content);
         if (embedding) {
-          store.updateEmbedding(memory.id, embedding, provider.name);
+          await store.updateEmbedding(memory.id, embedding, provider.name);
         }
       } catch {
         // Non-blocking — memory was created, embedding is optional

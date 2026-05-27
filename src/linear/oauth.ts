@@ -5,8 +5,8 @@ import { buildAuthorizationUrl, exchangeCode, type OAuthProviderConfig } from ".
 /** kv namespace for the Linear bot's appUserId (Q21.C). Keyed by workspace ID. */
 const APP_USER_ID_NAMESPACE = "integration:linear:bot-app-user-id";
 
-export function getLinearOAuthConfig(): OAuthProviderConfig | null {
-  const app = getOAuthApp("linear");
+export async function getLinearOAuthConfig(): Promise<OAuthProviderConfig | null> {
+  const app = await getOAuthApp("linear");
   if (!app) return null;
 
   const metadata = JSON.parse(app.metadata || "{}");
@@ -23,7 +23,7 @@ export function getLinearOAuthConfig(): OAuthProviderConfig | null {
 }
 
 export async function getLinearAuthorizationUrl(): Promise<string | null> {
-  const config = getLinearOAuthConfig();
+  const config = await getLinearOAuthConfig();
   if (!config) return null;
   const result = await buildAuthorizationUrl(config);
   return result.url;
@@ -33,7 +33,7 @@ export async function handleLinearCallback(
   code: string,
   state: string,
 ): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }> {
-  const config = getLinearOAuthConfig();
+  const config = await getLinearOAuthConfig();
   if (!config) throw new Error("Linear OAuth not configured");
   const result = await exchangeCode(config, code, state);
 
@@ -85,7 +85,7 @@ export async function captureLinearAppUserId(accessToken: string): Promise<void>
   if (!appUserId) {
     throw new Error("Linear viewer query returned no id");
   }
-  upsertKv({
+  await upsertKv({
     namespace: APP_USER_ID_NAMESPACE,
     key: workspaceId && workspaceId !== "" ? workspaceId : "default",
     value: appUserId,

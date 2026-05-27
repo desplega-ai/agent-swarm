@@ -43,15 +43,15 @@ export class ExplicitSelfDuplicateError extends Error {
   }
 }
 
-export function applyRating(
+export async function applyRating(
   events: RatingEvent[],
   ctx: ApplyRatingContext = {},
-): ApplyRatingResult {
+): Promise<ApplyRatingResult> {
   if (events.length === 0) {
     return { applied: 0, rejected: [] };
   }
 
-  const db = getDb();
+  const db = await getDb();
   const accepted: { event: RatingEvent; sanitizedReferencesSource: string | null }[] = [];
   const rejected: ApplyRatingResult["rejected"] = [];
 

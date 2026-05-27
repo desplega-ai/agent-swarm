@@ -126,9 +126,12 @@ function createTestRegistry(): ExecutorRegistry {
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(def: WorkflowDefinition, overrides?: Partial<Workflow>): Workflow {
+async function makeWorkflow(
+  def: WorkflowDefinition,
+  overrides?: Partial<Workflow>,
+): Promise<Workflow> {
   workflowCounter++;
-  const workflow = createWorkflow({
+  const workflow = await createWorkflow({
     name: overrides?.name || `test-integration-io-${workflowCounter}-${Date.now()}`,
     definition: def,
     triggers: overrides?.triggers,
@@ -149,13 +152,13 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
     } catch {
       // File doesn't exist
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }
@@ -251,7 +254,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
     test("triggerSchema rejects invalid payload (missing required field)", async () => {
       const registry = createTestRegistry();
       const def = buildDef();
-      const workflow = makeWorkflow(def, { triggerSchema });
+      const workflow = await makeWorkflow(def, { triggerSchema });
 
       // Missing "action" field
       await expect(
@@ -270,7 +273,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
     test("triggerSchema rejects wrong type", async () => {
       const registry = createTestRegistry();
       const def = buildDef();
-      const workflow = makeWorkflow(def, { triggerSchema });
+      const workflow = await makeWorkflow(def, { triggerSchema });
 
       // repo should be string but passing number
       await expect(
@@ -281,7 +284,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
     test("triggerSchema accepts valid payload — true branch executes", async () => {
       const registry = createTestRegistry();
       const def = buildDef();
-      const workflow = makeWorkflow(def, { triggerSchema });
+      const workflow = await makeWorkflow(def, { triggerSchema });
 
       const runId = await startWorkflowExecution(
         workflow,
@@ -289,7 +292,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         registry,
       );
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run).not.toBeNull();
       expect(run!.status).toBe("completed");
 
@@ -311,7 +314,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
       expect(ctx.B_alt).toBeUndefined();
 
       // Verify step records
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const nodeIds = steps.map((s) => s.nodeId);
       expect(nodeIds).toContain("A");
       expect(nodeIds).toContain("B");
@@ -323,7 +326,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
     test("false branch executes when condition fails — convergence works", async () => {
       const registry = createTestRegistry();
       const def = buildDef();
-      const workflow = makeWorkflow(def, { triggerSchema });
+      const workflow = await makeWorkflow(def, { triggerSchema });
 
       const runId = await startWorkflowExecution(
         workflow,
@@ -331,7 +334,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         registry,
       );
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -351,7 +354,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
       // D should still have run (convergence from B_alt)
       expect(ctx.D).toEqual({ echo: "D: fromA=repo=other-repo action=deploy" });
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const nodeIds = steps.map((s) => s.nodeId);
       expect(nodeIds).toContain("A");
       expect(nodeIds).toContain("B");
@@ -388,16 +391,16 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("Input schema validation failed");
       expect(run!.error).toContain("count");
 
       // consumer step should not have completed
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const consumerStep = steps.find((s) => s.nodeId === "consumer");
       expect(consumerStep).toBeDefined();
       expect(consumerStep!.status).toBe("failed");
@@ -430,14 +433,14 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("Output schema validation failed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const nodeIds = steps.map((s) => s.nodeId);
       expect(nodeIds).not.toContain("consumer");
     });
@@ -459,13 +462,13 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { actualField: "data" }, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(1);
 
       // Check that diagnostics contain unresolved tokens
@@ -502,10 +505,10 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -533,10 +536,10 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -561,10 +564,10 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { name: "test" }, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -586,14 +589,14 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
 
       // Set env var for input resolution
       process.env.TEST_INTEG_API_KEY = "secret123";
-      const workflow = makeWorkflow(def, {
+      const workflow = await makeWorkflow(def, {
         // biome-ignore lint/suspicious/noTemplateCurlyInString: testing env var syntax
         input: { API_KEY: "${TEST_INTEG_API_KEY}" },
       });
       const runId = await startWorkflowExecution(workflow, {}, registry);
       delete process.env.TEST_INTEG_API_KEY;
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -717,7 +720,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       // No triggerSchema — arbitrary data should work
       const runId = await startWorkflowExecution(
         workflow,
@@ -725,7 +728,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         registry,
       );
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
     });
   });
@@ -756,14 +759,14 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(
         workflow,
         { repo: "my-repo", source: "webhook" },
         registry,
       );
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -812,10 +815,10 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
@@ -825,7 +828,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
       expect(ctx.D).toEqual({ echo: "D got B:start and C:start" });
 
       // All 4 nodes should have steps
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(4);
       expect(steps.every((s) => s.status === "completed")).toBe(true);
     });
@@ -850,14 +853,14 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       // Should have 4 steps (root + 3 parallel)
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(4);
     });
   });
@@ -882,13 +885,13 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { mode: "fast" }, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const branchStep = steps.find((s) => s.nodeId === "branch");
       expect(branchStep).toBeDefined();
       expect(branchStep!.nextPort).toBe("true");

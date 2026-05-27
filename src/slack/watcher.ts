@@ -86,17 +86,17 @@ export const registerTaskMessage = registerTreeMessage;
  * Build TreeNode[] for a tree's root tasks and their children.
  * Used by the tree rendering loop (Phase 5) to construct the data for buildTreeBlocks().
  */
-export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
+export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]> {
   const nodes: TreeNode[] = [];
 
   for (const rootTaskId of tree.rootTaskIds) {
-    const task = getTaskById(rootTaskId);
+    const task = await getTaskById(rootTaskId);
     if (!task) {
       console.log(`[Slack] Tree root task ${rootTaskId.slice(0, 8)} not found, skipping`);
       continue;
     }
 
-    const agent = task.agentId ? getAgentById(task.agentId) : null;
+    const agent = task.agentId ? await getAgentById(task.agentId) : null;
     const agentName = agent?.name ?? "Unknown";
 
     // Compute duration for completed/failed tasks
@@ -112,7 +112,7 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
 
     while (taskQueue.length > 0) {
       const parentId = taskQueue.shift()!;
-      const childTasks = getChildTasks(parentId);
+      const childTasks = await getChildTasks(parentId);
 
       for (const child of childTasks) {
         if (seen.has(child.id)) continue;
@@ -126,7 +126,7 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
           );
         }
 
-        const childAgent = child.agentId ? getAgentById(child.agentId) : null;
+        const childAgent = child.agentId ? await getAgentById(child.agentId) : null;
         const childAgentName = childAgent?.name ?? "Unknown";
 
         let childDuration: string | undefined;
@@ -139,7 +139,7 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
         // completed task per tree render. Skipping non-completed avoids
         // hot-path queries for every in-progress poll tick.
         const childAttachments =
-          child.status === "completed" ? getTaskAttachments(child.id) : undefined;
+          child.status === "completed" ? await getTaskAttachments(child.id) : undefined;
 
         childNodes.push({
           taskId: child.id,
@@ -159,7 +159,8 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
       }
     }
 
-    const rootAttachments = task.status === "completed" ? getTaskAttachments(task.id) : undefined;
+    const rootAttachments =
+      task.status === "completed" ? await getTaskAttachments(task.id) : undefined;
 
     nodes.push({
       taskId: task.id,
@@ -267,7 +268,7 @@ export async function processTreeMessages(): Promise<void> {
 
     let nodes: TreeNode[];
     try {
-      nodes = buildTreeNodes(tree);
+      nodes = await buildTreeNodes(tree);
     } catch (error) {
       console.error(`[Slack] Tree render failed for ${messageTs}, skipping:`, error);
       continue;
@@ -375,7 +376,7 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs || !task.agentId) return undefined;
 
-  const agent = getAgentById(task.agentId);
+  const agent = await getAgentById(task.agentId);
   if (!agent) return undefined;
 
   // Build an initial tree with this single task
@@ -423,14 +424,14 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
 /**
  * Start watching for Slack task updates and sending responses.
  */
-export function startTaskWatcher(intervalMs = 3000): void {
+export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
   if (watcherInterval) {
     console.log("[Slack] Task watcher already running");
     return;
   }
 
   // Initialize with existing completed tasks to avoid re-notifying on restart
-  const existingCompleted = getCompletedSlackTasks();
+  const existingCompleted = await getCompletedSlackTasks();
   const now = Date.now();
   for (const task of existingCompleted) {
     notifiedCompletions.set(task.id, now);
@@ -447,7 +448,7 @@ export function startTaskWatcher(intervalMs = 3000): void {
       await processTreeMessages();
 
       // Check for progress updates on in-progress tasks
-      const inProgressTasks = getInProgressSlackTasks();
+      const inProgressTasks = await getInProgressSlackTasks();
       const now = Date.now();
       for (const task of inProgressTasks) {
         // Late-register descendant tasks into their ancestor's tree (walk up parent chain)
@@ -462,7 +463,7 @@ export function startTaskWatcher(intervalMs = 3000): void {
               );
               break;
             }
-            const ancestor = getTaskById(ancestorId);
+            const ancestor = await getTaskById(ancestorId);
             ancestorId = ancestor?.parentTaskId ?? undefined;
           }
         }
@@ -564,7 +565,7 @@ export function startTaskWatcher(intervalMs = 3000): void {
       }
 
       // Check for completed tasks
-      const completedTasks = getCompletedSlackTasks();
+      const completedTasks = await getCompletedSlackTasks();
       for (const task of completedTasks) {
         // Late-register descendant tasks into their ancestor's tree (walk up parent chain)
         if (!taskToTree.has(task.id) && task.parentTaskId) {
@@ -578,7 +579,7 @@ export function startTaskWatcher(intervalMs = 3000): void {
               );
               break;
             }
-            const ancestor = getTaskById(ancestorId);
+            const ancestor = await getTaskById(ancestorId);
             ancestorId = ancestor?.parentTaskId ?? undefined;
           }
         }

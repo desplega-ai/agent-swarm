@@ -17,7 +17,7 @@ async function removeDbFiles(path: string): Promise<void> {
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
@@ -60,7 +60,7 @@ describe("seeder harness — versioning rule", () => {
     expect(result.updated).toBe(0);
     expect(result.failed).toEqual([]);
     expect(upstream.get("a")).toBe("h-a1");
-    expect(getSeedState("create-test", "a")?.seededHash).toBe("h-a1");
+    expect((await getSeedState("create-test", "a"))?.seededHash).toBe("h-a1");
   });
 
   test("pristine upstream + unchanged source -> no-op", async () => {
@@ -88,7 +88,7 @@ describe("seeder harness — versioning rule", () => {
     expect(result.updated).toBe(1);
     expect(result.skippedUnchanged).toBe(0);
     expect(upstream.get("a")).toBe("h-a2");
-    expect(getSeedState("update-test", "a")?.seededHash).toBe("h-a2");
+    expect((await getSeedState("update-test", "a"))?.seededHash).toBe("h-a2");
   });
 
   test("user-modified upstream -> preserved, never overwritten", async () => {
@@ -113,11 +113,11 @@ describe("seeder harness — versioning rule", () => {
     const upstream = new Map([["x", "h-x1"]]); // pre-exists, byte-identical, never seeded
     const seeder = makeFakeSeeder("adopt-test", source, upstream);
 
-    expect(getSeedState("adopt-test", "x")).toBeNull();
+    expect(await getSeedState("adopt-test", "x")).toBeNull();
     const first = await runSeeder(seeder, { quiet: true });
     expect(first.skippedUnchanged).toBe(1);
     // It was adopted: seed state is now recorded so a future change is detectable.
-    expect(getSeedState("adopt-test", "x")?.seededHash).toBe("h-x1");
+    expect((await getSeedState("adopt-test", "x"))?.seededHash).toBe("h-x1");
 
     source.set("x", "h-x2");
     const second = await runSeeder(seeder, { quiet: true });
@@ -158,6 +158,6 @@ describe("seeder harness — versioning rule", () => {
     expect(result.failed).toEqual([{ key: "bad", error: "boom" }]);
     expect(upstream.get("ok")).toBe("h-ok");
     // A failed apply did not record seed state, so a later run retries it.
-    expect(getSeedState("failure-test", "bad")).toBeNull();
+    expect(await getSeedState("failure-test", "bad")).toBeNull();
   });
 });

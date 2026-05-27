@@ -37,17 +37,17 @@ export const registerMcpServerGetTool = (server: McpServer) => {
       let mcpServer = null;
 
       if (args.id) {
-        mcpServer = getMcpServerById(args.id);
+        mcpServer = await getMcpServerById(args.id);
       } else if (args.name && requestInfo.agentId) {
         // Scope cascade: agent > swarm > global
         mcpServer =
-          getMcpServerByName(args.name, "agent", requestInfo.agentId) ||
-          getMcpServerByName(args.name, "swarm", null) ||
-          getMcpServerByName(args.name, "global", null);
+          (await getMcpServerByName(args.name, "agent", requestInfo.agentId)) ||
+          (await getMcpServerByName(args.name, "swarm", null)) ||
+          (await getMcpServerByName(args.name, "global", null));
       } else if (args.name) {
         mcpServer =
-          getMcpServerByName(args.name, "swarm", null) ||
-          getMcpServerByName(args.name, "global", null);
+          (await getMcpServerByName(args.name, "swarm", null)) ||
+          (await getMcpServerByName(args.name, "global", null));
       }
 
       if (!mcpServer) {

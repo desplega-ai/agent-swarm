@@ -46,7 +46,7 @@ export const registerListConfigTool = (server: McpServer) => {
       }
 
       try {
-        const configs = getSwarmConfigs({
+        const configs = await getSwarmConfigs({
           scope,
           scopeId,
           key,

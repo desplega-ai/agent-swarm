@@ -60,10 +60,10 @@ export type RetrievalListFilter = {
  * `retrievedAt`. Caller MUST pass at least one of `taskId` / `sessionId`;
  * the route's Zod schema enforces this — this function does not re-validate.
  */
-export function getRetrievalsForAgent(
+export async function getRetrievalsForAgent(
   agentId: string,
   filter: RetrievalListFilter,
-): RetrievalListRow[] {
+): Promise<RetrievalListRow[]> {
   const conditions: string[] = ["mr.agentId = ?"];
   const params: (string | number)[] = [agentId];
   if (filter.taskId) {
@@ -96,7 +96,7 @@ export function getRetrievalsForAgent(
      LIMIT ?
   `;
 
-  return getDb()
+  return (await getDb())
     .prepare<RetrievalListRow, (string | number)[]>(sql)
     .all(RETRIEVAL_CONTENT_SNIPPET_CHARS, ...params, RETRIEVAL_LIST_LIMIT);
 }
@@ -106,8 +106,8 @@ export function getRetrievalsForAgent(
  * to the agent during the task? Used by the rate endpoint to reject
  * `explicit-self` ratings for memories the agent never saw.
  */
-export function hasRetrievalForTask(taskId: string, memoryId: string): boolean {
-  const row = getDb()
+export async function hasRetrievalForTask(taskId: string, memoryId: string): Promise<boolean> {
+  const row = (await getDb())
     .prepare<{ id: string }, [string, string]>(
       "SELECT id FROM memory_retrieval WHERE taskId = ? AND memoryId = ? LIMIT 1",
     )

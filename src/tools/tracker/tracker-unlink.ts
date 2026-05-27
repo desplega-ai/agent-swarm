@@ -21,7 +21,7 @@ export const registerTrackerUnlinkTool = (server: McpServer) => {
     },
     async (args, _requestInfo, _meta) => {
       try {
-        deleteTrackerSync(args.syncId);
+        await deleteTrackerSync(args.syncId);
         return {
           content: [{ type: "text", text: `Removed tracker sync mapping ${args.syncId}` }],
           structuredContent: {

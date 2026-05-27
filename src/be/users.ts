@@ -21,7 +21,7 @@
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { User } from "../types";
-import { getDb } from "./db";
+import { getDb, runDbTransaction } from "./db";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,8 +82,8 @@ function rowToUser(row: UserRow): User {
 // ---------------------------------------------------------------------------
 
 /** Single SELECT by primary key. */
-export function findUserById(id: string): User | null {
-  const row = getDb().prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
+export async function findUserById(id: string): Promise<User | null> {
+  const row = (await getDb()).prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
   return row ? rowToUser(row) : null;
 }
 
@@ -91,8 +91,8 @@ export function findUserById(id: string): User | null {
  * Look up a user by an `(kind, externalId)` pair via `user_external_ids`.
  * Returns null if no mapping exists. Use this for webhook auto-link paths.
  */
-export function findUserByExternalId(kind: string, externalId: string): User | null {
-  const row = getDb()
+export async function findUserByExternalId(kind: string, externalId: string): Promise<User | null> {
+  const row = (await getDb())
     .prepare<UserRow, [string, string]>(
       `SELECT u.* FROM users u
        INNER JOIN user_external_ids x ON x.userId = u.id
@@ -110,9 +110,9 @@ export function findUserByExternalId(kind: string, externalId: string): User | n
  * `emailAliases != '[]'` in the alias branch so the rare row with NULL
  * aliases doesn't blow up the JOIN.
  */
-export function findUserByEmail(email: string): User | null {
+export async function findUserByEmail(email: string): Promise<User | null> {
   const lower = email.toLowerCase();
-  const db = getDb();
+  const db = await getDb();
 
   // Primary email (case-insensitive)
   const primary = db
@@ -139,8 +139,10 @@ export function findUserByEmail(email: string): User | null {
  * Return all `(kind, externalId)` mappings for a user — used by the People
  * page detail view to render identity badges in one request.
  */
-export function getUserIdentities(userId: string): Array<{ kind: string; externalId: string }> {
-  return getDb()
+export async function getUserIdentities(
+  userId: string,
+): Promise<Array<{ kind: string; externalId: string }>> {
+  return (await getDb())
     .prepare<{ kind: string; externalId: string }, string>(
       "SELECT kind, externalId FROM user_external_ids WHERE userId = ? ORDER BY kind, externalId",
     )
@@ -189,13 +191,13 @@ function rowToEvent(row: IdentityEventRow): IdentityEvent {
  * is a cursor on `createdAt` (ISO string) so the caller can keep paging by
  * passing back the last event's `createdAt`.
  */
-export function listUserEvents(
+export async function listUserEvents(
   userId: string,
   opts: { limit?: number; before?: string } = {},
-): IdentityEvent[] {
+): Promise<IdentityEvent[]> {
   const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
   const before = opts.before;
-  const db = getDb();
+  const db = await getDb();
   if (before) {
     return db
       .prepare<IdentityEventRow, [string, string, number]>(
@@ -242,8 +244,8 @@ type UserTokenRow = UserTokenSummary;
  * MCP-token plan, this helper lands here so step-8's `GET /users` response
  * can include token summaries.
  */
-export function listUserTokens(userId: string): UserTokenSummary[] {
-  return getDb()
+export async function listUserTokens(userId: string): Promise<UserTokenSummary[]> {
+  return (await getDb())
     .prepare<UserTokenRow, string>(
       `SELECT id, userId, label, tokenPreview, createdAt, lastUsedAt, revokedAt
          FROM user_tokens
@@ -263,7 +265,7 @@ export function listUserTokens(userId: string): UserTokenSummary[] {
  * `budget_changed` / `status_changed` directly (the mutating helpers below
  * already emit their own events in-transaction).
  */
-export function recordIdentityEvent(
+export async function recordIdentityEvent(
   userId: string,
   eventType:
     | "auto_merge"
@@ -280,8 +282,8 @@ export function recordIdentityEvent(
   actor: IdentityActor,
   before: unknown | null,
   after: unknown | null,
-): void {
-  getDb()
+): Promise<void> {
+  (await getDb())
     .prepare(
       `INSERT INTO user_identity_events (id, userId, eventType, actor, beforeJson, afterJson, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -311,23 +313,23 @@ export function recordIdentityEvent(
  *
  * Wrapped in `db.transaction()` so create + event land together.
  */
-export function findOrCreateUserByEmail(
+export async function findOrCreateUserByEmail(
   email: string,
   hints: { name?: string; role?: string; notes?: string; preferredChannel?: string },
   actor: IdentityActor,
-): { user: User; created: boolean } {
-  const existing = findUserByEmail(email);
+): Promise<{ user: User; created: boolean }> {
+  const existing = await findUserByEmail(email);
   if (existing) {
-    recordIdentityEvent(existing.id, "auto_merge", actor, null, { email, hints });
+    await recordIdentityEvent(existing.id, "auto_merge", actor, null, { email, hints });
     return { user: existing, created: false };
   }
 
   const id = randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
   const name = hints.name?.trim() || email.split("@")[0] || email;
-  const db = getDb();
+  const db = await getDb();
 
-  const created = db.transaction(() => {
+  const created = await runDbTransaction(async () => {
     db.prepare(
       `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, createdAt, lastUpdatedAt, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
@@ -345,9 +347,9 @@ export function findOrCreateUserByEmail(
     );
     const row = db.prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
     if (!row) throw new Error("Failed to create user");
-    recordIdentityEvent(id, "identity_added", actor, null, { email, name });
+    await recordIdentityEvent(id, "identity_added", actor, null, { email, name });
     return rowToUser(row);
-  })();
+  });
 
   return { user: created, created: true };
 }
@@ -363,21 +365,21 @@ export function findOrCreateUserByEmail(
  *
  * Atomic: INSERT + event in one transaction.
  */
-export function linkIdentity(
+export async function linkIdentity(
   userId: string,
   kind: string,
   externalId: string,
   actor: IdentityActor,
-): void {
-  const db = getDb();
-  db.transaction(() => {
+): Promise<void> {
+  const db = await getDb();
+  await runDbTransaction(async () => {
     db.prepare("INSERT INTO user_external_ids (userId, kind, externalId) VALUES (?, ?, ?)").run(
       userId,
       kind,
       externalId,
     );
-    recordIdentityEvent(userId, "identity_added", actor, null, { kind, externalId });
-  })();
+    await recordIdentityEvent(userId, "identity_added", actor, null, { kind, externalId });
+  });
 }
 
 /**
@@ -385,19 +387,19 @@ export function linkIdentity(
  * still emit the event with the same before/after for the audit trail.
  * Atomic: DELETE + event in one transaction.
  */
-export function unlinkIdentity(
+export async function unlinkIdentity(
   userId: string,
   kind: string,
   externalId: string,
   actor: IdentityActor,
-): void {
-  const db = getDb();
-  db.transaction(() => {
+): Promise<void> {
+  const db = await getDb();
+  await runDbTransaction(async () => {
     db.prepare(
       "DELETE FROM user_external_ids WHERE userId = ? AND kind = ? AND externalId = ?",
     ).run(userId, kind, externalId);
-    recordIdentityEvent(userId, "identity_removed", actor, { kind, externalId }, null);
-  })();
+    await recordIdentityEvent(userId, "identity_removed", actor, { kind, externalId }, null);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -428,11 +430,11 @@ function sha256Hex(input: string): string {
  *
  * Token shape: `aswt_` + 24 base62 chars = >140 bits of entropy.
  */
-export function mintToken(
+export async function mintToken(
   userId: string,
   label: string | null,
   actor: IdentityActor,
-): { tokenId: string; plaintext: string } {
+): Promise<{ tokenId: string; plaintext: string }> {
   // 24 base62 chars from 24 random bytes (~143 bits of entropy).
   const plaintext = `${TOKEN_PREFIX}${base62(randomBytes(24))}`;
   const tokenId = randomUUID().replace(/-/g, "");
@@ -440,14 +442,14 @@ export function mintToken(
   const preview = plaintext.slice(-4);
   const now = new Date().toISOString();
 
-  const db = getDb();
-  db.transaction(() => {
+  const db = await getDb();
+  await runDbTransaction(async () => {
     db.prepare(
       `INSERT INTO user_tokens (id, userId, label, tokenHash, tokenPreview, createdAt)
        VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(tokenId, userId, label, hash, preview, now);
-    recordIdentityEvent(userId, "token_minted", actor, null, { tokenId, label, preview });
-  })();
+    await recordIdentityEvent(userId, "token_minted", actor, null, { tokenId, label, preview });
+  });
 
   return { tokenId, plaintext };
 }
@@ -456,9 +458,9 @@ export function mintToken(
  * Revoke a previously-minted token. Sets `revokedAt = now` and emits
  * `token_revoked`. Subsequent `resolveUserByToken(plaintext)` returns null.
  */
-export function revokeToken(tokenId: string, actor: IdentityActor): void {
-  const db = getDb();
-  db.transaction(() => {
+export async function revokeToken(tokenId: string, actor: IdentityActor): Promise<void> {
+  const db = await getDb();
+  await runDbTransaction(async () => {
     const row = db
       .prepare<{ userId: string; label: string | null; tokenPreview: string }, string>(
         "SELECT userId, label, tokenPreview FROM user_tokens WHERE id = ?",
@@ -471,14 +473,14 @@ export function revokeToken(tokenId: string, actor: IdentityActor): void {
       new Date().toISOString(),
       tokenId,
     );
-    recordIdentityEvent(
+    await recordIdentityEvent(
       row.userId,
       "token_revoked",
       actor,
       { tokenId, label: row.label, preview: row.tokenPreview },
       null,
     );
-  })();
+  });
 }
 
 /**
@@ -487,9 +489,9 @@ export function revokeToken(tokenId: string, actor: IdentityActor): void {
  * `lastUsedAt` update so the People page can surface "last seen" without
  * blocking the request path.
  */
-export function resolveUserByToken(plaintext: string): User | null {
+export async function resolveUserByToken(plaintext: string): Promise<User | null> {
   const hash = sha256Hex(plaintext);
-  const db = getDb();
+  const db = await getDb();
 
   const row = db
     .prepare<{ id: string; userId: string; revokedAt: string | null }, string>(
@@ -510,7 +512,7 @@ export function resolveUserByToken(plaintext: string): User | null {
     // Never let a `lastUsedAt` update failure leak to the caller.
   }
 
-  return findUserById(row.userId);
+  return await findUserById(row.userId);
 }
 
 // ---------------------------------------------------------------------------

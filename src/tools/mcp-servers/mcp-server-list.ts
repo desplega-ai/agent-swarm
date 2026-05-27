@@ -32,8 +32,8 @@ export const registerMcpServerListTool = (server: McpServer) => {
       try {
         const servers =
           args.installedOnly && requestInfo.agentId
-            ? getAgentMcpServers(requestInfo.agentId)
-            : listMcpServers({
+            ? await getAgentMcpServers(requestInfo.agentId)
+            : await listMcpServers({
                 scope: args.scope,
                 transport: args.transport,
                 search: args.search,

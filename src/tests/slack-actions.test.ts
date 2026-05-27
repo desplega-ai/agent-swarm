@@ -16,10 +16,10 @@ const TEST_DB_PATH = "./test-slack-actions.sqlite";
 let leadAgent: ReturnType<typeof createAgent>;
 let slackTask: ReturnType<typeof createTaskExtended>;
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
-  leadAgent = createAgent({ name: "ActionLead", isLead: true, status: "idle" });
-  slackTask = createTaskExtended("original task for actions test", {
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
+  leadAgent = await createAgent({ name: "ActionLead", isLead: true, status: "idle" });
+  slackTask = await createTaskExtended("original task for actions test", {
     agentId: leadAgent.id,
     source: "slack",
     slackChannelId: "C_ACTIONS",
@@ -40,22 +40,22 @@ afterAll(() => {
 });
 
 describe("follow_up_task action logic", () => {
-  test("getTaskById retrieves the original task", () => {
-    const task = getTaskById(slackTask.id);
+  test("getTaskById retrieves the original task", async () => {
+    const task = await getTaskById(slackTask.id);
     expect(task).toBeDefined();
     expect(task!.task).toBe("original task for actions test");
     expect(task!.slackChannelId).toBe("C_ACTIONS");
   });
 
-  test("getLeadAgent returns the lead", () => {
-    const lead = getLeadAgent();
+  test("getLeadAgent returns the lead", async () => {
+    const lead = await getLeadAgent();
     expect(lead).toBeDefined();
     expect(lead!.name).toBe("ActionLead");
   });
 
-  test("creates follow-up task with parentTaskId and custom description", () => {
-    const lead = getLeadAgent()!;
-    const followUpTask = createTaskExtended("Please also check the logs", {
+  test("creates follow-up task with parentTaskId and custom description", async () => {
+    const lead = await getLeadAgent()!;
+    const followUpTask = await createTaskExtended("Please also check the logs", {
       agentId: lead.id,
       source: "slack",
       parentTaskId: slackTask.id,
@@ -68,7 +68,7 @@ describe("follow_up_task action logic", () => {
     expect(followUpTask.task).toBe("Please also check the logs");
     expect(followUpTask.parentTaskId).toBe(slackTask.id);
 
-    const fetched = getTaskById(followUpTask.id);
+    const fetched = await getTaskById(followUpTask.id);
     expect(fetched).toBeDefined();
     expect(fetched!.parentTaskId).toBe(slackTask.id);
     expect(fetched!.slackChannelId).toBe("C_ACTIONS");
@@ -82,9 +82,9 @@ describe("follow_up_task action logic", () => {
 });
 
 describe("cancel_task action logic", () => {
-  test("cancelTask returns task object for a pending task", () => {
-    const agent = createAgent({ name: "CancelAgent", isLead: false, status: "idle" });
-    const task = createTaskExtended("task to cancel", {
+  test("cancelTask returns task object for a pending task", async () => {
+    const agent = await createAgent({ name: "CancelAgent", isLead: false, status: "idle" });
+    const task = await createTaskExtended("task to cancel", {
       agentId: agent.id,
       source: "slack",
       slackChannelId: "C_CANCEL",
@@ -92,18 +92,18 @@ describe("cancel_task action logic", () => {
       slackUserId: "U_CANCEL",
     });
 
-    const result = cancelTask(task.id, "Cancelled via Slack");
+    const result = await cancelTask(task.id, "Cancelled via Slack");
     expect(result).toBeTruthy();
 
     // Verify task is now cancelled
-    const fetched = getTaskById(task.id);
+    const fetched = await getTaskById(task.id);
     expect(fetched).toBeDefined();
     expect(fetched!.status).toBe("cancelled");
   });
 
-  test("cancelTask returns null for already-cancelled task", () => {
-    const agent = createAgent({ name: "CompletedAgent", isLead: false, status: "idle" });
-    const task = createTaskExtended("task to double-cancel", {
+  test("cancelTask returns null for already-cancelled task", async () => {
+    const agent = await createAgent({ name: "CompletedAgent", isLead: false, status: "idle" });
+    const task = await createTaskExtended("task to double-cancel", {
       agentId: agent.id,
       source: "slack",
       slackChannelId: "C_DONE",
@@ -112,11 +112,11 @@ describe("cancel_task action logic", () => {
     });
 
     // First cancel succeeds
-    const first = cancelTask(task.id, "First cancel");
+    const first = await cancelTask(task.id, "First cancel");
     expect(first).toBeTruthy();
 
     // Second cancel returns null — already in terminal state
-    const second = cancelTask(task.id, "Second cancel");
+    const second = await cancelTask(task.id, "Second cancel");
     expect(second).toBeNull();
   });
 

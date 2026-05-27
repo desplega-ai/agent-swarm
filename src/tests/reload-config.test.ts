@@ -15,10 +15,10 @@ import {
 const TEST_DB_PATH = "./test-reload-config.sqlite";
 const TEST_PORT = 13023;
 
-function insertLegacyReservedRow(key: string, value = "legacy"): string {
+async function insertLegacyReservedRow(key: string, value = "legacy"): Promise<string> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  getDb().run(
+  (await getDb()).run(
     `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt)
      VALUES (?, ?, NULL, ?, ?, 0, NULL, NULL, ?, ?)`,
     [id, "global", key, value, now, now],
@@ -26,10 +26,10 @@ function insertLegacyReservedRow(key: string, value = "legacy"): string {
   return id;
 }
 
-function insertUnreadableReservedSecretRow(key: string): string {
+async function insertUnreadableReservedSecretRow(key: string): Promise<string> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  getDb().run(
+  (await getDb()).run(
     `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
      VALUES (?, ?, NULL, ?, ?, 1, NULL, NULL, ?, ?, 1)`,
     [id, "global", key, "definitely-not-valid-ciphertext", now, now],
@@ -42,7 +42,7 @@ function createTestServer(): Server {
   return createHttpServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/internal/reload-config") {
       try {
-        const updated = loadGlobalConfigsIntoEnv(true);
+        const updated = await loadGlobalConfigsIntoEnv(true);
 
         const integrations: string[] = [];
 
@@ -82,7 +82,7 @@ describe("reload-config", () => {
   const envKeysToClean: string[] = [];
 
   beforeAll(async () => {
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     server = createTestServer();
     await new Promise<void>((resolve) => {
@@ -109,75 +109,75 @@ describe("reload-config", () => {
     expect(body.keysUpdated).toEqual([]);
   });
 
-  test("loadGlobalConfigsIntoEnv loads DB configs into process.env", () => {
+  test("loadGlobalConfigsIntoEnv loads DB configs into process.env", async () => {
     const testKey = `__TEST_RELOAD_KEY_${Date.now()}`;
     envKeysToClean.push(testKey);
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "test-value-123",
     });
 
-    const updated = loadGlobalConfigsIntoEnv(false);
+    const updated = await loadGlobalConfigsIntoEnv(false);
     expect(updated).toContain(testKey);
     expect(process.env[testKey]).toBe("test-value-123");
   });
 
-  test("loadGlobalConfigsIntoEnv does not override existing env vars when override=false", () => {
+  test("loadGlobalConfigsIntoEnv does not override existing env vars when override=false", async () => {
     const testKey = `__TEST_NO_OVERRIDE_${Date.now()}`;
     envKeysToClean.push(testKey);
 
     process.env[testKey] = "original-value";
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "db-value",
     });
 
-    const updated = loadGlobalConfigsIntoEnv(false);
+    const updated = await loadGlobalConfigsIntoEnv(false);
     expect(updated).not.toContain(testKey);
     expect(process.env[testKey]).toBe("original-value");
   });
 
-  test("loadGlobalConfigsIntoEnv overrides existing env vars when override=true", () => {
+  test("loadGlobalConfigsIntoEnv overrides existing env vars when override=true", async () => {
     const testKey = `__TEST_OVERRIDE_${Date.now()}`;
     envKeysToClean.push(testKey);
 
     process.env[testKey] = "original-value";
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "new-db-value",
     });
 
-    const updated = loadGlobalConfigsIntoEnv(true);
+    const updated = await loadGlobalConfigsIntoEnv(true);
     expect(updated).toContain(testKey);
     expect(process.env[testKey]).toBe("new-db-value");
   });
 
-  test("loadGlobalConfigsIntoEnv skips legacy reserved keys instead of injecting them", () => {
-    insertLegacyReservedRow("API_KEY", "legacy-api-key");
+  test("loadGlobalConfigsIntoEnv skips legacy reserved keys instead of injecting them", async () => {
+    await insertLegacyReservedRow("API_KEY", "legacy-api-key");
 
     delete process.env.API_KEY;
-    const updated = loadGlobalConfigsIntoEnv(true);
+    const updated = await loadGlobalConfigsIntoEnv(true);
 
     expect(updated).not.toContain("API_KEY");
     expect(process.env.API_KEY).toBeUndefined();
   });
 
-  test("loadGlobalConfigsIntoEnv skips unreadable reserved secret rows before decrypting them", () => {
-    const id = insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
+  test("loadGlobalConfigsIntoEnv skips unreadable reserved secret rows before decrypting them", async () => {
+    const id = await insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
 
     try {
       delete process.env.SECRETS_ENCRYPTION_KEY;
-      const updated = loadGlobalConfigsIntoEnv(true);
+      const updated = await loadGlobalConfigsIntoEnv(true);
       expect(updated).not.toContain("SECRETS_ENCRYPTION_KEY");
       expect(process.env.SECRETS_ENCRYPTION_KEY).toBeUndefined();
     } finally {
-      getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
+      (await getDb()).run("DELETE FROM swarm_config WHERE id = ?", [id]);
     }
   });
 
@@ -185,7 +185,7 @@ describe("reload-config", () => {
     const testKey = `__TEST_RELOAD_ENDPOINT_${Date.now()}`;
     envKeysToClean.push(testKey);
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "endpoint-test-value",
@@ -239,7 +239,7 @@ describe("auto-reload debouncer", () => {
 
   test("scheduleIntegrationsReload runs reload after the debounce window", async () => {
     const testKey = `__TEST_AUTO_RELOAD_RUNS_${Date.now()}`;
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "fresh" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "fresh" });
     delete process.env[testKey];
 
     scheduleIntegrationsReload(50);
@@ -255,7 +255,7 @@ describe("auto-reload debouncer", () => {
 
   test("rapid scheduleIntegrationsReload calls coalesce into one reload", async () => {
     const testKey = `__TEST_COALESCE_${Date.now()}`;
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "v1" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "v1" });
 
     scheduleIntegrationsReload(100);
     scheduleIntegrationsReload(100);
@@ -273,7 +273,7 @@ describe("auto-reload debouncer", () => {
 
   test("schedule during in-flight reload triggers exactly one rerun", async () => {
     const testKey = `__TEST_RERUN_${Date.now()}`;
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "first" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "first" });
 
     scheduleIntegrationsReload(20);
     // Wait just past the debounce so the first reload is in-flight, then
@@ -302,7 +302,7 @@ describe("auto-reload debouncer", () => {
     delete process.env[testKey];
 
     // Simulate the upsert path's behavior: write the row, then schedule.
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "live-update" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "live-update" });
     scheduleIntegrationsReload(20);
 
     await flushPendingIntegrationsReload();
@@ -316,7 +316,7 @@ describe("auto-reload debouncer", () => {
     process.env[testKey] = "shipped-by-deploy";
 
     // Pre-existing env should win at startup, but reload uses override=true.
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "from-config" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "from-config" });
     scheduleIntegrationsReload(20);
 
     await flushPendingIntegrationsReload();
@@ -329,12 +329,16 @@ describe("auto-reload debouncer", () => {
     const testKey = `__TEST_DELETE_${Date.now()}`;
     delete process.env[testKey];
 
-    const config = upsertSwarmConfig({ scope: "global", key: testKey, value: "to-be-deleted" });
+    const config = await upsertSwarmConfig({
+      scope: "global",
+      key: testKey,
+      value: "to-be-deleted",
+    });
     scheduleIntegrationsReload(20);
     await flushPendingIntegrationsReload();
     expect(process.env[testKey]).toBe("to-be-deleted");
 
-    deleteSwarmConfig(config.id);
+    await deleteSwarmConfig(config.id);
     // Mimic the delete handler in src/http/config.ts.
     scheduleIntegrationsReload(20);
     await flushPendingIntegrationsReload();

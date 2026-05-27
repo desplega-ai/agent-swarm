@@ -42,7 +42,7 @@ describe("GET /api/pages/actions — JSON-page action allowlist", () => {
 
   beforeAll(async () => {
     process.env.DB_PATH = TEST_DB_PATH;
-    initDb();
+    await initDb();
     server = createTestServer();
     await new Promise<void>((r) => server.listen(TEST_PORT, r));
   });

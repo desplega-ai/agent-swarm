@@ -64,7 +64,7 @@ describe("GET /p/:id — password mode (step-5)", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
     server = createTestServer();
     await new Promise<void>((resolve) => server.listen(TEST_PORT, () => resolve()));
   });
@@ -103,7 +103,7 @@ describe("GET /p/:id — password mode (step-5)", () => {
 
   test("password is hashed in the DB row (passwordHash != plaintext)", async () => {
     const id = await createPasswordPage("hashed", "swordfish");
-    const row = getPage(id);
+    const row = await getPage(id);
     expect(row).toBeTruthy();
     // passwordHash field is private; should be bcrypt and clearly not the plaintext.
     expect(row!.passwordHash).toBeTruthy();

@@ -24,8 +24,8 @@ beforeAll(async () => {
   try {
     await unlink(TEST_DB_PATH);
   } catch {}
-  initDb(TEST_DB_PATH);
-  testAgent = createAgent({ name: "Events Test Agent", isLead: false, status: "idle" });
+  await initDb(TEST_DB_PATH);
+  testAgent = await createAgent({ name: "Events Test Agent", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {
@@ -38,8 +38,8 @@ afterAll(async () => {
 });
 
 describe("createEvent", () => {
-  test("creates a single event with required fields", () => {
-    const evt = createEvent({
+  test("creates a single event with required fields", async () => {
+    const evt = await createEvent({
       category: "tool",
       event: "tool.start",
       source: "worker",
@@ -52,8 +52,8 @@ describe("createEvent", () => {
     expect(evt.createdAt).toBeDefined();
   });
 
-  test("creates event with all optional fields", () => {
-    const evt = createEvent({
+  test("creates event with all optional fields", async () => {
+    const evt = await createEvent({
       category: "tool",
       event: "tool.start",
       source: "worker",
@@ -76,27 +76,27 @@ describe("createEvent", () => {
     expect(evt.data).toEqual({ toolName: "Read", filePath: "/tmp/test.txt" });
   });
 
-  test("defaults status to ok", () => {
-    const evt = createEvent({ category: "system", event: "system.boot", source: "api" });
+  test("defaults status to ok", async () => {
+    const evt = await createEvent({ category: "system", event: "system.boot", source: "api" });
     expect(evt.status).toBe("ok");
   });
 });
 
 describe("createEventsBatch", () => {
-  test("inserts multiple events in a transaction", () => {
-    const before = getAllEvents(1000).length;
-    const count = createEventsBatch([
+  test("inserts multiple events in a transaction", async () => {
+    const before = (await getAllEvents(1000)).length;
+    const count = await createEventsBatch([
       { category: "tool", event: "tool.start", source: "worker", agentId: testAgent.id },
       { category: "tool", event: "tool.end", source: "worker", agentId: testAgent.id },
       { category: "skill", event: "skill.invoke", source: "worker", agentId: testAgent.id },
     ]);
     expect(count).toBe(3);
-    const after = getAllEvents(1000).length;
+    const after = (await getAllEvents(1000)).length;
     expect(after - before).toBe(3);
   });
 
-  test("returns 0 for empty batch", () => {
-    const count = createEventsBatch([]);
+  test("returns 0 for empty batch", async () => {
+    const count = await createEventsBatch([]);
     expect(count).toBe(0);
   });
 });
@@ -105,9 +105,9 @@ describe("query functions", () => {
   const sessionId = `query-test-session-${Date.now()}`;
   const taskId = `query-test-task-${Date.now()}`;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Seed events for query tests
-    createEventsBatch([
+    await createEventsBatch([
       {
         category: "tool",
         event: "tool.start",
@@ -152,79 +152,79 @@ describe("query functions", () => {
     ]);
   });
 
-  test("getEventsByCategory filters by category", () => {
-    const tools = getEventsByCategory("tool");
+  test("getEventsByCategory filters by category", async () => {
+    const tools = await getEventsByCategory("tool");
     expect(tools.length).toBeGreaterThanOrEqual(2);
     for (const evt of tools) {
       expect(evt.category).toBe("tool");
     }
   });
 
-  test("getEventsByEvent filters by event name", () => {
-    const starts = getEventsByEvent("tool.start");
+  test("getEventsByEvent filters by event name", async () => {
+    const starts = await getEventsByEvent("tool.start");
     expect(starts.length).toBeGreaterThanOrEqual(2);
     for (const evt of starts) {
       expect(evt.event).toBe("tool.start");
     }
   });
 
-  test("getEventsByAgentId filters by agentId", () => {
-    const agentEvents = getEventsByAgentId(testAgent.id);
+  test("getEventsByAgentId filters by agentId", async () => {
+    const agentEvents = await getEventsByAgentId(testAgent.id);
     expect(agentEvents.length).toBeGreaterThanOrEqual(4);
     for (const evt of agentEvents) {
       expect(evt.agentId).toBe(testAgent.id);
     }
   });
 
-  test("getEventsByTaskId filters by taskId", () => {
-    const taskEvents = getEventsByTaskId(taskId);
+  test("getEventsByTaskId filters by taskId", async () => {
+    const taskEvents = await getEventsByTaskId(taskId);
     expect(taskEvents.length).toBeGreaterThanOrEqual(4);
     for (const evt of taskEvents) {
       expect(evt.taskId).toBe(taskId);
     }
   });
 
-  test("getEventsBySessionId filters by sessionId", () => {
-    const sessionEvents = getEventsBySessionId(sessionId);
+  test("getEventsBySessionId filters by sessionId", async () => {
+    const sessionEvents = await getEventsBySessionId(sessionId);
     expect(sessionEvents.length).toBeGreaterThanOrEqual(4);
     for (const evt of sessionEvents) {
       expect(evt.sessionId).toBe(sessionId);
     }
   });
 
-  test("getAllEvents respects limit", () => {
-    const events = getAllEvents(2);
+  test("getAllEvents respects limit", async () => {
+    const events = await getAllEvents(2);
     expect(events.length).toBe(2);
   });
 
-  test("getAllEvents returns descending createdAt order", () => {
-    const events = getAllEvents(10);
+  test("getAllEvents returns descending createdAt order", async () => {
+    const events = await getAllEvents(10);
     for (let i = 1; i < events.length; i++) {
       expect(events[i - 1].createdAt >= events[i].createdAt).toBe(true);
     }
   });
 
-  test("getEventCounts groups by event name", () => {
-    const counts = getEventCounts();
+  test("getEventCounts groups by event name", async () => {
+    const counts = await getEventCounts();
     expect(counts.length).toBeGreaterThanOrEqual(1);
     const toolStart = counts.find((c) => c.event === "tool.start");
     expect(toolStart).toBeDefined();
     expect(toolStart!.count).toBeGreaterThanOrEqual(2);
   });
 
-  test("getEventCountsForAgent scopes to agent", () => {
-    const counts = getEventCountsForAgent(testAgent.id);
+  test("getEventCountsForAgent scopes to agent", async () => {
+    const counts = await getEventCountsForAgent(testAgent.id);
     expect(counts.length).toBeGreaterThanOrEqual(1);
     // All counted events should belong to this agent
     const total = counts.reduce((sum, c) => sum + c.count, 0);
-    const agentEvents = getEventsByAgentId(testAgent.id);
+    const agentEvents = await getEventsByAgentId(testAgent.id);
     expect(total).toBe(agentEvents.length);
   });
 });
 
 describe("getEventsFiltered", () => {
-  test("filters by multiple criteria", () => {
-    const events = getEventsFiltered({
+  test("filters by multiple criteria", async () => {
+    const events = await getEventsFiltered({
       category: "tool",
       source: "worker",
       agentId: testAgent.id,
@@ -238,74 +238,74 @@ describe("getEventsFiltered", () => {
     expect(events.length).toBeLessThanOrEqual(5);
   });
 
-  test("filters by status", () => {
-    createEvent({
+  test("filters by status", async () => {
+    await createEvent({
       category: "api",
       event: "api.error",
       source: "api",
       status: "error",
       data: { message: "timeout" },
     });
-    const errors = getEventsFiltered({ status: "error" });
+    const errors = await getEventsFiltered({ status: "error" });
     expect(errors.length).toBeGreaterThanOrEqual(1);
     for (const evt of errors) {
       expect(evt.status).toBe("error");
     }
   });
 
-  test("defaults limit to 100", () => {
-    const events = getEventsFiltered({});
+  test("defaults limit to 100", async () => {
+    const events = await getEventsFiltered({});
     expect(events.length).toBeLessThanOrEqual(100);
   });
 });
 
 describe("getEventCountsFiltered", () => {
-  test("filters counts by category", () => {
-    const counts = getEventCountsFiltered({ category: "tool" });
+  test("filters counts by category", async () => {
+    const counts = await getEventCountsFiltered({ category: "tool" });
     for (const c of counts) {
       // Each counted event name should be a tool event
       expect(c.event.startsWith("tool.")).toBe(true);
     }
   });
 
-  test("filters counts by source", () => {
-    const counts = getEventCountsFiltered({ source: "api" });
+  test("filters counts by source", async () => {
+    const counts = await getEventCountsFiltered({ source: "api" });
     expect(counts.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("returns empty for non-matching filters", () => {
-    const counts = getEventCountsFiltered({ agentId: "nonexistent-agent-id" });
+  test("returns empty for non-matching filters", async () => {
+    const counts = await getEventCountsFiltered({ agentId: "nonexistent-agent-id" });
     expect(counts.length).toBe(0);
   });
 });
 
 describe("data JSON round-trip", () => {
-  test("preserves nested objects in data field", () => {
+  test("preserves nested objects in data field", async () => {
     const data = {
       toolName: "Read",
       nested: { deep: { value: 42 } },
       array: [1, "two", { three: true }],
     };
-    const evt = createEvent({
+    const evt = await createEvent({
       category: "tool",
       event: "tool.start",
       source: "worker",
       data,
     });
     // Re-fetch from DB to verify round-trip
-    const fetched = getEventsFiltered({ limit: 1 });
+    const fetched = await getEventsFiltered({ limit: 1 });
     const found = fetched.find((e) => e.id === evt.id);
     expect(found).toBeDefined();
     expect(found!.data).toEqual(data);
   });
 
-  test("handles null data gracefully", () => {
-    const evt = createEvent({
+  test("handles null data gracefully", async () => {
+    const evt = await createEvent({
       category: "system",
       event: "system.boot",
       source: "api",
     });
-    const fetched = getEventsFiltered({ limit: 1000 });
+    const fetched = await getEventsFiltered({ limit: 1000 });
     const found = fetched.find((e) => e.id === evt.id);
     expect(found).toBeDefined();
     expect(found!.data).toBeUndefined();

@@ -43,8 +43,8 @@ export interface KapsoConfig {
  * Read a swarm-config value (global scope) by key, falling back to the process
  * env. Decryption happens inside `getSwarmConfigs`.
  */
-function readConfigValue(key: string): string | undefined {
-  const found = getSwarmConfigs({ scope: "global", key }).find(
+async function readConfigValue(key: string): Promise<string | undefined> {
+  const found = (await getSwarmConfigs({ scope: "global", key })).find(
     (c) => typeof c.value === "string" && c.value.length > 0,
   );
   if (found) return found.value;
@@ -53,25 +53,29 @@ function readConfigValue(key: string): string | undefined {
 }
 
 /** Resolve the Kapso integration config from swarm config (env fallback). */
-export function getKapsoConfig(): KapsoConfig {
-  const base = readConfigValue("KAPSO_API_BASE_URL") ?? DEFAULT_KAPSO_API_BASE_URL;
+export async function getKapsoConfig(): Promise<KapsoConfig> {
+  const base = (await readConfigValue("KAPSO_API_BASE_URL")) ?? DEFAULT_KAPSO_API_BASE_URL;
   return {
-    apiKey: readConfigValue("KAPSO_API_KEY"),
+    apiKey: await readConfigValue("KAPSO_API_KEY"),
     apiBaseUrl: base.replace(/\/+$/, ""),
-    webhookHmacSecret: readConfigValue("KAPSO_WEBHOOK_HMAC_SECRET"),
-    phoneNumberId: readConfigValue("KAPSO_PHONE_NUMBER_ID"),
+    webhookHmacSecret: await readConfigValue("KAPSO_WEBHOOK_HMAC_SECRET"),
+    phoneNumberId: await readConfigValue("KAPSO_PHONE_NUMBER_ID"),
   };
 }
 
 /** Look up the routing mapping for a phone-number-id, or null if unregistered. */
-export function getKapsoNumberMapping(phoneNumberId: string): KapsoNumberMapping | null {
-  const row = getKv(KAPSO_NUMBERS_NAMESPACE, phoneNumberId);
+export async function getKapsoNumberMapping(
+  phoneNumberId: string,
+): Promise<KapsoNumberMapping | null> {
+  const row = await getKv(KAPSO_NUMBERS_NAMESPACE, phoneNumberId);
   return row ? (row.value as KapsoNumberMapping) : null;
 }
 
 /** Upsert a routing mapping (no TTL). */
-export function putKapsoNumberMapping(mapping: KapsoNumberMapping): KapsoNumberMapping {
-  upsertKv({
+export async function putKapsoNumberMapping(
+  mapping: KapsoNumberMapping,
+): Promise<KapsoNumberMapping> {
+  await upsertKv({
     namespace: KAPSO_NUMBERS_NAMESPACE,
     key: mapping.phoneNumberId,
     value: mapping,
@@ -82,8 +86,8 @@ export function putKapsoNumberMapping(mapping: KapsoNumberMapping): KapsoNumberM
 }
 
 /** Delete a routing mapping. Returns true if a row was removed. */
-export function deleteKapsoNumberMapping(phoneNumberId: string): boolean {
-  return deleteKv(KAPSO_NUMBERS_NAMESPACE, phoneNumberId);
+export async function deleteKapsoNumberMapping(phoneNumberId: string): Promise<boolean> {
+  return await deleteKv(KAPSO_NUMBERS_NAMESPACE, phoneNumberId);
 }
 
 /**
@@ -91,9 +95,9 @@ export function deleteKapsoNumberMapping(phoneNumberId: string): boolean {
  * seen and false on every subsequent delivery within the TTL window — so the
  * caller drops duplicates (Kapso retries deliveries).
  */
-export function markKapsoMessageSeen(messageId: string): boolean {
-  if (getKv(KAPSO_DEDUPE_NAMESPACE, messageId)) return false;
-  upsertKv({
+export async function markKapsoMessageSeen(messageId: string): Promise<boolean> {
+  if (await getKv(KAPSO_DEDUPE_NAMESPACE, messageId)) return false;
+  await upsertKv({
     namespace: KAPSO_DEDUPE_NAMESPACE,
     key: messageId,
     value: 1,

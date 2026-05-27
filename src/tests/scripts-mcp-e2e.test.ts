@@ -146,12 +146,12 @@ beforeAll(async () => {
   savedEnv = { ...process.env };
   savedFetch = globalThis.fetch;
   await removeDbFiles(TEST_DB_PATH);
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(fakeEmbeddingProvider);
-  workerId = createAgent({ name: "scripts-mcp-worker", isLead: false, status: "idle" }).id;
+  workerId = (await createAgent({ name: "scripts-mcp-worker", isLead: false, status: "idle" })).id;
   process.env.MCP_BASE_URL = "http://scripts-mcp-e2e.test";
   globalThis.fetch = (async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -177,8 +177,8 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM scripts");
+beforeEach(async () => {
+  (await getDb()).run("DELETE FROM scripts");
 });
 
 describe("script_ MCP HTTP proxy tools", () => {

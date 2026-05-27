@@ -14,8 +14,8 @@ export type SeedStateRow = {
 };
 
 /** The last hash this framework seeded for `(kind, key)`, or null if never seeded. */
-export function getSeedState(kind: string, key: string): SeedStateRow | null {
-  const row = getDb()
+export async function getSeedState(kind: string, key: string): Promise<SeedStateRow | null> {
+  const row = (await getDb())
     .prepare<SeedStateRow, [string, string]>(
       "SELECT kind, key, seededHash, seededAt FROM seed_state WHERE kind = ? AND key = ?",
     )
@@ -24,8 +24,12 @@ export function getSeedState(kind: string, key: string): SeedStateRow | null {
 }
 
 /** Record (or refresh) the hash this framework just seeded for `(kind, key)`. */
-export function recordSeedState(kind: string, key: string, seededHash: string): void {
-  getDb().run(
+export async function recordSeedState(
+  kind: string,
+  key: string,
+  seededHash: string,
+): Promise<void> {
+  (await getDb()).run(
     `INSERT INTO seed_state (kind, key, seededHash, seededAt)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(kind, key) DO UPDATE SET

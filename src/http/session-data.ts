@@ -158,7 +158,7 @@ export async function handleSessionData(
     if (!parsed) return true;
 
     try {
-      createSessionLogs({
+      await createSessionLogs({
         taskId: parsed.body.taskId || undefined,
         sessionId: parsed.body.sessionId,
         iteration: parsed.body.iteration,
@@ -176,12 +176,12 @@ export async function handleSessionData(
   if (getSessionLogsByTask.match(req.method, pathSegments)) {
     const parsed = await getSessionLogsByTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.taskId);
+    const task = await getTaskById(parsed.params.taskId);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
     }
-    const logs = getSessionLogsByTaskId(parsed.params.taskId);
+    const logs = await getSessionLogsByTaskId(parsed.params.taskId);
     json(res, { logs });
     return true;
   }
@@ -218,25 +218,25 @@ export async function handleSessionData(
         // strip the prefix here before lookup. The original adapter-emitted
         // string is still persisted to `session_costs.model` for debugging.
         const lookupModel = normalizeModelKey(parsed.body.provider, model);
-        const inputRow = getActivePricingRow(
+        const inputRow = await getActivePricingRow(
           parsed.body.provider,
           lookupModel,
           "input",
           lookupTime,
         );
-        const cachedRow = getActivePricingRow(
+        const cachedRow = await getActivePricingRow(
           parsed.body.provider,
           lookupModel,
           "cached_input",
           lookupTime,
         );
-        const outputRow = getActivePricingRow(
+        const outputRow = await getActivePricingRow(
           parsed.body.provider,
           lookupModel,
           "output",
           lookupTime,
         );
-        const cacheWriteRow = getActivePricingRow(
+        const cacheWriteRow = await getActivePricingRow(
           parsed.body.provider,
           lookupModel,
           "cache_write",
@@ -265,7 +265,7 @@ export async function handleSessionData(
         }
       }
 
-      const cost = createSessionCost({
+      const cost = await createSessionCost({
         sessionId: parsed.body.sessionId,
         taskId: parsed.body.taskId || undefined,
         agentId: parsed.body.agentId,
@@ -294,7 +294,7 @@ export async function handleSessionData(
   if (getSessionCostSummaryRoute.match(req.method, pathSegments)) {
     const parsed = await getSessionCostSummaryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const summary = getSessionCostSummary({
+    const summary = await getSessionCostSummary({
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
       agentId: parsed.query.agentId || undefined,
@@ -305,7 +305,7 @@ export async function handleSessionData(
   }
 
   if (getDashboardCosts.match(req.method, pathSegments)) {
-    const dashboardCosts = getDashboardCostSummary();
+    const dashboardCosts = await getDashboardCostSummary();
     json(res, dashboardCosts);
     return true;
   }
@@ -318,18 +318,18 @@ export async function handleSessionData(
 
     let costs: SessionCost[];
     if (taskId) {
-      costs = getSessionCostsByTaskId(taskId, limit);
+      costs = await getSessionCostsByTaskId(taskId, limit);
     } else if (startDate || endDate) {
-      costs = getSessionCostsFiltered({
+      costs = await getSessionCostsFiltered({
         agentId: agentId || undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         limit,
       });
     } else if (agentId) {
-      costs = getSessionCostsByAgentId(agentId, limit);
+      costs = await getSessionCostsByAgentId(agentId, limit);
     } else {
-      costs = getAllSessionCosts(limit);
+      costs = await getAllSessionCosts(limit);
     }
 
     json(res, { costs });

@@ -55,14 +55,14 @@ let savedEnv: NodeJS.ProcessEnv;
 beforeAll(async () => {
   savedEnv = { ...process.env };
   await removeDbFiles(TEST_DB_PATH);
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(fakeEmbeddingProvider);
 
-  const worker = createAgent({ name: "scripts-worker", isLead: false, status: "idle" });
-  const lead = createAgent({ name: "scripts-lead", isLead: true, status: "idle" });
+  const worker = await createAgent({ name: "scripts-worker", isLead: false, status: "idle" });
+  const lead = await createAgent({ name: "scripts-lead", isLead: true, status: "idle" });
   workerId = worker.id;
   leadId = lead.id;
 });
@@ -81,9 +81,9 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM scripts");
-  getDb().run("DELETE FROM events WHERE event = 'script.global_upsert'");
+beforeEach(async () => {
+  (await getDb()).run("DELETE FROM scripts");
+  (await getDb()).run("DELETE FROM events WHERE event = 'script.global_upsert'");
 });
 
 type TestResponse = {
@@ -191,7 +191,7 @@ describe("/api/scripts HTTP", () => {
     const body = await res.json();
     expect(body.error).toBe("typecheck_failed");
     expect(body.diagnostics.length).toBeGreaterThan(0);
-    expect(getScript({ name: "bad-types", scope: "agent", scopeId: workerId })).toBeNull();
+    expect(await getScript({ name: "bad-types", scope: "agent", scopeId: workerId })).toBeNull();
   });
 
   test("upsert typecheck failure surfaces structured diagnostics with location + identifier", async () => {
@@ -329,7 +329,7 @@ describe("/api/scripts HTTP", () => {
     );
     expect(allowed.status).toBe(200);
 
-    const event = getDb()
+    const event = (await getDb())
       .prepare<{ data: string }, []>(
         "SELECT data FROM events WHERE event = 'script.global_upsert' LIMIT 1",
       )
@@ -346,7 +346,7 @@ describe("/api/scripts HTTP", () => {
     );
     expect(res.status).toBe(200);
 
-    const event = getDb()
+    const event = (await getDb())
       .prepare<{ data: string }, []>(
         "SELECT data FROM events WHERE event = 'script.global_upsert' ORDER BY createdAt DESC LIMIT 1",
       )
@@ -371,7 +371,9 @@ describe("/api/scripts HTTP", () => {
       source: `const x: number = "no"; export default async () => x;`,
     });
     expect(failed.status).toBe(400);
-    expect(getScript({ name: slug, scope: "agent", scopeId: workerId })?.isScratch).toBe(true);
+    expect((await getScript({ name: slug, scope: "agent", scopeId: workerId }))?.isScratch).toBe(
+      true,
+    );
   });
 
   test("run named scripts and inline scripts, auto-saving only successful inline source", async () => {
@@ -397,11 +399,13 @@ describe("/api/scripts HTTP", () => {
     expect(inlineBody.result).toEqual({ ok: "not typechecked" });
     expect(inlineBody.autoSaved.slug).toContain("scratch-inline-type-error-still-runs");
 
-    const beforeFailed = listScripts({
-      scope: "agent",
-      scopeId: workerId,
-      includeScratch: true,
-    }).length;
+    const beforeFailed = (
+      await listScripts({
+        scope: "agent",
+        scopeId: workerId,
+        includeScratch: true,
+      })
+    ).length;
     const failed = await dispatch("/api/scripts/run", {
       method: "POST",
       agentId: workerId,
@@ -412,9 +416,9 @@ describe("/api/scripts HTTP", () => {
     });
     expect(failed.status).toBe(200);
     expect((await failed.json()).autoSaved).toBeUndefined();
-    expect(listScripts({ scope: "agent", scopeId: workerId, includeScratch: true }).length).toBe(
-      beforeFailed,
-    );
+    expect(
+      (await listScripts({ scope: "agent", scopeId: workerId, includeScratch: true })).length,
+    ).toBe(beforeFailed);
   });
 
   test("workspace-rw named scripts return 501", async () => {
@@ -455,7 +459,9 @@ describe("/api/scripts HTTP", () => {
     });
     expect(del.status).toBe(200);
     expect(await del.json()).toEqual({ deleted: true });
-    expect(getScript({ name: "lookup-helper", scope: "agent", scopeId: workerId })).toBeNull();
+    expect(
+      await getScript({ name: "lookup-helper", scope: "agent", scopeId: workerId }),
+    ).toBeNull();
   });
 
   test("script_query_types returns argsJsonSchema for a script with argsSchema export", async () => {

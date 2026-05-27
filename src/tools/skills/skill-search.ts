@@ -23,7 +23,7 @@ export const registerSkillSearchTool = (server: McpServer) => {
       }),
     },
     async (args, requestInfo, _meta) => {
-      const skills = searchSkills(args.query, args.limit ?? 20);
+      const skills = await searchSkills(args.query, args.limit ?? 20);
       const result = skills.map(({ content: _content, ...rest }) => rest);
 
       return {

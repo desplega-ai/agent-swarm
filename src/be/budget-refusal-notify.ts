@@ -80,22 +80,25 @@ function formatSpendSummary(ctx: BudgetRefusalContext): string {
  * (operator query against the dedup table) but a thrown error here would be
  * useless noise on the API server.
  */
-export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted: boolean): void {
+export async function emitBudgetRefusalSideEffects(
+  ctx: BudgetRefusalContext,
+  inserted: boolean,
+): Promise<void> {
   // 1. Lead-facing follow-up task (first refusal of the day only).
   if (inserted) {
     try {
-      const leadAgent = getLeadAgent();
+      const leadAgent = await getLeadAgent();
       if (leadAgent) {
-        const refusingAgent = getAgentById(ctx.agentId);
+        const refusingAgent = await getAgentById(ctx.agentId);
         const agentName = refusingAgent?.name || ctx.agentId.slice(0, 8);
         const userName = ctx.task.requestedByUserId
-          ? (getUserById(ctx.task.requestedByUserId)?.name ??
+          ? ((await getUserById(ctx.task.requestedByUserId))?.name ??
             ctx.task.requestedByUserId.slice(0, 8))
           : undefined;
         const taskDesc = ctx.task.task.slice(0, 200);
         const spendSummary = formatSpendSummary(ctx);
 
-        const resolved = resolveTemplate(
+        const resolved = await resolveTemplate(
           "task.budget.refused",
           {
             cause: ctx.cause,
@@ -109,7 +112,7 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
           { agentId: ctx.agentId },
         );
 
-        const followUp = createTaskExtended(resolved.text, {
+        const followUp = await createTaskExtended(resolved.text, {
           agentId: leadAgent.id,
           source: "system",
           taskType: "follow-up",
@@ -120,7 +123,7 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
         });
 
         try {
-          setBudgetRefusalFollowUpTaskId(ctx.task.id, ctx.date, followUp.id);
+          await setBudgetRefusalFollowUpTaskId(ctx.task.id, ctx.date, followUp.id);
         } catch (err) {
           console.warn(
             `[budget-refusal-notify] Failed to write back follow_up_task_id for task ${ctx.task.id.slice(0, 8)} (${ctx.date}): ${err}`,

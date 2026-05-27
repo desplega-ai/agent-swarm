@@ -24,7 +24,7 @@ export const registerGetMetricsTool = (server: McpServer) => {
       }),
     },
     async () => {
-      const metrics = getSwarmMetrics();
+      const metrics = await getSwarmMetrics();
       return {
         content: [
           {

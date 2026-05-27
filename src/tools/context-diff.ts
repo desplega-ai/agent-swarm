@@ -77,7 +77,7 @@ export const registerContextDiffTool = (server: McpServer) => {
       }
 
       // Get the target version
-      const version = getContextVersion(versionId);
+      const version = await getContextVersion(versionId);
       if (!version) {
         return {
           content: [{ type: "text", text: `Version ${versionId} not found.` }],
@@ -91,7 +91,7 @@ export const registerContextDiffTool = (server: McpServer) => {
 
       // Access control: agents can diff their own context, lead can diff any
       if (version.agentId !== requestInfo.agentId) {
-        const callerAgent = getAgentById(requestInfo.agentId);
+        const callerAgent = await getAgentById(requestInfo.agentId);
         if (!callerAgent?.isLead) {
           return {
             content: [
@@ -112,7 +112,7 @@ export const registerContextDiffTool = (server: McpServer) => {
       // Get the comparison version
       let compareVersion: import("@/types").ContextVersion | null | undefined;
       if (compareToVersionId) {
-        compareVersion = getContextVersion(compareToVersionId);
+        compareVersion = await getContextVersion(compareToVersionId);
         if (!compareVersion) {
           return {
             content: [
@@ -138,7 +138,7 @@ export const registerContextDiffTool = (server: McpServer) => {
           };
         }
       } else if (version.previousVersionId) {
-        compareVersion = getContextVersion(version.previousVersionId);
+        compareVersion = await getContextVersion(version.previousVersionId);
       }
 
       const oldContent = compareVersion?.content ?? "";

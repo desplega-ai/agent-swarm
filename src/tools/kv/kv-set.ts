@@ -8,7 +8,10 @@ import { resolveNamespace } from "./resolve-namespace";
 // 2 MiB cap — mirrors the HTTP enforcement.
 const MAX_KV_BODY_BYTES = 2 * 1024 * 1024;
 
-function authError(namespace: string, info: { agentId: string | undefined }): string | null {
+async function authError(
+  namespace: string,
+  info: { agentId: string | undefined },
+): Promise<string | null> {
   if (namespace.startsWith("task:page:")) {
     // MCP requests don't carry an X-Page-Id; page writes must go through the
     // browser SDK + page proxy.
@@ -18,7 +21,7 @@ function authError(namespace: string, info: { agentId: string | undefined }): st
     const target = namespace.slice("task:agent:".length);
     if (info.agentId && target === info.agentId) return null;
     if (info.agentId) {
-      const agent = getAgentById(info.agentId);
+      const agent = await getAgentById(info.agentId);
       if (agent?.isLead) return null;
     }
     return "writes to another agent's namespace require lead";
@@ -64,7 +67,7 @@ export const registerKvSetTool = (server: McpServer) => {
       }),
     },
     async ({ key, value, valueType, expiresInSec, namespace }, requestInfo) => {
-      const resolved = resolveNamespace(namespace, requestInfo);
+      const resolved = await resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return {
           content: [{ type: "text", text: resolved.error }],
@@ -76,7 +79,7 @@ export const registerKvSetTool = (server: McpServer) => {
         };
       }
 
-      const authErr = authError(resolved.namespace, { agentId: requestInfo.agentId });
+      const authErr = await authError(resolved.namespace, { agentId: requestInfo.agentId });
       if (authErr) {
         return {
           content: [{ type: "text", text: authErr }],
@@ -155,7 +158,7 @@ export const registerKvSetTool = (server: McpServer) => {
       const expiresAt = expiresInSec !== undefined ? Date.now() + expiresInSec * 1000 : null;
 
       try {
-        const entry = upsertKv({
+        const entry = await upsertKv({
           namespace: resolved.namespace,
           key,
           value,

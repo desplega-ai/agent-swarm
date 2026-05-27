@@ -13,8 +13,8 @@ import { extractTaskFromMessage, routeMessage } from "../slack/router";
 
 const TEST_DB_PATH = "./test-slack-queue-offline.sqlite";
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(() => {
@@ -30,24 +30,34 @@ afterAll(() => {
 
 describe("Slack queue-when-offline", () => {
   describe("routeMessage returns empty when all agents are offline", () => {
-    test("returns no matches when only offline agents exist", () => {
-      createAgent({ name: "offline-worker", isLead: false, status: "offline", capabilities: [] });
+    test("returns no matches when only offline agents exist", async () => {
+      await createAgent({
+        name: "offline-worker",
+        isLead: false,
+        status: "offline",
+        capabilities: [],
+      });
 
-      const matches = routeMessage("Hello <@BOT123>", "BOT123", true);
+      const matches = await routeMessage("Hello <@BOT123>", "BOT123", true);
       expect(matches).toHaveLength(0);
     });
 
-    test("returns no matches when offline lead exists", () => {
-      createAgent({ name: "offline-lead", isLead: true, status: "offline", capabilities: [] });
+    test("returns no matches when offline lead exists", async () => {
+      await createAgent({
+        name: "offline-lead",
+        isLead: true,
+        status: "offline",
+        capabilities: [],
+      });
 
-      const matches = routeMessage("<@BOT123> do something", "BOT123", true);
+      const matches = await routeMessage("<@BOT123> do something", "BOT123", true);
       expect(matches).toHaveLength(0);
     });
   });
 
   describe("getLeadAgent finds lead regardless of status", () => {
-    test("returns offline lead agent", () => {
-      const lead = getLeadAgent();
+    test("returns offline lead agent", async () => {
+      const lead = await getLeadAgent();
       expect(lead).not.toBeNull();
       expect(lead!.isLead).toBe(true);
       // The lead we created above is offline — getLeadAgent should still find it
@@ -56,11 +66,11 @@ describe("Slack queue-when-offline", () => {
   });
 
   describe("queue as task when offline lead exists", () => {
-    test("creates task for offline lead with correct metadata", () => {
-      const lead = getLeadAgent()!;
+    test("creates task for offline lead with correct metadata", async () => {
+      const lead = await getLeadAgent()!;
       const taskDescription = "deploy the new feature";
 
-      const task = createTaskExtended(taskDescription, {
+      const task = await createTaskExtended(taskDescription, {
         agentId: lead.id,
         source: "slack",
         slackChannelId: "C999",
@@ -77,9 +87,9 @@ describe("Slack queue-when-offline", () => {
       expect(task.status).toBe("pending");
     });
 
-    test("queued task appears in lead's task list", () => {
-      const lead = getLeadAgent()!;
-      const tasks = getTasksByAgentId(lead.id);
+    test("queued task appears in lead's task list", async () => {
+      const lead = await getLeadAgent()!;
+      const tasks = await getTasksByAgentId(lead.id);
       expect(tasks.length).toBeGreaterThanOrEqual(1);
 
       const queued = tasks.find((t) => t.task === "deploy the new feature");
@@ -87,13 +97,13 @@ describe("Slack queue-when-offline", () => {
       expect(queued!.source).toBe("slack");
     });
 
-    test("creates task with thread context", () => {
-      const lead = getLeadAgent()!;
+    test("creates task with thread context", async () => {
+      const lead = await getLeadAgent()!;
       const threadContext = "Alice: something is broken\n[Agent]: I'll look into it";
       const taskDescription = "check the logs";
       const fullTaskDescription = `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`;
 
-      const task = createTaskExtended(fullTaskDescription, {
+      const task = await createTaskExtended(fullTaskDescription, {
         agentId: lead.id,
         source: "slack",
         slackChannelId: "C888",
@@ -108,10 +118,10 @@ describe("Slack queue-when-offline", () => {
   });
 
   describe("queue as unassigned task when no lead exists at all", () => {
-    test("creates unassigned task with Slack metadata", () => {
+    test("creates unassigned task with Slack metadata", async () => {
       const taskText = "fix the CI pipeline";
 
-      const task = createTaskExtended(taskText, {
+      const task = await createTaskExtended(taskText, {
         source: "slack",
         slackChannelId: "C777",
         slackThreadTs: "5555.6666",
@@ -127,19 +137,19 @@ describe("Slack queue-when-offline", () => {
       expect(task.slackUserId).toBe("U_HUMAN3");
     });
 
-    test("unassigned task appears in unassigned status query", () => {
-      const unassigned = getTasksByStatus("unassigned");
+    test("unassigned task appears in unassigned status query", async () => {
+      const unassigned = await getTasksByStatus("unassigned");
       const queued = unassigned.find((t) => t.task === "fix the CI pipeline");
       expect(queued).toBeDefined();
       expect(queued!.slackChannelId).toBe("C777");
     });
 
-    test("creates task with thread context in fullTaskDescription format", () => {
+    test("creates task with thread context in fullTaskDescription format", async () => {
       const threadContext = "Bob: deploy broke\n[Agent]: checking";
       const taskDescription = "investigate the deploy failure";
       const fullTaskDescription = `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`;
 
-      const task = createTaskExtended(fullTaskDescription, {
+      const task = await createTaskExtended(fullTaskDescription, {
         source: "slack",
         slackChannelId: "C666",
         slackThreadTs: "7777.8888",

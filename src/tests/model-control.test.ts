@@ -16,8 +16,8 @@ import { runScheduleNow } from "../scheduler";
 
 const TEST_DB_PATH = "./test-model-control.sqlite";
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(() => {
@@ -32,33 +32,33 @@ afterAll(() => {
 });
 
 describe("Model Control - Task Creation", () => {
-  test("should store model when creating a task with model='sonnet'", () => {
-    const task = createTaskExtended("Test task with sonnet", { model: "sonnet" });
+  test("should store model when creating a task with model='sonnet'", async () => {
+    const task = await createTaskExtended("Test task with sonnet", { model: "sonnet" });
     expect(task.model).toBe("sonnet");
 
-    const retrieved = getTaskById(task.id);
+    const retrieved = await getTaskById(task.id);
     expect(retrieved?.model).toBe("sonnet");
   });
 
-  test("should store model when creating a task with model='haiku'", () => {
-    const task = createTaskExtended("Test task with haiku", { model: "haiku" });
+  test("should store model when creating a task with model='haiku'", async () => {
+    const task = await createTaskExtended("Test task with haiku", { model: "haiku" });
     expect(task.model).toBe("haiku");
   });
 
-  test("should store model when creating a task with model='opus'", () => {
-    const task = createTaskExtended("Test task with opus", { model: "opus" });
+  test("should store model when creating a task with model='opus'", async () => {
+    const task = await createTaskExtended("Test task with opus", { model: "opus" });
     expect(task.model).toBe("opus");
   });
 
-  test("should default model to undefined when not specified", () => {
-    const task = createTaskExtended("Test task without model");
+  test("should default model to undefined when not specified", async () => {
+    const task = await createTaskExtended("Test task without model");
     expect(task.model).toBeUndefined();
   });
 
-  test("should preserve model alongside other task options", () => {
-    const agent = createAgent({ name: "model-test-agent", isLead: false, status: "idle" });
+  test("should preserve model alongside other task options", async () => {
+    const agent = await createAgent({ name: "model-test-agent", isLead: false, status: "idle" });
 
-    const task = createTaskExtended("Task with model and options", {
+    const task = await createTaskExtended("Task with model and options", {
       model: "haiku",
       agentId: agent.id,
       priority: 80,
@@ -73,10 +73,10 @@ describe("Model Control - Task Creation", () => {
     expect(task.tags).toContain("model-test");
   });
 
-  test("should store model on offered tasks", () => {
-    const agent = createAgent({ name: "offer-model-agent", isLead: false, status: "idle" });
+  test("should store model on offered tasks", async () => {
+    const agent = await createAgent({ name: "offer-model-agent", isLead: false, status: "idle" });
 
-    const task = createTaskExtended("Offered task with model", {
+    const task = await createTaskExtended("Offered task with model", {
       model: "sonnet",
       offeredTo: agent.id,
     });
@@ -87,8 +87,8 @@ describe("Model Control - Task Creation", () => {
 });
 
 describe("Model Control - Schedule Creation", () => {
-  test("should store model on scheduled task creation", () => {
-    const schedule = createScheduledTask({
+  test("should store model on scheduled task creation", async () => {
+    const schedule = await createScheduledTask({
       name: "model-schedule-sonnet",
       intervalMs: 60000,
       taskTemplate: "Scheduled with sonnet",
@@ -97,13 +97,13 @@ describe("Model Control - Schedule Creation", () => {
 
     expect(schedule.model).toBe("sonnet");
 
-    const retrieved = getScheduledTaskById(schedule.id);
+    const retrieved = await getScheduledTaskById(schedule.id);
     expect(retrieved?.model).toBe("sonnet");
   });
 
-  test("should store all valid model values on schedules", () => {
+  test("should store all valid model values on schedules", async () => {
     for (const model of ["haiku", "sonnet", "opus"] as const) {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: `model-schedule-all-${model}-${Date.now()}`,
         intervalMs: 60000,
         taskTemplate: `Scheduled with ${model}`,
@@ -114,8 +114,8 @@ describe("Model Control - Schedule Creation", () => {
     }
   });
 
-  test("should default model to undefined when not specified on schedule", () => {
-    const schedule = createScheduledTask({
+  test("should default model to undefined when not specified on schedule", async () => {
+    const schedule = await createScheduledTask({
       name: "model-schedule-default",
       intervalMs: 60000,
       taskTemplate: "Scheduled without model",
@@ -126,8 +126,8 @@ describe("Model Control - Schedule Creation", () => {
 });
 
 describe("Model Control - Schedule Update", () => {
-  test("should update model on existing schedule", () => {
-    const schedule = createScheduledTask({
+  test("should update model on existing schedule", async () => {
+    const schedule = await createScheduledTask({
       name: "model-update-test",
       intervalMs: 60000,
       taskTemplate: "Update model test",
@@ -136,15 +136,15 @@ describe("Model Control - Schedule Update", () => {
 
     expect(schedule.model).toBe("opus");
 
-    const updated = updateScheduledTask(schedule.id, { model: "haiku" });
+    const updated = await updateScheduledTask(schedule.id, { model: "haiku" });
     expect(updated?.model).toBe("haiku");
 
-    const retrieved = getScheduledTaskById(schedule.id);
+    const retrieved = await getScheduledTaskById(schedule.id);
     expect(retrieved?.model).toBe("haiku");
   });
 
-  test("should clear model by setting to null", () => {
-    const schedule = createScheduledTask({
+  test("should clear model by setting to null", async () => {
+    const schedule = await createScheduledTask({
       name: "model-clear-test",
       intervalMs: 60000,
       taskTemplate: "Clear model test",
@@ -153,19 +153,19 @@ describe("Model Control - Schedule Update", () => {
 
     expect(schedule.model).toBe("sonnet");
 
-    const updated = updateScheduledTask(schedule.id, { model: null });
+    const updated = await updateScheduledTask(schedule.id, { model: null });
     expect(updated?.model).toBeUndefined();
   });
 
-  test("should preserve model when updating other fields", () => {
-    const schedule = createScheduledTask({
+  test("should preserve model when updating other fields", async () => {
+    const schedule = await createScheduledTask({
       name: "model-preserve-test",
       intervalMs: 60000,
       taskTemplate: "Preserve model test",
       model: "haiku",
     });
 
-    const updated = updateScheduledTask(schedule.id, { priority: 90 });
+    const updated = await updateScheduledTask(schedule.id, { priority: 90 });
     expect(updated?.model).toBe("haiku");
     expect(updated?.priority).toBe(90);
   });
@@ -173,7 +173,7 @@ describe("Model Control - Schedule Update", () => {
 
 describe("Model Control - Schedule to Task Propagation", () => {
   test("should propagate model from schedule to task on manual run", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: "model-propagate-manual",
       intervalMs: 60000,
       taskTemplate: "Propagated model task (manual)",
@@ -185,17 +185,17 @@ describe("Model Control - Schedule to Task Propagation", () => {
 
     // Find the created task by its template text
     const { getDb } = await import("../be/db");
-    const row = getDb()
+    const row = (await getDb())
       .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
       .get("Propagated model task (manual)") as { id: string } | null;
 
     expect(row).not.toBeNull();
-    const task = getTaskById(row!.id);
+    const task = await getTaskById(row!.id);
     expect(task?.model).toBe("haiku");
   });
 
   test("should create task without model when schedule has no model", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: "model-propagate-none",
       intervalMs: 60000,
       taskTemplate: "Propagated no-model task",
@@ -205,62 +205,62 @@ describe("Model Control - Schedule to Task Propagation", () => {
     await runScheduleNow(schedule.id);
 
     const { getDb } = await import("../be/db");
-    const row = getDb()
+    const row = (await getDb())
       .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
       .get("Propagated no-model task") as { id: string } | null;
 
     expect(row).not.toBeNull();
-    const task = getTaskById(row!.id);
+    const task = await getTaskById(row!.id);
     expect(task?.model).toBeUndefined();
   });
 });
 
 describe("Model Control - Config MODEL_OVERRIDE Resolution", () => {
-  test("should resolve global MODEL_OVERRIDE config", () => {
-    upsertSwarmConfig({
+  test("should resolve global MODEL_OVERRIDE config", async () => {
+    await upsertSwarmConfig({
       scope: "global",
       key: "MODEL_OVERRIDE",
       value: "sonnet",
     });
 
-    const configs = getResolvedConfig();
+    const configs = await getResolvedConfig();
     const modelOverride = configs.find((c) => c.key === "MODEL_OVERRIDE");
     expect(modelOverride).toBeDefined();
     expect(modelOverride?.value).toBe("sonnet");
   });
 
-  test("agent-scoped MODEL_OVERRIDE should override global", () => {
-    const agent = createAgent({ name: "config-agent", isLead: false, status: "idle" });
+  test("agent-scoped MODEL_OVERRIDE should override global", async () => {
+    const agent = await createAgent({ name: "config-agent", isLead: false, status: "idle" });
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "MODEL_OVERRIDE",
       value: "opus",
     });
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "MODEL_OVERRIDE",
       value: "haiku",
     });
 
-    const configs = getResolvedConfig(agent.id);
+    const configs = await getResolvedConfig(agent.id);
     const modelOverride = configs.find((c) => c.key === "MODEL_OVERRIDE");
     expect(modelOverride?.value).toBe("haiku");
     expect(modelOverride?.scope).toBe("agent");
   });
 
-  test("should fallback to global when no agent-scoped config exists", () => {
-    const agent = createAgent({ name: "fallback-agent", isLead: false, status: "idle" });
+  test("should fallback to global when no agent-scoped config exists", async () => {
+    const agent = await createAgent({ name: "fallback-agent", isLead: false, status: "idle" });
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "MODEL_OVERRIDE",
       value: "sonnet",
     });
 
-    const configs = getResolvedConfig(agent.id);
+    const configs = await getResolvedConfig(agent.id);
     const modelOverride = configs.find((c) => c.key === "MODEL_OVERRIDE");
     expect(modelOverride?.value).toBe("sonnet");
     expect(modelOverride?.scope).toBe("global");

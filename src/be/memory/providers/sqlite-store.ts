@@ -1,4 +1,4 @@
-import { getDb, isSqliteVecAvailable } from "@/be/db";
+import { getDb, isSqliteVecAvailable, runDbTransaction } from "@/be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import { TTL_DEFAULTS } from "../constants";
@@ -81,10 +81,10 @@ export class SqliteMemoryStore implements MemoryStore {
     this.ensureVecTable();
   }
 
-  private ensureVecTable(): void {
+  private async ensureVecTable(): Promise<void> {
     if (this.vecInitialized || !isSqliteVecAvailable()) return;
 
-    const db = getDb();
+    const db = await getDb();
     // Create the virtual table if it doesn't exist
     try {
       db.run(`
@@ -126,12 +126,12 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
-  store(input: MemoryInput): AgentMemory {
+  async store(input: MemoryInput): Promise<AgentMemory> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const expiresAt = computeExpiresAt(input.source);
 
-    const row = getDb()
+    const row = (await getDb())
       .prepare<
         AgentMemoryRow,
         [
@@ -181,20 +181,18 @@ export class SqliteMemoryStore implements MemoryStore {
     return rowToAgentMemory(row);
   }
 
-  storeBatch(inputs: MemoryInput[]): AgentMemory[] {
-    const db = getDb();
-    const results: AgentMemory[] = [];
-    const tx = db.transaction(() => {
+  async storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]> {
+    return await runDbTransaction(async () => {
+      const results: AgentMemory[] = [];
       for (const input of inputs) {
-        results.push(this.store(input));
+        results.push(await this.store(input));
       }
+      return results;
     });
-    tx();
-    return results;
   }
 
-  get(id: string): AgentMemory | null {
-    const db = getDb();
+  async get(id: string): Promise<AgentMemory | null> {
+    const db = await getDb();
     const row = db
       .prepare<AgentMemoryRow, [string]>("SELECT * FROM agent_memory WHERE id = ?")
       .get(id);
@@ -208,23 +206,23 @@ export class SqliteMemoryStore implements MemoryStore {
     return rowToAgentMemory(row);
   }
 
-  peek(id: string): AgentMemory | null {
-    const row = getDb()
+  async peek(id: string): Promise<AgentMemory | null> {
+    const row = (await getDb())
       .prepare<AgentMemoryRow, [string]>("SELECT * FROM agent_memory WHERE id = ?")
       .get(id);
     if (!row) return null;
     return rowToAgentMemory(row);
   }
 
-  search(
+  async search(
     embedding: Float32Array,
     agentId: string,
     options: MemorySearchOptions = {},
-  ): MemoryCandidate[] {
+  ): Promise<MemoryCandidate[]> {
     const { scope = "all", limit = 10, source, isLead = false, includeExpired = false } = options;
 
     if (isSqliteVecAvailable() && this.vecInitialized) {
-      return this.searchWithVec(embedding, agentId, {
+      return await this.searchWithVec(embedding, agentId, {
         scope,
         limit,
         source,
@@ -232,7 +230,7 @@ export class SqliteMemoryStore implements MemoryStore {
         includeExpired,
       });
     }
-    return this.searchBruteForce(embedding, agentId, {
+    return await this.searchBruteForce(embedding, agentId, {
       scope,
       limit,
       source,
@@ -241,7 +239,7 @@ export class SqliteMemoryStore implements MemoryStore {
     });
   }
 
-  private searchWithVec(
+  private async searchWithVec(
     queryEmbedding: Float32Array,
     agentId: string,
     options: {
@@ -251,8 +249,8 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
     },
-  ): MemoryCandidate[] {
-    const db = getDb();
+  ): Promise<MemoryCandidate[]> {
+    const db = await getDb();
     const { scope, limit, source, isLead, includeExpired } = options;
 
     // KNN query — fetch more candidates than needed for post-filtering
@@ -309,7 +307,7 @@ export class SqliteMemoryStore implements MemoryStore {
     return candidates.slice(0, limit);
   }
 
-  private searchBruteForce(
+  private async searchBruteForce(
     queryEmbedding: Float32Array,
     agentId: string,
     options: {
@@ -319,9 +317,9 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
     },
-  ): MemoryCandidate[] {
+  ): Promise<MemoryCandidate[]> {
     const { scope, limit, source, isLead, includeExpired } = options;
-    const db = getDb();
+    const db = await getDb();
 
     const conditions: string[] = ["embedding IS NOT NULL"];
     const params: (string | null)[] = [];
@@ -382,9 +380,9 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
-  list(agentId: string, options: MemoryListOptions = {}): AgentMemory[] {
+  async list(agentId: string, options: MemoryListOptions = {}): Promise<AgentMemory[]> {
     const { scope = "all", limit = 20, offset = 0, isLead = false } = options;
-    const db = getDb();
+    const db = await getDb();
 
     const conditions: string[] = [];
     const params: (string | number)[] = [];
@@ -419,8 +417,10 @@ export class SqliteMemoryStore implements MemoryStore {
     return rows.map(rowToAgentMemory);
   }
 
-  listForReembedding(options?: { agentId?: string }): { id: string; content: string }[] {
-    const db = getDb();
+  async listForReembedding(options?: {
+    agentId?: string;
+  }): Promise<{ id: string; content: string }[]> {
+    const db = await getDb();
     if (options?.agentId) {
       return db
         .prepare<{ id: string; content: string }, [string]>(
@@ -433,8 +433,8 @@ export class SqliteMemoryStore implements MemoryStore {
       .all();
   }
 
-  delete(id: string): boolean {
-    const db = getDb();
+  async delete(id: string): Promise<boolean> {
+    const db = await getDb();
     if (isSqliteVecAvailable() && this.vecInitialized) {
       db.prepare("DELETE FROM memory_vec WHERE memory_id = ?").run(id);
     }
@@ -442,8 +442,8 @@ export class SqliteMemoryStore implements MemoryStore {
     return result.changes > 0;
   }
 
-  deleteBySourcePath(sourcePath: string, agentId: string): number {
-    const db = getDb();
+  async deleteBySourcePath(sourcePath: string, agentId: string): Promise<number> {
+    const db = await getDb();
 
     if (isSqliteVecAvailable() && this.vecInitialized) {
       // Get IDs first for vec table cleanup
@@ -467,8 +467,8 @@ export class SqliteMemoryStore implements MemoryStore {
     return result.changes;
   }
 
-  updateEmbedding(id: string, embedding: Float32Array, model: string): void {
-    const db = getDb();
+  async updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void> {
+    const db = await getDb();
     const buffer = serializeEmbedding(embedding);
     db.prepare("UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?").run(
       buffer,
@@ -484,8 +484,8 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
-  getStats(agentId: string): MemoryStats {
-    const db = getDb();
+  async getStats(agentId: string): Promise<MemoryStats> {
+    const db = await getDb();
 
     const total = db
       .prepare<{ count: number }, [string]>(

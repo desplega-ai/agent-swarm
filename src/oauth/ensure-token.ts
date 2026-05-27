@@ -4,8 +4,8 @@ import { type OAuthProviderConfig, refreshAccessToken } from "./wrapper";
 /**
  * Build an OAuthProviderConfig from the oauth_apps table for any provider.
  */
-function getOAuthConfig(provider: string): OAuthProviderConfig | null {
-  const app = getOAuthApp(provider);
+async function getOAuthConfig(provider: string): Promise<OAuthProviderConfig | null> {
+  const app = await getOAuthApp(provider);
   if (!app) return null;
 
   const metadata = JSON.parse(app.metadata || "{}");
@@ -56,10 +56,10 @@ export async function ensureToken(provider: string, bufferMs?: number): Promise<
  * shouldn't page anyone.
  */
 export async function ensureTokenOrThrow(provider: string, bufferMs?: number): Promise<void> {
-  if (!isTokenExpiringSoon(provider, bufferMs)) return;
+  if (!(await isTokenExpiringSoon(provider, bufferMs))) return;
 
-  const config = getOAuthConfig(provider);
-  const tokens = getOAuthTokens(provider);
+  const config = await getOAuthConfig(provider);
+  const tokens = await getOAuthTokens(provider);
   if (!config || !tokens?.refreshToken) {
     console.warn(
       `[OAuth] ${provider} token expiring but cannot refresh (missing config or refresh token)`,

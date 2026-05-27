@@ -343,7 +343,7 @@ if (!globalState.__runId) {
 // failures fail closed instead of leaving the runtime half-initialized.
 let startupConfigsInjected: string[] = [];
 try {
-  startupConfigsInjected = loadGlobalConfigsIntoEnv(false);
+  startupConfigsInjected = await loadGlobalConfigsIntoEnv(false);
 } catch (err) {
   console.error("[startup] Failed to load global swarm configs before listen:", err);
   throw err;
@@ -401,9 +401,9 @@ httpServer
     // must NOT mint (see src/commands/runner.ts).
     await initTelemetry(
       "api-server",
-      (key) => getSwarmConfigs({ scope: "global", key })?.[0]?.value,
-      (key, value) => {
-        upsertSwarmConfig({ scope: "global", key, value });
+      async (key) => (await getSwarmConfigs({ scope: "global", key }))?.[0]?.value,
+      async (key, value) => {
+        await upsertSwarmConfig({ scope: "global", key, value });
       },
       { generateIfMissing: true },
     );

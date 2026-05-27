@@ -49,7 +49,7 @@ export function getExecutorRegistry(): ExecutorRegistry {
  * 3. Recover incomplete runs from previous server lifecycle
  * 4. Start the retry poller for failed steps with pending retries
  */
-export function initWorkflows(): void {
+export async function initWorkflows(): Promise<void> {
   // 1. Create the executor registry singleton
   _registry = createExecutorRegistry({
     db,
@@ -73,5 +73,5 @@ export function initWorkflows(): void {
 
   // 6. Initialize wait-bus subscriptions for event-mode waits (Phase 3).
   // Re-attaches one bus listener per distinct pending eventName from the DB.
-  initWaitBusSubscriptions(_registry);
+  await initWaitBusSubscriptions(_registry);
 }

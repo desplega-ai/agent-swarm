@@ -9,8 +9,8 @@ import type { JiraOAuthAppMetadata } from "./types";
  * metadata column is unparseable JSON. We never throw on shape coercion —
  * the keys are all optional and downstream callers already null-check.
  */
-export function getJiraMetadata(): JiraOAuthAppMetadata {
-  const app = getOAuthApp("jira");
+export async function getJiraMetadata(): Promise<JiraOAuthAppMetadata> {
+  const app = await getOAuthApp("jira");
   if (!app) return {};
 
   let parsed: unknown;
@@ -56,8 +56,8 @@ export function getJiraMetadata(): JiraOAuthAppMetadata {
  * Throws if the `jira` provider row doesn't exist (caller must run `initJira()`
  * before any metadata writes).
  */
-export function updateJiraMetadata(partial: Partial<JiraOAuthAppMetadata>): void {
-  const db = getDb();
+export async function updateJiraMetadata(partial: Partial<JiraOAuthAppMetadata>): Promise<void> {
+  const db = await getDb();
   const txn = db.transaction(() => {
     const row = db.query("SELECT metadata FROM oauth_apps WHERE provider = 'jira'").get() as {
       metadata: string | null;
@@ -108,8 +108,8 @@ export function updateJiraMetadata(partial: Partial<JiraOAuthAppMetadata>): void
  * flow to drop cloudId, siteUrl, and webhookIds in one shot. The row itself
  * stays — `initJira()` requires the `oauth_apps` row to exist.
  */
-export function clearJiraMetadata(): void {
-  getDb()
+export async function clearJiraMetadata(): Promise<void> {
+  (await getDb())
     .query(
       "UPDATE oauth_apps SET metadata = '{}', updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE provider = 'jira'",
     )

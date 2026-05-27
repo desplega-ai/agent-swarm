@@ -43,7 +43,7 @@ export const registerSkillCreateTool = (server: McpServer) => {
 
         // If swarm scope requested, only leads can create directly
         if (args.scope === "swarm") {
-          const agent = getAgentById(requestInfo.agentId);
+          const agent = await getAgentById(requestInfo.agentId);
           if (!agent?.isLead) {
             return {
               content: [
@@ -61,7 +61,7 @@ export const registerSkillCreateTool = (server: McpServer) => {
           }
         }
 
-        const skill = createSkill({
+        const skill = await createSkill({
           name: parsed.name,
           description: parsed.description,
           content: args.content,
@@ -78,7 +78,7 @@ export const registerSkillCreateTool = (server: McpServer) => {
         });
 
         // Auto-install for the creating agent
-        installSkill(requestInfo.agentId, skill.id);
+        await installSkill(requestInfo.agentId, skill.id);
 
         return {
           content: [{ type: "text", text: `Created skill "${skill.name}" (${skill.id})` }],

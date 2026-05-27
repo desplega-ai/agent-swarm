@@ -16,10 +16,10 @@ import {
 
 const TEST_DB_PATH = "./test-slack-thread-buffer.sqlite";
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
   // Create a lead agent for flush to assign tasks to
-  createAgent({ name: "lead-agent", isLead: true, status: "idle", capabilities: [] });
+  await createAgent({ name: "lead-agent", isLead: true, status: "idle", capabilities: [] });
 });
 
 afterAll(() => {
@@ -115,7 +115,7 @@ describe("Slack thread buffer", () => {
       expect(getBufferMessageCount(`${channelId}:${threadTs}`)).toBe(0);
 
       // Check the task was created in the DB with correct Slack metadata
-      const task = getLatestActiveTaskInThread(channelId, threadTs);
+      const task = await getLatestActiveTaskInThread(channelId, threadTs);
       expect(task).not.toBeNull();
       expect(task!.task).toContain("fix the bug");
       expect(task!.task).toContain("also check the logs");
@@ -133,7 +133,7 @@ describe("Slack thread buffer", () => {
       const threadTs = "7000.0001";
 
       // Create a worker agent that owns a task in this thread
-      const worker = createAgent({
+      const worker = await createAgent({
         name: "buf-worker-1",
         isLead: false,
         status: "idle",
@@ -141,7 +141,7 @@ describe("Slack thread buffer", () => {
       });
 
       // Create an existing pending task assigned to the worker in this thread
-      const existingTask = createTaskExtended("original task", {
+      const existingTask = await createTaskExtended("original task", {
         agentId: worker.id,
         source: "slack",
         slackChannelId: channelId,
@@ -167,7 +167,7 @@ describe("Slack thread buffer", () => {
       // and wait for it. But the env var is read at module load time.
       // Instead, we'll verify the DB state by checking that getLatestActiveTaskInThread
       // returns the existing task before flush, confirming the dependency logic would work.
-      const latestActive = getLatestActiveTaskInThread(channelId, threadTs);
+      const latestActive = await getLatestActiveTaskInThread(channelId, threadTs);
       expect(latestActive).not.toBeNull();
       expect(latestActive!.id).toBe(existingTask.id);
 
@@ -182,14 +182,14 @@ describe("Slack thread buffer", () => {
       const threadTs = "8000.0001";
 
       // No existing tasks in this thread
-      const latestActive = getLatestActiveTaskInThread(channelId, threadTs);
+      const latestActive = await getLatestActiveTaskInThread(channelId, threadTs);
       expect(latestActive).toBeNull();
 
       bufferThreadMessage(channelId, threadTs, "new request", "U1", "8000.0010");
       await instantFlush(`${channelId}:${threadTs}`);
 
       // Task created with no dependency
-      const task = getLatestActiveTaskInThread(channelId, threadTs);
+      const task = await getLatestActiveTaskInThread(channelId, threadTs);
       expect(task).not.toBeNull();
       expect(task!.task).toContain("new request");
       // dependsOn is stored as JSON — null or empty means no dependency
@@ -203,13 +203,13 @@ describe("Slack thread buffer", () => {
       const threadTs = "9000.0001";
 
       // Create a worker agent and an active task in this thread
-      const worker = createAgent({
+      const worker = await createAgent({
         name: "buf-worker-2",
         isLead: false,
         status: "idle",
         capabilities: [],
       });
-      createTaskExtended("active task", {
+      await createTaskExtended("active task", {
         agentId: worker.id,
         source: "slack",
         slackChannelId: channelId,
@@ -218,7 +218,7 @@ describe("Slack thread buffer", () => {
       });
 
       // Confirm active task exists
-      const latestActive = getLatestActiveTaskInThread(channelId, threadTs);
+      const latestActive = await getLatestActiveTaskInThread(channelId, threadTs);
       expect(latestActive).not.toBeNull();
 
       // Buffer and instant flush
@@ -226,7 +226,7 @@ describe("Slack thread buffer", () => {
       await instantFlush(`${channelId}:${threadTs}`);
 
       // The newest task in this thread is the flushed one (latest by createdAt)
-      const newestTask = getLatestActiveTaskInThread(channelId, threadTs);
+      const newestTask = await getLatestActiveTaskInThread(channelId, threadTs);
       expect(newestTask).not.toBeNull();
       // Verify it's the flushed task by checking content
       expect(newestTask!.task).toContain("urgent fix");
@@ -296,7 +296,7 @@ describe("Slack thread buffer", () => {
       bufferThreadMessage(channelId, threadTs, "solo message", "U1", "13000.0010");
       await instantFlush(`${channelId}:${threadTs}`);
 
-      const task = getLatestActiveTaskInThread(channelId, threadTs);
+      const task = await getLatestActiveTaskInThread(channelId, threadTs);
       expect(task).not.toBeNull();
       expect(task!.task).toContain("1 message(s) buffered");
       expect(task!.task).toContain("solo message");

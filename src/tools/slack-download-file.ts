@@ -57,7 +57,7 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
         };
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return {
           content: [{ type: "text", text: "Agent not found." }],

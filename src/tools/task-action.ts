@@ -14,7 +14,6 @@ import {
   getActiveSessions,
   getActiveTaskCount,
   getAgentById,
-  getDb,
   getTaskById,
   hasCapacity,
   moveTaskFromBacklog,
@@ -23,6 +22,7 @@ import {
   recordBudgetRefusalNotification,
   rejectTask,
   releaseTask,
+  runDbTransaction,
   updateTaskClaudeSessionId,
 } from "@/be/db";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
@@ -150,12 +150,12 @@ export async function taskActionHandler(
       return agentOnlyActionResult();
     }
 
-    const result = getDb().transaction((): TaskActionResult | CallToolResult => {
+    const result = await runDbTransaction(async (): Promise<TaskActionResult | CallToolResult> => {
       if (!taskId) {
         return { success: false, message: `Task ID is required for '${action}' action.` };
       }
 
-      const existingTask = getTaskById(taskId);
+      const existingTask = await getTaskById(taskId);
       if (!existingTask) {
         return { success: false, message: `Task "${taskId}" not found.` };
       }
@@ -170,7 +170,7 @@ export async function taskActionHandler(
             message: `Task "${taskId}" is not unassigned (status: ${existingTask.status}). Only unassigned tasks can be moved to backlog.`,
           };
         }
-        const backlogTask = moveTaskToBacklog(taskId);
+        const backlogTask = await moveTaskToBacklog(taskId);
         if (!backlogTask) {
           return { success: false, message: `Failed to move task "${taskId}" to backlog.` };
         }
@@ -187,7 +187,7 @@ export async function taskActionHandler(
           message: `Task "${taskId}" is not in backlog (status: ${existingTask.status}).`,
         };
       }
-      const unassignedTask = moveTaskFromBacklog(taskId);
+      const unassignedTask = await moveTaskFromBacklog(taskId);
       if (!unassignedTask) {
         return { success: false, message: `Failed to move task "${taskId}" from backlog.` };
       }
@@ -196,7 +196,7 @@ export async function taskActionHandler(
         message: `Moved task "${taskId}" from backlog to pool.`,
         task: unassignedTask,
       };
-    })();
+    });
 
     return "content" in result ? result : taskActionCallResult(result);
   }
@@ -213,7 +213,7 @@ export async function taskActionHandler(
 
   const agentId = ctx.agentId;
 
-  const txn = getDb().transaction((): TaskActionResult => {
+  const result = await runDbTransaction(async (): Promise<TaskActionResult> => {
     switch (action) {
       case "create": {
         if (!task) {
@@ -222,7 +222,7 @@ export async function taskActionHandler(
             message: "Task description is required for 'create' action.",
           };
         }
-        const newTask = createTaskExtended(task, {
+        const newTask = await createTaskExtended(task, {
           creatorAgentId: agentId,
           taskType,
           tags,
@@ -243,9 +243,9 @@ export async function taskActionHandler(
           return { success: false, message: "Task ID is required for 'claim' action." };
         }
         // Check capacity before claiming
-        if (!hasCapacity(agentId)) {
-          const activeCount = getActiveTaskCount(agentId);
-          const agent = getAgentById(agentId);
+        if (!(await hasCapacity(agentId))) {
+          const activeCount = await getActiveTaskCount(agentId);
+          const agent = await getAgentById(agentId);
           return {
             success: false,
             message: `You have no capacity (${activeCount}/${agent?.maxTasks ?? 1} tasks). Complete a task first.`,
@@ -253,7 +253,7 @@ export async function taskActionHandler(
         }
         // Pre-checks for informative error messages (the atomic UPDATE in
         // claimTask is the real guard against race conditions)
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -264,7 +264,7 @@ export async function taskActionHandler(
           };
         }
         // Check if task dependencies are met
-        const { ready, blockedBy } = checkDependencies(taskId);
+        const { ready, blockedBy } = await checkDependencies(taskId);
         if (!ready) {
           return {
             success: false,
@@ -272,7 +272,7 @@ export async function taskActionHandler(
           };
         }
         // Atomic claim — only one agent can win this race
-        const claimedTask = claimTask(taskId, agentId);
+        const claimedTask = await claimTask(taskId, agentId);
         if (!claimedTask) {
           return {
             success: false,
@@ -281,10 +281,10 @@ export async function taskActionHandler(
         }
 
         // Reassociate session logs from pool trigger's random UUID to real task ID
-        const sessions = getActiveSessions(agentId);
+        const sessions = await getActiveSessions(agentId);
         const activeSession = sessions.find((s) => s.runnerSessionId);
         if (activeSession?.runnerSessionId) {
-          const count = reassociateSessionLogs(activeSession.runnerSessionId, taskId);
+          const count = await reassociateSessionLogs(activeSession.runnerSessionId, taskId);
           if (count > 0) {
             console.log(
               `[task-action] Reassociated ${count} session logs for claimed task ${taskId.slice(0, 8)}`,
@@ -292,7 +292,7 @@ export async function taskActionHandler(
           }
           // Propagate provider session ID (e.g. claudeSessionId) to the task
           if (activeSession.providerSessionId) {
-            updateTaskClaudeSessionId(taskId, activeSession.providerSessionId);
+            await updateTaskClaudeSessionId(taskId, activeSession.providerSessionId);
           }
         }
 
@@ -307,7 +307,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'release' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -320,7 +320,7 @@ export async function taskActionHandler(
             message: `Cannot release task in status "${existingTask.status}". Only 'pending' or 'in_progress' tasks can be released.`,
           };
         }
-        const releasedTask = releaseTask(taskId);
+        const releasedTask = await releaseTask(taskId);
         if (!releasedTask) {
           return { success: false, message: `Failed to release task "${taskId}".` };
         }
@@ -335,7 +335,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'accept' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -346,7 +346,7 @@ export async function taskActionHandler(
           return { success: false, message: `Task "${taskId}" was not offered to you.` };
         }
         // Check if task dependencies are met
-        const { ready, blockedBy } = checkDependencies(taskId);
+        const { ready, blockedBy } = await checkDependencies(taskId);
         if (!ready) {
           return {
             success: false,
@@ -357,7 +357,7 @@ export async function taskActionHandler(
         // as the /api/poll gates so capacity AND budget share atomicity.
         // Phase 5: record dedup row + capture side-effect context for the
         // after-commit lead follow-up + workflow event-bus emit.
-        const admission = canClaim(agentId, new Date(), existingTask.requestedByUserId);
+        const admission = await canClaim(agentId, new Date(), existingTask.requestedByUserId);
         if (!admission.allowed) {
           const causeMsg =
             admission.cause === "agent"
@@ -366,7 +366,7 @@ export async function taskActionHandler(
                 ? "user daily budget exceeded"
                 : "global daily budget exceeded";
           const utcDate = new Date().toISOString().slice(0, 10);
-          const dedup = recordBudgetRefusalNotification({
+          const dedup = await recordBudgetRefusalNotification({
             taskId,
             date: utcDate,
             agentId,
@@ -416,7 +416,7 @@ export async function taskActionHandler(
             },
           };
         }
-        const acceptedTask = acceptTask(taskId, agentId);
+        const acceptedTask = await acceptTask(taskId, agentId);
         if (!acceptedTask) {
           return { success: false, message: `Failed to accept task "${taskId}".` };
         }
@@ -431,7 +431,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'reject' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -441,7 +441,7 @@ export async function taskActionHandler(
         if (existingTask.offeredTo !== agentId) {
           return { success: false, message: `Task "${taskId}" was not offered to you.` };
         }
-        const rejectedTask = rejectTask(taskId, agentId, reason);
+        const rejectedTask = await rejectTask(taskId, agentId, reason);
         if (!rejectedTask) {
           return { success: false, message: `Failed to reject task "${taskId}".` };
         }
@@ -456,7 +456,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'to_backlog' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -466,7 +466,7 @@ export async function taskActionHandler(
             message: `Task "${taskId}" is not unassigned (status: ${existingTask.status}). Only unassigned tasks can be moved to backlog.`,
           };
         }
-        const backlogTask = moveTaskToBacklog(taskId);
+        const backlogTask = await moveTaskToBacklog(taskId);
         if (!backlogTask) {
           return { success: false, message: `Failed to move task "${taskId}" to backlog.` };
         }
@@ -481,7 +481,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'from_backlog' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -491,7 +491,7 @@ export async function taskActionHandler(
             message: `Task "${taskId}" is not in backlog (status: ${existingTask.status}).`,
           };
         }
-        const unassignedTask = moveTaskFromBacklog(taskId);
+        const unassignedTask = await moveTaskFromBacklog(taskId);
         if (!unassignedTask) {
           return { success: false, message: `Failed to move task "${taskId}" from backlog.` };
         }
@@ -507,8 +507,6 @@ export async function taskActionHandler(
     }
   });
 
-  const result = txn();
-
   // Phase 5: when the accept gate refused, run after-commit side
   // effects (lead follow-up + workflow bus). The dedup row was recorded
   // inside the txn; this just consumes the captured context.
@@ -521,7 +519,7 @@ export async function taskActionHandler(
       context: BudgetRefusalContext;
       inserted: boolean;
     };
-    emitBudgetRefusalSideEffects(sideEffects.context, sideEffects.inserted);
+    await emitBudgetRefusalSideEffects(sideEffects.context, sideEffects.inserted);
   }
 
   return taskActionCallResult(result, agentId);

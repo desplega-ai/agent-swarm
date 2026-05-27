@@ -53,7 +53,7 @@ class MockHITLExecutor extends BaseExecutor<
     const requestId = crypto.randomUUID();
     this.lastRequestId = requestId;
 
-    this.deps.db.createApprovalRequest({
+    await this.deps.db.createApprovalRequest({
       id: requestId,
       title: config.title,
       questions: [{ id: "q1", type: "approval", label: "Approve?", required: true }],
@@ -131,9 +131,9 @@ const mockDeps: ExecutorDependencies = {
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(def: WorkflowDefinition): Workflow {
+async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
   workflowCounter++;
-  const workflow = createWorkflow({
+  const workflow = await createWorkflow({
     name: `test-hitl-routing-${workflowCounter}-${Date.now()}`,
     definition: def,
   });
@@ -170,14 +170,14 @@ async function runHITLWorkflow(
     ],
   };
 
-  const workflow = makeWorkflow(def);
+  const workflow = await makeWorkflow(def);
   const runId = await startWorkflowExecution(workflow, {}, registry);
 
   // At this point, "start" has completed and "review" is waiting
-  const run = getWorkflowRun(runId);
+  const run = await getWorkflowRun(runId);
   expect(run!.status).toBe("waiting");
 
-  const steps = getWorkflowRunStepsByRunId(runId);
+  const steps = await getWorkflowRunStepsByRunId(runId);
   const reviewStep = steps.find((s) => s.nodeId === "review");
   expect(reviewStep).toBeDefined();
   expect(reviewStep!.status).toBe("waiting");
@@ -216,13 +216,13 @@ describe("HITL port-based routing", () => {
     } catch {
       // File doesn't exist
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }
@@ -246,10 +246,10 @@ describe("HITL port-based routing", () => {
 
     const { runId } = await runHITLWorkflow("approved", eventBus, registry);
 
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const stepNodeIds = steps.map((s) => s.nodeId);
 
     // Should have: start, review, deploy
@@ -271,10 +271,10 @@ describe("HITL port-based routing", () => {
 
     const { runId } = await runHITLWorkflow("rejected", eventBus, registry);
 
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const stepNodeIds = steps.map((s) => s.nodeId);
 
     // Should have: start, review, generate-question
@@ -296,10 +296,10 @@ describe("HITL port-based routing", () => {
 
     const { runId } = await runHITLWorkflow("timeout", eventBus, registry);
 
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const stepNodeIds = steps.map((s) => s.nodeId);
 
     // Should have: start, review, notify-timeout
@@ -345,14 +345,14 @@ describe("HITL port-based routing", () => {
       ],
     };
 
-    const workflow = makeWorkflow(def);
+    const workflow = await makeWorkflow(def);
     const runId = await startWorkflowExecution(workflow, {}, registry);
 
     // After start: generate-question completed, review-question is waiting
-    let run = getWorkflowRun(runId);
+    let run = await getWorkflowRun(runId);
     expect(run!.status).toBe("waiting");
 
-    let steps = getWorkflowRunStepsByRunId(runId);
+    let steps = await getWorkflowRunStepsByRunId(runId);
     expect(steps).toHaveLength(3); // start + generate-question + review-question
     const reviewStep1 = steps.find((s) => s.nodeId === "review-question");
     expect(reviewStep1!.status).toBe("waiting");
@@ -372,10 +372,10 @@ describe("HITL port-based routing", () => {
 
     // After rejection: generate-question should have re-executed (2nd time),
     // and review-question should be waiting again (2nd time)
-    run = getWorkflowRun(runId);
+    run = await getWorkflowRun(runId);
     expect(run!.status).toBe("waiting");
 
-    steps = getWorkflowRunStepsByRunId(runId);
+    steps = await getWorkflowRunStepsByRunId(runId);
     // Should have: start, generate-question(1), review-question(1), generate-question(2), review-question(2)
     expect(steps).toHaveLength(5);
 
@@ -403,10 +403,10 @@ describe("HITL port-based routing", () => {
     await approve2Promise;
 
     // Final state: completed with all steps
-    run = getWorkflowRun(runId);
+    run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
 
-    steps = getWorkflowRunStepsByRunId(runId);
+    steps = await getWorkflowRunStepsByRunId(runId);
     // start + generate(1) + review(1) + generate(2) + review(2) + success = 6 steps
     expect(steps).toHaveLength(6);
 
@@ -449,11 +449,11 @@ describe("HITL port-based routing", () => {
       ],
     };
 
-    const workflow = makeWorkflow(def);
+    const workflow = await makeWorkflow(def);
     const runId = await startWorkflowExecution(workflow, {}, registry);
 
     // After start: generate-question should be waiting (async task)
-    let run = getWorkflowRun(runId);
+    let run = await getWorkflowRun(runId);
     expect(run!.status).toBe("waiting");
 
     // Simulate async task completion for generate-question (1st iteration)
@@ -468,10 +468,10 @@ describe("HITL port-based routing", () => {
     await taskComplete1Promise;
 
     // Now review-question should be waiting for HITL approval
-    run = getWorkflowRun(runId);
+    run = await getWorkflowRun(runId);
     expect(run!.status).toBe("waiting");
 
-    let steps = getWorkflowRunStepsByRunId(runId);
+    let steps = await getWorkflowRunStepsByRunId(runId);
     const reviewStep1 = steps.find((s) => s.nodeId === "review-question" && s.status === "waiting");
     expect(reviewStep1).toBeDefined();
 
@@ -489,7 +489,7 @@ describe("HITL port-based routing", () => {
     await reject1Promise;
 
     // After rejection: generate-question should be waiting again (2nd async task)
-    run = getWorkflowRun(runId);
+    run = await getWorkflowRun(runId);
     expect(run!.status).toBe("waiting");
 
     const genMeta2 = asyncTaskExecutor.lastMeta!;
@@ -509,10 +509,10 @@ describe("HITL port-based routing", () => {
     // This is the bug: without the fix, findReadyNodes would skip review-question
     // because it was already completed in iteration 1, causing the run to complete
     // without ever pausing for HITL approval on the 2nd iteration.
-    run = getWorkflowRun(runId);
+    run = await getWorkflowRun(runId);
     expect(run!.status).toBe("waiting");
 
-    steps = getWorkflowRunStepsByRunId(runId);
+    steps = await getWorkflowRunStepsByRunId(runId);
     const reviewSteps = steps.filter((s) => s.nodeId === "review-question");
     expect(reviewSteps).toHaveLength(2); // Two iterations of review-question
 
@@ -534,10 +534,10 @@ describe("HITL port-based routing", () => {
     await approve2Promise;
 
     // Final state: completed
-    run = getWorkflowRun(runId);
+    run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
 
-    steps = getWorkflowRunStepsByRunId(runId);
+    steps = await getWorkflowRunStepsByRunId(runId);
     const successSteps2 = steps.filter((s) => s.nodeId === "success");
     expect(successSteps2).toHaveLength(1);
     expect(successSteps2[0]!.status).toBe("completed");

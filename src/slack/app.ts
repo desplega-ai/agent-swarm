@@ -64,7 +64,7 @@ export async function startSlackApp(): Promise<void> {
     console.log("[Slack] Bot connected via Socket Mode");
 
     // Start watching for task completions
-    startTaskWatcher();
+    await startTaskWatcher();
   }
 }
 

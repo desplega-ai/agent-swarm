@@ -39,7 +39,7 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
       }
 
       try {
-        const existing = getMcpServerById(args.id);
+        const existing = await getMcpServerById(args.id);
         if (!existing) {
           return {
             content: [{ type: "text", text: "MCP server not found." }],
@@ -52,7 +52,7 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
         }
 
         // Only owner or lead can update
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         if (existing.ownerAgentId !== requestInfo.agentId && !agent?.isLead) {
           return {
             content: [
@@ -78,7 +78,7 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
         if (args.headerConfigKeys !== undefined) updates.headerConfigKeys = args.headerConfigKeys;
         if (args.isEnabled !== undefined) updates.isEnabled = args.isEnabled;
 
-        const updated = updateMcpServer(args.id, updates);
+        const updated = await updateMcpServer(args.id, updates);
         if (!updated) {
           return {
             content: [{ type: "text", text: "Failed to update MCP server." }],

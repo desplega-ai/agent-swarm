@@ -200,9 +200,12 @@ let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
 /** Create a workflow persisted to the test DB */
-function makeWorkflow(def: WorkflowDefinition, overrides?: Partial<Workflow>): Workflow {
+async function makeWorkflow(
+  def: WorkflowDefinition,
+  overrides?: Partial<Workflow>,
+): Promise<Workflow> {
   workflowCounter++;
-  const workflow = createWorkflow({
+  const workflow = await createWorkflow({
     name: overrides?.name || `test-workflow-${workflowCounter}-${Date.now()}`,
     definition: def,
     triggers: overrides?.triggers,
@@ -223,14 +226,14 @@ describe("Workflow Engine v2 (Phase 3)", () => {
     } catch {
       // File doesn't exist
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
     // Clean up created workflows
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }
@@ -258,10 +261,10 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { test: true }, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run).not.toBeNull();
       expect(run!.status).toBe("completed");
 
@@ -273,7 +276,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       expect(ctx.step3).toEqual({ echo: "done" });
 
       // Verify 3 steps created
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(3);
       expect(steps.every((s) => s.status === "completed")).toBe(true);
     });
@@ -300,13 +303,13 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const stepNodeIds = steps.map((s) => s.nodeId);
       expect(stepNodeIds).toContain("start");
       expect(stepNodeIds).toContain("check");
@@ -332,13 +335,13 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const stepNodeIds = steps.map((s) => s.nodeId);
       expect(stepNodeIds).toContain("notok");
       expect(stepNodeIds).not.toContain("ok");
@@ -358,10 +361,10 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       };
 
       // Execute the workflow fully first
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       // Now walk the graph again with the same runId — steps should be skipped
@@ -370,7 +373,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       await walkGraph(def, runId, ctx, entryNodes, registry, workflow.id);
 
       // Should still have only 2 steps (no duplicates)
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(2);
 
       // Context should be re-populated from stored outputs
@@ -391,10 +394,10 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("timed out");
     }, 5_000); // Allow test up to 5s
@@ -422,13 +425,13 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(2);
     });
 
@@ -451,14 +454,14 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("Failed nodes: step1");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const nodeIds = steps.map((s) => s.nodeId);
       expect(nodeIds).not.toContain("step2");
     });
@@ -491,15 +494,15 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       // Run should be failed — the only non-entry completed step is none
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("Failed nodes: validator");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const nodeIds = steps.map((s) => s.nodeId);
       expect(nodeIds).toContain("trigger");
       expect(nodeIds).toContain("validator");
@@ -538,17 +541,17 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       // Run should complete (not fail) because branchB succeeded
       expect(run!.status).toBe("completed");
       // Should note partial failure
       expect(run!.error).toContain("Partial failure");
       expect(run!.error).toContain("branchA");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const nodeIds = steps.map((s) => s.nodeId);
       // branchA's successor should NOT have executed
       expect(nodeIds).not.toContain("afterA");
@@ -578,13 +581,13 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(2);
     });
   });
@@ -597,7 +600,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       const def: WorkflowDefinition = {
         nodes: [{ id: "a", type: "echo", config: {} }],
       };
-      const workflow = makeWorkflow(def, { cooldown: { hours: 1 } });
+      const workflow = await makeWorkflow(def, { cooldown: { hours: 1 } });
 
       // Create a successful run that just finished
       const runId = crypto.randomUUID();
@@ -608,11 +611,11 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       });
 
       // Should skip — within 1 hour cooldown
-      const skip = shouldSkipCooldown(workflow.id, { hours: 1 });
+      const skip = await shouldSkipCooldown(workflow.id, { hours: 1 });
       expect(skip).toBe(true);
 
       // Should not skip — with 0 second cooldown
-      const noSkip = shouldSkipCooldown(workflow.id, { seconds: 0 });
+      const noSkip = await shouldSkipCooldown(workflow.id, { seconds: 0 });
       expect(noSkip).toBe(false);
     });
 
@@ -621,16 +624,16 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       const def: WorkflowDefinition = {
         nodes: [{ id: "a", type: "echo", config: { message: "hi" } }],
       };
-      const workflow = makeWorkflow(def, { cooldown: { hours: 1 } });
+      const workflow = await makeWorkflow(def, { cooldown: { hours: 1 } });
 
       // Run the workflow once (should succeed)
       const run1Id = await startWorkflowExecution(workflow, {}, registry);
-      const run1 = getWorkflowRun(run1Id);
+      const run1 = await getWorkflowRun(run1Id);
       expect(run1!.status).toBe("completed");
 
       // Run again — should be skipped due to cooldown
       const run2Id = await startWorkflowExecution(workflow, {}, registry);
-      const run2 = getWorkflowRun(run2Id);
+      const run2 = await getWorkflowRun(run2Id);
       expect(run2!.status).toBe("skipped");
       expect(run2!.error).toBe("cooldown");
     });
@@ -639,22 +642,24 @@ describe("Workflow Engine v2 (Phase 3)", () => {
   // ─── Input Resolution ─────────────────────────────────────
 
   describe("Input resolution", () => {
-    test("resolves environment variables", () => {
+    test("resolves environment variables", async () => {
       process.env.TEST_WORKFLOW_VAR = "resolved_value";
       // biome-ignore lint/suspicious/noTemplateCurlyInString: testing env var syntax
-      const result = resolveInputs({ myVar: "${TEST_WORKFLOW_VAR}" });
+      const result = await resolveInputs({ myVar: "${TEST_WORKFLOW_VAR}" });
       expect(result.myVar).toBe("resolved_value");
       delete process.env.TEST_WORKFLOW_VAR;
     });
 
-    test("passes through literal strings", () => {
-      const result = resolveInputs({ name: "literal value" });
+    test("passes through literal strings", async () => {
+      const result = await resolveInputs({ name: "literal value" });
       expect(result.name).toBe("literal value");
     });
 
     test("throws on missing environment variable", () => {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: testing env var syntax
-      expect(() => resolveInputs({ bad: "${NONEXISTENT_WORKFLOW_VAR_12345}" })).toThrow("not set");
+      expect(async () => await resolveInputs({ bad: "${NONEXISTENT_WORKFLOW_VAR_12345}" })).toThrow(
+        "not set",
+      );
     });
   });
 
@@ -728,10 +733,10 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         nodes: [{ id: "fail", type: "failing", config: { errorMsg: "boom" } }],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("boom");
     });
@@ -745,13 +750,13 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const nodeIds = steps.map((s) => s.nodeId);
       expect(nodeIds).not.toContain("after");
     });
@@ -774,10 +779,10 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
       expect((run!.context as Record<string, unknown>).second).toEqual({
         echo: "got: hello",

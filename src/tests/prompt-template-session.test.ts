@@ -31,7 +31,7 @@ beforeAll(async () => {
     }
   }
   clearTemplateDefinitions();
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
@@ -106,8 +106,8 @@ describe("Session templates — individual resolution", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("system.agent.role interpolates role and agentId", () => {
-    const result = resolveTemplate("system.agent.role", {
+  test("system.agent.role interpolates role and agentId", async () => {
+    const result = await resolveTemplate("system.agent.role", {
       role: "worker",
       agentId: "agent-xyz-789",
     });
@@ -117,8 +117,8 @@ describe("Session templates — individual resolution", () => {
     expect(result.unresolved.length).toBe(0);
   });
 
-  test("system.agent.filesystem interpolates agentId", () => {
-    const result = resolveTemplate("system.agent.filesystem", {
+  test("system.agent.filesystem interpolates agentId", async () => {
+    const result = await resolveTemplate("system.agent.filesystem", {
       agentId: "agent-fs-test",
     });
     expect(result.skipped).toBe(false);
@@ -127,8 +127,8 @@ describe("Session templates — individual resolution", () => {
     expect(result.unresolved.length).toBe(0);
   });
 
-  test("system.agent.agent_fs interpolates agentId and sharedOrgId", () => {
-    const result = resolveTemplate("system.agent.agent_fs", {
+  test("system.agent.agent_fs interpolates agentId and sharedOrgId", async () => {
+    const result = await resolveTemplate("system.agent.agent_fs", {
       agentId: "agent-afs-test",
       sharedOrgId: "org-shared-123",
     });
@@ -137,8 +137,8 @@ describe("Session templates — individual resolution", () => {
     expect(result.unresolved.length).toBe(0);
   });
 
-  test("system.agent.services interpolates agentId and swarmUrl", () => {
-    const result = resolveTemplate("system.agent.services", {
+  test("system.agent.services interpolates agentId and swarmUrl", async () => {
+    const result = await resolveTemplate("system.agent.services", {
       agentId: "agent-svc-test",
       swarmUrl: "swarm.example.com",
     });
@@ -147,55 +147,55 @@ describe("Session templates — individual resolution", () => {
     expect(result.unresolved.length).toBe(0);
   });
 
-  test("system.agent.lead contains delegation rules", () => {
-    const result = resolveTemplate("system.agent.lead", {});
+  test("system.agent.lead contains delegation rules", async () => {
+    const result = await resolveTemplate("system.agent.lead", {});
     expect(result.text).toContain("CRITICAL: You are a coordinator");
     expect(result.text).toContain("coordinator");
     expect(result.text).not.toContain("slack-reply");
   });
 
-  test("system.agent.slack contains Slack tool guidance", () => {
-    const result = resolveTemplate("system.agent.slack", {});
+  test("system.agent.slack contains Slack tool guidance", async () => {
+    const result = await resolveTemplate("system.agent.slack", {});
     expect(result.text).toContain("Slack Tools");
     expect(result.text).toContain("slack-reply");
     expect(result.text).toContain("slack-read");
     expect(result.text).toContain("slack-list-channels");
   });
 
-  test("system.agent.worker contains worker tools", () => {
-    const result = resolveTemplate("system.agent.worker", {});
+  test("system.agent.worker contains worker tools", async () => {
+    const result = await resolveTemplate("system.agent.worker", {});
     expect(result.text).toContain("store-progress");
     expect(result.text).toContain("task-action");
   });
 
-  test("system.agent.register contains join-swarm", () => {
-    const result = resolveTemplate("system.agent.register", {});
+  test("system.agent.register contains join-swarm", async () => {
+    const result = await resolveTemplate("system.agent.register", {});
     expect(result.text).toContain("join-swarm");
   });
 
-  test("system.agent.self_awareness contains architecture details", () => {
-    const result = resolveTemplate("system.agent.self_awareness", {});
+  test("system.agent.self_awareness contains architecture details", async () => {
+    const result = await resolveTemplate("system.agent.self_awareness", {});
     expect(result.text).toContain("desplega-ai/agent-swarm");
     expect(result.text).toContain("Docker container");
   });
 
-  test("system.agent.context_mode contains context-mode reference", () => {
-    const result = resolveTemplate("system.agent.context_mode", {});
+  test("system.agent.context_mode contains context-mode reference", async () => {
+    const result = await resolveTemplate("system.agent.context_mode", {});
     expect(result.text).toContain("context-mode");
     expect(result.text).toContain("batch_execute");
   });
 
   // system.agent.guidelines was removed — its content was redundant with worker/lead templates
 
-  test("system.agent.system contains package info", () => {
-    const result = resolveTemplate("system.agent.system", {});
+  test("system.agent.system contains package info", async () => {
+    const result = await resolveTemplate("system.agent.system", {});
     expect(result.text).toContain("Ubuntu");
     expect(result.text).toContain("gh");
     expect(result.text).toContain("glab");
   });
 
-  test("system.agent.artifacts contains artifact info", () => {
-    const result = resolveTemplate("system.agent.artifacts", {});
+  test("system.agent.artifacts contains artifact info", async () => {
+    const result = await resolveTemplate("system.agent.artifacts", {});
     expect(result.text).toContain("localtunnel");
     expect(result.text).toContain("/workspace/personal/artifacts/");
   });
@@ -210,8 +210,8 @@ describe("Session templates — composite resolution", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("system.session.lead resolves all template references", () => {
-    const result = resolveTemplate("system.session.lead", {
+  test("system.session.lead resolves all template references", async () => {
+    const result = await resolveTemplate("system.session.lead", {
       role: "lead",
       agentId: "lead-agent-001",
     });
@@ -245,8 +245,8 @@ describe("Session templates — composite resolution", () => {
     expect(result.text).toContain("System packages available");
   });
 
-  test("system.session.worker resolves all template references", () => {
-    const result = resolveTemplate("system.session.worker", {
+  test("system.session.worker resolves all template references", async () => {
+    const result = await resolveTemplate("system.session.worker", {
       role: "worker",
       agentId: "worker-agent-001",
     });
@@ -280,8 +280,8 @@ describe("Session templates — composite resolution", () => {
     expect(result.text).toContain("System packages available");
   });
 
-  test("composite does NOT include conditional sections (agent_fs, services, artifacts)", () => {
-    const result = resolveTemplate("system.session.lead", {
+  test("composite does NOT include conditional sections (agent_fs, services, artifacts)", async () => {
+    const result = await resolveTemplate("system.session.lead", {
       role: "lead",
       agentId: "test-agent",
     });
@@ -292,12 +292,12 @@ describe("Session templates — composite resolution", () => {
     expect(result.text).not.toContain("localtunnel");
   });
 
-  test("lead and worker composites differ only in lead vs worker section", () => {
-    const leadResult = resolveTemplate("system.session.lead", {
+  test("lead and worker composites differ only in lead vs worker section", async () => {
+    const leadResult = await resolveTemplate("system.session.lead", {
       role: "lead",
       agentId: "test-agent",
     });
-    const workerResult = resolveTemplate("system.session.worker", {
+    const workerResult = await resolveTemplate("system.session.worker", {
       role: "worker",
       agentId: "test-agent",
     });

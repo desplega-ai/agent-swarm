@@ -31,7 +31,7 @@ describe("script MCP tools", () => {
     savedDatabasePath = process.env.DATABASE_PATH;
     process.env.DATABASE_PATH = TEST_DB_PATH;
     await removeDbFiles(TEST_DB_PATH);
-    const server = createServer();
+    const server = await createServer();
     tools = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
       ._registeredTools;
   });

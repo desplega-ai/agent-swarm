@@ -24,7 +24,7 @@ export const registerGetWorkflowTool = (server: McpServer) => {
     },
     async ({ id }) => {
       try {
-        const workflow = getWorkflow(id);
+        const workflow = await getWorkflow(id);
         if (!workflow) {
           return {
             content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],

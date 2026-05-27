@@ -38,7 +38,7 @@ export const registerMyAgentInfoTool = (server: McpServer) => {
         };
       }
 
-      const maybeAgent = getAgentById(requestInfo.agentId);
+      const maybeAgent = await getAgentById(requestInfo.agentId);
 
       let registeredMessage =
         " You are not registered as an agent, use the 'join-swarm' tool to register, use a nice name related to the project you are working on if not provided by the user.";

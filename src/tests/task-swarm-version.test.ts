@@ -18,7 +18,7 @@ describe("Task swarmVersion tracking", () => {
     try {
       await unlink(TEST_DB_PATH);
     } catch {}
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
@@ -30,40 +30,40 @@ describe("Task swarmVersion tracking", () => {
     }
   });
 
-  test("createTaskExtended stamps pkg.version on new tasks", () => {
-    const agent = createAgent({
+  test("createTaskExtended stamps pkg.version on new tasks", async () => {
+    const agent = await createAgent({
       id: "swarm-version-agent-1",
       name: "Swarm Version Agent",
       isLead: false,
       status: "idle",
     });
 
-    const task = createTaskExtended("extended task", { agentId: agent.id });
+    const task = await createTaskExtended("extended task", { agentId: agent.id });
 
     expect(task.swarmVersion).toBe(pkg.version);
 
-    const reloaded = getTaskById(task.id);
+    const reloaded = await getTaskById(task.id);
     expect(reloaded?.swarmVersion).toBe(pkg.version);
   });
 
-  test("createTask stamps pkg.version on new tasks", () => {
-    const agent = createAgent({
+  test("createTask stamps pkg.version on new tasks", async () => {
+    const agent = await createAgent({
       id: "swarm-version-agent-2",
       name: "Swarm Version Agent 2",
       isLead: false,
       status: "idle",
     });
 
-    const task = createTask(agent.id, "basic task");
+    const task = await createTask(agent.id, "basic task");
 
     expect(task.swarmVersion).toBe(pkg.version);
 
-    const reloaded = getTaskById(task.id);
+    const reloaded = await getTaskById(task.id);
     expect(reloaded?.swarmVersion).toBe(pkg.version);
   });
 
-  test("column exists and is indexed", () => {
-    const db = getDb();
+  test("column exists and is indexed", async () => {
+    const db = await getDb();
     const columns = db
       .prepare<{ name: string }, []>("PRAGMA table_info(agent_tasks)")
       .all()

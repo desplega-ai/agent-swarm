@@ -65,7 +65,7 @@ export const registerContextHistoryTool = (server: McpServer) => {
       const targetAgentId = agentId ?? requestInfo.agentId;
 
       // Verify target agent exists
-      const targetAgent = getAgentById(targetAgentId);
+      const targetAgent = await getAgentById(targetAgentId);
       if (!targetAgent) {
         return {
           content: [{ type: "text", text: "Agent not found." }],
@@ -79,7 +79,7 @@ export const registerContextHistoryTool = (server: McpServer) => {
 
       // Access control: agents can see their own history, lead can see any
       if (targetAgentId !== requestInfo.agentId) {
-        const callerAgent = getAgentById(requestInfo.agentId);
+        const callerAgent = await getAgentById(requestInfo.agentId);
         if (!callerAgent?.isLead) {
           return {
             content: [
@@ -97,7 +97,7 @@ export const registerContextHistoryTool = (server: McpServer) => {
         }
       }
 
-      const versions = getContextVersionHistory({
+      const versions = await getContextVersionHistory({
         agentId: targetAgentId,
         field: field as VersionableField | undefined,
         limit: limit ?? 10,

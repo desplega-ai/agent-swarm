@@ -47,10 +47,10 @@ export function getPathSegments(url: string): string[] {
 }
 
 /** Add capacity info to agent response */
-export function agentWithCapacity<T extends { id: string; maxTasks?: number }>(
+export async function agentWithCapacity<T extends { id: string; maxTasks?: number }>(
   agent: T,
-): T & { capacity: { current: number; max: number; available: number } } {
-  const activeCount = getActiveTaskCount(agent.id);
+): Promise<T & { capacity: { current: number; max: number; available: number } }> {
+  const activeCount = await getActiveTaskCount(agent.id);
   const max = agent.maxTasks ?? 1;
   return {
     ...agent,

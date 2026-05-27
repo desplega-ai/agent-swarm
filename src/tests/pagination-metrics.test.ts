@@ -34,7 +34,7 @@ describe("pagination metrics", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
@@ -46,42 +46,52 @@ describe("pagination metrics", () => {
     }
   });
 
-  test("getTasksCount is filter-aware and independent of limit/offset", () => {
-    const totalBefore = getTasksCount();
+  test("getTasksCount is filter-aware and independent of limit/offset", async () => {
+    const totalBefore = await getTasksCount();
 
     for (let i = 0; i < 7; i++) {
-      createTaskExtended(`alpha task ${i}`, { tags: ["alpha"] });
+      await createTaskExtended(`alpha task ${i}`, { tags: ["alpha"] });
     }
     for (let i = 0; i < 3; i++) {
-      createTaskExtended(`beta task ${i}`, { tags: ["beta"] });
+      await createTaskExtended(`beta task ${i}`, { tags: ["beta"] });
     }
 
     // Filtered count matches the number of matching rows...
-    expect(getTasksCount({ tags: ["alpha"] })).toBe(7);
-    expect(getTasksCount({ tags: ["beta"] })).toBe(3);
+    expect(await getTasksCount({ tags: ["alpha"] })).toBe(7);
+    expect(await getTasksCount({ tags: ["beta"] })).toBe(3);
 
     // ...and is unaffected by the page window applied to the list query.
-    const page1 = getAllTasks({ tags: ["alpha"], limit: 2, offset: 0 });
-    const page2 = getAllTasks({ tags: ["alpha"], limit: 2, offset: 2 });
+    const page1 = await getAllTasks({ tags: ["alpha"], limit: 2, offset: 0 });
+    const page2 = await getAllTasks({ tags: ["alpha"], limit: 2, offset: 2 });
     expect(page1).toHaveLength(2);
     expect(page2).toHaveLength(2);
-    expect(getTasksCount({ tags: ["alpha"], limit: 2, offset: 0 })).toBe(7);
+    expect(await getTasksCount({ tags: ["alpha"], limit: 2, offset: 0 })).toBe(7);
 
     // The unfiltered count covers every task created above.
-    expect(getTasksCount() - totalBefore).toBe(10);
+    expect((await getTasksCount()) - totalBefore).toBe(10);
   });
 
-  test("getTasksCount filter-aware on search", () => {
-    createTaskExtended("needle-xyz unique marker", {});
-    expect(getTasksCount({ search: "needle-xyz" })).toBe(1);
-    expect(getAllTasks({ search: "needle-xyz" })).toHaveLength(1);
+  test("getTasksCount filter-aware on search", async () => {
+    await createTaskExtended("needle-xyz unique marker", {});
+    expect(await getTasksCount({ search: "needle-xyz" })).toBe(1);
+    expect(await getAllTasks({ search: "needle-xyz" })).toHaveLength(1);
   });
 
-  test("countAllPages and countPagesByAgent", () => {
-    const a1 = createAgent({ id: "pm-agent-1", name: "PM Agent 1", isLead: false, status: "idle" });
-    const a2 = createAgent({ id: "pm-agent-2", name: "PM Agent 2", isLead: false, status: "busy" });
+  test("countAllPages and countPagesByAgent", async () => {
+    const a1 = await createAgent({
+      id: "pm-agent-1",
+      name: "PM Agent 1",
+      isLead: false,
+      status: "idle",
+    });
+    const a2 = await createAgent({
+      id: "pm-agent-2",
+      name: "PM Agent 2",
+      isLead: false,
+      status: "busy",
+    });
     for (let i = 0; i < 4; i++) {
-      createPage({
+      await createPage({
         agentId: a1.id,
         slug: `pm-page-a1-${i}`,
         title: `Page ${i}`,
@@ -91,7 +101,7 @@ describe("pagination metrics", () => {
       });
     }
     for (let i = 0; i < 2; i++) {
-      createPage({
+      await createPage({
         agentId: a2.id,
         slug: `pm-page-a2-${i}`,
         title: `Page ${i}`,
@@ -101,47 +111,47 @@ describe("pagination metrics", () => {
       });
     }
 
-    expect(countAllPages()).toBe(6);
-    expect(countPagesByAgent(a1.id)).toBe(4);
-    expect(countPagesByAgent(a2.id)).toBe(2);
+    expect(await countAllPages()).toBe(6);
+    expect(await countPagesByAgent(a1.id)).toBe(4);
+    expect(await countPagesByAgent(a2.id)).toBe(2);
   });
 
-  test("countSessions is filter-aware on source", () => {
+  test("countSessions is filter-aware on source", async () => {
     // Sessions are root tasks (parentTaskId IS NULL). Tasks created here have
     // no parent, so each is its own session. Assertions are delta-based so the
     // test is robust against tasks created by earlier tests in this file.
-    const mcpBefore = countSessions({ source: ["mcp"] });
-    const slackBefore = countSessions({ source: ["slack"] });
-    const bothBefore = countSessions({ source: ["mcp", "slack"] });
+    const mcpBefore = await countSessions({ source: ["mcp"] });
+    const slackBefore = await countSessions({ source: ["slack"] });
+    const bothBefore = await countSessions({ source: ["mcp", "slack"] });
 
     for (let i = 0; i < 5; i++) {
-      createTaskExtended(`mcp session ${i}`, { source: "mcp" });
+      await createTaskExtended(`mcp session ${i}`, { source: "mcp" });
     }
     for (let i = 0; i < 2; i++) {
-      createTaskExtended(`slack session ${i}`, { source: "slack" });
+      await createTaskExtended(`slack session ${i}`, { source: "slack" });
     }
 
-    expect(countSessions({ source: ["mcp"] }) - mcpBefore).toBe(5);
-    expect(countSessions({ source: ["slack"] }) - slackBefore).toBe(2);
-    expect(countSessions({ source: ["mcp", "slack"] }) - bothBefore).toBe(7);
+    expect((await countSessions({ source: ["mcp"] })) - mcpBefore).toBe(5);
+    expect((await countSessions({ source: ["slack"] })) - slackBefore).toBe(2);
+    expect((await countSessions({ source: ["mcp", "slack"] })) - bothBefore).toBe(7);
     // q filter narrows on top of source.
-    expect(countSessions({ source: ["slack"], q: "slack session" }) - slackBefore).toBe(2);
-    expect(countSessions({ q: "no-such-session-marker-zzz" })).toBe(0);
+    expect((await countSessions({ source: ["slack"], q: "slack session" })) - slackBefore).toBe(2);
+    expect(await countSessions({ q: "no-such-session-marker-zzz" })).toBe(0);
   });
 
-  test("getSwarmMetrics returns coherent aggregate counts", () => {
-    createWorkflow({
+  test("getSwarmMetrics returns coherent aggregate counts", async () => {
+    await createWorkflow({
       name: "PM Workflow A",
       definition: { nodes: [{ id: "n1", type: "raw-llm", config: {} }], onNodeFailure: "fail" },
     });
-    createWorkflow({
+    await createWorkflow({
       name: "PM Workflow B",
       definition: { nodes: [{ id: "n1", type: "raw-llm", config: {} }], onNodeFailure: "fail" },
     });
-    createSkill({ name: "pm-skill", description: "test skill", content: "body" });
-    insertActiveSession({ agentId: "pm-agent-1", triggerType: "task" });
+    await createSkill({ name: "pm-skill", description: "test skill", content: "body" });
+    await insertActiveSession({ agentId: "pm-agent-1", triggerType: "task" });
 
-    const m = getSwarmMetrics();
+    const m = await getSwarmMetrics();
 
     // tasks: by_status counts sum to the total.
     expect(m.tasks.total).toBeGreaterThan(0);

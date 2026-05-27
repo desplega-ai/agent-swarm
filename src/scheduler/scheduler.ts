@@ -1,6 +1,11 @@
 import { ensure } from "@desplega.ai/business-use";
 import { CronExpressionParser } from "cron-parser";
-import { getDb, getDueScheduledTasks, getScheduledTaskById, updateScheduledTask } from "@/be/db";
+import {
+  getDueScheduledTasks,
+  getScheduledTaskById,
+  runDbTransaction,
+  updateScheduledTask,
+} from "@/be/db";
 import { scheduleContextKey } from "@/tasks/context-key";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import type { ScheduledTask } from "@/types";
@@ -18,7 +23,7 @@ let executorRegistry: ExecutorRegistry | null = null;
  */
 async function recoverMissedSchedules(): Promise<void> {
   const now = new Date();
-  const dueSchedules = getDueScheduledTasks();
+  const dueSchedules = await getDueScheduledTasks();
 
   for (const schedule of dueSchedules) {
     if (!schedule.nextRunAt) continue;
@@ -44,8 +49,8 @@ async function recoverMissedSchedules(): Promise<void> {
       }
 
       if (!triggeredWorkflows) {
-        const tx = getDb().transaction(() => {
-          createTaskWithSiblingAwareness(schedule.taskTemplate, {
+        await runDbTransaction(async () => {
+          await createTaskWithSiblingAwareness(schedule.taskTemplate, {
             creatorAgentId: schedule.createdByAgentId,
             taskType: schedule.taskType,
             tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "recovered"],
@@ -57,12 +62,11 @@ async function recoverMissedSchedules(): Promise<void> {
             contextKey: scheduleContextKey({ scheduleId: schedule.id }),
           });
         });
-        tx();
       }
 
       // Update schedule state regardless of workflow/task path
       if (schedule.scheduleType === "one_time") {
-        updateScheduledTask(schedule.id, {
+        await updateScheduledTask(schedule.id, {
           lastRunAt: now.toISOString(),
           nextRunAt: null,
           enabled: false,
@@ -70,7 +74,7 @@ async function recoverMissedSchedules(): Promise<void> {
         });
       } else {
         const nextRun = calculateNextRun(schedule, now);
-        updateScheduledTask(schedule.id, {
+        await updateScheduledTask(schedule.id, {
           lastRunAt: now.toISOString(),
           nextRunAt: nextRun,
           lastUpdatedAt: now.toISOString(),
@@ -149,8 +153,8 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
 
     if (!triggeredWorkflows) {
       // No workflows linked — create standalone task (existing behavior)
-      getDb().transaction(() => {
-        createTaskWithSiblingAwareness(schedule.taskTemplate, {
+      await runDbTransaction(async () => {
+        await createTaskWithSiblingAwareness(schedule.taskTemplate, {
           creatorAgentId: schedule.createdByAgentId,
           taskType: schedule.taskType,
           tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
@@ -161,13 +165,13 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
           source: "schedule",
           contextKey: scheduleContextKey({ scheduleId: schedule.id }),
         });
-      })();
+      });
     }
 
     // Update schedule state regardless of workflow/task path
     const now = new Date().toISOString();
     if (schedule.scheduleType === "one_time") {
-      updateScheduledTask(schedule.id, {
+      await updateScheduledTask(schedule.id, {
         lastRunAt: now,
         nextRunAt: null,
         enabled: false,
@@ -179,7 +183,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
       console.log(`[Scheduler] Executed one-time schedule "${schedule.name}", auto-disabled`);
     } else {
       const nextRun = calculateNextRun(schedule, new Date());
-      updateScheduledTask(schedule.id, {
+      await updateScheduledTask(schedule.id, {
         lastRunAt: now,
         nextRunAt: nextRun,
         lastUpdatedAt: now,
@@ -229,7 +233,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
       console.log(`[Scheduler] Backing off "${schedule.name}" for ${backoff / 1000}s`);
     }
 
-    updateScheduledTask(schedule.id, updates);
+    await updateScheduledTask(schedule.id, updates);
   }
 }
 
@@ -286,7 +290,7 @@ async function processSchedules(): Promise<void> {
   isProcessing = true;
 
   try {
-    const dueSchedules = getDueScheduledTasks();
+    const dueSchedules = await getDueScheduledTasks();
 
     for (const schedule of dueSchedules) {
       try {
@@ -318,7 +322,7 @@ export function stopScheduler(): void {
  * @param scheduleId The ID of the schedule to run
  */
 export async function runScheduleNow(scheduleId: string): Promise<void> {
-  const schedule = getScheduledTaskById(scheduleId);
+  const schedule = await getScheduledTaskById(scheduleId);
   if (!schedule) {
     throw new Error(`Schedule not found: ${scheduleId}`);
   }
@@ -340,8 +344,8 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
 
   if (!triggeredWorkflows) {
     // No workflows linked — create standalone task (existing behavior)
-    getDb().transaction(() => {
-      createTaskWithSiblingAwareness(schedule.taskTemplate, {
+    await runDbTransaction(async () => {
+      await createTaskWithSiblingAwareness(schedule.taskTemplate, {
         creatorAgentId: schedule.createdByAgentId,
         taskType: schedule.taskType,
         tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
@@ -352,13 +356,13 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
         source: "schedule",
         contextKey: scheduleContextKey({ scheduleId: schedule.id }),
       });
-    })();
+    });
   }
 
   // Update schedule state
   const now = new Date().toISOString();
   if (schedule.scheduleType === "one_time") {
-    updateScheduledTask(schedule.id, {
+    await updateScheduledTask(schedule.id, {
       lastRunAt: now,
       nextRunAt: null,
       enabled: false,
@@ -369,7 +373,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
     );
   } else {
     // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
-    updateScheduledTask(schedule.id, {
+    await updateScheduledTask(schedule.id, {
       lastRunAt: now,
       lastUpdatedAt: now,
     });

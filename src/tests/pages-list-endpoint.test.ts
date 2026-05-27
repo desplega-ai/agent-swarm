@@ -65,7 +65,7 @@ describe("GET /api/pages — listing endpoint", () => {
     try {
       await unlink(TEST_DB_PATH);
     } catch {}
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
     server = createTestServer();
     await new Promise<void>((resolve) => {
       server.listen(TEST_PORT, () => resolve());

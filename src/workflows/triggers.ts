@@ -42,10 +42,10 @@ function resolveSignature(headers: HeaderBag, hmacHeader: string): string | unde
  * and `${ENV_VAR}` env refs (reusing the workflow input resolver); a plain
  * string is treated as a literal. Resolved per request, never at create time.
  */
-function resolveHmacSecret(raw: string): string {
+async function resolveHmacSecret(raw: string): Promise<string> {
   if (/^secret\..+$/.test(raw) || /^\$\{.+\}$/.test(raw)) {
     try {
-      return resolveInputValue(raw);
+      return await resolveInputValue(raw);
     } catch (err) {
       throw new WebhookError(
         `Failed to resolve webhook HMAC secret: ${err instanceof Error ? err.message : String(err)}`,
@@ -74,7 +74,7 @@ export async function handleWebhookTrigger(
   headers: HeaderBag,
   registry: ExecutorRegistry,
 ): Promise<{ runId: string }> {
-  const workflow = getWorkflow(workflowId);
+  const workflow = await getWorkflow(workflowId);
   if (!workflow) {
     throw new WebhookError("Workflow not found", 404);
   }
@@ -96,7 +96,7 @@ export async function handleWebhookTrigger(
       throw new WebhookError("Missing signature", 401);
     }
 
-    const secret = resolveHmacSecret(webhookTrigger.hmacSecret);
+    const secret = await resolveHmacSecret(webhookTrigger.hmacSecret);
     const isValid = verifyHmacSignature(
       secret,
       typeof payload === "string" ? payload : JSON.stringify(payload),
@@ -142,7 +142,7 @@ export async function handleScheduleTrigger(
   schedule: ScheduledTask,
   registry: ExecutorRegistry,
 ): Promise<string[]> {
-  const workflows = getWorkflowsByScheduleId(scheduleId);
+  const workflows = await getWorkflowsByScheduleId(scheduleId);
   if (workflows.length === 0) return [];
 
   const runIds: string[] = [];

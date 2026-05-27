@@ -23,23 +23,23 @@ export function hasOtherUserMention(text: string, botUserId: string): boolean {
  * - `swarm#all` → all non-lead agents
  * - Everything else → lead agent
  */
-export function routeMessage(
+export async function routeMessage(
   text: string,
   botUserId: string,
   botMentioned: boolean,
   threadContext?: ThreadContext,
-): AgentMatch[] {
+): Promise<AgentMatch[]> {
   const matches: AgentMatch[] = [];
   const requireMentionForThreadFollowup =
     process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION === "true";
-  const agents = getAllAgents().filter((a) => a.status !== "offline");
+  const agents = (await getAllAgents()).filter((a) => a.status !== "offline");
 
   // Check for explicit swarm#<id> syntax
   const idMatches = text.matchAll(/swarm#([a-f0-9-]{36})/gi);
   for (const match of idMatches) {
     const agentId = match[1];
     if (!agentId) continue;
-    const agent = getAgentById(agentId);
+    const agent = await getAgentById(agentId);
     if (agent && agent.status !== "offline") {
       matches.push({ agent, matchedText: match[0] });
     }
@@ -66,7 +66,10 @@ export function routeMessage(
       );
       return matches;
     }
-    const workingAgent = getAgentWorkingOnThread(threadContext.channelId, threadContext.threadTs);
+    const workingAgent = await getAgentWorkingOnThread(
+      threadContext.channelId,
+      threadContext.threadTs,
+    );
     if (workingAgent && workingAgent.status !== "offline") {
       console.log(
         `[Slack] Thread follow-up: routing to agent ${workingAgent.name} (${workingAgent.id}) in thread ${threadContext.threadTs}`,
@@ -77,7 +80,7 @@ export function routeMessage(
       console.log(
         `[Slack] Thread follow-up: agent ${workingAgent.name} is offline, routing to lead`,
       );
-      const allAgents = getAllAgents();
+      const allAgents = await getAllAgents();
       const lead = allAgents.find((a) => a.isLead && a.status !== "offline");
       if (lead) {
         matches.push({ agent: lead, matchedText: "thread follow-up (lead fallback)" });

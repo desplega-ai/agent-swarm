@@ -16,8 +16,8 @@ import {
 
 const TEST_DB_PATH = "./test-db-capacity.sqlite";
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(() => {
@@ -32,19 +32,19 @@ afterAll(() => {
 });
 
 describe("Agent Capacity Functions", () => {
-  test("getActiveTaskCount returns 0 for agent with no tasks", () => {
-    const agent = createAgent({
+  test("getActiveTaskCount returns 0 for agent with no tasks", async () => {
+    const agent = await createAgent({
       name: "test-agent-1",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    expect(getActiveTaskCount(agent.id)).toBe(0);
+    expect(await getActiveTaskCount(agent.id)).toBe(0);
   });
 
-  test("getActiveTaskCount returns count of in_progress tasks", () => {
-    const agent = createAgent({
+  test("getActiveTaskCount returns count of in_progress tasks", async () => {
+    const agent = await createAgent({
       name: "test-agent-2",
       isLead: false,
       status: "idle",
@@ -52,19 +52,19 @@ describe("Agent Capacity Functions", () => {
     });
 
     // Create and start two tasks
-    const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-    const task2 = createTaskExtended("Task 2", { agentId: agent.id });
-    const _task3 = createTaskExtended("Task 3", { agentId: agent.id });
+    const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+    const task2 = await createTaskExtended("Task 2", { agentId: agent.id });
+    const _task3 = await createTaskExtended("Task 3", { agentId: agent.id });
 
-    startTask(task1.id);
-    startTask(task2.id);
+    await startTask(task1.id);
+    await startTask(task2.id);
     // task3 stays pending
 
-    expect(getActiveTaskCount(agent.id)).toBe(2);
+    expect(await getActiveTaskCount(agent.id)).toBe(2);
   });
 
-  test("hasCapacity returns true when under limit", () => {
-    const agent = createAgent({
+  test("hasCapacity returns true when under limit", async () => {
+    const agent = await createAgent({
       name: "test-agent-3",
       isLead: false,
       status: "idle",
@@ -72,17 +72,17 @@ describe("Agent Capacity Functions", () => {
       maxTasks: 3,
     });
 
-    expect(hasCapacity(agent.id)).toBe(true);
+    expect(await hasCapacity(agent.id)).toBe(true);
 
     // Start one task
-    const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-    startTask(task1.id);
+    const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+    await startTask(task1.id);
 
-    expect(hasCapacity(agent.id)).toBe(true);
+    expect(await hasCapacity(agent.id)).toBe(true);
   });
 
-  test("hasCapacity returns false when at limit", () => {
-    const agent = createAgent({
+  test("hasCapacity returns false when at limit", async () => {
+    const agent = await createAgent({
       name: "test-agent-4",
       isLead: false,
       status: "idle",
@@ -91,16 +91,16 @@ describe("Agent Capacity Functions", () => {
     });
 
     // Start two tasks to fill capacity
-    const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-    const task2 = createTaskExtended("Task 2", { agentId: agent.id });
-    startTask(task1.id);
-    startTask(task2.id);
+    const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+    const task2 = await createTaskExtended("Task 2", { agentId: agent.id });
+    await startTask(task1.id);
+    await startTask(task2.id);
 
-    expect(hasCapacity(agent.id)).toBe(false);
+    expect(await hasCapacity(agent.id)).toBe(false);
   });
 
-  test("getRemainingCapacity returns correct count", () => {
-    const agent = createAgent({
+  test("getRemainingCapacity returns correct count", async () => {
+    const agent = await createAgent({
       name: "test-agent-5",
       isLead: false,
       status: "idle",
@@ -108,23 +108,23 @@ describe("Agent Capacity Functions", () => {
       maxTasks: 3,
     });
 
-    expect(getRemainingCapacity(agent.id)).toBe(3);
+    expect(await getRemainingCapacity(agent.id)).toBe(3);
 
-    const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-    startTask(task1.id);
-    expect(getRemainingCapacity(agent.id)).toBe(2);
+    const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+    await startTask(task1.id);
+    expect(await getRemainingCapacity(agent.id)).toBe(2);
 
-    const task2 = createTaskExtended("Task 2", { agentId: agent.id });
-    startTask(task2.id);
-    expect(getRemainingCapacity(agent.id)).toBe(1);
+    const task2 = await createTaskExtended("Task 2", { agentId: agent.id });
+    await startTask(task2.id);
+    expect(await getRemainingCapacity(agent.id)).toBe(1);
 
-    const task3 = createTaskExtended("Task 3", { agentId: agent.id });
-    startTask(task3.id);
-    expect(getRemainingCapacity(agent.id)).toBe(0);
+    const task3 = await createTaskExtended("Task 3", { agentId: agent.id });
+    await startTask(task3.id);
+    expect(await getRemainingCapacity(agent.id)).toBe(0);
   });
 
-  test("updateAgentStatusFromCapacity sets busy when tasks in progress", () => {
-    const agent = createAgent({
+  test("updateAgentStatusFromCapacity sets busy when tasks in progress", async () => {
+    const agent = await createAgent({
       name: "test-agent-6",
       isLead: false,
       status: "idle",
@@ -132,17 +132,17 @@ describe("Agent Capacity Functions", () => {
       maxTasks: 2,
     });
 
-    expect(getAgentById(agent.id)?.status).toBe("idle");
+    expect((await getAgentById(agent.id))?.status).toBe("idle");
 
-    const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-    startTask(task1.id);
-    updateAgentStatusFromCapacity(agent.id);
+    const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+    await startTask(task1.id);
+    await updateAgentStatusFromCapacity(agent.id);
 
-    expect(getAgentById(agent.id)?.status).toBe("busy");
+    expect((await getAgentById(agent.id))?.status).toBe("busy");
   });
 
-  test("updateAgentStatusFromCapacity sets idle when no tasks in progress", () => {
-    const agent = createAgent({
+  test("updateAgentStatusFromCapacity sets idle when no tasks in progress", async () => {
+    const agent = await createAgent({
       name: "test-agent-7",
       isLead: false,
       status: "busy",
@@ -151,12 +151,12 @@ describe("Agent Capacity Functions", () => {
     });
 
     // No tasks assigned, should become idle
-    updateAgentStatusFromCapacity(agent.id);
-    expect(getAgentById(agent.id)?.status).toBe("idle");
+    await updateAgentStatusFromCapacity(agent.id);
+    expect((await getAgentById(agent.id))?.status).toBe("idle");
   });
 
-  test("updateAgentStatusFromCapacity does not modify offline status", () => {
-    const agent = createAgent({
+  test("updateAgentStatusFromCapacity does not modify offline status", async () => {
+    const agent = await createAgent({
       name: "test-agent-8",
       isLead: false,
       status: "offline",
@@ -164,12 +164,12 @@ describe("Agent Capacity Functions", () => {
       maxTasks: 2,
     });
 
-    updateAgentStatusFromCapacity(agent.id);
-    expect(getAgentById(agent.id)?.status).toBe("offline");
+    await updateAgentStatusFromCapacity(agent.id);
+    expect((await getAgentById(agent.id))?.status).toBe("offline");
   });
 
-  test("agent defaults to maxTasks=1 when not specified", () => {
-    const agent = createAgent({
+  test("agent defaults to maxTasks=1 when not specified", async () => {
+    const agent = await createAgent({
       name: "test-agent-9",
       isLead: false,
       status: "idle",
@@ -180,14 +180,14 @@ describe("Agent Capacity Functions", () => {
     expect(agent.maxTasks).toBe(1);
 
     // Can only have 1 in-progress task
-    const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-    startTask(task1.id);
+    const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+    await startTask(task1.id);
 
-    expect(hasCapacity(agent.id)).toBe(false);
+    expect(await hasCapacity(agent.id)).toBe(false);
   });
 
-  test("completing tasks restores capacity", () => {
-    const agent = createAgent({
+  test("completing tasks restores capacity", async () => {
+    const agent = await createAgent({
       name: "test-agent-10",
       isLead: false,
       status: "idle",
@@ -195,18 +195,18 @@ describe("Agent Capacity Functions", () => {
       maxTasks: 2,
     });
 
-    const task1 = createTaskExtended("Task 1", { agentId: agent.id });
-    const task2 = createTaskExtended("Task 2", { agentId: agent.id });
-    startTask(task1.id);
-    startTask(task2.id);
+    const task1 = await createTaskExtended("Task 1", { agentId: agent.id });
+    const task2 = await createTaskExtended("Task 2", { agentId: agent.id });
+    await startTask(task1.id);
+    await startTask(task2.id);
 
-    expect(hasCapacity(agent.id)).toBe(false);
-    expect(getRemainingCapacity(agent.id)).toBe(0);
+    expect(await hasCapacity(agent.id)).toBe(false);
+    expect(await getRemainingCapacity(agent.id)).toBe(0);
 
     // Complete one task
-    completeTask(task1.id, "done");
+    await completeTask(task1.id, "done");
 
-    expect(hasCapacity(agent.id)).toBe(true);
-    expect(getRemainingCapacity(agent.id)).toBe(1);
+    expect(await hasCapacity(agent.id)).toBe(true);
+    expect(await getRemainingCapacity(agent.id)).toBe(1);
   });
 });

@@ -29,7 +29,7 @@ export const registerSkillPublishTool = (server: McpServer) => {
         };
       }
 
-      const skill = getSkillById(args.skillId);
+      const skill = await getSkillById(args.skillId);
       if (!skill) {
         return {
           content: [{ type: "text", text: "Skill not found." }],
@@ -64,7 +64,7 @@ export const registerSkillPublishTool = (server: McpServer) => {
       }
 
       // Find the lead agent
-      const leadAgent = getLeadAgent();
+      const leadAgent = await getLeadAgent();
 
       if (!leadAgent) {
         return {
@@ -78,7 +78,7 @@ export const registerSkillPublishTool = (server: McpServer) => {
       }
 
       // Create an approval task for the lead
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const taskDescription = `Skill Approval Request: "${skill.name}"
 
 Agent ${agent?.name ?? requestInfo.agentId} wants to publish a personal skill to swarm scope.
@@ -95,7 +95,7 @@ ${skill.content}
 To approve: update the skill's scope to "swarm" using skill-update.
 To reject: close this task with a rejection reason.`;
 
-      const task = createTaskExtended(taskDescription, {
+      const task = await createTaskExtended(taskDescription, {
         agentId: leadAgent.id,
         creatorAgentId: requestInfo.agentId,
         source: "mcp",

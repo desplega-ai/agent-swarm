@@ -41,18 +41,20 @@ function extractText(message: NonNullable<KapsoWebhookPayload["message"]>): stri
   return `(non-text message — type: ${message.type ?? "unknown"})`;
 }
 
-function buildTaskDescription(payload: KapsoWebhookPayload): string {
+async function buildTaskDescription(payload: KapsoWebhookPayload): Promise<string> {
   const message = payload.message ?? {};
   const conversation = payload.conversation ?? {};
-  return resolveTemplate("kapso.message.received", {
-    conversation_id: conversation.id ?? "unknown",
-    inbound_wamid: message.id ?? "unknown",
-    sender_phone: message.from ?? conversation.phone_number ?? "unknown",
-    contact_name: conversation.contact_name ?? "unknown",
-    phone_number_id: payload.phone_number_id ?? "unknown",
-    test_note: payload.test ? "\n- test: true (do NOT send a real WhatsApp reply)" : "",
-    message_text: extractText(message),
-  }).text;
+  return (
+    await resolveTemplate("kapso.message.received", {
+      conversation_id: conversation.id ?? "unknown",
+      inbound_wamid: message.id ?? "unknown",
+      sender_phone: message.from ?? conversation.phone_number ?? "unknown",
+      contact_name: conversation.contact_name ?? "unknown",
+      phone_number_id: payload.phone_number_id ?? "unknown",
+      test_note: payload.test ? "\n- test: true (do NOT send a real WhatsApp reply)" : "",
+      message_text: extractText(message),
+    })
+  ).text;
 }
 
 function normalizeKapsoSender(payload: KapsoWebhookPayload): string | null {
@@ -61,16 +63,18 @@ function normalizeKapsoSender(payload: KapsoWebhookPayload): string | null {
   return digits || null;
 }
 
-function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): string | undefined {
+async function resolveKapsoRequestedByUserId(
+  payload: KapsoWebhookPayload,
+): Promise<string | undefined> {
   const externalId = normalizeKapsoSender(payload);
   if (!externalId) return undefined;
 
   const mapped =
-    findUserByExternalId(KAPSO_IDENTITY_KIND, externalId) ??
-    findUserByExternalId(WHATSAPP_IDENTITY_KIND, externalId);
+    (await findUserByExternalId(KAPSO_IDENTITY_KIND, externalId)) ??
+    (await findUserByExternalId(WHATSAPP_IDENTITY_KIND, externalId));
   if (mapped) return mapped.id;
 
-  recordUnmappedIdentity(KAPSO_IDENTITY_KIND, externalId, {
+  await recordUnmappedIdentity(KAPSO_IDENTITY_KIND, externalId, {
     sampleEventType: "kapso.message.received",
     sampleContext: [
       payload.conversation?.contact_name ? `contact=${payload.conversation.contact_name}` : null,
@@ -96,7 +100,7 @@ function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): string | u
  *      or creates a native `kapso-inbound` task,
  *   5. returns `no_mapping` when the number isn't registered (caller logs a warning).
  */
-export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
+export async function routeKapsoInbound(payload: KapsoWebhookPayload): Promise<KapsoRouting> {
   const message = payload.message;
   const direction = message?.kapso?.direction;
   if (direction !== "inbound") {
@@ -108,7 +112,7 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     return { kind: "skip", reason: "missing_message_id" };
   }
 
-  if (!markKapsoMessageSeen(messageId)) {
+  if (!(await markKapsoMessageSeen(messageId))) {
     return { kind: "duplicate", messageId };
   }
 
@@ -124,7 +128,7 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     text: extractText(message ?? {}),
   });
 
-  const mapping = phoneNumberId ? getKapsoNumberMapping(phoneNumberId) : null;
+  const mapping = phoneNumberId ? await getKapsoNumberMapping(phoneNumberId) : null;
   if (!mapping) {
     return { kind: "no_mapping", phoneNumberId };
   }
@@ -133,13 +137,13 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     return { kind: "workflow", workflowId: mapping.workflowId };
   }
 
-  const task = createTaskWithSiblingAwareness(buildTaskDescription(payload), {
+  const task = await createTaskWithSiblingAwareness(await buildTaskDescription(payload), {
     agentId: mapping.agentId ?? null,
     source: "system",
     taskType: "kapso-inbound",
     tags: ["kapso-whatsapp", "inbound"],
     priority: 70,
-    requestedByUserId: resolveKapsoRequestedByUserId(payload),
+    requestedByUserId: await resolveKapsoRequestedByUserId(payload),
     contextKey: `kapso:conversation:${payload.conversation?.id ?? messageId}`,
   });
 

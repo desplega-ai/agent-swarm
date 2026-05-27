@@ -52,10 +52,10 @@ describe("skill-update scope promotion", () => {
     }
 
     closeDb();
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
-    createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
-    createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
+    await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
+    await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
 
     server = new McpServer({ name: "test-skill-update-scope", version: "1.0.0" });
     registerSkillUpdateTool(server);
@@ -73,7 +73,7 @@ describe("skill-update scope promotion", () => {
   });
 
   test("worker cannot promote their own skill to swarm scope", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "worker-skill-self-promote",
       description: "Worker tries to promote",
       content:
@@ -91,13 +91,13 @@ describe("skill-update scope promotion", () => {
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toContain("lead");
 
-    const stored = getSkillById(skill.id);
+    const stored = await getSkillById(skill.id);
     expect(stored?.scope).toBe("agent");
     expect(stored?.ownerAgentId).toBe(WORKER_ID);
   });
 
   test("lead can promote a worker's agent-scope skill to swarm without changing ownerAgentId", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "worker-skill-lead-promote",
       description: "Lead promotes",
       content: "---\nname: worker-skill-lead-promote\ndescription: Lead promotes\n---\n\nBody.",
@@ -115,13 +115,13 @@ describe("skill-update scope promotion", () => {
     expect(result.structuredContent.skill?.scope).toBe("swarm");
     expect(result.structuredContent.skill?.ownerAgentId).toBe(WORKER_ID);
 
-    const stored = getSkillById(skill.id);
+    const stored = await getSkillById(skill.id);
     expect(stored?.scope).toBe("swarm");
     expect(stored?.ownerAgentId).toBe(WORKER_ID);
   });
 
   test("lead demoting a swarm skill back to agent scope is allowed", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "swarm-skill-demote",
       description: "Demote test",
       content: "---\nname: swarm-skill-demote\ndescription: Demote test\n---\n\nBody.",
@@ -138,12 +138,12 @@ describe("skill-update scope promotion", () => {
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.skill?.scope).toBe("agent");
 
-    const stored = getSkillById(skill.id);
+    const stored = await getSkillById(skill.id);
     expect(stored?.scope).toBe("agent");
   });
 
   test("omitting scope leaves it unchanged", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "scope-untouched",
       description: "No scope change",
       content: "---\nname: scope-untouched\ndescription: No scope change\n---\n\nBody.",
@@ -158,7 +158,7 @@ describe("skill-update scope promotion", () => {
     });
 
     expect(result.structuredContent.success).toBe(true);
-    const stored = getSkillById(skill.id);
+    const stored = await getSkillById(skill.id);
     expect(stored?.scope).toBe("agent");
     expect(stored?.isEnabled).toBe(false);
   });

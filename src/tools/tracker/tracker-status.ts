@@ -33,18 +33,20 @@ export const registerTrackerStatusTool = (server: McpServer) => {
       // not-yet-expired access token. ensureToken is no-op when no refresh
       // token is stored and swallows refresh failures internally.
       await Promise.all(providers.map((provider) => ensureToken(provider)));
-      const trackers = providers.map((provider) => {
-        const app = getOAuthApp(provider);
-        const tokens = getOAuthTokens(provider);
+      const trackers = await Promise.all(
+        providers.map(async (provider) => {
+          const app = await getOAuthApp(provider);
+          const tokens = await getOAuthTokens(provider);
 
-        return {
-          provider,
-          connected: !!tokens,
-          tokenExpiresAt: tokens?.expiresAt ?? null,
-          scopes: tokens?.scope ?? app?.scopes ?? null,
-          redirectUri: app?.redirectUri ?? null,
-        };
-      });
+          return {
+            provider,
+            connected: !!tokens,
+            tokenExpiresAt: tokens?.expiresAt ?? null,
+            scopes: tokens?.scope ?? app?.scopes ?? null,
+            redirectUri: app?.redirectUri ?? null,
+          };
+        }),
+      );
 
       const summary = trackers
         .map((t) => `${t.provider}: ${t.connected ? "connected" : "not connected"}`)

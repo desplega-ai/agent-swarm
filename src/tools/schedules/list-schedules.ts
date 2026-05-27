@@ -78,8 +78,8 @@ export const registerListSchedulesTool = (server: McpServer) => {
       try {
         const filters = { enabled, name, scheduleType, hideCompleted };
         const schedules = includeFull
-          ? getScheduledTasks(filters)
-          : getScheduledTasks(filters, { slim: true });
+          ? await getScheduledTasks(filters)
+          : await getScheduledTasks(filters, { slim: true });
         const count = schedules.length;
         const statusSummary =
           count === 0 ? "No schedules found." : `Found ${count} schedule${count === 1 ? "" : "s"}.`;

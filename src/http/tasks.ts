@@ -6,7 +6,6 @@ import {
   completeTask,
   failTask,
   getAllTasks,
-  getDb,
   getLeadAgent,
   getLogsByTaskId,
   getPausedTasksForAgent,
@@ -16,6 +15,7 @@ import {
   getUserById,
   pauseTask,
   resumeTask,
+  runDbTransaction,
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
   updateTaskProgress,
@@ -319,8 +319,10 @@ export async function handleTasks(
     // List responses default to slim (full `task` text → bounded `taskPreview`,
     // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
     const tasks =
-      parsed.query.fields === "full" ? getAllTasks(filters) : getAllTasks(filters, { slim: true });
-    const total = getTasksCount(filters);
+      parsed.query.fields === "full"
+        ? await getAllTasks(filters)
+        : await getAllTasks(filters, { slim: true });
+    const total = await getTasksCount(filters);
     json(res, { tasks, total });
     return true;
   }
@@ -333,7 +335,7 @@ export async function handleTasks(
     // becoming a 500 — if the referenced user doesn't exist, log and drop
     // the field rather than letting the FK fail at INSERT.
     let requestedByUserId = parsed.body.requestedByUserId || undefined;
-    if (requestedByUserId && !getUserById(requestedByUserId)) {
+    if (requestedByUserId && !(await getUserById(requestedByUserId))) {
       console.warn(
         `[tasks] requestedByUserId ${requestedByUserId} does not exist — coercing to NULL`,
       );
@@ -348,12 +350,12 @@ export async function handleTasks(
     // there's no working agent).
     let defaultAgentId = parsed.body.agentId || undefined;
     if (!defaultAgentId) {
-      const lead = getLeadAgent();
+      const lead = await getLeadAgent();
       if (lead) defaultAgentId = lead.id;
     }
 
     try {
-      const task = createTaskWithSiblingAwareness(parsed.body.task, {
+      const task = await createTaskWithSiblingAwareness(parsed.body.task, {
         agentId: defaultAgentId,
         creatorAgentId: myAgentId || undefined,
         taskType: parsed.body.taskType || undefined,
@@ -404,7 +406,7 @@ export async function handleTasks(
   if (updateClaudeSession.match(req.method, pathSegments)) {
     const parsed = await updateClaudeSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = updateTaskClaudeSessionId(
+    const task = await updateTaskClaudeSessionId(
       parsed.params.id,
       parsed.body.claudeSessionId,
       parsed.body.provider,
@@ -422,7 +424,7 @@ export async function handleTasks(
   if (cancelTaskRoute.match(req.method, pathSegments)) {
     const parsed = await cancelTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -452,7 +454,7 @@ export async function handleTasks(
       }
     }
 
-    const cancelledTask = cancelTask(parsed.params.id, reason);
+    const cancelledTask = await cancelTask(parsed.params.id, reason);
     if (!cancelledTask) {
       jsonError(res, "Failed to cancel task", 500);
       return true;
@@ -509,7 +511,7 @@ export async function handleTasks(
     });
 
     if (task.agentId) {
-      updateAgentStatusFromCapacity(task.agentId);
+      await updateAgentStatusFromCapacity(task.agentId);
     }
 
     json(res, { success: true, task: cancelledTask });
@@ -519,15 +521,15 @@ export async function handleTasks(
   if (getTask.match(req.method, pathSegments)) {
     const parsed = await getTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
     }
 
-    const logs = getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
-    const attachments = getTaskAttachments(parsed.params.id);
+    const logs = await getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
+    const attachments = await getTaskAttachments(parsed.params.id);
     json(res, { ...task, logs, attachments });
     return true;
   }
@@ -535,14 +537,14 @@ export async function handleTasks(
   if (updateTaskProgressRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskProgressRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
     }
 
-    updateTaskProgress(parsed.params.id, parsed.body.progress);
+    await updateTaskProgress(parsed.params.id, parsed.body.progress);
     json(res, { success: true });
     return true;
   }
@@ -556,8 +558,8 @@ export async function handleTasks(
     const parsed = await finishTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const result = getDb().transaction(() => {
-      const task = getTaskById(parsed.params.id);
+    const result = await runDbTransaction(async () => {
+      const task = await getTaskById(parsed.params.id);
 
       if (!task) {
         return { error: "Task not found", status: 404 };
@@ -575,7 +577,7 @@ export async function handleTasks(
 
       let updatedTask: typeof task;
       if (parsed.body.status === "completed") {
-        const result = completeTask(
+        const result = await completeTask(
           parsed.params.id,
           parsed.body.output || "Completed by runner wrapper (no explicit output)",
         );
@@ -584,7 +586,7 @@ export async function handleTasks(
         }
         updatedTask = result;
       } else {
-        const result = failTask(
+        const result = await failTask(
           parsed.params.id,
           parsed.body.failureReason || "Process exited without explicit completion",
         );
@@ -595,11 +597,11 @@ export async function handleTasks(
       }
 
       if (task.agentId) {
-        updateAgentStatusFromCapacity(task.agentId);
+        await updateAgentStatusFromCapacity(task.agentId);
       }
 
       return { task: updatedTask, wasPaused };
-    })();
+    });
 
     if ("error" in result && result.error) {
       jsonError(res, result.error, (result as { status?: number }).status ?? 500);
@@ -638,7 +640,7 @@ export async function handleTasks(
       });
 
       try {
-        const followUp = createWorkerTaskFollowUp({
+        const followUp = await createWorkerTaskFollowUp({
           task: result.task,
           status: parsed.body.status,
           output: parsed.body.output,
@@ -667,7 +669,7 @@ export async function handleTasks(
       jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
     }
-    const pausedTasks = getPausedTasksForAgent(myAgentId);
+    const pausedTasks = await getPausedTasksForAgent(myAgentId);
     json(res, { tasks: pausedTasks });
     return true;
   }
@@ -675,7 +677,7 @@ export async function handleTasks(
   if (pauseTaskRoute.match(req.method, pathSegments)) {
     const parsed = await pauseTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -692,7 +694,7 @@ export async function handleTasks(
       return true;
     }
 
-    const pausedTask = pauseTask(parsed.params.id);
+    const pausedTask = await pauseTask(parsed.params.id);
     if (!pausedTask) {
       jsonError(res, "Failed to pause task", 500);
       return true;
@@ -721,7 +723,7 @@ export async function handleTasks(
   if (updateTaskVcsRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskVcsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = updateTaskVcs(parsed.params.id, parsed.body);
+    const task = await updateTaskVcs(parsed.params.id, parsed.body);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
@@ -733,7 +735,7 @@ export async function handleTasks(
   if (resumeTaskRoute.match(req.method, pathSegments)) {
     const parsed = await resumeTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -750,7 +752,7 @@ export async function handleTasks(
       return true;
     }
 
-    const resumedTask = resumeTask(parsed.params.id);
+    const resumedTask = await resumeTask(parsed.params.id);
     if (!resumedTask) {
       jsonError(res, "Failed to resume task", 500);
       return true;

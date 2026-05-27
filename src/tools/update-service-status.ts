@@ -51,9 +51,9 @@ export const registerUpdateServiceStatusTool = (server: McpServer) => {
 
       try {
         // Find the service
-        let service = serviceId ? getServiceById(serviceId) : null;
+        let service = serviceId ? await getServiceById(serviceId) : null;
         if (!service && name) {
-          service = getServiceByAgentAndName(requestInfo.agentId, name);
+          service = await getServiceByAgentAndName(requestInfo.agentId, name);
         }
 
         if (!service) {
@@ -79,7 +79,7 @@ export const registerUpdateServiceStatusTool = (server: McpServer) => {
           };
         }
 
-        const updated = updateServiceStatus(service.id, status);
+        const updated = await updateServiceStatus(service.id, status);
         if (!updated) {
           return {
             content: [{ type: "text", text: "Failed to update service status." }],

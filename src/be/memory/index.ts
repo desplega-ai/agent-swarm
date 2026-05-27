@@ -18,5 +18,5 @@ export function getMemoryStore(): MemoryStore {
       require("./providers/sqlite-store") as typeof import("./providers/sqlite-store");
     memoryStore = new SqliteMemoryStore();
   }
-  return memoryStore;
+  return memoryStore!;
 }

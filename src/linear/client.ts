@@ -3,8 +3,8 @@ import { getOAuthTokens } from "../be/db-queries/oauth";
 
 let linearClient: LinearClient | null = null;
 
-export function getLinearClient(): LinearClient | null {
-  const tokens = getOAuthTokens("linear");
+export async function getLinearClient(): Promise<LinearClient | null> {
+  const tokens = await getOAuthTokens("linear");
   if (!tokens) return null;
 
   if (!linearClient) {

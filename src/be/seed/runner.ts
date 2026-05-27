@@ -32,12 +32,12 @@ export async function runSeeder(seeder: Seeder, opts?: { quiet?: boolean }): Pro
       // Absent upstream -> create.
       if (upstream === null) {
         await seeder.apply(item, "create");
-        recordSeedState(seeder.kind, item.key, item.contentHash);
+        await recordSeedState(seeder.kind, item.key, item.contentHash);
         result.created += 1;
         continue;
       }
 
-      const state = getSeedState(seeder.kind, item.key);
+      const state = await getSeedState(seeder.kind, item.key);
       // "Pristine" = the live upstream copy still matches what we last seeded.
       // With no recorded state (first run after this framework landed, or a
       // pre-existing entity) we can only treat it as pristine when it is
@@ -54,14 +54,14 @@ export async function runSeeder(seeder: Seeder, opts?: { quiet?: boolean }): Pro
       if (upstream === item.contentHash) {
         // Neither side changed. Adopt an unrecorded-but-identical entity so the
         // next source change is correctly detectable as an update.
-        if (!state) recordSeedState(seeder.kind, item.key, item.contentHash);
+        if (!state) await recordSeedState(seeder.kind, item.key, item.contentHash);
         result.skippedUnchanged += 1;
         continue;
       }
 
       // Pristine upstream + changed source -> update to the new source version.
       await seeder.apply(item, "update");
-      recordSeedState(seeder.kind, item.key, item.contentHash);
+      await recordSeedState(seeder.kind, item.key, item.contentHash);
       result.updated += 1;
     } catch (err) {
       result.failed.push({

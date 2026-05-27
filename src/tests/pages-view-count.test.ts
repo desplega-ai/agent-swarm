@@ -78,7 +78,7 @@ describe("Pages — view_count counter", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
     server = await startTestServer();
   });
 

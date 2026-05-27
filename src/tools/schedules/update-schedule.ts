@@ -110,9 +110,9 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
 
       // Find the schedule
       const schedule = scheduleId
-        ? getScheduledTaskById(scheduleId)
+        ? await getScheduledTaskById(scheduleId)
         : name
-          ? getScheduledTaskByName(name)
+          ? await getScheduledTaskByName(name)
           : null;
 
       if (!schedule) {
@@ -126,7 +126,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       }
 
       // Check authorization (creator or lead)
-      const caller = getAgentById(requestInfo.agentId);
+      const caller = await getAgentById(requestInfo.agentId);
       const isCreator = schedule.createdByAgentId === requestInfo.agentId;
       const isLead = caller?.isLead === true;
 
@@ -176,7 +176,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
 
       // Validate targetAgentId if provided and not null
       if (targetAgentId && targetAgentId !== null) {
-        const agent = getAgentById(targetAgentId);
+        const agent = await getAgentById(targetAgentId);
         if (!agent) {
           return {
             content: [{ type: "text", text: `Target agent not found: ${targetAgentId}` }],
@@ -190,7 +190,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
 
       // Check if new name conflicts with existing
       if (newName && newName !== schedule.name) {
-        const existing = getScheduledTaskByName(newName);
+        const existing = await getScheduledTaskByName(newName);
         if (existing) {
           return {
             content: [{ type: "text", text: `Schedule with name "${newName}" already exists.` }],
@@ -273,7 +273,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           }
         }
 
-        const updated = updateScheduledTask(schedule.id, updateData);
+        const updated = await updateScheduledTask(schedule.id, updateData);
 
         if (!updated) {
           return {

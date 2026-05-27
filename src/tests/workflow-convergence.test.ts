@@ -99,9 +99,12 @@ function createTestRegistry(): ExecutorRegistry {
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(def: WorkflowDefinition, overrides?: Partial<Workflow>): Workflow {
+async function makeWorkflow(
+  def: WorkflowDefinition,
+  overrides?: Partial<Workflow>,
+): Promise<Workflow> {
   workflowCounter++;
-  const workflow = createWorkflow({
+  const workflow = await createWorkflow({
     name: overrides?.name || `test-convergence-${workflowCounter}-${Date.now()}`,
     definition: def,
     triggers: overrides?.triggers,
@@ -121,13 +124,13 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
     } catch {
       // File doesn't exist
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }
@@ -166,13 +169,13 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { flag: true }, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const stepNodeIds = steps.map((s) => s.nodeId);
       // A and C should execute; B should NOT execute
       expect(stepNodeIds).toContain("A");
@@ -197,13 +200,13 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { flag: false }, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const stepNodeIds = steps.map((s) => s.nodeId);
       // All three should execute: A → B → C
       expect(stepNodeIds).toContain("A");
@@ -226,13 +229,13 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const stepNodeIds = steps.map((s) => s.nodeId);
       expect(stepNodeIds).toContain("A");
       expect(stepNodeIds).toContain("B");
@@ -267,12 +270,12 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
       };
 
       // Take the "true" (left) path: A → B → D
-      const workflow1 = makeWorkflow(def);
+      const workflow1 = await makeWorkflow(def);
       const runId1 = await startWorkflowExecution(workflow1, { path: "left" }, registry);
-      const run1 = getWorkflowRun(runId1);
+      const run1 = await getWorkflowRun(runId1);
       expect(run1!.status).toBe("completed");
 
-      const steps1 = getWorkflowRunStepsByRunId(runId1);
+      const steps1 = await getWorkflowRunStepsByRunId(runId1);
       const nodeIds1 = steps1.map((s) => s.nodeId);
       expect(nodeIds1).toContain("A");
       expect(nodeIds1).toContain("B");
@@ -280,12 +283,12 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
       expect(nodeIds1).toContain("D");
 
       // Take the "false" (right) path: A → C → D
-      const workflow2 = makeWorkflow(def);
+      const workflow2 = await makeWorkflow(def);
       const runId2 = await startWorkflowExecution(workflow2, { path: "right" }, registry);
-      const run2 = getWorkflowRun(runId2);
+      const run2 = await getWorkflowRun(runId2);
       expect(run2!.status).toBe("completed");
 
-      const steps2 = getWorkflowRunStepsByRunId(runId2);
+      const steps2 = await getWorkflowRunStepsByRunId(runId2);
       const nodeIds2 = steps2.map((s) => s.nodeId);
       expect(nodeIds2).toContain("A");
       expect(nodeIds2).not.toContain("B");
@@ -315,10 +318,10 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
       };
 
       // Execute fully first (true path: A → C, skipping B)
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { flag: true }, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
       // Re-walk the same runId — should reconstruct active edges from stored nextPort
@@ -328,7 +331,7 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
       await walkGraph(def, runId, ctx, entryNodes, registry, workflow.id);
 
       // Should still be completed, no new steps
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const stepNodeIds = steps.map((s) => s.nodeId);
       expect(stepNodeIds).toContain("A");
       expect(stepNodeIds).toContain("C");
@@ -423,14 +426,14 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       // Should complete — 6 total executions (1 start + 5 parallel) well under default MAX
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(6);
     });
 
@@ -447,14 +450,14 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
       }
       const def: WorkflowDefinition = { nodes };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       // Should complete — 50 executions under the default 100 limit
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(50);
     });
 
@@ -477,10 +480,10 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       // With MAX_ITERATIONS=100 (module-level constant), this should complete.
       // The env var is read at module load time, so we can't dynamically change it.
       // Instead, verify the workflow runs correctly at the default limit.
@@ -520,13 +523,13 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
         ],
       };
 
-      const workflow = makeWorkflow(def);
+      const workflow = await makeWorkflow(def);
       const runId = await startWorkflowExecution(workflow, { x: 1 }, registry);
 
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const branchStep = steps.find((s) => s.nodeId === "branch");
       expect(branchStep).toBeDefined();
       // The branch executor returns nextPort "true" when condition passes

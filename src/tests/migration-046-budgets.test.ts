@@ -17,8 +17,8 @@ async function removeDbFiles(path: string): Promise<void> {
   }
 }
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
@@ -53,8 +53,8 @@ interface PricingRow {
 }
 
 describe("migration 046 — budgets and pricing", () => {
-  test("budgets table exists with expected columns and PK", () => {
-    const db = getDb();
+  test("budgets table exists with expected columns and PK", async () => {
+    const db = await getDb();
     const cols = db.prepare<TableInfoRow, []>("PRAGMA table_info(budgets)").all();
     expect(cols.length).toBeGreaterThan(0);
 
@@ -70,8 +70,8 @@ describe("migration 046 — budgets and pricing", () => {
     expect(colMap.get("scope_id")!.pk).toBeGreaterThan(0);
   });
 
-  test("budgets CHECK constraints reject invalid scope and negative budget", () => {
-    const db = getDb();
+  test("budgets CHECK constraints reject invalid scope and negative budget", async () => {
+    const db = await getDb();
     // Valid global row.
     db.prepare(
       "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
@@ -115,8 +115,8 @@ describe("migration 046 — budgets and pricing", () => {
     ).toThrow();
   });
 
-  test("pricing table exists with expected columns and composite PK", () => {
-    const db = getDb();
+  test("pricing table exists with expected columns and composite PK", async () => {
+    const db = await getDb();
     const cols = db.prepare<TableInfoRow, []>("PRAGMA table_info(pricing)").all();
     expect(cols.length).toBeGreaterThan(0);
 
@@ -134,8 +134,8 @@ describe("migration 046 — budgets and pricing", () => {
     expect(colMap.get("effective_from")!.pk).toBeGreaterThan(0);
   });
 
-  test("pricing seed has exactly 12 rows (4 models × 3 token_classes), all at effective_from=0", () => {
-    const db = getDb();
+  test("pricing seed has exactly 12 rows (4 models × 3 token_classes), all at effective_from=0", async () => {
+    const db = await getDb();
     const total = db.prepare<CountRow, []>("SELECT COUNT(*) as cnt FROM pricing").get();
     expect(total?.cnt).toBe(12);
 
@@ -145,8 +145,8 @@ describe("migration 046 — budgets and pricing", () => {
     expect(seedRows?.cnt).toBe(12);
   });
 
-  test("every CODEX_MODEL_PRICING entry has rows for input / cached_input / output with matching rates", () => {
-    const db = getDb();
+  test("every CODEX_MODEL_PRICING entry has rows for input / cached_input / output with matching rates", async () => {
+    const db = await getDb();
 
     for (const [model, pricing] of Object.entries(CODEX_MODEL_PRICING)) {
       const inputRow = db
@@ -172,8 +172,8 @@ describe("migration 046 — budgets and pricing", () => {
     }
   });
 
-  test("idx_pricing_lookup index exists", () => {
-    const db = getDb();
+  test("idx_pricing_lookup index exists", async () => {
+    const db = await getDb();
     const idx = db
       .prepare<MasterRow, []>(
         "SELECT name, sql FROM sqlite_master WHERE type='index' AND name='idx_pricing_lookup'",
@@ -186,8 +186,8 @@ describe("migration 046 — budgets and pricing", () => {
     expect(idx?.sql).toContain("effective_from");
   });
 
-  test("re-applying seed INSERT OR IGNORE does not duplicate rows", () => {
-    const db = getDb();
+  test("re-applying seed INSERT OR IGNORE does not duplicate rows", async () => {
+    const db = await getDb();
     const before = db.prepare<CountRow, []>("SELECT COUNT(*) as cnt FROM pricing").get();
 
     // Replay the same seed statements.
@@ -204,8 +204,8 @@ describe("migration 046 — budgets and pricing", () => {
     expect(after?.cnt).toBe(before?.cnt);
   });
 
-  test("append-only price history: new effective_from row coexists with seed; latest-active lookup picks correct row", () => {
-    const db = getDb();
+  test("append-only price history: new effective_from row coexists with seed; latest-active lookup picks correct row", async () => {
+    const db = await getDb();
     const NOW = 1_700_000_000_000; // arbitrary epoch ms in the future relative to 0
 
     // Add a NEW pricing row for codex/gpt-5.3-codex/input at a later effective_from with a different price.
@@ -247,8 +247,8 @@ describe("migration 046 — budgets and pricing", () => {
     expect(seedLookup?.price_per_million_usd).toBe(1.75);
   });
 
-  test("budget_refusal_notifications table exists with expected columns and composite PK", () => {
-    const db = getDb();
+  test("budget_refusal_notifications table exists with expected columns and composite PK", async () => {
+    const db = await getDb();
     const cols = db
       .prepare<TableInfoRow, []>("PRAGMA table_info(budget_refusal_notifications)")
       .all();
@@ -276,8 +276,8 @@ describe("migration 046 — budgets and pricing", () => {
     expect(colMap.get("follow_up_task_id")!.notnull).toBe(0);
   });
 
-  test("budget_refusal_notifications dedup via INSERT OR IGNORE on (task_id, date)", () => {
-    const db = getDb();
+  test("budget_refusal_notifications dedup via INSERT OR IGNORE on (task_id, date)", async () => {
+    const db = await getDb();
 
     const taskId = "task-dedup-1";
     const date = "2026-04-28";
@@ -312,8 +312,8 @@ describe("migration 046 — budgets and pricing", () => {
     expect(nextDay.changes).toBe(1);
   });
 
-  test("budget_refusal_notifications CHECK rejects unknown cause", () => {
-    const db = getDb();
+  test("budget_refusal_notifications CHECK rejects unknown cause", async () => {
+    const db = await getDb();
     expect(() =>
       db
         .prepare(

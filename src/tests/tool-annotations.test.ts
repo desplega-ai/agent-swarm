@@ -40,8 +40,8 @@ describe("Tool Annotations & Classification", () => {
         // File doesn't exist
       }
     }
-    initDb(TEST_DB_PATH);
-    server = createServer();
+    await initDb(TEST_DB_PATH);
+    server = await createServer();
     tools = getRegisteredTools(server);
   });
 

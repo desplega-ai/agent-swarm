@@ -19,23 +19,23 @@ function normalizeTrackerAgentMapping(row: TrackerAgentMapping): TrackerAgentMap
 
 // ── Tracker Sync ──
 
-export function getTrackerSync(
+export async function getTrackerSync(
   provider: string,
   entityType: "task",
   swarmId: string,
-): TrackerSync | null {
-  const row = getDb()
+): Promise<TrackerSync | null> {
+  const row = (await getDb())
     .query("SELECT * FROM tracker_sync WHERE provider = ? AND entityType = ? AND swarmId = ?")
     .get(provider, entityType, swarmId) as TrackerSync | null;
   return row ? normalizeTrackerSync(row) : null;
 }
 
-export function getTrackerSyncByExternalId(
+export async function getTrackerSyncByExternalId(
   provider: string,
   entityType: "task",
   externalId: string,
-): TrackerSync | null {
-  const row = getDb()
+): Promise<TrackerSync | null> {
+  const row = (await getDb())
     .query("SELECT * FROM tracker_sync WHERE provider = ? AND entityType = ? AND externalId = ?")
     .get(provider, entityType, externalId) as TrackerSync | null;
   return row ? normalizeTrackerSync(row) : null;
@@ -53,7 +53,7 @@ export function getTrackerSyncByExternalId(
  * passed in (callers typically pass a placeholder like `""` or a known UUID),
  * then update it with `updateTrackerSyncSwarmId` once the task is created.
  */
-export function createTrackerSyncIfAbsent(data: {
+export async function createTrackerSyncIfAbsent(data: {
   provider: string;
   entityType: "task";
   providerEntityType?: string | null;
@@ -64,8 +64,8 @@ export function createTrackerSyncIfAbsent(data: {
   lastSyncOrigin?: "swarm" | "external" | null;
   lastDeliveryId?: string | null;
   syncDirection?: "inbound" | "outbound" | "bidirectional";
-}): { inserted: boolean; sync: TrackerSync } {
-  const insertResult = getDb()
+}): Promise<{ inserted: boolean; sync: TrackerSync }> {
+  const insertResult = (await getDb())
     .query(
       `INSERT INTO tracker_sync (provider, entityType, providerEntityType, swarmId, externalId, externalIdentifier, externalUrl, lastSyncOrigin, lastDeliveryId, syncDirection)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -90,7 +90,11 @@ export function createTrackerSyncIfAbsent(data: {
   }
 
   // Row already existed — fetch it for the caller.
-  const existing = getTrackerSyncByExternalId(data.provider, data.entityType, data.externalId);
+  const existing = await getTrackerSyncByExternalId(
+    data.provider,
+    data.entityType,
+    data.externalId,
+  );
   if (!existing) {
     // Should be unreachable: ON CONFLICT means a row exists, but this guard
     // satisfies the type system and surfaces unexpected races loudly.
@@ -106,11 +110,11 @@ export function createTrackerSyncIfAbsent(data: {
  * idempotent `createTrackerSyncIfAbsent` returned `{ inserted: true }` and
  * we've now created the swarm task that should own this row.
  */
-export function updateTrackerSyncSwarmId(id: string, swarmId: string): void {
-  getDb().query("UPDATE tracker_sync SET swarmId = ? WHERE id = ?").run(swarmId, id);
+export async function updateTrackerSyncSwarmId(id: string, swarmId: string): Promise<void> {
+  (await getDb()).query("UPDATE tracker_sync SET swarmId = ? WHERE id = ?").run(swarmId, id);
 }
 
-export function createTrackerSync(data: {
+export async function createTrackerSync(data: {
   provider: string;
   entityType: "task";
   providerEntityType?: string | null;
@@ -121,8 +125,8 @@ export function createTrackerSync(data: {
   lastSyncOrigin?: "swarm" | "external" | null;
   lastDeliveryId?: string | null;
   syncDirection?: "inbound" | "outbound" | "bidirectional";
-}): TrackerSync {
-  const result = getDb()
+}): Promise<TrackerSync> {
+  const result = (await getDb())
     .query(
       `INSERT INTO tracker_sync (provider, entityType, providerEntityType, swarmId, externalId, externalIdentifier, externalUrl, lastSyncOrigin, lastDeliveryId, syncDirection)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -143,7 +147,7 @@ export function createTrackerSync(data: {
   return normalizeTrackerSync(result);
 }
 
-export function updateTrackerSync(
+export async function updateTrackerSync(
   id: string,
   data: Partial<
     Pick<
@@ -156,7 +160,7 @@ export function updateTrackerSync(
       | "externalIdentifier"
     >
   >,
-): void {
+): Promise<void> {
   const sets: string[] = [];
   const values: (string | null)[] = [];
 
@@ -188,13 +192,11 @@ export function updateTrackerSync(
   if (sets.length === 0) return;
 
   values.push(id);
-  getDb()
-    .query(`UPDATE tracker_sync SET ${sets.join(", ")} WHERE id = ?`)
-    .run(...values);
+  (await getDb()).query(`UPDATE tracker_sync SET ${sets.join(", ")} WHERE id = ?`).run(...values);
 }
 
-export function deleteTrackerSync(id: string): void {
-  getDb().query("DELETE FROM tracker_sync WHERE id = ?").run(id);
+export async function deleteTrackerSync(id: string): Promise<void> {
+  (await getDb()).query("DELETE FROM tracker_sync WHERE id = ?").run(id);
 }
 
 /**
@@ -205,12 +207,12 @@ export function deleteTrackerSync(id: string): void {
  * Returns `false` when `deliveryId` is falsy/empty so callers don't have to
  * branch.
  */
-export function hasTrackerDelivery(
+export async function hasTrackerDelivery(
   provider: string,
   deliveryId: string | null | undefined,
-): boolean {
+): Promise<boolean> {
   if (!deliveryId) return false;
-  const row = getDb()
+  const row = (await getDb())
     .query("SELECT 1 AS hit FROM tracker_sync WHERE provider = ? AND lastDeliveryId = ? LIMIT 1")
     .get(provider, deliveryId) as { hit: number } | null;
   return !!row;
@@ -224,20 +226,23 @@ export function hasTrackerDelivery(
  * the row via `createTrackerSyncIfAbsent` — recording delivery happens after
  * that). Caller is responsible for ordering.
  */
-export function markTrackerDelivery(
+export async function markTrackerDelivery(
   provider: string,
   entityType: "task",
   externalId: string,
   deliveryId: string,
-): void {
-  getDb()
+): Promise<void> {
+  (await getDb())
     .query(
       "UPDATE tracker_sync SET lastDeliveryId = ? WHERE provider = ? AND entityType = ? AND externalId = ?",
     )
     .run(deliveryId, provider, entityType, externalId);
 }
 
-export function getAllTrackerSyncs(provider?: string, entityType?: "task"): TrackerSync[] {
+export async function getAllTrackerSyncs(
+  provider?: string,
+  entityType?: "task",
+): Promise<TrackerSync[]> {
   const conditions: string[] = [];
   const values: string[] = [];
 
@@ -252,7 +257,7 @@ export function getAllTrackerSyncs(provider?: string, entityType?: "task"): Trac
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   return (
-    getDb()
+    (await getDb())
       .query(`SELECT * FROM tracker_sync ${where} ORDER BY createdAt DESC`)
       .all(...values) as TrackerSync[]
   ).map(normalizeTrackerSync);
@@ -260,33 +265,33 @@ export function getAllTrackerSyncs(provider?: string, entityType?: "task"): Trac
 
 // ── Tracker Agent Mapping ──
 
-export function getTrackerAgentMapping(
+export async function getTrackerAgentMapping(
   provider: string,
   agentId: string,
-): TrackerAgentMapping | null {
-  const row = getDb()
+): Promise<TrackerAgentMapping | null> {
+  const row = (await getDb())
     .query("SELECT * FROM tracker_agent_mapping WHERE provider = ? AND agentId = ?")
     .get(provider, agentId) as TrackerAgentMapping | null;
   return row ? normalizeTrackerAgentMapping(row) : null;
 }
 
-export function getTrackerAgentMappingByExternalUser(
+export async function getTrackerAgentMappingByExternalUser(
   provider: string,
   externalUserId: string,
-): TrackerAgentMapping | null {
-  const row = getDb()
+): Promise<TrackerAgentMapping | null> {
+  const row = (await getDb())
     .query("SELECT * FROM tracker_agent_mapping WHERE provider = ? AND externalUserId = ?")
     .get(provider, externalUserId) as TrackerAgentMapping | null;
   return row ? normalizeTrackerAgentMapping(row) : null;
 }
 
-export function createTrackerAgentMapping(data: {
+export async function createTrackerAgentMapping(data: {
   provider: string;
   agentId: string;
   externalUserId: string;
   agentName: string;
-}): TrackerAgentMapping {
-  const result = getDb()
+}): Promise<TrackerAgentMapping> {
+  const result = (await getDb())
     .query(
       `INSERT INTO tracker_agent_mapping (provider, agentId, externalUserId, agentName)
        VALUES (?, ?, ?, ?)
@@ -296,22 +301,24 @@ export function createTrackerAgentMapping(data: {
   return normalizeTrackerAgentMapping(result);
 }
 
-export function deleteTrackerAgentMapping(provider: string, agentId: string): void {
-  getDb()
+export async function deleteTrackerAgentMapping(provider: string, agentId: string): Promise<void> {
+  (await getDb())
     .query("DELETE FROM tracker_agent_mapping WHERE provider = ? AND agentId = ?")
     .run(provider, agentId);
 }
 
-export function getAllTrackerAgentMappings(provider?: string): TrackerAgentMapping[] {
+export async function getAllTrackerAgentMappings(
+  provider?: string,
+): Promise<TrackerAgentMapping[]> {
   if (provider) {
     return (
-      getDb()
+      (await getDb())
         .query("SELECT * FROM tracker_agent_mapping WHERE provider = ? ORDER BY createdAt DESC")
         .all(provider) as TrackerAgentMapping[]
     ).map(normalizeTrackerAgentMapping);
   }
   return (
-    getDb()
+    (await getDb())
       .query("SELECT * FROM tracker_agent_mapping ORDER BY createdAt DESC")
       .all() as TrackerAgentMapping[]
   ).map(normalizeTrackerAgentMapping);

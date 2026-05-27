@@ -32,10 +32,10 @@ describe("Context Versioning", () => {
       }
     }
 
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
-    createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
-    createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
+    await createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
+    await createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
   });
 
   afterAll(async () => {
@@ -54,8 +54,8 @@ describe("Context Versioning", () => {
   // ============================================================================
 
   describe("createContextVersion", () => {
-    test("creates a version and returns it with all fields", () => {
-      const version = createContextVersion({
+    test("creates a version and returns it with all fields", async () => {
+      const version = await createContextVersion({
         agentId: workerId,
         field: "soulMd",
         content: "# Soul v1\nI am a test agent.",
@@ -77,8 +77,8 @@ describe("Context Versioning", () => {
       expect(version.createdAt).toBeTruthy();
     });
 
-    test("creates a version with optional fields populated", () => {
-      const version = createContextVersion({
+    test("creates a version with optional fields populated", async () => {
+      const version = await createContextVersion({
         agentId: workerId,
         field: "identityMd",
         content: "# Identity v1",
@@ -93,8 +93,8 @@ describe("Context Versioning", () => {
       expect(version.changeReason).toBe("Initial coaching");
     });
 
-    test("chains versions with previousVersionId", () => {
-      const v1 = createContextVersion({
+    test("chains versions with previousVersionId", async () => {
+      const v1 = await createContextVersion({
         agentId: workerId,
         field: "toolsMd",
         content: "tools v1",
@@ -103,7 +103,7 @@ describe("Context Versioning", () => {
         contentHash: sha256("tools v1"),
       });
 
-      const v2 = createContextVersion({
+      const v2 = await createContextVersion({
         agentId: workerId,
         field: "toolsMd",
         content: "tools v2",
@@ -123,8 +123,8 @@ describe("Context Versioning", () => {
   // ============================================================================
 
   describe("getContextVersion", () => {
-    test("returns a version by ID", () => {
-      const created = createContextVersion({
+    test("returns a version by ID", async () => {
+      const created = await createContextVersion({
         agentId: workerId,
         field: "claudeMd",
         content: "claude md content",
@@ -133,14 +133,14 @@ describe("Context Versioning", () => {
         contentHash: sha256("claude md content"),
       });
 
-      const fetched = getContextVersion(created.id);
+      const fetched = await getContextVersion(created.id);
       expect(fetched).not.toBeNull();
       expect(fetched!.id).toBe(created.id);
       expect(fetched!.content).toBe("claude md content");
     });
 
-    test("returns null for non-existent ID", () => {
-      const result = getContextVersion("00000000-0000-4000-8000-999999999999");
+    test("returns null for non-existent ID", async () => {
+      const result = await getContextVersion("00000000-0000-4000-8000-999999999999");
       expect(result).toBeNull();
     });
   });
@@ -150,11 +150,11 @@ describe("Context Versioning", () => {
   // ============================================================================
 
   describe("getLatestContextVersion", () => {
-    test("returns the latest version for an agent+field", () => {
+    test("returns the latest version for an agent+field", async () => {
       const content1 = `setup script v1 ${crypto.randomUUID()}`;
       const content2 = `setup script v2 ${crypto.randomUUID()}`;
 
-      createContextVersion({
+      await createContextVersion({
         agentId: leadId,
         field: "setupScript",
         content: content1,
@@ -163,7 +163,7 @@ describe("Context Versioning", () => {
         contentHash: sha256(content1),
       });
 
-      createContextVersion({
+      await createContextVersion({
         agentId: leadId,
         field: "setupScript",
         content: content2,
@@ -172,14 +172,17 @@ describe("Context Versioning", () => {
         contentHash: sha256(content2),
       });
 
-      const latest = getLatestContextVersion(leadId, "setupScript");
+      const latest = await getLatestContextVersion(leadId, "setupScript");
       expect(latest).not.toBeNull();
       expect(latest!.version).toBe(2);
       expect(latest!.content).toBe(content2);
     });
 
-    test("returns null when no versions exist for agent+field", () => {
-      const result = getLatestContextVersion("00000000-0000-4000-8000-999999999999", "soulMd");
+    test("returns null when no versions exist for agent+field", async () => {
+      const result = await getLatestContextVersion(
+        "00000000-0000-4000-8000-999999999999",
+        "soulMd",
+      );
       expect(result).toBeNull();
     });
   });
@@ -191,13 +194,18 @@ describe("Context Versioning", () => {
   describe("getContextVersionHistory", () => {
     const historyAgentId = "cccc0000-0000-4000-8000-000000000003";
 
-    beforeAll(() => {
-      createAgent({ id: historyAgentId, name: "History Agent", isLead: false, status: "idle" });
+    beforeAll(async () => {
+      await createAgent({
+        id: historyAgentId,
+        name: "History Agent",
+        isLead: false,
+        status: "idle",
+      });
 
       // Create 5 versions for soulMd
       for (let i = 1; i <= 5; i++) {
         const content = `soul version ${i}`;
-        createContextVersion({
+        await createContextVersion({
           agentId: historyAgentId,
           field: "soulMd",
           content,
@@ -210,7 +218,7 @@ describe("Context Versioning", () => {
       // Create 2 versions for identityMd
       for (let i = 1; i <= 2; i++) {
         const content = `identity version ${i}`;
-        createContextVersion({
+        await createContextVersion({
           agentId: historyAgentId,
           field: "identityMd",
           content,
@@ -221,13 +229,13 @@ describe("Context Versioning", () => {
       }
     });
 
-    test("returns all versions for an agent (no field filter)", () => {
-      const history = getContextVersionHistory({ agentId: historyAgentId, limit: 50 });
+    test("returns all versions for an agent (no field filter)", async () => {
+      const history = await getContextVersionHistory({ agentId: historyAgentId, limit: 50 });
       expect(history.length).toBe(7); // 5 soulMd + 2 identityMd
     });
 
-    test("filters by field", () => {
-      const history = getContextVersionHistory({
+    test("filters by field", async () => {
+      const history = await getContextVersionHistory({
         agentId: historyAgentId,
         field: "soulMd",
         limit: 50,
@@ -238,8 +246,8 @@ describe("Context Versioning", () => {
       }
     });
 
-    test("respects limit parameter", () => {
-      const history = getContextVersionHistory({
+    test("respects limit parameter", async () => {
+      const history = await getContextVersionHistory({
         agentId: historyAgentId,
         field: "soulMd",
         limit: 3,
@@ -251,13 +259,13 @@ describe("Context Versioning", () => {
       expect(history[2]!.version).toBe(3);
     });
 
-    test("defaults limit to 10", () => {
-      const history = getContextVersionHistory({ agentId: historyAgentId });
+    test("defaults limit to 10", async () => {
+      const history = await getContextVersionHistory({ agentId: historyAgentId });
       expect(history.length).toBe(7); // Only 7 versions exist, so all returned
     });
 
-    test("returns empty array for agent with no versions", () => {
-      const history = getContextVersionHistory({
+    test("returns empty array for agent with no versions", async () => {
+      const history = await getContextVersionHistory({
         agentId: "00000000-0000-4000-8000-999999999999",
       });
       expect(history).toEqual([]);
@@ -271,28 +279,28 @@ describe("Context Versioning", () => {
   describe("updateAgentProfile with versioning", () => {
     const dedupAgentId = "dddd0000-0000-4000-8000-000000000004";
 
-    beforeAll(() => {
-      createAgent({ id: dedupAgentId, name: "Dedup Agent", isLead: false, status: "idle" });
+    beforeAll(async () => {
+      await createAgent({ id: dedupAgentId, name: "Dedup Agent", isLead: false, status: "idle" });
     });
 
-    test("creates a version when content changes", () => {
-      updateAgentProfile(dedupAgentId, { soulMd: "soul content A" }, { changeSource: "api" });
+    test("creates a version when content changes", async () => {
+      await updateAgentProfile(dedupAgentId, { soulMd: "soul content A" }, { changeSource: "api" });
 
-      const latest = getLatestContextVersion(dedupAgentId, "soulMd");
+      const latest = await getLatestContextVersion(dedupAgentId, "soulMd");
       expect(latest).not.toBeNull();
       expect(latest!.content).toBe("soul content A");
       expect(latest!.version).toBe(1);
       expect(latest!.changeSource).toBe("api");
     });
 
-    test("creates a new version when content changes again", () => {
-      updateAgentProfile(
+    test("creates a new version when content changes again", async () => {
+      await updateAgentProfile(
         dedupAgentId,
         { soulMd: "soul content B" },
         { changeSource: "self_edit", changedByAgentId: dedupAgentId },
       );
 
-      const latest = getLatestContextVersion(dedupAgentId, "soulMd");
+      const latest = await getLatestContextVersion(dedupAgentId, "soulMd");
       expect(latest).not.toBeNull();
       expect(latest!.content).toBe("soul content B");
       expect(latest!.version).toBe(2);
@@ -300,23 +308,23 @@ describe("Context Versioning", () => {
       expect(latest!.changedByAgentId).toBe(dedupAgentId);
     });
 
-    test("skips version creation when content is unchanged (dedup)", () => {
+    test("skips version creation when content is unchanged (dedup)", async () => {
       // Update with the same content
-      updateAgentProfile(
+      await updateAgentProfile(
         dedupAgentId,
         { soulMd: "soul content B" },
         { changeSource: "session_sync" },
       );
 
-      const latest = getLatestContextVersion(dedupAgentId, "soulMd");
+      const latest = await getLatestContextVersion(dedupAgentId, "soulMd");
       expect(latest).not.toBeNull();
       // Version should still be 2 — no new version created
       expect(latest!.version).toBe(2);
       expect(latest!.changeSource).toBe("self_edit"); // unchanged from before
     });
 
-    test("creates versions for multiple fields in one update", () => {
-      updateAgentProfile(
+    test("creates versions for multiple fields in one update", async () => {
+      await updateAgentProfile(
         dedupAgentId,
         {
           identityMd: "identity content",
@@ -325,8 +333,8 @@ describe("Context Versioning", () => {
         { changeSource: "api" },
       );
 
-      const identityLatest = getLatestContextVersion(dedupAgentId, "identityMd");
-      const toolsLatest = getLatestContextVersion(dedupAgentId, "toolsMd");
+      const identityLatest = await getLatestContextVersion(dedupAgentId, "identityMd");
+      const toolsLatest = await getLatestContextVersion(dedupAgentId, "toolsMd");
 
       expect(identityLatest).not.toBeNull();
       expect(identityLatest!.content).toBe("identity content");
@@ -337,31 +345,35 @@ describe("Context Versioning", () => {
       expect(toolsLatest!.version).toBe(1);
     });
 
-    test("defaults changeSource to 'api' when no meta provided", () => {
-      updateAgentProfile(dedupAgentId, { claudeMd: "claude content" });
+    test("defaults changeSource to 'api' when no meta provided", async () => {
+      await updateAgentProfile(dedupAgentId, { claudeMd: "claude content" });
 
-      const latest = getLatestContextVersion(dedupAgentId, "claudeMd");
+      const latest = await getLatestContextVersion(dedupAgentId, "claudeMd");
       expect(latest).not.toBeNull();
       expect(latest!.changeSource).toBe("api");
     });
 
-    test("chains previousVersionId correctly", () => {
+    test("chains previousVersionId correctly", async () => {
       // soulMd already has v1 and v2, create v3
-      updateAgentProfile(dedupAgentId, { soulMd: "soul content C" }, { changeSource: "self_edit" });
+      await updateAgentProfile(
+        dedupAgentId,
+        { soulMd: "soul content C" },
+        { changeSource: "self_edit" },
+      );
 
-      const v3 = getLatestContextVersion(dedupAgentId, "soulMd");
+      const v3 = await getLatestContextVersion(dedupAgentId, "soulMd");
       expect(v3).not.toBeNull();
       expect(v3!.version).toBe(3);
       expect(v3!.previousVersionId).not.toBeNull();
 
       // The previous version should be v2
-      const v2 = getContextVersion(v3!.previousVersionId!);
+      const v2 = await getContextVersion(v3!.previousVersionId!);
       expect(v2).not.toBeNull();
       expect(v2!.version).toBe(2);
     });
 
-    test("returns updated agent even with versioning", () => {
-      const agent = updateAgentProfile(
+    test("returns updated agent even with versioning", async () => {
+      const agent = await updateAgentProfile(
         dedupAgentId,
         { soulMd: "soul content D" },
         { changeSource: "api" },
@@ -383,10 +395,10 @@ describe("Context Versioning", () => {
     // so no versions should have been seeded for them.
     // Test by creating an agent with content and re-running initDb (which re-seeds).
 
-    test("agents without content fields get no seeded versions", () => {
+    test("agents without content fields get no seeded versions", async () => {
       // workerId was created without any soulMd/identityMd content
       // So no auto-seeded versions should exist for fields that were null
-      const history = getContextVersionHistory({
+      const history = await getContextVersionHistory({
         agentId: leadId,
         field: "soulMd",
         limit: 50,

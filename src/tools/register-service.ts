@@ -60,7 +60,7 @@ export const registerRegisterServiceTool = (server: McpServer) => {
 
       try {
         // Look up the agent to get its name
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         if (!agent) {
           return {
             content: [{ type: "text", text: "Agent not found. Join the swarm first." }],
@@ -78,7 +78,7 @@ export const registerRegisterServiceTool = (server: McpServer) => {
         const url = `https://${serviceName}.${SWARM_URL}`;
 
         // Upsert: create or update if exists
-        const service = upsertService(requestInfo.agentId, serviceName, {
+        const service = await upsertService(requestInfo.agentId, serviceName, {
           script,
           port: servicePort,
           description,

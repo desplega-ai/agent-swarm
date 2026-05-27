@@ -33,7 +33,7 @@ export const registerUpdateRepoTool = (server: McpServer) => {
       }),
     },
     async ({ id, ...updates }) => {
-      const updated = updateSwarmRepo(id, updates);
+      const updated = await updateSwarmRepo(id, updates);
 
       if (!updated) {
         return {

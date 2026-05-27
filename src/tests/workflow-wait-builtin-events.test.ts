@@ -50,8 +50,11 @@ const deps: ExecutorDependencies = {
 
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(name: string, def: WorkflowDefinition): Workflow {
-  const wf = createWorkflow({ name: `${name}-${Date.now()}-${Math.random()}`, definition: def });
+async function makeWorkflow(name: string, def: WorkflowDefinition): Promise<Workflow> {
+  const wf = await createWorkflow({
+    name: `${name}-${Date.now()}-${Math.random()}`,
+    definition: def,
+  });
   createdWorkflowIds.push(wf.id);
   return wf;
 }
@@ -62,13 +65,13 @@ beforeAll(async () => {
   } catch {
     // ignore
   }
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
   for (const id of createdWorkflowIds) {
     try {
-      deleteWorkflow(id);
+      await deleteWorkflow(id);
     } catch {}
   }
   closeDb();
@@ -81,9 +84,12 @@ afterEach(() => {
   _resetWaitBusSubscriptionsForTests();
 });
 
-async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 1000,
+): Promise<void> {
   const t0 = Date.now();
-  while (!predicate()) {
+  while (!(await predicate())) {
     if (Date.now() - t0 > timeoutMs) throw new Error("waitFor: timeout");
     await new Promise((r) => setTimeout(r, 10));
   }
@@ -133,21 +139,21 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
         },
       ],
     };
-    const wf = makeWorkflow("wait-builtin-task-completed", def);
+    const wf = await makeWorkflow("wait-builtin-task-completed", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
     // Initialize the bus listener registry (parity with initWorkflows()).
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     // The wait should be in 'waiting' status at this point — it registered
     // its bus subscription during execute. The fan-out's other branch may
     // already have run.
-    expect(getWorkflowRun(runId)?.status).toBe("waiting");
-    const steps = getWorkflowRunStepsByRunId(runId);
+    expect((await getWorkflowRun(runId))?.status).toBe("waiting");
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");
     expect(w1?.status).toBe("waiting");
 
-    const waitState = getWaitStateByStepId(w1!.id);
+    const waitState = await getWaitStateByStepId(w1!.id);
     expect(waitState).not.toBeNull();
     expect(waitState?.eventName).toBe("task.completed");
 
@@ -162,15 +168,15 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
       workflowRunStepId: "fake-step-id-on-some-other-run",
     });
 
-    await waitFor(() => getWaitStateByStepId(w1!.id)?.status === "fired");
+    await waitFor(async () => (await getWaitStateByStepId(w1!.id))?.status === "fired");
 
-    const fired = getWaitStateByStepId(w1!.id);
+    const fired = await getWaitStateByStepId(w1!.id);
     expect(fired?.status).toBe("fired");
     const stored = fired?.firedPayload as { workflowRunId?: string; output?: string };
     expect(stored?.workflowRunId).toBe(runId);
 
     // The wait advanced via `event` port — the run should reach the tail.
-    const finalSteps = getWorkflowRunStepsByRunId(runId);
+    const finalSteps = await getWorkflowRunStepsByRunId(runId);
     const w1After = finalSteps.find((s) => s.nodeId === "w1");
     expect(w1After?.status).toBe("completed");
     expect(w1After?.nextPort).toBe("event");
@@ -202,12 +208,12 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
         { id: "tail", type: "notify", config: { channel: "swarm", template: "done" } },
       ],
     };
-    const wf = makeWorkflow("wait-builtin-task-completed-other-run", def);
+    const wf = await makeWorkflow("wait-builtin-task-completed-other-run", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");
 
     // Emit a task.completed bound to a DIFFERENT run — must NOT resolve
@@ -222,7 +228,7 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
 
     // Yield to listeners.
     await new Promise((r) => setTimeout(r, 50));
-    expect(getWaitStateByStepId(w1!.id)?.status).toBe("pending");
+    expect((await getWaitStateByStepId(w1!.id))?.status).toBe("pending");
 
     // Now emit one bound to OUR run — should resolve.
     workflowEventBus.emit("task.completed", {
@@ -232,11 +238,11 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
       workflowRunId: runId,
       workflowRunStepId: "any-step",
     });
-    await waitFor(() => getWaitStateByStepId(w1!.id)?.status === "fired");
-    expect(getWaitStateByStepId(w1!.id)?.status).toBe("fired");
+    await waitFor(async () => (await getWaitStateByStepId(w1!.id))?.status === "fired");
+    expect((await getWaitStateByStepId(w1!.id))?.status).toBe("fired");
   });
 
-  test("create-workflow accepts a wait-node-containing definition (Zod round-trip)", () => {
+  test("create-workflow accepts a wait-node-containing definition (Zod round-trip)", async () => {
     // Validation is purely Zod-driven via WorkflowDefinitionSchema. Wait
     // node config is a `z.record` at the schema level; the WaitExecutor's
     // own configSchema parses it at execution time. Here we just round-trip
@@ -266,7 +272,7 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
         { id: "nay", type: "notify", config: { channel: "swarm", template: "timed out" } },
       ],
     };
-    const wf = makeWorkflow("wait-roundtrip", def);
+    const wf = await makeWorkflow("wait-roundtrip", def);
     expect(wf.id).toBeTruthy();
     expect(wf.definition.nodes).toHaveLength(4);
     const timeWait = wf.definition.nodes.find((n) => n.id === "time-wait");

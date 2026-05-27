@@ -35,7 +35,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
       }
 
       const store = getMemoryStore();
-      const memory = store.peek(memoryId);
+      const memory = await store.peek(memoryId);
 
       if (!memory) {
         return {
@@ -50,7 +50,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
 
       // Permission check: own memories or lead can delete swarm-scoped
       const isOwner = memory.agentId === requestInfo.agentId;
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const isLeadDeletingSwarm = agent?.isLead && memory.scope === "swarm";
 
       if (!isOwner && !isLeadDeletingSwarm) {
@@ -65,7 +65,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
         };
       }
 
-      const deleted = store.delete(memoryId);
+      const deleted = await store.delete(memoryId);
 
       return {
         content: [

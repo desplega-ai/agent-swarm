@@ -14,9 +14,9 @@ import {
 
 const TEST_DB_PATH = "./test-pool-session-logs.sqlite";
 
-beforeAll(() => {
+beforeAll(async () => {
   closeDb();
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
@@ -27,13 +27,13 @@ afterAll(async () => {
 });
 
 describe("reassociateSessionLogs", () => {
-  test("updates taskId on session logs matching the runnerSessionId", () => {
+  test("updates taskId on session logs matching the runnerSessionId", async () => {
     const runnerSessionId = "runner-sess-1";
     const randomUuid = crypto.randomUUID();
     const realTaskId = crypto.randomUUID();
 
     // Insert session logs under random UUID
-    createSessionLogs({
+    await createSessionLogs({
       taskId: randomUuid,
       sessionId: runnerSessionId,
       iteration: 1,
@@ -42,28 +42,28 @@ describe("reassociateSessionLogs", () => {
     });
 
     // Verify logs exist under random UUID
-    const beforeLogs = getSessionLogsByTaskId(randomUuid);
+    const beforeLogs = await getSessionLogsByTaskId(randomUuid);
     expect(beforeLogs.length).toBe(3);
 
     // Reassociate
-    const count = reassociateSessionLogs(runnerSessionId, realTaskId);
+    const count = await reassociateSessionLogs(runnerSessionId, realTaskId);
     expect(count).toBe(3);
 
     // Verify logs now exist under real task ID
-    const afterLogs = getSessionLogsByTaskId(realTaskId);
+    const afterLogs = await getSessionLogsByTaskId(realTaskId);
     expect(afterLogs.length).toBe(3);
 
     // Verify no logs remain under random UUID
-    const oldLogs = getSessionLogsByTaskId(randomUuid);
+    const oldLogs = await getSessionLogsByTaskId(randomUuid);
     expect(oldLogs.length).toBe(0);
   });
 
-  test("is idempotent — second call returns 0 changes", () => {
+  test("is idempotent — second call returns 0 changes", async () => {
     const runnerSessionId = "runner-sess-2";
     const randomUuid = crypto.randomUUID();
     const realTaskId = crypto.randomUUID();
 
-    createSessionLogs({
+    await createSessionLogs({
       taskId: randomUuid,
       sessionId: runnerSessionId,
       iteration: 1,
@@ -71,14 +71,14 @@ describe("reassociateSessionLogs", () => {
       lines: ["line a"],
     });
 
-    const first = reassociateSessionLogs(runnerSessionId, realTaskId);
+    const first = await reassociateSessionLogs(runnerSessionId, realTaskId);
     expect(first).toBe(1);
 
-    const second = reassociateSessionLogs(runnerSessionId, realTaskId);
+    const second = await reassociateSessionLogs(runnerSessionId, realTaskId);
     expect(second).toBe(0);
   });
 
-  test("does not affect logs from other sessions", () => {
+  test("does not affect logs from other sessions", async () => {
     const runnerSessionId = "runner-sess-3";
     const otherSessionId = "runner-sess-other";
     const randomUuid = crypto.randomUUID();
@@ -86,7 +86,7 @@ describe("reassociateSessionLogs", () => {
     const realTaskId = crypto.randomUUID();
 
     // Insert logs for our session
-    createSessionLogs({
+    await createSessionLogs({
       taskId: randomUuid,
       sessionId: runnerSessionId,
       iteration: 1,
@@ -95,7 +95,7 @@ describe("reassociateSessionLogs", () => {
     });
 
     // Insert logs for a different session
-    createSessionLogs({
+    await createSessionLogs({
       taskId: otherTaskId,
       sessionId: otherSessionId,
       iteration: 1,
@@ -104,21 +104,21 @@ describe("reassociateSessionLogs", () => {
     });
 
     // Reassociate only our session
-    reassociateSessionLogs(runnerSessionId, realTaskId);
+    await reassociateSessionLogs(runnerSessionId, realTaskId);
 
     // Other session's logs should be unchanged
-    const otherLogs = getSessionLogsByTaskId(otherTaskId);
+    const otherLogs = await getSessionLogsByTaskId(otherTaskId);
     expect(otherLogs.length).toBe(1);
     expect(otherLogs[0]?.sessionId).toBe(otherSessionId);
   });
 });
 
 describe("pool task claim flow", () => {
-  test("active session stores runnerSessionId", () => {
+  test("active session stores runnerSessionId", async () => {
     const agentId = crypto.randomUUID();
-    createAgent({ id: agentId, name: "Pool Test Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Pool Test Agent", isLead: false, status: "idle" });
 
-    const session = insertActiveSession({
+    const session = await insertActiveSession({
       agentId,
       taskId: "effective-task-id",
       triggerType: "pool_tasks_available",
@@ -128,25 +128,25 @@ describe("pool task claim flow", () => {
     expect(session.runnerSessionId).toBe("runner-sess-4");
 
     // Verify it can be retrieved
-    const sessions = getActiveSessions(agentId);
+    const sessions = await getActiveSessions(agentId);
     const found = sessions.find((s) => s.runnerSessionId === "runner-sess-4");
     expect(found).toBeDefined();
   });
 
-  test("end-to-end: pool task logs are reassociated after claim", () => {
+  test("end-to-end: pool task logs are reassociated after claim", async () => {
     const agentId = crypto.randomUUID();
     const runnerSessionId = "runner-sess-e2e";
     const effectiveTaskId = crypto.randomUUID();
-    createAgent({ id: agentId, name: "E2E Pool Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "E2E Pool Agent", isLead: false, status: "idle" });
 
     // 1. Create an unassigned task (pool task)
-    const task = createTaskExtended("Test pool task", {
+    const task = await createTaskExtended("Test pool task", {
       source: "api",
     });
     expect(task.agentId).toBeNull();
 
     // 2. Simulate runner creating active session with runnerSessionId
-    insertActiveSession({
+    await insertActiveSession({
       agentId,
       taskId: effectiveTaskId,
       triggerType: "pool_tasks_available",
@@ -154,7 +154,7 @@ describe("pool task claim flow", () => {
     });
 
     // 3. Simulate session logs being flushed with the random effectiveTaskId
-    createSessionLogs({
+    await createSessionLogs({
       taskId: effectiveTaskId,
       sessionId: runnerSessionId,
       iteration: 1,
@@ -163,24 +163,24 @@ describe("pool task claim flow", () => {
     });
 
     // 4. Verify logs are NOT under the real task ID yet
-    const beforeClaim = getSessionLogsByTaskId(task.id);
+    const beforeClaim = await getSessionLogsByTaskId(task.id);
     expect(beforeClaim.length).toBe(0);
 
     // 5. Simulate what task-action claim does: reassociate logs
-    const sessions = getActiveSessions(agentId);
+    const sessions = await getActiveSessions(agentId);
     const activeSession = sessions.find((s) => s.runnerSessionId);
     expect(activeSession?.runnerSessionId).toBe(runnerSessionId);
 
-    const count = reassociateSessionLogs(runnerSessionId, task.id);
+    const count = await reassociateSessionLogs(runnerSessionId, task.id);
     expect(count).toBe(3);
 
     // 6. Verify logs now appear under the real task ID
-    const afterClaim = getSessionLogsByTaskId(task.id);
+    const afterClaim = await getSessionLogsByTaskId(task.id);
     expect(afterClaim.length).toBe(3);
 
     // 7. Simulate more logs arriving after claim (with old effectiveTaskId)
     //    These would be caught by store-progress reinforcement
-    createSessionLogs({
+    await createSessionLogs({
       taskId: effectiveTaskId,
       sessionId: runnerSessionId,
       iteration: 1,
@@ -189,11 +189,11 @@ describe("pool task claim flow", () => {
     });
 
     // 8. Reinforce reassociation (like store-progress would)
-    const reinforceCount = reassociateSessionLogs(runnerSessionId, task.id);
+    const reinforceCount = await reassociateSessionLogs(runnerSessionId, task.id);
     expect(reinforceCount).toBe(1);
 
     // 9. All logs should now be under the real task ID
-    const allLogs = getSessionLogsByTaskId(task.id);
+    const allLogs = await getSessionLogsByTaskId(task.id);
     expect(allLogs.length).toBe(4);
   });
 });

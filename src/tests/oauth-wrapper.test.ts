@@ -23,10 +23,10 @@ const testConfig: OAuthProviderConfig = {
   extraParams: { actor: "app" },
 };
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
   // Create an oauth_app row so token storage works (FK constraint)
-  upsertOAuthApp("test-provider", {
+  await upsertOAuthApp("test-provider", {
     clientId: testConfig.clientId,
     clientSecret: testConfig.clientSecret,
     authorizeUrl: testConfig.authorizeUrl,

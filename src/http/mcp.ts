@@ -43,7 +43,7 @@ export async function handleMcp(
         }
       };
 
-      const server = createServer();
+      const server = await createServer();
       await server.connect(transport);
     } else {
       res.writeHead(400, { "Content-Type": "application/json" });

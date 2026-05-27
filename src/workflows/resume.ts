@@ -40,6 +40,35 @@ interface ApprovalEvent {
   workflowRunStepId?: string;
 }
 
+const resumeLocks = new Map<string, Promise<void>>();
+type ResumeHandlers = {
+  taskCompleted: (data: unknown) => void;
+  taskFailed: (data: unknown) => void;
+  taskCancelled: (data: unknown) => void;
+  approvalResolved: (data: unknown) => void;
+};
+const resumeHandlersByBus = new WeakMap<WorkflowEventBus, ResumeHandlers>();
+
+async function withResumeLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const previous = resumeLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const current = previous.catch(() => {}).then(() => gate);
+  resumeLocks.set(key, current);
+
+  await previous.catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (resumeLocks.get(key) === current) {
+      resumeLocks.delete(key);
+    }
+  }
+}
+
 /**
  * Wire up event bus listeners for workflow resume on task lifecycle events.
  */
@@ -47,45 +76,61 @@ export function setupWorkflowResumeListener(
   eventBus: WorkflowEventBus,
   registry: ExecutorRegistry,
 ): void {
-  eventBus.on("task.completed", async (data: unknown) => {
-    const event = data as TaskEvent;
-    if (!event.workflowRunId || !event.workflowRunStepId) return;
-    try {
-      await resumeFromTaskCompletion(event, registry);
-    } catch (err) {
-      console.error("[workflows] Resume from task completion failed:", err);
-    }
-  });
+  const existing = resumeHandlersByBus.get(eventBus);
+  if (existing) {
+    eventBus.off("task.completed", existing.taskCompleted);
+    eventBus.off("task.failed", existing.taskFailed);
+    eventBus.off("task.cancelled", existing.taskCancelled);
+    eventBus.off("approval.resolved", existing.approvalResolved);
+  }
 
-  eventBus.on("task.failed", async (data: unknown) => {
-    const event = data as TaskEvent;
-    if (!event.workflowRunId || !event.workflowRunStepId) return;
-    try {
-      await handleTaskFailure(event, event.failureReason ?? "Task failed", registry);
-    } catch (err) {
-      console.error("[workflows] Handle task failure error:", err);
-    }
-  });
+  const handlers: ResumeHandlers = {
+    taskCompleted: async (data: unknown) => {
+      const event = data as TaskEvent;
+      if (!event.workflowRunId || !event.workflowRunStepId) return;
+      try {
+        await resumeFromTaskCompletion(event, registry);
+      } catch (err) {
+        console.error("[workflows] Resume from task completion failed:", err);
+      }
+    },
 
-  eventBus.on("task.cancelled", async (data: unknown) => {
-    const event = data as TaskEvent;
-    if (!event.workflowRunId || !event.workflowRunStepId) return;
-    try {
-      await handleTaskFailure(event, "Task was cancelled", registry);
-    } catch (err) {
-      console.error("[workflows] Handle task cancellation error:", err);
-    }
-  });
+    taskFailed: async (data: unknown) => {
+      const event = data as TaskEvent;
+      if (!event.workflowRunId || !event.workflowRunStepId) return;
+      try {
+        await handleTaskFailure(event, event.failureReason ?? "Task failed", registry);
+      } catch (err) {
+        console.error("[workflows] Handle task failure error:", err);
+      }
+    },
 
-  eventBus.on("approval.resolved", async (data: unknown) => {
-    const event = data as ApprovalEvent;
-    if (!event.workflowRunId || !event.workflowRunStepId) return;
-    try {
-      await resumeFromApprovalResolution(event, registry);
-    } catch (err) {
-      console.error("[workflows] Resume from approval resolution failed:", err);
-    }
-  });
+    taskCancelled: async (data: unknown) => {
+      const event = data as TaskEvent;
+      if (!event.workflowRunId || !event.workflowRunStepId) return;
+      try {
+        await handleTaskFailure(event, "Task was cancelled", registry);
+      } catch (err) {
+        console.error("[workflows] Handle task cancellation error:", err);
+      }
+    },
+
+    approvalResolved: async (data: unknown) => {
+      const event = data as ApprovalEvent;
+      if (!event.workflowRunId || !event.workflowRunStepId) return;
+      try {
+        await resumeFromApprovalResolution(event, registry);
+      } catch (err) {
+        console.error("[workflows] Resume from approval resolution failed:", err);
+      }
+    },
+  };
+
+  eventBus.on("task.completed", handlers.taskCompleted);
+  eventBus.on("task.failed", handlers.taskFailed);
+  eventBus.on("task.cancelled", handlers.taskCancelled);
+  eventBus.on("approval.resolved", handlers.approvalResolved);
+  resumeHandlersByBus.set(eventBus, handlers);
 }
 
 /**
@@ -100,71 +145,73 @@ async function resumeFromTaskCompletion(
   event: TaskEvent,
   registry: ExecutorRegistry,
 ): Promise<void> {
-  const run = getWorkflowRun(event.workflowRunId!);
-  if (!run || (run.status !== "waiting" && run.status !== "running")) return;
+  await withResumeLock(event.workflowRunStepId!, async () => {
+    const run = await getWorkflowRun(event.workflowRunId!);
+    if (!run || (run.status !== "waiting" && run.status !== "running")) return;
 
-  const step = getWorkflowRunStep(event.workflowRunStepId!);
-  if (!step || step.status !== "waiting") return;
+    const step = await getWorkflowRunStep(event.workflowRunStepId!);
+    if (!step || step.status !== "waiting") return;
 
-  const workflow = getWorkflow(run.workflowId);
-  if (!workflow) return;
+    const workflow = await getWorkflow(run.workflowId);
+    if (!workflow) return;
 
-  // Checkpoint: atomic step completion + context update
-  const ctx = (run.context ?? {}) as Record<string, unknown>;
+    // Checkpoint: atomic step completion + context update
+    const ctx = (run.context ?? {}) as Record<string, unknown>;
 
-  // JSON-parse structured output so downstream nodes can access nested fields
-  let taskOutput: unknown = event.output;
-  if (event.output) {
-    try {
-      const parsed = JSON.parse(event.output);
-      if (typeof parsed === "object" && parsed !== null) {
-        taskOutput = parsed;
+    // JSON-parse structured output so downstream nodes can access nested fields
+    let taskOutput: unknown = event.output;
+    if (event.output) {
+      try {
+        const parsed = JSON.parse(event.output);
+        if (typeof parsed === "object" && parsed !== null) {
+          taskOutput = parsed;
+        }
+      } catch {
+        // Not JSON — keep as string (non-structured output tasks)
       }
-    } catch {
-      // Not JSON — keep as string (non-structured output tasks)
     }
-  }
-  const stepOutput = { taskId: event.taskId, taskOutput };
+    const stepOutput = { taskId: event.taskId, taskOutput };
 
-  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
+    await checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
 
-  // Set run back to running
-  updateWorkflowRun(run.id, { status: "running" });
+    // Set run back to running
+    await updateWorkflowRun(run.id, { status: "running" });
 
-  // Use direct successor-based routing (same as resumeFromApprovalResolution).
-  // findReadyNodes is NOT loop-aware — it excludes nodes with any completed step,
-  // which breaks loop workflows where a node needs re-execution on a new iteration.
-  // walkGraph handles convergence internally via activeEdges reconstruction.
-  const successors = getSuccessors(workflow.definition, step.nodeId);
+    // Use direct successor-based routing (same as resumeFromApprovalResolution).
+    // findReadyNodes is NOT loop-aware — it excludes nodes with any completed step,
+    // which breaks loop workflows where a node needs re-execution on a new iteration.
+    // walkGraph handles convergence internally via activeEdges reconstruction.
+    const successors = getSuccessors(workflow.definition, step.nodeId);
 
-  if (successors.length > 0) {
-    const secretKeys = getSecretInputKeys(workflow.input);
-    await walkGraph(
-      workflow.definition,
-      run.id,
-      ctx,
-      successors,
-      registry,
-      workflow.id,
-      secretKeys,
-    );
-  } else {
-    finalizeOrWait(run.id);
-  }
+    if (successors.length > 0) {
+      const secretKeys = getSecretInputKeys(workflow.input);
+      await walkGraph(
+        workflow.definition,
+        run.id,
+        ctx,
+        successors,
+        registry,
+        workflow.id,
+        secretKeys,
+      );
+    } else {
+      await finalizeOrWait(run.id);
+    }
+  });
 }
 
 /**
  * If no nodes are ready and no steps are still waiting, finalize the run.
  * Otherwise set it back to waiting for the next task completion.
  */
-export function finalizeOrWait(runId: string): void {
-  const steps = getWorkflowRunStepsByRunId(runId);
+export async function finalizeOrWait(runId: string): Promise<void> {
+  const steps = await getWorkflowRunStepsByRunId(runId);
   const hasWaiting = steps.some((s) => s.status === "waiting");
   if (hasWaiting) {
-    updateWorkflowRun(runId, { status: "waiting" });
+    await updateWorkflowRun(runId, { status: "waiting" });
   } else {
     // All steps done (completed or failed) — finalize the run
-    updateWorkflowRun(runId, {
+    await updateWorkflowRun(runId, {
       status: "completed",
       finishedAt: new Date().toISOString(),
     });
@@ -181,62 +228,64 @@ async function handleTaskFailure(
   reason: string,
   registry: ExecutorRegistry,
 ): Promise<void> {
-  const run = getWorkflowRun(event.workflowRunId!);
-  if (!run) return;
+  await withResumeLock(event.workflowRunStepId!, async () => {
+    const run = await getWorkflowRun(event.workflowRunId!);
+    if (!run) return;
 
-  const workflow = getWorkflow(run.workflowId);
-  if (!workflow) return;
+    const workflow = await getWorkflow(run.workflowId);
+    if (!workflow) return;
 
-  const onFailure = workflow.definition.onNodeFailure ?? "fail";
+    const onFailure = workflow.definition.onNodeFailure ?? "fail";
 
-  if (onFailure === "fail") {
-    markRunFailed(event, reason);
-    return;
-  }
+    if (onFailure === "fail") {
+      await markRunFailed(event, reason);
+      return;
+    }
 
-  // "continue": treat as completed with error output
-  const step = getWorkflowRunStep(event.workflowRunStepId!);
-  if (!step) return;
+    // "continue": treat as completed with error output
+    const step = await getWorkflowRunStep(event.workflowRunStepId!);
+    if (!step) return;
 
-  const ctx = (run.context ?? {}) as Record<string, unknown>;
-  const stepOutput = {
-    taskId: event.taskId,
-    taskOutput: `[FAILED: ${reason}] This node failed or was cancelled.`,
-  };
-  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
+    const ctx = (run.context ?? {}) as Record<string, unknown>;
+    const stepOutput = {
+      taskId: event.taskId,
+      taskOutput: `[FAILED: ${reason}] This node failed or was cancelled.`,
+    };
+    await checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
 
-  updateWorkflowRun(run.id, { status: "running" });
+    await updateWorkflowRun(run.id, { status: "running" });
 
-  // Use direct successor-based routing (loop-aware).
-  const successors = getSuccessors(workflow.definition, step.nodeId);
+    // Use direct successor-based routing (loop-aware).
+    const successors = getSuccessors(workflow.definition, step.nodeId);
 
-  if (successors.length > 0) {
-    const secretKeys = getSecretInputKeys(workflow.input);
-    await walkGraph(
-      workflow.definition,
-      run.id,
-      ctx,
-      successors,
-      registry,
-      workflow.id,
-      secretKeys,
-    );
-  } else {
-    finalizeOrWait(run.id);
-  }
+    if (successors.length > 0) {
+      const secretKeys = getSecretInputKeys(workflow.input);
+      await walkGraph(
+        workflow.definition,
+        run.id,
+        ctx,
+        successors,
+        registry,
+        workflow.id,
+        secretKeys,
+      );
+    } else {
+      await finalizeOrWait(run.id);
+    }
+  });
 }
 
 /**
  * Mark a workflow run as failed when its linked task fails or is cancelled.
  */
-function markRunFailed(event: TaskEvent, reason: string): void {
+async function markRunFailed(event: TaskEvent, reason: string): Promise<void> {
   const now = new Date().toISOString();
-  updateWorkflowRunStep(event.workflowRunStepId!, {
+  await updateWorkflowRunStep(event.workflowRunStepId!, {
     status: "failed",
     error: reason,
     finishedAt: now,
   });
-  updateWorkflowRun(event.workflowRunId!, {
+  await updateWorkflowRun(event.workflowRunId!, {
     status: "failed",
     error: reason,
     finishedAt: now,
@@ -247,24 +296,24 @@ function markRunFailed(event: TaskEvent, reason: string): void {
  * Retry a failed workflow run from its failed step.
  */
 export async function retryFailedRun(runId: string, registry: ExecutorRegistry): Promise<void> {
-  const run = getWorkflowRun(runId);
+  const run = await getWorkflowRun(runId);
   if (!run || run.status !== "failed") throw new Error("Run is not in failed state");
 
-  const workflow = getWorkflow(run.workflowId);
+  const workflow = await getWorkflow(run.workflowId);
   if (!workflow) throw new Error("Workflow not found");
 
   // Find the failed step
-  const steps = getWorkflowRunStepsByRunId(runId);
+  const steps = await getWorkflowRunStepsByRunId(runId);
   const failedStep = steps.find((s) => s.status === "failed");
   if (!failedStep) throw new Error("No failed step found");
 
   // Reset step and run
-  updateWorkflowRunStep(failedStep.id, { status: "pending", error: undefined });
+  await updateWorkflowRunStep(failedStep.id, { status: "pending", error: undefined });
   const ctx = (run.context ?? {}) as Record<string, unknown>;
-  updateWorkflowRun(runId, { status: "running", error: undefined, context: ctx });
+  await updateWorkflowRun(runId, { status: "running", error: undefined, context: ctx });
 
   // Resume from the failed node — use findReadyNodes for convergence safety
-  const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
+  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
   const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
   const failedNode = workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
   if (!failedNode) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
@@ -281,8 +330,8 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
  * Cancel a workflow run and all its non-terminal steps.
  * Also cancels any in-progress tasks spawned by waiting/running steps.
  */
-export function cancelWorkflowRun(runId: string, reason?: string): void {
-  const run = getWorkflowRun(runId);
+export async function cancelWorkflowRun(runId: string, reason?: string): Promise<void> {
+  const run = await getWorkflowRun(runId);
   if (!run) throw new Error("Workflow run not found");
 
   const terminalStatuses = ["completed", "failed", "cancelled", "skipped"];
@@ -294,17 +343,17 @@ export function cancelWorkflowRun(runId: string, reason?: string): void {
   const cancelReason = reason ?? "Cancelled by user";
 
   // Cancel non-terminal steps and their associated tasks
-  const steps = getWorkflowRunStepsByRunId(runId);
+  const steps = await getWorkflowRunStepsByRunId(runId);
   for (const step of steps) {
     if (terminalStatuses.includes(step.status)) continue;
 
     // Cancel any task linked to this step
-    const task = getTaskByWorkflowRunStepId(step.id);
+    const task = await getTaskByWorkflowRunStepId(step.id);
     if (task) {
-      cancelTask(task.id, cancelReason);
+      await cancelTask(task.id, cancelReason);
     }
 
-    updateWorkflowRunStep(step.id, {
+    await updateWorkflowRunStep(step.id, {
       status: "cancelled",
       error: cancelReason,
       finishedAt: now,
@@ -312,7 +361,7 @@ export function cancelWorkflowRun(runId: string, reason?: string): void {
   }
 
   // Mark the run itself as cancelled
-  updateWorkflowRun(runId, {
+  await updateWorkflowRun(runId, {
     status: "cancelled",
     error: cancelReason,
     finishedAt: now,
@@ -331,51 +380,57 @@ async function resumeFromApprovalResolution(
   event: ApprovalEvent,
   registry: ExecutorRegistry,
 ): Promise<void> {
-  const run = getWorkflowRun(event.workflowRunId!);
-  if (!run || (run.status !== "waiting" && run.status !== "running")) return;
+  await withResumeLock(event.workflowRunStepId!, async () => {
+    const run = await getWorkflowRun(event.workflowRunId!);
+    if (!run || (run.status !== "waiting" && run.status !== "running")) return;
 
-  const step = getWorkflowRunStep(event.workflowRunStepId!);
-  if (!step || step.status !== "waiting") return;
+    const step = await getWorkflowRunStep(event.workflowRunStepId!);
+    if (!step || step.status !== "waiting") return;
 
-  const workflow = getWorkflow(run.workflowId);
-  if (!workflow) return;
+    const workflow = await getWorkflow(run.workflowId);
+    if (!workflow) return;
 
-  const ctx = (run.context ?? {}) as Record<string, unknown>;
+    const ctx = (run.context ?? {}) as Record<string, unknown>;
 
-  // Determine output port based on approval status
-  const nextPort =
-    event.status === "timeout" ? "timeout" : event.status === "rejected" ? "rejected" : "approved";
+    // Determine output port based on approval status
+    const nextPort =
+      event.status === "timeout"
+        ? "timeout"
+        : event.status === "rejected"
+          ? "rejected"
+          : "approved";
 
-  const stepOutput = {
-    requestId: event.requestId,
-    status: event.status,
-    responses: event.responses,
-  };
+    const stepOutput = {
+      requestId: event.requestId,
+      status: event.status,
+      responses: event.responses,
+    };
 
-  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
-  updateWorkflowRun(run.id, { status: "running" });
+    await checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
+    await updateWorkflowRun(run.id, { status: "running" });
 
-  // Use port-based routing to determine the correct successors.
-  // findReadyNodes without activeEdges would return ALL structural successors
-  // (e.g. both "success" and "generate-question"), ignoring the port selection.
-  // Instead, compute the port-specific successors and let walkGraph handle
-  // convergence checks via its internal activeEdges reconstruction.
-  const successors = getSuccessors(workflow.definition, step.nodeId, nextPort);
+    // Use port-based routing to determine the correct successors.
+    // findReadyNodes without activeEdges would return ALL structural successors
+    // (e.g. both "success" and "generate-question"), ignoring the port selection.
+    // Instead, compute the port-specific successors and let walkGraph handle
+    // convergence checks via its internal activeEdges reconstruction.
+    const successors = getSuccessors(workflow.definition, step.nodeId, nextPort);
 
-  if (successors.length > 0) {
-    const secretKeys = getSecretInputKeys(workflow.input);
-    await walkGraph(
-      workflow.definition,
-      run.id,
-      ctx,
-      successors,
-      registry,
-      workflow.id,
-      secretKeys,
-    );
-  } else {
-    finalizeOrWait(run.id);
-  }
+    if (successors.length > 0) {
+      const secretKeys = getSecretInputKeys(workflow.input);
+      await walkGraph(
+        workflow.definition,
+        run.id,
+        ctx,
+        successors,
+        registry,
+        workflow.id,
+        secretKeys,
+      );
+    } else {
+      await finalizeOrWait(run.id);
+    }
+  });
 }
 
 /**
@@ -412,20 +467,20 @@ export async function resumeWaitState(
   const cappedPayload = capPayload(payload);
 
   // 2. Atomic state transition. Only the first caller proceeds.
-  const result = resolveWaitState(waitId, { status, firedPayload: cappedPayload });
+  const result = await resolveWaitState(waitId, { status, firedPayload: cappedPayload });
   if (!result.updated || !result.row) return;
 
   const waitRow = result.row;
 
   // 2. Load the surrounding run + step. If anything has moved on (cancelled,
   // failed, retried, etc.), stay quiet.
-  const run = getWorkflowRun(waitRow.workflowRunId);
+  const run = await getWorkflowRun(waitRow.workflowRunId);
   if (!run || (run.status !== "waiting" && run.status !== "running")) return;
 
-  const step = getWorkflowRunStep(waitRow.workflowRunStepId);
+  const step = await getWorkflowRunStep(waitRow.workflowRunStepId);
   if (!step || step.status !== "waiting") return;
 
-  const workflow = getWorkflow(run.workflowId);
+  const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
 
   // 3. Pick the output port.
@@ -440,8 +495,8 @@ export async function resumeWaitState(
     payload: cappedPayload === undefined ? undefined : cappedPayload,
   };
 
-  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
-  updateWorkflowRun(run.id, { status: "running" });
+  await checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
+  await updateWorkflowRun(run.id, { status: "running" });
 
   // 5. Bus listener bookkeeping: this wait is no longer pending, so drop it
   // from the per-event subscription set. If the set empties out, unwire the
@@ -463,7 +518,7 @@ export async function resumeWaitState(
       secretKeys,
     );
   } else {
-    finalizeOrWait(run.id);
+    await finalizeOrWait(run.id);
   }
 }
 
@@ -521,7 +576,7 @@ let busRegistry: ExecutorRegistry | null = null;
  * Subsequent calls update the registry reference (idempotent — listeners
  * already registered are not re-registered).
  */
-export function initWaitBusSubscriptions(registry: ExecutorRegistry): void {
+export async function initWaitBusSubscriptions(registry: ExecutorRegistry): Promise<void> {
   busRegistry = registry;
   // Pre-existing listeners are fine — they pick up the new registry via the
   // module-level `busRegistry` reference.
@@ -529,17 +584,17 @@ export function initWaitBusSubscriptions(registry: ExecutorRegistry): void {
   // arrive at the right wait once the listener is registered.
   // We use a dedicated DB query rather than getPendingWaitsByEvent so we can
   // page through ALL distinct event names in one pass.
-  const pendingNames = collectPendingEventNames();
+  const pendingNames = await collectPendingEventNames();
   for (const name of pendingNames) {
-    const pending = getPendingWaitsByEvent(name);
+    const pending = await getPendingWaitsByEvent(name);
     for (const w of pending) {
       registerWait(w.id, name);
     }
   }
 }
 
-function collectPendingEventNames(): Set<string> {
-  return new Set(getPendingEventWaitNames());
+async function collectPendingEventNames(): Promise<Set<string>> {
+  return new Set(await getPendingEventWaitNames());
 }
 
 /**
@@ -597,7 +652,7 @@ async function processBusEvent(eventName: string, payload: unknown): Promise<voi
   const waitIds = [...set];
   for (const waitId of waitIds) {
     try {
-      const row = getWaitStateById(waitId);
+      const row = await getWaitStateById(waitId);
       if (!row || row.status !== "pending") {
         // Already resolved (race) or vanished — drop the stale subscription.
         set.delete(waitId);

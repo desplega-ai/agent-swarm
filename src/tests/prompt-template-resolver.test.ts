@@ -24,7 +24,7 @@ describe("Prompt Template Resolver", () => {
     // Clear any previously registered templates before init
     clearTemplateDefinitions();
     closeDb();
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
@@ -113,7 +113,7 @@ describe("Prompt Template Resolver", () => {
       clearTemplateDefinitions();
     });
 
-    test("basic resolution: eventType + variables → interpolated string", () => {
+    test("basic resolution: eventType + variables → interpolated string", async () => {
       registerTemplate({
         eventType: "resolve.basic",
         header: "Event: {{event}}",
@@ -125,13 +125,13 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      const result = resolveTemplate("resolve.basic", { event: "push", user: "alice" });
+      const result = await resolveTemplate("resolve.basic", { event: "push", user: "alice" });
       expect(result.skipped).toBe(false);
       expect(result.text).toBe("Event: push\n\nHello alice, event is push");
       expect(result.unresolved.length).toBe(0);
     });
 
-    test("header + body composition (header non-empty)", () => {
+    test("header + body composition (header non-empty)", async () => {
       registerTemplate({
         eventType: "resolve.header_body",
         header: "HEADER",
@@ -140,11 +140,11 @@ describe("Prompt Template Resolver", () => {
         category: "system",
       });
 
-      const result = resolveTemplate("resolve.header_body", {});
+      const result = await resolveTemplate("resolve.header_body", {});
       expect(result.text).toBe("HEADER\n\nBODY");
     });
 
-    test("header empty → just body", () => {
+    test("header empty → just body", async () => {
       registerTemplate({
         eventType: "resolve.no_header",
         header: "",
@@ -153,11 +153,11 @@ describe("Prompt Template Resolver", () => {
         category: "system",
       });
 
-      const result = resolveTemplate("resolve.no_header", {});
+      const result = await resolveTemplate("resolve.no_header", {});
       expect(result.text).toBe("Just the body");
     });
 
-    test("unresolved variable tracking", () => {
+    test("unresolved variable tracking", async () => {
       registerTemplate({
         eventType: "resolve.unresolved",
         header: "",
@@ -169,13 +169,13 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      const result = resolveTemplate("resolve.unresolved", { user: "alice" });
+      const result = await resolveTemplate("resolve.unresolved", { user: "alice" });
       expect(result.text).toBe("Hello alice, your repo is ");
       expect(result.unresolved).toContain("repo");
     });
 
-    test("no code definition, no DB record → empty text", () => {
-      const result = resolveTemplate("totally.unknown.event", { foo: "bar" });
+    test("no code definition, no DB record → empty text", async () => {
+      const result = await resolveTemplate("totally.unknown.event", { foo: "bar" });
       expect(result.skipped).toBe(false);
       expect(result.text).toBe("");
       expect(result.templateId).toBeUndefined();
@@ -191,7 +191,7 @@ describe("Prompt Template Resolver", () => {
       clearTemplateDefinitions();
     });
 
-    test("DB body override replaces code defaultBody", () => {
+    test("DB body override replaces code defaultBody", async () => {
       registerTemplate({
         eventType: "resolve.db_override",
         header: "H",
@@ -201,19 +201,19 @@ describe("Prompt Template Resolver", () => {
       });
 
       // Insert a DB override
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: "resolve.db_override",
         scope: "global",
         body: "Custom DB body",
       });
 
-      const result = resolveTemplate("resolve.db_override", {});
+      const result = await resolveTemplate("resolve.db_override", {});
       expect(result.text).toBe("H\n\nCustom DB body");
       expect(result.templateId).toBeDefined();
       expect(result.scope).toBe("global");
     });
 
-    test("scope override: agent-level body replaces global default", () => {
+    test("scope override: agent-level body replaces global default", async () => {
       const agentId = "resolver-agent-001";
 
       registerTemplate({
@@ -224,24 +224,24 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: "resolve.scope_override",
         scope: "global",
         body: "Global body",
       });
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: "resolve.scope_override",
         scope: "agent",
         scopeId: agentId,
         body: "Agent body",
       });
 
-      const result = resolveTemplate("resolve.scope_override", {}, { agentId });
+      const result = await resolveTemplate("resolve.scope_override", {}, { agentId });
       expect(result.text).toBe("Agent body");
       expect(result.scope).toBe("agent");
     });
 
-    test("skip_event returns { skipped: true }", () => {
+    test("skip_event returns { skipped: true }", async () => {
       registerTemplate({
         eventType: "resolve.skip",
         header: "H",
@@ -250,19 +250,19 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: "resolve.skip",
         scope: "global",
         state: "skip_event",
         body: "Skipped body",
       });
 
-      const result = resolveTemplate("resolve.skip", {});
+      const result = await resolveTemplate("resolve.skip", {});
       expect(result.skipped).toBe(true);
       expect(result.text).toBe("");
     });
 
-    test("default_prompt_fallback falls through to next scope", () => {
+    test("default_prompt_fallback falls through to next scope", async () => {
       const agentId = "resolver-fallback-agent";
 
       registerTemplate({
@@ -273,26 +273,26 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: "resolve.fallback",
         scope: "agent",
         scopeId: agentId,
         state: "default_prompt_fallback",
         body: "Agent fallback",
       });
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: "resolve.fallback",
         scope: "global",
         state: "enabled",
         body: "Global enabled",
       });
 
-      const result = resolveTemplate("resolve.fallback", {}, { agentId });
+      const result = await resolveTemplate("resolve.fallback", {}, { agentId });
       expect(result.text).toBe("Global enabled");
       expect(result.scope).toBe("global");
     });
 
-    test("wildcard resolution in resolver context", () => {
+    test("wildcard resolution in resolver context", async () => {
       registerTemplate({
         eventType: "resolve.wild.specific",
         header: "",
@@ -302,13 +302,13 @@ describe("Prompt Template Resolver", () => {
       });
 
       // Only a wildcard DB entry exists
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: "resolve.wild.*",
         scope: "global",
         body: "Wildcard body",
       });
 
-      const result = resolveTemplate("resolve.wild.specific", {});
+      const result = await resolveTemplate("resolve.wild.specific", {});
       expect(result.text).toBe("Wildcard body");
     });
   });
@@ -322,7 +322,7 @@ describe("Prompt Template Resolver", () => {
       clearTemplateDefinitions();
     });
 
-    test("basic {{@template[id]}} expansion", () => {
+    test("basic {{@template[id]}} expansion", async () => {
       registerTemplate({
         eventType: "ref.main",
         header: "",
@@ -338,11 +338,11 @@ describe("Prompt Template Resolver", () => {
         category: "common",
       });
 
-      const result = resolveTemplate("ref.main", {});
+      const result = await resolveTemplate("ref.main", {});
       expect(result.text).toBe("Main body. Included: Common snippet");
     });
 
-    test("nested template refs up to depth 3", () => {
+    test("nested template refs up to depth 3", async () => {
       registerTemplate({
         eventType: "depth.0",
         header: "",
@@ -372,11 +372,11 @@ describe("Prompt Template Resolver", () => {
         category: "common",
       });
 
-      const result = resolveTemplate("depth.0", {});
+      const result = await resolveTemplate("depth.0", {});
       expect(result.text).toBe("L0[L1[L2[L3-leaf]]]");
     });
 
-    test("depth limit exceeded (>3 levels) — token left as-is", () => {
+    test("depth limit exceeded (>3 levels) — token left as-is", async () => {
       registerTemplate({
         eventType: "deep.0",
         header: "",
@@ -413,7 +413,7 @@ describe("Prompt Template Resolver", () => {
         category: "common",
       });
 
-      const result = resolveTemplate("deep.0", {});
+      const result = await resolveTemplate("deep.0", {});
       // depth.0 body starts at depth 0, expands depth.1 at depth 1, depth.2 at depth 2,
       // depth.3 at depth 3 — at this point the body of depth.3 contains {{@template[deep.4]}}
       // which would require depth 4, exceeding MAX_TEMPLATE_REF_DEPTH of 3.
@@ -423,7 +423,7 @@ describe("Prompt Template Resolver", () => {
       expect(result.unresolved).toContain("@template[deep.4]");
     });
 
-    test("cycle detection — token left as-is", () => {
+    test("cycle detection — token left as-is", async () => {
       registerTemplate({
         eventType: "cycle.a",
         header: "",
@@ -439,7 +439,7 @@ describe("Prompt Template Resolver", () => {
         category: "common",
       });
 
-      const result = resolveTemplate("cycle.a", {});
+      const result = await resolveTemplate("cycle.a", {});
       // cycle.a → expand cycle.b (add cycle.b to visited) → cycle.b body has cycle.a ref
       // → cycle.a is NOT in visited yet, so it expands cycle.a again (add cycle.a to visited)
       // → cycle.a body has cycle.b ref → cycle.b IS in visited → cycle detected, left as-is.
@@ -449,7 +449,7 @@ describe("Prompt Template Resolver", () => {
       expect(result.unresolved).toContain("@template[cycle.b]");
     });
 
-    test("template ref with DB override for referenced template", () => {
+    test("template ref with DB override for referenced template", async () => {
       registerTemplate({
         eventType: "refdb.main",
         header: "",
@@ -466,13 +466,13 @@ describe("Prompt Template Resolver", () => {
       });
 
       // Override the sub template in DB
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: "refdb.sub",
         scope: "global",
         body: "DB override sub",
       });
 
-      const result = resolveTemplate("refdb.main", {});
+      const result = await resolveTemplate("refdb.main", {});
       expect(result.text).toBe("Main: DB override sub");
     });
   });
@@ -486,7 +486,7 @@ describe("Prompt Template Resolver", () => {
       clearTemplateDefinitions();
     });
 
-    test("fresh DB gets all defaults from registered templates", () => {
+    test("fresh DB gets all defaults from registered templates", async () => {
       registerTemplate({
         eventType: "seed.test.alpha",
         header: "Alpha header",
@@ -502,9 +502,9 @@ describe("Prompt Template Resolver", () => {
         category: "system",
       });
 
-      seedDefaultTemplates();
+      await seedDefaultTemplates();
 
-      const alphaTemplates = getPromptTemplates({
+      const alphaTemplates = await getPromptTemplates({
         eventType: "seed.test.alpha",
         scope: "global",
         isDefault: true,
@@ -513,7 +513,7 @@ describe("Prompt Template Resolver", () => {
       expect(alphaTemplates[0].body).toBe("Alpha default body");
       expect(alphaTemplates[0].isDefault).toBe(true);
 
-      const betaTemplates = getPromptTemplates({
+      const betaTemplates = await getPromptTemplates({
         eventType: "seed.test.beta",
         scope: "global",
         isDefault: true,
@@ -522,7 +522,7 @@ describe("Prompt Template Resolver", () => {
       expect(betaTemplates[0].body).toBe("Beta default body");
     });
 
-    test("re-seeding updates defaults when code body changes", () => {
+    test("re-seeding updates defaults when code body changes", async () => {
       registerTemplate({
         eventType: "seed.test.reseed",
         header: "",
@@ -531,9 +531,9 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      seedDefaultTemplates();
+      await seedDefaultTemplates();
 
-      const before = getPromptTemplates({
+      const before = await getPromptTemplates({
         eventType: "seed.test.reseed",
         scope: "global",
         isDefault: true,
@@ -551,9 +551,9 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      seedDefaultTemplates();
+      await seedDefaultTemplates();
 
-      const after = getPromptTemplates({
+      const after = await getPromptTemplates({
         eventType: "seed.test.reseed",
         scope: "global",
         isDefault: true,
@@ -562,7 +562,7 @@ describe("Prompt Template Resolver", () => {
       expect(after[0].body).toBe("Updated default");
     });
 
-    test("re-seeding does not touch user customizations (isDefault=false)", () => {
+    test("re-seeding does not touch user customizations (isDefault=false)", async () => {
       registerTemplate({
         eventType: "seed.test.custom",
         header: "",
@@ -571,10 +571,10 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      seedDefaultTemplates();
+      await seedDefaultTemplates();
 
       // User customizes the template (upsert at global scope flips isDefault to false)
-      upsertPromptTemplate({
+      await upsertPromptTemplate({
         eventType: "seed.test.custom",
         scope: "global",
         body: "User custom body",
@@ -582,7 +582,7 @@ describe("Prompt Template Resolver", () => {
       });
 
       // Verify it's no longer default
-      const customized = getPromptTemplates({
+      const customized = await getPromptTemplates({
         eventType: "seed.test.custom",
         scope: "global",
       });
@@ -600,10 +600,10 @@ describe("Prompt Template Resolver", () => {
         category: "event",
       });
 
-      seedDefaultTemplates();
+      await seedDefaultTemplates();
 
       // User customization should be untouched (isDefault=false won't match the filter)
-      const afterReseed = getPromptTemplates({
+      const afterReseed = await getPromptTemplates({
         eventType: "seed.test.custom",
         scope: "global",
       });
@@ -612,10 +612,10 @@ describe("Prompt Template Resolver", () => {
       expect(afterReseed[0].isDefault).toBe(false);
     });
 
-    test("seeding with no registered templates is a no-op", () => {
+    test("seeding with no registered templates is a no-op", async () => {
       clearTemplateDefinitions();
       // Should not throw
-      seedDefaultTemplates();
+      await seedDefaultTemplates();
     });
   });
 });

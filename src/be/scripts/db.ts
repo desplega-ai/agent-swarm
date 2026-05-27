@@ -1,5 +1,5 @@
 import type { ScriptFsMode, ScriptRecord, ScriptScope, ScriptVersionRecord } from "../../types";
-import { computeContentHash, getDb } from "../db";
+import { computeContentHash, getDb, runDbTransaction } from "../db";
 import { embedScript } from "./embeddings";
 
 type ScriptRow = Omit<ScriptRecord, "isScratch" | "typeChecked"> & {
@@ -60,7 +60,7 @@ function rowToScriptVersion(row: ScriptVersionRow): ScriptVersionRecord {
   };
 }
 
-function insertScriptVersion(args: {
+async function insertScriptVersion(args: {
   scriptId: string;
   version: number;
   source: string;
@@ -70,8 +70,8 @@ function insertScriptVersion(args: {
   contentHash: string;
   changedByAgentId?: string | null;
   changeReason?: string | null;
-}): void {
-  getDb()
+}): Promise<void> {
+  (await getDb())
     .prepare(
       `INSERT INTO script_versions (
         id, scriptId, version, source, description, intent, signatureJson,
@@ -94,7 +94,7 @@ function insertScriptVersion(args: {
     );
 }
 
-export function insertScript(args: ScriptWriteArgs): ScriptRecord {
+export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord> {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const scopeId = normalizeScopeId(args.scope, args.scopeId);
@@ -103,8 +103,8 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
   const isScratch = args.isScratch ? 1 : 0;
   const typeChecked = args.typeChecked ? 1 : 0;
 
-  const txn = getDb().transaction(() => {
-    const row = getDb()
+  return await runDbTransaction(async () => {
+    const row = (await getDb())
       .prepare<
         ScriptRow,
         [
@@ -154,7 +154,7 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
 
     if (!row) throw new Error("Failed to insert script");
 
-    insertScriptVersion({
+    await insertScriptVersion({
       scriptId: row.id,
       version: row.version,
       source: row.source,
@@ -168,8 +168,6 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
 
     return rowToScript(row);
   });
-
-  return txn();
 }
 
 /**
@@ -178,9 +176,9 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
  * immediately consistent for authored/promoted scripts.
  */
 export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertScriptResult> {
-  const existing = getScript(args);
+  const existing = await getScript(args);
   if (!existing) {
-    const script = insertScript(args);
+    const script = await insertScript(args);
     if (!script.isScratch) {
       await embedScript(script);
     }
@@ -210,7 +208,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
       typeChecked !== existing.typeChecked ||
       trackedMetadataChanged
     ) {
-      const row = getDb()
+      const row = (await getDb())
         .prepare<
           ScriptRow,
           [string, string, string, string | null, number, number, string, string, string]
@@ -260,8 +258,8 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   const argsJsonSchema =
     args.argsJsonSchema !== undefined ? args.argsJsonSchema : existing.argsJsonSchema;
 
-  const txn = getDb().transaction(() => {
-    const row = getDb()
+  const script = await runDbTransaction(async () => {
+    const row = (await getDb())
       .prepare<
         ScriptRow,
         [
@@ -302,7 +300,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
 
     if (!row) throw new Error("Failed to update script");
 
-    insertScriptVersion({
+    await insertScriptVersion({
       scriptId: row.id,
       version: row.version,
       source: row.source,
@@ -316,8 +314,6 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
 
     return rowToScript(row);
   });
-
-  const script = txn();
   if (!script.isScratch) {
     await embedScript(script);
   }
@@ -329,16 +325,16 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   };
 }
 
-export function getScript(args: ScriptIdentity): ScriptRecord | null {
+export async function getScript(args: ScriptIdentity): Promise<ScriptRecord | null> {
   const scopeId = normalizeScopeId(args.scope, args.scopeId);
   const row =
     scopeId === null
-      ? getDb()
+      ? (await getDb())
           .prepare<ScriptRow, [string, ScriptScope]>(
             "SELECT * FROM scripts WHERE name = ? AND scope = ? AND scopeId IS NULL",
           )
           .get(args.name, args.scope)
-      : getDb()
+      : (await getDb())
           .prepare<ScriptRow, [string, ScriptScope, string]>(
             "SELECT * FROM scripts WHERE name = ? AND scope = ? AND scopeId = ?",
           )
@@ -347,23 +343,23 @@ export function getScript(args: ScriptIdentity): ScriptRecord | null {
   return row ? rowToScript(row) : null;
 }
 
-export function getScriptVersion(args: {
+export async function getScriptVersion(args: {
   scriptId: string;
   version?: number;
   contentHash?: string;
-}): ScriptVersionRecord | null {
+}): Promise<ScriptVersionRecord | null> {
   if (args.version === undefined && args.contentHash === undefined) {
     throw new Error("version or contentHash is required");
   }
 
   const row =
     args.version !== undefined
-      ? getDb()
+      ? (await getDb())
           .prepare<ScriptVersionRow, [string, number]>(
             "SELECT * FROM script_versions WHERE scriptId = ? AND version = ?",
           )
           .get(args.scriptId, args.version)
-      : getDb()
+      : (await getDb())
           .prepare<ScriptVersionRow, [string, string]>(
             "SELECT * FROM script_versions WHERE scriptId = ? AND contentHash = ? ORDER BY version DESC LIMIT 1",
           )
@@ -372,11 +368,11 @@ export function getScriptVersion(args: {
   return row ? rowToScriptVersion(row) : null;
 }
 
-export function listScripts(args?: {
+export async function listScripts(args?: {
   scope?: ScriptScope;
   scopeId?: string | null;
   includeScratch?: boolean;
-}): ScriptRecord[] {
+}): Promise<ScriptRecord[]> {
   const conditions: string[] = [];
   const params: (string | number | null)[] = [];
 
@@ -400,7 +396,7 @@ export function listScripts(args?: {
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return getDb()
+  return (await getDb())
     .prepare<ScriptRow, (string | number | null)[]>(
       `SELECT * FROM scripts ${whereClause} ORDER BY scope ASC, scopeId ASC, name ASC`,
     )
@@ -408,10 +404,10 @@ export function listScripts(args?: {
     .map(rowToScript);
 }
 
-export function deleteScript(args: ScriptIdentity): boolean {
-  const existing = getScript(args);
+export async function deleteScript(args: ScriptIdentity): Promise<boolean> {
+  const existing = await getScript(args);
   if (!existing) return false;
 
-  const result = getDb().run("DELETE FROM scripts WHERE id = ?", [existing.id]);
+  const result = (await getDb()).run("DELETE FROM scripts WHERE id = ?", [existing.id]);
   return result.changes > 0;
 }

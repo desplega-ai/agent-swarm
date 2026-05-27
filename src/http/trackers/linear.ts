@@ -104,8 +104,8 @@ const linearDisconnect = route({
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function buildLinearStatusPayload(req: IncomingMessage): Record<string, unknown> {
-  const tokens = getOAuthTokens("linear");
+async function buildLinearStatusPayload(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const tokens = await getOAuthTokens("linear");
   const baseUrl = deriveApiBaseUrl(req);
 
   return {
@@ -197,7 +197,7 @@ export async function handleLinearTracker(
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(buildLinearStatusPayload(req)));
+    res.end(JSON.stringify(await buildLinearStatusPayload(req)));
     return true;
   }
 
@@ -211,7 +211,7 @@ export async function handleLinearTracker(
       return true;
     }
 
-    const tokens = getOAuthTokens("linear");
+    const tokens = await getOAuthTokens("linear");
     if (!tokens?.refreshToken) {
       res.writeHead(409, { "Content-Type": "application/json" });
       res.end(
@@ -233,7 +233,7 @@ export async function handleLinearTracker(
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(buildLinearStatusPayload(req)));
+    res.end(JSON.stringify(await buildLinearStatusPayload(req)));
     return true;
   }
 
@@ -267,13 +267,13 @@ export async function handleLinearTracker(
       return true;
     }
 
-    const tokens = getOAuthTokens("linear");
+    const tokens = await getOAuthTokens("linear");
     let revoked = false;
     if (tokens?.accessToken) {
       revoked = await revokeLinearToken(tokens.accessToken);
     }
 
-    deleteOAuthTokens("linear");
+    await deleteOAuthTokens("linear");
 
     console.log(`[Linear] Disconnected: revoke=${revoked}, tokens cleared`);
 

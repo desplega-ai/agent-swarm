@@ -52,11 +52,11 @@ function namespace(kind: string): string {
  * best-effort audit, not a primary store. A partial failure is acceptable;
  * the next sighting reconciles.
  */
-export function recordUnmappedIdentity(
+export async function recordUnmappedIdentity(
   kind: string,
   externalId: string,
   meta: { sampleEventType: string; sampleContext: string },
-): void {
+): Promise<void> {
   const ns = namespace(kind);
   const now = new Date().toISOString();
   const expiresAt = Date.now() + TTL_MS;
@@ -65,9 +65,9 @@ export function recordUnmappedIdentity(
   // Snapshot count-row existence BEFORE incrementing so we know whether to
   // patch the TTL. Reads are race-tolerant: worst case two callers both see
   // "no row" and both patch — the second patch is idempotent.
-  const countBefore = getKv(ns, countKey);
+  const countBefore = await getKv(ns, countKey);
 
-  upsertKv({
+  await upsertKv({
     namespace: ns,
     key: `${externalId}:meta`,
     value: {
@@ -79,7 +79,7 @@ export function recordUnmappedIdentity(
     expiresAt,
   });
 
-  const incremented = incrKv(ns, countKey, 1);
+  const incremented = await incrKv(ns, countKey, 1);
 
   // First-mint TTL patch. Only patch when:
   //   * The pre-incr snapshot showed no row (or expired)
@@ -87,7 +87,7 @@ export function recordUnmappedIdentity(
   // Reading the post-incr value back keeps us from clobbering a concurrent
   // increment that already bumped past 1.
   if (countBefore === null) {
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: countKey,
       value: Number(incremented.value),

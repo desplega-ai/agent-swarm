@@ -55,12 +55,12 @@ function createTestRegistry(): ExecutorRegistry {
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(
+async function makeWorkflow(
   def: WorkflowDefinition,
   overrides?: { triggerSchema?: Record<string, unknown> },
-): Workflow {
+): Promise<Workflow> {
   workflowCounter++;
-  const workflow = createWorkflow({
+  const workflow = await createWorkflow({
     name: `test-trigger-schema-${workflowCounter}-${Date.now()}`,
     definition: def,
     triggerSchema: overrides?.triggerSchema,
@@ -78,13 +78,13 @@ describe("Workflow triggerSchema (Phase 4)", () => {
     } catch {
       // File doesn't exist
     }
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }
@@ -113,7 +113,7 @@ describe("Workflow triggerSchema (Phase 4)", () => {
       ],
     };
 
-    const workflow = makeWorkflow(def, {
+    const workflow = await makeWorkflow(def, {
       triggerSchema: {
         type: "object",
         properties: { message: { type: "string" } },
@@ -122,7 +122,7 @@ describe("Workflow triggerSchema (Phase 4)", () => {
     });
 
     const runId = await startWorkflowExecution(workflow, { message: "hello world" }, registry);
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
   });
 
@@ -140,7 +140,7 @@ describe("Workflow triggerSchema (Phase 4)", () => {
       ],
     };
 
-    const workflow = makeWorkflow(def, {
+    const workflow = await makeWorkflow(def, {
       triggerSchema: {
         type: "object",
         properties: { message: { type: "string" } },
@@ -174,14 +174,14 @@ describe("Workflow triggerSchema (Phase 4)", () => {
     };
 
     // No triggerSchema
-    const workflow = makeWorkflow(def);
+    const workflow = await makeWorkflow(def);
 
     const runId = await startWorkflowExecution(
       workflow,
       { anything: "goes", nested: { deep: true } },
       registry,
     );
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
   });
 
@@ -199,7 +199,7 @@ describe("Workflow triggerSchema (Phase 4)", () => {
       ],
     };
 
-    const workflow = makeWorkflow(def, {
+    const workflow = await makeWorkflow(def, {
       triggerSchema: {
         type: "object",
         required: ["repo", "branch"],
@@ -233,7 +233,7 @@ describe("Workflow triggerSchema (Phase 4)", () => {
       ],
     };
 
-    const workflow = makeWorkflow(def, {
+    const workflow = await makeWorkflow(def, {
       triggerSchema: {
         type: "object",
         properties: {
@@ -271,7 +271,7 @@ describe("Workflow triggerSchema (Phase 4)", () => {
 
   // ─── triggerSchema Persisted in DB ──────────────────────────
 
-  test("triggerSchema is persisted and retrieved from DB", () => {
+  test("triggerSchema is persisted and retrieved from DB", async () => {
     const def: WorkflowDefinition = {
       nodes: [{ id: "s1", type: "echo", config: { message: "hi" } }],
     };
@@ -282,19 +282,19 @@ describe("Workflow triggerSchema (Phase 4)", () => {
       required: ["repo"],
     };
 
-    const workflow = makeWorkflow(def, { triggerSchema: schema });
-    const loaded = getWorkflow(workflow.id);
+    const workflow = await makeWorkflow(def, { triggerSchema: schema });
+    const loaded = await getWorkflow(workflow.id);
     expect(loaded).not.toBeNull();
     expect(loaded!.triggerSchema).toEqual(schema);
   });
 
-  test("workflow without triggerSchema has undefined triggerSchema", () => {
+  test("workflow without triggerSchema has undefined triggerSchema", async () => {
     const def: WorkflowDefinition = {
       nodes: [{ id: "s1", type: "echo", config: { message: "hi" } }],
     };
 
-    const workflow = makeWorkflow(def);
-    const loaded = getWorkflow(workflow.id);
+    const workflow = await makeWorkflow(def);
+    const loaded = await getWorkflow(workflow.id);
     expect(loaded).not.toBeNull();
     expect(loaded!.triggerSchema).toBeUndefined();
   });
@@ -307,7 +307,7 @@ describe("Workflow triggerSchema (Phase 4)", () => {
       nodes: [{ id: "s1", type: "echo", config: { message: "hi" } }],
     };
 
-    const workflow = makeWorkflow(def, {
+    const workflow = await makeWorkflow(def, {
       triggerSchema: { type: "object" },
     });
 
@@ -330,7 +330,7 @@ describe("Workflow triggerSchema (Phase 4)", () => {
       nodes: [{ id: "s1", type: "echo", config: { message: "hi" } }],
     };
 
-    const workflow = makeWorkflow(def, {
+    const workflow = await makeWorkflow(def, {
       triggerSchema: { type: "object" },
     });
 
@@ -350,10 +350,10 @@ describe("Workflow triggerSchema (Phase 4)", () => {
       nodes: [{ id: "s1", type: "echo", config: { message: "hi" } }],
     };
 
-    const workflow = makeWorkflow(def, { triggerSchema: {} });
+    const workflow = await makeWorkflow(def, { triggerSchema: {} });
 
     const runId = await startWorkflowExecution(workflow, { anything: "goes" }, registry);
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
   });
 });

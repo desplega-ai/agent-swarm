@@ -22,7 +22,7 @@ export const registerGetWorkflowRunTool = (server: McpServer) => {
     },
     async ({ id }) => {
       try {
-        const run = getWorkflowRun(id);
+        const run = await getWorkflowRun(id);
         if (!run) {
           return {
             content: [{ type: "text" as const, text: `Workflow run not found: ${id}` }],
@@ -33,7 +33,7 @@ export const registerGetWorkflowRunTool = (server: McpServer) => {
             },
           };
         }
-        const steps = getWorkflowRunStepsByRunId(id);
+        const steps = await getWorkflowRunStepsByRunId(id);
         return {
           content: [
             {

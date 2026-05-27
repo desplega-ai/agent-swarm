@@ -31,7 +31,7 @@ export const registerSkillUninstallTool = (server: McpServer) => {
       const targetAgentId = args.agentId ?? requestInfo.agentId;
 
       if (targetAgentId !== requestInfo.agentId) {
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         if (!agent?.isLead) {
           return {
             content: [{ type: "text", text: "Only leads can uninstall skills for other agents." }],
@@ -44,7 +44,7 @@ export const registerSkillUninstallTool = (server: McpServer) => {
         }
       }
 
-      const removed = uninstallSkill(targetAgentId, args.skillId);
+      const removed = await uninstallSkill(targetAgentId, args.skillId);
       return {
         content: [
           { type: "text", text: removed ? "Skill uninstalled." : "Skill was not installed." },

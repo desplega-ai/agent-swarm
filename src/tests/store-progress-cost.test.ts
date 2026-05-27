@@ -35,10 +35,10 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
 
   beforeAll(async () => {
     // Initialize test database
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     // Create test agent
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "Test Worker",
       description: "Test agent for cost tracking",
       role: "worker",
@@ -50,7 +50,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     agentId = agent.id;
 
     // Create test task
-    const task = createTaskExtended("Test task for cost tracking", {
+    const task = await createTaskExtended("Test task for cost tracking", {
       agentId,
       source: "mcp",
       priority: 50,
@@ -67,7 +67,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     }
   });
 
-  test("should create session cost when costData is provided with store-progress", () => {
+  test("should create session cost when costData is provided with store-progress", async () => {
     // Simulate what store-progress does when costData is provided
     const costData = {
       totalCostUsd: 0.05,
@@ -82,7 +82,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
 
     // Create session cost (this is what store-progress does internally)
     const sessionId = `mcp-${taskId}-${Date.now()}`;
-    const cost = createSessionCost({
+    const cost = await createSessionCost({
       sessionId,
       taskId,
       agentId,
@@ -112,14 +112,14 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     expect(cost.isError).toBe(false);
 
     // Verify cost can be retrieved by taskId
-    const costs = getSessionCostsByTaskId(taskId);
+    const costs = await getSessionCostsByTaskId(taskId);
     expect(costs.length).toBeGreaterThan(0);
     expect(costs.some((c) => c.id === cost.id)).toBe(true);
   });
 
-  test("should create session cost with isError=true when task fails", () => {
+  test("should create session cost with isError=true when task fails", async () => {
     // Create another task for this test
-    const failTask2 = createTaskExtended("Test task for failure cost tracking", {
+    const failTask2 = await createTaskExtended("Test task for failure cost tracking", {
       agentId,
       source: "mcp",
       priority: 50,
@@ -135,7 +135,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     };
 
     const sessionId = `mcp-${failTask2.id}-${Date.now()}`;
-    const cost = createSessionCost({
+    const cost = await createSessionCost({
       sessionId,
       taskId: failTask2.id,
       agentId,
@@ -154,9 +154,9 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     expect(cost.model).toBe("sonnet");
   });
 
-  test("should use default values when optional cost fields are missing", () => {
+  test("should use default values when optional cost fields are missing", async () => {
     // Create another task for this test
-    const minimalTask = createTaskExtended("Test task with minimal cost data", {
+    const minimalTask = await createTaskExtended("Test task with minimal cost data", {
       agentId,
       source: "mcp",
       priority: 50,
@@ -168,7 +168,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     };
 
     const sessionId = `mcp-${minimalTask.id}-${Date.now()}`;
-    const cost = createSessionCost({
+    const cost = await createSessionCost({
       sessionId,
       taskId: minimalTask.id,
       agentId,
@@ -193,22 +193,22 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     expect(cost.model).toBe("unknown");
   });
 
-  test("should not create session cost when costData is not provided", () => {
+  test("should not create session cost when costData is not provided", async () => {
     // Create a task without cost data
-    const noCostTask = createTaskExtended("Test task without cost data", {
+    const noCostTask = await createTaskExtended("Test task without cost data", {
       agentId,
       source: "mcp",
       priority: 50,
     });
 
     // Just update progress without cost data (existing behavior)
-    updateTaskProgress(noCostTask.id, "Working on it...");
+    await updateTaskProgress(noCostTask.id, "Working on it...");
 
     // Complete the task without cost data
-    completeTask(noCostTask.id, "Done!");
+    await completeTask(noCostTask.id, "Done!");
 
     // No session costs should be created for this task
-    const costs = getSessionCostsByTaskId(noCostTask.id);
+    const costs = await getSessionCostsByTaskId(noCostTask.id);
     expect(costs.length).toBe(0);
   });
 });

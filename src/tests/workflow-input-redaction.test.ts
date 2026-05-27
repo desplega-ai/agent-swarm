@@ -133,8 +133,8 @@ describe("redactSecretsForStorage", () => {
 });
 
 describe("end-to-end — workflow step persistence redacts secrets", () => {
-  beforeAll(() => {
-    initDb(TEST_DB_PATH);
+  beforeAll(async () => {
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
@@ -152,10 +152,10 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
     CaptureExecutor.lastTokenSeen = undefined;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (workflowId) {
       try {
-        deleteWorkflow(workflowId);
+        await deleteWorkflow(workflowId);
       } catch {
         // ignore
       }
@@ -166,7 +166,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
   test("ctx.input[secretKey] is redacted in workflow_run_steps but real value reaches the executor", async () => {
     // Seed swarm config with a "secret" value
     const SECRET_VALUE = "ghp_supersecret_token_value_abc123";
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "TEST_REDACTION_GITHUB_TOKEN",
       value: SECRET_VALUE,
@@ -182,7 +182,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
         },
       ],
     };
-    const workflow = createWorkflow({
+    const workflow = await createWorkflow({
       name: `redaction-test-${Date.now()}`,
       definition: def,
       triggers: [],
@@ -208,7 +208,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
     expect(CaptureExecutor.lastTokenSeen).toBe(SECRET_VALUE);
 
     // Persisted step.input must have the secret redacted
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     expect(steps.length).toBe(1);
     const persistedInput = steps[0]!.input as Record<string, unknown>;
     const persistedInputBlock = persistedInput.input as Record<string, unknown>;
@@ -222,10 +222,10 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
 });
 
 describe("resolveInputs (unchanged behavior)", () => {
-  test("still resolves env-var references", () => {
+  test("still resolves env-var references", async () => {
     process.env.TEST_REDACT_VAR = "resolved";
     // biome-ignore lint/suspicious/noTemplateCurlyInString: testing env-var syntax
-    const out = resolveInputs({ x: "${TEST_REDACT_VAR}" });
+    const out = await resolveInputs({ x: "${TEST_REDACT_VAR}" });
     expect(out.x).toBe("resolved");
     delete process.env.TEST_REDACT_VAR;
   });

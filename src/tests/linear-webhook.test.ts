@@ -31,8 +31,8 @@ function signPayload(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(payload).digest("hex");
 }
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
   process.env.LINEAR_SIGNING_SECRET = TEST_SECRET;
 });
 
@@ -200,14 +200,14 @@ describe("handleAgentSessionEvent", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
     expect(sync).not.toBeNull();
     expect(sync!.externalIdentifier).toBe("ENG-100");
     expect(sync!.externalUrl).toBe("https://linear.app/team/issue/ENG-100");
     expect(sync!.lastSyncOrigin).toBe("external");
     expect(sync!.syncDirection).toBe("inbound");
 
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task).not.toBeNull();
     expect(task!.source).toBe("linear");
     expect(task!.taskType).toBe("linear-issue");
@@ -230,28 +230,34 @@ describe("handleAgentSessionEvent", () => {
     };
 
     // The task from the previous test is still pending (active)
-    const syncBefore = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
+    const syncBefore = await getTrackerSyncByExternalId(
+      "linear",
+      "task",
+      "issue-agent-session-001",
+    );
     expect(syncBefore).not.toBeNull();
     const originalSwarmId = syncBefore!.swarmId;
 
     await handleAgentSessionEvent(event);
 
     // Sync should still point to the same task (no follow-up created)
-    const syncAfter = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
+    const syncAfter = await getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
     expect(syncAfter).not.toBeNull();
     expect(syncAfter!.swarmId).toBe(originalSwarmId);
   });
 
   test("creates follow-up task when already-tracked issue has a completed task", async () => {
     // Create a task and tracker_sync, then mark the task as completed
-    const originalTask = createTaskExtended("Original linear task", {
+    const originalTask = await createTaskExtended("Original linear task", {
       source: "linear",
       taskType: "linear-issue",
     });
     const { getDb } = await import("../be/db");
-    getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(originalTask.id);
+    (await getDb())
+      .query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?")
+      .run(originalTask.id);
 
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       providerEntityType: "Issue",
@@ -280,12 +286,12 @@ describe("handleAgentSessionEvent", () => {
     await handleAgentSessionEvent(event);
 
     // tracker_sync should now point to a NEW task
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-followup-completed-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-followup-completed-001");
     expect(sync).not.toBeNull();
     expect(sync!.swarmId).not.toBe(originalTask.id);
 
     // New task should exist and use the reassigned template
-    const followupTask = getTaskById(sync!.swarmId);
+    const followupTask = await getTaskById(sync!.swarmId);
     expect(followupTask).not.toBeNull();
     expect(followupTask!.source).toBe("linear");
     expect(followupTask!.taskType).toBe("linear-issue");
@@ -294,14 +300,16 @@ describe("handleAgentSessionEvent", () => {
   });
 
   test("creates follow-up task when already-tracked issue has a failed task", async () => {
-    const originalTask = createTaskExtended("Failed linear task", {
+    const originalTask = await createTaskExtended("Failed linear task", {
       source: "linear",
       taskType: "linear-issue",
     });
     const { getDb } = await import("../be/db");
-    getDb().query("UPDATE agent_tasks SET status = 'failed' WHERE id = ?").run(originalTask.id);
+    (await getDb())
+      .query("UPDATE agent_tasks SET status = 'failed' WHERE id = ?")
+      .run(originalTask.id);
 
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       providerEntityType: "Issue",
@@ -328,11 +336,11 @@ describe("handleAgentSessionEvent", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-followup-failed-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-followup-failed-001");
     expect(sync).not.toBeNull();
     expect(sync!.swarmId).not.toBe(originalTask.id);
 
-    const followupTask = getTaskById(sync!.swarmId);
+    const followupTask = await getTaskById(sync!.swarmId);
     expect(followupTask).not.toBeNull();
     expect(followupTask!.source).toBe("linear");
   });
@@ -348,8 +356,8 @@ describe("handleAgentSessionEvent", () => {
 describe("handleIssueUpdate", () => {
   test("updates tracker_sync metadata on tracked issue status change", async () => {
     // Create a task + tracker_sync first
-    const task = createTaskExtended("Test issue update task", { source: "linear" });
-    createTrackerSync({
+    const task = await createTaskExtended("Test issue update task", { source: "linear" });
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,
@@ -371,15 +379,15 @@ describe("handleIssueUpdate", () => {
 
     await handleIssueUpdate(event, "delivery-update-001");
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-update-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-update-001");
     expect(sync).not.toBeNull();
     expect(sync!.lastSyncOrigin).toBe("external");
     expect(sync!.lastDeliveryId).toBe("delivery-update-001");
   });
 
   test("cancels task when Linear issue is cancelled", async () => {
-    const task = createTaskExtended("Test cancel task", { source: "linear" });
-    createTrackerSync({
+    const task = await createTaskExtended("Test cancel task", { source: "linear" });
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,
@@ -401,7 +409,7 @@ describe("handleIssueUpdate", () => {
 
     await handleIssueUpdate(event);
 
-    const updated = getTaskById(task.id);
+    const updated = await getTaskById(task.id);
     expect(updated).not.toBeNull();
     expect(updated!.status).toBe("cancelled");
   });
@@ -422,8 +430,8 @@ describe("handleIssueUpdate", () => {
   });
 
   test("ignores update without updatedFrom field", async () => {
-    const task = createTaskExtended("Test no-updatedFrom task", { source: "linear" });
-    createTrackerSync({
+    const task = await createTaskExtended("Test no-updatedFrom task", { source: "linear" });
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,
@@ -451,8 +459,8 @@ describe("handleIssueUpdate", () => {
 
 describe("handleIssueDelete", () => {
   test("cancels task when tracked issue is deleted", async () => {
-    const task = createTaskExtended("Test delete task", { source: "linear" });
-    createTrackerSync({
+    const task = await createTaskExtended("Test delete task", { source: "linear" });
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,
@@ -469,7 +477,7 @@ describe("handleIssueDelete", () => {
 
     await handleIssueDelete(event);
 
-    const updated = getTaskById(task.id);
+    const updated = await getTaskById(task.id);
     expect(updated).not.toBeNull();
     expect(updated!.status).toBe("cancelled");
   });
@@ -486,14 +494,14 @@ describe("handleIssueDelete", () => {
   });
 
   test("ignores delete for already-completed task", async () => {
-    const task = createTaskExtended("Test completed delete task", {
+    const task = await createTaskExtended("Test completed delete task", {
       source: "linear",
     });
     // Manually complete the task to test guard
     const { getDb } = await import("../be/db");
-    getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(task.id);
+    (await getDb()).query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(task.id);
 
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,
@@ -509,7 +517,7 @@ describe("handleIssueDelete", () => {
     });
 
     // Should still be completed, not cancelled
-    const updated = getTaskById(task.id);
+    const updated = await getTaskById(task.id);
     expect(updated!.status).toBe("completed");
   });
 });
@@ -759,7 +767,7 @@ describe("handleAgentSessionEvent — state gate", () => {
     await handleAgentSessionEvent(event);
 
     // No tracker_sync should have been created.
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-backlog-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-backlog-001");
     expect(sync).toBeNull();
   });
 
@@ -782,7 +790,7 @@ describe("handleAgentSessionEvent — state gate", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-triage-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-triage-001");
     expect(sync).toBeNull();
   });
 
@@ -805,10 +813,10 @@ describe("handleAgentSessionEvent — state gate", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-override-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-override-001");
     expect(sync).not.toBeNull();
     expect(sync!.externalIdentifier).toBe("ENG-502");
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task).not.toBeNull();
     expect(task!.source).toBe("linear");
   });
@@ -832,7 +840,7 @@ describe("handleAgentSessionEvent — state gate", () => {
         },
       };
       await handleAgentSessionEvent(event);
-      const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-env-allow-001");
+      const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-env-allow-001");
       expect(sync).not.toBeNull();
     } finally {
       delete process.env.LINEAR_ALLOWED_STATES;
@@ -858,7 +866,7 @@ describe("handleAgentSessionEvent — state gate", () => {
         },
       };
       await handleAgentSessionEvent(event);
-      const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-env-label-001");
+      const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-env-label-001");
       expect(sync).not.toBeNull();
     } finally {
       delete process.env.LINEAR_SWARM_READY_LABEL;
@@ -884,7 +892,7 @@ describe("handleAgentSessionEvent — state gate", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-todo-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-todo-001");
     expect(sync).not.toBeNull();
   });
 });

@@ -32,8 +32,11 @@ export type MemoryEdgeRow = {
  * shape as a memory with no edges, since neither case has anything useful
  * to surface to the caller.
  */
-export function listEdgesForAgent(agentId: string, memoryId: string): MemoryEdgeRow[] {
-  const db = getDb();
+export async function listEdgesForAgent(
+  agentId: string,
+  memoryId: string,
+): Promise<MemoryEdgeRow[]> {
+  const db = await getDb();
   const memory = db
     .prepare<{ scope: string; agentId: string | null }, [string]>(
       "SELECT scope, agentId FROM agent_memory WHERE id = ?",

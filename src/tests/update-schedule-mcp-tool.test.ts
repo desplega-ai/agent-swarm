@@ -64,8 +64,8 @@ beforeAll(async () => {
       await unlink(TEST_DB_PATH + suffix);
     } catch {}
   }
-  initDb(TEST_DB_PATH);
-  const creator = createAgent({
+  await initDb(TEST_DB_PATH);
+  const creator = await createAgent({
     name: "update-schedule-mcp-creator",
     isLead: false,
     status: "idle",
@@ -85,7 +85,7 @@ afterAll(async () => {
 describe("update-schedule MCP tool", () => {
   test("regression: { cronExpression: null, intervalMs: null, enabled: false } returns success:false and leaves DB row unchanged", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-regression-${Date.now()}`,
       cronExpression: "0 * * * *",
       taskTemplate: "hourly task",
@@ -93,7 +93,7 @@ describe("update-schedule MCP tool", () => {
       timezone: "UTC",
     });
 
-    const before = getScheduledTaskById(schedule.id)!;
+    const before = await getScheduledTaskById(schedule.id)!;
 
     const result = await callUpdateSchedule(
       server,
@@ -106,7 +106,7 @@ describe("update-schedule MCP tool", () => {
     expect(sc.message).toContain("At least one of intervalMs or cronExpression must be set");
 
     // DB row must be unchanged — no partial write on validation failure
-    const after = getScheduledTaskById(schedule.id)!;
+    const after = await getScheduledTaskById(schedule.id)!;
     expect(after.cronExpression).toBe(before.cronExpression);
     expect(after.intervalMs).toBe(before.intervalMs);
     expect(after.enabled).toBe(before.enabled);
@@ -114,7 +114,7 @@ describe("update-schedule MCP tool", () => {
 
   test("cron-to-interval switch: { cronExpression: null, intervalMs: 60000 } succeeds and nextRunAt is recomputed", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-cron-switch-${Date.now()}`,
       cronExpression: "0 * * * *",
       taskTemplate: "hourly task",
@@ -139,7 +139,7 @@ describe("update-schedule MCP tool", () => {
 
   test("interval happy path: { intervalMs: 120000 } on interval schedule succeeds and nextRunAt updates", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-interval-update-${Date.now()}`,
       intervalMs: 60000,
       taskTemplate: "heartbeat task",

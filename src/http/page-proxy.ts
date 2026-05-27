@@ -126,7 +126,7 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
     return true;
   }
 
-  const page = getPage(payload.pageId);
+  const page = await getPage(payload.pageId);
   if (!page) {
     // Cookie was issued before the page was deleted. Treat as a stale session
     // rather than 404 so the client knows to refresh / re-launch.

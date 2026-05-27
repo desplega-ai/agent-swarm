@@ -39,15 +39,15 @@ function buildFakeClient(log: FakeClientLog): ClaudeManagedTestClient {
   };
 }
 
-function clearManagedConfigRows() {
-  const all = getSwarmConfigs({ scope: "global" });
+async function clearManagedConfigRows() {
+  const all = await getSwarmConfigs({ scope: "global" });
   for (const row of all) {
     if (
       row.key === "ANTHROPIC_API_KEY" ||
       row.key === "MANAGED_AGENT_ID" ||
       row.key === "MANAGED_ENVIRONMENT_ID"
     ) {
-      deleteSwarmConfig(row.id);
+      await deleteSwarmConfig(row.id);
     }
   }
   // Also scrub process.env so resolveConfigValue's fallback doesn't bleed
@@ -68,7 +68,7 @@ describe("POST /api/integrations/claude-managed/test", () => {
   };
 
   beforeAll(async () => {
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
 
     const handler = createIntegrationsHandler({
       buildClient: () => buildFakeClient(log),
@@ -100,21 +100,21 @@ describe("POST /api/integrations/claude-managed/test", () => {
     }
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     log.retrieveCalls = [];
     log.retrieveResult = undefined;
     log.retrieveError = undefined;
-    clearManagedConfigRows();
+    await clearManagedConfigRows();
   });
 
   test("success path — returns ok:true with agent name + model", async () => {
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "ANTHROPIC_API_KEY",
       value: "sk-ant-test",
       isSecret: true,
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "MANAGED_AGENT_ID",
       value: "agent_abc123",
@@ -159,13 +159,13 @@ describe("POST /api/integrations/claude-managed/test", () => {
   });
 
   test("Anthropic API error — returns ok:false with the error message, HTTP 200", async () => {
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "ANTHROPIC_API_KEY",
       value: "sk-ant-test",
       isSecret: true,
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "MANAGED_AGENT_ID",
       value: "agent_does_not_exist",

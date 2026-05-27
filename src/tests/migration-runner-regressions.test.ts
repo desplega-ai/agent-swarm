@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 describe("migration regressions", () => {
-  test("incomplete existing DB runs 001_initial instead of blind bootstrap", () => {
+  test("incomplete existing DB runs 001_initial instead of blind bootstrap", async () => {
     const now = new Date().toISOString();
     const legacyDb = new Database(INCOMPLETE_DB_PATH, { create: true });
     legacyDb.run(`
@@ -46,7 +46,7 @@ describe("migration regressions", () => {
     );
     legacyDb.close();
 
-    const database = initDb(INCOMPLETE_DB_PATH);
+    const database = await initDb(INCOMPLETE_DB_PATH);
 
     const channelsTable = database
       .prepare<{ name: string }, []>(
@@ -71,13 +71,13 @@ describe("migration regressions", () => {
     expect(columns).toContain("setupScript");
   });
 
-  test("fresh DB drops source CHECK constraint on agent_tasks (Zod is the gate)", () => {
+  test("fresh DB drops source CHECK constraint on agent_tasks (Zod is the gate)", async () => {
     // Migration 056 removes the SQL CHECK on agent_tasks.source — the Zod
     // `AgentTaskSourceSchema` in src/types.ts is now the single source of
     // truth for the allowed enum, and is enforced at the HTTP/MCP ingress.
     // Direct SQL inserts no longer fail on unknown sources by design;
     // adding a new source no longer requires a forward-only migration.
-    const database = initDb(FRESH_DB_PATH);
+    const database = await initDb(FRESH_DB_PATH);
     const now = new Date().toISOString();
 
     expect(() => {

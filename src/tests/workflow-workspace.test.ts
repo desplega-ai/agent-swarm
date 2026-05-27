@@ -23,10 +23,10 @@ beforeAll(async () => {
   } catch {
     // Ignore
   }
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
 
   // Create a test agent for task assignment
-  createAgent({ name: "test-workspace-agent", isLead: false, status: "idle" });
+  await createAgent({ name: "test-workspace-agent", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {
@@ -41,8 +41,8 @@ afterAll(async () => {
 });
 
 describe("Workflow dir/vcsRepo persistence", () => {
-  test("workflow dir and vcsRepo persist through create/get cycle", () => {
-    const wf = createWorkflow({
+  test("workflow dir and vcsRepo persist through create/get cycle", async () => {
+    const wf = await createWorkflow({
       name: "wf-with-workspace",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
       dir: "/tmp/test-workspace",
@@ -52,14 +52,14 @@ describe("Workflow dir/vcsRepo persistence", () => {
     expect(wf.dir).toBe("/tmp/test-workspace");
     expect(wf.vcsRepo).toBe("desplega-ai/landing");
 
-    const fetched = getWorkflow(wf.id);
+    const fetched = await getWorkflow(wf.id);
     expect(fetched).not.toBeNull();
     expect(fetched!.dir).toBe("/tmp/test-workspace");
     expect(fetched!.vcsRepo).toBe("desplega-ai/landing");
   });
 
-  test("workflow without dir/vcsRepo returns undefined", () => {
-    const wf = createWorkflow({
+  test("workflow without dir/vcsRepo returns undefined", async () => {
+    const wf = await createWorkflow({
       name: "wf-no-workspace",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
     });
@@ -68,13 +68,13 @@ describe("Workflow dir/vcsRepo persistence", () => {
     expect(wf.vcsRepo).toBeUndefined();
   });
 
-  test("updateWorkflow can set dir and vcsRepo", () => {
-    const wf = createWorkflow({
+  test("updateWorkflow can set dir and vcsRepo", async () => {
+    const wf = await createWorkflow({
       name: "wf-update-workspace",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
     });
 
-    const updated = updateWorkflow(wf.id, {
+    const updated = await updateWorkflow(wf.id, {
       dir: "/tmp/updated-workspace",
       vcsRepo: "org/repo",
     });
@@ -84,15 +84,15 @@ describe("Workflow dir/vcsRepo persistence", () => {
     expect(updated!.vcsRepo).toBe("org/repo");
   });
 
-  test("updateWorkflow can clear dir and vcsRepo with null", () => {
-    const wf = createWorkflow({
+  test("updateWorkflow can clear dir and vcsRepo with null", async () => {
+    const wf = await createWorkflow({
       name: "wf-clear-workspace",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
       dir: "/tmp/clear-me",
       vcsRepo: "org/clear-me",
     });
 
-    const updated = updateWorkflow(wf.id, {
+    const updated = await updateWorkflow(wf.id, {
       dir: null,
       vcsRepo: null,
     });
@@ -102,15 +102,15 @@ describe("Workflow dir/vcsRepo persistence", () => {
     expect(updated!.vcsRepo).toBeUndefined();
   });
 
-  test("listWorkflows includes dir and vcsRepo", () => {
-    const wf = createWorkflow({
+  test("listWorkflows includes dir and vcsRepo", async () => {
+    const wf = await createWorkflow({
       name: "wf-list-workspace",
       definition: { nodes: [{ id: "n1", type: "agent-task", config: { template: "test" } }] },
       dir: "/tmp/list-test",
       vcsRepo: "org/list-test",
     });
 
-    const workflows = listWorkflows();
+    const workflows = await listWorkflows();
     const found = workflows.find((w) => w.id === wf.id);
     expect(found).not.toBeNull();
     expect(found!.dir).toBe("/tmp/list-test");
@@ -128,7 +128,7 @@ describe("Workflow dir/vcsRepo persistence", () => {
 
 describe("Agent-task executor workspace inheritance", () => {
   test("agent-task inherits workflow dir when node config omits it", async () => {
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: "wf-inherit-dir",
       definition: {
         nodes: [
@@ -153,22 +153,22 @@ describe("Agent-task executor workspace inheritance", () => {
     const runId = await startWorkflowExecution(wf, {}, registry);
 
     // The workflow run should have been created
-    const run = db.getWorkflowRun(runId);
+    const run = await db.getWorkflowRun(runId);
     expect(run).not.toBeNull();
     expect(run!.status).toBe("waiting"); // agent-task is async
 
     // Find the task created by the executor
-    const steps = db.getWorkflowRunStepsByRunId(runId);
+    const steps = await db.getWorkflowRunStepsByRunId(runId);
     expect(steps.length).toBe(1);
 
-    const task = db.getTaskByWorkflowRunStepId(steps[0]!.id);
+    const task = await db.getTaskByWorkflowRunStepId(steps[0]!.id);
     expect(task).not.toBeNull();
     expect(task!.dir).toBe("/tmp/inherited-workspace");
     expect(task!.vcsRepo).toBe("desplega-ai/inherited");
   });
 
   test("node-level dir overrides workflow-level dir", async () => {
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: "wf-override-dir",
       definition: {
         nodes: [
@@ -195,8 +195,8 @@ describe("Agent-task executor workspace inheritance", () => {
     });
 
     const runId = await startWorkflowExecution(wf, {}, registry);
-    const steps = db.getWorkflowRunStepsByRunId(runId);
-    const task = db.getTaskByWorkflowRunStepId(steps[0]!.id);
+    const steps = await db.getWorkflowRunStepsByRunId(runId);
+    const task = await db.getTaskByWorkflowRunStepId(steps[0]!.id);
 
     expect(task).not.toBeNull();
     expect(task!.dir).toBe("/tmp/node-specific");
@@ -204,7 +204,7 @@ describe("Agent-task executor workspace inheritance", () => {
   });
 
   test("workflow without dir/vcsRepo doesn't affect agent-task nodes", async () => {
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: "wf-no-inherit",
       definition: {
         nodes: [
@@ -225,8 +225,8 @@ describe("Agent-task executor workspace inheritance", () => {
     });
 
     const runId = await startWorkflowExecution(wf, {}, registry);
-    const steps = db.getWorkflowRunStepsByRunId(runId);
-    const task = db.getTaskByWorkflowRunStepId(steps[0]!.id);
+    const steps = await db.getWorkflowRunStepsByRunId(runId);
+    const task = await db.getTaskByWorkflowRunStepId(steps[0]!.id);
 
     expect(task).not.toBeNull();
     expect(task!.dir).toBeFalsy();
@@ -236,7 +236,7 @@ describe("Agent-task executor workspace inheritance", () => {
 
 describe("Workflow interpolation context", () => {
   test("{{workflow.dir}} and {{workflow.vcsRepo}} are available in context", async () => {
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: "wf-interpolation",
       definition: {
         nodes: [
@@ -261,8 +261,8 @@ describe("Workflow interpolation context", () => {
     });
 
     const runId = await startWorkflowExecution(wf, {}, registry);
-    const steps = db.getWorkflowRunStepsByRunId(runId);
-    const task = db.getTaskByWorkflowRunStepId(steps[0]!.id);
+    const steps = await db.getWorkflowRunStepsByRunId(runId);
+    const task = await db.getTaskByWorkflowRunStepId(steps[0]!.id);
 
     expect(task).not.toBeNull();
     // The template should have been interpolated with workflow context

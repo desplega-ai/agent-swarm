@@ -31,7 +31,7 @@ async function cleanupDb() {
 describe("swarm_config.encrypted column (migration 038)", () => {
   beforeAll(async () => {
     await cleanupDb();
-    initDb(TEST_DB_PATH);
+    await initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
@@ -39,8 +39,8 @@ describe("swarm_config.encrypted column (migration 038)", () => {
     await cleanupDb();
   });
 
-  test("PRAGMA table_info includes encrypted column with default 0", () => {
-    const cols = getDb().prepare<TableInfoRow, []>("PRAGMA table_info(swarm_config)").all();
+  test("PRAGMA table_info includes encrypted column with default 0", async () => {
+    const cols = (await getDb()).prepare<TableInfoRow, []>("PRAGMA table_info(swarm_config)").all();
 
     const encrypted = cols.find((c) => c.name === "encrypted");
     expect(encrypted).toBeDefined();
@@ -50,34 +50,34 @@ describe("swarm_config.encrypted column (migration 038)", () => {
     expect(encrypted?.dflt_value).toBe("0");
   });
 
-  test("legacy rows inserted without encrypted column get encrypted=0", () => {
+  test("legacy rows inserted without encrypted column get encrypted=0", async () => {
     // Simulate a legacy row written before the encryption feature existed.
     // We insert without referencing the `encrypted` column so the column's
     // DEFAULT 0 kicks in, matching how ALTER TABLE ADD COLUMN backfills
     // pre-existing rows.
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    getDb().run(
+    (await getDb()).run(
       `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt)
        VALUES (?, ?, NULL, ?, ?, 0, NULL, NULL, ?, ?)`,
       [id, "global", "LEGACY_PLAINTEXT_KEY", "legacy-value", now, now],
     );
 
-    const rawRow = getDb()
+    const rawRow = (await getDb())
       .prepare<{ encrypted: number }, [string]>("SELECT encrypted FROM swarm_config WHERE id = ?")
       .get(id);
     expect(rawRow?.encrypted).toBe(0);
 
     // And getSwarmConfigs() exposes it as the boolean false on the domain type.
-    const all = getSwarmConfigs();
+    const all = await getSwarmConfigs();
     const mapped = all.find((c) => c.id === id);
     expect(mapped).toBeDefined();
     expect(mapped?.encrypted).toBe(false);
     expect(mapped?.isSecret).toBe(false);
   });
 
-  test("upsertSwarmConfig (non-secret) returns encrypted=false", () => {
-    const config = upsertSwarmConfig({
+  test("upsertSwarmConfig (non-secret) returns encrypted=false", async () => {
+    const config = await upsertSwarmConfig({
       scope: "global",
       key: "PHASE3_NON_SECRET",
       value: "hello",
@@ -89,18 +89,18 @@ describe("swarm_config.encrypted column (migration 038)", () => {
 
     // Confirm the raw row also reflects encrypted=0 (no write-path wiring
     // exists yet in Phase 3, so the column should fall through to default).
-    const raw = getDb()
+    const raw = (await getDb())
       .prepare<{ encrypted: number }, [string]>("SELECT encrypted FROM swarm_config WHERE id = ?")
       .get(config.id);
     expect(raw?.encrypted).toBe(0);
   });
 
-  test("upsertSwarmConfig (isSecret=true) encrypts at rest and round-trips plaintext", () => {
+  test("upsertSwarmConfig (isSecret=true) encrypts at rest and round-trips plaintext", async () => {
     // Phase 4: secret writes are encrypted with AES-256-GCM before hitting
     // SQLite. The returned config object still carries plaintext (thanks to
     // rowToSwarmConfig's transparent decrypt), but the raw row holds
     // ciphertext and `encrypted = 1`.
-    const config = upsertSwarmConfig({
+    const config = await upsertSwarmConfig({
       scope: "global",
       key: "PHASE4_SECRET",
       value: "super-secret",
@@ -110,7 +110,7 @@ describe("swarm_config.encrypted column (migration 038)", () => {
     expect(config.encrypted).toBe(true);
     expect(config.value).toBe("super-secret");
 
-    const raw = getDb()
+    const raw = (await getDb())
       .prepare<{ encrypted: number; value: string }, [string]>(
         "SELECT encrypted, value FROM swarm_config WHERE id = ?",
       )
@@ -122,8 +122,8 @@ describe("swarm_config.encrypted column (migration 038)", () => {
     expect(raw?.value.length ?? 0).toBeGreaterThan(0);
   });
 
-  test("migration 038 is recorded in _migrations exactly once", () => {
-    const rows = getDb()
+  test("migration 038 is recorded in _migrations exactly once", async () => {
+    const rows = (await getDb())
       .prepare<{ version: number; name: string }, []>(
         "SELECT version, name FROM _migrations WHERE version = 38",
       )

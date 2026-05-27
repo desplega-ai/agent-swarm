@@ -56,8 +56,8 @@ async function removeDbFiles(): Promise<void> {
   }
 }
 
-function makeWorkflow(def: WorkflowDefinition): Workflow {
-  return createWorkflow({
+async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
+  return await createWorkflow({
     name: `workflow-e2e-${crypto.randomUUID()}`,
     definition: def,
     createdByAgentId: agentId,
@@ -81,7 +81,7 @@ async function saveScript(name: string, source: string) {
 async function waitForRunStatus(runId: string, status: string): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    if (getWorkflowRun(runId)?.status === status) return;
+    if ((await getWorkflowRun(runId))?.status === status) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for workflow run ${runId} to reach ${status}`);
@@ -90,12 +90,12 @@ async function waitForRunStatus(runId: string, status: string): Promise<void> {
 beforeAll(async () => {
   savedEnv = { ...process.env };
   await removeDbFiles();
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   delete process.env.API_KEY;
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
 
-  const agent = createAgent({ name: "workflow-e2e-agent", isLead: true, status: "idle" });
+  const agent = await createAgent({ name: "workflow-e2e-agent", isLead: true, status: "idle" });
   agentId = agent.id;
 
   eventBus = new InProcessEventBus();
@@ -124,12 +124,12 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM workflow_run_steps");
-  getDb().run("DELETE FROM workflow_runs");
-  getDb().run("DELETE FROM scripts");
-  getDb().run("DELETE FROM agent_tasks");
-  getDb().run("DELETE FROM workflows");
+beforeEach(async () => {
+  (await getDb()).run("DELETE FROM workflow_run_steps");
+  (await getDb()).run("DELETE FROM workflow_runs");
+  (await getDb()).run("DELETE FROM scripts");
+  (await getDb()).run("DELETE FROM agent_tasks");
+  (await getDb()).run("DELETE FROM workflows");
 });
 
 describe("workflow e2e swarm-script", () => {
@@ -138,7 +138,7 @@ describe("workflow e2e swarm-script", () => {
       "square",
       `export default async (args: { value: number }) => ({ squared: args.value * args.value });`,
     );
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "script",
@@ -149,8 +149,8 @@ describe("workflow e2e swarm-script", () => {
     });
 
     const runId = await startWorkflowExecution(workflow, {}, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
 
     expect(run?.status).toBe("completed");
     expect(steps).toHaveLength(1);
@@ -166,7 +166,7 @@ describe("workflow e2e swarm-script", () => {
       "second-script",
       `export default async (args: { value: string }) => ({ final: Number(args.value) + 1 });`,
     );
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "first",
@@ -191,12 +191,12 @@ describe("workflow e2e swarm-script", () => {
     });
 
     const runId = await startWorkflowExecution(workflow, {}, registry);
-    expect(getWorkflowRun(runId)?.status).toBe("waiting");
+    expect((await getWorkflowRun(runId))?.status).toBe("waiting");
 
-    const waitingSteps = getWorkflowRunStepsByRunId(runId);
+    const waitingSteps = await getWorkflowRunStepsByRunId(runId);
     const taskStep = waitingSteps.find((step) => step.nodeId === "task");
     expect(taskStep?.status).toBe("waiting");
-    const task = getTaskByWorkflowRunStepId(taskStep!.id);
+    const task = await getTaskByWorkflowRunStepId(taskStep!.id);
     expect(task?.task).toBe("Use 2");
 
     eventBus.emit("task.completed", {
@@ -207,7 +207,7 @@ describe("workflow e2e swarm-script", () => {
     });
 
     await waitForRunStatus(runId, "completed");
-    const completedSteps = getWorkflowRunStepsByRunId(runId);
+    const completedSteps = await getWorkflowRunStepsByRunId(runId);
     expect(completedSteps).toHaveLength(3);
     expect(completedSteps.find((step) => step.nodeId === "first")?.status).toBe("completed");
     expect(completedSteps.find((step) => step.nodeId === "task")?.status).toBe("completed");

@@ -160,9 +160,9 @@ function getRedirectUri(req: IncomingMessage): string {
   return `${deriveApiBaseUrl(req)}/api/trackers/jira/callback`;
 }
 
-function buildJiraStatusPayload(req: IncomingMessage): Record<string, unknown> {
-  const tokens = getOAuthTokens("jira");
-  const meta = getJiraMetadata();
+async function buildJiraStatusPayload(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const tokens = await getOAuthTokens("jira");
+  const meta = await getJiraMetadata();
   const scope = tokens?.scope ?? null;
   // Atlassian returns scopes space-separated in the token response.
   const scopeList = scope ? scope.split(/[\s,]+/).filter(Boolean) : [];
@@ -271,7 +271,7 @@ export async function handleJiraTracker(
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(buildJiraStatusPayload(req)));
+    res.end(JSON.stringify(await buildJiraStatusPayload(req)));
     return true;
   }
 
@@ -285,7 +285,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     if (!tokens?.refreshToken) {
       res.writeHead(409, { "Content-Type": "application/json" });
       res.end(
@@ -309,7 +309,7 @@ export async function handleJiraTracker(
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(buildJiraStatusPayload(req)));
+    res.end(JSON.stringify(await buildJiraStatusPayload(req)));
     return true;
   }
 
@@ -414,7 +414,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     const ids = (meta.webhookIds ?? []).map((entry) => entry.id);
 
     let webhooksDeleted = 0;
@@ -430,8 +430,8 @@ export async function handleJiraTracker(
       }
     }
 
-    deleteOAuthTokens("jira");
-    clearJiraMetadata();
+    await deleteOAuthTokens("jira");
+    await clearJiraMetadata();
 
     console.log(
       `[Jira] Disconnected: ${webhooksDeleted}/${ids.length} webhooks deleted, tokens cleared, metadata reset`,

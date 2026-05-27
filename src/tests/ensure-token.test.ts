@@ -22,18 +22,18 @@ const testApp = {
 
 const originalFetch = globalThis.fetch;
 
-beforeAll(() => {
-  initDb(TEST_DB_PATH);
-  upsertOAuthApp("test-provider", testApp);
-  upsertOAuthApp("jira", {
+beforeAll(async () => {
+  await initDb(TEST_DB_PATH);
+  await upsertOAuthApp("test-provider", testApp);
+  await upsertOAuthApp("jira", {
     ...testApp,
     tokenUrl: "https://example.com/jira/oauth/token",
   });
 });
 
-beforeEach(() => {
-  deleteOAuthTokens("test-provider");
-  deleteOAuthTokens("jira");
+beforeEach(async () => {
+  await deleteOAuthTokens("test-provider");
+  await deleteOAuthTokens("jira");
   globalThis.fetch = originalFetch;
 });
 
@@ -47,7 +47,7 @@ afterAll(async () => {
 
 describe("ensureToken", () => {
   test("does nothing when token is not expiring", async () => {
-    storeOAuthTokens("test-provider", {
+    await storeOAuthTokens("test-provider", {
       accessToken: "valid-token",
       refreshToken: "refresh-token",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour from now
@@ -62,12 +62,12 @@ describe("ensureToken", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
 
     // Token should be unchanged
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("valid-token");
   });
 
   test("refreshes token when expiring soon", async () => {
-    storeOAuthTokens("test-provider", {
+    await storeOAuthTokens("test-provider", {
       accessToken: "old-token",
       refreshToken: "refresh-token",
       expiresAt: new Date(Date.now() + 2 * 60 * 1000).toISOString(), // 2 minutes (within 5-min buffer)
@@ -99,14 +99,14 @@ describe("ensureToken", () => {
     expect(init.body).toContain("refresh_token=refresh-token");
 
     // Token should be updated in DB
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("new-access-token");
     expect(tokens?.refreshToken).toBe("new-refresh-token");
   });
 
   test("handles gracefully when no tokens exist", async () => {
     // No tokens stored — isTokenExpiringSoon returns true but no refresh token available
-    deleteOAuthTokens("test-provider");
+    await deleteOAuthTokens("test-provider");
 
     const fetchSpy = mock(() => Promise.resolve(new Response()));
     globalThis.fetch = fetchSpy;
@@ -130,7 +130,7 @@ describe("ensureToken", () => {
   });
 
   test("handles refresh failure gracefully", async () => {
-    storeOAuthTokens("test-provider", {
+    await storeOAuthTokens("test-provider", {
       accessToken: "old-token",
       refreshToken: "refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(), // 1 minute from now
@@ -152,12 +152,12 @@ describe("ensureToken", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     // Original token should still be in DB (refresh failed)
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("old-token");
   });
 
   test("refreshes token when custom bufferMs makes it 'expiring soon'", async () => {
-    storeOAuthTokens("test-provider", {
+    await storeOAuthTokens("test-provider", {
       accessToken: "old-token",
       refreshToken: "refresh-token",
       expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(), // 12h from now
@@ -186,12 +186,12 @@ describe("ensureToken", () => {
     await ensureToken("test-provider", 13 * 60 * 60 * 1000);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("refreshed-token");
   });
 
   test("handles token with no refresh token", async () => {
-    storeOAuthTokens("test-provider", {
+    await storeOAuthTokens("test-provider", {
       accessToken: "old-token",
       refreshToken: null,
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(), // 1 minute from now
@@ -210,7 +210,7 @@ describe("ensureToken", () => {
 
 describe("ensureTokenOrThrow", () => {
   test("throws when refresh fails for a configured provider (so keepalive can alert)", async () => {
-    storeOAuthTokens("test-provider", {
+    await storeOAuthTokens("test-provider", {
       accessToken: "old-token",
       refreshToken: "refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
@@ -229,7 +229,7 @@ describe("ensureTokenOrThrow", () => {
   });
 
   test("stays silent (no throw) when no refresh token is stored", async () => {
-    deleteOAuthTokens("test-provider");
+    await deleteOAuthTokens("test-provider");
 
     // "Not connected" should not page anyone
     await expect(ensureTokenOrThrow("test-provider")).resolves.toBeUndefined();
@@ -243,7 +243,7 @@ describe("ensureTokenOrThrow", () => {
     // Pattern used by the POST /api/trackers/{provider}/refresh route to
     // guarantee a rotation regardless of how far the current token is from
     // expiry.
-    storeOAuthTokens("test-provider", {
+    await storeOAuthTokens("test-provider", {
       accessToken: "old-token",
       refreshToken: "refresh-token",
       expiresAt: new Date(Date.now() + 50 * 60 * 1000).toISOString(), // 50 min ahead
@@ -267,13 +267,13 @@ describe("ensureTokenOrThrow", () => {
     await ensureTokenOrThrow("test-provider", Number.MAX_SAFE_INTEGER);
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("rotated-token");
     expect(tokens?.refreshToken).toBe("rotated-refresh");
   });
 
   test("persists Jira's rotated refresh token before reporting refresh success", async () => {
-    storeOAuthTokens("jira", {
+    await storeOAuthTokens("jira", {
       accessToken: "old-jira-access",
       refreshToken: "old-jira-refresh",
       expiresAt: new Date(Date.now() + 50 * 60 * 1000).toISOString(),
@@ -295,13 +295,13 @@ describe("ensureTokenOrThrow", () => {
 
     await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
 
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("new-jira-access");
     expect(tokens?.refreshToken).toBe("new-jira-refresh");
   });
 
   test("rejects a Jira refresh response that omits the rotated refresh token", async () => {
-    storeOAuthTokens("jira", {
+    await storeOAuthTokens("jira", {
       accessToken: "old-jira-access",
       refreshToken: "old-jira-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
@@ -322,20 +322,20 @@ describe("ensureTokenOrThrow", () => {
 
     await expect(ensureTokenOrThrow("jira")).rejects.toThrow(/rotated refresh_token/);
 
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("old-jira-access");
     expect(tokens?.refreshToken).toBe("old-jira-refresh");
   });
 
   test("does not use a refreshed Jira access token when persistence loses the CAS race", async () => {
-    storeOAuthTokens("jira", {
+    await storeOAuthTokens("jira", {
       accessToken: "old-jira-access",
       refreshToken: "old-jira-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
-    globalThis.fetch = mock(() => {
-      storeOAuthTokens("jira", {
+    globalThis.fetch = mock(async () => {
+      await storeOAuthTokens("jira", {
         accessToken: "concurrent-jira-access",
         refreshToken: "concurrent-jira-refresh",
         expiresAt: new Date(Date.now() + 3600_000).toISOString(),
@@ -355,7 +355,7 @@ describe("ensureTokenOrThrow", () => {
 
     await expect(ensureTokenOrThrow("jira")).rejects.toThrow(/stored refresh token changed/);
 
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("concurrent-jira-access");
     expect(tokens?.refreshToken).toBe("concurrent-jira-refresh");
   });

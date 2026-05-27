@@ -57,7 +57,7 @@ let port: number;
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
-  initDb(TEST_DB_PATH);
+  await initDb(TEST_DB_PATH);
   server = createTestServer(API_KEY);
   port = await listen(server);
 });
@@ -68,8 +68,8 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  const db = getDb();
+afterEach(async () => {
+  const db = await getDb();
   // Remove every non-seed pricing row so each test starts from the migration
   // 044 seed (effective_from=0). The seed uses literal 0 for effective_from.
   db.prepare("DELETE FROM pricing WHERE effective_from > 0").run();
@@ -284,7 +284,7 @@ describe("Phase 6 — /api/pricing REST surface", () => {
         body: JSON.stringify({ pricePerMillionUsd: 1.5, effectiveFrom: 100 }),
       });
 
-      const logs = getLogsByEventType("pricing.inserted");
+      const logs = await getLogsByEventType("pricing.inserted");
       expect(logs.length).toBe(1);
       const meta = JSON.parse(logs[0].metadata!);
       expect(meta.provider).toBe("codex");
@@ -303,7 +303,7 @@ describe("Phase 6 — /api/pricing REST surface", () => {
       });
       await authedFetch(`/api/pricing/codex/gpt-5.3-codex/input/200`, { method: "DELETE" });
 
-      const logs = getLogsByEventType("pricing.deleted");
+      const logs = await getLogsByEventType("pricing.deleted");
       expect(logs.length).toBe(1);
       const meta = JSON.parse(logs[0].metadata!);
       expect(meta.provider).toBe("codex");

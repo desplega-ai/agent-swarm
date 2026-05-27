@@ -15,13 +15,16 @@ import type { PageSnapshot, PageVersion } from "../types";
  * with an empty catch — snapshot failure should not block the update (matches
  * the workflow pattern at src/http/workflows.ts:483-486).
  */
-export function snapshotPage(pageId: string, changedByAgentId?: string): PageVersion {
-  const page = getPage(pageId);
+export async function snapshotPage(
+  pageId: string,
+  changedByAgentId?: string,
+): Promise<PageVersion> {
+  const page = await getPage(pageId);
   if (!page) {
     throw new Error(`Page ${pageId} not found — cannot create snapshot`);
   }
 
-  const existingVersions = getPageVersions(pageId);
+  const existingVersions = await getPageVersions(pageId);
   const maxVersion = existingVersions.length > 0 ? existingVersions[0]!.version : 0;
   const nextVersion = maxVersion + 1;
 
@@ -35,7 +38,7 @@ export function snapshotPage(pageId: string, changedByAgentId?: string): PageVer
     needsCredentials: page.needsCredentials,
   };
 
-  return createPageVersion({
+  return await createPageVersion({
     pageId,
     version: nextVersion,
     snapshot,
