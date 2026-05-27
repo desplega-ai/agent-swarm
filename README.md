@@ -39,7 +39,7 @@
 
 > **Agent Swarm is your Company's Compounding Intelligence Layer. A system of AI agents that remember, reason, act and get better with every task.**
 
-> **You are not alone — an agentic operating system.** FOSS · AI-Native · Compounds · Presence · Harness & LLM-Agnostic · Your Infra · Your Memory. Open source, runs on your own infrastructure, works with any harness or model provider, and feels like a new peer on your team — not a chatbot you have to babysit. Your data, identity, and memory stay yours.
+> AI-Native · Compounds · Presence · Harness & LLM-Agnostic · Your Infra · Your Memory · 
 
 ## What it does
 
