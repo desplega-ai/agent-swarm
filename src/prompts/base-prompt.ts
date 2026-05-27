@@ -23,8 +23,6 @@ const BOOTSTRAP_TOTAL_MAX_CHARS = 150_000;
 const truncationNotice = (file: string) =>
   `\n\n[...truncated, see /workspace/${file} for full content]\n`;
 
-const SLACK_TOOL_NAME_RE = /\bslack-[a-z-]+\b/;
-
 export function areSlackPromptToolsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const slackDisable = env.SLACK_DISABLE;
   if (slackDisable === "true" || slackDisable === "1") return false;
@@ -81,6 +79,11 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   let prompt = compositeResult.text;
 
   const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
+
+  if (role === "lead" && hasMcp && slackPromptToolsEnabled) {
+    const slackResult = await resolveTemplateAsync("system.agent.lead.slack", {});
+    prompt += slackResult.text;
+  }
 
   // Conditionally inject Slack instructions for workers with Slack-originated tasks
   if (role !== "lead" && args.slackContext && hasMcp && slackPromptToolsEnabled) {
@@ -261,18 +264,8 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     prompt += conditionalSuffix;
   }
 
-  return slackPromptToolsEnabled ? prompt : stripSlackToolReferences(prompt);
+  return prompt;
 };
-
-function stripSlackToolReferences(prompt: string): string {
-  const lines = prompt.split("\n");
-  const keptLines = lines.filter((line) => !SLACK_TOOL_NAME_RE.test(line));
-
-  return keptLines
-    .join("\n")
-    .replace(/\n{4,}/g, "\n\n\n")
-    .trimEnd();
-}
 
 /** Truncate a section to fit within a character budget, appending a notice if cut */
 function truncateSection(
