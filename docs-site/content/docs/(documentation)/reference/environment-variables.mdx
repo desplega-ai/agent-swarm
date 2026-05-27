@@ -213,6 +213,21 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `AGENTMAIL_INBOX_DOMAIN_FILTER` | Comma-separated domains to allow for incoming inbox webhooks (e.g., `yourdomain.com,example.com`). Unmatched inbox domains are silently dropped |
 | `AGENTMAIL_SENDER_DOMAIN_FILTER` | Comma-separated sender domains to allow (e.g., `gmail.com,company.com`). Unmatched sender domains are silently dropped |
 
+## Kapso / WhatsApp Integration
+
+| Variable | Description |
+|----------|-------------|
+| `KAPSO_API_KEY` | Kapso API key used for outbound sends and optional webhook registration (`X-API-Key`) |
+| `KAPSO_PHONE_NUMBER_ID` | Default WhatsApp Business phone-number ID the swarm sends from |
+| `KAPSO_WEBHOOK_HMAC_SECRET` | Shared secret used to verify Kapso's `X-Webhook-Signature` header on inbound webhooks |
+| `KAPSO_API_BASE_URL` | Optional Kapso API base URL override (default: `https://api.kapso.ai`) |
+
+### Setup Steps
+
+1. Set the values above in your `.env` or integrations dashboard.
+2. Have the lead call `register-kapso-number` to point the number at `/api/integrations/kapso/webhook` and store the routing mapping.
+3. Use `send-whatsapp-message` / `reply-whatsapp-message` for the common text path, or the `kapso-whatsapp` skill for templates, media, and reactions.
+
 ## Sentry Integration
 
 | Variable | Description |
@@ -340,7 +355,7 @@ OpenTelemetry traces are disabled unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set. S
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | SDK default | Export protocol. Use `http/protobuf` for SigNoz Cloud |
 | `OTEL_SERVICE_NAME` | `agent-swarm-api` or `agent-swarm-worker` outside local compose | OpenTelemetry `service.name`. Set to `agent-swarm` everywhere to keep one service and split by `agentswarm.service.role` |
 | `OTEL_RESOURCE_ATTRIBUTES` | derived from `NODE_ENV` | Comma-separated resource attributes such as `deployment.environment=local,env=local,service.namespace=agent-swarm` |
-| `OTEL_TRACE_POLL` | OFF | When set to `1`/`true`, emits trace spans for worker poll loop (`worker.poll`) and the `/api/poll` HTTP endpoint. Skip by default to reduce span volume. |
+| `OTEL_TRACE_POLL` | OFF | When set to `1`/`true`, emits trace spans for the worker poll loop (`worker.poll`) and the `/api/poll` HTTP endpoint. Skip by default to reduce span volume. |
 
 ## Business-Use Instrumentation
 

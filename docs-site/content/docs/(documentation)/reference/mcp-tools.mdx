@@ -1,6 +1,6 @@
 ---
 title: MCP Tools Reference
-description: Complete reference for all 87+ MCP tools in Agent Swarm — core and deferred tiers, annotations, Tool Search discovery, and how tools are organized by capability for MCP-based agent orchestration
+description: Complete reference for Agent Swarm MCP tools — core and deferred tiers, annotations, Tool Search discovery, and capability-based organization
 ---
 
 Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools. Tools are grouped by capability.
@@ -9,8 +9,8 @@ Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools
 
 All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) to improve Claude Code's Tool Search discoverability. Tools are split into two tiers:
 
-- **Core tools** (13) — Always available in context: task lifecycle, basic communication, memory recall, and swarm awareness
-- **Deferred tools** (74) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, config, skills, workflows, MCP servers, Slack, user identity, repos, etc.)
+- **Core tools** — Always available in context: task lifecycle, basic communication, memory recall, and swarm awareness
+- **Deferred tools** — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, config, skills, workflows, MCP servers, Slack, user identity, repos, etc.)
 
 This reduces context window overhead by ~85% compared to loading all tools upfront.
 
@@ -234,6 +234,47 @@ Register an AgentMail inbox ID to route incoming emails to this agent.
 | `action` | string | Yes | `register`, `unregister`, or `list` |
 | `inboxId` | string | No | AgentMail inbox ID (required for register/unregister) |
 | `inboxEmail` | string | No | Email address for reference |
+
+### register-kapso-number
+
+Provision a Kapso WhatsApp phone number for native inbound routing. Lead-only. Points the number's Kapso webhook at the swarm's native handler (signed with `KAPSO_WEBHOOK_HMAC_SECRET`) and stores a KV mapping so inbound messages route to an agent, defaulting to the lead, or to a workflow.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `phoneNumberId` | string | Yes | Kapso/Meta phone-number ID to provision (`KAPSO_PHONE_NUMBER_ID`) |
+| `agentId` | string | No | Agent to route inbound messages to as a `kapso-inbound` task. Defaults to the lead |
+| `workflowId` | string | No | Advanced override: dispatch inbound via this workflow's webhook trigger instead of a task |
+| `name` | string | No | Human-friendly display name for the number |
+
+### unregister-kapso-number
+
+Remove a Kapso phone number's native routing mapping from the KV store. Lead-only. Inbound messages for the number stop routing through the native handler. The Kapso-side webhook is not deleted automatically.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `phoneNumberId` | string | Yes | Kapso/Meta phone-number ID whose mapping should be removed |
+
+### send-whatsapp-message
+
+Send a free-form WhatsApp text via Kapso within the 24h session window. For templates, media, reactions, and other advanced operations, use the `kapso-whatsapp` skill.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `phoneNumberId` | string | Yes | The swarm's Kapso/Meta phone-number ID to send from (`KAPSO_PHONE_NUMBER_ID`) |
+| `to` | string | Yes | Recipient phone in E.164 format without `+` (for example `15551234567`) |
+| `body` | string | Yes | Message text |
+| `previewUrl` | boolean | No | Render a link preview for URLs in the body (default: `false`) |
+
+### reply-whatsapp-message
+
+Quote-reply a WhatsApp message via Kapso. Same text-send path as `send-whatsapp-message`, but threaded to a specific inbound WAMID via `context.message_id`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `phoneNumberId` | string | Yes | The swarm's Kapso/Meta phone-number ID to send from (`KAPSO_PHONE_NUMBER_ID`) |
+| `to` | string | Yes | Recipient phone in E.164 format without `+` |
+| `inReplyTo` | string | Yes | The inbound WAMID to quote-reply |
+| `body` | string | Yes | Reply text |
 
 ## Task Pool Tools
 
