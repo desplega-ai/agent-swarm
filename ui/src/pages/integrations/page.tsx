@@ -9,7 +9,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
-import { INTEGRATIONS, type IntegrationCategory } from "@/lib/integrations-catalog";
+import {
+  getIntegrationFields,
+  INTEGRATIONS,
+  type IntegrationCategory,
+} from "@/lib/integrations-catalog";
 import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-status";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +41,7 @@ export default function IntegrationsPage() {
   const allCatalogKeys = useMemo(() => {
     const keys = new Set<string>();
     for (const def of INTEGRATIONS) {
-      for (const f of def.fields) keys.add(f.key);
+      for (const f of getIntegrationFields(def)) keys.add(f.key);
       if (def.disableKey) keys.add(def.disableKey);
     }
     return Array.from(keys);
@@ -48,7 +52,7 @@ export default function IntegrationsPage() {
   // "Fresh swarm" check: nothing in DB AND nothing in deploy env.
   const hasAnyIntegrationConfigured = useMemo(() => {
     for (const def of INTEGRATIONS) {
-      for (const f of def.fields) {
+      for (const f of getIntegrationFields(def)) {
         if (findConfigForKey(configs ?? [], f.key)) return true;
         if (presence[f.key]) return true;
       }
