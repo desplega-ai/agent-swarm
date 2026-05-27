@@ -690,6 +690,69 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
 
+  // ---------------------------------------------------------- Amazon Bedrock
+  {
+    id: "bedrock",
+    name: "Amazon Bedrock",
+    description:
+      "Route pi/pi-mono harness calls to Amazon Bedrock via MODEL_OVERRIDE, with auth delegated to the AWS SDK default credential chain.",
+    category: "llm",
+    iconKey: "cloud",
+    docsUrl:
+      "https://docs.agent-swarm.dev/docs/guides/harness-providers#pi-mono--amazon-bedrock-auth",
+    restartRequired: true,
+    fields: [
+      {
+        key: "MODEL_OVERRIDE",
+        label: "Model override",
+        type: "text",
+        required: true,
+        placeholder: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+        helpText:
+          "Use the amazon-bedrock/<model-id> prefix to route pi/pi-mono through Amazon Bedrock.",
+        affectsRestart: true,
+      },
+      {
+        key: "AWS_REGION",
+        label: "AWS region",
+        type: "text",
+        required: true,
+        placeholder: "us-east-1",
+        helpText:
+          "Must be a Bedrock-enabled AWS region. AWS_DEFAULT_REGION also works for the SDK.",
+        affectsRestart: true,
+      },
+      {
+        key: "AWS_ACCESS_KEY_ID",
+        label: "AWS access key ID",
+        type: "password",
+        isSecret: true,
+        helpText:
+          "Optional static credentials path. Pair with AWS_SECRET_ACCESS_KEY for the simplest Bedrock setup.",
+        affectsRestart: true,
+      },
+      {
+        key: "AWS_SECRET_ACCESS_KEY",
+        label: "AWS secret access key",
+        type: "password",
+        isSecret: true,
+        helpText:
+          "Optional static credentials path. Profiles, AWS SSO, web-identity, credential_process, and assume-role chains also work.",
+        affectsRestart: true,
+      },
+      {
+        key: "AWS_SESSION_TOKEN",
+        label: "AWS session token",
+        type: "password",
+        isSecret: true,
+        placeholder: "Optional for temporary credentials",
+        helpText:
+          "Optional for temporary static credentials. See the harness-providers guide for all AWS SDK default credential chain sources.",
+        affectsRestart: true,
+      },
+    ],
+  },
+
   // ---------------------------------------------------------- Codex OAuth
   {
     id: "codex-oauth",
