@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt";
 import type { ProviderTraits } from "../providers/types";
 
@@ -8,6 +8,39 @@ const minimalArgs: BasePromptArgs = {
   agentId: "agent-abc-123",
   swarmUrl: "swarm.example.com",
 };
+
+const originalSlackDisable = process.env.SLACK_DISABLE;
+const originalSlackBotToken = process.env.SLACK_BOT_TOKEN;
+const originalSlackAppToken = process.env.SLACK_APP_TOKEN;
+
+afterEach(() => {
+  restoreEnv("SLACK_DISABLE", originalSlackDisable);
+  restoreEnv("SLACK_BOT_TOKEN", originalSlackBotToken);
+  restoreEnv("SLACK_APP_TOKEN", originalSlackAppToken);
+});
+
+function restoreEnv(
+  name: "SLACK_DISABLE" | "SLACK_BOT_TOKEN" | "SLACK_APP_TOKEN",
+  value: string | undefined,
+) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
+function enableSlackPromptTools() {
+  process.env.SLACK_DISABLE = "false";
+  process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
+  process.env.SLACK_APP_TOKEN = "xapp-test-token";
+}
+
+function disableSlackPromptTools() {
+  process.env.SLACK_DISABLE = "true";
+  delete process.env.SLACK_BOT_TOKEN;
+  delete process.env.SLACK_APP_TOKEN;
+}
 
 // ---------------------------------------------------------------------------
 // Basic fields
@@ -531,5 +564,61 @@ describe("getBasePrompt — local providers unaffected", () => {
     const result = await getBasePrompt(minimalArgs);
     expect(result).toContain("store-progress");
     expect(result).toContain("/workspace");
+  });
+});
+
+describe("getBasePrompt — conditional Slack templates", () => {
+  test("omits Slack tool templates when Slack is disabled", async () => {
+    disableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      slackContext: { channelId: "C123", threadTs: "123.456" },
+    });
+
+    expect(result).not.toMatch(/\bslack-[a-z-]+\b/);
+    expect(result).toContain("Task Routing");
+  });
+
+  test("includes Slack tool template for lead when Slack is enabled", async () => {
+    enableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+    });
+
+    expect(result).toContain("#### Slack Tools");
+    expect(result).toContain("slack-reply");
+    expect(result).toContain("slack-read");
+    expect(result).toContain("slack-list-channels");
+  });
+
+  test("includes Slack tool template for worker when Slack is enabled", async () => {
+    enableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "worker",
+    });
+
+    expect(result).toContain("#### Slack Tools");
+    expect(result).toContain("slack-reply");
+    expect(result).toContain("slack-read");
+    expect(result).toContain("slack-list-channels");
+  });
+
+  test("includes worker Slack thread template when Slack is enabled", async () => {
+    enableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "worker",
+      slackContext: { channelId: "C123", threadTs: "123.456" },
+    });
+
+    expect(result).toContain("slack-reply");
+    expect(result).toContain("C123");
   });
 });
