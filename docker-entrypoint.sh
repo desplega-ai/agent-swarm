@@ -376,7 +376,17 @@ if [ -n "$AGENT_ID" ]; then
             #   - HARNESS_PROVIDER: live-reconciled by runner.ts poll loop;
             #     baking it would also defeat the precedence invariant
             #     (swarm_config > env > "claude")
-            jq -r '.configs[] | select(.key != "codex_oauth" and .key != "HARNESS_PROVIDER") | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
+            # Also skip keys that are not valid POSIX shell identifiers
+            # (e.g. CF-Access-Client-Id). Sourcing such a key causes the shell
+            # to parse "CF-Access-Client-Id=value" as a command invocation →
+            # "command not found", aborting the rest of the export. These keys
+            # are still available to the runner via headerConfigKeys (resolved
+            # per-request), so skipping them here is safe.
+            SKIPPED_NONIDENT=$(jq -r '.configs[] | select(.key != "codex_oauth" and .key != "HARNESS_PROVIDER") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$") | not) | .key' /tmp/swarm_config.json 2>/dev/null || true)
+            if [ -n "$SKIPPED_NONIDENT" ]; then
+                echo "[entrypoint] debug: skipping non-identifier config keys (not valid POSIX shell variable names, still available via headerConfigKeys): $(echo "$SKIPPED_NONIDENT" | tr '\n' ' ')"
+            fi
+            jq -r '.configs[] | select(.key != "codex_oauth" and .key != "HARNESS_PROVIDER") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
             if [ -f /tmp/swarm_config.env ]; then
                 set -a
                 . /tmp/swarm_config.env
