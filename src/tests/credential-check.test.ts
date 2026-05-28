@@ -315,48 +315,64 @@ describe("checkOpencodeCredentials", () => {
 describe("checkProviderCredentials dispatcher", () => {
   const HOME = "/home/worker";
 
-  test("dispatches to the right adapter for every supported provider", () => {
-    expect(checkProviderCredentials("claude", { CLAUDE_CODE_OAUTH_TOKEN: "x" }).ready).toBe(true);
-    expect(checkProviderCredentials("claude", {}).ready).toBe(false);
+  test("dispatches to the right adapter for every supported provider", async () => {
+    expect((await checkProviderCredentials("claude", { CLAUDE_CODE_OAUTH_TOKEN: "x" })).ready).toBe(
+      true,
+    );
+    expect((await checkProviderCredentials("claude", {})).ready).toBe(false);
 
     expect(
-      checkProviderCredentials(
-        "claude-managed",
-        {
-          ANTHROPIC_API_KEY: "x",
-          MANAGED_AGENT_ID: "a",
-          MANAGED_ENVIRONMENT_ID: "e",
-          MCP_BASE_URL: "https://x",
-        },
-        { homeDir: HOME, fs: noFiles },
+      (
+        await checkProviderCredentials(
+          "claude-managed",
+          {
+            ANTHROPIC_API_KEY: "x",
+            MANAGED_AGENT_ID: "a",
+            MANAGED_ENVIRONMENT_ID: "e",
+            MCP_BASE_URL: "https://x",
+          },
+          { homeDir: HOME, fs: noFiles },
+        )
       ).ready,
     ).toBe(true);
 
-    expect(checkProviderCredentials("devin", { DEVIN_API_KEY: "x", DEVIN_ORG_ID: "y" }).ready).toBe(
-      true,
-    );
-
     expect(
-      checkProviderCredentials("codex", { OPENAI_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
-        .ready,
+      (await checkProviderCredentials("devin", { DEVIN_API_KEY: "x", DEVIN_ORG_ID: "y" })).ready,
     ).toBe(true);
 
     expect(
-      checkProviderCredentials("pi", { ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
-        .ready,
+      (
+        await checkProviderCredentials(
+          "codex",
+          { OPENAI_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
     ).toBe(true);
 
     expect(
-      checkProviderCredentials(
-        "opencode",
-        { OPENROUTER_API_KEY: "x" },
-        { homeDir: HOME, fs: noFiles },
+      (
+        await checkProviderCredentials(
+          "pi",
+          { ANTHROPIC_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
+    ).toBe(true);
+
+    expect(
+      (
+        await checkProviderCredentials(
+          "opencode",
+          { OPENROUTER_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
       ).ready,
     ).toBe(true);
   });
 
-  test("throws on unknown provider", () => {
-    expect(() => checkProviderCredentials("nope", {})).toThrow(/unknown provider/i);
+  test("throws on unknown provider", async () => {
+    expect(checkProviderCredentials("nope", {})).rejects.toThrow(/unknown provider/i);
   });
 });
 
@@ -366,16 +382,16 @@ describe("snapshot: every provider", () => {
   const HOME = "/home/worker";
   const providers = ["claude", "claude-managed", "codex", "devin", "opencode", "pi"] as const;
 
-  test("fully unset env → ready=false with non-empty missing[] and hint", () => {
+  test("fully unset env → ready=false with non-empty missing[] and hint", async () => {
     for (const p of providers) {
-      const status = checkProviderCredentials(p, {}, { homeDir: HOME, fs: noFiles });
+      const status = await checkProviderCredentials(p, {}, { homeDir: HOME, fs: noFiles });
       expect(status.ready).toBe(false);
       expect(status.missing.length).toBeGreaterThan(0);
       expect(status.hint).toBeTruthy();
     }
   });
 
-  test("minimum sufficient env → ready=true", () => {
+  test("minimum sufficient env → ready=true", async () => {
     const minimums: Record<string, Record<string, string>> = {
       claude: { CLAUDE_CODE_OAUTH_TOKEN: "x" },
       "claude-managed": {
@@ -390,7 +406,10 @@ describe("snapshot: every provider", () => {
       pi: { ANTHROPIC_API_KEY: "x" },
     };
     for (const p of providers) {
-      const status = checkProviderCredentials(p, minimums[p]!, { homeDir: HOME, fs: noFiles });
+      const status = await checkProviderCredentials(p, minimums[p]!, {
+        homeDir: HOME,
+        fs: noFiles,
+      });
       expect(status.ready).toBe(true);
     }
   });

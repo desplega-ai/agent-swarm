@@ -2182,7 +2182,7 @@ export function implicitCloseActiveToolSpans(
 }
 
 async function spawnProviderProcess(
-  adapter: ReturnType<typeof createProviderAdapter>,
+  adapter: Awaited<ReturnType<typeof createProviderAdapter>>,
   opts: {
     prompt: string;
     logFile: string;
@@ -3121,7 +3121,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Create provider adapter using the resolved value. `let` so the poll-loop
   // reconciliation block (Section 4) can swap it live when an operator changes
   // HARNESS_PROVIDER in swarm_config — call sites read the current binding.
-  let adapter = createProviderAdapter(bootProvider);
+  let adapter = await createProviderAdapter(bootProvider);
 
   // Configure HTTP-based template resolution (workers resolve via API, not local DB)
   if (apiKey) {
@@ -3368,7 +3368,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       const previous = state.harnessProvider;
       console.log(`[${role}] [harness] Reconciling adapter: ${previous} → ${resolvedProvider}`);
       try {
-        adapter = createProviderAdapter(resolvedProvider);
+        adapter = await createProviderAdapter(resolvedProvider);
         state.harnessProvider = resolvedProvider;
         basePrompt = await buildSystemPrompt();
         resolvedSystemPrompt = additionalSystemPrompt

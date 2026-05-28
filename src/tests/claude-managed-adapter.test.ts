@@ -40,14 +40,14 @@ describe("ClaudeManagedAdapter (Phase 1 skeleton)", () => {
     }
   });
 
-  test("factory returns ClaudeManagedAdapter for 'claude-managed'", () => {
-    const adapter = createProviderAdapter("claude-managed");
+  test("factory returns ClaudeManagedAdapter for 'claude-managed'", async () => {
+    const adapter = await createProviderAdapter("claude-managed");
     expect(adapter).toBeInstanceOf(ClaudeManagedAdapter);
     expect(adapter.name).toBe("claude-managed");
   });
 
-  test("factory still rejects unknown providers and lists claude-managed", () => {
-    expect(() => createProviderAdapter("nope")).toThrow(
+  test("factory still rejects unknown providers and lists claude-managed", async () => {
+    expect(createProviderAdapter("nope")).rejects.toThrow(
       'Unknown HARNESS_PROVIDER: "nope". Supported: claude, pi, codex, devin, claude-managed',
     );
   });

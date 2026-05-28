@@ -6,32 +6,32 @@ import { PiMonoAdapter } from "../providers/pi-mono-adapter";
 import type { CostData, ProviderEvent } from "../providers/types";
 
 describe("createProviderAdapter", () => {
-  test("returns ClaudeAdapter for 'claude'", () => {
-    const adapter = createProviderAdapter("claude");
+  test("returns ClaudeAdapter for 'claude'", async () => {
+    const adapter = await createProviderAdapter("claude");
     expect(adapter).toBeInstanceOf(ClaudeAdapter);
     expect(adapter.name).toBe("claude");
   });
 
-  test("returns PiMonoAdapter for 'pi'", () => {
-    const adapter = createProviderAdapter("pi");
+  test("returns PiMonoAdapter for 'pi'", async () => {
+    const adapter = await createProviderAdapter("pi");
     expect(adapter).toBeInstanceOf(PiMonoAdapter);
     expect(adapter.name).toBe("pi");
   });
 
-  test("returns OpencodeAdapter for 'opencode'", () => {
-    const adapter = createProviderAdapter("opencode");
+  test("returns OpencodeAdapter for 'opencode'", async () => {
+    const adapter = await createProviderAdapter("opencode");
     expect(adapter).toBeInstanceOf(OpencodeAdapter);
     expect(adapter.name).toBe("opencode");
   });
 
-  test("throws for unknown provider", () => {
-    expect(() => createProviderAdapter("unknown")).toThrow(
+  test("throws for unknown provider", async () => {
+    expect(createProviderAdapter("unknown")).rejects.toThrow(
       'Unknown HARNESS_PROVIDER: "unknown". Supported: claude, pi, codex, devin, claude-managed, opencode',
     );
   });
 
-  test("throws for empty string", () => {
-    expect(() => createProviderAdapter("")).toThrow("Unknown HARNESS_PROVIDER");
+  test("throws for empty string", async () => {
+    expect(createProviderAdapter("")).rejects.toThrow("Unknown HARNESS_PROVIDER");
   });
 });
 

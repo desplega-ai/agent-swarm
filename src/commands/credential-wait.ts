@@ -133,7 +133,7 @@ export async function awaitCredentials(opts: AwaitCredentialsOptions): Promise<C
 
   // Fast path: already satisfied at boot.
   let currentProvider = readProvider();
-  let status = checkProviderCredentials(currentProvider, initialEnv, opts.credCheckOptions);
+  let status = await checkProviderCredentials(currentProvider, initialEnv, opts.credCheckOptions);
   if (status.ready) {
     log(
       `[boot] credentials ready (provider=${currentProvider}, satisfiedBy=${status.satisfiedBy})`,
@@ -183,7 +183,7 @@ export async function awaitCredentials(opts: AwaitCredentialsOptions): Promise<C
       currentProvider = nextProvider;
     }
 
-    status = checkProviderCredentials(currentProvider, process.env, opts.credCheckOptions);
+    status = await checkProviderCredentials(currentProvider, process.env, opts.credCheckOptions);
 
     if (!status.ready) {
       // Exponential backoff with cap.
