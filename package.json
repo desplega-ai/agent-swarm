@@ -45,6 +45,8 @@
     "tsc:check": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
+    "sync-chart-version": "bun scripts/sync-chart-version.ts",
+    "check-chart-version": "bun scripts/sync-chart-version.ts --check-if-package-version-changed",
     "cli": "bun src/cli.tsx",
     "hook": "bun src/hooks/hook.ts",
     "claude": "bun src/cli.tsx claude",
