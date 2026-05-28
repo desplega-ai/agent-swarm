@@ -6,6 +6,7 @@ import {
   deleteTemplate,
   type E2BSandboxInfo,
   sandboxPortHost,
+  setTemplateVisibility,
 } from "../e2b/dispatch";
 import {
   parseDotenv,
@@ -154,6 +155,32 @@ describe("E2B dispatch helpers", () => {
     ).resolves.toMatchObject({
       exitCode: 0,
       stdout: "e2b template delete agent-swarm-worker-e2e -y\n",
+    });
+  });
+
+  test("setTemplateVisibility supports dry-run publish and unpublish", async () => {
+    await expect(
+      setTemplateVisibility({
+        name: "agent-swarm-worker-latest",
+        public: true,
+        e2bEnv: { E2B_API_KEY: "secret", E2B_ACCESS_TOKEN: "secret" },
+        dryRun: true,
+      }),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "e2b template publish agent-swarm-worker-latest -y\n",
+    });
+
+    await expect(
+      setTemplateVisibility({
+        name: "agent-swarm-worker-latest",
+        public: false,
+        e2bEnv: { E2B_API_KEY: "secret", E2B_ACCESS_TOKEN: "secret" },
+        dryRun: true,
+      }),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "e2b template unpublish agent-swarm-worker-latest -y\n",
     });
   });
 

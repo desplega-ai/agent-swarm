@@ -42,6 +42,13 @@ export type DeleteTemplateOptions = {
   dryRun?: boolean;
 };
 
+export type TemplateVisibilityOptions = {
+  name: string;
+  e2bEnv: EnvMap;
+  public: boolean;
+  dryRun?: boolean;
+};
+
 export type BuildImageTemplateOptions = {
   role: E2BRole;
   name: string;
@@ -309,6 +316,17 @@ export async function buildImageTemplate(
 
 export async function deleteTemplate(opts: DeleteTemplateOptions): Promise<E2BCommandResult> {
   const args = ["template", "delete", opts.name, "-y"];
+  if (opts.dryRun) {
+    return { exitCode: 0, stdout: `e2b ${args.join(" ")}\n`, stderr: "" };
+  }
+  return runE2BCommand(args, opts.e2bEnv);
+}
+
+export async function setTemplateVisibility(
+  opts: TemplateVisibilityOptions,
+): Promise<E2BCommandResult> {
+  const action = opts.public ? "publish" : "unpublish";
+  const args = ["template", action, opts.name, "-y"];
   if (opts.dryRun) {
     return { exitCode: 0, stdout: `e2b ${args.join(" ")}\n`, stderr: "" };
   }

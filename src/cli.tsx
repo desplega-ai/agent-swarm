@@ -295,6 +295,8 @@ const COMMAND_HELP: Record<
     options: [
       "  build-template --role api|worker    Build or rebuild an E2B template",
       "  delete-template <template...>        Delete E2B templates",
+      "  publish-template <template...>       Publish E2B templates",
+      "  unpublish-template <template...>     Make E2B templates private",
       "  start-api --template <name>          Start the API in an E2B sandbox",
       "  start-worker --api-url <url>         Start a worker against a public API URL",
       "  start-stack                         Start API plus one or more workers",

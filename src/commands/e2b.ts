@@ -9,6 +9,7 @@ import {
   killSandbox,
   listSandboxes,
   sandboxPortUrl,
+  setTemplateVisibility,
   startDetachedProcess,
   waitForHttpOk,
 } from "../e2b/dispatch";
@@ -127,13 +128,20 @@ async function gitCommonRoot(cwd: string): Promise<string | null> {
   return commonDir.endsWith("/.git") ? dirname(commonDir) : dirname(dirname(commonDir));
 }
 
-async function loadE2BControllerEnv(flags: ParsedFlags, cwd: string): Promise<EnvMap> {
+async function loadE2BControllerEnv(
+  flags: ParsedFlags,
+  cwd: string,
+  opts: { requireApiKey?: boolean } = {},
+): Promise<EnvMap> {
+  const requireApiKey = opts.requireApiKey ?? true;
   if (booleanFlag(flags, "dry-run")) {
-    return { E2B_API_KEY: "dry-run" };
+    return { E2B_ACCESS_TOKEN: "dry-run", E2B_API_KEY: "dry-run" };
   }
 
   const explicit = value(flags, "e2b-api-key");
   const fromFile = value(flags, "e2b-api-key-file");
+  const explicitAccessToken = value(flags, "e2b-access-token");
+  const accessTokenFile = value(flags, "e2b-access-token-file");
   const candidates: string[] = [];
   const commonRoot = await gitCommonRoot(cwd);
 
@@ -155,13 +163,20 @@ async function loadE2BControllerEnv(flags: ParsedFlags, cwd: string): Promise<En
   if (fromFile) {
     apiKey = (await Bun.file(absolutePath(fromFile, cwd)).text()).trim();
   }
-  if (!apiKey) {
+  let accessToken =
+    explicitAccessToken || process.env.E2B_ACCESS_TOKEN || loaded.E2B_ACCESS_TOKEN || "";
+  if (accessTokenFile) {
+    accessToken = (await Bun.file(absolutePath(accessTokenFile, cwd)).text()).trim();
+  }
+  if (!apiKey && requireApiKey) {
     throw new Error(
       "Missing E2B_API_KEY. Set it in env, pass --e2b-api-key-file, or put it in .env.e2b/.env.",
     );
   }
 
-  const env: EnvMap = { E2B_API_KEY: apiKey };
+  const env: EnvMap = {};
+  if (apiKey) env.E2B_API_KEY = apiKey;
+  if (accessToken) env.E2B_ACCESS_TOKEN = accessToken;
   const domain = process.env.E2B_DOMAIN || loaded.E2B_DOMAIN;
   if (domain) env.E2B_DOMAIN = domain;
   return env;
@@ -412,7 +427,7 @@ async function buildTemplateCommand(flags: ParsedFlags, cwd: string): Promise<vo
     buildArgs[key] = argValue;
   }
 
-  const controllerEnv = await loadE2BControllerEnv(flags, cwd);
+  const controllerEnv = await loadE2BControllerEnv(flags, cwd, { requireApiKey: false });
   const configPath = value(
     flags,
     "config",
@@ -442,7 +457,7 @@ async function buildTemplateCommand(flags: ParsedFlags, cwd: string): Promise<vo
 async function deleteTemplateCommand(flags: ParsedFlags, cwd: string): Promise<void> {
   const names = flags.positionals;
   if (names.length === 0) throw new Error("delete-template requires at least one template name");
-  const controllerEnv = await loadE2BControllerEnv(flags, cwd);
+  const controllerEnv = await loadE2BControllerEnv(flags, cwd, { requireApiKey: false });
 
   for (const name of names) {
     const result = await deleteTemplate({
@@ -454,6 +469,31 @@ async function deleteTemplateCommand(flags: ParsedFlags, cwd: string): Promise<v
     if (result.stderr) process.stderr.write(result.stderr);
     if (result.exitCode !== 0) {
       throw new Error(`e2b template delete failed for ${name} with exit code ${result.exitCode}`);
+    }
+  }
+}
+
+async function templateVisibilityCommand(
+  flags: ParsedFlags,
+  cwd: string,
+  isPublic: boolean,
+): Promise<void> {
+  const names = flags.positionals;
+  const action = isPublic ? "publish-template" : "unpublish-template";
+  if (names.length === 0) throw new Error(`${action} requires at least one template name`);
+  const controllerEnv = await loadE2BControllerEnv(flags, cwd, { requireApiKey: false });
+
+  for (const name of names) {
+    const result = await setTemplateVisibility({
+      name,
+      public: isPublic,
+      e2bEnv: controllerEnv,
+      dryRun: booleanFlag(flags, "dry-run"),
+    });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.exitCode !== 0) {
+      throw new Error(`e2b template visibility update failed for ${name}`);
     }
   }
 }
@@ -542,6 +582,8 @@ agent-swarm e2b
 Usage:
   agent-swarm e2b build-template --role api|worker [--source local|image]
   agent-swarm e2b delete-template <template-name...>
+  agent-swarm e2b publish-template <template-name...>
+  agent-swarm e2b unpublish-template <template-name...>
   agent-swarm e2b start-api --template <template> [--env-file .env]
   agent-swarm e2b start-worker --template <template> --api-url <https-url> [--env-file .env]
   agent-swarm e2b start-stack --api-template <template> --worker-template <template> [--workers 1]
@@ -556,6 +598,8 @@ Common options:
   --agent-id <id>            Worker agent ID (default: e2b-<sandbox-id>)
   --timeout-sec <seconds>    Sandbox TTL (default 3600)
   --e2b-api-key-file <path>  Read the E2B controller API key from a file
+  --e2b-access-token-file <path>
+                             Read E2B CLI access token for publish/unpublish
   --config <path>            E2B template config path for build-template
   --json                     Print machine-readable output
   --dry-run                  Print/derive planned work without touching E2B
@@ -576,6 +620,12 @@ export async function runE2BCommand(argv: string[]): Promise<void> {
         return;
       case "delete-template":
         await deleteTemplateCommand(flags, cwd);
+        return;
+      case "publish-template":
+        await templateVisibilityCommand(flags, cwd, true);
+        return;
+      case "unpublish-template":
+        await templateVisibilityCommand(flags, cwd, false);
         return;
       case "start-api":
         await startApiCommand(flags, cwd);

@@ -8,6 +8,7 @@ environment that cannot run Docker locally.
 - `e2b` CLI available on `PATH` for local-checkout template builds.
 - `E2B_API_KEY` in the environment, `.env.e2b`, `.env`, or passed with
   `--e2b-api-key-file`.
+- `E2B_ACCESS_TOKEN` for non-interactive template publish/unpublish operations.
 - A public swarm API URL for worker-only dispatch. Use ngrok/Cloudflare Tunnel
   for a local API, or use `start-stack` to launch the API in E2B first.
 
@@ -85,6 +86,16 @@ bun run src/cli.tsx e2b kill <sandbox-id>
 bun run src/cli.tsx e2b delete-template <template-name>
 ```
 
+Publish public templates:
+
+```bash
+bun run src/cli.tsx e2b publish-template agent-swarm-api-latest
+bun run src/cli.tsx e2b publish-template agent-swarm-worker-latest
+```
+
+Publishing/unpublishing uses the E2B CLI. In non-interactive CI, provide
+`E2B_ACCESS_TOKEN` in addition to `E2B_API_KEY`.
+
 ## GitHub Actions Shape
 
 Store `E2B_API_KEY` plus provider credentials as repository secrets, then run:
@@ -112,3 +123,18 @@ Store `E2B_API_KEY` plus provider credentials as repository secrets, then run:
 Provider keys such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and
 `OPENROUTER_API_KEY` are forwarded from the dispatcher process by default.
 Use `--inherit-env CUSTOM_KEY` for additional CI secrets.
+
+## Release Templates
+
+`.github/workflows/docker-and-deploy.yml` publishes public E2B templates on
+version bumps after the Docker manifests have been pushed:
+
+- `agent-swarm-api-<version-with-dashes>`
+- `agent-swarm-api-latest`
+- `agent-swarm-worker-<version-with-dashes>`
+- `agent-swarm-worker-latest`
+
+The workflow builds templates from the same GHCR images as the release, then
+runs `publish-template` so E2B users can start API, lead, or worker sandboxes
+directly from public template names. The worker template is also the lead
+runtime; start it with `--agent-role lead`.

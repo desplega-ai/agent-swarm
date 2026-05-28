@@ -10,7 +10,7 @@ Three workflows live in `.github/workflows/`:
 |---|---|---|
 | `merge-gate.yml` | PR → `main` | **The gate.** All jobs below must pass for merge. |
 | `ci.yml` | Push → `main` | Lint + tsc + test (subset of merge-gate). |
-| `docker-and-deploy.yml` | Push → `main` | Build + deploy. Not part of PR gate. |
+| `docker-and-deploy.yml` | Push → `main` | Build images, publish release E2B templates, deploy, and publish npm/GitHub releases. Not part of PR gate. |
 
 Both PR-blocking workflows path-ignore `docs-site/**`. PRs that touch only those don't run code jobs (but Vercel deploys docs-site separately).
 
