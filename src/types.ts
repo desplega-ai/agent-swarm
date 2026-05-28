@@ -103,6 +103,13 @@ export type ProviderMetaMap = {
   opencode: NoProviderMeta;
 };
 
+export const FollowUpConfigSchema = z.object({
+  disabled: z.boolean().optional(),
+  onCompleted: z.string().max(4000).optional(),
+  onFailed: z.string().max(4000).optional(),
+});
+export type FollowUpConfig = z.infer<typeof FollowUpConfigSchema>;
+
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
   agentId: z.uuid().nullable(), // Nullable for unassigned tasks
@@ -185,6 +192,9 @@ export const AgentTaskSchema = z.object({
 
   // Structured output schema (optional — JSON Schema that task output must conform to)
   outputSchema: z.record(z.string(), z.unknown()).optional(),
+
+  // Lead follow-up control (optional — null/undefined preserves default behavior)
+  followUpConfig: FollowUpConfigSchema.optional(),
 
   // Pause tracking
   wasPaused: z.boolean().default(false),

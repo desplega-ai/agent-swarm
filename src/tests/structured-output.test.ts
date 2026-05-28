@@ -253,6 +253,29 @@ describe("AgentTaskConfigSchema — outputSchema", () => {
       expect(parsed.data.outputSchema).toEqual(config.outputSchema);
     }
   });
+
+  test("accepts followUpConfig in config", async () => {
+    const { AgentTaskExecutor } = await import("../workflows/executors/agent-task");
+    const executor = new AgentTaskExecutor({
+      // biome-ignore lint/suspicious/noExplicitAny: mock DB for test
+      db: {} as any,
+      eventBus: { emit: () => {}, on: () => {}, off: () => {} },
+      interpolate: (t: string) => t,
+    });
+
+    const config = {
+      template: "Count files",
+      followUpConfig: {
+        onCompleted: "post the URL",
+        onFailed: "page Taras",
+      },
+    };
+    const parsed = executor.configSchema.safeParse(config);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.followUpConfig).toEqual(config.followUpConfig);
+    }
+  });
 });
 
 // ─── Workflow agent-task → DB with outputSchema ──────────────
@@ -304,5 +327,51 @@ describe("Workflow agent-task creates task with outputSchema", () => {
     const task = getTaskById(taskId);
     expect(task).toBeDefined();
     expect(task!.outputSchema).toEqual(schema);
+  });
+
+  test("followUpConfig flows from executor config to created task", async () => {
+    const { AgentTaskExecutor } = await import("../workflows/executors/agent-task");
+    const db = await import("../be/db");
+
+    const executor = new AgentTaskExecutor({
+      db: db as typeof import("../be/db"),
+      eventBus: { emit: () => {}, on: () => {}, off: () => {} },
+      interpolate: (t: string) => t,
+    });
+
+    const wf = createWorkflow({
+      name: "test-follow-up-config",
+      definition: { nodes: [], edges: [] },
+    });
+    const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
+    const step = createWorkflowRunStep({
+      id: crypto.randomUUID(),
+      runId: run.id,
+      nodeId: "n1",
+      nodeType: "agent-task",
+    });
+
+    const followUpConfig = { disabled: true };
+
+    const result = await executor.run({
+      config: {
+        template: "Summarize the document",
+        followUpConfig,
+      },
+      context: {},
+      meta: {
+        runId: run.id,
+        stepId: step.id,
+        nodeId: "n1",
+        workflowId: wf.id,
+        dryRun: false,
+      },
+    });
+
+    expect(result.status).toBe("success");
+    const taskId = (result as { correlationId?: string }).correlationId!;
+    const task = getTaskById(taskId);
+    expect(task).toBeDefined();
+    expect(task!.followUpConfig).toEqual(followUpConfig);
   });
 });

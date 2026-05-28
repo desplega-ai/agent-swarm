@@ -2,6 +2,7 @@ import { z } from "zod";
 import { workflowContextKey } from "../../tasks/context-key";
 import { withSiblingAwareness } from "../../tasks/sibling-awareness";
 import type { ExecutorMeta } from "../../types";
+import { FollowUpConfigSchema } from "../../types";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 
@@ -18,6 +19,7 @@ const AgentTaskConfigSchema = z.object({
   model: z.string().min(1).optional(),
   parentTaskId: z.string().uuid().optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
+  followUpConfig: FollowUpConfigSchema.optional(),
 });
 
 const AgentTaskOutputSchema = z.object({
@@ -94,6 +96,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         model: config.model,
         parentTaskId: config.parentTaskId,
         outputSchema: config.outputSchema,
+        followUpConfig: config.followUpConfig,
         contextKey: workflowContextKey({ workflowRunId: meta.runId }),
       },
     );

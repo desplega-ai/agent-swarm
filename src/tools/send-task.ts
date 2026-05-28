@@ -14,7 +14,7 @@ import {
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema } from "@/types";
+import { AgentTaskSchema, FollowUpConfigSchema } from "@/types";
 
 export const sendTaskInputSchema = z.object({
   agentId: z
@@ -83,6 +83,9 @@ export const sendTaskInputSchema = z.object({
     .describe(
       "ID of the human user who originally requested this task chain. When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically.",
     ),
+  followUpConfig: FollowUpConfigSchema.optional().describe(
+    "Control the lead follow-up created when this task finishes. `disabled: true` skips follow-up creation. `onCompleted` / `onFailed` inject extra instructions into the lead's prompt for the matching outcome.",
+  ),
 });
 
 export const sendTaskOutputSchema = z.object({
@@ -113,6 +116,7 @@ export async function sendTaskHandler(
     slackThreadTs,
     slackUserId,
     requestedByUserId: inputRequestedByUserId,
+    followUpConfig,
   }: SendTaskArgs,
 ): Promise<CallToolResult> {
   if (ctx.kind === "owner" && !ctx.agentId) {
@@ -259,6 +263,7 @@ export async function sendTaskHandler(
         slackChannelId,
         slackThreadTs,
         slackUserId,
+        followUpConfig,
       });
 
       return {
@@ -311,6 +316,7 @@ export async function sendTaskHandler(
         slackChannelId,
         slackThreadTs,
         slackUserId,
+        followUpConfig,
       });
 
       return {
@@ -337,6 +343,7 @@ export async function sendTaskHandler(
       slackChannelId,
       slackThreadTs,
       slackUserId,
+      followUpConfig,
     });
 
     return {
