@@ -67,7 +67,7 @@ const MANUAL_PRICING_OVERRIDES: Array<{
  * fields the models.dev snapshot doesn't index directly; we map them here.
  */
 const ANTHROPIC_SHORTNAME_TO_MODELSDEV: Record<string, string> = {
-  opus: "claude-opus-4-7",
+  opus: "claude-opus-4-8",
   sonnet: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5",
 };
