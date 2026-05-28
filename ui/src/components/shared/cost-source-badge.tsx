@@ -36,9 +36,9 @@ export function CostSourceBadge({ source }: { source?: SessionCostSource | null 
         variant="outline"
         size="tag"
         className="border-status-warning/40 text-status-warning-strong"
-        title="No pricing row matched (provider, model); reported USD is from the worker as-is"
+        title="No pricing row matched this provider/model; USD is the worker-reported value and token counts are shown below"
       >
-        UNPRICED
+        NO RATE
       </Badge>
     );
   }

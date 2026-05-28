@@ -153,6 +153,31 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
     expect(body.cost.totalCostUsd).toBeCloseTo(6.64, 5);
   });
 
+  test("provider=codex model=gpt-5.5 uses seeded pricing rows instead of falling through to unpriced", async () => {
+    const res = await authedFetch(`/api/session-costs`, {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "codex-gpt-5-5-regression",
+        agentId: testAgent.id,
+        totalCostUsd: 0,
+        // Mirrors task 1a459c1c-c89c-417a-a60c-6a060ad4a602.
+        inputTokens: 3_495_764,
+        cacheReadTokens: 3_333_632,
+        outputTokens: 8_106,
+        model: "gpt-5.5",
+        provider: "codex",
+        durationMs: 1_000,
+        numTurns: 1,
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as CreatedCostResponse;
+    expect(body.cost.costSource).toBe("pricing-table");
+    // uncached = 3,495,764 - 3,333,632 = 162,132
+    // cost = (162,132 * 5.0 + 3,333,632 * 0.5 + 8,106 * 30.0) / 1_000_000
+    expect(body.cost.totalCostUsd).toBeCloseTo(2.720656, 6);
+  });
+
   test("provider=codex but input/output rows missing → 'unpriced', worker value preserved", async () => {
     // Only seed cached_input. Missing input + output blocks recompute and
     // Phase 2 tags the row 'unpriced' (no rates means we can't trust harness USD either).

@@ -789,6 +789,10 @@ describe("resolveCodexModel", () => {
     expect(resolveCodexModel("gpt-5.4-mini")).toBe("gpt-5.4-mini");
   });
 
+  test("passthrough 'gpt-5.5' → gpt-5.5", () => {
+    expect(resolveCodexModel("gpt-5.5")).toBe("gpt-5.5");
+  });
+
   test("passthrough 'gpt-5.3-codex' → gpt-5.3-codex", () => {
     expect(resolveCodexModel("gpt-5.3-codex")).toBe("gpt-5.3-codex");
   });
@@ -816,6 +820,10 @@ describe("getCodexContextWindow", () => {
     expect(getCodexContextWindow("gpt-5.4-mini")).toBe(200_000);
   });
 
+  test("gpt-5.5 → 1_050_000", () => {
+    expect(getCodexContextWindow("gpt-5.5")).toBe(1_050_000);
+  });
+
   test("gpt-5.3-codex → 1_000_000 (1M context)", () => {
     expect(getCodexContextWindow("gpt-5.3-codex")).toBe(1_000_000);
   });
@@ -831,6 +839,11 @@ describe("computeCodexCostUsd", () => {
     // 1_000_000 output × $15.00/M = $15.00
     const cost = computeCodexCostUsd("gpt-5.4", 1_000_000, 0, 1_000_000);
     expect(cost).toBeCloseTo(17.5, 4);
+  });
+
+  test("gpt-5.5 with 1M uncached input + 1M output = $5 + $30 = $35", () => {
+    const cost = computeCodexCostUsd("gpt-5.5", 1_000_000, 0, 1_000_000);
+    expect(cost).toBeCloseTo(35, 4);
   });
 
   test("gpt-5.4 with cached input applies the cached discount", () => {
