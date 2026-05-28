@@ -66,6 +66,7 @@ import {
   type WebSearchItem,
 } from "@openai/codex-sdk";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
+import { getApiKey } from "../utils/api-key";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -1385,6 +1386,8 @@ class CodexSubprocessSession implements ProviderSession {
       parentOtelEnv: buildOtelTraceparentEnv(config.env ?? process.env),
     };
 
+    const apiKey = getApiKey();
+
     this.proc = Bun.spawn(argv, {
       // Minimal env: forward what the subprocess needs to talk to the API,
       // load the codex CLI binary, and read OAuth tokens. config.env (which
@@ -1397,10 +1400,7 @@ class CodexSubprocessSession implements ProviderSession {
           ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
           : {}),
         ...(process.env.MCP_BASE_URL ? { MCP_BASE_URL: process.env.MCP_BASE_URL } : {}),
-        ...(process.env.AGENT_SWARM_API_KEY
-          ? { AGENT_SWARM_API_KEY: process.env.AGENT_SWARM_API_KEY }
-          : {}),
-        ...(process.env.API_KEY ? { API_KEY: process.env.API_KEY } : {}),
+        ...(apiKey ? { AGENT_SWARM_API_KEY: apiKey, API_KEY: apiKey } : {}),
         // Embedding / summarization paths read these:
         ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
         ...(process.env.OPENROUTER_API_KEY
