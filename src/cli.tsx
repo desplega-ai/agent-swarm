@@ -16,8 +16,12 @@ import { getApiKey, setApiKey } from "./utils/api-key.ts";
 // Get CLI name from bin field (assumes single key)
 const binName = Object.keys(pkg.bin)[0];
 
-// Restore cursor on exit
-const restoreCursor = () => process.stdout.write("\x1B[?25h");
+// Restore cursor on exit — only when stdout is a TTY.  Non-TTY invocations
+// (like the codex-session-runner subprocess whose stdout is a JSON pipe)
+// must not inject terminal escape sequences into the byte stream.
+const restoreCursor = () => {
+  if (process.stdout.isTTY) process.stdout.write("\x1B[?25h");
+};
 process.on("exit", restoreCursor);
 process.on("SIGINT", () => {
   restoreCursor();

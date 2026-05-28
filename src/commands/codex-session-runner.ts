@@ -61,12 +61,26 @@ function writeLine(obj: unknown): void {
 }
 
 export async function runCodexSessionRunner(): Promise<void> {
+  try {
+    await runCodexSessionRunnerInner();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error(`[codex-session-runner] top-level crash: ${message}`);
+    if (stack) console.error(stack);
+    writeLine({ kind: "error", message: `codex-session-runner: unexpected crash: ${message}` });
+    process.exit(1);
+  }
+}
+
+async function runCodexSessionRunnerInner(): Promise<void> {
   let input: CodexSubprocessInput;
   try {
     const raw = await readAllStdin();
     input = JSON.parse(raw) as CodexSubprocessInput;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error(`[codex-session-runner] stdin parse failed: ${message}`);
     writeLine({
       kind: "error",
       message: `codex-session-runner: failed to parse stdin: ${message}`,
@@ -90,6 +104,7 @@ export async function runCodexSessionRunner(): Promise<void> {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error(`[codex-session-runner] createSession failed: ${message}`);
     writeLine({ kind: "error", message: `codex-session-runner: createSession failed: ${message}` });
     process.exit(1);
   }

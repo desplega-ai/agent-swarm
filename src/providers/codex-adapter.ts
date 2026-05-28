@@ -1472,6 +1472,7 @@ class CodexSubprocessSession implements ProviderSession {
   private async processStreams(): Promise<ProviderResult> {
     let result: ProviderResult | null = null;
     let partial = "";
+    let stderrTail = "";
 
     const stdoutPromise = (async () => {
       const stdout = this.proc.stdout as ReadableStream<Uint8Array> | null;
@@ -1501,6 +1502,7 @@ class CodexSubprocessSession implements ProviderSession {
       if (!stderr) return;
       for await (const chunk of stderr) {
         const text = new TextDecoder().decode(chunk);
+        stderrTail = (stderrTail + text).slice(-2000);
         // Surface subprocess stderr (codex CLI warnings, auth.json
         // restoration messages) into the parent's event stream so it lands
         // in /workspace/logs/*.jsonl the way the in-process path did.
@@ -1515,12 +1517,14 @@ class CodexSubprocessSession implements ProviderSession {
       return result;
     }
     // Subprocess exited before sending a structured result — synthesise one
-    // so the runner doesn't hang on waitForCompletion.
+    // so the runner doesn't hang on waitForCompletion. Include stderr tail
+    // so the actual error message reaches the task failure reason.
+    const stderrHint = stderrTail.trim() ? ` — stderr: ${stderrTail.trim().slice(-500)}` : "";
     return {
       exitCode: exitCode ?? 1,
       sessionId: this._sessionId,
       isError: true,
-      failureReason: `codex subprocess exited (code=${exitCode ?? "?"}) without a structured result`,
+      failureReason: `codex subprocess exited (code=${exitCode ?? "?"}) without a structured result${stderrHint}`,
     };
   }
 
@@ -1543,6 +1547,12 @@ class CodexSubprocessSession implements ProviderSession {
     }
     if (msg.kind === "error" && msg.message) {
       this.emit({ type: "error", message: msg.message });
+      setResult({
+        exitCode: 1,
+        sessionId: this._sessionId,
+        isError: true,
+        failureReason: msg.message,
+      });
       return;
     }
   }
