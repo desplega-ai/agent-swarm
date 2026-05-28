@@ -16,8 +16,27 @@ import "./session-templates";
 /** Max characters per individual injected section before truncation */
 const BOOTSTRAP_MAX_CHARS = 20_000;
 
-/** Max total characters across all injected sections combined */
-const BOOTSTRAP_TOTAL_MAX_CHARS = 150_000;
+/**
+ * Max total characters across all injected sections combined.
+ *
+ * Sized to stay safely below Linux's `MAX_ARG_STRLEN = 131,072` bytes — the
+ * per-argv-element kernel limit that bit Picateclas attempts 4-6
+ * (2026-05-28). The base-prompt becomes one argv element when the claude
+ * adapter passes `--append-system-prompt <prompt>`, so the prompt MUST stay
+ * under MAX_ARG_STRLEN even with a few KB of growth. The claude-adapter
+ * also stages the prompt to a file (`--append-system-prompt-file`) as a
+ * belt-and-braces fix, but the budget cap is the cheap insurance for any
+ * code path that ever passes the prompt inline.
+ */
+const BOOTSTRAP_TOTAL_MAX_CHARS = 120_000;
+
+/**
+ * Per-section cap applied to the *repo* CLAUDE.md (the agent-swarm OSS
+ * one is ~18 KB and the biggest volatile component of the system prompt).
+ * 12 KB leaves room for the static prompt scaffold + identity + tools +
+ * agent CLAUDE.md without ever crossing MAX_ARG_STRLEN.
+ */
+const REPO_CLAUDE_MD_MAX_CHARS = 12_000;
 
 /** Truncation notice appended when a section is cut */
 const truncationNotice = (file: string) =>
@@ -150,7 +169,16 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
         prompt += `The following CLAUDE.md is from the repository cloned at \`${args.repoContext.clonePath}\`. `;
         prompt += `**IMPORTANT: These instructions apply ONLY when working within the \`${args.repoContext.clonePath}\` directory.** `;
         prompt += `Do NOT apply these rules to files outside that directory.\n\n`;
-        prompt += `${args.repoContext.claudeMd}\n`;
+        // Cap the repo CLAUDE.md so it can't blow the bootstrap budget on its
+        // own. Pre-cap, the agent-swarm OSS CLAUDE.md was 17,856 B — the
+        // single biggest volatile component of the system prompt and the
+        // direct driver of the Picateclas argv-E2BIG saga (2026-05-28).
+        // Truncation footer points readers at the on-disk copy in the cwd.
+        prompt += `${truncateRepoClaudeMd(
+          args.repoContext.claudeMd,
+          args.repoContext.clonePath,
+          REPO_CLAUDE_MD_MAX_CHARS,
+        )}\n`;
       } else if (!args.repoContext.warning) {
         prompt += `Repository is cloned at \`${args.repoContext.clonePath}\` but has no CLAUDE.md file.\n`;
       }
@@ -266,6 +294,24 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   return prompt;
 };
+
+/**
+ * Truncate the repo CLAUDE.md to a hard byte budget so it can't blow the
+ * bootstrap argv ceiling on its own (Picateclas spawn-OOM, 2026-05-28).
+ *
+ * The footer is structured as a `[truncated — see <path>/CLAUDE.md for full
+ * content]` notice so anyone reading the system prompt knows exactly where
+ * the dropped content lives on disk.
+ *
+ * Exported only for testing.
+ */
+export function truncateRepoClaudeMd(content: string, clonePath: string, budget: number): string {
+  if (content.length <= budget) return content;
+  const notice = `\n\n[...truncated — see ${clonePath}/CLAUDE.md for full content]\n`;
+  const contentBudget = budget - notice.length;
+  if (contentBudget <= 0) return notice.trimStart();
+  return content.slice(0, contentBudget) + notice;
+}
 
 /** Truncate a section to fit within a character budget, appending a notice if cut */
 function truncateSection(

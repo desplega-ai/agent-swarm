@@ -1,0 +1,13 @@
+{
+  "kind": "workflow",
+  "name": "ralph-loop",
+  "displayName": "Iterative Review Loop",
+  "slug": "ralph-loop",
+  "title": "Iterative Review Loop",
+  "description": "Run an implement-review-fix loop until verification passes or a human decision is needed.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": ["REPO_URL"],
+  "runAllSeedersCandidate": false,
+  "tags": ["workflow", "review", "iteration"]
+}

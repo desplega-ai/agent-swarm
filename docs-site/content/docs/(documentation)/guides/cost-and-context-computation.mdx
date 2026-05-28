@@ -38,7 +38,7 @@ The task-detail and task-detail-sheet views render the `costSource` next to ever
 
 ## How the pricing table is seeded
 
-The `pricing` table is seeded at server boot from the vendored models.dev snapshot at `ui/src/lib/modelsdev-cache.json` plus a small set of manual overrides for items models.dev doesn't carry.
+The `pricing` table is seeded at server boot from the vendored models.dev snapshot at `src/be/modelsdev-cache.json` plus a small set of manual overrides for items models.dev doesn't carry. The UI path `ui/src/lib/modelsdev-cache.json` is a symlink to that backend source of truth, so the model picker and backend seed read the same snapshot.
 
 - **Projection rules** live in `src/be/seed-pricing.ts`:
   - Anthropic models → rows under both `provider='claude'` AND `provider='claude-managed'`. Shortnames (`opus`/`sonnet`/`haiku`) also land under the current default full id.

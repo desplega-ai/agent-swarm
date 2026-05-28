@@ -1,0 +1,21 @@
+{
+  "kind": "schedule",
+  "name": "daily-compounding-reflection",
+  "displayName": "Daily Compounding Reflection",
+  "slug": "daily-compounding-reflection",
+  "title": "Daily Compounding Reflection",
+  "description": "Capture lessons from the day into memory, skills, and workflow improvements.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": [
+    "SLACK_CHANNEL_ID",
+    "TIMEZONE"
+  ],
+  "runAllSeedersCandidate": true,
+  "tags": [
+    "memory",
+    "skills",
+    "operations"
+  ],
+  "must": true
+}

@@ -4,6 +4,7 @@ import * as z from "zod";
 import {
   createTaskExtended,
   findCompletedTaskInThread,
+  findRecentCancelledTaskInThread,
   getActiveTaskCount,
   getAgentById,
   getDb,
@@ -192,6 +193,13 @@ export async function sendTaskHandler(
   // When the source task is a "follow-up" (worker completed/failed notification),
   // check if there are completed tasks in the same Slack thread recently.
   // This prevents the cycle: worker completes → follow-up → Lead re-delegates → repeat.
+  //
+  // Exception: if a MORE RECENT task in the same thread was cancelled (exit 130,
+  // status='cancelled', or status='failed' with failureReason containing
+  // "cancelled"), bypass the guard. A cancellation means the work was
+  // interrupted — re-dispatch is the correct response, not a deduped no-op.
+  // Without this bypass, a cancelled worker permanently jams the thread
+  // against re-delegation when an earlier completed sibling exists.
   if (sourceTaskId) {
     const sourceTask = getTaskById(sourceTaskId);
     if (
@@ -205,15 +213,28 @@ export async function sendTaskHandler(
         2880, // 48 hours in minutes
       );
       if (recentCompleted) {
-        const msg = `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`;
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: creatorAgentId,
-            success: false,
-            message: msg,
-          },
-        };
+        const recentCancelled = findRecentCancelledTaskInThread(
+          sourceTask.slackChannelId,
+          sourceTask.slackThreadTs,
+          2880,
+        );
+        const cancelledMoreRecent =
+          recentCancelled &&
+          new Date(recentCancelled.lastUpdatedAt).getTime() >
+            new Date(recentCompleted.lastUpdatedAt).getTime();
+        if (!cancelledMoreRecent) {
+          const msg = `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`;
+          return {
+            content: [{ type: "text", text: msg }],
+            structuredContent: {
+              yourAgentId: creatorAgentId,
+              success: false,
+              message: msg,
+            },
+          };
+        }
+        // else: fall through — the cancellation is more recent than the
+        // completion, so re-delegation is legitimate.
       }
     }
   }

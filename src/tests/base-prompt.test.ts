@@ -328,16 +328,17 @@ describe("getBasePrompt — truncation", () => {
   });
 
   test("total budget respected — tools truncated before claudeMd", async () => {
-    // Use soulMd to eat up most of the 150k total budget so that
-    // truncatable sections (claudeMd, toolsMd) must compete for the remainder.
+    // Use soulMd to eat up most of the 120k total budget (lowered from 150k
+    // in the Picateclas spawn-OOM fix, 2026-05-28) so that truncatable
+    // sections (claudeMd, toolsMd) must compete for the remainder.
     // soulMd is part of `prompt` which counts toward protectedLength.
     const baseResult = await getBasePrompt(minimalArgs);
     const staticLength = baseResult.length; // ~12-13k for static content
 
     // Leave exactly enough budget for claudeMd but not toolsMd.
-    // Total budget = 150k - protectedLength.
-    // We want: protectedLength ≈ 150k - 18k = 132k, so claudeMd (15k) fits but toolsMd doesn't.
-    const soulSize = 132_000 - staticLength;
+    // Total budget = 120k - protectedLength.
+    // We want: protectedLength ≈ 120k - 18k = 102k, so claudeMd (15k) fits but toolsMd doesn't.
+    const soulSize = 102_000 - staticLength;
     const result = await getBasePrompt({
       ...minimalArgs,
       soulMd: bigString(Math.max(0, soulSize)),
@@ -354,7 +355,29 @@ describe("getBasePrompt — truncation", () => {
     expect(hasToolsTruncation || !hasToolsHeader).toBe(true);
   });
 
-  test("repo context never truncated", async () => {
+  test("Picateclas spawn-OOM hardening — total prompt stays below MAX_ARG_STRLEN", async () => {
+    // Even at the worst-case where every truncatable section maxes out its
+    // budget and the repo CLAUDE.md is huge, the final prompt must stay
+    // safely below Linux's `MAX_ARG_STRLEN = 131,072` bytes (the per-argv-
+    // element kernel limit that bit Picateclas attempts 4-6, 2026-05-28).
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      soulMd: bigString(40_000),
+      claudeMd: bigString(40_000),
+      toolsMd: bigString(40_000),
+      repoContext: {
+        claudeMd: bigString(60_000),
+        clonePath: "/workspace/repos/big-repo",
+      },
+    });
+    expect(result.length).toBeLessThan(131_072);
+  });
+
+  test("repo CLAUDE.md is capped at REPO_CLAUDE_MD_MAX_CHARS (12 KB) with on-disk pointer", async () => {
+    // Picateclas spawn-OOM permanent fix (2026-05-28): repo CLAUDE.md was the
+    // single biggest volatile component of the bootstrap argv. It is now
+    // truncated to ~12 KB with a footer pointing at the on-disk file, mirroring
+    // the same shape as the agent claudeMd / toolsMd caps.
     const hugeRepoClaudeMd = bigString(30_000);
     const result = await getBasePrompt({
       ...minimalArgs,
@@ -363,8 +386,23 @@ describe("getBasePrompt — truncation", () => {
         clonePath: "/workspace/big-repo",
       },
     });
-    // The full repo content should be present (never truncated)
-    expect(result).toContain(hugeRepoClaudeMd);
+    // The full 30 KB content should NOT survive — capped at ~12 KB.
+    expect(result).not.toContain(hugeRepoClaudeMd);
+    // The truncation footer points at the on-disk path so readers can find
+    // the full content.
+    expect(result).toContain("[...truncated — see /workspace/big-repo/CLAUDE.md");
+  });
+
+  test("repo CLAUDE.md under the cap is preserved verbatim", async () => {
+    const smallRepoClaudeMd = bigString(5_000);
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: smallRepoClaudeMd,
+        clonePath: "/workspace/small-repo",
+      },
+    });
+    expect(result).toContain(smallRepoClaudeMd);
     expect(result).not.toContain("[...truncated");
   });
 });

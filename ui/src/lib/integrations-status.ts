@@ -11,7 +11,12 @@
 // appears we skip it so it can't influence status.
 
 import type { SwarmConfig } from "@/api/types";
-import type { IntegrationDef, IntegrationField } from "./integrations-catalog";
+import {
+  getIntegrationFields,
+  type IntegrationConfigGroup,
+  type IntegrationDef,
+  type IntegrationField,
+} from "./integrations-catalog";
 
 export type IntegrationStatus = "configured" | "partial" | "disabled" | "none";
 
@@ -73,14 +78,16 @@ export function deriveIntegrationStatus(
     }
   }
 
-  const requiredFields: IntegrationField[] = def.fields.filter(
-    (f) => f.required === true && !isReservedKey(f.key),
-  );
-  const advancedFields: IntegrationField[] = def.fields.filter(
-    (f) => f.advanced === true && !isReservedKey(f.key),
-  );
+  const groups = def.configGroups ?? [];
+  if (groups.length > 0) {
+    return deriveGroupedStatus(groups, configs, envPresence);
+  }
 
-  const allFieldsPresent = def.fields.some((f) => isFieldPresent(f.key, configs, envPresence));
+  const fields = getIntegrationFields(def);
+  const requiredFields: IntegrationField[] = fields.filter((f) => f.required === true);
+  const advancedFields: IntegrationField[] = fields.filter((f) => f.advanced === true);
+
+  const allFieldsPresent = fields.some((f) => isFieldPresent(f.key, configs, envPresence));
 
   if (requiredFields.length === 0) {
     return allFieldsPresent ? "configured" : "none";
@@ -100,6 +107,45 @@ export function deriveIntegrationStatus(
   // mode sets GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY instead of GITHUB_TOKEN).
   // Count the integration as configured as long as SOMETHING is set.
   if (requiredPresentCount === 0 && advancedPresentCount > 0) return "configured";
-  if (requiredPresentCount === 0 && !allFieldsPresent) return "none";
+  if (requiredPresentCount === 0) return "none";
   return "partial";
+}
+
+function deriveGroupedStatus(
+  groups: IntegrationConfigGroup[],
+  configs: SwarmConfig[],
+  envPresence: EnvPresence,
+): IntegrationStatus {
+  let hasAnyRequiredPresent = false;
+  let hasAnyFieldPresent = false;
+  let hasAnyRequiredGroup = false;
+
+  for (const group of groups) {
+    const fields = group.fields.filter((f) => !isReservedKey(f.key));
+    const requiredFields = fields.filter((f) => f.required === true);
+    if (requiredFields.length > 0) {
+      hasAnyRequiredGroup = true;
+    }
+    const requiredPresentCount = requiredFields.reduce(
+      (acc, f) => acc + (isFieldPresent(f.key, configs, envPresence) ? 1 : 0),
+      0,
+    );
+
+    if (fields.some((f) => isFieldPresent(f.key, configs, envPresence))) {
+      hasAnyFieldPresent = true;
+    }
+    if (requiredPresentCount > 0) {
+      hasAnyRequiredPresent = true;
+    }
+    if (requiredFields.length > 0 && requiredPresentCount === requiredFields.length) {
+      return "configured";
+    }
+    if (requiredFields.length === 0 && hasAnyFieldPresent) {
+      return "configured";
+    }
+  }
+
+  if (!hasAnyFieldPresent) return "none";
+  if (hasAnyRequiredGroup) return hasAnyRequiredPresent ? "partial" : "none";
+  return "configured";
 }

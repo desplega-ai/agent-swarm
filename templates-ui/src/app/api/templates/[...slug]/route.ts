@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
-import { getAllTemplates, getTemplate, parseTemplateId } from "@/lib/templates";
+import {
+  getAllTemplates,
+  getAllAssets,
+  getTemplate,
+  getAsset,
+  parseTemplateId,
+  isAssetCategory,
+} from "@/lib/templates";
 
 // Intentional: public registry API, consumed by agent-swarm workers and external tools
 const corsHeaders = {
@@ -18,13 +25,26 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   // GET /api/templates -> list all templates
   if (!slug || slug.length === 0) {
     const templates = getAllTemplates();
-    return NextResponse.json(templates, { headers: corsHeaders });
+    const assets = getAllAssets();
+    return NextResponse.json({ templates, assets }, { headers: corsHeaders });
   }
 
   // Reconstruct the template ID from slug segments
-  // e.g. ["official", "coder"] or ["official", "coder@1.0.0"]
+  // e.g. ["official", "coder"] or ["skills", "agentmail-sending"]
   const templateId = slug.join("/");
   const parsed = parseTemplateId(templateId);
+
+  if (isAssetCategory(parsed.category)) {
+    try {
+      const asset = getAsset(parsed.category, parsed.name);
+      return NextResponse.json(asset, { headers: corsHeaders });
+    } catch {
+      return NextResponse.json(
+        { error: `Asset template "${templateId}" not found` },
+        { status: 404, headers: corsHeaders },
+      );
+    }
+  }
 
   try {
     const template = getTemplate(parsed.category, parsed.name);

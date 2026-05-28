@@ -592,6 +592,12 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { runCodexLogin } = await import("./commands/codex-login");
   const codexLoginArgs = process.argv.slice(process.argv.indexOf("codex-login") + 1);
   await runCodexLogin(codexLoginArgs);
+} else if (args.command === "codex-session-runner") {
+  // Internal subcommand — invoked by CodexSubprocessSession to host a single
+  // codex session in a throwaway subprocess. See src/commands/codex-session-runner.ts
+  // for the rationale (Picateclas spawn-OOM permanent fix, 2026-05-28).
+  const { runCodexSessionRunner } = await import("./commands/codex-session-runner");
+  await runCodexSessionRunner();
 } else if (args.command === "claude-managed-setup") {
   const { runClaudeManagedSetup } = await import("./commands/claude-managed-setup");
   const setupArgs = process.argv.slice(process.argv.indexOf("claude-managed-setup") + 1);

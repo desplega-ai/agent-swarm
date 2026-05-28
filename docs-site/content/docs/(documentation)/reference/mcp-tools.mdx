@@ -805,6 +805,15 @@ Execute a read-only SQL query against the swarm database. Available to all authe
 | `sql` | string | Yes | SQL query (read-only only — writes are rejected) |
 | `params` | array | No | Query parameters |
 
+### get-oauth-access-token
+
+Return a valid plaintext OAuth access token for an integrated tracker. The token is refreshed first when it is near expiry. Returns `access_token` only; never returns `refresh_token`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `provider` | string | Yes | OAuth provider slug to read from `oauth_tokens` (for example: `linear`, `jira`) |
+| `minValiditySeconds` | number | No | Minimum remaining token lifetime required before returning it (default: 300) |
+
 ## Memory Tools
 
 ### memory-search

@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "scheduled-task-resilience",
+  "displayName": "Scheduled Task Resilience",
+  "slug": "scheduled-task-resilience",
+  "title": "Scheduled Task Resilience",
+  "description": "Guardrails for polling, scheduled jobs, and long-running external operations.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "tags": ["schedules", "reliability", "polling"]
+}

@@ -19,6 +19,7 @@
   - [resolve-user](#resolve-user)
   - [manage-user](#manage-user)
   - [db-query](#db-query)
+  - [get-oauth-access-token](#get-oauth-access-token)
   - [set-config](#set-config)
   - [get-config](#get-config)
   - [list-config](#list-config)
@@ -143,19 +144,7 @@ Returns a list of agents in the swarm without their tasks. Identity markdown (cl
 
 Returns a list of tasks in the swarm with various filters. Sorted by priority (desc) then lastUpdatedAt (desc). Each row carries a `taskPreview` (~300 chars) — enough to pool-triage; pass includeFull:true (or call `get-task-details` by id) for the full `task` text.
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `mineOnly` | `boolean` | No | - | Only return tasks assigned to you. |
-| `unassigned` | `boolean` | No | - | Only return unassigned tasks in the pool. |
-| `offeredToMe` | `boolean` | No | - | Only return tasks offered to you (awaiting accept/reject). |
-| `readyOnly` | `boolean` | No | - | Only return tasks whose dependencies are met. |
-| `taskType` | `string` | No | - | Filter by task type (e.g., 'bug', 'feature'). |
-| `tags` | `array` | No | - | Filter by any matching tag. |
-| `search` | `string` | No | - | Search in task description. |
-| `scheduleId` | `string` | No | - | Filter by schedule ID to find tasks created by a specific schedule. |
-| `includeHeartbeat` | `boolean` | No | - | Include heartbeat/system tasks in results (excluded by default). |
-| `limit` | `number` | No | - | Max tasks to return (default: 25, max: 100). |
-| `includeFull` | `boolean` | No | - | Return the full `task` text instead of a ~300-char `taskPreview`. Default false. |
+*No parameters*
 
 ### get-metrics
 
@@ -171,24 +160,7 @@ Returns lightweight swarm-wide counts in a single object — tasks (total + by s
 
 Sends a task to a specific agent, creates an unassigned task for the pool, or offers a task for acceptance.
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `agentId` | `uuid` | No | - | The agent to assign/offer task to. Omit to create unassigned task for pool. |
-| `task` | `string` | Yes | - | The task description to send. |
-| `offerMode` | `boolean` | No | false | If true, offer the task instead of direct assign (agent must accept/reject). |
-| `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature', 'review'). |
-| `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
-| `priority` | `number` | No | - | Priority 0-100 (default: 50). |
-| `dependsOn` | `array` | No | - | Task IDs this task depends on. |
-| `parentTaskId` | `uuid` | No | - | Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided. |
-| `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. If the directory doesn't exist, falls back to the default working directory. |
-| `vcsRepo` | `string` | No | - | VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context. |
-| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for this task ('haiku', 'sonnet', or 'opus'). If not set, uses agent/global config MODEL_OVERRIDE or defaults to 'opus'. |
-| `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. |
-| `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
-| `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
-| `slackUserId` | `string` | No | - | Slack user ID of the original requester. |
-| `requestedByUserId` | `string` | No | - | ID of the human user who originally requested this task chain. When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. |
+*No parameters*
 
 ### get-task-details
 
@@ -196,9 +168,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 
 Returns detailed information about a specific task, including output, failure reason, and log history.
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `taskId` | `uuid` | Yes | - | The ID of the task to get details for. |
+*No parameters*
 
 ### store-progress
 
@@ -229,10 +199,7 @@ Returns your agent ID based on the X-Agent-ID header.
 
 Cancel a task that is pending or in progress. Only the lead or task creator can cancel tasks. The worker will be notified via hooks.
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `taskId` | `uuid` | Yes | - | The ID of the task to cancel. |
-| `reason` | `string` | No | - | Reason for cancellation. |
+*No parameters*
 
 ### resolve-user
 
@@ -260,6 +227,17 @@ Execute a read-only SQL query against the swarm database. Available to all authe
 |-----------|------|----------|---------|-------------|
 | `sql` | `string` | Yes | - | SQL query (read-only only — writes are rejected) |
 | `params` | `array` | No | [] | Query parameters |
+
+### get-oauth-access-token
+
+**Get OAuth access token**
+
+Return a valid plaintext OAuth access token for an integrated tracker. The token is refreshed first when it is near expiry. Returns access_token only; never returns refresh_token.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | OAuth provider slug to read from oauth_tokens (for example: linear, jira). |
+| `minValiditySeconds` | `number` | No | 300 | Minimum remaining token lifetime required before returning it. |
 
 ### set-config
 
@@ -552,13 +530,7 @@ Provision a Kapso WhatsApp phone number for native inbound routing. Lead-only. P
 
 ### unregister-kapso-number
 
-**Unregister Kapso WhatsApp Number**
-
-Remove a Kapso phone number's native routing mapping from the KV store. Lead-only. Inbound messages for the number stop routing through the native handler. The Kapso-side webhook is not deleted automatically.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `phoneNumberId` | `string` | Yes | - | Kapso/Meta phone-number ID whose mapping should be removed. |
+*Documentation not available*
 
 ### send-whatsapp-message
 
@@ -575,16 +547,7 @@ Send a free-form WhatsApp text via Kapso (within the 24h session window). Thin w
 
 ### reply-whatsapp-message
 
-**Reply to WhatsApp Message**
-
-Quote-reply a WhatsApp message via Kapso. Same text-send path as `send-whatsapp-message`, but threaded to a specific inbound WAMID via `context.message_id`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `phoneNumberId` | `string` | Yes | - | The swarm's Kapso/Meta phone-number ID to send from (KAPSO_PHONE_NUMBER_ID). |
-| `to` | `string` | Yes | - | Recipient phone in E.164 WITHOUT '+'. |
-| `inReplyTo` | `string` | Yes | - | The inbound WAMID to quote-reply (set as context.message_id). |
-| `body` | `string` | Yes | - | Reply text. |
+*Documentation not available*
 
 ## Task Pool Tools
 
@@ -596,13 +559,7 @@ Quote-reply a WhatsApp message via Kapso. Same text-send path as `send-whatsapp-
 
 Perform task pool operations: create unassigned tasks, claim/release tasks from pool, accept/reject offered tasks.
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature'). |
-| `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
-| `priority` | `number` | No | - | Priority 0-100, default 50. |
-| `dependsOn` | `array` | No | - | Task IDs this task depends on. |
-| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for the created task ('haiku', 'sonnet', or 'opus'). Only used with 'create' action. |
+*No parameters*
 
 ## Messaging Tools
 
@@ -1228,7 +1185,6 @@ Remove a skill from an agent.
 |-----------|------|----------|---------|-------------|
 | `skillId` | `string` | Yes | - | ID of the skill to uninstall |
 | `agentId` | `string` | No | - | Target agent (default: calling agent) |
-
 ### skill-publish
 
 **Publish Skill**

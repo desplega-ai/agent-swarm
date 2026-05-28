@@ -178,6 +178,75 @@ interface ThreadMessage {
 // Cache for bot's own user ID (avoids redundant auth.test calls)
 let cachedBotUserId: string | null = null;
 
+// Cache for bot's own bot_id (auth.test). Persona-override messages
+// (username/icon_emoji) carry `bot_id` but not `user`, so this is needed to
+// recognize swarm-authored messages that the `cachedBotUserId` check would miss.
+let cachedBotId: string | null = null;
+
+// Cache: `${channelId}:${threadTs}` → whether our swarm bot authored the thread
+// root. A thread's root author never changes, so caching is permanently correct.
+// Bounded to avoid unbounded growth in long-running processes.
+const swarmThreadRootCache = new Map<string, boolean>();
+const SWARM_THREAD_ROOT_CACHE_MAX = 1000;
+
+/**
+ * Pure check: does the given thread-root message belong to our own swarm bot?
+ * Exported for testing.
+ *
+ * Matches OUR bot specifically (not any bot in the workspace):
+ * - non-persona posts carry `user === <our bot user id>`
+ * - persona posts (username/icon_emoji override) carry `bot_id === <our bot id>`
+ *   but typically omit `user`
+ */
+export function isSwarmThreadRoot(
+  root: { bot_id?: string; user?: string } | undefined,
+  botUserId: string | null,
+  botId: string | null,
+): boolean {
+  if (!root) return false;
+  if (botUserId && root.user === botUserId) return true;
+  if (botId && root.bot_id === botId) return true;
+  return false;
+}
+
+/**
+ * Returns true if the root message of the given thread was posted by our own
+ * swarm bot (a proactive/standalone message the swarm started). Used to treat
+ * human replies to swarm-initiated threads as follow-ups that don't require an
+ * @mention. Result is cached per thread.
+ */
+async function wasThreadStartedBySwarm(
+  client: WebClient,
+  channelId: string,
+  threadTs: string,
+): Promise<boolean> {
+  const key = `${channelId}:${threadTs}`;
+  const cached = swarmThreadRootCache.get(key);
+  if (cached !== undefined) return cached;
+
+  let startedBySwarm = false;
+  try {
+    const resp = await client.conversations.replies({
+      channel: channelId,
+      ts: threadTs,
+      limit: 1,
+      inclusive: true,
+    });
+    const root = resp.messages?.[0] as { bot_id?: string; user?: string } | undefined;
+    startedBySwarm = isSwarmThreadRoot(root, cachedBotUserId, cachedBotId);
+  } catch (error) {
+    console.error("[Slack] Failed to check whether thread was started by swarm:", error);
+  }
+
+  // Evict oldest entry (insertion-ordered Map) once the cap is reached.
+  if (swarmThreadRootCache.size >= SWARM_THREAD_ROOT_CACHE_MAX) {
+    const oldest = swarmThreadRootCache.keys().next().value;
+    if (oldest !== undefined) swarmThreadRootCache.delete(oldest);
+  }
+  swarmThreadRootCache.set(key, startedBySwarm);
+  return startedBySwarm;
+}
+
 // Cache for user display names
 const userNameCache = new Map<string, string>();
 
@@ -346,6 +415,7 @@ export function registerMessageHandler(app: App): void {
       try {
         const authResult = await client.auth.test();
         cachedBotUserId = authResult.user_id as string;
+        cachedBotId = (authResult.bot_id as string | undefined) ?? null;
       } catch (error) {
         console.error("[Slack] Failed to cache bot user ID:", error);
       }
@@ -458,8 +528,15 @@ export function registerMessageHandler(app: App): void {
         );
         return;
       }
-      // Check if this thread has any swarm activity (existing tasks)
-      const hasSwarmActivity = getAgentWorkingOnThread(msg.channel, msg.thread_ts) !== null;
+      // Treat the thread as having swarm activity if either:
+      //  - a Slack task is already linked to it (someone started it via @mention), or
+      //  - the swarm itself posted the thread's root message (a proactive/standalone
+      //    message the swarm started). In the latter case there is no task row yet,
+      //    so the human's reply would otherwise require an @mention. The Slack lookup
+      //    is skipped when a task already matches.
+      const hasSwarmActivity =
+        getAgentWorkingOnThread(msg.channel, msg.thread_ts) !== null ||
+        (await wasThreadStartedBySwarm(client, msg.channel, msg.thread_ts));
 
       if (hasSwarmActivity) {
         const threadKey = `${msg.channel}:${msg.thread_ts}`;

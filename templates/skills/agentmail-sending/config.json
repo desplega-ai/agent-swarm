@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "agentmail-sending",
+  "displayName": "AgentMail Sending",
+  "slug": "agentmail-sending",
+  "title": "AgentMail Sending",
+  "description": "Generic rules for sending email through an agent-accessible mailbox API.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["COMPANY_SIGNATURE"],
+  "runAllSeedersCandidate": false,
+  "tags": ["email", "communications"]
+}

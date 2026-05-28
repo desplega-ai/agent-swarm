@@ -1,0 +1,18 @@
+{
+  "kind": "skill",
+  "name": "pages",
+  "displayName": "Pages",
+  "slug": "pages",
+  "title": "Pages",
+  "description": "Publish human-readable task outputs as shareable pages.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "tags": [
+    "pages",
+    "reporting",
+    "artifacts"
+  ],
+  "must": true
+}

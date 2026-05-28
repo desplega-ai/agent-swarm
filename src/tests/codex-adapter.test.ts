@@ -96,7 +96,7 @@ async function runSessionWithThrowingThread(
     };
 
   try {
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     const session = await adapter.createSession(config);
     const emitted: ProviderEvent[] = [];
     session.onEvent((e) => emitted.push(e));
@@ -175,7 +175,7 @@ async function runSessionWithFakeThread(
   };
 
   try {
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     const session = await adapter.createSession(config);
 
     const emitted: ProviderEvent[] = [];
@@ -575,7 +575,7 @@ describe("CodexSession event mapping", () => {
     };
 
     try {
-      const adapter = new CodexAdapter();
+      const adapter = new CodexAdapter({ bypassSubprocess: true });
       const config = testConfig({
         logFile: join(tmpLogDir, "abort.log"),
         cwd: "",
@@ -612,7 +612,7 @@ describe("CodexSession event mapping", () => {
 
 describe("CodexAdapter.canResume", () => {
   test("returns false for empty / non-string session ids", async () => {
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     expect(await adapter.canResume("")).toBe(false);
     // @ts-expect-error: deliberate runtime check for non-string input
     expect(await adapter.canResume(undefined)).toBe(false);
@@ -631,7 +631,7 @@ describe("CodexAdapter.canResume", () => {
       ).resumeThread = function resumeThread(): unknown {
         return { id: "thread-resumed" };
       };
-      const adapter = new CodexAdapter();
+      const adapter = new CodexAdapter({ bypassSubprocess: true });
       expect(await adapter.canResume("thread-resumed")).toBe(true);
 
       // Failure path
@@ -789,6 +789,10 @@ describe("resolveCodexModel", () => {
     expect(resolveCodexModel("gpt-5.4-mini")).toBe("gpt-5.4-mini");
   });
 
+  test("passthrough 'gpt-5.5' → gpt-5.5", () => {
+    expect(resolveCodexModel("gpt-5.5")).toBe("gpt-5.5");
+  });
+
   test("passthrough 'gpt-5.3-codex' → gpt-5.3-codex", () => {
     expect(resolveCodexModel("gpt-5.3-codex")).toBe("gpt-5.3-codex");
   });
@@ -816,6 +820,10 @@ describe("getCodexContextWindow", () => {
     expect(getCodexContextWindow("gpt-5.4-mini")).toBe(200_000);
   });
 
+  test("gpt-5.5 → 1_050_000", () => {
+    expect(getCodexContextWindow("gpt-5.5")).toBe(1_050_000);
+  });
+
   test("gpt-5.3-codex → 1_000_000 (1M context)", () => {
     expect(getCodexContextWindow("gpt-5.3-codex")).toBe(1_000_000);
   });
@@ -831,6 +839,11 @@ describe("computeCodexCostUsd", () => {
     // 1_000_000 output × $15.00/M = $15.00
     const cost = computeCodexCostUsd("gpt-5.4", 1_000_000, 0, 1_000_000);
     expect(cost).toBeCloseTo(17.5, 4);
+  });
+
+  test("gpt-5.5 with 1M uncached input + 1M output = $5 + $30 = $35", () => {
+    const cost = computeCodexCostUsd("gpt-5.5", 1_000_000, 0, 1_000_000);
+    expect(cost).toBeCloseTo(35, 4);
   });
 
   test("gpt-5.4 with cached input applies the cached discount", () => {
@@ -1136,7 +1149,7 @@ async function runSessionWithFakeThreadAndDeps(
     };
 
   try {
-    const adapter = new CodexAdapter({ summarizeDeps });
+    const adapter = new CodexAdapter({ summarizeDeps, bypassSubprocess: true });
     const session = await adapter.createSession(config);
     const emitted: ProviderEvent[] = [];
     session.onEvent((e) => emitted.push(e));
@@ -1626,7 +1639,7 @@ describe("CodexSession — rate-limit error preservation", () => {
     };
 
     try {
-      const adapter = new CodexAdapter();
+      const adapter = new CodexAdapter({ bypassSubprocess: true });
       const config = testConfig({
         logFile: join(tmpLogDir, "abort-guard.log"),
         cwd: "",

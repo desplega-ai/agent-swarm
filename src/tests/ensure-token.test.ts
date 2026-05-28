@@ -300,6 +300,77 @@ describe("ensureTokenOrThrow", () => {
     expect(tokens?.refreshToken).toBe("new-jira-refresh");
   });
 
+  test("serializes concurrent Jira refresh callers before the token endpoint", async () => {
+    storeOAuthTokens("jira", {
+      accessToken: "old-jira-access",
+      refreshToken: "old-jira-refresh",
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+
+    const fetchSpy = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "new-jira-access",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "new-jira-refresh",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    globalThis.fetch = fetchSpy;
+
+    await Promise.all([
+      ensureTokenOrThrow("jira"),
+      ensureTokenOrThrow("jira"),
+      ensureTokenOrThrow("jira"),
+    ]);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [_url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(init.body).toContain("refresh_token=old-jira-refresh");
+
+    const tokens = getOAuthTokens("jira");
+    expect(tokens?.accessToken).toBe("new-jira-access");
+    expect(tokens?.refreshToken).toBe("new-jira-refresh");
+  });
+
+  test("does not rotate again when a concurrent caller already changed the token row", async () => {
+    storeOAuthTokens("jira", {
+      accessToken: "old-jira-access",
+      refreshToken: "old-jira-refresh",
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+
+    const fetchSpy = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "new-jira-access",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "new-jira-refresh",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    globalThis.fetch = fetchSpy;
+
+    await Promise.all([
+      ensureTokenOrThrow("jira", 65 * 60 * 1000),
+      ensureTokenOrThrow("jira", 65 * 60 * 1000),
+      ensureTokenOrThrow("jira", 65 * 60 * 1000),
+    ]);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const tokens = getOAuthTokens("jira");
+    expect(tokens?.accessToken).toBe("new-jira-access");
+    expect(tokens?.refreshToken).toBe("new-jira-refresh");
+  });
+
   test("rejects a Jira refresh response that omits the rotated refresh token", async () => {
     storeOAuthTokens("jira", {
       accessToken: "old-jira-access",

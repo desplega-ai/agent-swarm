@@ -119,6 +119,13 @@ export function createSwarmEventHandler(
         };
         const isCancelled = data.cancelled?.some((t) => t.id === taskId);
         if (isCancelled) {
+          // Log BEFORE aborting so the reason is visible in the worker
+          // transcript even when the abort propagates immediately. Without
+          // this, cancellations originating from this poll were invisible
+          // (only the runner-side poll in runner.ts logs them).
+          console.log(
+            `[swarm-events] aborting task ${taskId}: cancelled via /cancelled-tasks poll`,
+          );
           opts.abortRef.current?.abort();
           if (opts.onCancel) {
             try {
@@ -141,6 +148,13 @@ export function createSwarmEventHandler(
     void checkToolLoop(taskId, toolName, argRecord)
       .then((result) => {
         if (result.blocked) {
+          // Surface the loop-detector's reason. Without this log, the abort
+          // was indistinguishable from a /cancelled-tasks abort or a runner
+          // SIGTERM. `result.reason` already carries the diagnostic detail
+          // ("Tool X called 15 times…", "ping-pong between A and B…").
+          console.log(
+            `[swarm-events] aborting task ${taskId}: tool-loop detected — ${result.reason ?? "unknown reason"}`,
+          );
           opts.abortRef.current?.abort();
         }
       })

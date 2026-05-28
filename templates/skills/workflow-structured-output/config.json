@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "workflow-structured-output",
+  "displayName": "Workflow Structured Output",
+  "slug": "workflow-structured-output",
+  "title": "Workflow Structured Output",
+  "description": "Ensure agent workflow steps satisfy exact JSON output contracts.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "tags": ["workflows", "json", "validation"]
+}

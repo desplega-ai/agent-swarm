@@ -1,0 +1,18 @@
+{
+  "kind": "skill",
+  "name": "workflow-iterate",
+  "displayName": "Workflow Iteration",
+  "slug": "workflow-iterate",
+  "title": "Workflow Iteration",
+  "description": "A procedure for improving workflows through small tested revisions.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "tags": [
+    "workflows",
+    "authoring",
+    "qa"
+  ],
+  "must": true
+}

@@ -318,6 +318,30 @@ export function buildClaudeCodeOtelEnv(
   return otelEnv;
 }
 
+/**
+ * Resolve the path at which the per-task system prompt is staged on disk.
+ *
+ * Pushing the prompt as `--append-system-prompt <value>` makes the entire
+ * prompt one argv element. Linux's per-arg limit is `MAX_ARG_STRLEN = 131072`
+ * bytes — and the system prompt (CLAUDE.md + TOOLS.md + identity files +
+ * repo CLAUDE.md) routinely runs 50–80 KB. A few growth nudges push us
+ * across the cliff and `posix_spawn` returns E2BIG, killing the worker
+ * (Picateclas attempts 4-6, 2026-05-28).
+ *
+ * `claude --append-system-prompt-file <path>` reads the prompt from disk,
+ * so the argv stays bounded by the filename length and the system prompt
+ * size is decoupled from the kernel's argv ceiling.
+ *
+ * Exported for unit testing.
+ */
+export function getSystemPromptFilePath(taskId: string): string {
+  // The taskId is a UUID; safe to embed in a /tmp filename. Mirrors the
+  // existing /tmp/agent-swarm-task-${pid}.json + /tmp/mcp-${taskId}.json
+  // convention so a janitor sweeping /tmp can find all session-scoped state
+  // under the same prefix.
+  return `/tmp/agent-swarm-system-prompt-${taskId}.txt`;
+}
+
 class ClaudeSession implements ProviderSession {
   private proc: ReturnType<typeof Bun.spawn>;
   private listeners: Array<(event: ProviderEvent) => void> = [];
@@ -327,6 +351,8 @@ class ClaudeSession implements ProviderSession {
   private errorTracker = new SessionErrorTracker();
   private taskFilePid: number;
   private contextWindowSize: number;
+  /** Path to the system-prompt temp file when one was staged for this session. */
+  private systemPromptFile: string | null;
 
   constructor(
     private config: ProviderSessionConfig,
@@ -335,9 +361,11 @@ class ClaudeSession implements ProviderSession {
     taskFilePid: number,
     private sessionMcpConfig: string | null = null,
     private claudeBinaryArgv: readonly string[] = ["claude"],
+    systemPromptFile: string | null = null,
   ) {
     this.taskFilePid = taskFilePid;
     this.contextWindowSize = getContextWindowSize(model);
+    this.systemPromptFile = systemPromptFile;
     const cmd = this.buildCommand();
 
     console.log(
@@ -403,7 +431,13 @@ class ClaudeSession implements ProviderSession {
       cmd.push(...this.config.additionalArgs);
     }
 
-    if (this.config.systemPrompt) {
+    // System prompt is staged on disk and read via the file-flag — see
+    // `getSystemPromptFilePath` for the rationale (argv E2BIG hardening,
+    // Picateclas spawn-OOM, 2026-05-28). The legacy inline form is kept as
+    // a fallback for the (unlikely) case where the file couldn't be staged.
+    if (this.systemPromptFile) {
+      cmd.push("--append-system-prompt-file", this.systemPromptFile);
+    } else if (this.config.systemPrompt) {
       cmd.push("--append-system-prompt", this.config.systemPrompt);
     }
 
@@ -490,11 +524,18 @@ class ClaudeSession implements ProviderSession {
     await logFileHandle.end();
     const exitCode = await this.proc.exited;
 
-    // Cleanup task file and per-session MCP config
+    // Cleanup task file, per-session MCP config, and per-task system prompt
     await cleanupTaskFile(this.taskFilePid);
     if (this.sessionMcpConfig) {
       try {
         await unlink(this.sessionMcpConfig);
+      } catch {
+        // ignore — temp file may already be gone
+      }
+    }
+    if (this.systemPromptFile) {
+      try {
+        await unlink(this.systemPromptFile);
       } catch {
         // ignore — temp file may already be gone
       }
@@ -723,6 +764,22 @@ class ClaudeSession implements ProviderSession {
           startedAt: new Date().toISOString(),
         });
 
+        // Re-stage the system prompt for the retry — the original was unlinked
+        // when the first session finished. Same soft-fail semantics: null
+        // falls back to the inline --append-system-prompt argv.
+        let retrySystemPromptFile: string | null = null;
+        if (retryConfig.systemPrompt) {
+          const candidate = getSystemPromptFilePath(retryConfig.taskId);
+          try {
+            await writeFile(candidate, retryConfig.systemPrompt);
+            retrySystemPromptFile = candidate;
+          } catch (err) {
+            console.warn(
+              `\x1b[33m[claude]\x1b[0m Failed to stage retry system prompt to ${candidate} (${err}); falling back to --append-system-prompt argv.`,
+            );
+          }
+        }
+
         const retrySession = new ClaudeSession(
           retryConfig,
           this.model,
@@ -730,6 +787,7 @@ class ClaudeSession implements ProviderSession {
           this.taskFilePid,
           null,
           this.claudeBinaryArgv,
+          retrySystemPromptFile,
         );
 
         // Forward events from retry to our listeners
@@ -832,6 +890,28 @@ export class ClaudeAdapter implements ProviderAdapter {
       installedServers,
     );
 
+    // Stage the system prompt on disk so it can be passed as a file path
+    // instead of one giant argv element. This is the structural fix for
+    // posix_spawn E2BIG once the prompt grows past MAX_ARG_STRLEN (131,072
+    // bytes) — see `getSystemPromptFilePath` and PR description for the
+    // Picateclas spawn-OOM saga. Soft-fail (`systemPromptFile = null`) makes
+    // the session fall back to the inline `--append-system-prompt` argv;
+    // good enough since `BOOTSTRAP_TOTAL_MAX_CHARS` (now 120,000) already
+    // caps the worst-case argv element below the kernel limit even without
+    // the file path.
+    let systemPromptFile: string | null = null;
+    if (config.systemPrompt) {
+      const candidate = getSystemPromptFilePath(config.taskId);
+      try {
+        await writeFile(candidate, config.systemPrompt);
+        systemPromptFile = candidate;
+      } catch (err) {
+        console.warn(
+          `\x1b[33m[claude]\x1b[0m Failed to stage system prompt to ${candidate} (${err}); falling back to --append-system-prompt argv. Argv may approach MAX_ARG_STRLEN if the prompt is large.`,
+        );
+      }
+    }
+
     return new ClaudeSession(
       config,
       model,
@@ -839,6 +919,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       taskFilePid,
       sessionMcpConfig,
       claudeBinaryArgv,
+      systemPromptFile,
     );
   }
 

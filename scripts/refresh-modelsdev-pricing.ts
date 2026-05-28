@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Refresh the vendored models.dev snapshot at `ui/src/lib/modelsdev-cache.json`.
+ * Refresh the vendored models.dev snapshot at `src/be/modelsdev-cache.json`.
  *
  * Usage: `bun run scripts/refresh-modelsdev-pricing.ts`
  *
@@ -12,7 +12,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-const CACHE_PATH = path.join(process.cwd(), "ui", "src", "lib", "modelsdev-cache.json");
+const CACHE_PATH = path.join(process.cwd(), "src", "be", "modelsdev-cache.json");
 const MODELSDEV_URL = "https://models.dev/api.json";
 
 interface CostBlock {

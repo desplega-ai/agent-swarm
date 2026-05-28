@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "jira-interaction",
+  "displayName": "Jira Interaction",
+  "slug": "jira-interaction",
+  "title": "Jira Interaction",
+  "description": "Generic Jira update discipline for issue comments, transitions, and triage.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["JIRA_PROJECT_KEY"],
+  "runAllSeedersCandidate": false,
+  "tags": ["jira", "tracker", "project-management"]
+}

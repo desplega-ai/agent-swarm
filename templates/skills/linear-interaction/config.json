@@ -1,0 +1,20 @@
+{
+  "kind": "skill",
+  "name": "linear-interaction",
+  "displayName": "Linear Interaction",
+  "slug": "linear-interaction",
+  "title": "Linear Interaction",
+  "description": "Create issues, update status, and post comments in Linear with explicit project placeholders.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [
+    "LINEAR_PROJECT_ID"
+  ],
+  "runAllSeedersCandidate": false,
+  "tags": [
+    "linear",
+    "tracker",
+    "project-management"
+  ],
+  "must": true
+}

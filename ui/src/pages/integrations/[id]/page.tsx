@@ -68,7 +68,9 @@ import {
 } from "@/components/ui/detail-page-layout";
 import { PageHeader } from "@/components/ui/page-header";
 import {
+  getIntegrationFields,
   INTEGRATIONS,
+  type IntegrationConfigGroup,
   type IntegrationDef,
   type IntegrationField,
 } from "@/lib/integrations-catalog";
@@ -117,7 +119,7 @@ type DirtyState = Record<string, DirtyField>;
 //    renderer shows masked read-only + Replace.
 function buildInitialState(def: IntegrationDef, configs: SwarmConfig[]): DirtyState {
   const state: DirtyState = {};
-  for (const f of def.fields) {
+  for (const f of getIntegrationFields(def)) {
     const existing = findConfigForKey(configs, f.key);
     if (!existing) {
       state[f.key] = { value: f.default ?? "" };
@@ -141,7 +143,7 @@ export default function IntegrationDetailPage() {
 
   const envPresenceKeys = useMemo(() => {
     if (!def) return [];
-    const keys = def.fields.map((f) => f.key);
+    const keys = getIntegrationFields(def).map((f) => f.key);
     if (def.disableKey) keys.push(def.disableKey);
     return keys;
   }, [def]);
@@ -209,6 +211,7 @@ function IntegrationDetailInner({
 }: InnerProps) {
   const Icon = resolveIcon(def.iconKey);
   const status = deriveIntegrationStatus(def, configs, envPresence);
+  const allFields = useMemo(() => getIntegrationFields(def), [def]);
 
   const [state, setState] = useState<DirtyState>(initialState);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
@@ -227,7 +230,7 @@ function IntegrationDetailInner({
   //   - Non-secret + value differs from the stored value → send.
   function computeDirtyEntries(): UpsertConfigEntry[] {
     const entries: UpsertConfigEntry[] = [];
-    for (const f of def.fields) {
+    for (const f of allFields) {
       const current = state[f.key];
       if (!current) continue;
       const existing = findConfigForKey(configs, f.key);
@@ -329,7 +332,7 @@ function IntegrationDetailInner({
   }
 
   function handleReset() {
-    const keys = def.fields.map((f) => f.key);
+    const keys = allFields.map((f) => f.key);
     if (def.disableKey) keys.push(def.disableKey);
     deleteBatch.mutate({ configs, keys });
     setConfirmResetOpen(false);
@@ -352,10 +355,12 @@ function IntegrationDetailInner({
   const isDisabled =
     !!disableCfg && ["true", "1", "yes"].includes(disableCfg.value.trim().toLowerCase());
 
-  const requiredFields = def.fields.filter(
+  const requiredFields = allFields.filter(
     (f) => f.required === true || (f.advanced !== true && !f.required),
   );
-  const advancedFields = def.fields.filter((f) => f.advanced === true);
+  const advancedFields = allFields.filter((f) => f.advanced === true);
+  const strictRequiredFields = allFields.filter((f) => f.required === true);
+  const hasConfigGroups = (def.configGroups?.length ?? 0) > 0;
 
   const isLinearOAuth = def.specialFlow === "linear-oauth";
   const isJiraOAuth = def.specialFlow === "jira-oauth";
@@ -446,11 +451,20 @@ function IntegrationDetailInner({
             {isCodexCli ? (
               // Codex has zero catalog fields; swap the generic form entirely.
               <CodexOAuthSection />
-            ) : def.fields.length === 0 ? (
+            ) : allFields.length === 0 ? (
               <EmptyState
                 icon={Plug}
                 title="No configurable fields"
                 description="This integration has no key/value fields — see the docs for the required setup steps."
+              />
+            ) : hasConfigGroups ? (
+              <ConfigGroupSections
+                groups={def.configGroups ?? []}
+                state={state}
+                configs={configs}
+                envPresence={envPresence}
+                onUpdate={updateField}
+                onClearField={handleClearField}
               />
             ) : (
               <div className="space-y-6">
@@ -518,8 +532,8 @@ function IntegrationDetailInner({
           <DetailPageRail>
             <QuickStats>
               <QuickStat label="Status" value={status} />
-              <QuickStat label="Total fields" value={def.fields.length} />
-              <QuickStat label="Required" value={requiredFields.length} />
+              <QuickStat label="Total fields" value={allFields.length} />
+              <QuickStat label="Required" value={strictRequiredFields.length} />
               <QuickStat label="Advanced" value={advancedFields.length} />
               {def.disableKey && <QuickStat label="Disabled" value={isDisabled ? "Yes" : "No"} />}
             </QuickStats>
@@ -565,6 +579,105 @@ interface FieldGroupProps {
   onUpdate: (key: string, patch: Partial<DirtyField>) => void;
   onClearField: (key: string) => void;
   bare?: boolean;
+}
+
+interface ConfigGroupSectionsProps {
+  groups: IntegrationConfigGroup[];
+  state: DirtyState;
+  configs: SwarmConfig[];
+  envPresence: EnvPresenceMap;
+  onUpdate: (key: string, patch: Partial<DirtyField>) => void;
+  onClearField: (key: string) => void;
+}
+
+function ConfigGroupSections({
+  groups,
+  state,
+  configs,
+  envPresence,
+  onUpdate,
+  onClearField,
+}: ConfigGroupSectionsProps) {
+  return (
+    <div className="space-y-5">
+      {groups.map((group) => {
+        const requiredFields = group.fields.filter((f) => f.required === true);
+        const optionalFields = group.fields.filter(
+          (f) => f.required !== true && f.advanced !== true,
+        );
+        const advancedFields = group.fields.filter((f) => f.advanced === true);
+
+        return (
+          <section
+            key={group.id}
+            className="space-y-4 rounded-md border border-border bg-muted/10 p-4"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold">{group.title}</h2>
+                {group.description && (
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {group.description}
+                  </p>
+                )}
+              </div>
+              {group.docsUrl && (
+                <Button asChild size="sm" variant="outline" className="gap-1 shrink-0">
+                  <a href={group.docsUrl} target="_blank" rel="noreferrer">
+                    Docs <ExternalLink className="h-3 w-3" />
+                  </a>
+                </Button>
+              )}
+            </div>
+
+            {requiredFields.length > 0 && (
+              <FieldGroup
+                title="Required"
+                fields={requiredFields}
+                state={state}
+                configs={configs}
+                envPresence={envPresence}
+                onUpdate={onUpdate}
+                onClearField={onClearField}
+              />
+            )}
+
+            {optionalFields.length > 0 && (
+              <FieldGroup
+                title="Optional"
+                fields={optionalFields}
+                state={state}
+                configs={configs}
+                envPresence={envPresence}
+                onUpdate={onUpdate}
+                onClearField={onClearField}
+              />
+            )}
+
+            {advancedFields.length > 0 && (
+              <details className="rounded-md border border-border bg-background/60">
+                <summary className="cursor-pointer px-4 py-2 text-sm font-medium select-none">
+                  Advanced ({advancedFields.length})
+                </summary>
+                <div className="px-4 pb-4 pt-2">
+                  <FieldGroup
+                    title=""
+                    fields={advancedFields}
+                    state={state}
+                    configs={configs}
+                    envPresence={envPresence}
+                    onUpdate={onUpdate}
+                    onClearField={onClearField}
+                    bare
+                  />
+                </div>
+              </details>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
 }
 
 function FieldGroup({

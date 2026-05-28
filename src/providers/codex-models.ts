@@ -1,6 +1,6 @@
 /**
  * Codex API-addressable models, verified from https://developers.openai.com/codex/models
- * and https://developers.openai.com/api/docs/deprecations as of 2026-04-09.
+ * and https://developers.openai.com/api/docs/deprecations as of 2026-05-28.
  *
  * NOTE: `gpt-5.3-codex-spark` is intentionally excluded. It is a ChatGPT Pro
  * research preview and is NOT API-addressable via the Codex SDK at launch.
@@ -18,6 +18,7 @@
  * SDK, so new OpenAI models work without a code change.
  */
 export const CODEX_MODELS = [
+  "gpt-5.5", // newest frontier coding/professional-work model, 1.05M context
   "gpt-5.4", // default — mainline reasoning model w/ frontier coding
   "gpt-5.4-mini", // faster/cheaper
   "gpt-5.3-codex", // coding-specialized, 1M context
@@ -63,6 +64,7 @@ export function resolveCodexModel(modelStr: string | undefined): string {
  * Update this map whenever a model's context window changes.
  */
 export const CODEX_MODEL_CONTEXT_WINDOWS: Record<CodexModel, number> = {
+  "gpt-5.5": 1_050_000,
   "gpt-5.4": 200_000,
   "gpt-5.4-mini": 200_000,
   "gpt-5.3-codex": 1_000_000, // 1M context per plan Key Discoveries
@@ -80,7 +82,7 @@ export function getCodexContextWindow(model: string): number {
 
 /**
  * Per-model pricing in USD per million tokens, sourced from
- * https://developers.openai.com/api/docs/pricing on 2026-04-09 (Standard tier,
+ * https://developers.openai.com/api/docs/pricing on 2026-05-28 (Standard tier,
  * short-context column — long-context multipliers and Batch / Flex / Priority
  * tiers exist but the Codex SDK does not expose which tier was used so we
  * default to the headline rate).
@@ -103,6 +105,11 @@ export interface CodexModelPricing {
 }
 
 export const CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = {
+  "gpt-5.5": {
+    inputPerMillion: 5.0,
+    cachedInputPerMillion: 0.5,
+    outputPerMillion: 30.0,
+  },
   "gpt-5.4": {
     inputPerMillion: 2.5,
     cachedInputPerMillion: 0.25,

@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "kv-storage",
+  "displayName": "KV Storage",
+  "slug": "kv-storage",
+  "title": "KV Storage",
+  "description": "Use swarm key-value storage for small state, idempotency keys, and resumable automation.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "tags": ["state", "automation", "idempotency"]
+}

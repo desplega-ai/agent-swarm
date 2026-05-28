@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "artifacts",
+  "displayName": "Artifacts",
+  "slug": "artifacts",
+  "title": "Artifacts",
+  "description": "Store logs, screenshots, exports, and generated files as durable task artifacts.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "tags": ["artifacts", "evidence", "qa"]
+}

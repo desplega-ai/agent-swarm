@@ -63,7 +63,9 @@ const OPENAI_META = {
 
 const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
   claude: [
+    { id: "claude-opus-4-8", label: "Claude Opus 4.8", ...ANTHROPIC_META },
     { id: "claude-opus-4-7", label: "Claude Opus 4.7", ...ANTHROPIC_META },
+    { id: "claude-opus-4-6", label: "Claude Opus 4.6", ...ANTHROPIC_META },
     { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", ...ANTHROPIC_META },
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", ...ANTHROPIC_META },
   ],
@@ -100,7 +102,7 @@ const SNAPSHOT_META: Record<
 };
 
 const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
-  claude: "claude-opus-4-7",
+  claude: "claude-opus-4-8",
   codex: "gpt-5.4",
   pi: "openrouter/google/gemini-3-flash-preview",
   opencode: "openrouter/qwen/qwen3-coder-flash",
@@ -189,7 +191,7 @@ export function findModelOption(
 // may report these verbatim — we map them to the canonical id so the row reads
 // "Claude Sonnet 4.6" instead of a bare "sonnet".
 const ANTHROPIC_SHORTNAME_TO_ID: Record<string, string> = {
-  opus: "claude-opus-4-7",
+  opus: "claude-opus-4-8",
   sonnet: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5",
 };

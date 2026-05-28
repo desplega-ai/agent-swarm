@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "kapso-whatsapp",
+  "displayName": "WhatsApp Messaging",
+  "slug": "kapso-whatsapp",
+  "title": "WhatsApp Messaging",
+  "description": "Generic WhatsApp messaging guardrails for approved business messaging providers.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["WHATSAPP_PROVIDER_API_KEY", "WHATSAPP_SENDER_ID"],
+  "runAllSeedersCandidate": false,
+  "tags": ["whatsapp", "messaging", "communications"]
+}

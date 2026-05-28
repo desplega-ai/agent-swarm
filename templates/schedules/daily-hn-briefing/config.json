@@ -1,0 +1,13 @@
+{
+  "kind": "schedule",
+  "name": "daily-hn-briefing",
+  "displayName": "Daily Hacker News Briefing",
+  "slug": "daily-hn-briefing",
+  "title": "Daily Hacker News Briefing",
+  "description": "Demonstrate web research automation by summarizing relevant technology discussion.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": ["SLACK_CHANNEL_ID", "TIMEZONE"],
+  "runAllSeedersCandidate": false,
+  "tags": ["research", "briefing", "browser"]
+}

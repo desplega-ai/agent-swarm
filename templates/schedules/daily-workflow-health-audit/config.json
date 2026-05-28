@@ -1,0 +1,13 @@
+{
+  "kind": "schedule",
+  "name": "daily-workflow-health-audit",
+  "displayName": "Daily Workflow Health Audit",
+  "slug": "daily-workflow-health-audit",
+  "title": "Daily Workflow Health Audit",
+  "description": "Check scheduled jobs and workflows for repeated failures, stale runs, and silent drift.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": ["SLACK_CHANNEL_ID", "TIMEZONE"],
+  "runAllSeedersCandidate": true,
+  "tags": ["workflows", "schedules", "reliability"]
+}

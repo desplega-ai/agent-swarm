@@ -101,7 +101,7 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `tags` | Labels for filtering (e.g., `['urgent', 'frontend']`) |
 | `taskType` | Classification (e.g., `bug`, `feature`, `review`) |
 | `dependsOn` | Array of task IDs that must complete first |
-| `parentTaskId` | For session continuity — child task resumes parent's Claude session |
+| `parentTaskId` | For follow-up continuity — child tasks inherit bounded prior-task context for every harness, and resumable providers can also reuse the parent's native session |
 | `dir` | Working directory (absolute path) for the agent to start in. Falls back to repo clone path or default cwd |
 | `model` | Model override: `haiku`, `sonnet`, or `opus`. Priority: task > `MODEL_OVERRIDE` config > `opus` |
 | `scheduleId` | Back-reference to the originating schedule (set automatically for schedule-created tasks) |
@@ -122,6 +122,8 @@ Every task created through an ingress path gets a `contextKey` stamped on it so 
 | Workflow | `task:workflow:{workflowRunId}` | `task:workflow:f8d42a10-...` |
 
 Child tasks created via `parentTaskId` (including `send-task` delegations) automatically inherit their parent's `contextKey`. This enables sibling-task awareness: when a worker starts a task, its prompt surfaces recent siblings sharing the same `contextKey` so related work across ingress paths isn't missed.
+
+In addition, follow-up tasks now receive a bounded **context preamble** built from the parent chain before execution begins. The immediate parent contributes inline task/output/artifact detail, older ancestors are included as pointers only, and the whole block is capped by `CONTEXT_PREAMBLE_MAX_TOKENS` (default: 2000) so continuity works across non-resumable harnesses without unbounded context growth.
 
 The column is indexed as `(contextKey, status)` for fast sibling lookup. Historical rows remain `null` — no backfill is performed.
 

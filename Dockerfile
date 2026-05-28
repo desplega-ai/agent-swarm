@@ -79,6 +79,10 @@ COPY package.json ./
 # Copy migration SQL files (compiled binary can't read from /$bunfs virtual filesystem)
 COPY src/be/migrations/*.sql /app/migrations/
 
+# Copy vendored models.dev pricing snapshot so the compiled binary can seed
+# pricing rows from a real filesystem path at runtime.
+COPY src/be/modelsdev-cache.json /app/src/be/modelsdev-cache.json
+
 # Copy sqlite-vec native extension on real disk. `bun build --compile` embeds JS
 # into /$bunfs/ but not native .so files, and dlopen can't load from /$bunfs/.
 # The glob matches whichever arch-specific sqlite-vec optional dep bun installed

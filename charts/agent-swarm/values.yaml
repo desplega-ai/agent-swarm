@@ -222,7 +222,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.5.4
+    tag: 0.7.2
   port: 7433
   # -- Bucket name for agent-fs's object storage backend.
   bucket: ""

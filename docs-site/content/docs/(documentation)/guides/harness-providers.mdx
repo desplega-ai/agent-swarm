@@ -174,9 +174,9 @@ Tasks may carry an optional JSON Schema on `outputSchema` that the agent's final
 | `codex` | Yes | Via MCP `store-progress` |
 | `opencode` | Yes | Via MCP `store-progress` |
 | `pi` (`pi-mono`) | Yes | Via MCP `store-progress` |
-| `devin` | Conditional | Only when `HAS_MCP=true`. In default mode the schema is **not** enforced — Devin's free-form output is stored as-is. |
+| `devin` | Yes | Via MCP `store-progress` when `HAS_MCP=true`; otherwise the runner validates direct `providerOutput` before finishing the task |
 
-When supported, validation happens in the MCP `store-progress` tool: a non-conforming output fails the tool call and the agent is asked to retry. Callers consuming a schema'd task's output should still be defensive about JSON parsing — when a task runs on default-mode Devin, `task.output` may not match the schema.
+The primary enforcement point is the MCP `store-progress` tool: a non-conforming output fails the tool call and the agent is asked to retry. For providers that return direct `providerOutput` to the runner, `ensureTaskFinished()` now performs the same JSON-parse + schema-validation check before persisting `task.output`; if validation fails, the task is marked failed instead of silently storing invalid structured output.
 
 ---
 
@@ -209,7 +209,7 @@ Assembled around `runner.ts` L1582–1596 and L3093–3133:
 
 | `ProviderSessionConfig` field | Comes from |
 |---|---|
-| `prompt` | `buildPromptForTrigger(trigger, task, memories, ...)` |
+| `prompt` | `buildPromptForTrigger(trigger, task, memories, ...)`, optionally prefixed with a bounded follow-up context preamble when `task.parentTaskId` is set |
 | `systemPrompt` | `buildSystemPrompt()` + `task.additionalSystemPrompt` (see §6) |
 | `model` | `task.model` → `MODEL_OVERRIDE` env → `""` |
 | `agentId`, `taskId`, `apiUrl`, `apiKey` | Worker env + task row |
@@ -236,9 +236,9 @@ The runner (not the adapter) owns all of these. They are listed here so you know
 
 ### Resume semantics
 
-- **Parent → child** session handoff: Claude receives `--resume <parentSessionId>` via `additionalArgs` (L3002–3016).
-- **Pause → resume**: a paused task restarts with a **new** session, re-applying `task.progress` via `buildResumePrompt` (L809–829).
-- **Codex** exposes `adapter.canResume(sessionId)` and `codex.resumeThread(...)` at [`codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) L871–873, but is not yet auto-wired to pause/resume from the runner.
+- **Parent → child** continuity is now two-layered: the runner prepends a bounded context preamble for **all** providers when `parentTaskId` is set, and resumable providers can additionally receive a native `resumeSessionId` when a reusable parent session exists.
+- **Pause → resume**: a paused task restarts with a **new** session, re-applying `task.progress` via `buildResumePrompt` (L809–829); if the task is also part of a parent chain, the same context-preamble path is applied before execution resumes.
+- **Codex** exposes `adapter.canResume(sessionId)` and `codex.resumeThread(...)` at [`codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) L871–873.
 - **Claude** has a stale-session recovery path at [`claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) L489–540 that strips `--resume` and opens a fresh session with a new `logFile`.
 
 **What your adapter owes the task:** emit `session_init` as early as possible (so the runner can persist the provider session id), emit `tool_start`/`tool_end` faithfully (so the UI shows the agent's work), and emit a `result` with populated `CostData` before your `waitForCompletion()` resolves.

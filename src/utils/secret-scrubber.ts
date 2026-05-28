@@ -142,6 +142,7 @@ interface ScrubCache {
 }
 
 let cache: ScrubCache | null = null;
+const volatileSecrets = new Map<string, string>();
 
 /** Fingerprint current env so we can invalidate cache cheaply when it changes. */
 function snapshotEnv(): string {
@@ -225,6 +226,12 @@ export function scrubSecrets(text: string | null | undefined): string {
     }
   }
 
+  for (const [value, name] of volatileSecrets) {
+    if (out.includes(value)) {
+      out = out.split(value).join(`[REDACTED:${name}]`);
+    }
+  }
+
   // Pass 2: structural patterns (catches secrets we never saw in env, e.g.
   // a token pasted into a tool_result by the operator or fetched from a
   // third-party API during a task).
@@ -264,4 +271,20 @@ export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
  */
 export function refreshSecretScrubberCache(): void {
   cache = null;
+}
+
+/**
+ * Register a runtime-fetched secret that is not present in process.env.
+ *
+ * Use this before returning short-lived tokens through an API/tool result so
+ * follow-on logs, telemetry previews, and session-log egress can redact the
+ * concrete value even though the caller still receives it.
+ */
+export function registerVolatileSecret(value: string, name: string): void {
+  if (value.length < MIN_VALUE_LENGTH) return;
+  volatileSecrets.set(value, name);
+}
+
+export function clearVolatileSecretsForTesting(): void {
+  volatileSecrets.clear();
 }

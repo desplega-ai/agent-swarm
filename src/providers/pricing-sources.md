@@ -5,8 +5,11 @@ Operators bumping a rate by hand should also update this file.
 
 ## Primary: vendored models.dev snapshot
 
-- **Path**: `ui/src/lib/modelsdev-cache.json`
-- **Loaded by**: `src/be/seed-pricing.ts` → `seedPricingFromModelsDev()`,
+- **Source-of-truth path**: `src/be/modelsdev-cache.json`
+- **UI compatibility path**: `ui/src/lib/modelsdev-cache.json` symlinks to the
+  backend snapshot so existing UI imports keep working.
+- **Loaded by**: `src/be/modelsdev-cache.ts` → `src/be/seed-pricing.ts` →
+  `seedPricingFromModelsDev()`,
   called from `src/server.ts` after `initDb`.
 - **Projection rules** (see the same module for code-level detail):
   - Anthropic models → rows under `provider='claude'` AND `provider='claude-managed'`.
@@ -23,7 +26,7 @@ Operators bumping a rate by hand should also update this file.
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the
     script). It fetches the latest snapshot from models.dev, diffs against
     the vendored copy, prints a summary, and writes the new file.
-  - Commit the regenerated `modelsdev-cache.json` together with a bump
+  - Commit the regenerated `src/be/modelsdev-cache.json` together with a bump
     note in the PR description.
 
 ## Manual overrides
@@ -47,6 +50,6 @@ no input/output pricing rows at the lookup time, the row is persisted with
 `costSource='unpriced'` (rather than 'harness'). The UI surfaces this as a
 yellow badge.
 
-To fix: either add the model to `modelsdev-cache.json` (preferred — the
+To fix: either add the model to `src/be/modelsdev-cache.json` (preferred — the
 upstream snapshot probably needs refreshing) or add a manual override row via
 the existing admin route `POST /api/pricing`.

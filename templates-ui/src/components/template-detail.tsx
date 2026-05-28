@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Check, Copy } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { FilePreview } from "./file-preview";
@@ -81,9 +82,9 @@ export function TemplateDetail({ template, category }: TemplateDetailProps) {
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           Add this to your worker&apos;s environment variables, or use the{" "}
-          <a href="/builder" className="text-primary hover:underline">
+          <Link href="/builder" className="text-primary hover:underline">
             Docker Compose Builder
-          </a>{" "}
+          </Link>{" "}
           to generate a full configuration.
         </p>
       </div>

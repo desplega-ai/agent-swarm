@@ -16,6 +16,7 @@ jobs:
       openapi: ${{ steps.check.outputs.openapi }}
       docker: ${{ steps.check.outputs.docker }}
       ui: ${{ steps.check.outputs.ui }}
+      templates_workflows: ${{ steps.check.outputs.templates_workflows }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -67,7 +68,10 @@ jobs:
           # ui app lint + typecheck.
           UI=$(match '^ui/')
 
-          for k in LINT TEST PI_SKILLS OPENAPI DOCKER UI; do
+          # workflow template validation: content.md changes in templates/workflows/.
+          TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
+
+          for k in LINT TEST PI_SKILLS OPENAPI DOCKER UI TEMPLATES_WORKFLOWS; do
             v=$(eval echo \$$k)
             key=$(echo "$k" | tr '[:upper:]' '[:lower:]')
             echo "${key}=${v}" >> $GITHUB_OUTPUT
@@ -252,9 +256,30 @@ jobs:
       - name: Run TypeScript type check
         run: pnpm exec tsc -b
 
+  template-workflow-validation:
+    name: Validate Workflow Templates
+    needs: detect-changes
+    if: needs.detect-changes.outputs.templates_workflows == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate workflow templates
+        run: bun run scripts/validate-template-workflows.ts
+
   gate:
     name: Merge Gate
-    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, openapi-freshness, docker-build, ui-lint]
+    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, openapi-freshness, docker-build, ui-lint, template-workflow-validation]
     if: always()
     runs-on: ubuntu-latest
 

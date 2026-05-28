@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "x-api-interactions",
+  "displayName": "X API Interactions",
+  "slug": "x-api-interactions",
+  "title": "X API Interactions",
+  "description": "Safely post, reply, or quote through the X API with account placeholders.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["X_HANDLE"],
+  "runAllSeedersCandidate": false,
+  "tags": ["social", "x", "communications"]
+}

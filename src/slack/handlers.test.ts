@@ -6,6 +6,7 @@ import {
   checkUserAccess,
   formatFileSize,
   isBotMessage,
+  isSwarmThreadRoot,
   type UserFilterConfig,
 } from "./handlers";
 
@@ -357,5 +358,39 @@ describe("isBotMessage", () => {
       expect(isBotMessage({}, "UBOT123")).toBe(false);
       expect(isBotMessage({ user: "UHUMAN456" }, "UBOT123")).toBe(false);
     });
+  });
+});
+
+describe("isSwarmThreadRoot", () => {
+  test("matches our bot by user ID (non-persona post)", () => {
+    expect(isSwarmThreadRoot({ user: "UBOT123" }, "UBOT123", "B_SWARM")).toBe(true);
+  });
+
+  test("matches our bot by bot_id (persona post omits user)", () => {
+    // Posts with username/icon_emoji override carry bot_id but no user field.
+    expect(isSwarmThreadRoot({ bot_id: "B_SWARM" }, "UBOT123", "B_SWARM")).toBe(true);
+  });
+
+  test("does NOT match a different bot in the workspace", () => {
+    // A thread started by some OTHER bot must not be treated as swarm-started.
+    expect(isSwarmThreadRoot({ bot_id: "B_OTHER", user: "UOTHER" }, "UBOT123", "B_SWARM")).toBe(
+      false,
+    );
+  });
+
+  test("does NOT match a human-started thread", () => {
+    expect(isSwarmThreadRoot({ user: "UHUMAN456" }, "UBOT123", "B_SWARM")).toBe(false);
+  });
+
+  test("returns false for an undefined root message", () => {
+    expect(isSwarmThreadRoot(undefined, "UBOT123", "B_SWARM")).toBe(false);
+  });
+
+  test("returns false when our bot identity is unknown", () => {
+    expect(isSwarmThreadRoot({ bot_id: "B_SWARM", user: "UBOT123" }, null, null)).toBe(false);
+  });
+
+  test("falls back to bot_id when bot user ID is unknown but bot_id is", () => {
+    expect(isSwarmThreadRoot({ bot_id: "B_SWARM" }, null, "B_SWARM")).toBe(true);
   });
 });

@@ -104,8 +104,9 @@ export const DEFERRED_TOOLS = new Set([
   "send-whatsapp-message",
   "reply-whatsapp-message",
 
-  // Tracker (6)
+  // Tracker (7)
   "tracker-status",
+  "get-oauth-access-token",
   "tracker-link-task",
   "tracker-unlink",
   "tracker-sync-status",

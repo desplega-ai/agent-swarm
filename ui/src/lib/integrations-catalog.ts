@@ -32,6 +32,14 @@ export interface IntegrationField {
   affectsRestart?: boolean;
 }
 
+export interface IntegrationConfigGroup {
+  id: string;
+  title: string;
+  description?: string;
+  docsUrl?: string;
+  fields: IntegrationField[];
+}
+
 export type IntegrationCategory =
   | "comm"
   | "issues"
@@ -102,6 +110,8 @@ export interface IntegrationDef {
   /** External docs URL or in-repo docs path. */
   docsUrl: string;
   fields: IntegrationField[];
+  /** Optional grouped field layout for integrations with multiple harness modes. */
+  configGroups?: IntegrationConfigGroup[];
   /** Env var that disables the integration (e.g. "SLACK_DISABLE"). */
   disableKey?: string;
   /** Changes require API server restart to take effect. */
@@ -115,6 +125,20 @@ export interface IntegrationDef {
    * skill lives so the operator knows how to get it.
    */
   recommendedSkills?: RecommendedSkill[];
+}
+
+export function getIntegrationFields(def: IntegrationDef): IntegrationField[] {
+  const groups = def.configGroups ?? [];
+  if (groups.length === 0) return def.fields;
+
+  const seen = new Set<string>();
+  const fields: IntegrationField[] = [];
+  for (const field of groups.flatMap((group) => group.fields)) {
+    if (seen.has(field.key)) continue;
+    seen.add(field.key);
+    fields.push(field);
+  }
+  return fields;
 }
 
 export const INTEGRATIONS: IntegrationDef[] = [
@@ -686,6 +710,218 @@ export const INTEGRATIONS: IntegrationDef[] = [
         placeholder: "sk-...",
         helpText: "OpenAI API key. Used by the codex provider when no ChatGPT OAuth is stored.",
         affectsRestart: true,
+      },
+    ],
+  },
+
+  // ---------------------------------------------------------- Amazon Bedrock
+  {
+    id: "bedrock",
+    name: "Amazon Bedrock",
+    description:
+      "Route pi/pi-mono and Claude Code harness calls to Amazon Bedrock with auth delegated to the AWS SDK credential chain.",
+    category: "llm",
+    iconKey: "cloud",
+    docsUrl:
+      "https://docs.agent-swarm.dev/docs/guides/harness-providers#pi-mono--amazon-bedrock-auth",
+    restartRequired: true,
+    fields: [],
+    configGroups: [
+      {
+        id: "pi-mono",
+        title: "pi / pi-mono",
+        description:
+          "Use pi-mono's Bedrock routing prefix while AWS credentials resolve through the SDK default chain.",
+        docsUrl:
+          "https://docs.agent-swarm.dev/docs/guides/harness-providers#pi-mono--amazon-bedrock-auth",
+        fields: [
+          {
+            key: "MODEL_OVERRIDE",
+            label: "Model override",
+            type: "text",
+            required: true,
+            placeholder: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+            helpText:
+              "Use the amazon-bedrock/<model-id> prefix to route pi/pi-mono through Amazon Bedrock.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_REGION",
+            label: "AWS region",
+            type: "text",
+            required: true,
+            placeholder: "us-east-1",
+            helpText:
+              "Must be a Bedrock-enabled AWS region. AWS_DEFAULT_REGION also works for the SDK.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_ACCESS_KEY_ID",
+            label: "AWS access key ID",
+            type: "password",
+            isSecret: true,
+            helpText:
+              "Optional static credentials path. Pair with AWS_SECRET_ACCESS_KEY for the simplest Bedrock setup.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_SECRET_ACCESS_KEY",
+            label: "AWS secret access key",
+            type: "password",
+            isSecret: true,
+            helpText:
+              "Optional static credentials path. Profiles, AWS SSO, web-identity, credential_process, and assume-role chains also work.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_SESSION_TOKEN",
+            label: "AWS session token",
+            type: "password",
+            isSecret: true,
+            placeholder: "Optional for temporary credentials",
+            helpText:
+              "Optional for temporary static credentials. See the harness-providers guide for all AWS SDK default credential chain sources.",
+            affectsRestart: true,
+          },
+        ],
+      },
+      {
+        id: "claude-code",
+        title: "Claude Code",
+        description:
+          "Enable Claude Code's native Amazon Bedrock provider and optionally pin Bedrock inference profile IDs.",
+        docsUrl: "https://code.claude.com/docs/en/amazon-bedrock",
+        fields: [
+          {
+            key: "CLAUDE_CODE_USE_BEDROCK",
+            label: "Enable Bedrock",
+            type: "text",
+            required: true,
+            placeholder: "1",
+            helpText: "Set to 1 or true to route Claude Code through Amazon Bedrock.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_REGION",
+            label: "AWS region",
+            type: "text",
+            required: true,
+            placeholder: "us-east-1",
+            helpText:
+              "Required by Claude Code; it does not read AWS_REGION from ~/.aws/config. Use a region where your selected Bedrock models or inference profiles are available.",
+            affectsRestart: true,
+          },
+          {
+            key: "ANTHROPIC_MODEL",
+            label: "Primary model override",
+            type: "text",
+            placeholder: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            helpText:
+              "Optional Bedrock inference profile ID or application inference profile ARN for the primary Claude Code model. Cross-region profile IDs commonly use a prefix such as us.",
+            affectsRestart: true,
+          },
+          {
+            key: "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            label: "Small/fast model",
+            type: "text",
+            placeholder: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            helpText:
+              "Optional Haiku-class model for background tasks such as session title generation. Claude Code defaults this to the primary model on Bedrock when Haiku is not enabled.",
+            affectsRestart: true,
+          },
+          {
+            key: "ANTHROPIC_SMALL_FAST_MODEL",
+            label: "Small/fast model (deprecated)",
+            type: "text",
+            advanced: true,
+            placeholder: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            helpText:
+              "Deprecated Claude Code small/fast model override. Prefer ANTHROPIC_DEFAULT_HAIKU_MODEL for new Bedrock setups.",
+            affectsRestart: true,
+          },
+          {
+            key: "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+            label: "Small/fast model region",
+            type: "text",
+            placeholder: "us-west-2",
+            helpText:
+              "Optional region override for the small/fast model. On Bedrock this only matters when ANTHROPIC_DEFAULT_HAIKU_MODEL, or the deprecated ANTHROPIC_SMALL_FAST_MODEL, is set.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_PROFILE",
+            label: "AWS profile",
+            type: "text",
+            placeholder: "myprofile",
+            helpText:
+              "Optional AWS SDK profile after running aws sso login or configuring ~/.aws credentials.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_ACCESS_KEY_ID",
+            label: "AWS access key ID",
+            type: "password",
+            isSecret: true,
+            helpText:
+              "Optional static credentials path. Claude Code also supports AWS profiles, SSO, existing environment credentials, and Bedrock API keys.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_SECRET_ACCESS_KEY",
+            label: "AWS secret access key",
+            type: "password",
+            isSecret: true,
+            helpText: "Optional static credentials path. Pair with AWS_ACCESS_KEY_ID.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_SESSION_TOKEN",
+            label: "AWS session token",
+            type: "password",
+            isSecret: true,
+            placeholder: "Optional for temporary credentials",
+            helpText: "Optional for temporary static credentials.",
+            affectsRestart: true,
+          },
+          {
+            key: "AWS_BEARER_TOKEN_BEDROCK",
+            label: "Bedrock API key",
+            type: "password",
+            isSecret: true,
+            helpText:
+              "Optional Bedrock API key alternative when you do not want full AWS credentials.",
+            affectsRestart: true,
+          },
+          {
+            key: "ANTHROPIC_BEDROCK_BASE_URL",
+            label: "Bedrock base URL",
+            type: "text",
+            advanced: true,
+            placeholder: "https://bedrock-runtime.us-east-1.amazonaws.com",
+            helpText: "Optional endpoint override for custom endpoints or gateways.",
+            affectsRestart: true,
+          },
+          {
+            key: "DISABLE_PROMPT_CACHING",
+            label: "Disable prompt caching",
+            type: "text",
+            advanced: true,
+            placeholder: "1",
+            helpText:
+              "Optional escape hatch. Prompt caching may not be available in every Bedrock model or region.",
+            affectsRestart: true,
+          },
+          {
+            key: "ENABLE_PROMPT_CACHING_1H",
+            label: "Use 1-hour prompt cache",
+            type: "text",
+            advanced: true,
+            placeholder: "1",
+            helpText:
+              "Optional. Requests a 1-hour prompt cache TTL instead of the 5-minute default; Claude Code docs note the longer TTL is billed at a higher rate.",
+            affectsRestart: true,
+          },
+        ],
       },
     ],
   },

@@ -1875,6 +1875,50 @@ export function findCompletedTaskInThread(
   return row ? rowToAgentTask(row) : null;
 }
 
+/**
+ * Find the most recent CANCELLED task in a Slack thread. Used by the
+ * follow-up re-delegation guard so a cancellation (worker SIGTERM,
+ * runner-side abort, swarm-events tool-loop abort) doesn't permanently
+ * jam re-dispatch when an earlier sibling task in the same thread also
+ * completed.
+ *
+ * Matches both:
+ *   - `status = 'cancelled'` (the canonical terminal state from cancelTask)
+ *   - `status = 'failed'` with a failureReason that starts with "cancelled"
+ *     or "exit 130" or contains "cancelled" (the codex-adapter abort path
+ *     emits `failureReason: "cancelled"` and exits 130).
+ */
+export function findRecentCancelledTaskInThread(
+  channelId: string,
+  threadTs: string,
+  windowMinutes: number,
+): AgentTask | null {
+  const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ?
+       AND slackThreadTs = ?
+       AND lastUpdatedAt > ?
+       AND (
+         status = 'cancelled'
+         OR (
+           status = 'failed'
+           AND failureReason IS NOT NULL
+           AND (
+             failureReason LIKE 'cancelled%'
+             OR failureReason LIKE 'exit 130%'
+             OR failureReason LIKE '%cancelled%'
+           )
+         )
+       )
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 1`,
+    )
+    .get(channelId, threadTs, since);
+  return row ? rowToAgentTask(row) : null;
+}
+
 export function completeTask(id: string, output?: string): AgentTask | null {
   const oldTask = getTaskById(id);
   if (!oldTask) return null;
