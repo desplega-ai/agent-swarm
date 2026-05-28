@@ -122,6 +122,28 @@ describe("E2B dispatch helpers", () => {
     expect(sandboxPortHost(sandboxDomain, 3013)).toBe("3013-sbx123.e2b.app");
   });
 
+  test("computes public port host from configured E2B endpoints when API domain is absent", () => {
+    const missingDomain: E2BSandboxInfo = {
+      sandboxID: "sbx123",
+      templateID: "tpl",
+      domain: null,
+    };
+
+    expect(sandboxPortHost(missingDomain, 3013, { E2B_DOMAIN: "self-hosted.e2b.test" })).toBe(
+      "3013-sbx123.self-hosted.e2b.test",
+    );
+    expect(
+      sandboxPortHost(missingDomain, 3013, {
+        E2B_SANDBOX_URL: "https://sandbox.private.e2b.test",
+      }),
+    ).toBe("3013-sbx123.private.e2b.test");
+    expect(
+      sandboxPortHost(missingDomain, 3013, {
+        E2B_SANDBOX_URL: "https://sandboxes.internal:8443",
+      }),
+    ).toBe("3013-sbx123.sandboxes.internal:8443");
+  });
+
   test("buildDetachedShell backgrounds command and captures pid without invalid shell chaining", () => {
     const shell = buildDetachedShell("/api-entrypoint.sh", "/tmp/api.log", "/tmp/api.pid");
 

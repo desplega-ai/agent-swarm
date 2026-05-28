@@ -10,7 +10,7 @@ export type E2BSandboxInfo = {
   alias?: string;
   envdAccessToken?: string;
   trafficAccessToken?: string;
-  domain?: string;
+  domain?: string | null;
   startedAt?: string;
   endAt?: string;
   metadata?: Record<string, string>;
@@ -120,16 +120,34 @@ export function e2bSdkConnectionOptions(
   return options;
 }
 
-export function sandboxPortHost(sandbox: E2BSandboxInfo, port: number): string {
-  const domain = sandbox.domain || "e2b.app";
+function sandboxDomainFromUrl(rawUrl: string): string | undefined {
+  try {
+    const url = new URL(rawUrl);
+    const host = url.host;
+    return host.startsWith("sandbox.") ? host.slice("sandbox.".length) : host;
+  } catch {
+    const host = rawUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    if (!host) return undefined;
+    return host.startsWith("sandbox.") ? host.slice("sandbox.".length) : host;
+  }
+}
+
+function configuredSandboxDomain(env: EnvMap): string | undefined {
+  if (env.E2B_DOMAIN) return env.E2B_DOMAIN;
+  if (env.E2B_SANDBOX_URL) return sandboxDomainFromUrl(env.E2B_SANDBOX_URL);
+  return undefined;
+}
+
+export function sandboxPortHost(sandbox: E2BSandboxInfo, port: number, env: EnvMap = {}): string {
+  const domain = sandbox.domain || configuredSandboxDomain(env) || "e2b.app";
   if (domain.includes(sandbox.sandboxID)) {
     return `${port}-${domain}`;
   }
   return `${port}-${sandbox.sandboxID}.${domain}`;
 }
 
-export function sandboxPortUrl(sandbox: E2BSandboxInfo, port: number): string {
-  return `https://${sandboxPortHost(sandbox, port)}`;
+export function sandboxPortUrl(sandbox: E2BSandboxInfo, port: number, env: EnvMap = {}): string {
+  return `https://${sandboxPortHost(sandbox, port, env)}`;
 }
 
 async function readResponseBody(response: Response): Promise<string> {

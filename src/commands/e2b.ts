@@ -372,7 +372,7 @@ async function startRole(
     return {
       role,
       sandbox: fakeSandbox,
-      url: role === "api" ? sandboxPortUrl(fakeSandbox, port) : undefined,
+      url: role === "api" ? sandboxPortUrl(fakeSandbox, port, controllerEnv) : undefined,
     };
   }
 
@@ -402,7 +402,7 @@ async function startRole(
       cwd: role === "api" ? "/app" : "/workspace",
     });
 
-    const url = role === "api" ? sandboxPortUrl(sandbox, port) : undefined;
+    const url = role === "api" ? sandboxPortUrl(sandbox, port, controllerEnv) : undefined;
     if (role === "api" && !booleanFlag(flags, "no-wait")) {
       await waitForHttpOk(`${url}/health`, integerFlag(flags, "wait-ms", 90_000));
     }
