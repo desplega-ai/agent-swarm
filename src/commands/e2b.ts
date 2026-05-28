@@ -536,33 +536,69 @@ async function startWorkerCommand(flags: ParsedFlags, cwd: string): Promise<void
   }
 }
 
-async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void> {
-  const api = await startRole(flags, cwd, "api");
-  if (!api.url) throw new Error("API sandbox did not produce a public URL");
+async function cleanupStartedRoles(
+  flags: ParsedFlags,
+  cwd: string,
+  started: StartedRole[],
+): Promise<void> {
+  if (booleanFlag(flags, "dry-run") || started.length === 0) return;
 
-  const workerCount = integerFlag(flags, "workers", 1);
-  const workers: StartedRole[] = [];
-  for (let i = 0; i < workerCount; i++) {
-    workers.push(await startRole(flags, cwd, "worker", api.url));
-  }
-  const runtimeEnv = await loadRuntimeEnv(flags, "api");
+  const controllerEnv = await loadE2BControllerEnv(flags, cwd);
+  const controllerApiKey = e2bControllerApiKey(controllerEnv);
+  const apiBase = value(flags, "e2b-api-base", DEFAULT_E2B_API_BASE);
 
-  if (booleanFlag(flags, "json")) {
-    console.log(
-      JSON.stringify(
-        {
-          api: publicStartedRole(api, runtimeEnv),
-          workers: workers.map((worker) => publicStartedRole(worker, runtimeEnv)),
-        },
-        null,
-        2,
-      ),
-    );
-  } else {
-    printHumanStart(api, runtimeEnv);
-    for (const worker of workers) {
-      printHumanStart(worker, runtimeEnv);
+  for (const role of [...started].reverse()) {
+    try {
+      await killSandbox(role.sandbox.sandboxID, controllerApiKey, apiBase);
+    } catch (cleanupErr) {
+      const message = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+      console.warn(
+        redactWithEnv(
+          `e2b: failed to clean up ${role.role} sandbox ${role.sandbox.sandboxID} after stack startup failure: ${message}`,
+          controllerEnv,
+        ),
+      );
     }
+  }
+}
+
+async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void> {
+  const started: StartedRole[] = [];
+  const workers: StartedRole[] = [];
+
+  try {
+    const api = await startRole(flags, cwd, "api");
+    started.push(api);
+    if (!api.url) throw new Error("API sandbox did not produce a public URL");
+
+    const workerCount = integerFlag(flags, "workers", 1);
+    for (let i = 0; i < workerCount; i++) {
+      const worker = await startRole(flags, cwd, "worker", api.url);
+      workers.push(worker);
+      started.push(worker);
+    }
+    const runtimeEnv = await loadRuntimeEnv(flags, "api");
+
+    if (booleanFlag(flags, "json")) {
+      console.log(
+        JSON.stringify(
+          {
+            api: publicStartedRole(api, runtimeEnv),
+            workers: workers.map((worker) => publicStartedRole(worker, runtimeEnv)),
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      printHumanStart(api, runtimeEnv);
+      for (const worker of workers) {
+        printHumanStart(worker, runtimeEnv);
+      }
+    }
+  } catch (err) {
+    await cleanupStartedRoles(flags, cwd, started);
+    throw err;
   }
 }
 
