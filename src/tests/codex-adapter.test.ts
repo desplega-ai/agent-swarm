@@ -611,41 +611,16 @@ describe("CodexSession event mapping", () => {
 });
 
 describe("CodexAdapter.canResume", () => {
-  test("returns false for empty / non-string session ids", async () => {
+  // Native resume is deprecated. The runner no longer threads resumeSessionId
+  // to adapters; canResume returns false unconditionally so any stray caller
+  // gets a fresh-session start. Follow-up continuity flows via the context
+  // preamble (see src/commands/context-preamble.ts).
+  test("always returns false now that native resume is deprecated", async () => {
     const adapter = new CodexAdapter({ bypassSubprocess: true });
     expect(await adapter.canResume("")).toBe(false);
+    expect(await adapter.canResume("thread-anything")).toBe(false);
     // @ts-expect-error: deliberate runtime check for non-string input
     expect(await adapter.canResume(undefined)).toBe(false);
-  });
-
-  test("returns true when resumeThread succeeds and false when it throws", async () => {
-    const sdk = await import("@openai/codex-sdk");
-    const originalResume = (
-      sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
-    ).resumeThread;
-
-    try {
-      // Success path
-      (
-        sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
-      ).resumeThread = function resumeThread(): unknown {
-        return { id: "thread-resumed" };
-      };
-      const adapter = new CodexAdapter({ bypassSubprocess: true });
-      expect(await adapter.canResume("thread-resumed")).toBe(true);
-
-      // Failure path
-      (
-        sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
-      ).resumeThread = function resumeThread(): unknown {
-        throw new Error("not found");
-      };
-      expect(await adapter.canResume("thread-missing")).toBe(false);
-    } finally {
-      (
-        sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
-      ).resumeThread = originalResume;
-    }
   });
 });
 

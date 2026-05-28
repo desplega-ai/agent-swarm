@@ -159,14 +159,14 @@ Remove the `--resume` flag construction from Claude adapters and the `resumeThre
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun test src/tests/claude-adapter.test.ts` passes
-- [ ] `bun test src/tests/claude-managed-adapter.test.ts` passes
-- [ ] `bun test src/tests/codex-adapter.test.ts` passes (if present)
-- [ ] `bun run tsc:check`
-- [ ] `bun run lint`
-- [ ] `grep -rn "resumeSessionId" src/providers/` — only the warn-and-ignore call sites remain; no actual use.
-- [ ] `grep -rn "\-\-resume" src/providers/` — zero hits.
-- [ ] `grep -rn "resumeThread" src/providers/codex-adapter.ts` — zero hits.
+- [x] `bun test src/tests/claude-adapter.test.ts` passes
+- [x] `bun test src/tests/claude-managed-adapter.test.ts` passes
+- [x] `bun test src/tests/codex-adapter.test.ts` passes (if present)
+- [x] `bun run tsc:check`
+- [x] `bun run lint`
+- [x] `grep -rn "resumeSessionId" src/providers/` — only the warn-and-ignore call sites remain; no actual use. (Plus the field def in `types.ts:92`, deferred to Phase 3 for the `@deprecated` JSDoc.)
+- [x] `grep -rn "\-\-resume" src/providers/` — zero hits.
+- [x] `grep -rn "resumeThread" src/providers/codex-adapter.ts` — zero hits.
 
 #### Automated QA:
 - [ ] Repeat the Phase 1 Slack E2E: confirm spawned commands have no `--resume` arg AND that any stray `resumeSessionId` reaching an adapter triggers the warn log.

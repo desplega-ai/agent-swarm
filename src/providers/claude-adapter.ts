@@ -423,10 +423,6 @@ class ClaudeSession implements ProviderSession {
       this.config.prompt,
     ];
 
-    if (this.config.resumeSessionId) {
-      cmd.push("--resume", this.config.resumeSessionId);
-    }
-
     if (this.config.additionalArgs?.length) {
       cmd.push(...this.config.additionalArgs);
     }
@@ -728,78 +724,7 @@ class ClaudeSession implements ProviderSession {
   }
 
   async waitForCompletion(): Promise<ProviderResult> {
-    const result = await this.completionPromise;
-
-    // Stale session retry: if process failed because session not found and we used --resume,
-    // strip --resume and retry with a fresh session
-    if (result.exitCode !== 0 && this.errorTracker.isSessionNotFound()) {
-      const hasResume =
-        !!this.config.resumeSessionId || (this.config.additionalArgs || []).includes("--resume");
-      if (hasResume) {
-        console.log(
-          `\x1b[33m[${this.config.role}] Session resume failed for task ${this.config.taskId.slice(0, 8)} — retrying without --resume\x1b[0m`,
-        );
-
-        const freshArgs = (this.config.additionalArgs || []).filter((arg, idx, arr) => {
-          if (arg === "--resume") return false;
-          if (idx > 0 && arr[idx - 1] === "--resume") return false;
-          return true;
-        });
-
-        const logDir = this.config.logFile.substring(0, this.config.logFile.lastIndexOf("/"));
-        const retryTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const retryLogFile = `${logDir}/${retryTimestamp}-retry-${this.config.taskId.slice(0, 8)}.jsonl`;
-
-        const retryConfig: ProviderSessionConfig = {
-          ...this.config,
-          additionalArgs: freshArgs,
-          logFile: retryLogFile,
-          resumeSessionId: undefined,
-        };
-
-        // Write new task file for retry
-        const taskFilePath = await writeTaskFile(this.taskFilePid, {
-          taskId: this.config.taskId,
-          agentId: this.config.agentId,
-          startedAt: new Date().toISOString(),
-        });
-
-        // Re-stage the system prompt for the retry — the original was unlinked
-        // when the first session finished. Same soft-fail semantics: null
-        // falls back to the inline --append-system-prompt argv.
-        let retrySystemPromptFile: string | null = null;
-        if (retryConfig.systemPrompt) {
-          const candidate = getSystemPromptFilePath(retryConfig.taskId);
-          try {
-            await writeFile(candidate, retryConfig.systemPrompt);
-            retrySystemPromptFile = candidate;
-          } catch (err) {
-            console.warn(
-              `\x1b[33m[claude]\x1b[0m Failed to stage retry system prompt to ${candidate} (${err}); falling back to --append-system-prompt argv.`,
-            );
-          }
-        }
-
-        const retrySession = new ClaudeSession(
-          retryConfig,
-          this.model,
-          taskFilePath,
-          this.taskFilePid,
-          null,
-          this.claudeBinaryArgv,
-          retrySystemPromptFile,
-        );
-
-        // Forward events from retry to our listeners
-        for (const listener of this.listeners) {
-          retrySession.onEvent(listener);
-        }
-
-        return retrySession.waitForCompletion();
-      }
-    }
-
-    return result;
+    return this.completionPromise;
   }
 
   async abort(): Promise<void> {
@@ -812,6 +737,15 @@ export class ClaudeAdapter implements ProviderAdapter {
   readonly traits = { hasMcp: true, hasLocalEnvironment: true };
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
+    // Native resume is deprecated. Follow-up continuity is delivered via the
+    // context preamble (see src/commands/context-preamble.ts). Any stray
+    // resumeSessionId is logged and ignored — we always spawn a fresh session.
+    if (config.resumeSessionId) {
+      console.warn(
+        "[claude-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
+      );
+    }
+
     const model = config.model || "opus";
 
     const credType = validateClaudeCredentials(config.env || process.env);

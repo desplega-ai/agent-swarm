@@ -808,85 +808,71 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
   }
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
-    let sessionId: string;
-    let userMessageContent: BetaManagedAgentsTextBlock[] | null;
+    // Native resume is deprecated. Follow-up continuity is delivered via the
+    // context preamble (see src/commands/context-preamble.ts). Any stray
+    // resumeSessionId is logged and ignored — we always create a fresh session.
+    if (config.resumeSessionId) {
+      console.warn(
+        "[claude-managed-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
+      );
+    }
+
     const seenEventIds = new Set<string>();
 
-    if (config.resumeSessionId) {
-      // Resume path: skip `sessions.create`. Pre-fetch event history via
-      // `events.list` so the SSE loop can skip duplicates that the live
-      // stream replays. NO new `user.message` is sent (the agent already
-      // has one in flight).
-      sessionId = config.resumeSessionId;
-      userMessageContent = null;
-      try {
-        const list = await Promise.resolve(this.client.beta.sessions.events.list(sessionId));
-        for await (const evt of list) {
-          if ("id" in evt && evt.id) {
-            seenEventIds.add(evt.id);
-          }
-        }
-      } catch {
-        // If history fetch fails, fall through with an empty `seenEventIds`
-        // — the worst case is that the listener sees a few duplicate events
-        // (which the runner-side dedup handles).
-      }
-    } else {
-      // Fresh session. Compose the cache-control-annotated user message and
-      // open the managed session against the pre-existing agent + env.
-      userMessageContent = composeManagedUserMessage(config);
-      // Phase 4: derive `resources` from `config.vcsRepo` (which the runner
-      // copies from `task.vcsRepo` at the spawn site, see
-      // src/commands/runner.ts:3296). The SDK contract is
-      // `BetaManagedAgentsGitHubRepositoryResourceParams`:
-      //   { type: 'github_repository', url, authorization_token, checkout?: { type: 'branch', name } }
-      // We default `branch` to "main" since `ProviderSessionConfig` only
-      // carries the repo identifier as a string.
-      //
-      // GitHub auth: prefer the operator-side `MANAGED_GITHUB_VAULT_ID`
-      // (passed via `vault_ids` on the session — see runbook §"Claude Managed
-      // Agents — GitHub access"). If a literal PAT is supplied via
-      // `MANAGED_GITHUB_TOKEN`, use that instead. Without either, the SDK's
-      // required `authorization_token` field gets an empty string and the
-      // operator sees an authentication error from Anthropic — which is
-      // strictly better than silently dropping `resources`.
-      const createParams: Record<string, unknown> = {
-        agent: this.agentId,
-        environment_id: this.environmentId,
-        title: `Task ${config.taskId}`,
-        metadata: {
-          swarmAgentId: config.agentId,
-          swarmTaskId: config.taskId,
+    // Fresh session. Compose the cache-control-annotated user message and
+    // open the managed session against the pre-existing agent + env.
+    const userMessageContent: BetaManagedAgentsTextBlock[] | null =
+      composeManagedUserMessage(config);
+    // Phase 4: derive `resources` from `config.vcsRepo` (which the runner
+    // copies from `task.vcsRepo` at the spawn site, see
+    // src/commands/runner.ts:3296). The SDK contract is
+    // `BetaManagedAgentsGitHubRepositoryResourceParams`:
+    //   { type: 'github_repository', url, authorization_token, checkout?: { type: 'branch', name } }
+    // We default `branch` to "main" since `ProviderSessionConfig` only
+    // carries the repo identifier as a string.
+    //
+    // GitHub auth: prefer the operator-side `MANAGED_GITHUB_VAULT_ID`
+    // (passed via `vault_ids` on the session — see runbook §"Claude Managed
+    // Agents — GitHub access"). If a literal PAT is supplied via
+    // `MANAGED_GITHUB_TOKEN`, use that instead. Without either, the SDK's
+    // required `authorization_token` field gets an empty string and the
+    // operator sees an authentication error from Anthropic — which is
+    // strictly better than silently dropping `resources`.
+    const createParams: Record<string, unknown> = {
+      agent: this.agentId,
+      environment_id: this.environmentId,
+      title: `Task ${config.taskId}`,
+      metadata: {
+        swarmAgentId: config.agentId,
+        swarmTaskId: config.taskId,
+      },
+    };
+    if (config.vcsRepo) {
+      const repoUrl = normalizeRepoUrl(config.vcsRepo);
+      const branch = "main"; // ProviderSessionConfig doesn't carry per-task branch info today.
+      const githubToken = process.env.MANAGED_GITHUB_TOKEN ?? "";
+      createParams.resources = [
+        {
+          type: "github_repository",
+          url: repoUrl,
+          authorization_token: githubToken,
+          checkout: { type: "branch", name: branch },
         },
-      };
-      if (config.vcsRepo) {
-        const repoUrl = normalizeRepoUrl(config.vcsRepo);
-        const branch = "main"; // ProviderSessionConfig doesn't carry per-task branch info today.
-        const githubToken = process.env.MANAGED_GITHUB_TOKEN ?? "";
-        createParams.resources = [
-          {
-            type: "github_repository",
-            url: repoUrl,
-            authorization_token: githubToken,
-            checkout: { type: "branch", name: branch },
-          },
-        ];
-      }
-      // Multiple vaults can be linked to a single session — `vault_ids` is an
-      // array. The MCP vault holds the static-bearer credential for our
-      // `/mcp` endpoint (provisioned by `claude-managed-setup`); the GitHub
-      // vault holds the credential used by the `github_repository` resource.
-      // Either or both may be unset.
-      const vaultIds = [
-        process.env.MANAGED_MCP_VAULT_ID,
-        process.env.MANAGED_GITHUB_VAULT_ID,
-      ].filter((v): v is string => !!v && v.length > 0);
-      if (vaultIds.length > 0) {
-        createParams.vault_ids = Array.from(new Set(vaultIds));
-      }
-      const created = await Promise.resolve(this.client.beta.sessions.create(createParams));
-      sessionId = created.id;
+      ];
     }
+    // Multiple vaults can be linked to a single session — `vault_ids` is an
+    // array. The MCP vault holds the static-bearer credential for our
+    // `/mcp` endpoint (provisioned by `claude-managed-setup`); the GitHub
+    // vault holds the credential used by the `github_repository` resource.
+    // Either or both may be unset.
+    const vaultIds = [process.env.MANAGED_MCP_VAULT_ID, process.env.MANAGED_GITHUB_VAULT_ID].filter(
+      (v): v is string => !!v && v.length > 0,
+    );
+    if (vaultIds.length > 0) {
+      createParams.vault_ids = Array.from(new Set(vaultIds));
+    }
+    const created = await Promise.resolve(this.client.beta.sessions.create(createParams));
+    const sessionId = created.id;
 
     return new ClaudeManagedSession(
       this.client,

@@ -6,7 +6,8 @@
  *
  *   Phase 1 — factory wiring + skeleton classes.
  *   Phase 2 — event stream normalization, CostData, AbortController, log file,
- *             AGENTS.md system-prompt injection, canResume via resumeThread.
+ *             AGENTS.md system-prompt injection. (Native resume was removed in
+ *             the 2026-05-28 deprecate-native-resume plan — see context-preamble.ts.)
  *   Phase 3 — per-session MCP config builder + model catalogue wiring. The
  *             baseline Codex config (`~/.codex/config.toml`) is written at
  *             Docker image build time (deferred to Phase 6). For local dev
@@ -1280,9 +1281,15 @@ export async function createInProcessCodexSession(
       model: resolvedModel,
     };
 
-    const thread = config.resumeSessionId
-      ? codex.resumeThread(config.resumeSessionId, threadOptions)
-      : codex.startThread(threadOptions);
+    // Native resume is deprecated. Follow-up continuity is delivered via the
+    // context preamble (see src/commands/context-preamble.ts). Any stray
+    // resumeSessionId is logged and ignored — we always start a fresh thread.
+    if (config.resumeSessionId) {
+      console.warn(
+        "[codex-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
+      );
+    }
+    const thread = codex.startThread(threadOptions);
 
     return new CodexSession(
       thread,
@@ -1605,20 +1612,10 @@ export class CodexAdapter implements ProviderAdapter {
     return new CodexSubprocessSession(config, this.skillsDir);
   }
 
-  async canResume(sessionId: string): Promise<boolean> {
-    if (!sessionId || typeof sessionId !== "string") {
-      return false;
-    }
-    try {
-      const codex = new Codex();
-      // `resumeThread` is synchronous in 0.118.x and returns a Thread handle.
-      // The runner only calls canResume when deciding whether to resume a
-      // task, so we accept the (cheap) handshake cost.
-      codex.resumeThread(sessionId);
-      return true;
-    } catch {
-      return false;
-    }
+  async canResume(_sessionId: string): Promise<boolean> {
+    // Native resume is deprecated; runner no longer threads resumeSessionId
+    // to adapters. Follow-up continuity flows via the context preamble.
+    return false;
   }
 
   formatCommand(commandName: string): string {

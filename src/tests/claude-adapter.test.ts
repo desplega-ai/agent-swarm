@@ -54,13 +54,13 @@ describe("ClaudeSession CLI argument construction", () => {
     expect(config.systemPrompt).toBe("You are a test agent");
   });
 
-  test("config with additionalArgs including --resume is accepted", () => {
+  test("config with arbitrary additionalArgs is accepted", () => {
+    // Native resume is deprecated — the adapter no longer special-cases
+    // --resume in additionalArgs. The config shape just round-trips opaquely.
     const config = makeConfig({
-      additionalArgs: ["--resume", "session-abc-123"],
-      resumeSessionId: "session-abc-123",
+      additionalArgs: ["--max-turns", "10"],
     });
-    expect(config.additionalArgs).toContain("--resume");
-    expect(config.additionalArgs).toContain("session-abc-123");
+    expect(config.additionalArgs).toEqual(["--max-turns", "10"]);
   });
 });
 
@@ -401,27 +401,5 @@ describe("createSessionMcpConfig", () => {
     expect(path).toBe("/tmp/mcp-task-installed.json");
     const written = await readWritten(path!);
     expect(written.mcpServers["from-api"]).toBeDefined();
-  });
-});
-
-describe("Stale session retry logic", () => {
-  test("--resume args are stripped correctly", () => {
-    const args = ["--max-turns", "10", "--resume", "session-abc", "--verbose"];
-    const freshArgs = args.filter((arg, idx, arr) => {
-      if (arg === "--resume") return false;
-      if (idx > 0 && arr[idx - 1] === "--resume") return false;
-      return true;
-    });
-    expect(freshArgs).toEqual(["--max-turns", "10", "--verbose"]);
-  });
-
-  test("args without --resume remain unchanged", () => {
-    const args = ["--max-turns", "10", "--verbose"];
-    const freshArgs = args.filter((arg, idx, arr) => {
-      if (arg === "--resume") return false;
-      if (idx > 0 && arr[idx - 1] === "--resume") return false;
-      return true;
-    });
-    expect(freshArgs).toEqual(["--max-turns", "10", "--verbose"]);
   });
 });
