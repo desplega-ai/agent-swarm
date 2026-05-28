@@ -90,7 +90,7 @@ export default async function TemplateDetailPage({ params }: PageProps) {
     return (
       <div className="flex min-h-screen flex-col">
         <Header />
-        <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-12">
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-12">
           <AssetDetail asset={asset} category={category} name={name} />
         </main>
         <Footer />
@@ -122,7 +122,7 @@ export default async function TemplateDetailPage({ params }: PageProps) {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-12">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-12">
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

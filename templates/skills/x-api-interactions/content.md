@@ -14,7 +14,10 @@ Retrieve with `get-config` tool.
 
 ## OAuth 1.0a Signing
 
+The Twitter API v2 requires OAuth 1.0a signature for POST requests. Use a library or construct manually:
+
 ```bash
+# Using node with oauth-1.0a package
 node -e "
 const OAuth = require('oauth-1.0a');
 const crypto = require('crypto');
@@ -27,8 +30,11 @@ const oauth = OAuth({
 
 const token = { key: process.env.X_ACCESS_TOKEN, secret: process.env.X_ACCESS_TOKEN_SECRET };
 const url = 'https://api.x.com/2/tweets';
-const auth = oauth.authorize({ url, method: 'POST' }, token);
-console.log(oauth.toHeader(auth).Authorization);
+const method = 'POST';
+
+const auth = oauth.authorize({ url, method }, token);
+const header = oauth.toHeader(auth);
+console.log(header.Authorization);
 "
 ```
 
@@ -43,10 +49,10 @@ curl -s "https://api.x.com/2/tweets/{TWEET_ID}?tweet.fields=reply_settings" \
 
 Response includes `reply_settings`:
 - `everyone` — Anyone can reply
-- `mentionedUsers` — Only mentioned users can reply
-- `following` — Only followers can reply
+- `mentionedUsers` — Only mentioned users can reply (unless @desplegalabs is mentioned)
+- `following` — Only followers can reply (unless the author follows @desplegalabs)
 
-**If reply_settings is NOT "everyone", do NOT attempt the reply.** Report back that the tweet has conversation restrictions.
+**If reply_settings is NOT "everyone", do NOT attempt the reply.** Report back that the tweet has conversation restrictions. Quote tweets may also be restricted on such tweets.
 
 ## Posting a Tweet
 
@@ -78,14 +84,14 @@ curl -X POST "https://api.x.com/2/tweets" \
 ## Common Errors
 
 | Error | Cause | Fix |
-|---|---|---|
-| **402 CreditsDepleted** | Monthly API credits exhausted | **STOP immediately.** Do NOT retry. Save generated content to agent-fs. Report to Slack. Taras must top up at developer.x.com. |
+|-------|-------|-----|
+| **402 CreditsDepleted** | Monthly API credits exhausted | **STOP immediately.** Do NOT retry. Save generated content to agent-fs for later manual posting. Report to Slack. Mark task as failed. Taras must top up credits at developer.x.com. |
 | 403 Forbidden on reply | Conversation restrictions | Pre-check reply_settings |
 | 403 Forbidden on quote | Quote restrictions | Report back, don't retry |
 | 401 Unauthorized | Bad OAuth signature | Verify credentials, check timestamp |
-| 429 Too Many Requests | Rate limit | Wait for reset time |
+| 429 Too Many Requests | Rate limit | Wait and retry after reset time |
 
-**IMPORTANT: 402 CreditsDepleted is NOT retryable.** Both media-attached and text-only tweets fail with this error. The issue is account-level, not request-level. Do not waste context trying alternative posting methods.
+**IMPORTANT: 402 CreditsDepleted is NOT retryable.** Both media-attached and text-only tweets fail with this error. Do not waste context trying alternative posting methods — the issue is account-level, not request-level.
 
 ## Account Info
 
@@ -98,11 +104,6 @@ curl -X POST "https://api.x.com/2/tweets" \
 2. **Pre-check** target tweet's reply_settings (if replying)
 3. Construct OAuth 1.0a signature
 4. POST the tweet/reply/quote
-5. If 402, STOP — save content to agent-fs and report
+5. If 402, STOP — save content to agent-fs and report (credits depleted)
 6. If 403, report the restriction — do NOT retry blindly
 
-## Trade-offs
-
-**OAuth 1.0a vs Bearer token:** Bearer tokens are simpler but read-only. Write operations require the full 4-token OAuth 1.0a signing dance. The `oauth-1.0a` npm package simplifies this.
-
-**Rate limits:** Twitter v2 API rate limits are aggressive on the free/basic tier. Pre-check conversation restrictions before attempting a reply to avoid burning a rate limit slot on a guaranteed-failure request.

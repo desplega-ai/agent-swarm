@@ -1,49 +1,58 @@
 # Weekly GTM Metrics Review
 
-A Friday afternoon schedule that compiles a GTM (go-to-market) metrics review from available analytics sources and posts it to a Slack channel. Surfaces top wins, regressions, and three recommended actions for the following week.
+Summarize product, marketing, or sales signals into an operator-friendly weekly review.
 
-## What It Does
-
-An analyst agent pulls available metrics (web analytics, CRM exports, sales data) and compiles a weekly review covering:
-- Top wins: significant positive changes vs the prior week
-- Regressions: metrics that declined and need attention
-- Anomalous changes: unexpected spikes or drops requiring investigation
-- Three recommended next actions based on the data
-
-## Configuration
+## Schedule
 
 ```json
 {
-  "name": "Weekly GTM metrics review",
-  "cron": "0 14 * * 5",
-  "timezone": "{{TIMEZONE}}",
-  "agentRole": "analyst",
-  "enabled": false,
-  "slackChannelId": "{{SLACK_CHANNEL_ID}}",
-  "task": "Prepare a weekly GTM review from the available analytics sources. Include top wins, regressions, anomalous changes, and three recommended next actions. Use placeholders or skip sections when data sources are not configured."
+  "cron": "20 3 * * 1",
+  "timezone": "UTC",
+  "agentRole": "lead",
+  "enabled": true
 }
 ```
 
-**Placeholders to configure:**
-- `{{TIMEZONE}}` — Your local timezone.
-- `{{SLACK_CHANNEL_ID}}` — The Slack channel for weekly reviews.
+## Scheduled Task
 
-## Customization Notes
+This is the full task prompt the schedule runs on each fire — including the accumulated operational learnings baked into it. Adapt the swarm-specific references (channel IDs, agent names, repo paths) to your environment before enabling.
 
-- **`enabled: false`** — keep disabled until data sources are configured. The agent will produce a placeholder report without live data, which isn't useful for recurring delivery.
-- **Wire up data sources:** Add specific data access instructions to the task prompt. Examples:
-  - `"Pull GSC data using the gsc-analytics skill for site:yourdomain.com"`
-  - `"Fetch the weekly CRM export from agent-fs at docs/crm-weekly.csv"`
-  - `"Use the PostHog API at {{POSTHOG_API_URL}} to pull weekly session and conversion metrics"`
-- **Cron time:** `"0 14 * * 5"` = 2pm Fridays. Shift to your team's end-of-week rhythm — many teams prefer Thursday EOD to have time to act on insights before the weekend.
-- **Analyst role:** Needs access to whatever data sources you configure. If those require Lead-only secrets, use `"agentRole": "lead"` or wire secrets via swarm config.
+Task Type: Research
+Topic: Weekly GTM Metrics Review for agent-swarm
 
-## When to Use
+Goal: Check current GitHub stars, traffic, Google Search Console performance, and content metrics for the GTM campaign.
 
-Enable this after your first two weeks with the swarm, once you have baseline metrics to compare against. Week 1 without a baseline produces an incomplete review.
+Instructions:
+1. Check GitHub metrics: `gh api repos/desplega-ai/agent-swarm` (stars, forks, issues)
+2. Check traffic: `gh api repos/desplega-ai/agent-swarm/traffic/views` and `/traffic/clones`
+3. Check referrers: `gh api repos/desplega-ai/agent-swarm/traffic/popular/referrers`
+4. Check popular content: `gh api repos/desplega-ai/agent-swarm/traffic/popular/paths`
 
-## Trade-offs
+5. **Pull Google Search Console data** using the `gsc-analytics` skill (already installed on this agent). Do NOT write Python auth code — use the `gsc` CLI at `/workspace/repos/agent-work/gsc/gsc`. The setup script already wires up `GOOGLE_APPLICATION_CREDENTIALS`, so no extra env setup needed.
 
-**Data source dependency:** This schedule is only as good as its configured data sources. Without concrete access to analytics or CRM, it produces generic placeholder output. Invest time upfront to wire the actual data connections.
+   Pull the weekly snapshot for each of the 4 Desplega properties:
+   ```bash
+   GSC=/workspace/repos/agent-work/gsc/gsc
+   for site in desplega.ai agent-swarm.dev desplega.sh agent-fs.dev; do
+     echo "=== $site ==="
+     $GSC analytics "sc-domain:$site" --top 20 --json > "/tmp/gsc-$site.json"
+     jq '{current, previous, window, prior,
+          top_queries: [.topQueries[:10][] | {q: .keys[0], c: .clicks, i: .impressions, ctr: .ctr, pos: .position}],
+          top_pages:   [.topPages[:10][]   | {p: .keys[0], c: .clicks, i: .impressions, ctr: .ctr, pos: .position}]
+         }' "/tmp/gsc-$site.json"
+   done
+   ```
 
-**Analyst vs researcher role:** "Analyst" is a role designation that maps to an agent with data-analysis capabilities. If your swarm doesn't have a dedicated analyst, `"agentRole": "researcher"` or `"lead"` works.
+   The `analytics` subcommand returns headline KPIs (clicks, impressions, CTR, avg position) PLUS a WoW comparison against the prior 7 days — this is what powers the "this week vs last week" section of the report.
+
+6. Review the GTM plan at /workspace/shared/thoughts/shared/research/gtm-state-assessment.md
+7. Compile a brief report with:
+   - Current star count, weekly change
+   - Top traffic sources
+   - **GSC summary**: total clicks/impressions across all domains, top performing queries, queries with growth potential (high impressions, low CTR or position 5-20)
+   - What's working, what to try next
+   - **SEO opportunities**: queries where we're close to page 1, content gaps to fill
+
+Save report to /workspace/shared/thoughts/shared/research/gtm-weekly-{date}.md
+
+This is part of the GTM: Agent Swarm → 100k GitHub Stars epic.

@@ -1,27 +1,35 @@
 # Turso Interaction
 
-## The Two-Token Model (READ THIS FIRST)
+## The two-token model (READ THIS FIRST)
 
 Turso has two separate auth planes — they do NOT cross over.
 
-| Token type | Where it works | Stored in swarm config as | Expiry |
-|---|---|---|---|
-| **Platform JWT** (management plane) | `api.turso.tech/v1/*` — list orgs, list DBs, mint DB tokens | `TURSO_API_TOKEN` | ~7 days (Clerk rotates) |
-| **DB token** (data plane) | `https://<db-host>/v2/pipeline` — SELECT/INSERT/etc. against a specific DB | `TURSO_DB_TOKEN`, etc. | non-expiring (mint with `--expiration none`) |
+| Token type | Where it works | Stored in swarm config as | Signature | Expiry |
+|---|---|---|---|---|
+| **Platform JWT** (management plane) | `api.turso.tech/v1/*` — list orgs, list DBs, mint DB tokens, group/db CRUD; also what the `turso` CLI uses | `TURSO_API_TOKEN` | Clerk-issued RS256 | ~7 days — Clerk rotates it |
+| **DB token** (data plane) | `https://<db-host>/v2/pipeline` — SELECT/INSERT/etc. against a specific DB | `TURSO_DB_TOKEN` (content-state), `TURSO_X_POSTS_DB_TOKEN` (x-posts), etc. | EdDSA | non-expiring (mint with `--expiration none`) or per-token TTL |
 
-Using the **platform JWT against `/v2/pipeline` returns `HTTP 401`** — by design. If you see that error, you're using the wrong token. Use the DB-specific one.
+Using the **platform JWT against `/v2/pipeline` returns `HTTP 401 "invalid JWT token: can't be decoded with any of the existing keys"`** on every DB — that's by design, not a bug. If you see that error, you reached for the wrong token. Use the DB-specific one.
 
-## Swarm Config Inventory
+The platform JWT *can*, however, **mint** a DB token for any DB (see "Mint a DB token via API" below) — that's how you bootstrap access to a DB whose token isn't stored in config.
+
+## Swarm config inventory (current)
+
+Always fetch with `get-config includeSecrets=true`. As of 2026-05-12:
 
 | Key | Plane | Scope | Notes |
 |---|---|---|---|
-| `TURSO_API_TOKEN` | Platform | global | Clerk JWT. Expires ~weekly. |
-| `TURSO_DB_TOKEN` | Data (content-state) | global | EdDSA, non-expiring. |
-| `TURSO_DB_URL` | Data (content-state) | global | `https://content-state-desplega.aws-eu-west-1.turso.io` |
+| `TURSO_API_TOKEN` | Platform | global | Clerk JWT. Expires ~weekly. When expired, daily-blocker-digest surfaces it and Taras refreshes via Turso dashboard. |
+| `TURSO_DB_TOKEN` | Data (content-state) | global | EdDSA, non-expiring. Used with `TURSO_DB_URL` for `/v2/pipeline`. |
+| `TURSO_DB_URL` | Data (content-state) | global | `https://content-state-desplega.aws-eu-west-1.turso.io` (HTTPS form — required for HTTP API). |
 | `TURSO_X_POSTS_DB_TOKEN` | Data (x-posts) | global | EdDSA, non-expiring. |
-| `TURSO_X_POSTS_DB_URL` | Data (x-posts) | global | `libsql://x-posts-desplega...` — swap `libsql://` → `https://` before hitting `/v2/pipeline` |
+| `TURSO_X_POSTS_DB_URL` | Data (x-posts) | global | `libsql://x-posts-desplega.aws-eu-west-1.turso.io` — **swap `libsql://` → `https://` before hitting `/v2/pipeline`**. |
 
-## Querying via HTTP API `/v2/pipeline`
+`dummy-test-db` has no stored DB token. Mint one via the API on demand (recipe below).
+
+## Querying via HTTP API `/v2/pipeline` (the workflow path)
+
+Workflow script nodes hit the DB over HTTP. This is the pattern to use anywhere outside the CLI.
 
 ```bash
 curl -s -X POST "$DB_URL/v2/pipeline" \
@@ -35,16 +43,21 @@ curl -s -X POST "$DB_URL/v2/pipeline" \
   }'
 ```
 
-Always include `{"type":"close"}` as the last request. Use parameterized statements for user-supplied values.
+Response shape (success):
+```json
+{"results":[{"type":"ok","response":{"type":"execute","result":{"cols":[{"name":"name","decltype":"TEXT"}],"rows":[[{"type":"text","value":"posts"}]]}}}, {"type":"ok","response":{"type":"close"}}]}
+```
 
-**URL form**: `/v2/pipeline` only accepts `https://`. Rewrite `libsql://` keys:
+Always include `{"type":"close"}` as the last request. Use parameterized statements (`stmt.args`) for user-supplied values, not string-built SQL.
+
+**URL form**: `/v2/pipeline` only accepts `https://`. If a config key holds the `libsql://` form, rewrite the scheme:
 ```bash
 URL="${TURSO_X_POSTS_DB_URL/libsql:\/\//https:\/\/}"
 ```
 
-## Mint a DB Token via the Platform API
+## Mint a DB token via the platform API
 
-When a DB has no stored token, mint one with the platform JWT:
+When a DB has no stored token (e.g., `dummy-test-db`), mint one with the platform JWT:
 
 ```bash
 DB=dummy-test-db
@@ -53,11 +66,22 @@ DB_TOKEN=$(curl -s -X POST \
   -H "Authorization: Bearer $TURSO_API_TOKEN" | jq -r '.jwt')
 ```
 
-## CLI Authentication
+`authorization` can be `read-only` or `full-access`. Add `?expiration=1d` (or `7d`, `never`) to control TTL.
+
+## CLI installation
 
 ```bash
 curl -sSfL https://get.tur.so/install.sh | bash
 export PATH="$HOME/.turso:$PATH"
+```
+
+The binary lives at `~/.turso/turso`. PATH must be exported in the same session.
+
+## CLI authentication
+
+The CLI uses the **platform JWT**, not a DB token:
+
+```bash
 turso config set token "$TURSO_API_TOKEN"
 turso org switch desplega
 turso db list   # verify
@@ -65,35 +89,104 @@ turso db list   # verify
 
 Do NOT use `turso auth login` — it needs a browser. Always feed the config token in.
 
-## CLI Database Operations
+If `turso db list` returns 401, the platform JWT has expired — refresh `TURSO_API_TOKEN` in swarm config (Taras owns this; surface via blocker digest).
+
+## CLI database operations
 
 ```bash
-turso db create <name>
+turso db create <name>                       # default group, aws-eu-west-1
 turso db list
-turso db show <name>          # URL, region, size
-turso db shell <name>         # interactive
-turso db shell <name> "SELECT * FROM t;"  # one-shot
-turso db shell <name> < dump.sql          # pipe file
-turso db tokens create <name> --expiration none  # non-expiring token
+turso db show <name>                         # URL, region, size
+turso db shell <name>                        # interactive
+turso db shell <name> "SELECT * FROM t;"     # one-shot
+turso db shell <name> < dump.sql             # pipe file
+turso db destroy <name>                      # !!!
 ```
 
-## Key Databases (org = desplega)
+## CLI DB-token generation
 
-| Database | HTTPS URL | Token config key |
-|---|---|---|
-| `content-state` | `https://content-state-desplega.aws-eu-west-1.turso.io` | `TURSO_DB_TOKEN` |
-| `x-posts` | `https://x-posts-desplega.aws-eu-west-1.turso.io` | `TURSO_X_POSTS_DB_TOKEN` |
-| `dummy-test-db` | `https://dummy-test-db-desplega.aws-eu-west-1.turso.io` | — (mint via API) |
+```bash
+turso db tokens create <name>                       # default TTL
+turso db tokens create <name> --expiration none     # non-expiring (what we store in config)
+turso db tokens create <name> --read-only           # SELECT-only
+```
 
-## When Tokens Expire
+After generating, write back to swarm config with `set-config` (mark `isSecret=true`).
 
-- **`TURSO_API_TOKEN` expired** → CLI breaks, can't mint new DB tokens. Existing DB tokens keep working. Action: Taras rotates via Turso dashboard, updates config.
-- **A DB token expired/revoked** → that specific DB returns 401. Other DBs unaffected. Action: mint a new one, update the config key.
+## Seeding a Turso DB from local SQLite
 
-Don't conflate the two failure modes.
+```bash
+sqlite3 local.db .dump > dump.sql
+turso db create <name>
+turso db shell <name> < dump.sql
+```
 
-## Trade-offs
+## Connection-URL pattern
 
-**Two-plane auth:** The platform JWT and DB tokens are separate by design. The benefit is security (leaked DB token doesn't compromise management plane); the cost is remembering which token goes where. The 401 error from using the wrong token has burned multiple engineers.
+```
+libsql://<db-name>-<org>.aws-eu-west-1.turso.io   # for libsql:// clients
+https://<db-name>-<org>.aws-eu-west-1.turso.io    # for HTTP API /v2/pipeline
+```
 
-**HTTP API vs CLI:** The HTTP `/v2/pipeline` API works from anywhere (workflow script nodes, curl in worker containers). The CLI is better for local dev and interactive queries. Workflow nodes should use the HTTP API.
+Same host, two schemes. Some config keys store the libsql form, some the https form — normalize before use.
+
+## Key databases (org = desplega)
+
+| Database | HTTPS URL | Token config key | Used by |
+|---|---|---|---|
+| `content-state` | `https://content-state-desplega.aws-eu-west-1.turso.io` | `TURSO_DB_TOKEN` | Content workflows (`content_history`, `image_prompt_history`, `refresh_history`, `repo_patterns`, `workflow_executions`) |
+| `x-posts` | `https://x-posts-desplega.aws-eu-west-1.turso.io` | `TURSO_X_POSTS_DB_TOKEN` | X/Twitter post tracking + meme cooldown (`posts` table) |
+| `dummy-test-db` | `https://dummy-test-db-desplega.aws-eu-west-1.turso.io` | — (mint via API) | Test fixture (`users` table) |
+
+## Groups
+
+```bash
+turso group list
+turso group create <name> --location <location>
+```
+
+Default group: `default` in `aws-eu-west-1`.
+
+## Local development
+
+```bash
+turso dev    # starts a local LibSQL server
+```
+
+## Full bootstrap from scratch
+
+```bash
+curl -sSfL https://get.tur.so/install.sh | bash
+export PATH="$HOME/.turso:$PATH"
+# Fetch TURSO_API_TOKEN via get-config includeSecrets=true
+turso config set token "$TURSO_API_TOKEN"
+turso org switch desplega
+turso db list
+```
+
+## Health-check recipe (verify all 3 DBs in <30s)
+
+```bash
+# Platform plane
+curl -s -H "Authorization: Bearer $TURSO_API_TOKEN" \
+  https://api.turso.tech/v1/organizations/desplega/databases | jq '[.databases[].Name]'
+
+# Data plane — one /v2/pipeline call per DB
+for pair in "$TURSO_DB_URL|$TURSO_DB_TOKEN" "https://x-posts-desplega.aws-eu-west-1.turso.io|$TURSO_X_POSTS_DB_TOKEN"; do
+  url="${pair%|*}"; tok="${pair#*|}"
+  curl -s -X POST "$url/v2/pipeline" -H "Authorization: Bearer $tok" \
+    -H "Content-Type: application/json" \
+    -d '{"requests":[{"type":"execute","stmt":{"sql":"SELECT 1"}},{"type":"close"}]}' \
+    | jq -c '.results[0]'
+done
+```
+
+If either plane returns 401, treat as a blocker — surface in HEARTBEAT.md, do not retry silently.
+
+## When tokens expire / get rotated
+
+- **`TURSO_API_TOKEN` expired** → CLI breaks, can't mint new DB tokens, `api.turso.tech` returns 401. Existing DB tokens keep working (data plane is independent). Action: Taras rotates via Turso dashboard, updates config.
+- **A DB token expired/revoked** → that specific DB returns 401 on `/v2/pipeline`. Other DBs unaffected. Action: mint a new one (CLI or platform API), update the corresponding config key.
+
+Don't conflate the two failure modes. The blocker-digest writer should name the exact key that needs rotation.
+

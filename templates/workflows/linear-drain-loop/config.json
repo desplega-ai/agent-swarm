@@ -7,7 +7,15 @@
   "description": "Break down a Linear parent issue and process ready child issues through workers.",
   "version": "1.0.0",
   "category": "workflows",
-  "placeholders": ["LINEAR_PROJECT_ID", "REPO_URL"],
+  "placeholders": [
+    "LINEAR_PROJECT_ID",
+    "REPO_URL"
+  ],
   "runAllSeedersCandidate": false,
-  "tags": ["workflow", "linear", "triage"]
+  "tags": [
+    "workflow",
+    "linear",
+    "triage"
+  ],
+  "must": true
 }

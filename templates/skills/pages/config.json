@@ -9,5 +9,10 @@
   "category": "skills",
   "placeholders": [],
   "runAllSeedersCandidate": true,
-  "tags": ["pages", "reporting", "artifacts"]
+  "tags": [
+    "pages",
+    "reporting",
+    "artifacts"
+  ],
+  "must": true
 }

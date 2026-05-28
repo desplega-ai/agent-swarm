@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Calendar, GitBranch, Wrench, type LucideIcon } from "lucide-react";
+import { Calendar, GitBranch, Star, Wrench, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AgentAssetConfig, AgentAssetKind } from "../../../templates/schema";
@@ -42,12 +42,19 @@ export function AssetCard({ asset }: AssetCardProps) {
                 <p className="text-xs text-muted-foreground capitalize">{asset.kind}</p>
               </div>
             </div>
-            <Badge
-              variant={asset.runAllSeedersCandidate ? "default" : "secondary"}
-              className="text-xs"
-            >
-              {asset.runAllSeedersCandidate ? "starter" : asset.kind}
-            </Badge>
+            {asset.must ? (
+              <Badge className="gap-1 bg-amber-500 text-xs text-white hover:bg-amber-500/90">
+                <Star className="h-3 w-3 fill-current" />
+                Must-have
+              </Badge>
+            ) : (
+              <Badge
+                variant={asset.runAllSeedersCandidate ? "default" : "secondary"}
+                className="text-xs"
+              >
+                {asset.runAllSeedersCandidate ? "starter" : asset.kind}
+              </Badge>
+            )}
           </div>
         </CardHeader>
         <CardContent>

@@ -50,6 +50,8 @@ export interface AgentAssetConfig {
   category: AgentAssetCategory;
   placeholders: string[];
   runAllSeedersCandidate: boolean;
+  /** Marks an asset as an essential, recommended-for-every-swarm building block. */
+  must?: boolean;
   tags: string[];
 }
 

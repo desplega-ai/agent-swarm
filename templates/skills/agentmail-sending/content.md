@@ -4,7 +4,7 @@ These rules are MANDATORY for all agents sending email via AgentMail. Violating 
 
 ## Rule 1: TEXT ONLY — Never Pass `html` Parameter
 
-**AgentMail has a critical bug:** When both `text` and `html` parameters are passed to `send_message` or `reply_to_message`, the HTML body content is silently dropped. The resulting email has an empty `<div dir="ltr"></div>`. Email clients (Gmail, etc.) prefer the HTML version over plain text, so recipients see a completely blank email.
+**AgentMail has a critical bug (as of 2026-03-25):** When both `text` and `html` parameters are passed to `send_message` or `reply_to_message`, the HTML body content is silently dropped. The resulting email has an empty `<div dir="ltr"></div>`. Email clients (Gmail, etc.) prefer the HTML version over plain text, so recipients see a completely blank email.
 
 **What to do:**
 - ONLY pass the `text` parameter
@@ -46,12 +46,3 @@ Before every `send_message` or `reply_to_message` call:
 - [ ] Plain text signature appended
 - [ ] Human-approved if it's outreach/cold email
 
-## When to Use
-
-Invoke this skill whenever an agent calls `send_message` or `reply_to_message` via AgentMail. These rules apply to all swarm agents — they are not optional.
-
-## Trade-offs
-
-**Text-only limitation:** Plain text emails lack formatting (no bold, tables, links with custom text). This is a known UX trade-off accepted until the AgentMail HTML bug is fixed upstream.
-
-**BCC requirement:** Adding `t@desplega.ai` as BCC on every external email means the founder sees all agent-sent correspondence. Intended for oversight, not for customer-facing emails where a BCC would appear in the header — use `bcc` (not visible in `to/cc`).

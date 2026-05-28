@@ -27,6 +27,12 @@ export function Header() {
           >
             Builder
           </Link>
+          <Link
+            href="/api-reference"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            API
+          </Link>
           <a
             href="https://docs.agent-swarm.dev"
             target="_blank"

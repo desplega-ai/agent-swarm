@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Header } from "@/components/header";
-import { Footer } from "@/components/footer";
 import { ComposeBuilder } from "@/components/compose-builder";
 import { getAllTemplates } from "@/lib/templates";
 

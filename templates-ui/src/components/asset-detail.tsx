@@ -1,9 +1,21 @@
 "use client";
 
-import { useState } from "react";
-import { Check, Copy, Calendar, GitBranch, Wrench } from "lucide-react";
+import {
+  BadgeCheck,
+  Calendar,
+  Check,
+  Copy,
+  GitBranch,
+  MessageSquareQuote,
+  Wrench,
+} from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import * as Popover from "@radix-ui/react-popover";
 import { Badge } from "@/components/ui/badge";
-import type { AgentAssetResponse, AgentAssetKind } from "../../../templates/schema";
+import { Markdown } from "@/components/markdown";
+import { WorkflowGraph, type WorkflowDefinitionLike } from "@/components/workflow-graph";
+import { cn } from "@/lib/utils";
+import type { AgentAssetKind, AgentAssetResponse } from "../../../templates/schema";
 
 const kindIcons = {
   skill: Wrench,
@@ -35,6 +47,131 @@ function buildPromptForLead(asset: AgentAssetResponse["config"], pageUrl: string
   return `Create a workflow using the "${displayName}" template.\n\nReference: ${pageUrl}${placeholderNote}\n\nCopy the workflow JSON from the template and run:\ncreate-workflow --from-template ${slug}`;
 }
 
+/**
+ * Pull the first ```json fenced block out of the markdown body. Returns the
+ * parsed definition, the pretty-printed JSON, and the markdown with the block
+ * removed so prose can be rendered around the graph. Falls back to nulls when
+ * there is no parseable JSON block.
+ */
+function extractWorkflowJson(body: string): {
+  definition: WorkflowDefinitionLike | null;
+  prettyJson: string | null;
+  rest: string;
+} {
+  const match = body.match(/```json\n([\s\S]*?)```/);
+  if (!match) return { definition: null, prettyJson: null, rest: body };
+
+  try {
+    const parsed = JSON.parse(match[1]) as WorkflowDefinitionLike;
+    const prettyJson = JSON.stringify(parsed, null, 2);
+    const rest = body.replace(match[0], "").replace(/\n{3,}/g, "\n\n").trim();
+    return { definition: parsed, prettyJson, rest };
+  } catch {
+    return { definition: null, prettyJson: null, rest: body };
+  }
+}
+
+/** Small copy-to-clipboard button with a transient "Copied!" state. */
+function CopyButton({
+  text,
+  label,
+  copiedLabel = "Copied!",
+  className,
+}: {
+  text: string;
+  label: string;
+  copiedLabel?: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can reject (e.g. insecure context) — fail silently.
+    }
+  }, [text]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
+        className,
+      )}
+    >
+      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+      {copied ? copiedLabel : label}
+    </button>
+  );
+}
+
+/** "Prompt for the Lead" — a button that copies on open and reveals the prompt. */
+function PromptForLeadPopover({ promptText, kindLabel }: { promptText: string; kindLabel: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignore clipboard failures
+    }
+  }, [promptText]);
+
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) void copy();
+    },
+    [copy],
+  );
+
+  return (
+    <Popover.Root onOpenChange={handleOpenChange}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
+        >
+          <MessageSquareQuote className="h-4 w-4" />
+          Prompt for the Lead
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={8}
+          className="z-50 w-[min(28rem,calc(100vw-2rem))] rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-md outline-none"
+        >
+          <p className="mb-2 text-xs text-muted-foreground">
+            Hand this to your Lead agent to install or create this {kindLabel.toLowerCase()}.
+          </p>
+          <div className="max-h-80 overflow-y-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap">
+            {promptText}
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              {copied && (
+                <>
+                  <Check className="h-3.5 w-3.5" />
+                  Copied to clipboard
+                </>
+              )}
+            </span>
+            <CopyButton text={promptText} label="Copy again" className="px-2.5 py-1 text-xs" />
+          </div>
+          <Popover.Arrow className="fill-border" />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
 interface AssetDetailProps {
   asset: AgentAssetResponse;
   category: string;
@@ -42,30 +179,39 @@ interface AssetDetailProps {
 }
 
 export function AssetDetail({ asset, category, name }: AssetDetailProps) {
-  const [copied, setCopied] = useState(false);
   const pageUrl = `https://templates.agent-swarm.dev/${category}/${name}`;
   const promptText = buildPromptForLead(asset.config, pageUrl);
   const Icon = kindIcons[asset.config.kind];
+  const kindLabel = kindLabels[asset.config.kind];
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(promptText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const isWorkflow = asset.config.kind === "workflow";
+  const { definition, prettyJson, rest } = useMemo(
+    () => (isWorkflow ? extractWorkflowJson(asset.body) : { definition: null, prettyJson: null, rest: asset.body }),
+    [isWorkflow, asset.body],
+  );
 
   return (
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <div className="flex items-center gap-3 mb-2">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
             <Icon className="h-5 w-5 text-primary" />
           </div>
           <h1 className="text-3xl font-bold">{asset.config.displayName}</h1>
-          <Badge variant="secondary">{kindLabels[asset.config.kind]}</Badge>
+          <Badge variant="secondary">{kindLabel}</Badge>
           <Badge variant="outline">v{asset.config.version}</Badge>
+          {asset.config.must === true && (
+            <Badge variant="default" className="gap-1">
+              <BadgeCheck className="h-3.5 w-3.5" />
+              Must-have
+            </Badge>
+          )}
+          <div className="ml-auto">
+            <PromptForLeadPopover promptText={promptText} kindLabel={kindLabel} />
+          </div>
         </div>
-        <p className="text-lg text-muted-foreground mb-4">{asset.config.description}</p>
+        <p className="mb-4 text-lg text-muted-foreground">{asset.config.description}</p>
         <div className="flex flex-wrap gap-1.5">
           {asset.config.tags.map((tag) => (
             <Badge key={tag} variant="outline" className="text-xs">
@@ -74,10 +220,10 @@ export function AssetDetail({ asset, category, name }: AssetDetailProps) {
           ))}
         </div>
         {asset.config.placeholders.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2 items-center text-sm text-muted-foreground">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <span>Placeholders to fill:</span>
             {asset.config.placeholders.map((p) => (
-              <code key={p} className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
+              <code key={p} className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
                 {`{{${p}}}`}
               </code>
             ))}
@@ -85,128 +231,29 @@ export function AssetDetail({ asset, category, name }: AssetDetailProps) {
         )}
       </div>
 
-      {/* Prompt for Lead */}
-      <div className="rounded-lg border border-border bg-card p-4">
-        <h2 className="text-sm font-semibold mb-1">Prompt for the Lead</h2>
-        <p className="text-xs text-muted-foreground mb-3">
-          Copy this instruction and hand it to your Lead agent to install or create this{" "}
-          {kindLabels[asset.config.kind].toLowerCase()}.
-        </p>
-        <div className="rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap">
-          {promptText}
+      {/* Workflow graph */}
+      {isWorkflow && definition && (
+        <div>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">Workflow</h2>
+            {prettyJson && (
+              <CopyButton text={prettyJson} label="Copy workflow JSON" />
+            )}
+          </div>
+          <WorkflowGraph definition={definition} />
         </div>
-        <button
-          onClick={handleCopy}
-          className="mt-2 flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-        >
-          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-          {copied ? "Copied!" : "Copy prompt"}
-        </button>
-      </div>
+      )}
 
       {/* Content */}
       <div>
-        <h2 className="text-lg font-semibold mb-4">Template Content</h2>
-        <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card/50 p-6">
-          <MarkdownBody content={asset.body} />
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Template Content</h2>
+          <CopyButton text={asset.body} label="Copy contents" />
+        </div>
+        <div className="rounded-lg border border-border bg-card/50 p-6">
+          <Markdown>{isWorkflow && definition ? rest : asset.body}</Markdown>
         </div>
       </div>
     </div>
   );
-}
-
-function MarkdownBody({ content }: { content: string }) {
-  // Simple markdown renderer: code fences and paragraphs
-  const lines = content.split("\n");
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.startsWith("```")) {
-      const lang = line.slice(3).trim();
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      elements.push(
-        <pre key={i} className="rounded-md bg-muted p-4 overflow-x-auto">
-          <code className={lang ? `language-${lang}` : ""}>
-            {codeLines.join("\n")}
-          </code>
-        </pre>,
-      );
-      i++;
-    } else if (line.startsWith("# ")) {
-      elements.push(
-        <h1 key={i} className="text-xl font-bold mt-6 mb-2">
-          {line.slice(2)}
-        </h1>,
-      );
-      i++;
-    } else if (line.startsWith("## ")) {
-      elements.push(
-        <h2 key={i} className="text-lg font-semibold mt-5 mb-2">
-          {line.slice(3)}
-        </h2>,
-      );
-      i++;
-    } else if (line.startsWith("### ")) {
-      elements.push(
-        <h3 key={i} className="text-base font-semibold mt-4 mb-1">
-          {line.slice(4)}
-        </h3>,
-      );
-      i++;
-    } else if (/^\d+\. /.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\d+\. /.test(lines[i])) {
-        items.push(lines[i].replace(/^\d+\. /, ""));
-        i++;
-      }
-      elements.push(
-        <ol key={i} className="list-decimal list-inside space-y-1 my-2 text-sm">
-          {items.map((item, idx) => (
-            <li key={idx} dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
-          ))}
-        </ol>,
-      );
-    } else if (line.startsWith("- ")) {
-      const items: string[] = [];
-      while (i < lines.length && lines[i].startsWith("- ")) {
-        items.push(lines[i].slice(2));
-        i++;
-      }
-      elements.push(
-        <ul key={i} className="list-disc list-inside space-y-1 my-2 text-sm">
-          {items.map((item, idx) => (
-            <li key={idx} dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
-          ))}
-        </ul>,
-      );
-    } else if (line.trim() === "") {
-      i++;
-    } else {
-      elements.push(
-        <p
-          key={i}
-          className="my-2 text-sm"
-          dangerouslySetInnerHTML={{ __html: renderInline(line) }}
-        />,
-      );
-      i++;
-    }
-  }
-
-  return <>{elements}</>;
-}
-
-function renderInline(text: string): string {
-  return text
-    .replace(/`([^`]+)`/g, "<code class=\"rounded bg-muted px-1 py-0.5 text-xs font-mono\">$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
 }

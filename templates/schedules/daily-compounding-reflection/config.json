@@ -7,7 +7,15 @@
   "description": "Capture lessons from the day into memory, skills, and workflow improvements.",
   "version": "1.0.0",
   "category": "schedules",
-  "placeholders": ["SLACK_CHANNEL_ID", "TIMEZONE"],
+  "placeholders": [
+    "SLACK_CHANNEL_ID",
+    "TIMEZONE"
+  ],
   "runAllSeedersCandidate": true,
-  "tags": ["memory", "skills", "operations"]
+  "tags": [
+    "memory",
+    "skills",
+    "operations"
+  ],
+  "must": true
 }

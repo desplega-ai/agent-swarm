@@ -9,5 +9,10 @@
   "category": "skills",
   "placeholders": [],
   "runAllSeedersCandidate": true,
-  "tags": ["workflows", "authoring", "qa"]
+  "tags": [
+    "workflows",
+    "authoring",
+    "qa"
+  ],
+  "must": true
 }
