@@ -26,7 +26,9 @@
 /** Models supported by the managed-agents surface for the swarm worker. */
 export const CLAUDE_MANAGED_MODELS = [
   "claude-sonnet-4-6",
+  "claude-opus-4-8",
   "claude-opus-4-7",
+  "claude-opus-4-6",
   "claude-haiku-4-5",
 ] as const;
 
@@ -45,11 +47,13 @@ export interface ClaudeManagedModelPricing {
 }
 
 /**
- * Anthropic public list pricing as of 2026-04-28. Source:
+ * Anthropic public list pricing. Source:
  * https://platform.claude.com/docs/en/about-claude/pricing
  *
  * - claude-sonnet-4-6: $3 / $15 / $0.30 / $3.75    (in / out / cache-read / cache-write)
- * - claude-opus-4-7:   $15 / $75 / $1.50 / $18.75
+ * - claude-opus-4-8:   $5 / $25 / $0.50 / $6.25    (verified 2026-05-28)
+ * - claude-opus-4-7:   $15 / $75 / $1.50 / $18.75  (STALE — was correct at launch, Anthropic has since dropped Opus to $5/$25)
+ * - claude-opus-4-6:   $5 / $25 / $0.50 / $6.25    (verified 2026-05-28)
  * - claude-haiku-4-5:  $1 / $5 / $0.10 / $1.25
  */
 export const CLAUDE_MANAGED_MODEL_PRICING: Record<ClaudeManagedModel, ClaudeManagedModelPricing> = {
@@ -59,11 +63,23 @@ export const CLAUDE_MANAGED_MODEL_PRICING: Record<ClaudeManagedModel, ClaudeMana
     cacheReadPerMillion: 0.3,
     cacheWritePerMillion: 3.75,
   },
+  "claude-opus-4-8": {
+    inputPerMillion: 5.0,
+    outputPerMillion: 25.0,
+    cacheReadPerMillion: 0.5,
+    cacheWritePerMillion: 6.25,
+  },
   "claude-opus-4-7": {
     inputPerMillion: 15.0,
     outputPerMillion: 75.0,
     cacheReadPerMillion: 1.5,
     cacheWritePerMillion: 18.75,
+  },
+  "claude-opus-4-6": {
+    inputPerMillion: 5.0,
+    outputPerMillion: 25.0,
+    cacheReadPerMillion: 0.5,
+    cacheWritePerMillion: 6.25,
   },
   "claude-haiku-4-5": {
     inputPerMillion: 1.0,
