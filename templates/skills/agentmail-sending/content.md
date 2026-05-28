@@ -1,12 +1,57 @@
-# AgentMail Sending
+# AgentMail Sending Rules
 
-Use this skill when an agent sends email on behalf of an operator.
+These rules are MANDATORY for all agents sending email via AgentMail. Violating them will result in blank emails reaching real people.
 
-Checklist:
+## Rule 1: TEXT ONLY — Never Pass `html` Parameter
 
-1. Confirm recipient, subject, and intended outcome.
-2. Keep the message concise and specific.
-3. Never expose secrets, internal task IDs, private Slack links, or unapproved customer data.
-4. Include a plain-text signature such as `{{COMPANY_SIGNATURE}}`.
-5. If replying, preserve the relevant context and avoid changing commitments made earlier.
-6. When the API returns a provider error, report the provider status and do not retry blindly.
+**AgentMail has a critical bug:** When both `text` and `html` parameters are passed to `send_message` or `reply_to_message`, the HTML body content is silently dropped. The resulting email has an empty `<div dir="ltr"></div>`. Email clients (Gmail, etc.) prefer the HTML version over plain text, so recipients see a completely blank email.
+
+**What to do:**
+- ONLY pass the `text` parameter
+- NEVER pass the `html` parameter
+- This applies to BOTH `send_message` and `reply_to_message`
+
+**Why this matters:** This bug caused real outbound prospect emails to arrive blank, burning contacts permanently. It is not a cosmetic issue — it's a data loss / reputation issue.
+
+## Rule 2: Always BCC t@desplega.ai on Outbound Emails
+
+All outbound emails to external recipients (anyone outside @agent-swarm.dev) MUST include `t@desplega.ai` as BCC. This gives the human founder visibility into what emails the swarm is sending.
+
+**How:**
+```
+send_message({
+  inboxId: "lead@agent-swarm.dev",
+  to: ["recipient@example.com"],
+  bcc: ["t@desplega.ai"],
+  subject: "...",
+  text: "..."
+})
+```
+
+**Exception:** Internal emails between agent inboxes (@agent-swarm.dev) or to t@desplega.ai / e@desplega.ai directly do NOT need BCC.
+
+## Rule 3: Always Include Signature
+
+Use the `email-signature` skill to append the proper plain text signature to every outgoing email. See that skill for the template.
+
+## Rule 4: Human Approval Before Sending to Prospects
+
+Never send outreach/cold emails to external prospects without explicit human approval. Draft the emails, present them for review, and only send after receiving "approved" or equivalent confirmation.
+
+## Summary Checklist
+
+Before every `send_message` or `reply_to_message` call:
+- [ ] Only `text` param, NO `html` param
+- [ ] BCC `t@desplega.ai` if recipient is external
+- [ ] Plain text signature appended
+- [ ] Human-approved if it's outreach/cold email
+
+## When to Use
+
+Invoke this skill whenever an agent calls `send_message` or `reply_to_message` via AgentMail. These rules apply to all swarm agents — they are not optional.
+
+## Trade-offs
+
+**Text-only limitation:** Plain text emails lack formatting (no bold, tables, links with custom text). This is a known UX trade-off accepted until the AgentMail HTML bug is fixed upstream.
+
+**BCC requirement:** Adding `t@desplega.ai` as BCC on every external email means the founder sees all agent-sent correspondence. Intended for oversight, not for customer-facing emails where a BCC would appear in the header — use `bcc` (not visible in `to/cc`).
