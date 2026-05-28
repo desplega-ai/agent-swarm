@@ -219,19 +219,19 @@ Remove the `--resume` flag construction from Claude adapters and the `resumeThre
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun test src/tests/resume-session.test.ts` passes
-- [ ] `bun test src/tests/runner-context-preamble.test.ts` passes
-- [ ] `bun run tsc:check`
-- [ ] `bun run lint`
-- [ ] `bun test` (full suite) — no regressions
-- [ ] `grep -rn "RESUMABLE_PROVIDERS\|isClaudeCliSessionId" src/` — zero hits.
+- [x] `bun test src/tests/resume-session.test.ts` passes
+- [x] `bun test src/tests/runner-context-preamble.test.ts` passes
+- [x] `bun run tsc:check`
+- [x] `bun run lint`
+- [x] `bun test` (full suite) — no regressions (4723 pass / 0 fail)
+- [x] `grep -rn "RESUMABLE_PROVIDERS\|isClaudeCliSessionId" src/` — zero hits.
 
 #### Automated QA:
 - [ ] Slack E2E one more time: send → reply → confirm preamble fires, no `--resume`, no warn lines (adapter no longer sees `resumeSessionId` at all).
 - [ ] Restart the worker container mid-thread, send a follow-up, confirm the next turn still has prior context. This is the exact failure case that motivated the plan.
 
 #### Manual Verification:
-- [ ] Docs grep is clean — no stale references to `--resume` as the continuity mechanism.
+- [x] Docs grep is clean — no stale references to `--resume` as the continuity mechanism. (Only mention is the deprecation note in `runbooks/harness-providers.md` and the historical reference in `docs-site/.../guides/harness-providers.mdx`.)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 3] reduce resume-session to observability shim`.
 

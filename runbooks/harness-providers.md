@@ -61,6 +61,20 @@ When `MODEL_OVERRIDE=amazon-bedrock/<model-id>` (e.g. `amazon-bedrock/anthropic.
 - Credential errors surface at the first Bedrock inference call as an AWS SDK error in the session log (scrubbed via `scrubSecrets` at egress). Treat this the same as a codex `auth.json` failure: the adapter/SDK is the source of truth, not the boot gate.
 - This is the closest precedent to codex's "presence-only" pattern (`codexAuthFileExists` → `presenceCheckOk`). If pi-ai later exposes a `validateBedrockCredentials` helper, the live-test branch in `validateProviderCredentials` can be upgraded without touching the boot gate.
 
+## Native session resume is deprecated (2026-05-28)
+
+The runner no longer asks any harness to resume a prior session. Follow-up continuity flows entirely through the bounded context preamble (`src/commands/context-preamble.ts`), which is rebuilt deterministically from the parent-task chain held in the API DB and survives worker-container restarts. The earlier path — `claude --resume <UUID>` / `codex.resumeThread(id)` / managed-cloud `events.list` replay — depended on an on-disk transcript that disappears on deploy/OOM/autoscaler reschedule; when it died, users perceived the agent as having forgotten the conversation.
+
+Concretely:
+
+- `src/commands/runner.ts` calls `resolveResumeSession(...)` and `logResumeResolution(...)` for observability only; the runner never threads `resumeSessionId` into `spawnProviderProcess`.
+- `src/commands/resume-session.ts` is reduced to an observability shim — every non-empty candidate ends up in `resolution.skipped` with reason `"native resume deprecated — using context preamble"`. `resolveResumeSession` always returns `resumeSessionId: undefined`.
+- All local adapters (`claude`, `claude-managed`, `codex`) warn + ignore any stray `resumeSessionId` and spawn a fresh session. `CodexAdapter.canResume()` returns `false` unconditionally.
+- `ProviderSessionConfig.resumeSessionId` stays in the type for backwards compatibility but is marked `@deprecated`. New writes to `tasks.claudeSessionId` / `provider` / `providerMeta` continue for observability; no migration was run.
+- **Out of scope**: Devin. Its server-side continuation lives in Cognition's cloud and is immune to the container-restart bug — Devin's resume path is unchanged.
+
+Refs: [`thoughts/taras/plans/2026-05-28-deprecate-native-resume.md`](../thoughts/taras/plans/2026-05-28-deprecate-native-resume.md). When rolling back, prefer `git revert` over re-introducing a runtime flag — the deprecation was intentionally one-shot to avoid keeping dead resume paths around.
+
 ## Same-PR doc-update rule
 
 Any **observable** change must update the docs-site guide in the **same PR** as the code change. Observable means:

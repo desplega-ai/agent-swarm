@@ -63,6 +63,7 @@ interface ProviderSessionConfig {
   apiUrl: string;           // swarm API base URL for callbacks
   apiKey: string;           // swarm API key
   cwd: string;              // workspace dir
+  /** @deprecated Always undefined — native resume removed in the 2026-05-28 plan. */
   resumeSessionId?: string;
   iteration?: number;
   logFile: string;          // jsonl log path
@@ -214,7 +215,7 @@ Assembled around `runner.ts` L1582–1596 and L3093–3133:
 | `model` | `task.model` → `MODEL_OVERRIDE` env → `""` |
 | `agentId`, `taskId`, `apiUrl`, `apiKey` | Worker env + task row |
 | `cwd` | `task.dir` → `repoContext.clonePath` → `process.cwd()` (L3050–3072) |
-| `resumeSessionId` | Parent task's provider session, looked up via `fetchProviderSessionId` (L1145–1160) when `task.parentTaskId` is set |
+| `resumeSessionId` | **Deprecated** — always `undefined`. The runner stopped threading native session resume in the 2026-05-28 plan; follow-up continuity flows entirely through the context preamble prepended to `prompt`. |
 | `iteration` | Retry counter (runner state) |
 | `logFile` | `${logDir}/${timestamp}-${taskIdSlice}.jsonl` (L3102) — see §4 |
 | `env` | Merged worker env + task-provided env |
@@ -236,10 +237,11 @@ The runner (not the adapter) owns all of these. They are listed here so you know
 
 ### Resume semantics
 
-- **Parent → child** continuity is now two-layered: the runner prepends a bounded context preamble for **all** providers when `parentTaskId` is set, and resumable providers can additionally receive a native `resumeSessionId` when a reusable parent session exists.
-- **Pause → resume**: a paused task restarts with a **new** session, re-applying `task.progress` via `buildResumePrompt` (L809–829); if the task is also part of a parent chain, the same context-preamble path is applied before execution resumes.
-- **Codex** exposes `adapter.canResume(sessionId)` and `codex.resumeThread(...)` at [`codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) L871–873.
-- **Claude** has a stale-session recovery path at [`claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) L489–540 that strips `--resume` and opens a fresh session with a new `logFile`.
+Native session resume (the `claude --resume <UUID>` CLI flag and `codex.resumeThread(id)` SDK call) was removed in the 2026-05-28 deprecation plan ([`thoughts/taras/plans/2026-05-28-deprecate-native-resume.md`](https://github.com/desplega-ai/agent-swarm/blob/main/thoughts/taras/plans/2026-05-28-deprecate-native-resume.md)). The reasoning: native resume relied on an on-disk transcript that disappears when the worker container restarts (deploy, OOM, autoscaler reschedule), and the harness then either errored out or silently spawned a context-less session. The bounded context preamble survives any worker restart because it is rebuilt from the parent-task chain held in the API DB.
+
+- **Parent → child** continuity is now single-layered: the runner prepends a bounded preamble (cap ~2000 tokens, see `src/commands/context-preamble.ts`) for **all** providers when `task.parentTaskId` is set, and adapters always spawn a fresh harness session. `resolveResumeSession` is preserved as an observability shim that logs which session ids *would* have been used; it never returns a `resumeSessionId`.
+- **Pause → resume**: a paused task restarts with a **new** session, re-applying `task.progress` via `buildResumePrompt` (L809–829); if the task is also part of a parent chain, the context-preamble path is applied before execution resumes.
+- **Adapter behavior**: claude / claude-managed / codex each warn and ignore any stray `resumeSessionId` they receive; the runner no longer sets one. `CodexAdapter.canResume()` returns `false` unconditionally.
 
 **What your adapter owes the task:** emit `session_init` as early as possible (so the runner can persist the provider session id), emit `tool_start`/`tool_end` faithfully (so the UI shows the agent's work), and emit a `result` with populated `CostData` before your `waitForCompletion()` resolves.
 
