@@ -8,6 +8,7 @@
  */
 
 import type { ProviderTraits } from "../providers/types";
+import type { ProviderName } from "../types";
 import { resolveTemplateAsync } from "./resolver";
 
 // Side-effect import: register all system + session templates
@@ -55,6 +56,12 @@ export type BasePromptArgs = {
   swarmUrl: string;
   capabilities?: string[];
   traits?: ProviderTraits;
+  /**
+   * Harness provider for this session. Gates provider-specific prompt blocks
+   * (e.g. the context-mode block is excluded for `pi`, which has no
+   * context-mode MCP wiring yet — deferred to DES-514).
+   */
+  provider?: ProviderName;
   name?: string;
   description?: string;
   soulMd?: string;
@@ -91,8 +98,16 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   if (!hasMcp) {
     // If no MCP, role cannot be lead
     compositeEventType = "system.session.worker.remote";
+  } else if (role === "lead") {
+    compositeEventType = "system.session.lead";
+  } else if (args.provider === "pi") {
+    // Pi has no context-mode MCP wiring yet (deferred to DES-514), so it uses a
+    // worker composite that omits the context_mode block to avoid advertising
+    // phantom `ctx_*` tools. All other local providers (claude, codex, opencode)
+    // keep the block via the standard worker composite.
+    compositeEventType = "system.session.worker.pi";
   } else {
-    compositeEventType = role === "lead" ? "system.session.lead" : "system.session.worker";
+    compositeEventType = "system.session.worker";
   }
   const compositeResult = await resolveTemplateAsync(compositeEventType, vars);
   let prompt = compositeResult.text;
