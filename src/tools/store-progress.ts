@@ -29,17 +29,47 @@ import { validateJsonSchema } from "@/workflows/json-schema-validator";
 // that double-counted alongside the harness's authoritative entry.
 
 const SCHEDULE_TAG_PREFIX = "schedule:";
+const AUTOMATIC_TASK_TYPES = new Set([
+  "boot-triage",
+  "heartbeat",
+  "heartbeat-checklist",
+  "health-check",
+  "health-probe",
+  "monitor",
+  "monitoring",
+]);
 
 export function isScheduledTaskCompletion(task: { tags?: string[] | null }): boolean {
   return task.tags?.some((tag) => tag.startsWith(SCHEDULE_TAG_PREFIX)) ?? false;
 }
 
+export function isAutomaticOrRecurringTaskCompletion(task: {
+  source?: string | null;
+  taskType?: string | null;
+  tags?: string[] | null;
+}): boolean {
+  const tags = task.tags ?? [];
+  const taskType = task.taskType?.toLowerCase();
+
+  return (
+    task.source === "schedule" ||
+    task.source === "system" ||
+    tags.includes("scheduled") ||
+    tags.includes("auto-generated") ||
+    tags.some((tag) => tag.startsWith(SCHEDULE_TAG_PREFIX)) ||
+    (taskType !== undefined &&
+      (AUTOMATIC_TASK_TYPES.has(taskType) ||
+        taskType.endsWith("-monitor") ||
+        taskType.endsWith("-digest")))
+  );
+}
+
 export function shouldPersistTaskCompletionMemory(
-  task: { tags?: string[] | null },
+  task: { source?: string | null; taskType?: string | null; tags?: string[] | null },
   persistMemory?: boolean,
 ): boolean {
   if (persistMemory) return true;
-  return !isScheduledTaskCompletion(task);
+  return !isAutomaticOrRecurringTaskCompletion(task);
 }
 
 export const registerStoreProgressTool = (server: McpServer) => {
@@ -74,7 +104,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .boolean()
           .optional()
           .describe(
-            "Opt in to task_completion memory persistence for scheduled/recurring tasks. Manual tasks are persisted by default; tasks tagged schedule:* are skipped unless this is true.",
+            "Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true.",
           ),
         // Phase 11: `costData` removed. The harness adapter is the sole
         // writer of `session_costs` (see POST /api/session-costs in the
@@ -349,7 +379,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
       // Index completed and failed tasks as memory (async, non-blocking).
       // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate
       // memory entries / vector index pollution.
-      // Scheduled/recurring tasks are noisy by default; require explicit opt-in.
+      // Automatic/recurring tasks are noisy by default; require explicit opt-in.
       if (
         shouldRunTerminalSideEffects &&
         shouldPersistTaskCompletionMemory(result.task, persistMemory)
