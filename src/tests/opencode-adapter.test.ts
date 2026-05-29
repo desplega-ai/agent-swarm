@@ -7,6 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
 import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
@@ -645,22 +646,28 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
 
 describe("OpencodeAdapter — context-mode plugin wiring (phase 4)", () => {
   let prevContextModeDisabled: string | undefined;
+  let prevContextModePluginPath: string | undefined;
+  // The global npm install of context-mode is absent in the test env, so point
+  // the override at a real temp file to make resolution succeed deterministically.
+  const fakePluginPath = "/tmp/ctx-mode-opencode-plugin.test.js";
 
   beforeEach(() => {
     prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
+    prevContextModePluginPath = process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH;
     lastCreateOpencodeConfig = undefined;
     mock.restore();
   });
 
   afterEach(() => {
-    // Never leak the env mutation across tests.
-    if (prevContextModeDisabled === undefined) {
-      delete process.env.CONTEXT_MODE_DISABLED;
-    } else {
-      process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
-    }
+    // Never leak the env mutations across tests.
+    if (prevContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+    else process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
+    if (prevContextModePluginPath === undefined)
+      delete process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH;
+    else process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = prevContextModePluginPath;
     Bun.$`rm -rf /tmp/opencode-task-1.json /tmp/opencode-data-task-1`.quiet().nothrow();
     Bun.$`rm -rf /tmp/test/.opencode`.quiet().nothrow();
+    Bun.$`rm -f ${fakePluginPath}`.quiet().nothrow();
   });
 
   /** Pull the opencode config object passed to createOpencode. */
@@ -672,30 +679,52 @@ describe("OpencodeAdapter — context-mode plugin wiring (phase 4)", () => {
     return opts.config as { plugin?: string[]; mcp?: Record<string, unknown> };
   }
 
-  test("plugin array includes context-mode by default", async () => {
+  test("resolveContextModePluginPath returns the override path when it exists", async () => {
+    writeFileSync(fakePluginPath, "// test plugin\n");
+    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
+    const { resolveContextModePluginPath } = await import("../providers/opencode-adapter");
+    expect(resolveContextModePluginPath()).toBe(fakePluginPath);
+  });
+
+  test("resolveContextModePluginPath returns null when the override path is missing", async () => {
+    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = "/tmp/ctx-mode-does-not-exist.js";
+    const { resolveContextModePluginPath } = await import("../providers/opencode-adapter");
+    expect(resolveContextModePluginPath()).toBeNull();
+  });
+
+  test("plugin array includes the resolved context-mode plugin path when available", async () => {
     delete process.env.CONTEXT_MODE_DISABLED;
+    writeFileSync(fakePluginPath, "// test plugin\n");
+    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
     const events: OpencodeEvent[] = [
       { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
     ];
     await driveSession(events, testConfig({ taskId: "task-1" }));
 
     const built = getBuiltConfig();
-    expect(built.plugin).toContain("context-mode");
+    expect(built.plugin).toContain(fakePluginPath);
+    // The bare package name must never be used — opencode can't resolve it offline.
+    expect(built.plugin).not.toContain("context-mode");
   });
 
   test("plugin array excludes context-mode when CONTEXT_MODE_DISABLED=true", async () => {
     process.env.CONTEXT_MODE_DISABLED = "true";
+    writeFileSync(fakePluginPath, "// test plugin\n");
+    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
     const events: OpencodeEvent[] = [
       { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
     ];
     await driveSession(events, testConfig({ taskId: "task-1" }));
 
     const built = getBuiltConfig();
+    expect(built.plugin).not.toContain(fakePluginPath);
     expect(built.plugin).not.toContain("context-mode");
   });
 
   test("context-mode does NOT appear in the mcp block", async () => {
     delete process.env.CONTEXT_MODE_DISABLED;
+    writeFileSync(fakePluginPath, "// test plugin\n");
+    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
     const events: OpencodeEvent[] = [
       { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
     ];
