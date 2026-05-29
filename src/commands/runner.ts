@@ -1054,8 +1054,21 @@ async function supersedeTaskViaAPI(
       return { ok: true, resumeTaskId, kind };
     }
 
-    // 4xx → treat as terminal: do NOT fall back to legacy pause (it would
-    // misinterpret a deliberate rejection as a partial-deploy mismatch).
+    // 404 / 405 — the route doesn't exist on this API server. Happens during
+    // partial deploys (new worker rolled out before new API). Fall back to
+    // legacy pause so the task isn't left orphaned in_progress until heartbeat
+    // recovery picks it up minutes later.
+    if (response.status === 404 || response.status === 405) {
+      console.warn(
+        `[${role}] Supersede route missing for task ${taskId.slice(0, 8)} (${response.status}); falling back to pause`,
+      );
+      return { ok: false };
+    }
+
+    // Other 4xx → deliberate rejection from a current API (bad request,
+    // idempotent no-op, forbidden, conflict). Do NOT fall back to legacy
+    // pause — the API actively rejected the supersede, retrying via pause
+    // would be wrong.
     if (response.status >= 400 && response.status < 500) {
       const error = await response.text();
       console.warn(

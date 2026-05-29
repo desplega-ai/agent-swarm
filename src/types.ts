@@ -1,10 +1,6 @@
 import * as z from "zod";
 
 // Task status - includes new unassigned and offered states
-// Terminal statuses: "completed", "failed", "cancelled", "superseded".
-// Terminal-status guards live in src/be/db.ts (startTask, completeTask, failTask,
-// cancelTask, supersedeTask, setProgress CASE clause). Keep them in sync when
-// adding new terminal statuses.
 export const AgentTaskStatusSchema = z.enum([
   "backlog", // Task is in backlog, not yet ready for pool
   "unassigned", // Task pool - no owner yet
@@ -18,6 +14,22 @@ export const AgentTaskStatusSchema = z.enum([
   "cancelled", // Task was cancelled by lead or creator
   "superseded", // Original terminated, replaced by a follow-up "resume" task
 ]);
+
+/**
+ * Terminal task statuses — a task in one of these is done. No further state
+ * transitions, no re-assignment, no follow-up creation on the same id.
+ *
+ * Single source of truth for JS-side checks (sync handlers, store-progress,
+ * db mutator guards, HTTP cancel guard). SQL-side guards in `src/be/db.ts`
+ * inline these strings (can't import a TS const into a prepared statement) —
+ * keep them in sync manually when adding a new terminal status.
+ */
+export const TERMINAL_TASK_STATUSES = ["completed", "failed", "cancelled", "superseded"] as const;
+export type TerminalTaskStatus = (typeof TERMINAL_TASK_STATUSES)[number];
+
+export function isTerminalTaskStatus(status: string): status is TerminalTaskStatus {
+  return (TERMINAL_TASK_STATUSES as readonly string[]).includes(status);
+}
 
 // ============================================================================
 // Lead Inbox Types

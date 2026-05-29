@@ -88,7 +88,7 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "../types";
-import { FollowUpConfigSchema } from "../types";
+import { FollowUpConfigSchema, isTerminalTaskStatus } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
@@ -1269,7 +1269,7 @@ export function startTask(taskId: string): AgentTask | null {
   if (!oldTask) return null;
 
   // Guard: never revive tasks that are already in a terminal state
-  if (["completed", "failed", "cancelled", "superseded"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -1969,7 +1969,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   // Idempotency guard: don't re-complete a task already in a terminal state.
   // Mirrors cancelTask. Prevents duplicate task.completed events, duplicate
   // log entries, and duplicate follow-up tasks when multiple sessions race.
-  if (["completed", "failed", "cancelled", "superseded"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -2014,7 +2014,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
   // Idempotency guard: don't re-fail a task already in a terminal state.
   // Mirrors cancelTask / completeTask. Prevents duplicate task.failed events
   // and duplicate follow-up tasks when multiple sessions race.
-  if (["completed", "failed", "cancelled", "superseded"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -2051,8 +2051,7 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
   if (!oldTask) return null;
 
   // Only cancel tasks that are not already in a terminal state
-  const terminalStatuses = ["completed", "failed", "cancelled", "superseded"];
-  if (terminalStatuses.includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -2105,7 +2104,7 @@ export function supersedeTask(
   if (!oldTask) return null;
 
   // Idempotency guard: don't re-supersede a task already in a terminal state.
-  if (["completed", "failed", "cancelled", "superseded"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -4128,6 +4127,15 @@ export const sessionLogQueries = {
       "SELECT * FROM session_logs WHERE taskId = ? ORDER BY iteration ASC, lineNumber ASC",
     ),
 
+  getRecentByTaskId: () =>
+    getDb().prepare<SessionLogRow, [string, number]>(
+      `SELECT * FROM (
+         SELECT * FROM session_logs WHERE taskId = ?
+         ORDER BY iteration DESC, lineNumber DESC
+         LIMIT ?
+       ) ORDER BY iteration ASC, lineNumber ASC`,
+    ),
+
   getBySessionId: () =>
     getDb().prepare<SessionLogRow, [string, number]>(
       "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY lineNumber ASC",
@@ -4163,7 +4171,10 @@ export function createSessionLogs(logs: {
   })();
 }
 
-export function getSessionLogsByTaskId(taskId: string): SessionLog[] {
+export function getSessionLogsByTaskId(taskId: string, limit?: number): SessionLog[] {
+  if (typeof limit === "number" && limit > 0) {
+    return sessionLogQueries.getRecentByTaskId().all(taskId, limit).map(rowToSessionLog);
+  }
   return sessionLogQueries.getByTaskId().all(taskId).map(rowToSessionLog);
 }
 

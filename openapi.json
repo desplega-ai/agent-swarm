@@ -7139,6 +7139,16 @@
             "required": true,
             "name": "taskId",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
           }
         ],
         "responses": {
@@ -10147,7 +10157,8 @@
                     "enum": [
                       "graceful_shutdown",
                       "context_limits",
-                      "manual_supersede"
+                      "manual_supersede",
+                      "crash_recovery"
                     ]
                   }
                 },

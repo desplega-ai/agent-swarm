@@ -30,6 +30,7 @@ import {
   AgentTaskSourceSchema,
   type AgentTaskStatus,
   AgentTaskStatusSchema,
+  isTerminalTaskStatus,
   ProviderNameSchema,
   ResumeReasonSchema,
 } from "../types";
@@ -450,8 +451,7 @@ export async function handleTasks(
       return true;
     }
 
-    const terminalStatuses = ["completed", "failed", "cancelled"];
-    if (terminalStatuses.includes(task.status)) {
+    if (isTerminalTaskStatus(task.status)) {
       jsonError(res, `Cannot cancel task with status '${task.status}'`, 400);
       return true;
     }
@@ -815,7 +815,7 @@ export async function handleTasks(
     // Idempotency: if already terminal, return the alreadyFinished-shaped
     // response (mirrors finishTask). Caller treats this as a successful
     // supersede.
-    if (["completed", "failed", "cancelled", "superseded"].includes(task.status)) {
+    if (isTerminalTaskStatus(task.status)) {
       json(res, {
         success: true,
         kind: "alreadyFinished",

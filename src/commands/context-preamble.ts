@@ -212,7 +212,11 @@ async function fetchSessionLogsForResume(
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   try {
-    const response = await fetch(`${apiUrl}/api/tasks/${taskId}/session-logs`, { headers });
+    // Bound server-side: long-running parents can accumulate large `session_logs`
+    // and the preamble only consumes the tail (see CONTEXT_PREAMBLE_RESUME_SESSION_LOG_LIMIT).
+    // Passing `?limit=N` keeps dispatch fast and memory-flat regardless of run length.
+    const url = `${apiUrl}/api/tasks/${taskId}/session-logs?limit=${CONTEXT_PREAMBLE_RESUME_SESSION_LOG_LIMIT}`;
+    const response = await fetch(url, { headers });
     if (!response.ok) return [];
     const data = (await response.json()) as { logs?: SessionLogForPreamble[] };
     return Array.isArray(data.logs) ? data.logs : [];
