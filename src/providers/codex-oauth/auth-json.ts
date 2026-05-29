@@ -40,6 +40,9 @@ export function authJsonToCredentialSelection(auth: CodexAuthJson, slot = 0, tot
     );
   }
   return {
+    // `selected` satisfies the CredentialSelection interface but is never read
+    // for CODEX_OAUTH: creds are materialised to ~/.codex/auth.json (not env-injected),
+    // and all tracking flows through `keySuffix` + `index` (never `selected`).
     selected: auth.tokens.account_id,
     index: slot,
     total,
