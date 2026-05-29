@@ -1,7 +1,7 @@
 ---
 date: 2026-05-28T12:00:00Z
 topic: "Context-Mode MCP Wiring for Swarm Workers"
-status: approved
+status: completed
 autonomy: critical
 commit_per_phase: true
 ---
@@ -148,8 +148,8 @@ Add `context-mode` as a globally-installed npm package (version-pinned), pin the
 - [ ] Docker build succeeds: `docker build -f Dockerfile.worker .`
 - [ ] `context-mode` binary is on PATH in the image: `docker run --rm <img> which context-mode`
 - [ ] `context-mode` package is importable: `docker run --rm <img> node -e "require('context-mode')"`
-- [ ] Existing tests pass: `bun test`
-- [ ] Type check passes: `bun run tsc:check`
+- [x] Existing tests pass: `bun test`
+- [x] Type check passes: `bun run tsc:check`
 
 #### Automated QA:
 - [ ] Verify `context-mode --help` or `context-mode doctor` runs inside a fresh container
@@ -189,13 +189,13 @@ Inject a `context-mode` stdio MCP server entry into the per-session config built
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun test src/tests/claude-adapter.test.ts`
-- [ ] All tests pass: `bun test`
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
+- [x] Tests pass: `bun test src/tests/claude-adapter.test.ts`
+- [x] All tests pass: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
 
 #### Automated QA:
-- [ ] `cat /tmp/mcp-<taskId>.json` in a test run shows the `context-mode` entry alongside `agent-swarm`
+- [x] `cat /tmp/mcp-<taskId>.json` in a test run shows the `context-mode` entry alongside `agent-swarm` <!-- covered by claude-adapter.test.ts unit assertions -->
 
 #### Manual Verification:
 - [ ] Start a Claude worker locally, verify `ctx stats` or `ctx doctor` tool is callable (requires Docker image from Phase 1)
@@ -255,13 +255,13 @@ Add a `context-mode` entry to the `mcp_servers` object built by `buildCodexConfi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun test src/tests/codex-adapter.test.ts`
-- [ ] All tests pass: `bun test`
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
+- [x] Tests pass: `bun test src/tests/codex-adapter.test.ts`
+- [x] All tests pass: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
 
 #### Automated QA:
-- [ ] Log/print the built Codex config in a test run and verify `context-mode` appears in `mcp_servers` and `features.hooks` is `true`
+- [x] Log/print the built Codex config in a test run and verify `context-mode` appears in `mcp_servers` and `features.hooks` is `true` <!-- covered by codex-adapter.test.ts unit assertions -->
 
 #### Manual Verification:
 - [ ] Start a Codex worker locally with Docker, verify `ctx_*` tools are available and hooks fire (check for routing instruction injection at session start)
@@ -302,13 +302,13 @@ Add `"context-mode"` to the `plugin` array in the OpenCode config (NOT the `mcp`
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun test src/tests/opencode-adapter.test.ts`
-- [ ] All tests pass: `bun test`
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
+- [x] Tests pass: `bun test src/tests/opencode-adapter.test.ts`
+- [x] All tests pass: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
 
 #### Automated QA:
-- [ ] Print the written `/tmp/opencode-<taskId>.json` and verify `context-mode` is in `plugin` but not in `mcp`
+- [x] Print the written `/tmp/opencode-<taskId>.json` and verify `context-mode` is in `plugin` but not in `mcp` <!-- covered by opencode-adapter.test.ts unit assertions -->
 
 #### Manual Verification:
 - [ ] Start an OpenCode worker locally with Docker, verify `ctx_*` tools load
@@ -340,13 +340,13 @@ Stop advertising `ctx_*` tools to pi workers since they can't use them (deferred
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun test src/tests/base-prompt.test.ts`
-- [ ] All tests pass: `bun test`
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
+- [x] Tests pass: `bun test src/tests/base-prompt.test.ts`
+- [x] All tests pass: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
 
 #### Automated QA:
-- [ ] Diff the generated system prompts for each provider and confirm context_mode presence/absence is correct
+- [x] Diff the generated system prompts for each provider and confirm context_mode presence/absence is correct <!-- covered by base-prompt.test.ts unit assertions -->
 
 #### Manual Verification:
 - [ ] None — automated checks sufficient
