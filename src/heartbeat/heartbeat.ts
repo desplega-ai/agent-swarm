@@ -17,17 +17,26 @@ import {
   getTaskStats,
   getTasksByStatus,
   getUnassignedPoolTasks,
+  hasNonTerminalResumeChild,
   releaseStaleMentionProcessing,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
+  supersedeTask,
   updateAgentStatus,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
+import { createResumeFollowUp } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
 // Side-effect import: registers heartbeat event templates in the in-memory registry
 import "./templates";
+
+/**
+ * System tasks that must NOT be auto-resumed — mirrors `runRebootSweep`'s exclusion list
+ * to prevent infinite retry loops on the heartbeat/triage system tasks themselves.
+ */
+const SKIP_AUTO_RESUME_TYPES = new Set(["heartbeat-checklist", "boot-triage", "heartbeat"]);
 
 // ============================================================================
 // Configuration (env var overrides)
@@ -65,6 +74,12 @@ const HEARTBEAT_CHECKLIST_DISABLE = Boolean(process.env.HEARTBEAT_CHECKLIST_DISA
 export interface HeartbeatFindings {
   stalledTasks: AgentTask[];
   autoFailedTasks: Array<{ taskId: string; agentId: string; reason: string }>;
+  autoResumedTasks: Array<{
+    taskId: string;
+    resumeTaskId: string;
+    agentId: string;
+    reason: string;
+  }>;
   workerHealthFixes: Array<{ agentId: string; oldStatus: string; newStatus: string }>;
   autoAssigned: Array<{ taskId: string; agentId: string }>;
   staleCleanup: {
@@ -128,6 +143,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   const findings: HeartbeatFindings = {
     stalledTasks: [],
     autoFailedTasks: [],
+    autoResumedTasks: [],
     workerHealthFixes: [],
     autoAssigned: [],
     staleCleanup: {
@@ -175,19 +191,13 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
     if (!session) {
       // Case A: No active session — worker is dead
       if (taskAgeMs >= STALL_THRESHOLD_NO_SESSION_MIN * 60 * 1000) {
-        const reason =
-          "Auto-failed by heartbeat: worker session not found (no active session for task)";
-        const failed = failTask(task.id, reason);
-        if (failed) {
-          findings.autoFailedTasks.push({ taskId: task.id, agentId: task.agentId, reason });
-          console.log(`[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — no active session`);
-
-          // Fix agent status if no other active tasks
-          const remaining = getActiveTaskCount(task.agentId);
-          if (remaining === 0) {
-            updateAgentStatus(task.agentId, "idle");
-          }
-        }
+        remediateCrashedWorkerTask(findings, task, {
+          supersedeReason:
+            "Auto-superseded by heartbeat: worker session not found (no active session for task)",
+          legacyFailReason:
+            "Auto-failed by heartbeat: worker session not found (no active session for task)",
+          shortLabel: "no active session",
+        });
       }
     } else {
       const sessionHeartbeatAgeMs = Date.now() - new Date(session.lastHeartbeatAt).getTime();
@@ -197,21 +207,14 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
       if (isStaleHeartbeat) {
         // Case B: Session exists but heartbeat is stale — worker likely crashed
         if (taskAgeMs >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000) {
-          const reason =
-            "Auto-failed by heartbeat: worker session heartbeat is stale (likely crashed)";
-          const failed = failTask(task.id, reason);
-          if (failed) {
-            findings.autoFailedTasks.push({ taskId: task.id, agentId: task.agentId, reason });
-            deleteActiveSession(task.id);
-            console.log(
-              `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — stale session heartbeat`,
-            );
-
-            const remaining = getActiveTaskCount(task.agentId);
-            if (remaining === 0) {
-              updateAgentStatus(task.agentId, "idle");
-            }
-          }
+          remediateCrashedWorkerTask(findings, task, {
+            supersedeReason:
+              "Auto-superseded by heartbeat: worker session heartbeat is stale (likely crashed)",
+            legacyFailReason:
+              "Auto-failed by heartbeat: worker session heartbeat is stale (likely crashed)",
+            shortLabel: "stale session heartbeat",
+            cleanupActiveSession: true,
+          });
         }
       } else {
         // Case C: Session exists and heartbeat is fresh — ambiguous
@@ -221,6 +224,115 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
       }
     }
   }
+}
+
+/**
+ * Shared remediation for Cases A (no active session) and B (stale heartbeat) of the
+ * stalled-task detector. Prefers the supersede → resume follow-up path (DES-523) so a
+ * crashed worker's task gets a fresh "resume" sibling instead of being silently dropped.
+ *
+ * Falls back to the legacy `failTask` path when:
+ *   - the task is a system task (heartbeat / boot-triage) — would loop forever,
+ *   - a non-terminal child already exists — a prior sweep already created a resume,
+ *   - `createResumeFollowUp` returns `workflow-skip` — workflow engine owns retries.
+ */
+function remediateCrashedWorkerTask(
+  findings: HeartbeatFindings,
+  task: AgentTask,
+  opts: {
+    supersedeReason: string;
+    legacyFailReason: string;
+    shortLabel: string;
+    cleanupActiveSession?: boolean;
+  },
+): void {
+  if (!task.agentId) return; // Type guard — caller already checked.
+
+  const skipAutoResume = SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "");
+  // Workflow-step tasks: skip supersede entirely so the engine's retry policy
+  // owns recovery. `createResumeFollowUp` would also bail with `workflow-skip`,
+  // but checking here avoids leaving the parent in `superseded` with a dangling
+  // dedicated-reason `failTask` no-op chasing it.
+  const isWorkflowStep = task.workflowRunStepId != null;
+  // Idempotency: if a non-terminal `resume` child already exists for this
+  // parent, a prior sweep already created the resume — fall back to the
+  // legacy fail path. We filter on `taskType = 'resume'` specifically (not
+  // any child task) because `send-task` auto-defaults `parentTaskId` to the
+  // caller's current task, so a crashed worker with delegated subtasks
+  // would otherwise be incorrectly skipped (PR #594 review).
+  const alreadyResumed = !skipAutoResume && !isWorkflowStep && hasNonTerminalResumeChild(task.id);
+
+  if (isWorkflowStep) {
+    const failed = failTask(task.id, "superseded_workflow_task");
+    if (failed) {
+      findings.autoFailedTasks.push({
+        taskId: task.id,
+        agentId: task.agentId,
+        reason: "superseded_workflow_task",
+      });
+      if (opts.cleanupActiveSession) deleteActiveSession(task.id);
+      console.log(
+        `[Heartbeat] Workflow-step task ${task.id.slice(0, 8)} failed — engine will handle retry (${opts.shortLabel})`,
+      );
+      const remaining = getActiveTaskCount(task.agentId);
+      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+    }
+    return;
+  }
+
+  if (skipAutoResume || alreadyResumed) {
+    const failed = failTask(task.id, opts.legacyFailReason);
+    if (failed) {
+      findings.autoFailedTasks.push({
+        taskId: task.id,
+        agentId: task.agentId,
+        reason: opts.legacyFailReason,
+      });
+      if (opts.cleanupActiveSession) deleteActiveSession(task.id);
+      console.log(
+        `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — ${opts.shortLabel} (${
+          skipAutoResume ? "skipRetry taskType" : "resume already exists"
+        })`,
+      );
+      const remaining = getActiveTaskCount(task.agentId);
+      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+    }
+    return;
+  }
+
+  // Supersede + resume path.
+  const superseded = supersedeTask(task.id, {
+    reason: opts.supersedeReason,
+    resumeTaskId: null,
+  });
+  if (!superseded) return;
+
+  const resume = createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
+
+  if (resume.kind === "created") {
+    findings.autoResumedTasks.push({
+      taskId: task.id,
+      resumeTaskId: resume.task.id,
+      agentId: task.agentId,
+      reason: opts.supersedeReason,
+    });
+    console.log(
+      `[Heartbeat] Auto-superseded task ${task.id.slice(0, 8)} — created resume ${resume.task.id.slice(0, 8)} (${opts.shortLabel})`,
+    );
+  } else {
+    // `workflow-skip` is unreachable here (handled above). `skipped` covers
+    // parent-not-found / lead-not-found edge cases — just log for operators.
+    console.log(
+      `[Heartbeat] Task ${task.id.slice(0, 8)} superseded but no resume created (${
+        resume.kind === "skipped" ? resume.reason : "workflow-skip"
+      })`,
+    );
+  }
+
+  if (opts.cleanupActiveSession) deleteActiveSession(task.id);
+
+  const remaining = getActiveTaskCount(task.agentId);
+  if (remaining === 0) updateAgentStatus(task.agentId, "idle");
 }
 
 /**
@@ -268,8 +380,7 @@ export async function runRebootSweep(): Promise<void> {
       }
 
       // Don't retry system-generated heartbeat tasks
-      const skipRetryTypes = ["heartbeat-checklist", "boot-triage", "heartbeat"];
-      if (skipRetryTypes.includes(task.taskType ?? "")) {
+      if (SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "")) {
         rebootAffectedTasks.push({ original: failed, retryTaskId: null });
         continue;
       }
@@ -674,6 +785,7 @@ export async function runHeartbeatSweep(): Promise<void> {
       const cleanupOnlyFindings: HeartbeatFindings = {
         stalledTasks: [],
         autoFailedTasks: [],
+        autoResumedTasks: [],
         workerHealthFixes: [],
         autoAssigned: [],
         staleCleanup: {
@@ -707,6 +819,9 @@ function logFindings(findings: HeartbeatFindings): void {
 
   if (findings.autoFailedTasks.length > 0) {
     parts.push(`auto_failed=${findings.autoFailedTasks.length}`);
+  }
+  if (findings.autoResumedTasks.length > 0) {
+    parts.push(`auto_resumed=${findings.autoResumedTasks.length}`);
   }
   if (findings.stalledTasks.length > 0) {
     parts.push(`stalled=${findings.stalledTasks.length}`);

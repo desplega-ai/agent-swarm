@@ -204,6 +204,10 @@ export async function sendTaskHandler(
   // interrupted — re-dispatch is the correct response, not a deduped no-op.
   // Without this bypass, a cancelled worker permanently jams the thread
   // against re-delegation when an earlier completed sibling exists.
+  //
+  // NOTE: `taskType === "resume"` (created by createResumeFollowUp on
+  // supersede) is intentionally NOT in this guard — a resume IS the legitimate
+  // re-dispatch and bypassing the check is correct. Do not add "resume" here.
   if (sourceTaskId) {
     const sourceTask = getTaskById(sourceTaskId);
     if (

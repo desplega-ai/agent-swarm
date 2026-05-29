@@ -25,7 +25,7 @@ import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { buildJiraContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import type { Agent } from "../types";
+import { type Agent, isTerminalTaskStatus } from "../types";
 import { extractMentions, extractText } from "./adf";
 import { getJiraMetadata } from "./metadata";
 // Side-effect import: registers all Jira event templates in the prompt registry
@@ -252,7 +252,7 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
 
   // Pre-existing — branch on prior task state.
   const priorTask = claim.sync.swarmId ? getTaskById(claim.sync.swarmId) : null;
-  if (priorTask && !["completed", "failed", "cancelled"].includes(priorTask.status)) {
+  if (priorTask && !isTerminalTaskStatus(priorTask.status)) {
     // In-progress: do not duplicate. Match Linear's behavior of acknowledging
     // and continuing with the existing task.
     console.log(
@@ -408,7 +408,7 @@ async function routeCommentOnExistingSync(input: {
   syncRow: { id: string; swarmId: string };
 }): Promise<void> {
   const priorTask = input.syncRow.swarmId ? getTaskById(input.syncRow.swarmId) : null;
-  if (priorTask && !["completed", "failed", "cancelled"].includes(priorTask.status)) {
+  if (priorTask && !isTerminalTaskStatus(priorTask.status)) {
     // In-progress: log and ignore (mirrors Linear's prompted-on-active path).
     console.log(
       `[Jira Sync] Bot mentioned on issue ${input.issueKey} but task ${priorTask.id} still ${priorTask.status} — ignoring`,
@@ -440,7 +440,7 @@ export async function handleIssueDeleteEvent(event: Record<string, unknown>): Pr
   if (!sync) return;
 
   const task = sync.swarmId ? getTaskById(sync.swarmId) : null;
-  if (task && !["completed", "failed", "cancelled"].includes(task.status)) {
+  if (task && !isTerminalTaskStatus(task.status)) {
     cancelTask(sync.swarmId, "Jira issue deleted");
     console.log(
       `[Jira Sync] Cancelled task ${sync.swarmId} (Jira issue ${issue.key ?? issue.id} deleted)`,

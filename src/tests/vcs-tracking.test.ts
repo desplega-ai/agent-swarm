@@ -1,11 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
+  cancelTask,
   closeDb,
+  completeTask,
   createAgent,
   createTaskExtended,
+  failTask,
   findTaskByVcs,
   initDb,
+  startTask,
+  supersedeTask,
   updateTaskVcs,
 } from "../be/db";
 
@@ -131,6 +136,40 @@ describe("updateTaskVcs", () => {
     const found = findTaskByVcs("owner/findme", 99);
     expect(found).not.toBeNull();
     expect(found!.id).toBe(task.id);
+  });
+
+  test("findTaskByVcs excludes ALL terminal statuses (completed, failed, cancelled, superseded)", () => {
+    // PR #594 review: missing `cancelled` / `superseded` in the filter
+    // meant webhooks for a terminated PR/MR still routed to the dead task.
+    // Guard against any one of the four terminal statuses being missed.
+    const TERMINAL_CASES = [
+      { name: "completed", number: 200, terminate: (id: string) => completeTask(id, "done") },
+      { name: "failed", number: 201, terminate: (id: string) => failTask(id, "boom") },
+      { name: "cancelled", number: 202, terminate: (id: string) => cancelTask(id) },
+      {
+        name: "superseded",
+        number: 203,
+        terminate: (id: string) =>
+          supersedeTask(id, { reason: "manual_supersede", resumeTaskId: null }),
+      },
+    ];
+    for (const c of TERMINAL_CASES) {
+      const task = createTaskExtended(`Terminal=${c.name}`, {
+        agentId: "vcs-track-agent-001",
+        source: "api",
+      });
+      updateTaskVcs(task.id, {
+        vcsProvider: "github",
+        vcsRepo: "owner/terminal",
+        vcsNumber: c.number,
+        vcsUrl: `https://github.com/owner/terminal/pull/${c.number}`,
+      });
+      startTask(task.id);
+      c.terminate(task.id);
+
+      const found = findTaskByVcs("owner/terminal", c.number);
+      expect(found).toBeNull();
+    }
   });
 
   test("idempotent: calling twice with same data both succeed", () => {

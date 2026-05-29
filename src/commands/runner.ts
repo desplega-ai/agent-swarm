@@ -50,7 +50,7 @@ import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { interpolate } from "../workflows/template.ts";
-import { buildContextPreamble } from "./context-preamble.ts";
+import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
 import {
   buildCredStatusReport,
@@ -1012,6 +1012,84 @@ async function reportKeyRateLimit(
 }
 
 /**
+ * Supersede a task via the API (for graceful shutdown / context-limit /
+ * operator-triggered). Returns `{ ok: true, resumeTaskId }` on success.
+ * On 5xx / network failure returns `{ ok: false }` so the caller can fall
+ * back to the legacy `pauseTaskViaAPI` (handles partial-deploy windows where
+ * the API is older than the worker).
+ */
+async function supersedeTaskViaAPI(
+  config: ApiConfig,
+  role: string,
+  taskId: string,
+  reason: "graceful_shutdown" | "context_limits" | "manual_supersede",
+): Promise<{ ok: true; resumeTaskId: string | null; kind: string } | { ok: false }> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": config.agentId,
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/supersede`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ reason }),
+    });
+
+    if (response.ok) {
+      const body = (await response.json().catch(() => null)) as {
+        resumeTaskId?: string | null;
+        kind?: string;
+      } | null;
+      const resumeTaskId = body?.resumeTaskId ?? null;
+      const kind = body?.kind ?? "resumed";
+      console.log(
+        `[${role}] Task ${taskId.slice(0, 8)} superseded (kind=${kind}, resume=${
+          resumeTaskId ? resumeTaskId.slice(0, 8) : "none"
+        })`,
+      );
+      return { ok: true, resumeTaskId, kind };
+    }
+
+    // 404 / 405 — the route doesn't exist on this API server. Happens during
+    // partial deploys (new worker rolled out before new API). Fall back to
+    // legacy pause so the task isn't left orphaned in_progress until heartbeat
+    // recovery picks it up minutes later.
+    if (response.status === 404 || response.status === 405) {
+      console.warn(
+        `[${role}] Supersede route missing for task ${taskId.slice(0, 8)} (${response.status}); falling back to pause`,
+      );
+      return { ok: false };
+    }
+
+    // Other 4xx → deliberate rejection from a current API (bad request,
+    // idempotent no-op, forbidden, conflict). Do NOT fall back to legacy
+    // pause — the API actively rejected the supersede, retrying via pause
+    // would be wrong.
+    if (response.status >= 400 && response.status < 500) {
+      const error = await response.text();
+      console.warn(
+        `[${role}] Supersede rejected for task ${taskId.slice(0, 8)}: ${response.status} ${error}`,
+      );
+      return { ok: true, resumeTaskId: null, kind: "rejected" };
+    }
+
+    // 5xx → fall through to legacy pause.
+    const error = await response.text();
+    console.warn(
+      `[${role}] Supersede failed for task ${taskId.slice(0, 8)}: ${response.status} ${error}`,
+    );
+    return { ok: false };
+  } catch (err) {
+    console.warn(`[${role}] Error superseding task ${taskId.slice(0, 8)}: ${err}`);
+    return { ok: false };
+  }
+}
+
+/**
  * Pause a task via the API (for graceful shutdown).
  * Unlike marking as failed, paused tasks can be resumed after container restart.
  */
@@ -1181,21 +1259,35 @@ function setupShutdownHandlers(
         }
       }
 
-      // Force kill remaining tasks and mark them as paused (for graceful resume after restart)
+      // Force kill remaining tasks and supersede them so a fresh "resume"
+      // follow-up can pick up the work on any worker. Fallback chain:
+      //   1. supersedeTaskViaAPI (primary)
+      //   2. pauseTaskViaAPI (legacy — preserves graceful behavior during
+      //      partial-deploy windows where the API server is older than the
+      //      worker)
+      //   3. ensureTaskFinished (mark as failed — last resort)
       if (state.activeTasks.size > 0) {
         console.log(
-          `[${role}] Pausing ${state.activeTasks.size} remaining task(s) for resume after restart...`,
+          `[${role}] Superseding ${state.activeTasks.size} remaining task(s) for resume after restart...`,
         );
         for (const [taskId, task] of state.activeTasks) {
-          console.log(`[${role}] Pausing task ${taskId.slice(0, 8)}`);
+          console.log(`[${role}] Superseding task ${taskId.slice(0, 8)}`);
           task.session.abort().catch(() => {});
-          // Mark as paused for graceful resume (instead of failed)
           if (apiConfig) {
+            const supersede = await supersedeTaskViaAPI(
+              apiConfig,
+              role,
+              taskId,
+              "graceful_shutdown",
+            );
+            if (supersede.ok) {
+              continue;
+            }
+            // 5xx / network failure → try legacy pause for partial-deploy windows.
             const paused = await pauseTaskViaAPI(apiConfig, role, taskId);
             if (!paused) {
-              // Fallback to marking as failed if pause fails
               console.warn(
-                `[${role}] Failed to pause task ${taskId.slice(0, 8)}, marking as failed instead`,
+                `[${role}] Both supersede and pause failed for task ${taskId.slice(0, 8)}, marking as failed instead`,
               );
               await ensureTaskFinished(
                 apiConfig,
@@ -3754,7 +3846,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   }
 
   // ========== Resume paused tasks with PRIORITY ==========
-  // Check for paused tasks from previous shutdown and resume them before normal polling
+  // LEGACY SAFETY NET — kept for tasks that were paused by older worker
+  // builds during partial-deploy windows (when the API server already
+  // accepted /pause but the new worker has rolled out /supersede). New
+  // graceful-shutdown writes go through the supersede path (see
+  // supersedeTaskViaAPI + the SIGTERM handler) and create a fresh
+  // "resume" follow-up task instead of mutating the original. Cleanup of
+  // this entire block is tracked in the "Legacy paused-task cleanup"
+  // follow-up plan — remove once no new `paused` tasks have been created
+  // for one full quarter.
   try {
     console.log(`[${role}] Checking for paused tasks to resume...`);
     const pausedTasks = await getPausedTasksFromAPI(apiConfig);
@@ -4180,13 +4280,20 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // Universal context preamble: inject for all providers when task is a follow-up.
         // Gives non-resumable providers (opencode/pi/devin) prior-task context; also
         // acts as a bounded safety net for resumable ones (claude/codex).
-        const taskObj = trigger.task as { parentTaskId?: string } | undefined;
+        // For taskType="resume" (created by supersedeTaskViaAPI), use the
+        // larger resume preamble that includes a session-log tool-call summary.
+        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
         if (taskObj?.parentTaskId && apiUrl) {
-          const contextPreamble = await buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId);
+          const isResumeTask = taskObj.taskType === "resume";
+          const contextPreamble = isResumeTask
+            ? await buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+            : await buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId);
           if (contextPreamble) {
             triggerPrompt = contextPreamble + triggerPrompt;
             console.log(
-              `[${role}] Injected context preamble for follow-up task (parent: ${taskObj.parentTaskId.slice(0, 8)})`,
+              `[${role}] Injected ${isResumeTask ? "resume" : "context"} preamble for ${
+                isResumeTask ? "resume" : "follow-up"
+              } task (parent: ${taskObj.parentTaskId.slice(0, 8)})`,
             );
           }
         }

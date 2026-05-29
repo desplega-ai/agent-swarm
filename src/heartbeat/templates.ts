@@ -78,13 +78,17 @@ The API server has just restarted (deployment, pod rotation, or crash). An aggre
    - If a retry failed or is stuck, re-create the task manually
    - If the work is no longer needed, cancel the retry task
    - You MUST address every item — do NOT skip this section
-2. **Check orphaned tasks.** If the "Orphaned Tasks" section lists pending/offered tasks assigned to offline workers, re-assign or cancel them.
-3. Review agent status — are all expected workers online? If not, note which are missing.
-4. Review your standing orders for any post-reboot checks.
-5. Take action using your available tools.
-6. Complete this task with a summary of what you found and what actions you took. Include the status of each reboot-interrupted task.
-7. Do NOT create another boot-triage task — this is a one-off event.
-8. **Update your standing orders** — If the reboot revealed a pattern worth monitoring (e.g., frequent restarts, specific tasks that keep failing), add a standing order to HEARTBEAT.md via \`update-profile\` with \`heartbeatMd\`.`,
+2. **Verify supersede + resume worked end-to-end.** Worker crashes / OOMs are recovered via supersede (parent → \`superseded\`) + a fresh \`taskType=resume\` child created by the heartbeat sweep (DES-523). Sanity check:
+   - List recent \`superseded\` tasks: \`list-tasks status=superseded\` (last ~hour).
+   - For each, confirm a child task with \`taskType=resume\` and a non-terminal status exists. If a superseded task is missing its resume child, the work is silently dropped — recreate the task manually.
+   - Look for \`in_progress\` tasks older than 5 min on agents that show as offline — the sweep should have caught them. If any remain, recreate as needed.
+3. **Check orphaned tasks.** If the "Orphaned Tasks" section lists pending/offered tasks assigned to offline workers, re-assign or cancel them.
+4. Review agent status — are all expected workers online? If not, note which are missing.
+5. Review your standing orders for any post-reboot checks.
+6. Take action using your available tools.
+7. Complete this task with a summary of what you found and what actions you took. Include the status of each reboot-interrupted task.
+8. Do NOT create another boot-triage task — this is a one-off event.
+9. **Update your standing orders** — If the reboot revealed a pattern worth monitoring (e.g., frequent restarts, specific tasks that keep failing), add a standing order to HEARTBEAT.md via \`update-profile\` with \`heartbeatMd\`.`,
   variables: [
     {
       name: "system_status",

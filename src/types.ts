@@ -8,11 +8,35 @@ export const AgentTaskStatusSchema = z.enum([
   "reviewing", // Agent is reviewing an offered task
   "pending", // Assigned/accepted, waiting to start
   "in_progress",
-  "paused", // Interrupted by graceful shutdown, can resume
+  "paused", // Interrupted by graceful shutdown (legacy), can resume
   "completed",
   "failed",
   "cancelled", // Task was cancelled by lead or creator
+  "superseded", // Original terminated, replaced by a follow-up "resume" task
 ]);
+
+/**
+ * Terminal task statuses — a task in one of these is done. No further state
+ * transitions, no re-assignment, no follow-up creation on the same id.
+ *
+ * Single source of truth for JS-side checks (sync handlers, store-progress,
+ * db mutator guards, HTTP cancel guard).
+ *
+ * **SQL drift watch**: `src/be/db.ts` has ~8 prepared statements that inline
+ * these strings — SQL can't import a TS const. When adding a new terminal
+ * status, grep across `src/be/db.ts` for:
+ *   - `status NOT IN ('completed'` — non-terminal filters (findTaskByVcs,
+ *     findRecentSimilarTasks, mutator guards, hasNonTerminalChildTask)
+ *   - `status IN ('completed', 'failed'` — intent-terminal lookups
+ *   - `status = CASE WHEN status IN ('completed'` — setProgress guard
+ * and update every site.
+ */
+export const TERMINAL_TASK_STATUSES = ["completed", "failed", "cancelled", "superseded"] as const;
+export type TerminalTaskStatus = (typeof TERMINAL_TASK_STATUSES)[number];
+
+export function isTerminalTaskStatus(status: string): status is TerminalTaskStatus {
+  return (TERMINAL_TASK_STATUSES as readonly string[]).includes(status);
+}
 
 // ============================================================================
 // Lead Inbox Types
@@ -670,7 +694,18 @@ export const AgentLogEventTypeSchema = z.enum([
   "budget.deleted",
   "pricing.inserted",
   "pricing.deleted",
+  // Graceful pause/resume via follow-up
+  "task_superseded",
 ]);
+
+// Reasons a task can be superseded (terminal) and replaced by a "resume" follow-up.
+export const ResumeReasonSchema = z.enum([
+  "graceful_shutdown", // Worker received SIGTERM / SIGINT
+  "context_limits", // Provider session approaching context-window limits (Phase 6)
+  "manual_supersede", // Operator-triggered (e.g. dashboard button)
+  "crash_recovery", // Heartbeat sweep detected dead/stalled worker (DES-523)
+]);
+export type ResumeReason = z.infer<typeof ResumeReasonSchema>;
 
 export const AgentLogSchema = z.object({
   id: z.uuid(),

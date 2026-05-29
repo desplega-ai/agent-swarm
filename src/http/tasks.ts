@@ -16,20 +16,23 @@ import {
   getUserById,
   pauseTask,
   resumeTask,
+  supersedeTask,
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
   updateTaskProgress,
   updateTaskVcs,
 } from "../be/db";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
+import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { telemetry } from "../telemetry";
 import {
   type AgentTaskSource,
   AgentTaskSourceSchema,
   type AgentTaskStatus,
   AgentTaskStatusSchema,
+  isTerminalTaskStatus,
   ProviderNameSchema,
+  ResumeReasonSchema,
 } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -234,6 +237,25 @@ const resumeTaskRoute = route({
   },
 });
 
+const supersedeTaskRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/supersede",
+  pattern: ["api", "tasks", null, "supersede"],
+  summary: "Supersede an in-progress task (terminate + spawn resume follow-up)",
+  description:
+    'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies.',
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({ reason: ResumeReasonSchema }),
+  auth: { apiKey: true, agentId: true },
+  responses: {
+    200: { description: "Task superseded (or workflow-failed)" },
+    400: { description: "Task not in_progress" },
+    403: { description: "Task belongs to another agent" },
+    404: { description: "Task not found" },
+  },
+});
+
 const updateTaskVcsRoute = route({
   method: "patch",
   path: "/api/tasks/{id}/vcs",
@@ -429,8 +451,7 @@ export async function handleTasks(
       return true;
     }
 
-    const terminalStatuses = ["completed", "failed", "cancelled"];
-    if (terminalStatuses.includes(task.status)) {
+    if (isTerminalTaskStatus(task.status)) {
       jsonError(res, `Cannot cancel task with status '${task.status}'`, 400);
       return true;
     }
@@ -773,6 +794,134 @@ export async function handleTasks(
     });
 
     json(res, { success: true, task: resumedTask });
+    return true;
+  }
+
+  if (supersedeTaskRoute.match(req.method, pathSegments)) {
+    const parsed = await supersedeTaskRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.id);
+
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+
+    if (myAgentId && task.agentId !== myAgentId) {
+      jsonError(res, "Task belongs to another agent", 403);
+      return true;
+    }
+
+    // Idempotency: if already terminal, return the alreadyFinished-shaped
+    // response (mirrors finishTask). Caller treats this as a successful
+    // supersede.
+    if (isTerminalTaskStatus(task.status)) {
+      json(res, {
+        success: true,
+        kind: "alreadyFinished",
+        task,
+        resumeTaskId: null,
+      });
+      return true;
+    }
+
+    if (task.status !== "in_progress") {
+      jsonError(res, `Task status is '${task.status}', not 'in_progress'`, 400);
+      return true;
+    }
+
+    // Workflow-step tasks: fail back to the engine instead of superseding.
+    // Check this BEFORE the supersede UPDATE so we don't leave a workflow
+    // step in `superseded` if the engine expects `failed`.
+    if (task.workflowRunStepId != null) {
+      const failed = failTask(parsed.params.id, "superseded_workflow_task");
+      ensure({
+        id: "task.workflow_step_failed_on_supersede",
+        flow: "task",
+        runId: parsed.params.id,
+        data: {
+          taskId: parsed.params.id,
+          agentId: task.agentId,
+          stepId: task.workflowRunStepId,
+          reason: parsed.body.reason,
+        },
+      });
+      json(res, {
+        success: true,
+        kind: "workflow-failed",
+        task: failed,
+        resumeTaskId: null,
+      });
+      return true;
+    }
+
+    // Supersede FIRST (atomic + idempotent in db.ts) so we don't orphan a
+    // resume child if a worker races to complete/fail/cancel between the
+    // pre-read status check and the supersede UPDATE.
+    const superseded = supersedeTask(parsed.params.id, {
+      reason: parsed.body.reason,
+      // resumeTaskId is attached AFTER the child is created. Lost race here
+      // means no child is created at all, so the log entry's null is accurate.
+      resumeTaskId: null,
+    });
+    if (!superseded) {
+      // Worker won the race (terminal transition between status check and
+      // this UPDATE). Treat as `alreadyFinished` — no resume child is created.
+      const fresh = getTaskById(parsed.params.id);
+      json(res, {
+        success: true,
+        kind: "alreadyFinished",
+        task: fresh,
+        resumeTaskId: null,
+      });
+      return true;
+    }
+
+    // Parent is now superseded. Create the resume child.
+    const followUp = createResumeFollowUp({
+      parentId: parsed.params.id,
+      reason: parsed.body.reason,
+    });
+
+    // `workflow-skip` is unreachable here (workflow-step path branched above).
+    // `skipped` covers parent_not_found / lead_not_found edge cases — the
+    // supersede already landed, so log + roll forward without a resume task.
+    if (followUp.kind !== "created") {
+      console.warn(
+        `[Supersede] Task ${parsed.params.id.slice(0, 8)} superseded but resume creation skipped (${
+          followUp.kind === "skipped" ? followUp.reason : followUp.kind
+        })`,
+      );
+      json(res, {
+        success: true,
+        kind: "resumed",
+        task: superseded,
+        resumeTaskId: null,
+      });
+      return true;
+    }
+
+    const resumeTaskId = followUp.task.id;
+
+    ensure({
+      id: "task.superseded",
+      flow: "task",
+      runId: parsed.params.id,
+      data: {
+        taskId: parsed.params.id,
+        agentId: task.agentId,
+        reason: parsed.body.reason,
+        resumeTaskId,
+      },
+    });
+
+    json(res, {
+      success: true,
+      kind: "resumed",
+      task: superseded,
+      resumeTaskId,
+      resumeTaskStatus: followUp.task.status,
+    });
     return true;
   }
 

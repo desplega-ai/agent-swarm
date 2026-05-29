@@ -18,7 +18,7 @@ import { getRetrievalsForTask } from "@/be/memory/raters/retrieval";
 import { runServerRaters } from "@/be/memory/raters/run-server-raters";
 import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema, AttachmentInputSchema } from "@/types";
+import { AgentTaskSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
@@ -115,7 +115,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         }
 
         let updatedTask = existingTask;
-        const isTerminal = ["completed", "failed", "cancelled"].includes(existingTask.status);
+        const isTerminal = isTerminalTaskStatus(existingTask.status);
 
         // Attachments — pointer-based, append-only. Insert each row inside
         // this transaction; the helper dedups by sha256 (when present) or by

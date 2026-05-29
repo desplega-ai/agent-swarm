@@ -88,7 +88,7 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "../types";
-import { FollowUpConfigSchema } from "../types";
+import { FollowUpConfigSchema, isTerminalTaskStatus } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
@@ -1198,7 +1198,7 @@ export const taskQueries = {
   setProgress: () =>
     getDb().prepare<AgentTaskRow, [string, string]>(
       `UPDATE agent_tasks SET progress = ?,
-       status = CASE WHEN status IN ('completed', 'failed', 'cancelled') THEN status ELSE 'in_progress' END,
+       status = CASE WHEN status IN ('completed', 'failed', 'cancelled', 'superseded') THEN status ELSE 'in_progress' END,
        lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
     ),
@@ -1269,14 +1269,14 @@ export function startTask(taskId: string): AgentTask | null {
   if (!oldTask) return null;
 
   // Guard: never revive tasks that are already in a terminal state
-  if (["completed", "failed", "cancelled"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
   const row = getDb()
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled') RETURNING *`,
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
     )
     .get(taskId);
   if (row && oldTask) {
@@ -1314,6 +1314,31 @@ export function getChildTasks(parentTaskId: string): AgentTask[] {
     )
     .all(parentTaskId)
     .map(rowToAgentTask);
+}
+
+/**
+ * Returns true if `parentId` has at least one non-terminal child task with
+ * `taskType = 'resume'`. Used by the heartbeat sweep as an idempotency guard:
+ * if a prior sweep tick already created a resume follow-up for this parent,
+ * don't create a duplicate.
+ *
+ * **Filters by taskType = 'resume'** specifically. A parent task can also
+ * have ordinary non-terminal delegation children (`send-task` auto-defaults
+ * `parentTaskId` to the caller's current task — see src/tools/send-task.ts).
+ * Treating those as "already resumed" would incorrectly skip the resume
+ * path for a crashed worker that had delegated subtasks (PR #594 review).
+ */
+export function hasNonTerminalResumeChild(parentId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM agent_tasks
+       WHERE parentTaskId = ?
+         AND taskType = 'resume'
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       LIMIT 1`,
+    )
+    .get(parentId);
+  return row !== undefined && row !== null;
 }
 
 export function updateTaskClaudeSessionId(
@@ -1395,14 +1420,18 @@ export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
 
 /**
  * Find a task by VCS repo and issue/PR/MR number.
- * Returns the most recent non-completed/failed task for this VCS entity.
+ * Returns the most recent non-terminal task for this VCS entity.
+ *
+ * Terminal exclusion MUST stay in lock-step with `TERMINAL_TASK_STATUSES`
+ * in `src/types.ts`. SQL strings can't import a TS const — if you add a
+ * new terminal status, grep for `NOT IN ('completed'` across this file.
  */
 export function findTaskByVcs(vcsRepo: string, vcsNumber: number): AgentTask | null {
   const row = getDb()
     .prepare<AgentTaskRow, [string, number]>(
       `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ?
-       AND status NOT IN ('completed', 'failed')
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY createdAt DESC
        LIMIT 1`,
     )
@@ -1951,7 +1980,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   // Idempotency guard: don't re-complete a task already in a terminal state.
   // Mirrors cancelTask. Prevents duplicate task.completed events, duplicate
   // log entries, and duplicate follow-up tasks when multiple sessions race.
-  if (["completed", "failed", "cancelled"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -1996,7 +2025,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
   // Idempotency guard: don't re-fail a task already in a terminal state.
   // Mirrors cancelTask / completeTask. Prevents duplicate task.failed events
   // and duplicate follow-up tasks when multiple sessions race.
-  if (["completed", "failed", "cancelled"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -2033,8 +2062,7 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
   if (!oldTask) return null;
 
   // Only cancel tasks that are not already in a terminal state
-  const terminalStatuses = ["completed", "failed", "cancelled"];
-  if (terminalStatuses.includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -2057,6 +2085,69 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
       import("../workflows/event-bus").then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.cancelled", {
           taskId: id,
+          agentId: row.agentId,
+          workflowRunId: row.workflowRunId,
+          workflowRunStepId: row.workflowRunStepId,
+        });
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Supersede a task: mark it as `superseded` (terminal) so a fresh "resume"
+ * follow-up task can pick up where it left off. Used by the graceful-shutdown
+ * path and the `POST /api/tasks/:id/supersede` route. Returns null if the task
+ * is already terminal (mirrors `completeTask` / `cancelTask` idempotency).
+ *
+ * Writes a `task_superseded` agent_log with `{ reason, resumeTaskId }` payload
+ * and emits a `task.superseded` workflow event. The caller is responsible for
+ * creating the resume follow-up (via `createResumeFollowUp`) and passing the
+ * resulting id as `resumeTaskId`.
+ */
+export function supersedeTask(
+  id: string,
+  args: { reason: string; resumeTaskId: string | null },
+): AgentTask | null {
+  const oldTask = getTaskById(id);
+  if (!oldTask) return null;
+
+  // Idempotency guard: don't re-supersede a task already in a terminal state.
+  if (isTerminalTaskStatus(oldTask.status)) {
+    return null;
+  }
+
+  const finishedAt = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `UPDATE agent_tasks
+       SET status = 'superseded',
+           finishedAt = ?,
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       RETURNING *`,
+    )
+    .get(finishedAt, id);
+
+  if (row && oldTask) {
+    try {
+      createLogEntry({
+        eventType: "task_superseded",
+        taskId: id,
+        agentId: row.agentId ?? undefined,
+        oldValue: oldTask.status,
+        newValue: "superseded",
+        metadata: { reason: args.reason, resumeTaskId: args.resumeTaskId },
+      });
+    } catch {}
+    try {
+      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.superseded", {
+          taskId: id,
+          reason: args.reason,
+          resumeTaskId: args.resumeTaskId,
           agentId: row.agentId,
           workflowRunId: row.workflowRunId,
           workflowRunStepId: row.workflowRunStepId,
@@ -2604,8 +2695,9 @@ export function findRecentSimilarTasks(opts: {
   const conditions: string[] = ["createdAt > ?"];
   const params: (string | number)[] = [since];
 
-  // Exclude completed/failed/cancelled tasks — only active or recently created
-  conditions.push("status NOT IN ('completed', 'failed', 'cancelled')");
+  // Exclude all terminal statuses — only active or recently created.
+  // Keep in lock-step with `TERMINAL_TASK_STATUSES` in src/types.ts.
+  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded')");
 
   if (opts.creatorAgentId) {
     conditions.push("creatorAgentId = ?");
@@ -2640,6 +2732,16 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   if (options?.parentTaskId) {
     const parent = getTaskById(options.parentTaskId);
     if (parent) {
+      // Identity & routing — anything that says "what work is this, who asked
+      // for it, where does it run" carries forward to every child (follow-ups,
+      // reboot retries, resume tasks). Explicit options always win.
+      //
+      // When adding a new identity-shaped column to `agent_tasks`, ADD IT HERE
+      // unless you have a specific reason a child should NOT inherit it. This
+      // is the single source of truth — `createResumeFollowUp` and the other
+      // follow-up creators rely on this block instead of re-listing fields.
+
+      // Slack context
       if (parent.slackChannelId && !options.slackChannelId) {
         options.slackChannelId = parent.slackChannelId;
       }
@@ -2649,12 +2751,74 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.slackUserId && !options.slackUserId) {
         options.slackUserId = parent.slackUserId;
       }
+
+      // AgentMail context
       if (parent.agentmailInboxId && !options.agentmailInboxId) {
         options.agentmailInboxId = parent.agentmailInboxId;
+      }
+      if (parent.agentmailMessageId && !options.agentmailMessageId) {
+        options.agentmailMessageId = parent.agentmailMessageId;
       }
       if (parent.agentmailThreadId && !options.agentmailThreadId) {
         options.agentmailThreadId = parent.agentmailThreadId;
       }
+
+      // Mention context (Slack @-mentions)
+      if (parent.mentionMessageId && !options.mentionMessageId) {
+        options.mentionMessageId = parent.mentionMessageId;
+      }
+      if (parent.mentionChannelId && !options.mentionChannelId) {
+        options.mentionChannelId = parent.mentionChannelId;
+      }
+
+      // VCS identity (GitHub / GitLab issue / PR / MR + webhook routing)
+      // Webhook handlers locate active work via `findTaskByVcs(repo, number)`,
+      // so a resume / follow-up child MUST carry the full VCS identity or
+      // subsequent review/update events get dropped.
+      if (parent.vcsProvider && !options.vcsProvider) {
+        options.vcsProvider = parent.vcsProvider;
+      }
+      if (parent.vcsRepo && !options.vcsRepo) {
+        options.vcsRepo = parent.vcsRepo;
+      }
+      if (parent.vcsNumber != null && options.vcsNumber == null) {
+        options.vcsNumber = parent.vcsNumber;
+      }
+      if (parent.vcsEventType && !options.vcsEventType) {
+        options.vcsEventType = parent.vcsEventType;
+      }
+      if (parent.vcsCommentId != null && options.vcsCommentId == null) {
+        options.vcsCommentId = parent.vcsCommentId;
+      }
+      if (parent.vcsAuthor && !options.vcsAuthor) {
+        options.vcsAuthor = parent.vcsAuthor;
+      }
+      if (parent.vcsUrl && !options.vcsUrl) {
+        options.vcsUrl = parent.vcsUrl;
+      }
+      if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
+        options.vcsInstallationId = parent.vcsInstallationId;
+      }
+      if (parent.vcsNodeId && !options.vcsNodeId) {
+        options.vcsNodeId = parent.vcsNodeId;
+      }
+
+      // Execution context (per-task overrides)
+      if (parent.model && !options.model) {
+        options.model = parent.model;
+      }
+      if (parent.dir && !options.dir) {
+        options.dir = parent.dir;
+      }
+
+      // Contract (schema validation) — `store-progress` validates completion
+      // output against `outputSchema`, runner injects structured-output
+      // instructions only when it's present.
+      if (parent.outputSchema && !options.outputSchema) {
+        options.outputSchema = parent.outputSchema;
+      }
+
+      // Attribution
       if (parent.requestedByUserId && !options.requestedByUserId) {
         options.requestedByUserId = parent.requestedByUserId;
       }
@@ -4047,6 +4211,15 @@ export const sessionLogQueries = {
       "SELECT * FROM session_logs WHERE taskId = ? ORDER BY iteration ASC, lineNumber ASC",
     ),
 
+  getRecentByTaskId: () =>
+    getDb().prepare<SessionLogRow, [string, number]>(
+      `SELECT * FROM (
+         SELECT * FROM session_logs WHERE taskId = ?
+         ORDER BY iteration DESC, lineNumber DESC
+         LIMIT ?
+       ) ORDER BY iteration ASC, lineNumber ASC`,
+    ),
+
   getBySessionId: () =>
     getDb().prepare<SessionLogRow, [string, number]>(
       "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY lineNumber ASC",
@@ -4082,7 +4255,10 @@ export function createSessionLogs(logs: {
   })();
 }
 
-export function getSessionLogsByTaskId(taskId: string): SessionLog[] {
+export function getSessionLogsByTaskId(taskId: string, limit?: number): SessionLog[] {
+  if (typeof limit === "number" && limit > 0) {
+    return sessionLogQueries.getRecentByTaskId().all(taskId, limit).map(rowToSessionLog);
+  }
   return sessionLogQueries.getByTaskId().all(taskId).map(rowToSessionLog);
 }
 

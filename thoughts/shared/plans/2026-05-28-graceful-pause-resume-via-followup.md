@@ -2,7 +2,7 @@
 date: 2026-05-28T12:00:00Z
 planner: claude
 topic: "Graceful Worker Task Pause & Resume via Follow-Up"
-status: draft
+status: completed
 ---
 
 # Graceful Worker Task Pause & Resume via Follow-Up

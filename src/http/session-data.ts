@@ -46,6 +46,13 @@ const getSessionLogsByTask = route({
   summary: "Get session logs for a task",
   tags: ["Session Data"],
   params: z.object({ taskId: z.string() }),
+  query: z.object({
+    // When set, returns the last N log rows ordered ASC. Used by the
+    // resume context preamble to avoid pulling the full log set over HTTP
+    // just to slice the tail. Server-side limit prevents OOM / slow
+    // dispatch for tasks with very long run history (PR #594 review).
+    limit: z.coerce.number().int().min(1).max(1000).optional(),
+  }),
   responses: {
     200: { description: "Session logs" },
     404: { description: "Task not found" },
@@ -181,7 +188,7 @@ export async function handleSessionData(
       jsonError(res, "Task not found", 404);
       return true;
     }
-    const logs = getSessionLogsByTaskId(parsed.params.taskId);
+    const logs = getSessionLogsByTaskId(parsed.params.taskId, parsed.query?.limit);
     json(res, { logs });
     return true;
   }
