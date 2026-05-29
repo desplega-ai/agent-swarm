@@ -85,7 +85,12 @@ export function decodeJwt(token: string): Record<string, unknown> | null {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
     const payload = parts[1] ?? "";
-    const decoded = atob(payload);
+    // Normalize base64url → standard base64 before decoding.
+    // JWTs use base64url (RFC 7515): '-' replaces '+', '_' replaces '/', padding stripped.
+    // atob() only accepts standard base64; passing raw base64url throws on '-' or '_'.
+    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const decoded = atob(padded);
     return JSON.parse(decoded);
   } catch {
     return null;

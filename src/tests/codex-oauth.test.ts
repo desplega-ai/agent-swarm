@@ -126,6 +126,22 @@ describe("decodeJwt", () => {
     expect(decodeJwt("not-a-jwt")).toBeNull();
     expect(decodeJwt("a.b")).toBeNull();
   });
+
+  it("handles base64url-encoded payload containing URL-safe '-' chars", () => {
+    // Real JWTs use base64url (RFC 7515): '-' replaces '+', '_' replaces '/'.
+    // atob() throws on these chars; decodeJwt() must normalize before calling atob().
+    // This payload encodes {"https://api.openai.com/auth":{"chatgpt_user_id":"user-abc>def"}}
+    // The '>' in the user_id forces a '+' → '-' substitution when base64url-encoded.
+    const b64urlPayload =
+      "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF91c2VyX2lkIjoidXNlci1hYmM-ZGVmIn19";
+    expect(b64urlPayload).toContain("-"); // sanity: this test actually exercises the fix
+    const token = `header.${b64urlPayload}.signature`;
+    const decoded = decodeJwt(token);
+    expect(decoded).not.toBeNull();
+    expect(
+      (decoded?.["https://api.openai.com/auth"] as Record<string, unknown>)?.chatgpt_user_id,
+    ).toBe("user-abc>def");
+  });
 });
 
 describe("getAccountId", () => {
@@ -205,6 +221,20 @@ describe("extractChatgptUserId", () => {
     expect(extractChatgptUserId(tokenA)).toBe("user-daniel-001");
     expect(extractChatgptUserId(tokenB)).toBe("user-lorenzo-002");
     expect(extractChatgptUserId(tokenA)).not.toBe(extractChatgptUserId(tokenB));
+  });
+
+  it("extracts user_id from a base64url-encoded JWT payload containing '-' chars", () => {
+    // Regression: decodeJwt() previously called atob() on raw base64url segments.
+    // atob() throws on '-' or '_' (base64url chars not in standard base64 alphabet),
+    // causing extractChatgptUserId() to silently return null and fall back to account_id,
+    // reintroducing the slot-collision bug this PR fixes.
+    // This payload is base64url-encoded (contains '-') and decodes to:
+    // {"https://api.openai.com/auth":{"chatgpt_user_id":"user-abc>def"}}
+    const b64urlPayload =
+      "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF91c2VyX2lkIjoidXNlci1hYmM-ZGVmIn19";
+    expect(b64urlPayload).toContain("-"); // sanity: payload actually has base64url chars
+    const token = `header.${b64urlPayload}.signature`;
+    expect(extractChatgptUserId(token)).toBe("user-abc>def");
   });
 });
 
