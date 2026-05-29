@@ -129,13 +129,16 @@ export type CreateResumeFollowUpResult =
  * so the caller can `failTask(parent.id, 'superseded_workflow_task')` and let
  * the workflow engine's retry/failure policy take over.
  *
- * Field inheritance is explicit (`model`, `dir`, `vcsRepo`, `vcsProvider`).
- * Other fields (`slackChannelId`, `slackThreadTs`, `slackUserId`,
- * `agentmailInboxId`, `agentmailThreadId`, `requestedByUserId`, `contextKey`)
- * are inherited transitively by `createTaskExtended` via the `parentTaskId`
- * lookup at `src/be/db.ts:2614-2640`. This was chosen over modifying
- * `createTaskExtended`'s central inheritance list to avoid regressing other
- * follow-up flows.
+ * Field inheritance is transitive via `createTaskExtended`'s `parentTaskId`
+ * lookup (`dir`, `vcsRepo`/`vcsProvider`/etc., `outputSchema`, Slack/AgentMail
+ * context, `requestedByUserId`, `contextKey`, `followUpConfig`). This was chosen
+ * over re-listing fields here so there is a single source of truth.
+ *
+ * `model` is intentionally NOT inherited: a resume task is routinely claimed by
+ * a different worker (and thus a different harness/provider) than the parent, so
+ * carrying the parent's concrete provider-specific model would break the child
+ * at session-init. The resume task runs on the assignee agent's own model. See
+ * the `model` carve-out comment in `createTaskExtended` (`src/be/db.ts`).
  *
  * Routing: the parent's assigned worker (`parent.agentId`) is preferred if
  * its `lastActivityAt` is within `WORKER_LIVENESS_WINDOW_SECONDS` AND it has
@@ -204,10 +207,12 @@ export function createResumeFollowUp(args: {
   const priority = Math.min(100, (parent.priority ?? 50) + 10);
   const tags = ["auto-resume", `reason:${args.reason}`];
 
-  // Identity-shaped fields (model, dir, VCS provider/repo/number/url/etc.,
+  // Identity-shaped fields (dir, VCS provider/repo/number/url/etc.,
   // outputSchema, slack channel/thread/user, agentmail, mention, contextKey,
   // requestedByUserId, followUpConfig) are auto-inherited from the parent by
-  // `createTaskExtended`'s parentTaskId block (see src/be/db.ts ~line 2722).
+  // `createTaskExtended`'s parentTaskId block (see src/be/db.ts). `model` is
+  // deliberately excluded there so the resume task resolves to the claiming
+  // agent's own provider/model — never the parent's concrete model string.
   // We only override what's SPECIFIC to the resume task here.
   const created = createTaskExtended(followUpDescription, {
     agentId: preferredAgentId,

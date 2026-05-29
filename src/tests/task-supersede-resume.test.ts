@@ -171,13 +171,55 @@ describe("Task Supersede + Resume", () => {
       const child = result.task;
       expect(child.taskType).toBe("resume");
       expect(child.parentTaskId).toBe(parent.id);
-      expect(child.model).toBe("openrouter/openai/gpt-5-nano");
+      // `model` is DELIBERATELY NOT inherited: a resume task may be claimed by a
+      // different-provider worker, so it must resolve to the claiming agent's
+      // own model at session-init rather than the parent's concrete string.
+      expect(child.model).toBeUndefined();
       expect(child.dir).toBe("/workspace/project-x");
       expect(child.vcsRepo).toBe("owner/repo");
       expect(child.vcsProvider).toBe("github");
       expect(child.tags).toContain("auto-resume");
       expect(child.tags).toContain("reason:graceful_shutdown");
       expect(child.priority).toBeGreaterThanOrEqual(parent.priority);
+    });
+
+    // Guard at the single-source-of-truth level: any child created via
+    // `parentTaskId` must NOT inherit the parent's concrete `model`, but MUST
+    // still inherit other identity-shaped fields (dir, VCS). This is the
+    // consolidated fix covering resume tasks, completion/review follow-ups, and
+    // re-dispatches — a derived task on a different-provider agent would
+    // otherwise die at session-init with a model-incompatibility error.
+    test("createTaskExtended(parentTaskId) does NOT inherit model but DOES inherit dir/vcs", () => {
+      const parent = createTaskExtended("Parent pinned to a provider-specific model", {
+        agentId: freshAgent("worker-model-guard").id,
+        model: "claude-opus-4-8",
+        dir: "/workspace/project-y",
+        vcsRepo: "owner/repo2",
+        vcsProvider: "github",
+      });
+
+      const child = createTaskExtended("Derived task", {
+        source: "system",
+        taskType: "follow-up",
+        parentTaskId: parent.id,
+      });
+
+      // model NOT inherited → resolves to the assignee agent's own model
+      expect(child.model).toBeUndefined();
+      // other identity-shaped fields STILL inherit
+      expect(child.dir).toBe("/workspace/project-y");
+      expect(child.vcsRepo).toBe("owner/repo2");
+      expect(child.vcsProvider).toBe("github");
+
+      // An explicit model on the child is still honored (same-provider creator
+      // deliberately pinning a model is unaffected by the inheritance carve-out).
+      const explicitChild = createTaskExtended("Derived with explicit model", {
+        source: "system",
+        taskType: "follow-up",
+        parentTaskId: parent.id,
+        model: "sonnet",
+      });
+      expect(explicitChild.model).toBe("sonnet");
     });
 
     test("non-workflow parent with outputSchema → schema carries forward to resume child", () => {

@@ -2804,9 +2804,24 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       }
 
       // Execution context (per-task overrides)
-      if (parent.model && !options.model) {
-        options.model = parent.model;
-      }
+      //
+      // `model` is DELIBERATELY NOT inherited. A parent task's `model` is a
+      // concrete, provider-specific resolved string (e.g. `claude-opus-4-8`,
+      // `openrouter/moonshotai/kimi-k2.6`). Derived tasks (resume follow-ups,
+      // completion/review follow-ups, re-dispatches) routinely land on a
+      // DIFFERENT agent — and therefore a different harness/provider — than the
+      // parent. Carrying the parent's concrete model across that boundary makes
+      // the child die at session-init with a model-incompatibility error before
+      // any worker code runs (e.g. a `claude-opus-4-8` resume claimed by a Codex
+      // worker → `400 model is not supported when using Codex`, or a
+      // `kimi-k2.6` review follow-up routed to a Claude-harness Lead → session
+      // exit 1). Per Taras's directive (2026-05-29): derived tasks must never
+      // set the model — it resolves from the ASSIGNEE agent's own provider /
+      // `MODEL_OVERRIDE` config at session-init (see
+      // `src/commands/runner.ts` — `opts.model || configModel`). A null `model`
+      // here is the correct, intended state. Do NOT re-add inheritance here; if
+      // a same-provider child genuinely needs a specific model, the creator must
+      // pass it explicitly.
       if (parent.dir && !options.dir) {
         options.dir = parent.dir;
       }
