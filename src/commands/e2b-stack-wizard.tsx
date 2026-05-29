@@ -180,17 +180,20 @@ export function StackWizard({ defaults, skips, onComplete }: StackWizardProps) {
             <Select
               options={[
                 { label: "Create a new swarm", value: "create" },
-                // PHASE 4 HOOK: "add-to-existing" requires swarm metadata tagging
-                // (metadata.swarm) + a group picker over `listSandboxes`, which
-                // Phase 4 introduces. Until then this option is intentionally
-                // disabled — we don't build a half-working picker against
-                // metadata that doesn't exist yet.
-                { label: "Add to an existing swarm (coming in Phase 4)", value: "add" },
+                // Phase 4: the add-to-existing flow lives in the standalone
+                // `e2b swarms add` command, which has its own TTY swarm picker,
+                // `--workers`/`--add-lead` flags, and TTL re-sync to the group's
+                // end. Rather than fork that whole flow into this wizard (which
+                // is scoped to *creating* a stack), we point the operator at it.
+                // This keeps a single, fully-working add path instead of a
+                // half-duplicated one.
+                { label: "Add to an existing swarm (run: e2b swarms add <slug>)", value: "add" },
               ]}
               onChange={(value) => {
                 if (value === "add") {
                   setError(
-                    "Add-to-existing-swarm is not available yet (Phase 4). Choose 'Create a new swarm'.",
+                    "To add to an existing swarm, exit and run: e2b swarms add <slug> " +
+                      "(no slug → it lists your swarms to pick from). Choose 'Create a new swarm' to continue here.",
                   );
                   return;
                 }
@@ -308,6 +311,42 @@ export function StackWizard({ defaults, skips, onComplete }: StackWizardProps) {
           onContinue={() => advance({ integrations: { ...integrationToggles } })}
         />
       )}
+    </Box>
+  );
+}
+
+/**
+ * One-shot picker over existing swarm slugs, used by `e2b swarms add` when no
+ * slug was passed on an interactive TTY. Resolves the chosen slug back to the
+ * caller via `onSelect`, then exits. Consistent with the wizard's Ink + Select.
+ */
+export type SwarmPickerOption = { slug: string; label: string };
+
+export function SwarmPicker({
+  slugs,
+  onSelect,
+}: {
+  slugs: SwarmPickerOption[];
+  onSelect: (slug: string) => void;
+}) {
+  const { exit } = useApp();
+  return (
+    <Box flexDirection="column" padding={1}>
+      <Text color="cyan" bold>
+        Add to which swarm?
+      </Text>
+      <Box marginTop={1}>
+        <Select
+          options={slugs.map((s) => ({ label: s.label, value: s.slug }))}
+          onChange={(value) => {
+            // Defer so React commits before we tear down the Ink instance.
+            queueMicrotask(() => {
+              onSelect(value);
+              exit();
+            });
+          }}
+        />
+      </Box>
     </Box>
   );
 }

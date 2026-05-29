@@ -4,7 +4,7 @@ topic: "E2B Dispatch CLI — Lead Stacks, Swarm Grouping, Lifecycle Control"
 status: in-progress
 autonomy: autopilot
 last_updated: 2026-05-30T00:00:00Z
-last_updated_by: phase-running (Phase 3)
+last_updated_by: phase-running (Phase 4)
 ---
 
 # E2B Dispatch CLI — Lead Stacks, Swarm Grouping, Lifecycle Control: Implementation Plan
@@ -181,10 +181,10 @@ Every launch is tagged with a shared swarm slug; `e2b swarms list|info|kill|add`
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Metadata carried (dry-run prints fake sandbox metadata): `bun run src/cli.tsx e2b start-stack --dry-run --yes --swarm demo` shows `swarm`/`swarmRole`
-- [ ] Deep-link unit test passes (camelCase params; onboarding builders now camelCase): `bun test src/tests/e2b-dispatch.test.ts`
-- [ ] Help lists swarms subcommands: `bun run src/cli.tsx e2b swarms --help`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Metadata carried (dry-run prints fake sandbox metadata): `bun run src/cli.tsx e2b start-stack --dry-run --yes --swarm demo` shows `swarm`/`swarmRole`
+- [x] Deep-link unit test passes (camelCase params; onboarding builders now camelCase): `bun test src/tests/e2b-dispatch.test.ts`
+- [x] Help lists swarms subcommands: `bun run src/cli.tsx e2b swarms --help`
 
 #### Automated QA:
 - [ ] Agent starts a real swarm `--swarm qa-grp`, runs `swarms list` (group present), `swarms info qa-grp` (correct API URL, key source, lead+worker, health 200, TTL), `swarms info qa-grp --reveal-key` (deep-link contains the resolved key), then `swarms add qa-grp --workers 1` (worker count grows), then `swarms kill qa-grp` (0 remain).

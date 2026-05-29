@@ -33,6 +33,7 @@ import {
   selectEnv,
   splitKeys,
 } from "../e2b/env";
+import { getAppUrl } from "../utils/constants";
 import {
   DEFAULT_STACK_TIMEOUT_SEC,
   DEFAULT_STACK_WORKERS,
@@ -41,6 +42,7 @@ import {
   type StackWizardDefaults,
   type StackWizardResult,
   type StackWizardSkips,
+  SwarmPicker,
   slugify,
 } from "./e2b-stack-wizard.tsx";
 
@@ -65,6 +67,14 @@ type StartedRole = {
 export type EnvScope = "api" | "lead" | "worker";
 
 /**
+ * The swarm-grouping role stamped onto `metadata.swarmRole`. Distinct from the
+ * E2B `SwarmRole` ("api" | "worker") because a lead is E2B `SwarmRole:"worker"`
+ * but a separate grouping role for `e2b swarms` purposes. Used by `swarms info`
+ * to resolve which sandbox is the API vs lead vs workers.
+ */
+export type MetadataSwarmRole = "api" | "lead" | "worker";
+
+/**
  * Per-instance launch spec threaded through {@link startRole}. `swarmRole` is
  * the E2B template/entrypoint dimension (api vs worker). `agentRole` is the
  * swarm-side role written to `AGENT_ROLE` (a lead is `swarmRole:"worker"` +
@@ -75,6 +85,13 @@ export type LaunchSpec = {
   swarmRole: SwarmRole;
   agentRole?: "worker" | "lead";
   envScope: EnvScope;
+  /**
+   * The grouping role stamped onto `metadata.swarmRole`. Defaults to a sensible
+   * value derived from `swarmRole`/`agentRole` (api → "api", lead → "lead",
+   * worker → "worker") when omitted. Kept explicit on the spec so the stack's
+   * lead and workers tag distinctly even though both are E2B `SwarmRole:"worker"`.
+   */
+  metadataSwarmRole?: MetadataSwarmRole;
   /**
    * Flag the explicit AGENT_ID override is read from (default `"agent-id"`).
    * The stack's lead reads `"lead-agent-id"` so a single `--agent-id` never
@@ -91,13 +108,18 @@ export type LaunchSpec = {
 };
 
 /** The byte-identical specs for the legacy `start-api` / `start-worker` paths. */
-const API_SPEC: LaunchSpec = { swarmRole: "api", envScope: "api" };
-const WORKER_SPEC: LaunchSpec = { swarmRole: "worker", envScope: "worker" };
+const API_SPEC: LaunchSpec = { swarmRole: "api", envScope: "api", metadataSwarmRole: "api" };
+const WORKER_SPEC: LaunchSpec = {
+  swarmRole: "worker",
+  envScope: "worker",
+  metadataSwarmRole: "worker",
+};
 
 /**
  * Stack-specific specs. The lead is E2B `SwarmRole === "worker"` (same template
- * + entrypoint) but pins `agentRole:"lead"`, its own `"lead"` env scope, and a
- * dedicated `--lead-agent-id` override + `e2b-lead-<sandboxID>` default.
+ * + entrypoint) but pins `agentRole:"lead"`, its own `"lead"` env scope, a
+ * dedicated `--lead-agent-id` override + `e2b-lead-<sandboxID>` default, and a
+ * `"lead"` grouping role so `e2b swarms` can tell it apart from the workers.
  */
 const STACK_LEAD_SPEC: LaunchSpec = {
   swarmRole: "worker",
@@ -105,11 +127,13 @@ const STACK_LEAD_SPEC: LaunchSpec = {
   envScope: "lead",
   agentIdFlag: "lead-agent-id",
   agentIdPrefix: "e2b-lead",
+  metadataSwarmRole: "lead",
 };
 const STACK_WORKER_SPEC: LaunchSpec = {
   swarmRole: "worker",
   agentRole: "worker",
   envScope: "worker",
+  metadataSwarmRole: "worker",
 };
 
 const DEFAULT_API_PORT = 3013;
@@ -122,6 +146,10 @@ const BOOLEAN_FLAGS = new Set([
   "yes",
   "non-interactive",
   "no-lead",
+  "reveal-key",
+  // `swarms add --add-lead` adds a lead to an existing swarm (in addition to or
+  // instead of workers). Boolean so it never swallows the next positional slug.
+  "add-lead",
   // Integration disable shortcuts: `--no-<integration>` sets the matching
   // API-side `*_DISABLE=true`. The `--integrations <csv>` allowlist is the
   // value-bearing alternative (handled separately).
@@ -444,17 +472,80 @@ export async function loadRuntimeEnv(
   return runtime;
 }
 
-function parseMetadata(flags: ParsedFlags, role: SwarmRole): Record<string, string> {
+/**
+ * Reserved sandbox-metadata keys this dispatcher stamps on every launch. They
+ * are read back by `e2b list`, `e2b kill --all`, and the `e2b swarms` family to
+ * group/inspect sandboxes — operators should not override them via `--metadata`.
+ *
+ *   app        — "agent-swarm" (provenance; every sandbox we create)
+ *   role       — E2B SwarmRole ("api" | "worker"); template/entrypoint dimension
+ *   launcher   — "agent-swarm-e2b" (the dispatcher tag `kill --all` filters on)
+ *   swarm      — shared slug grouping every sandbox of one launch (Phase 4)
+ *   swarmRole  — grouping role ("api" | "lead" | "worker"); a lead is E2B
+ *                role:"worker" but swarmRole:"lead", so `swarms info` can tell
+ *                the lead apart from the workers
+ *   apiPort    — (API sandbox only) the port the swarm API listens on, so
+ *                `swarms info` reconstructs the API URL without guessing
+ *   agentId    — (lead/worker only) the agent ID it registered under, when known
+ *                pre-create (explicit --agent-id / --lead-agent-id / env). When
+ *                absent (auto `<prefix>-<sandboxID>` default), `swarms info`
+ *                reconstructs it from the sandbox ID + swarmRole.
+ */
+const RESERVED_METADATA_KEYS = [
+  "app",
+  "role",
+  "launcher",
+  "swarm",
+  "swarmRole",
+  "apiPort",
+  "agentId",
+] as const;
+
+type MetadataTagging = {
+  /** E2B SwarmRole — the template/entrypoint dimension. */
+  role: SwarmRole;
+  /** Shared swarm slug for grouping (Phase 4). Omitted on legacy single-role launches. */
+  swarm?: string;
+  /** Grouping role for `e2b swarms` (api | lead | worker). */
+  swarmRole?: MetadataSwarmRole;
+  /** API port (API sandbox only) so `swarms info` rebuilds the URL deterministically. */
+  apiPort?: number;
+  /** Resolved agent ID (lead/worker only) when known before sandbox creation. */
+  agentId?: string;
+};
+
+function parseMetadata(flags: ParsedFlags, tagging: MetadataTagging): Record<string, string> {
   const metadata: Record<string, string> = {
     app: "agent-swarm",
-    role,
+    role: tagging.role,
     launcher: "agent-swarm-e2b",
   };
+  if (tagging.swarm) metadata.swarm = tagging.swarm;
+  if (tagging.swarmRole) metadata.swarmRole = tagging.swarmRole;
+  if (tagging.apiPort !== undefined) metadata.apiPort = String(tagging.apiPort);
+  if (tagging.agentId) metadata.agentId = tagging.agentId;
   for (const raw of values(flags, "metadata")) {
     const [key, metadataValue] = parseKeyValue(raw, "--metadata");
     metadata[key] = metadataValue;
   }
   return metadata;
+}
+
+/** The grouping role to stamp for a spec (defaults from swarmRole/agentRole). */
+function metadataSwarmRoleForSpec(spec: LaunchSpec): MetadataSwarmRole {
+  if (spec.metadataSwarmRole) return spec.metadataSwarmRole;
+  if (spec.swarmRole === "api") return "api";
+  return spec.agentRole === "lead" ? "lead" : "worker";
+}
+
+/**
+ * The auto-generated AGENT_ID prefix for a grouping role (mirrors the prefixes
+ * in {@link startRole}). Lets `swarms info` reconstruct an agent ID from a
+ * sandbox ID when `metadata.agentId` is absent (the auto `<prefix>-<sandboxID>`
+ * default was used).
+ */
+function agentIdPrefixForSwarmRole(swarmRole: MetadataSwarmRole): string {
+  return swarmRole === "lead" ? "e2b-lead" : "e2b";
 }
 
 function roleTemplate(flags: ParsedFlags, role: SwarmRole): string {
@@ -514,7 +605,25 @@ async function startRole(
   const apiBase = e2bApiBase(flags, controllerEnv);
   const dryRun = booleanFlag(flags, "dry-run");
   const port = Number.parseInt(runtimeEnv.PORT || String(DEFAULT_API_PORT), 10);
-  const metadata = parseMetadata(flags, role);
+
+  const swarmSlug = value(flags, "swarm") || undefined;
+  const metadataSwarmRole = metadataSwarmRoleForSpec(spec);
+  // Resolve the agent ID we can know BEFORE the sandbox exists: an explicit
+  // --agent-id / --lead-agent-id flag, or AGENT_ID from the runtime env. The
+  // auto `<prefix>-<sandboxID>` default depends on the not-yet-created sandbox
+  // ID, so it is NOT stamped here — `swarms info` reconstructs it from the
+  // sandbox ID + swarmRole instead.
+  const preCreateAgentId =
+    role === "worker"
+      ? value(flags, spec.agentIdFlag ?? "agent-id") || runtimeEnv.AGENT_ID || undefined
+      : undefined;
+  const metadata = parseMetadata(flags, {
+    role,
+    swarm: swarmSlug,
+    swarmRole: metadataSwarmRole,
+    apiPort: role === "api" ? port : undefined,
+    agentId: preCreateAgentId,
+  });
 
   if (dryRun) {
     const fakeSandbox = {
@@ -822,16 +931,24 @@ async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void>
   }
 
   // Normalize a provided --swarm into a clean slug so the value is consistent
-  // whether it came from a flag or the wizard. (Phase 4 stamps it onto sandbox
-  // metadata; Phase 3 only uses it for wizard naming + the echoed command.)
+  // whether it came from a flag or the wizard. When none is provided we GENERATE
+  // one (`swarm-<short-random>`) so every sandbox of this launch shares a single
+  // grouping slug stamped onto metadata.swarm (read by `e2b swarms`). The slug
+  // lands on `flags` here, BEFORE any startRole call, so all roles inherit it.
   const swarmFlag = value(flags, "swarm");
-  if (swarmFlag) setFlagValue(flags, "swarm", slugify(swarmFlag));
+  setFlagValue(flags, "swarm", swarmFlag ? slugify(swarmFlag) : generateSwarmSlug());
 
   // Interactive wizard (TTY only). Headless runs (--yes / --non-interactive /
-  // --dry-run / non-TTY) skip it entirely and rely on flags + defaults.
+  // --dry-run / non-TTY) skip it entirely and rely on flags + defaults. The
+  // wizard may overwrite the swarm slug if the operator names the swarm.
   if (!isStackHeadless(flags)) {
     await runStackWizard(flags);
   }
+
+  // Echo the resolved slug up front so the operator can group/inspect/extend the
+  // launch via `e2b swarms <cmd> <slug>` even if a later role fails.
+  const swarmSlug = value(flags, "swarm");
+  console.log(`swarm: ${swarmSlug}`);
 
   const noLead = booleanFlag(flags, "no-lead");
   const started: StartedRole[] = [];
@@ -883,6 +1000,15 @@ async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void>
       for (const worker of workers) {
         printHumanStart(worker, runtimeEnv);
       }
+      // Dashboard deep-link (key hidden unless --reveal-key). Only printed on the
+      // human path — the --json payload is consumed programmatically and the URL
+      // would otherwise embed the swarm key in machine output.
+      printDashboardDeepLink(flags, {
+        apiUrl: api.url,
+        apiKey: runtimeEnv.AGENT_SWARM_API_KEY,
+        name: swarmSlug,
+        env: runtimeEnv,
+      });
     }
   } catch (err) {
     await cleanupStartedRoles(flags, cwd, started);
@@ -998,6 +1124,102 @@ async function runStackWizard(flags: ParsedFlags): Promise<void> {
 
   console.log("\nEquivalent one-shot command:");
   console.log(`  ${buildOneShotCommand(flags)}\n`);
+}
+
+/**
+ * Generate a fresh swarm slug (`swarm-<short-random>`) when the operator did not
+ * name the swarm. Shared across every sandbox of one launch via `metadata.swarm`.
+ * `crypto.randomUUID()` is overkill; a short hex tail keeps the slug readable
+ * while staying collision-free enough for a handful of concurrent launches.
+ */
+function generateSwarmSlug(): string {
+  const tail = Math.random().toString(16).slice(2, 8);
+  return `swarm-${tail}`;
+}
+
+/**
+ * Mask a swarm API key for display: keep a short non-sensitive prefix/suffix and
+ * elide the middle. Short keys are fully masked. Never prints the whole key.
+ */
+function maskKey(key: string): string {
+  if (!key) return "(none)";
+  if (key.length <= 8) return "****";
+  return `${key.slice(0, 4)}…${key.slice(-4)}`;
+}
+
+/**
+ * Report where `resolveSwarmApiKey` sourced the key from, for `swarms info`. The
+ * precedence mirrors {@link resolveSwarmApiKey} (explicit > AGENT_SWARM_API_KEY >
+ * API_KEY > getApiKey()/env default). Returns a human label, never the value.
+ *
+ * `runtime` is built from `selectEnv(process.env, FORWARD_KEYS)` by the caller,
+ * so its AGENT_SWARM_API_KEY / API_KEY entries already reflect the process env —
+ * no direct `process.env` reads here (that path is owned by getApiKey(), per the
+ * api-key boundary). A resolved key with neither entry came from getApiKey().
+ */
+function swarmApiKeySource(flags: ParsedFlags, runtime: EnvMap): string {
+  if (value(flags, "api-key")) return "from --api-key";
+  if (runtime.AGENT_SWARM_API_KEY) return "from AGENT_SWARM_API_KEY";
+  if (runtime.API_KEY) return "from API_KEY";
+  return "from getApiKey() default";
+}
+
+export type DashboardDeepLinkParts = {
+  apiUrl?: string;
+  apiKey?: string;
+  name?: string;
+};
+
+/**
+ * Build the dashboard deep-link the SPA reads. The SPA expects **camelCase**
+ * `apiUrl` / `apiKey` / `name` query params (see ui/src/hooks/use-config.ts) and
+ * silently ignores snake_case — so these MUST stay camelCase.
+ *
+ * When `reveal` is false the `apiKey` param is replaced with a placeholder so the
+ * key never lands in logs/scrollback by default. When `reveal` is true the real
+ * key is embedded — the caller is responsible for the secret warning and for NOT
+ * routing the revealed URL through a redactor (the key would be scrubbed out).
+ */
+export function buildDashboardDeepLink(parts: DashboardDeepLinkParts, reveal: boolean): string {
+  const params = new URLSearchParams();
+  if (parts.apiUrl) params.set("apiUrl", parts.apiUrl);
+  // URLSearchParams percent-encodes the placeholder's spaces/em-dash; build the
+  // query manually so the hidden hint stays human-readable in the printed URL.
+  const keyParam = reveal
+    ? parts.apiKey
+      ? `apiKey=${encodeURIComponent(parts.apiKey)}`
+      : ""
+    : "apiKey=<hidden — pass --reveal-key>";
+  if (parts.name) params.set("name", parts.name);
+  const encodedRest = params.toString();
+  const query = [keyParam, encodedRest].filter(Boolean).join("&");
+  return `${getAppUrl()}${query ? `?${query}` : ""}`;
+}
+
+/**
+ * Print the dashboard deep-link. Default: key hidden. With `--reveal-key`: emit
+ * the full key-bearing URL RAW (not via redactWithEnv — a redactor would mask
+ * the very key the operator asked to reveal) under an explicit secret warning.
+ */
+function printDashboardDeepLink(
+  flags: ParsedFlags,
+  opts: { apiUrl?: string; apiKey?: string; name?: string; env: EnvMap },
+): void {
+  if (!opts.apiUrl) return;
+  const reveal = booleanFlag(flags, "reveal-key");
+  const parts: DashboardDeepLinkParts = {
+    apiUrl: opts.apiUrl,
+    apiKey: opts.apiKey,
+    name: opts.name,
+  };
+  if (reveal) {
+    console.log("\n⚠ secret: the URL below embeds the swarm API key — do not share or paste it.");
+    // Intentionally NOT redacted: the operator asked to reveal the key.
+    console.log(`dashboard: ${buildDashboardDeepLink(parts, true)}`);
+  } else {
+    console.log(`dashboard: ${buildDashboardDeepLink(parts, false)}`);
+    console.log("  (pass --reveal-key to embed the swarm API key for one-click connect)");
+  }
 }
 
 function isInteractiveTty(): boolean {
@@ -1122,6 +1344,393 @@ async function listCommand(flags: ParsedFlags, cwd: string): Promise<void> {
   }
 }
 
+/** Bucket key for sandboxes carrying no `metadata.swarm` tag (legacy/standalone). */
+const UNGROUPED_BUCKET = "(ungrouped)";
+
+/**
+ * Group dispatcher sandboxes by `metadata.swarm`. Sandboxes with no swarm tag
+ * (legacy `start-api`/`start-worker` launches, or anything created before Phase
+ * 4) land in the `(ungrouped)` bucket. Returns an insertion-ordered map.
+ */
+function groupSandboxesBySwarm(sandboxes: E2BSandboxInfo[]): Map<string, E2BSandboxInfo[]> {
+  const groups = new Map<string, E2BSandboxInfo[]>();
+  for (const sandbox of sandboxes) {
+    const slug = sandbox.metadata?.swarm || UNGROUPED_BUCKET;
+    const bucket = groups.get(slug);
+    if (bucket) bucket.push(sandbox);
+    else groups.set(slug, [sandbox]);
+  }
+  return groups;
+}
+
+/** The grouping role for a sandbox, defaulting from the E2B `role` when absent. */
+function sandboxSwarmRole(sandbox: E2BSandboxInfo): MetadataSwarmRole {
+  const swarmRole = sandbox.metadata?.swarmRole;
+  if (swarmRole === "api" || swarmRole === "lead" || swarmRole === "worker") return swarmRole;
+  // Pre-Phase-4 sandboxes only carry the E2B role (api|worker). Map worker → worker.
+  return sandbox.metadata?.role === "api" ? "api" : "worker";
+}
+
+/** The agent ID for a lead/worker sandbox: metadata if present, else reconstructed. */
+function sandboxAgentId(sandbox: E2BSandboxInfo): string {
+  const explicit = sandbox.metadata?.agentId;
+  if (explicit) return explicit;
+  // Auto-generated default was `<prefix>-<sandboxID>` (see startRole). Rebuild it
+  // so `swarms info` can name + probe the agent even without a stamped agentId.
+  return `${agentIdPrefixForSwarmRole(sandboxSwarmRole(sandbox))}-${sandbox.sandboxID}`;
+}
+
+/** The API URL for a swarm's API sandbox, preferring its own custom `domain`. */
+function swarmApiUrl(apiSandbox: E2BSandboxInfo, controllerEnv: EnvMap): string {
+  const port = Number.parseInt(apiSandbox.metadata?.apiPort || String(DEFAULT_API_PORT), 10);
+  // sandboxPortUrl already prefers the sandbox's own `domain` field over the
+  // configured controller domain (custom-domain correctness), falling back to
+  // the controller env's E2B_DOMAIN/E2B_SANDBOX_URL only when domain is absent.
+  return sandboxPortUrl(apiSandbox, port, controllerEnv);
+}
+
+/** A short role-count summary for a group, e.g. "1 api, 1 lead, 2 worker". */
+function roleCountSummary(sandboxes: E2BSandboxInfo[]): string {
+  const counts: Record<MetadataSwarmRole, number> = { api: 0, lead: 0, worker: 0 };
+  for (const sandbox of sandboxes) counts[sandboxSwarmRole(sandbox)]++;
+  return (["api", "lead", "worker"] as const)
+    .filter((role) => counts[role] > 0)
+    .map((role) => `${counts[role]} ${role}`)
+    .join(", ");
+}
+
+/** The shortest remaining TTL across a group's sandboxes (the group's true expiry). */
+function groupTtlSummary(sandboxes: E2BSandboxInfo[]): string {
+  let minSeconds: number | undefined;
+  for (const sandbox of sandboxes) {
+    const { secondsLeft } = ttlRemaining(sandbox);
+    if (secondsLeft === undefined) continue;
+    if (minSeconds === undefined || secondsLeft < minSeconds) minSeconds = secondsLeft;
+  }
+  return minSeconds === undefined ? "ttl unknown" : `expires in ${formatDuration(minSeconds)}`;
+}
+
+/** Probe `GET <apiUrl>/health` once, unauthenticated. Returns up/down + detail. */
+async function probeHealth(apiUrl: string): Promise<{ up: boolean; detail: string }> {
+  try {
+    const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/health`);
+    return { up: response.ok, detail: `${response.status} ${response.statusText}`.trim() };
+  } catch (err) {
+    return { up: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function swarmsListCommand(flags: ParsedFlags, cwd: string): Promise<void> {
+  const controllerEnv = await loadE2BControllerEnv(flags, cwd);
+  const apiBase = e2bApiBase(flags, controllerEnv);
+  const sandboxes = await listSandboxes(e2bControllerApiKey(controllerEnv), apiBase);
+  const groups = groupSandboxesBySwarm(sandboxes);
+
+  if (booleanFlag(flags, "json")) {
+    const payload = [...groups.entries()].map(([slug, members]) => ({
+      swarm: slug,
+      count: members.length,
+      roles: roleCountSummary(members),
+      sandboxIDs: members.map((m) => m.sandboxID),
+    }));
+    console.log(JSON.stringify(redactObjectWithEnv(payload, controllerEnv), null, 2));
+    return;
+  }
+
+  if (groups.size === 0) {
+    console.log("no swarms found");
+    return;
+  }
+  for (const [slug, members] of groups) {
+    console.log(
+      `${slug}\t${members.length} sandbox(es)\t${roleCountSummary(members)}\t${groupTtlSummary(
+        members,
+      )}`,
+    );
+  }
+}
+
+/** Find the sandboxes belonging to a swarm slug (throws if the group is empty). */
+async function resolveSwarmGroup(
+  flags: ParsedFlags,
+  cwd: string,
+  slug: string,
+): Promise<{ members: E2BSandboxInfo[]; controllerEnv: EnvMap; apiBase: string }> {
+  const controllerEnv = await loadE2BControllerEnv(flags, cwd);
+  const apiBase = e2bApiBase(flags, controllerEnv);
+  const sandboxes = await listSandboxes(e2bControllerApiKey(controllerEnv), apiBase);
+  const members = sandboxes.filter((sandbox) => sandbox.metadata?.swarm === slug);
+  if (members.length === 0) {
+    throw new Error(`no swarm found with slug "${slug}" (try: e2b swarms list)`);
+  }
+  return { members, controllerEnv, apiBase };
+}
+
+async function swarmsInfoCommand(flags: ParsedFlags, cwd: string): Promise<void> {
+  const slug = flags.positionals[1];
+  if (!slug) throw new Error("swarms info requires a slug: e2b swarms info <slug>");
+
+  const { members, controllerEnv } = await resolveSwarmGroup(flags, cwd, slug);
+  const api = members.find((m) => sandboxSwarmRole(m) === "api");
+  const lead = members.find((m) => sandboxSwarmRole(m) === "lead");
+  const workers = members.filter((m) => sandboxSwarmRole(m) === "worker");
+
+  // Re-resolve the swarm API key LOCALLY (never from the sandbox) so we can build
+  // the deep-link / authed probe. Source is reported; the value is masked.
+  const runtime: EnvMap = selectEnv(process.env, [...DEFAULT_E2B_FORWARD_KEYS]);
+  let resolvedKey = "";
+  let keySource = "unresolved";
+  try {
+    resolvedKey = resolveSwarmApiKey(runtime, value(flags, "api-key"));
+    keySource = swarmApiKeySource(flags, runtime);
+  } catch {
+    keySource = "unresolved (set AGENT_SWARM_API_KEY / API_KEY or pass --api-key)";
+  }
+
+  const apiUrl = api ? swarmApiUrl(api, controllerEnv) : undefined;
+
+  console.log(`swarm: ${slug}`);
+  console.log(`sandboxes: ${members.length} (${roleCountSummary(members)})`);
+  if (apiUrl) console.log(`api url: ${apiUrl}`);
+  console.log(`api key: ${maskKey(resolvedKey)} (${keySource})`);
+
+  // Per-sandbox lines, grouped API → lead → workers (resolved by swarmRole), each
+  // with its agent ID (lead/workers) and remaining TTL.
+  const ttlText = (member: E2BSandboxInfo): string => {
+    const { secondsLeft } = ttlRemaining(member);
+    return secondsLeft !== undefined ? `expires in ${formatDuration(secondsLeft)}` : "ttl unknown";
+  };
+  if (api) console.log(`  api    ${api.sandboxID}  ${ttlText(api)}`);
+  if (lead) {
+    console.log(`  lead   ${lead.sandboxID}  ${sandboxAgentId(lead)}  ${ttlText(lead)}`);
+  }
+  for (const worker of workers) {
+    console.log(`  worker ${worker.sandboxID}  ${sandboxAgentId(worker)}  ${ttlText(worker)}`);
+  }
+
+  // Single-shot unauthenticated health probe.
+  if (apiUrl) {
+    const health = await probeHealth(apiUrl);
+    console.log(`health: ${health.up ? "up" : "down"} (${health.detail})`);
+
+    // If the key resolved, do one authenticated probe to detect a key mismatch.
+    if (resolvedKey) {
+      try {
+        const authed = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/agents`, {
+          headers: { Authorization: `Bearer ${resolvedKey}` },
+        });
+        if (authed.status === 401) {
+          console.warn(
+            "warning: authenticated probe returned 401 — the resolved key may not match the launch key.",
+          );
+        }
+      } catch {
+        // A network error on the authed probe is non-fatal; the unauth health
+        // probe above already reported reachability.
+      }
+    }
+  }
+
+  // Dashboard deep-link (masked by default; --reveal-key embeds the key raw).
+  printDashboardDeepLink(flags, {
+    apiUrl,
+    apiKey: resolvedKey || undefined,
+    name: slug,
+    env: controllerEnv,
+  });
+}
+
+async function swarmsKillCommand(flags: ParsedFlags, cwd: string): Promise<void> {
+  const all = booleanFlag(flags, "all");
+  const controllerEnv = await loadE2BControllerEnv(flags, cwd);
+  const apiBase = e2bApiBase(flags, controllerEnv);
+  const controllerApiKey = e2bControllerApiKey(controllerEnv);
+
+  // Build the ordered kill list. Within each group: every non-API sandbox first,
+  // then the API LAST (so workers/lead never lose their API mid-teardown).
+  function orderGroup(members: E2BSandboxInfo[]): E2BSandboxInfo[] {
+    const apiLast = [...members].sort((a, b) => {
+      const aApi = sandboxSwarmRole(a) === "api" ? 1 : 0;
+      const bApi = sandboxSwarmRole(b) === "api" ? 1 : 0;
+      return aApi - bApi;
+    });
+    return apiLast;
+  }
+
+  let targets: E2BSandboxInfo[];
+  let label: string;
+  if (all) {
+    const sandboxes = await listSandboxes(controllerApiKey, apiBase);
+    const swarmTagged = sandboxes.filter((s) => s.metadata?.launcher === "agent-swarm-e2b");
+    if (swarmTagged.length === 0) {
+      console.log("no agent-swarm swarms to kill");
+      return;
+    }
+    // Order each group api-last, then concatenate.
+    const grouped = groupSandboxesBySwarm(swarmTagged);
+    targets = [...grouped.values()].flatMap(orderGroup);
+    label = `all ${grouped.size} swarm(s) (${targets.length} sandboxes)`;
+  } else {
+    const slug = flags.positionals[1];
+    if (!slug) throw new Error("swarms kill requires a slug (or --all): e2b swarms kill <slug>");
+    const { members } = await resolveSwarmGroup(flags, cwd, slug);
+    targets = orderGroup(members);
+    label = `swarm "${slug}" (${targets.length} sandboxes)`;
+  }
+
+  const ok = await confirm(`Kill ${label}?`, flags);
+  if (!ok) {
+    console.log("aborted (pass --yes to skip this prompt)");
+    return;
+  }
+
+  for (const sandbox of targets) {
+    await killSandbox(sandbox.sandboxID, controllerApiKey, apiBase);
+    console.log(`killed ${sandbox.sandboxID} (${sandboxSwarmRole(sandbox)})`);
+  }
+}
+
+async function swarmsAddCommand(flags: ParsedFlags, cwd: string): Promise<void> {
+  let slug = flags.positionals[1];
+
+  // No slug on a TTY → offer a picker of existing swarms.
+  if (!slug) {
+    if (!isInteractiveTty()) {
+      throw new Error("swarms add requires a slug: e2b swarms add <slug>");
+    }
+    slug = await pickSwarmSlug(flags, cwd);
+    if (!slug) {
+      console.log("aborted (no swarm selected)");
+      return;
+    }
+  }
+
+  const { members, controllerEnv, apiBase } = await resolveSwarmGroup(flags, cwd, slug);
+  const api = members.find((m) => sandboxSwarmRole(m) === "api");
+  if (!api) {
+    throw new Error(`swarm "${slug}" has no API sandbox — cannot add members to it`);
+  }
+  const apiUrl = swarmApiUrl(api, controllerEnv);
+  const controllerApiKey = e2bControllerApiKey(controllerEnv);
+
+  // Stamp the existing slug + point new members at the existing API. The slug
+  // flows into metadata via parseMetadata; MCP_BASE_URL via the apiUrl arg below.
+  setFlagValue(flags, "swarm", slug);
+
+  // Compute the group's current end so new members re-sync to the SAME wall-clock
+  // expiry (reuse setSandboxTimeout). The shortest remaining TTL is the group's
+  // true end; new members align to that rather than a fresh full TTL.
+  const groupEndSeconds = members
+    .map((m) => ttlRemaining(m).secondsLeft)
+    .filter((s): s is number => s !== undefined);
+  const resyncSeconds = groupEndSeconds.length > 0 ? Math.min(...groupEndSeconds) : undefined;
+
+  const addLead = booleanFlag(flags, "add-lead");
+  const workerCount = integerFlag(flags, "workers", addLead ? 0 : 1);
+  const added: StartedRole[] = [];
+
+  try {
+    if (addLead) {
+      const lead = await startRole(flags, cwd, STACK_LEAD_SPEC, apiUrl);
+      added.push(lead);
+    }
+    for (let i = 0; i < workerCount; i++) {
+      const worker = await startRole(flags, cwd, STACK_WORKER_SPEC, apiUrl);
+      added.push(worker);
+    }
+  } catch (err) {
+    await cleanupStartedRoles(flags, cwd, added);
+    throw err;
+  }
+
+  // Re-sync the freshly-added members to the group's current end (best-effort).
+  if (resyncSeconds !== undefined && !booleanFlag(flags, "dry-run")) {
+    for (const role of added) {
+      try {
+        await setSandboxTimeout({
+          sandboxId: role.sandbox.sandboxID,
+          apiKey: controllerApiKey,
+          apiBase,
+          e2bEnv: controllerEnv,
+          timeoutMs: resyncSeconds * 1000,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(
+          redactWithEnv(
+            `e2b: failed to re-sync TTL for added ${role.role} sandbox ${role.sandbox.sandboxID}: ${message}`,
+            controllerEnv,
+          ),
+        );
+      }
+    }
+  }
+
+  const runtimeEnv = await loadRuntimeEnv(flags, STACK_WORKER_SPEC, apiUrl);
+  if (booleanFlag(flags, "json")) {
+    console.log(
+      JSON.stringify(
+        { swarm: slug, added: added.map((r) => publicStartedRole(r, runtimeEnv)) },
+        null,
+        2,
+      ),
+    );
+  } else {
+    console.log(`added ${added.length} member(s) to swarm ${slug}:`);
+    for (const role of added) {
+      printHumanStart(role, runtimeEnv);
+    }
+  }
+}
+
+/** Render a one-shot Ink picker over existing swarm slugs. Returns "" if cancelled. */
+async function pickSwarmSlug(flags: ParsedFlags, cwd: string): Promise<string> {
+  const controllerEnv = await loadE2BControllerEnv(flags, cwd);
+  const apiBase = e2bApiBase(flags, controllerEnv);
+  const sandboxes = await listSandboxes(e2bControllerApiKey(controllerEnv), apiBase);
+  const groups = groupSandboxesBySwarm(sandboxes);
+  const slugs = [...groups.keys()].filter((slug) => slug !== UNGROUPED_BUCKET);
+  if (slugs.length === 0) {
+    throw new Error("no existing swarms to add to (create one with e2b start-stack)");
+  }
+
+  let chosen = "";
+  const instance = render(
+    createElement(SwarmPicker, {
+      slugs: slugs.map((slug) => {
+        const members = groups.get(slug) ?? [];
+        return { slug, label: `${slug} (${roleCountSummary(members)})` };
+      }),
+      onSelect: (slug: string) => {
+        chosen = slug;
+      },
+    }),
+  );
+  await instance.waitUntilExit();
+  return chosen;
+}
+
+async function swarmsCommand(flags: ParsedFlags, cwd: string): Promise<void> {
+  const sub = flags.positionals[0];
+  switch (sub) {
+    case undefined:
+    case "list":
+      await swarmsListCommand(flags, cwd);
+      return;
+    case "info":
+      await swarmsInfoCommand(flags, cwd);
+      return;
+    case "kill":
+      await swarmsKillCommand(flags, cwd);
+      return;
+    case "add":
+      await swarmsAddCommand(flags, cwd);
+      return;
+    default:
+      throw new Error(`Unknown e2b swarms subcommand: ${sub} (expected list|info|kill|add)`);
+  }
+}
+
 function printE2BHelp(): void {
   console.log(`
 agent-swarm e2b
@@ -1135,6 +1744,7 @@ Usage:
   agent-swarm e2b start-worker --api-url <https-url> [--template <name>] [--env-file .env]
   agent-swarm e2b start-stack [--swarm <slug>] [--workers <n>] [--no-lead] [--yes]
   agent-swarm e2b list [--json]
+  agent-swarm e2b swarms list | info <slug> | kill <slug> | add <slug>
   agent-swarm e2b extend <sandbox-id...> --timeout-sec <seconds>
   agent-swarm e2b kill <sandbox-id...> | --all
 
@@ -1176,6 +1786,17 @@ Role-scoped env (layer ON TOP of the shared --env-file/--secret, never replace):
   --worker-secret KEY=VALUE  Secret applied only to worker sandboxes (repeatable)
   Precedence (highest wins): forward-keys < --env-file < --<scope>-env-file
     < --secret < --<scope>-secret < forced API_KEY/AGENT_SWARM_API_KEY.
+
+swarms (group by metadata.swarm slug):
+  list                       Group sandboxes by swarm (ungrouped → "(ungrouped)")
+  info <slug>                API URL, key source (masked), roles, per-sandbox TTL,
+                             a one-shot /health probe, and the dashboard deep-link
+  kill <slug> | --all        Tear down a swarm (API last) or every swarm (--all)
+  add <slug>                 Add worker(s)/--add-lead to an existing swarm, TTL
+                             re-synced to the group's current end. No slug on a
+                             TTY → swarm picker. --workers <n> sets the count.
+  --reveal-key               Embed the swarm API key in the dashboard deep-link
+                             (printed RAW — the URL is a secret; hidden otherwise)
 
 extend:
   Extend (or reduce) a live sandbox's TTL. E2B clamps to your tier max, so the
@@ -1224,6 +1845,9 @@ export async function runE2BCommand(argv: string[]): Promise<void> {
         return;
       case "list":
         await listCommand(flags, cwd);
+        return;
+      case "swarms":
+        await swarmsCommand(flags, cwd);
         return;
       case "extend":
         await extendCommand(flags, cwd);

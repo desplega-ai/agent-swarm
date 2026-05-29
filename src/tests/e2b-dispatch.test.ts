@@ -3,12 +3,14 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  buildDashboardDeepLink,
   type LaunchSpec,
   loadRuntimeEnv,
   parseFlags,
   resolveIntegrationToggles,
   runE2BCommand,
 } from "../commands/e2b";
+import { buildOnboardDashboardUrl } from "../commands/onboard/dashboard-url";
 import {
   buildDetachedShell,
   buildImageTemplate,
@@ -588,7 +590,10 @@ describe("E2B start-stack topology (Phase 3)", () => {
     }
     // A clean dry-run must not set a failure exit code.
     expect(process.exitCode ?? 0).toBe(previousExitCode ?? 0);
-    return JSON.parse(lines.join("\n")) as Record<string, unknown>;
+    // Phase 4 prepends a "swarm: <slug>" echo before the JSON; parse from the
+    // first line that opens the JSON object so the preamble is skipped.
+    const jsonStart = lines.findIndex((l) => l.trim().startsWith("{"));
+    return JSON.parse(lines.slice(Math.max(jsonStart, 0)).join("\n")) as Record<string, unknown>;
   }
 
   test("dry-run stack provisions api + lead + N workers", async () => {
@@ -679,5 +684,139 @@ describe("E2B start-stack topology (Phase 3)", () => {
     expect(api.GITHUB_DISABLE).toBeUndefined();
     // The worker scope never carries these API-side toggles.
     expect(worker.SLACK_DISABLE).toBeUndefined();
+  });
+});
+
+describe("E2B swarm grouping + deep-link (Phase 4)", () => {
+  const previous: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const key of ["AGENT_SWARM_API_KEY", "API_KEY", "HARNESS_PROVIDER", "APP_URL"]) {
+      previous[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+  afterEach(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  /** Run `e2b <argv>` capturing stdout lines (no JSON parse). */
+  async function runStackLines(argv: string[]): Promise<string[]> {
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await runE2BCommand(argv);
+    } finally {
+      console.log = originalLog;
+    }
+    return lines;
+  }
+
+  test("dry-run stack stamps swarm + swarmRole onto every sandbox's metadata", async () => {
+    const lines = await runStackLines([
+      "start-stack",
+      "--dry-run",
+      "--yes",
+      "--workers",
+      "1",
+      "--swarm",
+      "demo",
+      "--json",
+    ]);
+    // The "swarm: demo" echo precedes the JSON; parse only the JSON tail.
+    const jsonStart = lines.findIndex((l) => l.trim().startsWith("{"));
+    const payload = JSON.parse(lines.slice(jsonStart).join("\n")) as {
+      api: { sandbox: { metadata: Record<string, string> } };
+      lead: { sandbox: { metadata: Record<string, string> } };
+      workers: { sandbox: { metadata: Record<string, string> } }[];
+    };
+
+    // Shared slug across all roles.
+    expect(payload.api.sandbox.metadata.swarm).toBe("demo");
+    expect(payload.lead.sandbox.metadata.swarm).toBe("demo");
+    expect(payload.workers[0]?.sandbox.metadata.swarm).toBe("demo");
+
+    // Distinct grouping roles (lead is E2B role:"worker" but swarmRole:"lead").
+    expect(payload.api.sandbox.metadata.swarmRole).toBe("api");
+    expect(payload.lead.sandbox.metadata.swarmRole).toBe("lead");
+    expect(payload.workers[0]?.sandbox.metadata.swarmRole).toBe("worker");
+
+    // API carries its port; lead/worker do not (they carry agentId reconstruction-ready data).
+    expect(payload.api.sandbox.metadata.apiPort).toBe("3013");
+  });
+
+  test("a stack with no --swarm generates a shared slug and echoes it", async () => {
+    const lines = await runStackLines(["start-stack", "--dry-run", "--yes", "--workers", "1"]);
+    const swarmLine = lines.find((l) => l.startsWith("swarm: "));
+    expect(swarmLine).toBeDefined();
+    const slug = swarmLine?.slice("swarm: ".length).trim() ?? "";
+    expect(slug).toMatch(/^swarm-[0-9a-f]{6}$/);
+  });
+
+  test("e2b dashboard deep-link uses camelCase params and hides the key by default", () => {
+    const masked = buildDashboardDeepLink(
+      { apiUrl: "https://api.example.com", apiKey: "super-secret-key", name: "demo" },
+      false,
+    );
+    // camelCase params the SPA reads.
+    expect(masked).toContain("apiUrl=https%3A%2F%2Fapi.example.com");
+    expect(masked).toContain("name=demo");
+    // Key hidden — the real value MUST NOT appear.
+    expect(masked).toContain("apiKey=<hidden — pass --reveal-key>");
+    expect(masked).not.toContain("super-secret-key");
+    // Never snake_case.
+    expect(masked).not.toContain("api_url");
+    expect(masked).not.toContain("api_key");
+  });
+
+  test("e2b dashboard deep-link embeds the real key only when revealed", () => {
+    const revealed = buildDashboardDeepLink(
+      { apiUrl: "https://api.example.com", apiKey: "super-secret-key", name: "demo" },
+      true,
+    );
+    expect(revealed).toContain("apiKey=super-secret-key");
+    expect(revealed).not.toContain("<hidden");
+    expect(revealed).toContain("apiUrl=https%3A%2F%2Fapi.example.com");
+  });
+
+  test("--reveal-key gating: default masks the key in stack output, flag reveals it", async () => {
+    process.env.APP_URL = "https://dash.example.com";
+    const baseArgs = [
+      "start-stack",
+      "--dry-run",
+      "--yes",
+      "--workers",
+      "1",
+      "--api-key",
+      "k3y-s3cr3t-value",
+    ];
+
+    const maskedLines = await runStackLines(baseArgs);
+    const maskedDash = maskedLines.find((l) => l.startsWith("dashboard: ")) ?? "";
+    expect(maskedDash).toContain("apiKey=<hidden — pass --reveal-key>");
+    expect(maskedDash).not.toContain("k3y-s3cr3t-value");
+
+    const revealedLines = await runStackLines([...baseArgs, "--reveal-key"]);
+    const revealedDash = revealedLines.find((l) => l.startsWith("dashboard: ")) ?? "";
+    expect(revealedDash).toContain("apiKey=k3y-s3cr3t-value");
+    expect(revealedDash).not.toContain("<hidden");
+  });
+
+  test("onboarding dashboard builder emits camelCase apiUrl/apiKey (not snake_case)", () => {
+    const url = buildOnboardDashboardUrl({
+      apiUrl: "http://localhost:3013",
+      apiKey: "onboard-key",
+    });
+    expect(url).toContain("apiUrl=http%3A%2F%2Flocalhost%3A3013");
+    expect(url).toContain("apiKey=onboard-key");
+    // The bug we fixed: snake_case is silently ignored by the SPA.
+    expect(url).not.toContain("api_url");
+    expect(url).not.toContain("api_key");
+    expect(url.startsWith("https://app.agent-swarm.dev?")).toBe(true);
   });
 });
