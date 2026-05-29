@@ -588,6 +588,15 @@ export class OpencodeAdapter implements ProviderAdapter {
     // an accident, not a contract.
     const pluginPath = resolvePluginPath();
 
+    // context-mode ships as an in-process opencode plugin (NOT an MCP server).
+    // Adding it to the `plugin` array registers both its native ctx_* tools and
+    // its 5 hook surrogates. It must NOT also appear in the `mcp` block — dual
+    // registration yields zero tools. Gated so builds/deploys without it opt out.
+    const plugins = [pluginPath];
+    if (process.env.CONTEXT_MODE_DISABLED !== "true") {
+      plugins.push("context-mode");
+    }
+
     // Build per-task opencode config (plugin field carries the swarm plugin)
     const opencodeConfig: Config & { plugin?: string[] } = {
       $schema: "https://opencode.ai/config.json",
@@ -600,7 +609,7 @@ export class OpencodeAdapter implements ProviderAdapter {
         doom_loop: "allow",
         external_directory: "allow",
       },
-      plugin: [pluginPath],
+      plugin: plugins,
     };
 
     // Write per-task config file

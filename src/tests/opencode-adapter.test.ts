@@ -640,3 +640,69 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
     await Bun.$`rm -rf /tmp/opencode-data-task-cfg-json`.quiet().nothrow();
   });
 });
+
+// ── Phase 4: context-mode in-process plugin ────────────────────────────────────
+
+describe("OpencodeAdapter — context-mode plugin wiring (phase 4)", () => {
+  let prevContextModeDisabled: string | undefined;
+
+  beforeEach(() => {
+    prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
+    lastCreateOpencodeConfig = undefined;
+    mock.restore();
+  });
+
+  afterEach(() => {
+    // Never leak the env mutation across tests.
+    if (prevContextModeDisabled === undefined) {
+      delete process.env.CONTEXT_MODE_DISABLED;
+    } else {
+      process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
+    }
+    Bun.$`rm -rf /tmp/opencode-task-1.json /tmp/opencode-data-task-1`.quiet().nothrow();
+    Bun.$`rm -rf /tmp/test/.opencode`.quiet().nothrow();
+  });
+
+  /** Pull the opencode config object passed to createOpencode. */
+  function getBuiltConfig(): { plugin?: string[]; mcp?: Record<string, unknown> } {
+    const opts = lastCreateOpencodeConfig as {
+      config?: { plugin?: string[]; mcp?: Record<string, unknown> };
+    };
+    expect(opts.config).toBeDefined();
+    return opts.config as { plugin?: string[]; mcp?: Record<string, unknown> };
+  }
+
+  test("plugin array includes context-mode by default", async () => {
+    delete process.env.CONTEXT_MODE_DISABLED;
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    await driveSession(events, testConfig({ taskId: "task-1" }));
+
+    const built = getBuiltConfig();
+    expect(built.plugin).toContain("context-mode");
+  });
+
+  test("plugin array excludes context-mode when CONTEXT_MODE_DISABLED=true", async () => {
+    process.env.CONTEXT_MODE_DISABLED = "true";
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    await driveSession(events, testConfig({ taskId: "task-1" }));
+
+    const built = getBuiltConfig();
+    expect(built.plugin).not.toContain("context-mode");
+  });
+
+  test("context-mode does NOT appear in the mcp block", async () => {
+    delete process.env.CONTEXT_MODE_DISABLED;
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    await driveSession(events, testConfig({ taskId: "task-1" }));
+
+    const built = getBuiltConfig();
+    expect(built.mcp).toBeDefined();
+    expect(built.mcp?.["context-mode"]).toBeUndefined();
+  });
+});
