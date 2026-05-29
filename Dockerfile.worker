@@ -170,12 +170,15 @@ RUN mkdir -p /home/worker/.claude \
     # desplega.ai qa-use CLI
     && claude plugin marketplace add desplega-ai/qa-use || true \
     && claude plugin install qa-use@desplega.ai --scope user || true \
-    # context-mode to improve context-window usage. Pin the marketplace clone
-    # to the tag matching CONTEXT_MODE_VERSION so the installed plugin tracks the
-    # globally-installed CLI. The marketplace repo tags releases as v<version>;
-    # the checkout is guarded so an unexpected tag scheme can't fail the build.
+    # context-mode to improve context-window usage. NOTE: this plugin (which
+    # provides the ctx_* HOOKS) tracks the marketplace HEAD and is NOT version-
+    # pinned. A build-time `git checkout v${CONTEXT_MODE_VERSION}` in the
+    # marketplace clone does not work (git rejects it with "dubious ownership"
+    # and the clone is shallow without tags), so we don't attempt it. The ctx_*
+    # TOOLS are served by the globally-installed CLI (npm i -g
+    # context-mode@${CONTEXT_MODE_VERSION} above), which IS pinned; only the
+    # hook bundle floats — acceptable since the hooks are backward-compatible.
     && claude plugin marketplace add mksglu/claude-context-mode || true \
-    && (cd /home/worker/.claude/plugins/marketplaces/context-mode && git checkout "v${CONTEXT_MODE_VERSION}" 2>/dev/null || true) \
     && claude plugin install context-mode@context-mode --scope user || true \
     # agent-fs goodies
     && claude plugin marketplace add desplega-ai/agent-fs || true \
