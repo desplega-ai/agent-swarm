@@ -206,6 +206,45 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.outputSchema).toEqual(schema);
     });
 
+    test("non-workflow parent with full VCS identity → all VCS fields carry forward", () => {
+      // PR #594 review: codex flagged that `vcsNumber` (+ url/comment/installation/etc.)
+      // were dropped on resume, breaking webhook routing via findTaskByVcs.
+      // The fix lives in `createTaskExtended`'s parent-inheritance block —
+      // this test guards against regression for ALL VCS identity fields at once.
+      const worker = freshAgent("worker-vcs", {
+        lastActivityAt: new Date().toISOString(),
+      });
+      const parent = createTaskExtended("Parent with full VCS context", {
+        agentId: worker.id,
+        vcsProvider: "github",
+        vcsRepo: "desplega-ai/agent-swarm",
+        vcsNumber: 594,
+        vcsEventType: "pull_request.opened",
+        vcsCommentId: 12345,
+        vcsAuthor: "tarasyarema",
+        vcsUrl: "https://github.com/desplega-ai/agent-swarm/pull/594",
+        vcsInstallationId: 999,
+        vcsNodeId: "PR_kwDOQr3Tmc7abcdef",
+      });
+      startTask(parent.id);
+
+      const result = createResumeFollowUp({
+        parentId: parent.id,
+        reason: "context_limits",
+      });
+      if (result.kind !== "created") throw new Error("expected created");
+
+      expect(result.task.vcsProvider).toBe("github");
+      expect(result.task.vcsRepo).toBe("desplega-ai/agent-swarm");
+      expect(result.task.vcsNumber).toBe(594);
+      expect(result.task.vcsEventType).toBe("pull_request.opened");
+      expect(result.task.vcsCommentId).toBe(12345);
+      expect(result.task.vcsAuthor).toBe("tarasyarema");
+      expect(result.task.vcsUrl).toBe("https://github.com/desplega-ai/agent-swarm/pull/594");
+      expect(result.task.vcsInstallationId).toBe(999);
+      expect(result.task.vcsNodeId).toBe("PR_kwDOQr3Tmc7abcdef");
+    });
+
     test("workflow-step parent → returns workflow-skip (no task created)", () => {
       const worker = freshAgent("worker-7");
       const parent = createTaskExtended("Workflow-step parent", {

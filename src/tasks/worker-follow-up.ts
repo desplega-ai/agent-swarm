@@ -203,6 +203,11 @@ export function createResumeFollowUp(args: {
   const priority = Math.min(100, (parent.priority ?? 50) + 10);
   const tags = ["auto-resume", `reason:${args.reason}`];
 
+  // Identity-shaped fields (model, dir, VCS provider/repo/number/url/etc.,
+  // outputSchema, slack channel/thread/user, agentmail, mention, contextKey,
+  // requestedByUserId, followUpConfig) are auto-inherited from the parent by
+  // `createTaskExtended`'s parentTaskId block (see src/be/db.ts ~line 2722).
+  // We only override what's SPECIFIC to the resume task here.
   const created = createTaskExtended(followUpDescription, {
     agentId: preferredAgentId,
     creatorAgentId: parent.creatorAgentId,
@@ -211,23 +216,6 @@ export function createResumeFollowUp(args: {
     tags,
     priority,
     parentTaskId: parent.id,
-    // Explicit inheritance — createTaskExtended does NOT propagate these from
-    // the parent today (see src/be/db.ts:2614-2640).
-    model: parent.model,
-    dir: parent.dir,
-    vcsRepo: parent.vcsRepo,
-    vcsProvider: parent.vcsProvider,
-    // outputSchema MUST carry forward — `store-progress` validates completion
-    // output against `existingTask.outputSchema`, and the runner only injects
-    // structured-output instructions when the task object has a schema.
-    // Without this, a resumed schema'd task can complete with free-form output
-    // and skip validation (silent contract regression).
-    outputSchema: parent.outputSchema,
-    // Optionally pass these too — createTaskExtended will skip when already
-    // overridden by the parent-id inheritance pass.
-    slackChannelId: parent.slackChannelId,
-    slackThreadTs: parent.slackThreadTs,
-    slackUserId: parent.slackUserId,
   });
 
   return { kind: "created", task: created };

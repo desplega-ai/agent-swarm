@@ -20,9 +20,16 @@ export const AgentTaskStatusSchema = z.enum([
  * transitions, no re-assignment, no follow-up creation on the same id.
  *
  * Single source of truth for JS-side checks (sync handlers, store-progress,
- * db mutator guards, HTTP cancel guard). SQL-side guards in `src/be/db.ts`
- * inline these strings (can't import a TS const into a prepared statement) —
- * keep them in sync manually when adding a new terminal status.
+ * db mutator guards, HTTP cancel guard).
+ *
+ * **SQL drift watch**: `src/be/db.ts` has ~8 prepared statements that inline
+ * these strings — SQL can't import a TS const. When adding a new terminal
+ * status, grep across `src/be/db.ts` for:
+ *   - `status NOT IN ('completed'` — non-terminal filters (findTaskByVcs,
+ *     findRecentSimilarTasks, mutator guards, hasNonTerminalChildTask)
+ *   - `status IN ('completed', 'failed'` — intent-terminal lookups
+ *   - `status = CASE WHEN status IN ('completed'` — setProgress guard
+ * and update every site.
  */
 export const TERMINAL_TASK_STATUSES = ["completed", "failed", "cancelled", "superseded"] as const;
 export type TerminalTaskStatus = (typeof TERMINAL_TASK_STATUSES)[number];

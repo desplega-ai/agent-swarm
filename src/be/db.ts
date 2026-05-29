@@ -1413,14 +1413,18 @@ export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
 
 /**
  * Find a task by VCS repo and issue/PR/MR number.
- * Returns the most recent non-completed/failed task for this VCS entity.
+ * Returns the most recent non-terminal task for this VCS entity.
+ *
+ * Terminal exclusion MUST stay in lock-step with `TERMINAL_TASK_STATUSES`
+ * in `src/types.ts`. SQL strings can't import a TS const — if you add a
+ * new terminal status, grep for `NOT IN ('completed'` across this file.
  */
 export function findTaskByVcs(vcsRepo: string, vcsNumber: number): AgentTask | null {
   const row = getDb()
     .prepare<AgentTaskRow, [string, number]>(
       `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ?
-       AND status NOT IN ('completed', 'failed')
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY createdAt DESC
        LIMIT 1`,
     )
@@ -2684,8 +2688,9 @@ export function findRecentSimilarTasks(opts: {
   const conditions: string[] = ["createdAt > ?"];
   const params: (string | number)[] = [since];
 
-  // Exclude completed/failed/cancelled tasks — only active or recently created
-  conditions.push("status NOT IN ('completed', 'failed', 'cancelled')");
+  // Exclude all terminal statuses — only active or recently created.
+  // Keep in lock-step with `TERMINAL_TASK_STATUSES` in src/types.ts.
+  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded')");
 
   if (opts.creatorAgentId) {
     conditions.push("creatorAgentId = ?");
@@ -2720,6 +2725,16 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   if (options?.parentTaskId) {
     const parent = getTaskById(options.parentTaskId);
     if (parent) {
+      // Identity & routing — anything that says "what work is this, who asked
+      // for it, where does it run" carries forward to every child (follow-ups,
+      // reboot retries, resume tasks). Explicit options always win.
+      //
+      // When adding a new identity-shaped column to `agent_tasks`, ADD IT HERE
+      // unless you have a specific reason a child should NOT inherit it. This
+      // is the single source of truth — `createResumeFollowUp` and the other
+      // follow-up creators rely on this block instead of re-listing fields.
+
+      // Slack context
       if (parent.slackChannelId && !options.slackChannelId) {
         options.slackChannelId = parent.slackChannelId;
       }
@@ -2729,12 +2744,74 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.slackUserId && !options.slackUserId) {
         options.slackUserId = parent.slackUserId;
       }
+
+      // AgentMail context
       if (parent.agentmailInboxId && !options.agentmailInboxId) {
         options.agentmailInboxId = parent.agentmailInboxId;
+      }
+      if (parent.agentmailMessageId && !options.agentmailMessageId) {
+        options.agentmailMessageId = parent.agentmailMessageId;
       }
       if (parent.agentmailThreadId && !options.agentmailThreadId) {
         options.agentmailThreadId = parent.agentmailThreadId;
       }
+
+      // Mention context (Slack @-mentions)
+      if (parent.mentionMessageId && !options.mentionMessageId) {
+        options.mentionMessageId = parent.mentionMessageId;
+      }
+      if (parent.mentionChannelId && !options.mentionChannelId) {
+        options.mentionChannelId = parent.mentionChannelId;
+      }
+
+      // VCS identity (GitHub / GitLab issue / PR / MR + webhook routing)
+      // Webhook handlers locate active work via `findTaskByVcs(repo, number)`,
+      // so a resume / follow-up child MUST carry the full VCS identity or
+      // subsequent review/update events get dropped.
+      if (parent.vcsProvider && !options.vcsProvider) {
+        options.vcsProvider = parent.vcsProvider;
+      }
+      if (parent.vcsRepo && !options.vcsRepo) {
+        options.vcsRepo = parent.vcsRepo;
+      }
+      if (parent.vcsNumber != null && options.vcsNumber == null) {
+        options.vcsNumber = parent.vcsNumber;
+      }
+      if (parent.vcsEventType && !options.vcsEventType) {
+        options.vcsEventType = parent.vcsEventType;
+      }
+      if (parent.vcsCommentId != null && options.vcsCommentId == null) {
+        options.vcsCommentId = parent.vcsCommentId;
+      }
+      if (parent.vcsAuthor && !options.vcsAuthor) {
+        options.vcsAuthor = parent.vcsAuthor;
+      }
+      if (parent.vcsUrl && !options.vcsUrl) {
+        options.vcsUrl = parent.vcsUrl;
+      }
+      if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
+        options.vcsInstallationId = parent.vcsInstallationId;
+      }
+      if (parent.vcsNodeId && !options.vcsNodeId) {
+        options.vcsNodeId = parent.vcsNodeId;
+      }
+
+      // Execution context (per-task overrides)
+      if (parent.model && !options.model) {
+        options.model = parent.model;
+      }
+      if (parent.dir && !options.dir) {
+        options.dir = parent.dir;
+      }
+
+      // Contract (schema validation) — `store-progress` validates completion
+      // output against `outputSchema`, runner injects structured-output
+      // instructions only when it's present.
+      if (parent.outputSchema && !options.outputSchema) {
+        options.outputSchema = parent.outputSchema;
+      }
+
+      // Attribution
       if (parent.requestedByUserId && !options.requestedByUserId) {
         options.requestedByUserId = parent.requestedByUserId;
       }
