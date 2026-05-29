@@ -4,6 +4,11 @@ on:
   pull_request:
     branches:
       - main
+  # Run the same gate when GitHub's merge queue forms a merge group, so the
+  # "Merge Gate" required check reports a status for queued PRs. Without this,
+  # a merge-queue-required check would never run and PRs would be stuck.
+  # https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue#triggering-merge-group-checks-with-github-actions
+  merge_group:
 
 jobs:
   detect-changes:
@@ -23,14 +28,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch base branch
-        run: git fetch origin ${{ github.base_ref }}
+      - name: Determine base for diff
+        id: base
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            # merge_group events have no github.base_ref; diff against the
+            # merge group's base SHA (already reachable via fetch-depth: 0).
+            echo "ref=${{ github.event.merge_group.base_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            git fetch origin "${{ github.base_ref }}"
+            echo "ref=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Compute per-domain change flags
         id: check
         run: |
           set -euo pipefail
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          CHANGED=$(git diff --name-only ${{ steps.base.outputs.ref }}...HEAD)
           echo "Changed files:"
           echo "$CHANGED"
           echo "---"
