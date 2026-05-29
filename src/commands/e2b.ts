@@ -32,7 +32,7 @@ import {
   splitKeys,
 } from "../e2b/env";
 
-type ParsedFlags = {
+export type ParsedFlags = {
   command?: string;
   positionals: string[];
   values: Map<string, string[]>;
@@ -45,10 +45,34 @@ type StartedRole = {
   url?: string;
 };
 
+/**
+ * Env scope for role-scoped secret/env-file layering. A lead is E2B
+ * `SwarmRole === "worker"` but gets its own `"lead"` env scope so lead and
+ * worker env never cross-contaminate.
+ */
+export type EnvScope = "api" | "lead" | "worker";
+
+/**
+ * Per-instance launch spec threaded through {@link startRole}. `swarmRole` is
+ * the E2B template/entrypoint dimension (api vs worker). `agentRole` is the
+ * swarm-side role written to `AGENT_ROLE` (a lead is `swarmRole:"worker"` +
+ * `agentRole:"lead"`). `envScope` selects which scoped `--{scope}-env-file` /
+ * `--{scope}-secret` flags layer on top of the shared ones.
+ */
+export type LaunchSpec = {
+  swarmRole: SwarmRole;
+  agentRole?: "worker" | "lead";
+  envScope: EnvScope;
+};
+
+/** The byte-identical specs for the legacy `start-api` / `start-worker` paths. */
+const API_SPEC: LaunchSpec = { swarmRole: "api", envScope: "api" };
+const WORKER_SPEC: LaunchSpec = { swarmRole: "worker", envScope: "worker" };
+
 const DEFAULT_API_PORT = 3013;
 const BOOLEAN_FLAGS = new Set(["dry-run", "json", "no-cache", "no-wait", "all", "yes"]);
 
-function parseFlags(argv: string[]): ParsedFlags {
+export function parseFlags(argv: string[]): ParsedFlags {
   const [command, ...rest] = argv;
   const positionals: string[] = [];
   const values = new Map<string, string[]>();
@@ -196,25 +220,44 @@ function e2bApiBase(flags: ParsedFlags, controllerEnv: EnvMap): string {
   return value(flags, "e2b-api-base") || controllerEnv.E2B_API_URL || DEFAULT_E2B_API_BASE;
 }
 
-async function loadRuntimeEnv(
+/** Read every `--{key}` env-file (repeatable) and merge them left-to-right. */
+async function loadEnvFiles(flags: ParsedFlags, key: string): Promise<EnvMap> {
+  const paths = values(flags, key).map((path) => absolutePath(path));
+  const merged: EnvMap = {};
+  for (const env of await Promise.all(paths.map((path) => readDotenvFile(path)))) {
+    Object.assign(merged, env);
+  }
+  return merged;
+}
+
+/** Apply every `--{key} KEY=VALUE` secret (repeatable) onto `target`, in order. */
+function applySecrets(flags: ParsedFlags, key: string, target: EnvMap): void {
+  for (const raw of values(flags, key)) {
+    const [secretKey, secretValue] = parseKeyValue(raw, `--${key}`);
+    target[secretKey] = secretValue;
+  }
+}
+
+export async function loadRuntimeEnv(
   flags: ParsedFlags,
-  role: SwarmRole,
+  spec: LaunchSpec,
   apiUrl?: string,
 ): Promise<EnvMap> {
-  const envFiles = values(flags, "env-file").map((path) => absolutePath(path));
-  const fileEnv: EnvMap = {};
-  for (const env of await Promise.all(envFiles.map((path) => readDotenvFile(path)))) {
-    Object.assign(fileEnv, env);
-  }
+  const role = spec.swarmRole;
+  const scope = spec.envScope;
 
+  // Precedence (lowest → highest, later overrides earlier):
+  //   forward-keys (process.env) < shared --env-file < scoped --{scope}-env-file
+  //   < shared --secret < scoped --{scope}-secret < forced API_KEY/AGENT_SWARM_API_KEY.
+  // Scoped flags LAYER ON TOP of the shared ones — they never replace them.
   const inheritKeys = [...DEFAULT_E2B_FORWARD_KEYS, ...splitKeys(values(flags, "inherit-env"))];
-  const inherited = selectEnv(process.env, inheritKeys);
-  const runtime: EnvMap = { ...inherited, ...fileEnv };
+  const runtime: EnvMap = selectEnv(process.env, inheritKeys);
 
-  for (const raw of values(flags, "secret")) {
-    const [key, secretValue] = parseKeyValue(raw, "--secret");
-    runtime[key] = secretValue;
-  }
+  Object.assign(runtime, await loadEnvFiles(flags, "env-file"));
+  Object.assign(runtime, await loadEnvFiles(flags, `${scope}-env-file`));
+
+  applySecrets(flags, "secret", runtime);
+  applySecrets(flags, `${scope}-secret`, runtime);
 
   let swarmApiKey: string;
   try {
@@ -249,7 +292,10 @@ async function loadRuntimeEnv(
       throw new Error("Worker startup requires --api-url, or use start-stack to create API first.");
     }
     runtime.MCP_BASE_URL = apiUrl;
-    runtime.AGENT_ROLE = value(flags, "agent-role", "worker");
+    // AGENT_ROLE comes from the spec (so start-stack can pin lead/worker per
+    // instance); when the spec leaves it unset we fall back to the global
+    // --agent-role flag, keeping start-worker byte-identical to before.
+    runtime.AGENT_ROLE = spec.agentRole ?? value(flags, "agent-role", "worker");
     runtime.HARNESS_PROVIDER = value(flags, "provider", runtime.HARNESS_PROVIDER || "claude");
     runtime.WORKER_YOLO = value(flags, "worker-yolo", "false");
     runtime.WORKER_LOG_DIR = value(flags, "worker-log-dir", "/logs");
@@ -357,11 +403,12 @@ function publicStartedRole(result: StartedRole, env: EnvMap): StartedRole {
 async function startRole(
   flags: ParsedFlags,
   cwd: string,
-  role: SwarmRole,
+  spec: LaunchSpec,
   apiUrl?: string,
 ): Promise<StartedRole> {
+  const role = spec.swarmRole;
   const controllerEnv = await loadE2BControllerEnv(flags, cwd);
-  const runtimeEnv = await loadRuntimeEnv(flags, role, apiUrl);
+  const runtimeEnv = await loadRuntimeEnv(flags, spec, apiUrl);
   const controllerApiKey = e2bControllerApiKey(controllerEnv);
   const template = roleTemplate(flags, role);
   const timeoutSec = integerFlag(flags, "timeout-sec", 3600);
@@ -559,8 +606,8 @@ async function templateVisibilityCommand(
 }
 
 async function startApiCommand(flags: ParsedFlags, cwd: string): Promise<void> {
-  const result = await startRole(flags, cwd, "api");
-  const runtimeEnv = await loadRuntimeEnv(flags, "api");
+  const result = await startRole(flags, cwd, API_SPEC);
+  const runtimeEnv = await loadRuntimeEnv(flags, API_SPEC);
   if (booleanFlag(flags, "json")) {
     console.log(JSON.stringify(publicStartedRole(result, runtimeEnv), null, 2));
   } else {
@@ -570,8 +617,8 @@ async function startApiCommand(flags: ParsedFlags, cwd: string): Promise<void> {
 
 async function startWorkerCommand(flags: ParsedFlags, cwd: string): Promise<void> {
   const apiUrl = value(flags, "api-url");
-  const result = await startRole(flags, cwd, "worker", apiUrl);
-  const runtimeEnv = await loadRuntimeEnv(flags, "worker", apiUrl);
+  const result = await startRole(flags, cwd, WORKER_SPEC, apiUrl);
+  const runtimeEnv = await loadRuntimeEnv(flags, WORKER_SPEC, apiUrl);
   if (booleanFlag(flags, "json")) {
     console.log(JSON.stringify(publicStartedRole(result, runtimeEnv), null, 2));
   } else {
@@ -645,13 +692,15 @@ async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void>
   const workers: StartedRole[] = [];
 
   try {
-    const api = await startRole(flags, cwd, "api");
+    const api = await startRole(flags, cwd, API_SPEC);
     started.push(api);
     if (!api.url) throw new Error("API sandbox did not produce a public URL");
 
     const workerCount = integerFlag(flags, "workers", 1);
     for (let i = 0; i < workerCount; i++) {
-      const worker = await startRole(flags, cwd, "worker", api.url);
+      // Phase 3 splits this into a lead + workers; for now every member of the
+      // stack uses the worker spec, preserving the legacy homogeneous topology.
+      const worker = await startRole(flags, cwd, WORKER_SPEC, api.url);
       workers.push(worker);
       started.push(worker);
     }
@@ -663,7 +712,7 @@ async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void>
     // short-circuits — never touches E2B.
     await resyncStackTimeout(flags, cwd, started);
 
-    const runtimeEnv = await loadRuntimeEnv(flags, "api");
+    const runtimeEnv = await loadRuntimeEnv(flags, API_SPEC);
 
     if (booleanFlag(flags, "json")) {
       console.log(
@@ -827,8 +876,8 @@ Usage:
   agent-swarm e2b kill <sandbox-id...> | --all
 
 Common options:
-  --env-file <path>          Load runtime env/secrets for API or worker (repeatable)
-  --secret KEY=VALUE         Add/override one runtime secret (repeatable)
+  --env-file <path>          Load runtime env/secrets for all roles (repeatable)
+  --secret KEY=VALUE         Add/override one runtime secret for all roles (repeatable)
   --inherit-env KEY[,KEY]    Forward extra local env vars into the sandbox
   --api-key <key>            Swarm API key passed to API/worker (required unless env provides one)
   --agent-id <id>            Worker agent ID (default: e2b-<sandbox-id>)
@@ -838,6 +887,16 @@ Common options:
   --timeout-sec <seconds>    Sandbox TTL (default 3600); for extend, the new TTL from now
   --no-wait                  Skip waiting for API health / worker registration
   --e2b-api-key-file <path>  Read the E2B controller API key from a file
+
+Role-scoped env (layer ON TOP of the shared --env-file/--secret, never replace):
+  --api-env-file <path>      Env file applied only to the API sandbox (repeatable)
+  --lead-env-file <path>     Env file applied only to the lead sandbox (repeatable)
+  --worker-env-file <path>   Env file applied only to worker sandboxes (repeatable)
+  --api-secret KEY=VALUE     Secret applied only to the API sandbox (repeatable)
+  --lead-secret KEY=VALUE    Secret applied only to the lead sandbox (repeatable)
+  --worker-secret KEY=VALUE  Secret applied only to worker sandboxes (repeatable)
+  Precedence (highest wins): forward-keys < --env-file < --<scope>-env-file
+    < --secret < --<scope>-secret < forced API_KEY/AGENT_SWARM_API_KEY.
 
 extend:
   Extend (or reduce) a live sandbox's TTL. E2B clamps to your tier max, so the

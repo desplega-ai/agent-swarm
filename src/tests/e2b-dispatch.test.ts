@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type LaunchSpec, loadRuntimeEnv, parseFlags } from "../commands/e2b";
 import {
   buildDetachedShell,
   buildImageTemplate,
@@ -371,5 +375,179 @@ describe("E2B dispatch helpers", () => {
         "e2b-sdk template build --from-image ghcr.io/desplega-ai/agent-swarm:latest",
       ),
     });
+  });
+});
+
+describe("E2B namespaced env scoping", () => {
+  const API_SPEC: LaunchSpec = { swarmRole: "api", envScope: "api" };
+  const LEAD_SPEC: LaunchSpec = { swarmRole: "worker", agentRole: "lead", envScope: "lead" };
+  const WORKER_SPEC: LaunchSpec = { swarmRole: "worker", agentRole: "worker", envScope: "worker" };
+  // A dummy MCP base URL — loadRuntimeEnv requires one for non-api roles.
+  const API_URL = "https://api.example.com";
+
+  // Phase 2 layering is precedence-only; --dry-run keeps the swarm-API-key
+  // resolution from throwing without touching E2B. We snapshot/restore the
+  // forward-key env vars so ambient values can't leak into the assertions.
+  const previous: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const key of ["AGENT_SWARM_API_KEY", "API_KEY", "HARNESS_PROVIDER"]) {
+      previous[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+  afterEach(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  async function resolveAllScopes(argv: string[]) {
+    const flags = parseFlags(["start-stack", ...argv, "--dry-run"]);
+    const [api, lead, worker] = await Promise.all([
+      loadRuntimeEnv(flags, API_SPEC),
+      loadRuntimeEnv(flags, LEAD_SPEC, API_URL),
+      loadRuntimeEnv(flags, WORKER_SPEC, API_URL),
+    ]);
+    return { api, lead, worker };
+  }
+
+  test("--worker-secret lands only in the worker scope", async () => {
+    const { api, lead, worker } = await resolveAllScopes(["--worker-secret", "FOO=x"]);
+    expect(worker.FOO).toBe("x");
+    expect(lead.FOO).toBeUndefined();
+    expect(api.FOO).toBeUndefined();
+  });
+
+  test("--lead-secret lands only in the lead scope", async () => {
+    const { api, lead, worker } = await resolveAllScopes(["--lead-secret", "K=v"]);
+    expect(lead.K).toBe("v");
+    expect(worker.K).toBeUndefined();
+    expect(api.K).toBeUndefined();
+  });
+
+  test("--api-secret lands only in the api scope", async () => {
+    const { api, lead, worker } = await resolveAllScopes(["--api-secret", "ZED=q"]);
+    expect(api.ZED).toBe("q");
+    expect(lead.ZED).toBeUndefined();
+    expect(worker.ZED).toBeUndefined();
+  });
+
+  test("shared --secret applies to all three scopes", async () => {
+    const { api, lead, worker } = await resolveAllScopes(["--secret", "BAR=y"]);
+    expect(api.BAR).toBe("y");
+    expect(lead.BAR).toBe("y");
+    expect(worker.BAR).toBe("y");
+  });
+
+  test("scoped --secret layers on top of the shared --secret without replacing it", async () => {
+    // Shared sets SHARED + OVERRIDE; worker scope overrides OVERRIDE and adds
+    // WORKER_ONLY. The shared value must survive in the non-overridden scopes.
+    const { api, lead, worker } = await resolveAllScopes([
+      "--secret",
+      "SHARED=shared",
+      "--secret",
+      "OVERRIDE=shared-val",
+      "--worker-secret",
+      "OVERRIDE=worker-val",
+      "--worker-secret",
+      "WORKER_ONLY=w",
+    ]);
+
+    expect(api.SHARED).toBe("shared");
+    expect(lead.SHARED).toBe("shared");
+    expect(worker.SHARED).toBe("shared");
+
+    expect(worker.OVERRIDE).toBe("worker-val");
+    expect(lead.OVERRIDE).toBe("shared-val");
+    expect(api.OVERRIDE).toBe("shared-val");
+
+    expect(worker.WORKER_ONLY).toBe("w");
+    expect(lead.WORKER_ONLY).toBeUndefined();
+    expect(api.WORKER_ONLY).toBeUndefined();
+  });
+
+  test("scoped --{scope}-env-file layers over the shared --env-file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "e2b-env-scope-"));
+    const sharedFile = join(dir, "shared.env");
+    const workerFile = join(dir, "worker.env");
+    writeFileSync(sharedFile, "SHARED_FILE=base\nFROM_SHARED=keep\n");
+    writeFileSync(workerFile, "SHARED_FILE=override\nWORKER_FILE_ONLY=w\n");
+
+    const { api, lead, worker } = await resolveAllScopes([
+      "--env-file",
+      sharedFile,
+      "--worker-env-file",
+      workerFile,
+    ]);
+
+    // Shared file is visible everywhere.
+    expect(api.FROM_SHARED).toBe("keep");
+    expect(lead.FROM_SHARED).toBe("keep");
+    expect(worker.FROM_SHARED).toBe("keep");
+
+    // Worker-scoped file overrides the shared value only in the worker scope.
+    expect(worker.SHARED_FILE).toBe("override");
+    expect(lead.SHARED_FILE).toBe("base");
+    expect(api.SHARED_FILE).toBe("base");
+
+    // Worker-only key never bleeds into the other scopes.
+    expect(worker.WORKER_FILE_ONLY).toBe("w");
+    expect(lead.WORKER_FILE_ONLY).toBeUndefined();
+    expect(api.WORKER_FILE_ONLY).toBeUndefined();
+  });
+
+  test("scoped --secret wins over both shared and scoped env-files (precedence order)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "e2b-env-prec-"));
+    const sharedFile = join(dir, "shared.env");
+    const workerFile = join(dir, "worker.env");
+    writeFileSync(sharedFile, "PREC=from-shared-file\n");
+    writeFileSync(workerFile, "PREC=from-worker-file\n");
+
+    const { worker } = await resolveAllScopes([
+      "--env-file",
+      sharedFile,
+      "--worker-env-file",
+      workerFile,
+      "--secret",
+      "PREC=from-shared-secret",
+      "--worker-secret",
+      "PREC=from-worker-secret",
+    ]);
+
+    // Highest-precedence non-forced layer wins.
+    expect(worker.PREC).toBe("from-worker-secret");
+  });
+
+  test("AGENT_ROLE comes from the spec; lead spec yields AGENT_ROLE=lead", async () => {
+    const { lead, worker } = await resolveAllScopes([]);
+    expect(lead.AGENT_ROLE).toBe("lead");
+    expect(worker.AGENT_ROLE).toBe("worker");
+  });
+
+  test("worker spec without an agentRole falls back to the global --agent-role", async () => {
+    // start-worker stays identical: WORKER_SPEC carries agentRole:"worker" only
+    // in start-stack; the legacy path uses a spec with no agentRole and relies
+    // on --agent-role. Mirror that here with an agentRole-less worker spec.
+    const flags = parseFlags(["start-worker", "--agent-role", "lead", "--dry-run"]);
+    const legacyWorkerSpec: LaunchSpec = { swarmRole: "worker", envScope: "worker" };
+    const env = await loadRuntimeEnv(flags, legacyWorkerSpec, API_URL);
+    expect(env.AGENT_ROLE).toBe("lead");
+  });
+
+  test("forced API_KEY/AGENT_SWARM_API_KEY win over a user --secret API_KEY", async () => {
+    // A user must not be able to break swarm auth by overriding API_KEY via a
+    // scoped or shared secret — the forced resolution always applies last.
+    const flags = parseFlags([
+      "start-api",
+      "--api-key",
+      "forced-key",
+      "--secret",
+      "API_KEY=attacker",
+      "--dry-run",
+    ]);
+    const env = await loadRuntimeEnv(flags, API_SPEC);
+    expect(env.API_KEY).toBe("forced-key");
+    expect(env.AGENT_SWARM_API_KEY).toBe("forced-key");
   });
 });

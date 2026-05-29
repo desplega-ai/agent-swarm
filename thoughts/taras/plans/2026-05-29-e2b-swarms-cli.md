@@ -4,7 +4,7 @@ topic: "E2B Dispatch CLI — Lead Stacks, Swarm Grouping, Lifecycle Control"
 status: in-progress
 autonomy: autopilot
 last_updated: 2026-05-30T00:00:00Z
-last_updated_by: phase-running (Phase 1)
+last_updated_by: phase-running (Phase 2)
 ---
 
 # E2B Dispatch CLI — Lead Stacks, Swarm Grouping, Lifecycle Control: Implementation Plan
@@ -109,12 +109,12 @@ Extend the E2B dispatch CLI so an operator can launch a complete, long-lived swa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] New isolation tests pass: `--worker-secret FOO=x` appears in worker runtime but **not** lead/API; shared `--secret BAR=y` appears in all three; existing tests stay green — `bun test src/tests/e2b-dispatch.test.ts`
-- [ ] API-key boundary intact: `bash scripts/check-api-key-boundary.sh`
+- [x] Type check passes: `bun run tsc:check`
+- [x] New isolation tests pass: `--worker-secret FOO=x` appears in worker runtime but **not** lead/API; shared `--secret BAR=y` appears in all three; existing tests stay green — `bun test src/tests/e2b-dispatch.test.ts`
+- [x] API-key boundary intact: `bash scripts/check-api-key-boundary.sh`
 
 #### Automated QA:
-- [ ] Agent runs `start-worker --dry-run --agent-role lead --lead-secret K=v` and confirms (via dry-run output / a debug print) the spec resolves `AGENT_ROLE=lead` and `K=v` only in that role's env.
+- [ ] Agent runs `start-worker --dry-run --agent-role lead --lead-secret K=v` and confirms (via dry-run output / a debug print) the spec resolves `AGENT_ROLE=lead` and `K=v` only in that role's env. <!-- Covered via unit tests: dry-run JSON intentionally does NOT surface resolved env (it carries secrets), so per the plan's guidance the proof lives in src/tests/e2b-dispatch.test.ts ("AGENT_ROLE comes from the spec…", fallback test, and "--lead-secret lands only in the lead scope") rather than via noisy debug prints. The literal command runs cleanly (exit 0). -->
 
 #### Manual Verification:
 - [ ] None (fully covered by automated checks).

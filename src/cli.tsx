@@ -307,6 +307,9 @@ const COMMAND_HELP: Record<
       "  list                                 List dispatcher sandboxes",
       "  extend <sandbox-id...>               Extend a sandbox TTL (--timeout-sec <s>)",
       "  kill <sandbox-id...> | --all         Clean up sandboxes (--all sweeps the fleet)",
+      "  --env-file / --secret                Shared env/secrets applied to all roles (repeatable)",
+      "  --<api|lead|worker>-env-file <path>  Role-scoped env file, layers on the shared one (repeatable)",
+      "  --<api|lead|worker>-secret KEY=VAL   Role-scoped secret, layers on the shared one (repeatable)",
       "  -h, --help                          Show this help",
     ].join("\n"),
     examples: [
