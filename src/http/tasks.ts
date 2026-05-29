@@ -830,13 +830,10 @@ export async function handleTasks(
       return true;
     }
 
-    const followUp = createResumeFollowUp({
-      parentId: parsed.params.id,
-      reason: parsed.body.reason,
-    });
-
     // Workflow-step tasks: fail back to the engine instead of superseding.
-    if (followUp.kind === "workflow-skip") {
+    // Check this BEFORE the supersede UPDATE so we don't leave a workflow
+    // step in `superseded` if the engine expects `failed`.
+    if (task.workflowRunStepId != null) {
       const failed = failTask(parsed.params.id, "superseded_workflow_task");
       ensure({
         id: "task.workflow_step_failed_on_supersede",
@@ -845,7 +842,7 @@ export async function handleTasks(
         data: {
           taskId: parsed.params.id,
           agentId: task.agentId,
-          stepId: followUp.stepId,
+          stepId: task.workflowRunStepId,
           reason: parsed.body.reason,
         },
       });
@@ -858,20 +855,53 @@ export async function handleTasks(
       return true;
     }
 
+    // Supersede FIRST (atomic + idempotent in db.ts) so we don't orphan a
+    // resume child if a worker races to complete/fail/cancel between the
+    // pre-read status check and the supersede UPDATE.
+    const superseded = supersedeTask(parsed.params.id, {
+      reason: parsed.body.reason,
+      // resumeTaskId is attached AFTER the child is created. Lost race here
+      // means no child is created at all, so the log entry's null is accurate.
+      resumeTaskId: null,
+    });
+    if (!superseded) {
+      // Worker won the race (terminal transition between status check and
+      // this UPDATE). Treat as `alreadyFinished` — no resume child is created.
+      const fresh = getTaskById(parsed.params.id);
+      json(res, {
+        success: true,
+        kind: "alreadyFinished",
+        task: fresh,
+        resumeTaskId: null,
+      });
+      return true;
+    }
+
+    // Parent is now superseded. Create the resume child.
+    const followUp = createResumeFollowUp({
+      parentId: parsed.params.id,
+      reason: parsed.body.reason,
+    });
+
+    // `workflow-skip` is unreachable here (workflow-step path branched above).
+    // `skipped` covers parent_not_found / lead_not_found edge cases — the
+    // supersede already landed, so log + roll forward without a resume task.
     if (followUp.kind !== "created") {
-      jsonError(res, `Failed to create resume follow-up: ${followUp.reason}`, 500);
+      console.warn(
+        `[Supersede] Task ${parsed.params.id.slice(0, 8)} superseded but resume creation skipped (${
+          followUp.kind === "skipped" ? followUp.reason : followUp.kind
+        })`,
+      );
+      json(res, {
+        success: true,
+        kind: "resumed",
+        task: superseded,
+        resumeTaskId: null,
+      });
       return true;
     }
 
     const resumeTaskId = followUp.task.id;
-    const superseded = supersedeTask(parsed.params.id, {
-      reason: parsed.body.reason,
-      resumeTaskId,
-    });
-    if (!superseded) {
-      jsonError(res, "Failed to supersede task", 500);
-      return true;
-    }
 
     ensure({
       id: "task.superseded",
