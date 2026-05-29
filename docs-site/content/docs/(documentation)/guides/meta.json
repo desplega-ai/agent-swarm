@@ -2,6 +2,7 @@
   "title": "Guides",
   "pages": [
     "deployment",
+    "e2b-provider-smoke-tests",
     "personalization",
     "secrets-encryption",
     "harness-configuration",
