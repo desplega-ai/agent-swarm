@@ -208,7 +208,7 @@ describe("Heartbeat Triage", () => {
   // ==========================================================================
 
   describe("Code-Level Triage", () => {
-    test("auto-fails stalled task with no active session", async () => {
+    test("auto-supersedes stalled task with no active session (DES-523)", async () => {
       const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: agent.id });
       startTask(task.id);
@@ -219,17 +219,21 @@ describe("Heartbeat Triage", () => {
 
       const findings = await codeLevelTriage();
 
-      expect(findings.autoFailedTasks.length).toBe(1);
-      expect(findings.autoFailedTasks[0]!.taskId).toBe(task.id);
+      expect(findings.autoResumedTasks.length).toBe(1);
+      expect(findings.autoResumedTasks[0]!.taskId).toBe(task.id);
+      expect(findings.autoResumedTasks[0]!.reason).toContain("no active session");
+      expect(findings.autoFailedTasks.length).toBe(0);
       expect(findings.stalledTasks.length).toBe(0);
 
-      // Verify task is actually failed in DB
+      // Verify task is superseded (not failed) — the resume task carries the work forward.
+      // `failureReason` is unset on superseded tasks; the supersede reason lives on the log
+      // entry and on `findings.autoResumedTasks[].reason` (checked above).
       const updated = getTaskById(task.id);
-      expect(updated?.status).toBe("failed");
-      expect(updated?.failureReason).toContain("no active session");
+      expect(updated?.status).toBe("superseded");
+      expect(updated?.failureReason).toBeFalsy();
     });
 
-    test("auto-fails stalled task with stale session heartbeat", async () => {
+    test("auto-supersedes stalled task with stale session heartbeat (DES-523)", async () => {
       const agent = createAgent({ name: "crashed-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: agent.id });
       startTask(task.id);
@@ -250,14 +254,18 @@ describe("Heartbeat Triage", () => {
 
       const findings = await codeLevelTriage();
 
-      expect(findings.autoFailedTasks.length).toBe(1);
-      expect(findings.autoFailedTasks[0]!.taskId).toBe(task.id);
+      expect(findings.autoResumedTasks.length).toBe(1);
+      expect(findings.autoResumedTasks[0]!.taskId).toBe(task.id);
+      expect(findings.autoResumedTasks[0]!.reason).toContain("stale");
+      expect(findings.autoFailedTasks.length).toBe(0);
       expect(findings.stalledTasks.length).toBe(0);
 
-      // Verify task is failed and session is deleted
+      // Verify task is superseded and session is deleted.
+      // `failureReason` is unset on superseded tasks; the supersede reason lives on the log
+      // entry and on `findings.autoResumedTasks[].reason` (checked above).
       const updated = getTaskById(task.id);
-      expect(updated?.status).toBe("failed");
-      expect(updated?.failureReason).toContain("stale");
+      expect(updated?.status).toBe("superseded");
+      expect(updated?.failureReason).toBeFalsy();
 
       const session = getActiveSessionForTask(task.id);
       expect(session).toBeNull();
@@ -361,7 +369,7 @@ describe("Heartbeat Triage", () => {
       expect(findings.stalledTasks.length).toBe(0);
     });
 
-    test("sets agent to idle after auto-failing its only task", async () => {
+    test("sets agent to idle after auto-superseding its only task", async () => {
       const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: agent.id });
       startTask(task.id);
@@ -371,7 +379,8 @@ describe("Heartbeat Triage", () => {
 
       await codeLevelTriage();
 
-      // Agent should be set to idle since it has no more active tasks
+      // Agent should be set to idle since the parent task is terminal (superseded)
+      // and the resume follow-up was routed to the unassigned pool (worker is "dead").
       const agents = getDb().query("SELECT status FROM agents WHERE id = ?").get(agent.id) as {
         status: string;
       };
@@ -404,7 +413,7 @@ describe("Heartbeat Triage", () => {
       expect(tasks.length).toBe(1);
     });
 
-    test("auto-fails stalled task with no session during sweep", async () => {
+    test("auto-supersedes stalled task with no session during sweep", async () => {
       const worker = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled no-session", { agentId: worker.id });
       startTask(task.id);
@@ -415,7 +424,8 @@ describe("Heartbeat Triage", () => {
       await runHeartbeatSweep();
 
       const updated = getTaskById(task.id);
-      expect(updated?.status).toBe("failed");
+      // DES-523: heartbeat sweep now creates a resume follow-up instead of silently failing.
+      expect(updated?.status).toBe("superseded");
     });
 
     test("cleans stale sessions even when preflight gate bails", async () => {

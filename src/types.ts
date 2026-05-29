@@ -674,6 +674,7 @@ export const ResumeReasonSchema = z.enum([
   "graceful_shutdown", // Worker received SIGTERM / SIGINT
   "context_limits", // Provider session approaching context-window limits (Phase 6)
   "manual_supersede", // Operator-triggered (e.g. dashboard button)
+  "crash_recovery", // Heartbeat sweep detected dead/stalled worker (DES-523)
 ]);
 export type ResumeReason = z.infer<typeof ResumeReasonSchema>;
 

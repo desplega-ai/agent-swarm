@@ -1,0 +1,241 @@
+/**
+ * DES-523: heartbeat sweep should auto-supersede + resume crashed-worker tasks.
+ *
+ * Mirrors the test-setup pattern from `heartbeat.test.ts` (own sqlite file,
+ * full DB reset between tests). Each test exercises one branch of
+ * `remediateCrashedWorkerTask` inside `detectAndRemediateStalledTasks`.
+ */
+
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { unlink } from "node:fs/promises";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  getChildTasks,
+  getDb,
+  getTaskById,
+  initDb,
+  insertActiveSession,
+  startTask,
+} from "../be/db";
+import { codeLevelTriage } from "../heartbeat/heartbeat";
+
+const TEST_DB_PATH = "./test-heartbeat-supersede-resume.sqlite";
+
+describe("Heartbeat — supersede + resume (DES-523)", () => {
+  beforeAll(async () => {
+    try {
+      await unlink(TEST_DB_PATH);
+    } catch {
+      // File doesn't exist
+    }
+    closeDb();
+    initDb(TEST_DB_PATH);
+  });
+
+  afterAll(async () => {
+    closeDb();
+    for (const path of [TEST_DB_PATH, `${TEST_DB_PATH}-wal`, `${TEST_DB_PATH}-shm`]) {
+      try {
+        await unlink(path);
+      } catch {
+        // Files may not exist
+      }
+    }
+  });
+
+  beforeEach(() => {
+    getDb().run("DELETE FROM agent_tasks");
+    getDb().run("DELETE FROM agents");
+    getDb().run("DELETE FROM active_sessions");
+  });
+
+  // --------------------------------------------------------------------------
+  // Case A — no active session
+  // --------------------------------------------------------------------------
+
+  test("Case A: regular task with no active session is auto-superseded and resumed", async () => {
+    const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Long-running parent work", { agentId: agent.id });
+    startTask(parent.id);
+
+    // 10 min stale — past the 5 min no-session threshold.
+    const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.autoResumedTasks.length).toBe(1);
+    expect(findings.autoResumedTasks[0]!.taskId).toBe(parent.id);
+    expect(findings.autoFailedTasks.length).toBe(0);
+
+    // Parent transitioned to `superseded` (NOT `failed`).
+    const updatedParent = getTaskById(parent.id);
+    expect(updatedParent?.status).toBe("superseded");
+
+    // A resume follow-up child exists.
+    const children = getChildTasks(parent.id);
+    expect(children.length).toBe(1);
+    const resume = children[0]!;
+    expect(resume.taskType).toBe("resume");
+    expect(resume.tags).toContain("auto-resume");
+    expect(resume.tags).toContain("reason:crash_recovery");
+    expect(resume.id).toBe(findings.autoResumedTasks[0]!.resumeTaskId);
+  });
+
+  // --------------------------------------------------------------------------
+  // Case A — system task: must fall back to failTask, never resume
+  // --------------------------------------------------------------------------
+
+  test("Case A: system task (taskType=heartbeat) is failed, not resumed", async () => {
+    const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+    const parent = createTaskExtended("Periodic heartbeat checklist", {
+      agentId: lead.id,
+      taskType: "heartbeat",
+    });
+    startTask(parent.id);
+
+    const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.autoFailedTasks.length).toBe(1);
+    expect(findings.autoFailedTasks[0]!.taskId).toBe(parent.id);
+    expect(findings.autoResumedTasks.length).toBe(0);
+
+    const updatedParent = getTaskById(parent.id);
+    expect(updatedParent?.status).toBe("failed");
+
+    // No resume child was created.
+    const children = getChildTasks(parent.id);
+    expect(children.length).toBe(0);
+  });
+
+  // --------------------------------------------------------------------------
+  // Case A — idempotency: a non-terminal child already exists → fail, no 2nd resume
+  // --------------------------------------------------------------------------
+
+  test("Case A: idempotency — non-terminal child already exists, parent is failed (no 2nd resume)", async () => {
+    const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Parent with existing child", { agentId: agent.id });
+    startTask(parent.id);
+
+    // Pre-insert a non-terminal child. `createTaskExtended` defaults to
+    // `unassigned` without an agentId — we assign the same agent so the child
+    // lands in `pending`, mirroring what a prior sweep would have produced.
+    const preexisting = createTaskExtended("Existing pending child", {
+      parentTaskId: parent.id,
+      agentId: agent.id,
+      tags: ["auto-resume", "reason:crash_recovery"],
+      taskType: "resume",
+    });
+    expect(preexisting.status).toBe("pending");
+
+    const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+
+    const findings = await codeLevelTriage();
+
+    // Idempotency path: parent gets the legacy `failTask` treatment.
+    expect(findings.autoFailedTasks.length).toBe(1);
+    expect(findings.autoFailedTasks[0]!.taskId).toBe(parent.id);
+    expect(findings.autoResumedTasks.length).toBe(0);
+
+    const updatedParent = getTaskById(parent.id);
+    expect(updatedParent?.status).toBe("failed");
+
+    // Only the original pre-existing child remains — no second resume was created.
+    const children = getChildTasks(parent.id);
+    expect(children.length).toBe(1);
+    expect(children[0]!.id).toBe(preexisting.id);
+  });
+
+  // --------------------------------------------------------------------------
+  // Case B — stale session heartbeat
+  // --------------------------------------------------------------------------
+
+  test("Case B: stale session heartbeat is auto-superseded and resumed", async () => {
+    const agent = createAgent({ name: "crashed-worker", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Crashed worker's task", { agentId: agent.id });
+    startTask(parent.id);
+
+    insertActiveSession({
+      agentId: agent.id,
+      taskId: parent.id,
+      triggerType: "task_assigned",
+    });
+
+    // Make both task and session heartbeat 20 min stale — past the 15 min threshold.
+    const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+      oldTime,
+      parent.id,
+    ]);
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.autoResumedTasks.length).toBe(1);
+    expect(findings.autoResumedTasks[0]!.taskId).toBe(parent.id);
+    expect(findings.autoFailedTasks.length).toBe(0);
+
+    const updatedParent = getTaskById(parent.id);
+    expect(updatedParent?.status).toBe("superseded");
+
+    const children = getChildTasks(parent.id);
+    expect(children.length).toBe(1);
+    const resume = children[0]!;
+    expect(resume.taskType).toBe("resume");
+    expect(resume.tags).toContain("auto-resume");
+    expect(resume.tags).toContain("reason:crash_recovery");
+
+    // Orphan active_session row was cleaned up.
+    const remainingSessions = getDb()
+      .query("SELECT COUNT(*) as count FROM active_sessions WHERE taskId = ?")
+      .get(parent.id) as { count: number };
+    expect(remainingSessions.count).toBe(0);
+  });
+
+  // --------------------------------------------------------------------------
+  // Workflow carve-out — workflowRunStepId set → workflow-skip → failTask path
+  // --------------------------------------------------------------------------
+
+  test("Workflow-step parent: failed with workflow reason, no supersede or resume", async () => {
+    const agent = createAgent({ name: "workflow-worker", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Workflow-step task", { agentId: agent.id });
+    startTask(parent.id);
+
+    // Backfill workflowRunStepId — createTaskExtended doesn't accept it.
+    // FKs are toggled off because this test only exercises the heartbeat path,
+    // not the workflow engine itself (same pattern as task-supersede-resume.test.ts).
+    const stepId = crypto.randomUUID();
+    getDb().exec("PRAGMA foreign_keys = OFF");
+    try {
+      getDb().run("UPDATE agent_tasks SET workflowRunStepId = ? WHERE id = ?", [stepId, parent.id]);
+    } finally {
+      getDb().exec("PRAGMA foreign_keys = ON");
+    }
+
+    const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+
+    const findings = await codeLevelTriage();
+
+    // Workflow carve-out: the engine owns retry. Skip the supersede flow and
+    // mark the dedicated workflow-task failure so the engine can react.
+    expect(findings.autoResumedTasks.length).toBe(0);
+    expect(findings.autoFailedTasks.length).toBe(1);
+    expect(findings.autoFailedTasks[0]!.taskId).toBe(parent.id);
+    expect(findings.autoFailedTasks[0]!.reason).toBe("superseded_workflow_task");
+
+    // No resume child was created.
+    const children = getChildTasks(parent.id);
+    expect(children.length).toBe(0);
+
+    const updatedParent = getTaskById(parent.id);
+    expect(updatedParent?.status).toBe("failed");
+    expect(updatedParent?.failureReason).toBe("superseded_workflow_task");
+  });
+});

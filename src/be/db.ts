@@ -1291,6 +1291,24 @@ export function getChildTasks(parentTaskId: string): AgentTask[] {
     .map(rowToAgentTask);
 }
 
+/**
+ * Returns true if `parentId` has at least one child task whose status is NOT in the
+ * terminal set (`completed | failed | cancelled | superseded`). Used by the heartbeat
+ * sweep to avoid creating a duplicate "resume" follow-up when one already exists for a
+ * supersede-eligible parent (DES-523).
+ */
+export function hasNonTerminalChildTask(parentId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM agent_tasks
+       WHERE parentTaskId = ?
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       LIMIT 1`,
+    )
+    .get(parentId);
+  return row !== undefined && row !== null;
+}
+
 export function updateTaskClaudeSessionId(
   taskId: string,
   claudeSessionId: string,
