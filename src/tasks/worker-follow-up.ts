@@ -46,6 +46,9 @@ export function createWorkerTaskFollowUp(args: {
 
   const agentName = taskAgent.name || task.agentId?.slice(0, 8) || "Unknown";
   const taskDesc = task.task.slice(0, 200);
+  const creatorAgent = task.creatorAgentId
+    ? `${task.creatorAgentId}${task.creatorAgentId === leadAgent.id ? " (you)" : ""}`
+    : "<none>";
   const instructions =
     status === "completed"
       ? (task.followUpConfig?.onCompleted ?? "")
@@ -63,6 +66,7 @@ export function createWorkerTaskFollowUp(args: {
     const completedResult = resolveTemplate("task.worker.completed", {
       agent_name: agentName,
       task_desc: taskDesc,
+      creator_agent: creatorAgent,
       output_summary: outputSummary,
       follow_up_instructions: followUpInstructions,
       task_id: task.id,
@@ -73,6 +77,7 @@ export function createWorkerTaskFollowUp(args: {
     const failedResult = resolveTemplate("task.worker.failed", {
       agent_name: agentName,
       task_desc: taskDesc,
+      creator_agent: creatorAgent,
       failure_reason: reason,
       follow_up_instructions: followUpInstructions,
       task_id: task.id,

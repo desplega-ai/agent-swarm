@@ -88,6 +88,7 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "../types";
+import { FollowUpConfigSchema } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
@@ -1021,8 +1022,20 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
   let followUpConfig: FollowUpConfig | undefined;
   if (row.followUpConfig) {
     try {
-      followUpConfig = JSON.parse(row.followUpConfig);
-    } catch {
+      const parsed = FollowUpConfigSchema.safeParse(JSON.parse(row.followUpConfig));
+      if (parsed.success) {
+        followUpConfig = parsed.data;
+      } else {
+        console.warn(
+          `[db] Ignoring invalid agent_tasks.followUpConfig for task ${row.id}:`,
+          parsed.error.message,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[db] Ignoring malformed agent_tasks.followUpConfig for task ${row.id}:`,
+        error instanceof Error ? error.message : String(error),
+      );
       followUpConfig = undefined;
     }
   }

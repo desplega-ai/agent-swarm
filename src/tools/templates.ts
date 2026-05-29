@@ -52,6 +52,7 @@ registerTemplate({
   defaultBody: `Worker task completed \u2014 review needed.
 
 Agent: {{agent_name}}
+Original task created by agent {{creator_agent}}
 Task: "{{task_desc}}"
 
 Output:
@@ -65,6 +66,7 @@ IMPORTANT: Do NOT re-delegate or re-answer the original request. The worker has 
 Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
   variables: [
     { name: "agent_name", description: "Worker agent name or ID prefix" },
+    { name: "creator_agent", description: "Agent ID that originally created the worker task" },
     { name: "task_desc", description: "Task description (truncated to 200 chars)" },
     { name: "output_summary", description: "Task output (truncated to 500 chars)" },
     {
@@ -110,6 +112,7 @@ registerTemplate({
   defaultBody: `Worker task failed \u2014 action needed.
 
 Agent: {{agent_name}}
+Original task created by agent {{creator_agent}}
 Task: "{{task_desc}}"
 
 Failure reason: {{failure_reason}}{{follow_up_instructions}}
@@ -117,6 +120,7 @@ Failure reason: {{failure_reason}}{{follow_up_instructions}}
 Decide whether to reassign, retry, or handle the failure. Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
   variables: [
     { name: "agent_name", description: "Worker agent name or ID prefix" },
+    { name: "creator_agent", description: "Agent ID that originally created the worker task" },
     { name: "task_desc", description: "Task description (truncated to 200 chars)" },
     { name: "failure_reason", description: "Failure reason text" },
     {

@@ -324,6 +324,7 @@ describe("Task lifecycle — backward compatibility", () => {
   test("task.worker.completed produces expected output", () => {
     const result = resolveTemplate("task.worker.completed", {
       agent_name: "Worker-1",
+      creator_agent: "creator-agent-1",
       task_desc: "Fix the login page CSS",
       output_summary: "Fixed the CSS alignment issue on the login form",
       task_id: "task-abc-123",
@@ -334,6 +335,7 @@ describe("Task lifecycle — backward compatibility", () => {
     const expected = `Worker task completed \u2014 review needed.
 
 Agent: Worker-1
+Original task created by agent creator-agent-1
 Task: "Fix the login page CSS"
 
 Output:
@@ -352,6 +354,7 @@ Use \`get-task-details\` with taskId "task-abc-123" for full details.`;
   test("task.worker.failed produces expected output", () => {
     const result = resolveTemplate("task.worker.failed", {
       agent_name: "Worker-2",
+      creator_agent: "creator-agent-2",
       task_desc: "Deploy to production",
       failure_reason: "Docker build failed: missing dependency",
       task_id: "task-def-456",
@@ -362,6 +365,7 @@ Use \`get-task-details\` with taskId "task-abc-123" for full details.`;
     const expected = `Worker task failed \u2014 action needed.
 
 Agent: Worker-2
+Original task created by agent creator-agent-2
 Task: "Deploy to production"
 
 Failure reason: Docker build failed: missing dependency
