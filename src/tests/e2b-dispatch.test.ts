@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LaunchSpec, loadRuntimeEnv, parseFlags } from "../commands/e2b";
+import {
+  type LaunchSpec,
+  loadRuntimeEnv,
+  parseFlags,
+  resolveIntegrationToggles,
+  runE2BCommand,
+} from "../commands/e2b";
 import {
   buildDetachedShell,
   buildImageTemplate,
@@ -549,5 +555,129 @@ describe("E2B namespaced env scoping", () => {
     const env = await loadRuntimeEnv(flags, API_SPEC);
     expect(env.API_KEY).toBe("forced-key");
     expect(env.AGENT_SWARM_API_KEY).toBe("forced-key");
+  });
+});
+
+describe("E2B start-stack topology (Phase 3)", () => {
+  const previous: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const key of ["AGENT_SWARM_API_KEY", "API_KEY", "HARNESS_PROVIDER"]) {
+      previous[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+  afterEach(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  /** Run `e2b <argv>` capturing stdout, then parse the JSON it printed. */
+  async function runStackJson(argv: string[]): Promise<Record<string, unknown>> {
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    const previousExitCode = process.exitCode;
+    try {
+      await runE2BCommand(argv);
+    } finally {
+      console.log = originalLog;
+    }
+    // A clean dry-run must not set a failure exit code.
+    expect(process.exitCode ?? 0).toBe(previousExitCode ?? 0);
+    return JSON.parse(lines.join("\n")) as Record<string, unknown>;
+  }
+
+  test("dry-run stack provisions api + lead + N workers", async () => {
+    const payload = await runStackJson([
+      "start-stack",
+      "--dry-run",
+      "--yes",
+      "--workers",
+      "2",
+      "--swarm",
+      "test",
+      "--json",
+    ]);
+
+    expect(payload.api).toBeDefined();
+    expect(payload.lead).toBeDefined();
+    expect(Array.isArray(payload.workers)).toBe(true);
+    expect((payload.workers as unknown[]).length).toBe(2);
+    // The lead is E2B SwarmRole "worker" with AGENT_ROLE lead.
+    expect((payload.lead as { role: string }).role).toBe("worker");
+    expect((payload.api as { role: string }).role).toBe("api");
+  });
+
+  test("--no-lead keeps the legacy api + workers topology (no lead key)", async () => {
+    const payload = await runStackJson([
+      "start-stack",
+      "--dry-run",
+      "--yes",
+      "--no-lead",
+      "--workers",
+      "2",
+      "--swarm",
+      "test",
+      "--json",
+    ]);
+
+    expect(payload.api).toBeDefined();
+    expect(payload.lead).toBeUndefined();
+    expect(Array.isArray(payload.workers)).toBe(true);
+    expect((payload.workers as unknown[]).length).toBe(2);
+  });
+
+  test("integration toggles disable only the unlisted/--no-<x> integrations", () => {
+    // Default: all on.
+    expect(resolveIntegrationToggles(parseFlags(["start-stack"]))).toEqual({
+      slack: true,
+      github: true,
+      jira: true,
+      linear: true,
+    });
+    // --no-slack flips just slack off.
+    expect(resolveIntegrationToggles(parseFlags(["start-stack", "--no-slack"]))).toMatchObject({
+      slack: false,
+      github: true,
+    });
+    // --integrations is an allowlist: only github stays on.
+    expect(
+      resolveIntegrationToggles(parseFlags(["start-stack", "--integrations", "github"])),
+    ).toEqual({
+      slack: false,
+      github: true,
+      jira: false,
+      linear: false,
+    });
+  });
+
+  test("integration disables land only on the API runtime scope", async () => {
+    const flags = parseFlags([
+      "start-stack",
+      "--no-slack",
+      "--integrations",
+      "github",
+      "--dry-run",
+      "--api-key",
+      "k",
+    ]);
+    const api = await loadRuntimeEnv(flags, { swarmRole: "api", envScope: "api" });
+    const worker = await loadRuntimeEnv(
+      flags,
+      { swarmRole: "worker", agentRole: "worker", envScope: "worker" },
+      "https://api.example.com",
+    );
+
+    expect(api.SLACK_DISABLE).toBe("true");
+    expect(api.JIRA_DISABLE).toBe("true");
+    expect(api.LINEAR_DISABLE).toBe("true");
+    // github stayed on via the allowlist.
+    expect(api.GITHUB_DISABLE).toBeUndefined();
+    // The worker scope never carries these API-side toggles.
+    expect(worker.SLACK_DISABLE).toBeUndefined();
   });
 });

@@ -4,7 +4,7 @@ topic: "E2B Dispatch CLI — Lead Stacks, Swarm Grouping, Lifecycle Control"
 status: in-progress
 autonomy: autopilot
 last_updated: 2026-05-30T00:00:00Z
-last_updated_by: phase-running (Phase 2)
+last_updated_by: phase-running (Phase 3)
 ---
 
 # E2B Dispatch CLI — Lead Stacks, Swarm Grouping, Lifecycle Control: Implementation Plan
@@ -142,11 +142,11 @@ Extend the E2B dispatch CLI so an operator can launch a complete, long-lived swa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Dry-run shows API + lead + N workers: `bun run src/cli.tsx e2b start-stack --dry-run --yes --workers 2 --swarm test` (JSON has `api`, `lead`, 2 `workers`)
-- [ ] Help lists new flags: `bun run src/cli.tsx e2b start-stack --help`
-- [ ] Non-TTY never prompts (piped): `echo | bun run src/cli.tsx e2b start-stack --dry-run --swarm test` exits without hanging
-- [ ] Unit tests pass: `bun test src/tests/e2b-dispatch.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Dry-run shows API + lead + N workers: `bun run src/cli.tsx e2b start-stack --dry-run --yes --workers 2 --swarm test` (JSON has `api`, `lead`, 2 `workers`)
+- [x] Help lists new flags: `bun run src/cli.tsx e2b start-stack --help`
+- [x] Non-TTY never prompts (piped): `echo | bun run src/cli.tsx e2b start-stack --dry-run --swarm test` exits without hanging
+- [x] Unit tests pass: `bun test src/tests/e2b-dispatch.test.ts`
 
 #### Automated QA:
 - [ ] Agent runs `start-stack --yes --swarm qa --workers 1 --timeout-sec 1800 --json` against real E2B, then queries `${apiUrl}/api/agents` and confirms exactly one `isLead:true` agent + one worker registered, API `/health` 200.

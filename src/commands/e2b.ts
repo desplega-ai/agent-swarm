@@ -1,4 +1,6 @@
 import { dirname, resolve } from "node:path";
+import { render } from "ink";
+import { createElement } from "react";
 import {
   buildImageTemplate,
   buildTemplate,
@@ -31,6 +33,16 @@ import {
   selectEnv,
   splitKeys,
 } from "../e2b/env";
+import {
+  DEFAULT_STACK_TIMEOUT_SEC,
+  DEFAULT_STACK_WORKERS,
+  STACK_INTEGRATIONS,
+  StackWizard,
+  type StackWizardDefaults,
+  type StackWizardResult,
+  type StackWizardSkips,
+  slugify,
+} from "./e2b-stack-wizard.tsx";
 
 export type ParsedFlags = {
   command?: string;
@@ -63,14 +75,61 @@ export type LaunchSpec = {
   swarmRole: SwarmRole;
   agentRole?: "worker" | "lead";
   envScope: EnvScope;
+  /**
+   * Flag the explicit AGENT_ID override is read from (default `"agent-id"`).
+   * The stack's lead reads `"lead-agent-id"` so a single `--agent-id` never
+   * collides the lead and a worker onto the same agent record.
+   */
+  agentIdFlag?: string;
+  /**
+   * Prefix for the generated default AGENT_ID (`<prefix>-<sandboxID>`). Workers
+   * use `"e2b"` (legacy, unchanged); the stack's lead uses `"e2b-lead"`. The
+   * sandbox ID is unique per sandbox, so every instance still registers
+   * distinctly even without an explicit `--agent-id`.
+   */
+  agentIdPrefix?: string;
 };
 
 /** The byte-identical specs for the legacy `start-api` / `start-worker` paths. */
 const API_SPEC: LaunchSpec = { swarmRole: "api", envScope: "api" };
 const WORKER_SPEC: LaunchSpec = { swarmRole: "worker", envScope: "worker" };
 
+/**
+ * Stack-specific specs. The lead is E2B `SwarmRole === "worker"` (same template
+ * + entrypoint) but pins `agentRole:"lead"`, its own `"lead"` env scope, and a
+ * dedicated `--lead-agent-id` override + `e2b-lead-<sandboxID>` default.
+ */
+const STACK_LEAD_SPEC: LaunchSpec = {
+  swarmRole: "worker",
+  agentRole: "lead",
+  envScope: "lead",
+  agentIdFlag: "lead-agent-id",
+  agentIdPrefix: "e2b-lead",
+};
+const STACK_WORKER_SPEC: LaunchSpec = {
+  swarmRole: "worker",
+  agentRole: "worker",
+  envScope: "worker",
+};
+
 const DEFAULT_API_PORT = 3013;
-const BOOLEAN_FLAGS = new Set(["dry-run", "json", "no-cache", "no-wait", "all", "yes"]);
+const BOOLEAN_FLAGS = new Set([
+  "dry-run",
+  "json",
+  "no-cache",
+  "no-wait",
+  "all",
+  "yes",
+  "non-interactive",
+  "no-lead",
+  // Integration disable shortcuts: `--no-<integration>` sets the matching
+  // API-side `*_DISABLE=true`. The `--integrations <csv>` allowlist is the
+  // value-bearing alternative (handled separately).
+  "no-slack",
+  "no-github",
+  "no-jira",
+  "no-linear",
+]);
 
 export function parseFlags(argv: string[]): ParsedFlags {
   const [command, ...rest] = argv;
@@ -238,6 +297,42 @@ function applySecrets(flags: ParsedFlags, key: string, target: EnvMap): void {
   }
 }
 
+/** Integrations toggleable via `--integrations <csv>` / `--no-<integration>`. */
+const E2B_INTEGRATIONS = ["slack", "github", "jira", "linear"] as const;
+type E2BIntegration = (typeof E2B_INTEGRATIONS)[number];
+
+/**
+ * Resolve which integrations are enabled. Default: all on. `--integrations
+ * <csv>` is an allowlist — anything not listed is disabled. `--no-<integration>`
+ * disables a single one (and stacks on top of the allowlist). Returns a map of
+ * integration → enabled.
+ */
+export function resolveIntegrationToggles(flags: ParsedFlags): Record<E2BIntegration, boolean> {
+  const allowlistRaw = splitKeys(values(flags, "integrations")).map((s) => s.toLowerCase());
+  const hasAllowlist = allowlistRaw.length > 0;
+  const toggles = {} as Record<E2BIntegration, boolean>;
+  for (const integration of E2B_INTEGRATIONS) {
+    // With an allowlist, only listed integrations stay on; without one, all on.
+    let enabled = hasAllowlist ? allowlistRaw.includes(integration) : true;
+    if (booleanFlag(flags, `no-${integration}`)) enabled = false;
+    toggles[integration] = enabled;
+  }
+  return toggles;
+}
+
+/**
+ * Stamp `*_DISABLE=true` for any integration the operator turned off. These envs
+ * are read API-side, so the caller only applies this to the API runtime scope.
+ */
+function applyIntegrationDisables(flags: ParsedFlags, target: EnvMap): void {
+  const toggles = resolveIntegrationToggles(flags);
+  for (const integration of E2B_INTEGRATIONS) {
+    if (!toggles[integration]) {
+      target[`${integration.toUpperCase()}_DISABLE`] = "true";
+    }
+  }
+}
+
 export async function loadRuntimeEnv(
   flags: ParsedFlags,
   spec: LaunchSpec,
@@ -287,6 +382,10 @@ export async function loadRuntimeEnv(
     runtime.SCRIPT_RUNTIME_DIR = value(flags, "script-runtime-dir", "/app/scripts-runtime");
     runtime.TS_LIB_DIR = value(flags, "ts-lib-dir", "/app/typescript-lib");
     runtime.SCRIPT_TYPES_DIR = value(flags, "script-types-dir", "/app/script-types");
+    // Integration toggles are read API-side, so they only ever apply to the API
+    // sandbox's runtime env. `--no-<integration>` / `--integrations <csv>`
+    // resolve to `*_DISABLE=true` here.
+    applyIntegrationDisables(flags, runtime);
   } else {
     if (!apiUrl) {
       throw new Error("Worker startup requires --api-url, or use start-stack to create API first.");
@@ -444,7 +543,14 @@ async function startRole(
 
   try {
     if (role === "worker" && !runtimeEnv.AGENT_ID) {
-      runtimeEnv.AGENT_ID = value(flags, "agent-id", `e2b-${sandbox.sandboxID}`);
+      // Per-instance AGENT_ID. The explicit-override flag and the generated
+      // default prefix come from the spec so the stack's lead never collides
+      // with a worker (lead → --lead-agent-id / e2b-lead-<id>; worker →
+      // --agent-id / e2b-<id>). Sandbox IDs are unique, so each instance
+      // registers distinctly even without an explicit override.
+      const agentIdFlag = spec.agentIdFlag ?? "agent-id";
+      const agentIdPrefix = spec.agentIdPrefix ?? "e2b";
+      runtimeEnv.AGENT_ID = value(flags, agentIdFlag, `${agentIdPrefix}-${sandbox.sandboxID}`);
     }
 
     const entrypoint = role === "api" ? "/api-entrypoint.sh" : "/docker-entrypoint.sh";
@@ -687,8 +793,49 @@ async function resyncStackTimeout(
   }
 }
 
+/**
+ * `start-stack` should run headless (no prompts, never read stdin) whenever:
+ *   - `--yes` / `--non-interactive` is passed,
+ *   - `--dry-run` is passed (CI/preview path), or
+ *   - we're not on an interactive TTY (piped / redirected stdin or stdout).
+ * Critically, the piped case (`echo | … start-stack …`) MUST take this path so
+ * it exits without hanging on a prompt that no one can answer.
+ */
+function isStackHeadless(flags: ParsedFlags): boolean {
+  return (
+    booleanFlag(flags, "yes") ||
+    booleanFlag(flags, "non-interactive") ||
+    booleanFlag(flags, "dry-run") ||
+    !isInteractiveTty()
+  );
+}
+
 async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void> {
+  // `--agent-role` is meaningless for the split topology (API + lead + workers
+  // each get a fixed role). Warn and point the operator at the right tool
+  // rather than silently ignoring an intent to change roles.
+  if (value(flags, "agent-role")) {
+    console.warn(
+      "e2b start-stack: --agent-role is ignored (the stack pins API/lead/worker roles). " +
+        "Use --no-lead for an API + workers topology, or start-worker --agent-role for a single custom-role worker.",
+    );
+  }
+
+  // Normalize a provided --swarm into a clean slug so the value is consistent
+  // whether it came from a flag or the wizard. (Phase 4 stamps it onto sandbox
+  // metadata; Phase 3 only uses it for wizard naming + the echoed command.)
+  const swarmFlag = value(flags, "swarm");
+  if (swarmFlag) setFlagValue(flags, "swarm", slugify(swarmFlag));
+
+  // Interactive wizard (TTY only). Headless runs (--yes / --non-interactive /
+  // --dry-run / non-TTY) skip it entirely and rely on flags + defaults.
+  if (!isStackHeadless(flags)) {
+    await runStackWizard(flags);
+  }
+
+  const noLead = booleanFlag(flags, "no-lead");
   const started: StartedRole[] = [];
+  let lead: StartedRole | undefined;
   const workers: StartedRole[] = [];
 
   try {
@@ -696,11 +843,18 @@ async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void>
     started.push(api);
     if (!api.url) throw new Error("API sandbox did not produce a public URL");
 
+    // (2) One lead, unless --no-lead retains the legacy homogeneous topology.
+    if (!noLead) {
+      lead = await startRole(flags, cwd, STACK_LEAD_SPEC, api.url);
+      // The lead MUST be in `started[]` so a mid-launch failure tears it down,
+      // and so the TTL re-sync pass below covers it.
+      started.push(lead);
+    }
+
+    // (3) N workers.
     const workerCount = integerFlag(flags, "workers", 1);
     for (let i = 0; i < workerCount; i++) {
-      // Phase 3 splits this into a lead + workers; for now every member of the
-      // stack uses the worker spec, preserving the legacy homogeneous topology.
-      const worker = await startRole(flags, cwd, WORKER_SPEC, api.url);
+      const worker = await startRole(flags, cwd, STACK_WORKER_SPEC, api.url);
       workers.push(worker);
       started.push(worker);
     }
@@ -715,18 +869,17 @@ async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void>
     const runtimeEnv = await loadRuntimeEnv(flags, API_SPEC);
 
     if (booleanFlag(flags, "json")) {
-      console.log(
-        JSON.stringify(
-          {
-            api: publicStartedRole(api, runtimeEnv),
-            workers: workers.map((worker) => publicStartedRole(worker, runtimeEnv)),
-          },
-          null,
-          2,
-        ),
-      );
+      // Legacy shape under --no-lead: {api, workers}. New shape with a lead:
+      // {api, lead, workers}.
+      const payload: Record<string, unknown> = {
+        api: publicStartedRole(api, runtimeEnv),
+      };
+      if (lead) payload.lead = publicStartedRole(lead, runtimeEnv);
+      payload.workers = workers.map((worker) => publicStartedRole(worker, runtimeEnv));
+      console.log(JSON.stringify(payload, null, 2));
     } else {
       printHumanStart(api, runtimeEnv);
+      if (lead) printHumanStart(lead, runtimeEnv);
       for (const worker of workers) {
         printHumanStart(worker, runtimeEnv);
       }
@@ -735,6 +888,116 @@ async function startStackCommand(flags: ParsedFlags, cwd: string): Promise<void>
     await cleanupStartedRoles(flags, cwd, started);
     throw err;
   }
+}
+
+/** Set/replace a single-value flag in place (mirrors `--key value`). */
+function setFlagValue(flags: ParsedFlags, key: string, value: string): void {
+  flags.values.set(key, [value]);
+}
+
+/**
+ * Compute which wizard steps to skip because the operator already supplied the
+ * value on the command line. A step is skipped when its driving flag is present.
+ */
+function stackWizardSkips(flags: ParsedFlags): StackWizardSkips {
+  return {
+    swarm: Boolean(value(flags, "swarm")),
+    workers: flags.values.has("workers"),
+    provider: flags.values.has("provider"),
+    timeout: flags.values.has("timeout-sec"),
+    envFiles: flags.values.has("env-file"),
+    integrations:
+      flags.values.has("integrations") ||
+      STACK_INTEGRATIONS.some((i) => booleanFlag(flags, `no-${i}`)),
+  };
+}
+
+/** Seed the wizard with whatever the flags already resolve to. */
+function stackWizardDefaults(flags: ParsedFlags): StackWizardDefaults {
+  return {
+    swarmSlug: value(flags, "swarm") || undefined,
+    workers: integerFlag(flags, "workers", DEFAULT_STACK_WORKERS),
+    provider: value(flags, "provider", "claude"),
+    timeoutSec: integerFlag(flags, "timeout-sec", DEFAULT_STACK_TIMEOUT_SEC),
+    envFiles: values(flags, "env-file"),
+    integrations: resolveIntegrationToggles(flags),
+    noLead: booleanFlag(flags, "no-lead"),
+  };
+}
+
+/**
+ * Fold the wizard's answers back onto `flags` so the single headless launch
+ * path below picks them up. Only values the wizard actually collected are
+ * written; flag-provided values were skipped in the wizard and remain as-is.
+ */
+function applyWizardResultToFlags(flags: ParsedFlags, result: StackWizardResult): void {
+  setFlagValue(flags, "swarm", result.swarmSlug);
+  setFlagValue(flags, "workers", String(result.workers));
+  setFlagValue(flags, "provider", result.provider);
+  setFlagValue(flags, "timeout-sec", String(result.timeoutSec));
+  if (result.envFiles.length > 0) {
+    flags.values.set("env-file", result.envFiles);
+  }
+  // A disabled integration becomes `--no-<integration>` (→ API `*_DISABLE`).
+  for (const integration of STACK_INTEGRATIONS) {
+    if (!result.integrations[integration]) {
+      flags.booleans.add(`no-${integration}`);
+    }
+  }
+  if (result.noLead) flags.booleans.add("no-lead");
+}
+
+/**
+ * Reconstruct the equivalent headless one-shot command from the resolved flags,
+ * so an operator who ran the wizard can copy/paste it for a repeatable CI run.
+ * Secrets are NOT included — only the topology-shaping flags the wizard sets.
+ */
+function buildOneShotCommand(flags: ParsedFlags): string {
+  const parts = ["agent-swarm e2b start-stack --yes"];
+  const slug = value(flags, "swarm");
+  if (slug) parts.push(`--swarm ${slug}`);
+  parts.push(`--workers ${integerFlag(flags, "workers", DEFAULT_STACK_WORKERS)}`);
+  const provider = value(flags, "provider");
+  if (provider) parts.push(`--provider ${provider}`);
+  parts.push(`--timeout-sec ${integerFlag(flags, "timeout-sec", DEFAULT_STACK_TIMEOUT_SEC)}`);
+  for (const file of values(flags, "env-file")) {
+    parts.push(`--env-file ${file}`);
+  }
+  for (const integration of STACK_INTEGRATIONS) {
+    if (booleanFlag(flags, `no-${integration}`)) parts.push(`--no-${integration}`);
+  }
+  if (booleanFlag(flags, "no-lead")) parts.push("--no-lead");
+  return parts.join(" ");
+}
+
+/**
+ * Render the Ink wizard, await the operator's answers, fold them onto `flags`,
+ * and echo the equivalent `--yes` command. Only called on an interactive TTY
+ * (see {@link isStackHeadless}).
+ */
+async function runStackWizard(flags: ParsedFlags): Promise<void> {
+  const skips = stackWizardSkips(flags);
+  const defaults = stackWizardDefaults(flags);
+
+  let resolved: StackWizardResult | undefined;
+  const instance = render(
+    createElement(StackWizard, {
+      defaults,
+      skips,
+      onComplete: (result: StackWizardResult) => {
+        resolved = result;
+      },
+    }),
+  );
+  await instance.waitUntilExit();
+
+  if (!resolved) {
+    throw new Error("stack wizard exited without producing a configuration");
+  }
+  applyWizardResultToFlags(flags, resolved);
+
+  console.log("\nEquivalent one-shot command:");
+  console.log(`  ${buildOneShotCommand(flags)}\n`);
 }
 
 function isInteractiveTty(): boolean {
@@ -868,9 +1131,9 @@ Usage:
   agent-swarm e2b delete-template <template-name...>
   agent-swarm e2b publish-template <template-name...>
   agent-swarm e2b unpublish-template <template-name...>
-  agent-swarm e2b start-api --template <template> [--env-file .env]
-  agent-swarm e2b start-worker --template <template> --api-url <https-url> [--env-file .env]
-  agent-swarm e2b start-stack --api-template <template> --worker-template <template> [--workers 1]
+  agent-swarm e2b start-api [--template <name>] [--env-file .env]
+  agent-swarm e2b start-worker --api-url <https-url> [--template <name>] [--env-file .env]
+  agent-swarm e2b start-stack [--swarm <slug>] [--workers <n>] [--no-lead] [--yes]
   agent-swarm e2b list [--json]
   agent-swarm e2b extend <sandbox-id...> --timeout-sec <seconds>
   agent-swarm e2b kill <sandbox-id...> | --all
@@ -879,14 +1142,30 @@ Common options:
   --env-file <path>          Load runtime env/secrets for all roles (repeatable)
   --secret KEY=VALUE         Add/override one runtime secret for all roles (repeatable)
   --inherit-env KEY[,KEY]    Forward extra local env vars into the sandbox
-  --api-key <key>            Swarm API key passed to API/worker (required unless env provides one)
+  --api-key <key>            Swarm API key for API/worker (required unless env provides one)
+  --api-url <https-url>      Public API URL a worker connects to (start-worker)
   --agent-id <id>            Worker agent ID (default: e2b-<sandbox-id>)
-  --agent-role worker|lead   Role the worker sandbox runs as (default worker)
+  --agent-role worker|lead   Role for start-worker (ignored by start-stack)
   --provider <name>          Harness provider for workers (default claude)
-  --workers <n>              Worker count for start-stack (default 1)
+  --template <name>          Override the E2B template for the role
+  --api-template / --worker-template <name>   Per-role E2B template overrides
   --timeout-sec <seconds>    Sandbox TTL (default 3600); for extend, the new TTL from now
   --no-wait                  Skip waiting for API health / worker registration
   --e2b-api-key-file <path>  Read the E2B controller API key from a file
+
+start-stack (API + lead + N workers):
+  Provisions an API, one lead, and N workers. Interactive wizard on a TTY;
+  headless under --yes / --non-interactive / --dry-run / a non-TTY.
+  --swarm <slug>             Swarm name/slug (used for the wizard + echoed command)
+  --workers <n>              Worker count (default 1)
+  --no-lead                  Legacy topology: API + N workers, no lead
+  --lead-agent-id <id>       Lead agent ID (default: e2b-lead-<sandbox-id>)
+  --yes                      Skip the wizard; use flags + defaults (CI/headless)
+  --non-interactive          Same as --yes for prompting (never reads stdin)
+  --integrations <csv>       Allowlist of integrations to keep on (slack,github,jira,linear)
+  --no-slack / --no-github / --no-jira / --no-linear
+                             Disable an integration (sets the API's <NAME>_DISABLE=true)
+  JSON shape: {api, lead, workers:[...]} — or {api, workers:[...]} with --no-lead.
 
 Role-scoped env (layer ON TOP of the shared --env-file/--secret, never replace):
   --api-env-file <path>      Env file applied only to the API sandbox (repeatable)
