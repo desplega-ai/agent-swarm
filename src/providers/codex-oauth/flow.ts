@@ -172,6 +172,24 @@ export function getAccountId(accessToken: string): string | null {
   return typeof accountId === "string" && accountId.length > 0 ? accountId : null;
 }
 
+/**
+ * Extract `chatgpt_user_id` from the JWT's OpenAI-auth claim namespace. This
+ * is per-OAuth-grant (unique per user-on-account), distinct from
+ * `chatgpt_account_id` which is shared across all users in a ChatGPT Team
+ * workspace. Used to give pooled credentials a slot-unique `keySuffix` even
+ * when multiple pool slots authenticate against the same Team account.
+ *
+ * Returns null if the JWT cannot be decoded, the namespace is absent, or the
+ * claim is missing/empty. Callers MUST handle null by falling back to a
+ * different identifier (typically `chatgpt_account_id`) — do not throw.
+ */
+export function extractChatgptUserId(accessToken: string): string | null {
+  const payload = decodeJwt(accessToken);
+  const auth = payload?.[JWT_CLAIM_PATH] as Record<string, unknown> | undefined;
+  const userId = auth?.chatgpt_user_id;
+  return typeof userId === "string" && userId.length > 0 ? userId : null;
+}
+
 export async function createAuthorizationFlow(
   originator = "agent-swarm",
 ): Promise<{ verifier: string; state: string; url: string }> {

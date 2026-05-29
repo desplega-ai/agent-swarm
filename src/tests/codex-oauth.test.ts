@@ -11,6 +11,7 @@ import {
   createState,
   decodeJwt,
   exchangeAuthorizationCode,
+  extractChatgptUserId,
   getAccountId,
   JWT_CLAIM_PATH,
   parseAuthorizationInput,
@@ -150,6 +151,63 @@ describe("getAccountId", () => {
   });
 });
 
+describe("extractChatgptUserId", () => {
+  it("extracts chatgpt_user_id from JWT auth namespace", () => {
+    const payload = {
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "acc-team-abc",
+        chatgpt_user_id: "user-zzz-12345",
+      },
+    };
+    const token = `header.${btoa(JSON.stringify(payload))}.signature`;
+    expect(extractChatgptUserId(token)).toBe("user-zzz-12345");
+  });
+
+  it("returns null when chatgpt_user_id is absent", () => {
+    const payload = { "https://api.openai.com/auth": { chatgpt_account_id: "acc-only" } };
+    const token = `header.${btoa(JSON.stringify(payload))}.signature`;
+    expect(extractChatgptUserId(token)).toBeNull();
+  });
+
+  it("returns null when the entire OpenAI auth namespace is absent", () => {
+    const payload = { sub: "user-from-some-other-claim" };
+    const token = `header.${btoa(JSON.stringify(payload))}.signature`;
+    expect(extractChatgptUserId(token)).toBeNull();
+  });
+
+  it("returns null when chatgpt_user_id is empty string", () => {
+    const payload = { "https://api.openai.com/auth": { chatgpt_user_id: "" } };
+    const token = `header.${btoa(JSON.stringify(payload))}.signature`;
+    expect(extractChatgptUserId(token)).toBeNull();
+  });
+
+  it("returns null when JWT is malformed", () => {
+    expect(extractChatgptUserId("not.a.jwt-payload")).toBeNull();
+    expect(extractChatgptUserId("only-two.parts")).toBeNull();
+    expect(extractChatgptUserId("")).toBeNull();
+  });
+
+  it("is independent of chatgpt_account_id (slot-unique-vs-account-shared invariant)", () => {
+    const payloadA = {
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "team-shared-id",
+        chatgpt_user_id: "user-daniel-001",
+      },
+    };
+    const payloadB = {
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "team-shared-id",
+        chatgpt_user_id: "user-lorenzo-002",
+      },
+    };
+    const tokenA = `h.${btoa(JSON.stringify(payloadA))}.s`;
+    const tokenB = `h.${btoa(JSON.stringify(payloadB))}.s`;
+    expect(extractChatgptUserId(tokenA)).toBe("user-daniel-001");
+    expect(extractChatgptUserId(tokenB)).toBe("user-lorenzo-002");
+    expect(extractChatgptUserId(tokenA)).not.toBe(extractChatgptUserId(tokenB));
+  });
+});
+
 describe("exchangeAuthorizationCode", () => {
   afterEach(() => {
     resetFetchForTesting();
@@ -283,9 +341,69 @@ describe("authJsonToCredentials", () => {
 });
 
 describe("authJsonToCredentialSelection", () => {
-  it("maps chatgpt auth.json to CODEX_OAUTH tracking info", () => {
+  function tokenFor(payload: Record<string, unknown>): string {
+    return `header.${btoa(JSON.stringify(payload))}.signature`;
+  }
+
+  it("derives keySuffix from chatgpt_user_id when present", () => {
+    const userId = "user-MYUYWj0C9zVPo6TX2NjodCyi";
+    const access = tokenFor({
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "3a730921-cc80-4759-8fdd-242d8e80c847",
+        chatgpt_user_id: userId,
+      },
+    });
     const creds: CodexOAuthCredentials = {
-      access: "at_123",
+      access,
+      refresh: "rt_456",
+      expires: Date.now() + 3600000,
+      accountId: "3a730921-cc80-4759-8fdd-242d8e80c847",
+    };
+
+    const selection = authJsonToCredentialSelection(credentialsToAuthJson(creds));
+    expect(selection.keyType).toBe("CODEX_OAUTH");
+    expect(selection.index).toBe(0);
+    expect(selection.total).toBe(1);
+    expect(selection.keySuffix).toBe(userId.slice(-5));
+    expect(selection.selected).toBe(creds.accountId);
+  });
+
+  it("two slots on the same account get distinct suffixes when user_ids differ", () => {
+    const userIdDaniel = "user-MYUYWj0C9zVPo6TX2NjodCyi";
+    const userIdLorenzo = "user-5M89tz8tAYHIaByagMVd3Ove";
+    const sharedAccountId = "3a730921-cc80-4759-8fdd-242d8e80c847";
+
+    const makeCredsForUser = (userId: string): CodexOAuthCredentials => ({
+      access: tokenFor({
+        "https://api.openai.com/auth": {
+          chatgpt_account_id: sharedAccountId,
+          chatgpt_user_id: userId,
+        },
+      }),
+      refresh: "rt_x",
+      expires: Date.now() + 3600000,
+      accountId: sharedAccountId,
+    });
+
+    const selDaniel = authJsonToCredentialSelection(
+      credentialsToAuthJson(makeCredsForUser(userIdDaniel)),
+      0,
+      2,
+    );
+    const selLorenzo = authJsonToCredentialSelection(
+      credentialsToAuthJson(makeCredsForUser(userIdLorenzo)),
+      1,
+      2,
+    );
+
+    expect(selDaniel.keySuffix).toBe(userIdDaniel.slice(-5));
+    expect(selLorenzo.keySuffix).toBe(userIdLorenzo.slice(-5));
+    expect(selDaniel.keySuffix).not.toBe(selLorenzo.keySuffix);
+  });
+
+  it("falls back to account_id suffix when JWT lacks chatgpt_user_id", () => {
+    const creds: CodexOAuthCredentials = {
+      access: "at_no_user_id_claim",
       refresh: "rt_456",
       expires: Date.now() + 3600000,
       accountId: "c724a178-3621-41bb-bdb5-7b6ca848c965",
@@ -293,8 +411,6 @@ describe("authJsonToCredentialSelection", () => {
 
     const selection = authJsonToCredentialSelection(credentialsToAuthJson(creds));
     expect(selection.keyType).toBe("CODEX_OAUTH");
-    expect(selection.index).toBe(0);
-    expect(selection.total).toBe(1);
     expect(selection.keySuffix).toBe("8c965");
     expect(selection.selected).toBe(creds.accountId);
   });

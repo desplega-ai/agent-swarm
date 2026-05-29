@@ -37,9 +37,19 @@ const MOCK_API_URL = "http://localhost:3013";
 const MOCK_API_KEY = "test-api-key";
 const FUTURE = Date.now() + 3_600_000;
 
+function makeJwt(userId: string, accountId: string): string {
+  const payload = {
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: accountId,
+      chatgpt_user_id: userId,
+    },
+  };
+  return `header.${btoa(JSON.stringify(payload))}.signature`;
+}
+
 function makeCreds(suffix: string): CodexOAuthCredentials {
   return {
-    access: `at_${suffix}`,
+    access: makeJwt(`user-${suffix}`, `acc-${suffix}`),
     refresh: `rt_${suffix}`,
     expires: FUTURE,
     accountId: `acc-${suffix}`,
@@ -166,8 +176,9 @@ describe("Scenario 1 — 3-slot round-trip with availability filter", () => {
     expect(sel.index).toBe(selectedSlot);
     expect(sel.total).toBe(3);
     expect(sel.keyType).toBe("CODEX_OAUTH");
-    // keySuffix is derived from accountId.
-    expect(slotEntry.creds.accountId.endsWith(sel.keySuffix)).toBe(true);
+    // keySuffix is derived from chatgpt_user_id (slot-unique), not accountId.
+    const expectedUserId = `user-slot${selectedSlot}`;
+    expect(sel.keySuffix).toBe(expectedUserId.slice(-5));
   });
 });
 
