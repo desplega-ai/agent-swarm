@@ -95,6 +95,8 @@ Models can be set per-task via the API or per-agent via the agent profile. See t
 
 Codex runs through the `codex` CLI and supports both direct OpenAI API keys and ChatGPT OAuth.
 
+Each task runs inside a throwaway `codex-session-runner` subprocess. The worker sends the session config over stdin and receives line-delimited events/results over stdout, so `@openai/codex-sdk` state dies with the task instead of accumulating in the long-lived runner process.
+
 ### Authentication Methods
 
 Codex checks credentials in this order:
@@ -120,6 +122,12 @@ For ChatGPT OAuth setup, see [Provider Auth: Codex OAuth](/docs/guides/provider-
 ### Model Selection
 
 The default model baked into the worker image is `gpt-5.4`. You can override it with `MODEL_OVERRIDE` if needed.
+
+### Codex Specifics
+
+- **Per-task subprocess isolation**: each task gets a fresh `codex-session-runner` process, which keeps the worker's baseline memory flat and avoids long-lived SDK heap growth on hot workers.
+- **Small spawn argv**: large system prompts are staged to a temp file and passed via `--append-system-prompt-file`, avoiding Linux `MAX_ARG_STRLEN` / `E2BIG` failures on prompt-heavy repos.
+- **Actionable failure reporting**: subprocess startup / parse failures are emitted back to the parent as structured errors, and non-TTY runs no longer leak cursor escape sequences into the JSON pipe.
 
 ---
 
@@ -227,6 +235,7 @@ The prefix before the first `/` selects the provider and the matching credential
 ### pi-mono Specifics
 
 - **AGENTS.md symlink**: pi-mono reads `AGENTS.md` for project instructions (equivalent to Claude's `CLAUDE.md`). The adapter automatically creates a symlink `AGENTS.md → CLAUDE.md` during sessions so your existing project instructions work with both providers.
+- **Lazy provider import**: the worker only imports `@earendil-works/pi-coding-agent` when `HARNESS_PROVIDER=pi`, so non-pi workers are no longer exposed to pi-mono's module-level side effects at boot.
 - **MCP tool discovery**: pi-mono discovers swarm MCP tools at session creation via HTTP and registers them as custom tools. This is handled automatically — no `.mcp.json` needed for the swarm connection (though installed MCP servers are also discovered).
 - **Skills sync**: The Docker entrypoint syncs skills to both `~/.claude/skills/` and `~/.pi/agent/skills/` so skills work regardless of provider.
 - **Per-task hot-reload**: between tasks the worker polls a cheap `GET /api/agents/:id/skills/signature` (hash) endpoint and only re-syncs the filesystem when the installed-skill set actually changes. Newly installed / uninstalled skills appear on the next task without restarting the worker, while unchanged sessions skip the work. Foreign skills (`~/.claude/skills/<name>/SKILL.md` files not owned by the swarm) are preserved across re-syncs. See `src/utils/skills-refresh.ts`.
