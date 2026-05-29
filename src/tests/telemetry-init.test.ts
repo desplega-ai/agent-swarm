@@ -17,6 +17,7 @@ describe("initTelemetry", () => {
     // Tests below set MCP_BASE_URL to assert classification — clear between
     // tests so cases that expect "unset" don't inherit a prior test's value.
     delete process.env.MCP_BASE_URL;
+    delete process.env.DESPLEGA_TELEMETRY_ENV;
   });
 
   test("without generateIfMissing + missing config → installationId stays null (track no-ops)", async () => {
@@ -388,6 +389,74 @@ describe("initTelemetry", () => {
 
       const properties = (captured as { properties: Record<string, unknown> }).properties;
       expect(properties.is_cloud).toBe(true);
+    });
+  });
+
+  describe("track() metadata.environment", () => {
+    const originalFetch = globalThis.fetch;
+    const originalNodeEnv = process.env.NODE_ENV;
+    let captured: Record<string, unknown> | null = null;
+
+    beforeEach(() => {
+      captured = null;
+      globalThis.fetch = (async (_url: string, init?: { body?: string }) => {
+        captured = init?.body ? JSON.parse(init.body) : null;
+        return new Response(null, { status: 204 });
+      }) as typeof fetch;
+      delete process.env.DESPLEGA_TELEMETRY_ENV;
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      delete process.env.DESPLEGA_TELEMETRY_ENV;
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    test("defaults to production even when NODE_ENV is development", async () => {
+      process.env.NODE_ENV = "development";
+      await initTelemetry(
+        "api-server",
+        async () => "install_default_env",
+        async () => {},
+      );
+
+      track({ event: "test.event", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(metadata.environment).toBe("production");
+    });
+
+    test("uses DESPLEGA_TELEMETRY_ENV when set", async () => {
+      process.env.NODE_ENV = "production";
+      process.env.DESPLEGA_TELEMETRY_ENV = "development";
+      await initTelemetry(
+        "api-server",
+        async () => "install_explicit_env",
+        async () => {},
+      );
+
+      track({ event: "test.event", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(metadata.environment).toBe("development");
+    });
+
+    test("preserves NODE_ENV=test when telemetry env is unset", async () => {
+      process.env.NODE_ENV = "test";
+      await initTelemetry(
+        "api-server",
+        async () => "install_test_env",
+        async () => {},
+      );
+
+      track({ event: "test.event", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(metadata.environment).toBe("test");
     });
   });
 });
