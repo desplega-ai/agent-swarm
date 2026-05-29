@@ -11,6 +11,10 @@ import {
 } from "../be/db";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { getBasePrompt } from "../prompts/base-prompt";
+import {
+  isScheduledTaskCompletion,
+  shouldPersistTaskCompletionMemory,
+} from "../tools/store-progress";
 
 const TEST_DB_PATH = "./test-self-improvement.sqlite";
 
@@ -142,6 +146,41 @@ describe("Self-Improvement Mechanisms", () => {
       const shortContent = "Task: X\n\nOutput:\n";
       expect(shortContent.length).toBeLessThan(30);
       // In store-progress, this would return early without creating memory
+    });
+
+    test("manual task completions persist memory by default", () => {
+      const task = createTaskExtended("Manual implementation task", {
+        agentId: workerId,
+        source: "mcp",
+        priority: 50,
+        tags: ["memory", "bug-fix"],
+      });
+
+      expect(isScheduledTaskCompletion(task)).toBe(false);
+      expect(shouldPersistTaskCompletionMemory(task)).toBe(true);
+    });
+
+    test("scheduled task completions skip memory by default", () => {
+      const task = createTaskExtended("Run heartbeat checklist", {
+        agentId: workerId,
+        source: "schedule",
+        priority: 50,
+        tags: ["scheduled", "schedule:heartbeat-checklist"],
+      });
+
+      expect(isScheduledTaskCompletion(task)).toBe(true);
+      expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
+    });
+
+    test("scheduled task completions can opt in to memory persistence", () => {
+      const task = createTaskExtended("Daily digest found reusable incident pattern", {
+        agentId: workerId,
+        source: "schedule",
+        priority: 50,
+        tags: ["scheduled", "schedule:daily-blocker-digest"],
+      });
+
+      expect(shouldPersistTaskCompletionMemory(task, true)).toBe(true);
     });
   });
 

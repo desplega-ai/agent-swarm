@@ -28,6 +28,20 @@ import { validateJsonSchema } from "@/workflows/json-schema-validator";
 // echoed the schema example, producing noise rows keyed `mcp-<taskId>-<ts>`
 // that double-counted alongside the harness's authoritative entry.
 
+const SCHEDULE_TAG_PREFIX = "schedule:";
+
+export function isScheduledTaskCompletion(task: { tags?: string[] | null }): boolean {
+  return task.tags?.some((tag) => tag.startsWith(SCHEDULE_TAG_PREFIX)) ?? false;
+}
+
+export function shouldPersistTaskCompletionMemory(
+  task: { tags?: string[] | null },
+  persistMemory?: boolean,
+): boolean {
+  if (persistMemory) return true;
+  return !isScheduledTaskCompletion(task);
+}
+
 export const registerStoreProgressTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "store-progress",
@@ -56,6 +70,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .describe(
             "Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name).",
           ),
+        persistMemory: z
+          .boolean()
+          .optional()
+          .describe(
+            "Opt in to task_completion memory persistence for scheduled/recurring tasks. Manual tasks are persisted by default; tasks tagged schedule:* are skipped unless this is true.",
+          ),
         // Phase 11: `costData` removed. The harness adapter is the sole
         // writer of `session_costs` (see POST /api/session-costs in the
         // runner). If a payload still includes the field, Zod's
@@ -75,7 +95,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
       }),
     },
     async (
-      { taskId, progress, status, output, failureReason, attachments },
+      { taskId, progress, status, output, failureReason, attachments, persistMemory },
       requestInfo,
       _meta,
     ) => {
@@ -320,14 +340,19 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
       const result = txn();
 
-      // Index completed and failed tasks as memory (async, non-blocking).
-      // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate
-      // memory entries / vector index pollution.
-      if (
+      const shouldRunTerminalSideEffects =
         (status === "completed" || status === "failed") &&
         result.success &&
         result.task &&
-        !("wasNoOp" in result && result.wasNoOp)
+        !("wasNoOp" in result && result.wasNoOp);
+
+      // Index completed and failed tasks as memory (async, non-blocking).
+      // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate
+      // memory entries / vector index pollution.
+      // Scheduled/recurring tasks are noisy by default; require explicit opt-in.
+      if (
+        shouldRunTerminalSideEffects &&
+        shouldPersistTaskCompletionMemory(result.task, persistMemory)
       ) {
         (async () => {
           try {
@@ -384,7 +409,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
             // Non-blocking — task completion memory failure should not affect task status
           }
         })();
+      }
 
+      if (shouldRunTerminalSideEffects) {
         // Memory rater v1.5 — fire server-side raters on task completion.
         // Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-2.md §5
         //
