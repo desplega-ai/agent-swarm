@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Codex subprocess session runner** (#581) — Codex tasks now execute inside a throwaway `codex-session-runner` child process that receives config over stdin and streams structured events/results back over stdout, isolating `@openai/codex-sdk` state to one task at a time and keeping the long-lived worker runner's heap flat.
 - **Universal follow-up context preamble across all harnesses** (#567) — child tasks now receive a bounded parent-context summary before execution, so follow-up continuity works on non-resumable providers (`pi`, `opencode`, `devin`) as well as resumable ones. The immediate parent contributes task/output/artifact detail, older ancestors are pointer-only, and `CONTEXT_PREAMBLE_MAX_TOKENS` caps prompt growth.
 - **Native Kapso / WhatsApp integration** (#560) — Agent Swarm now supports native inbound WhatsApp routing via Kapso. Lead-only `register-kapso-number` / `unregister-kapso-number` MCP tools provision number routing through the swarm's native webhook, inbound messages are verified and deduped before creating `kapso-inbound` tasks or dispatching workflows, and new `send-whatsapp-message` / `reply-whatsapp-message` MCP tools cover the common outbound text path while the `kapso-whatsapp` skill handles templates, media, and reactions.
 - **User-facing MCP token flow for canonical users** (#536) — operators can now mint one-time plaintext MCP tokens for a user, revoke them later, and manage the flow through the People/user registry surface. This adds the user-token API routes and makes the canonical-user model usable for end-user MCP auth flows.
@@ -32,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`tmux` apt-installed in `Dockerfile.worker`** (#482) — ships in the worker image by default so `CLAUDE_BINARY="bunx @dexh/shannon"` works out of the box. Single apt list addition, same `RUN` block — no new layer.
 
 ### Changed
+- **Worker harness pins refreshed** (#583) — `Dockerfile.worker` now ships Claude Code `2.1.154`, pi-mono `0.76.0`, Codex CLI / SDK `0.135.0`, and opencode / `@opencode-ai/sdk` `1.15.12`.
+- **Helm chart version sync is scripted and CI-guarded** (#578) — new `bun run sync-chart-version` and `bun run check-chart-version` commands keep `charts/agent-swarm/Chart.yaml` aligned with `package.json` and fail CI when they drift.
 - **Worker image: `postgresql-client` pre-installed** (#553) — `Dockerfile.worker` now apt-installs `postgresql-client`, so `psql` is available on every lead/worker boot. Eliminates the per-session `apt-get install` cost for agents doing ad-hoc Postgres queries.
 - **Docker harness bumps** (#552) — `Dockerfile.worker` ships newer `claude-code`, `pi`, `opencode`, and `codex` (0.133.0) harness versions; no compose-side changes required.
 - **Slim list-endpoint payloads, add `?fields=full` opt-in** (#527) — `get-swarm`, `get-tasks`, `list-schedules`, `list-workflows` now return slim default payloads (dashboard-shape only) with an opt-in `?fields=full` query param for callers that need every column. Cuts dashboard polling bandwidth substantially on swarms with hundreds of in-flight tasks; `costData`, `progress`, large JSON blobs, and other expensive columns gate behind the opt-in.
@@ -45,6 +48,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Docker harness bumps** (#489) — `Dockerfile.worker` ships newer codex / claude-code / pi-coding-agent / opencode versions; no compose-side changes required.
 
 ### Fixed
+- **Codex spawn-budget hardening** (#581) — the Claude adapter now stages large system prompts via `--append-system-prompt-file`, and the prompt bootstrapper caps injected repo `CLAUDE.md` content so hot workers stop tripping Linux `E2BIG` / `MAX_ARG_STRLEN` spawn failures on prompt-heavy repos.
+- **Codex subprocess diagnostics + pipe hygiene** (#584) — structured subprocess errors now propagate their real failure messages, non-TTY runs stop emitting cursor-restore escape codes into the JSON pipe, and fallback failures include stderr tail for postmortems.
+- **Lazy provider loading for `pi` credential checks / adapter init** (#585) — workers that are not using `HARNESS_PROVIDER=pi` no longer import `@earendil-works/pi-coding-agent` at boot, avoiding module-side-effect crashes on unrelated providers.
+- **Slack replies to swarm-started threads** (`1c6ea7f2`) — human replies now route correctly when the swarm posted the thread root itself, without requiring a fresh `@mention`.
+- **Config env export skips invalid shell identifiers** (#573) — `docker-entrypoint.sh` now drops keys like `CF-Access-Client-Id` from `/tmp/swarm_config.env` instead of aborting the shell `source` and silently losing all later config entries.
 - **Runner rate-limit cooldown parsing** (#559) — runner health detection now recognizes more qualified rate-limit messages and preserves structured cooldown timing instead of immediately reusing a credential slot that is still cooling down.
 - **Claude resume-session recovery** — stale or invalid Claude resume-session IDs are now handled more reliably in the runner/resume path instead of failing the resumed task outright.
 - **Jira OAuth token rotation persistence** — rotated Jira OAuth credentials now persist correctly after refresh, preventing follow-up tracker calls from regressing onto stale tokens.

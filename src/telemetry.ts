@@ -153,6 +153,16 @@ function isCloudDeployment(): boolean {
   return raw === "true" || raw === "1";
 }
 
+function getTelemetryEnvironment(): string {
+  const explicit = process.env.DESPLEGA_TELEMETRY_ENV?.trim();
+  if (explicit) return explicit;
+
+  // Do not default from NODE_ENV: shipped Bun/npm installs can report
+  // "development" even when the operator did not choose a telemetry cohort.
+  if (process.env.NODE_ENV === "test") return "test";
+  return "production";
+}
+
 /** Fire-and-forget telemetry event. Never throws, never blocks. */
 export function track(options: TrackOptions): void {
   if (!isEnabled() || !installationId) return;
@@ -177,7 +187,7 @@ export function track(options: TrackOptions): void {
       metadata: {
         transport: "https",
         schema_version: 1,
-        environment: process.env.NODE_ENV ?? "production",
+        environment: getTelemetryEnvironment(),
         is_cloud: isCloudDeployment(),
         ...getOrgIdentity(),
         ...options.metadata,

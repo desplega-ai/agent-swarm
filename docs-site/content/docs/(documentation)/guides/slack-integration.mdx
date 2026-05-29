@@ -50,7 +50,7 @@ SLACK_DISABLE=true
 
 1. `swarm#<uuid>` — explicit agent targeting (always wins)
 2. `swarm#all` — broadcast to all workers
-3. **Thread follow-up** — if in a thread where a worker is already active, routes directly to that worker
+3. **Thread follow-up** — if in a thread where a worker is already active, or the thread was originally started by the swarm, routes directly to that worker/flow
 4. **Lead fallback** — if the bot was @mentioned and no other match, routes to the lead agent
 
 If no agents are online, the message is queued as an unassigned task in the pool. The bot confirms that your request has been queued and will be processed when agents come back up.
@@ -61,7 +61,7 @@ When you @mention the bot in a thread where a worker is already handling a task,
 
 If the assigned worker is offline or unavailable, the follow-up routes to the lead agent instead of dropping the message. The lead picks up the thread context and continues the conversation, preserving `parentTaskId` continuity for chained tasks.
 
-By default, thread follow-ups route automatically without requiring an @mention. Set `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` to require an explicit @mention for thread follow-up routing — non-mention thread messages will be silently dropped instead of auto-routing.
+By default, thread follow-ups route automatically without requiring an @mention. That includes human replies to swarm-started root messages, even when no task row existed yet for the thread. Set `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` to require an explicit @mention for thread follow-up routing — non-mention thread messages will be silently dropped instead of auto-routing.
 
 **Follow-up re-delegation guard:** When the lead receives a `task.worker.completed` or `task.worker.failed` follow-up, it is explicitly instructed (via prompt template) not to re-delegate the same work back to a worker. A second guard in `send-task` blocks any re-delegation on a Slack thread that already has a completed task within the last 48 hours, preventing the duplicate-response cycle where repeated re-delegations caused the bot to answer the same thread multiple times.
 

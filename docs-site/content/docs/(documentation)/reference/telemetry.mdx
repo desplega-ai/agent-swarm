@@ -24,7 +24,7 @@ Telemetry tracks high-level lifecycle events — no task content, prompts, outpu
 Every event also includes:
 - A timestamp (`occurred_at`)
 - The source component (`api-server` or `worker`)
-- The environment (`production` or `development`)
+- The environment (`production` by default; override with `DESPLEGA_TELEMETRY_ENV`)
 - A schema version number
 - `is_cloud` — boolean flag indicating whether the event originated from a cloud-hosted swarm or a self-hosted install. Lets the backend partition cloud vs self-hosted traffic without joining to another dimension.
 
