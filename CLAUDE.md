@@ -152,9 +152,9 @@ After adding a handler: also add the import to `scripts/generate-openapi.ts`, th
 
 <important if="you are bumping the version in package.json">
 
-`openapi.json` and `docs-site/content/docs/api-reference/**` embed `package.json`'s version. CI fails the `OpenAPI Spec Freshness Check` on any version bump without a regenerated spec.
+Two artifacts derive from `package.json`'s `version`: `openapi.json` + `docs-site/content/docs/api-reference/**` (embed it) and `charts/agent-swarm/Chart.yaml` (`version`/`appVersion` must match). CI fails the `OpenAPI Spec Freshness Check` and the chart-version sync check on a bump without regenerating them.
 
-On every version bump: run `bun run docs:openapi` and commit the regenerated files alongside the bump.
+On every version bump: run `bun run prepare-release` (runs `sync-chart-version` + `docs:openapi`) and commit ALL regenerated files alongside the bump. Releasing itself is automated — merging the bump to `main` publishes Docker/npm/E2B/GitHub release. Full flow: [runbooks/release.md](./runbooks/release.md).
 
 </important>
 
@@ -277,7 +277,7 @@ Same-PR doc-update rule: update [docs-site/.../guides/cost-and-context-computati
 
 ## Related
 
-- [runbooks/](./runbooks/) — ci, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts
+- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference
