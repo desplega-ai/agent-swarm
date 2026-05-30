@@ -101,7 +101,8 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `tags` | Labels for filtering (e.g., `['urgent', 'frontend']`) |
 | `taskType` | Classification (e.g., `bug`, `feature`, `review`) |
 | `dependsOn` | Array of task IDs that must complete first |
-| `parentTaskId` | For follow-up continuity — child tasks inherit bounded prior-task context for every harness, and resumable providers can also reuse the parent's native session |
+| `parentTaskId` | For follow-up continuity — child tasks inherit a bounded prior-task context preamble rebuilt from the task chain, so continuity survives restarts and works the same across every harness |
+| `followUpConfig` | Optional control over the lead follow-up created when this task completes or fails. Useful for long-running flows that need custom completion instructions or no follow-up at all |
 | `dir` | Working directory (absolute path) for the agent to start in. Falls back to repo clone path or default cwd |
 | `model` | Model override: `haiku`, `sonnet`, or `opus`. Priority: task > `MODEL_OVERRIDE` config > `opus` |
 | `scheduleId` | Back-reference to the originating schedule (set automatically for schedule-created tasks) |
@@ -123,7 +124,7 @@ Every task created through an ingress path gets a `contextKey` stamped on it so 
 
 Child tasks created via `parentTaskId` (including `send-task` delegations) automatically inherit their parent's `contextKey`. This enables sibling-task awareness: when a worker starts a task, its prompt surfaces recent siblings sharing the same `contextKey` so related work across ingress paths isn't missed.
 
-In addition, follow-up tasks now receive a bounded **context preamble** built from the parent chain before execution begins. The immediate parent contributes inline task/output/artifact detail, older ancestors are included as pointers only, and the whole block is capped by `CONTEXT_PREAMBLE_MAX_TOKENS` (default: 2000) so continuity works across non-resumable harnesses without unbounded context growth.
+In addition, follow-up tasks now receive a bounded **context preamble** built from the parent chain before execution begins. The immediate parent contributes inline task/output/artifact detail, older ancestors are included as pointers only, and the whole block is capped by `CONTEXT_PREAMBLE_MAX_TOKENS` (default: 2000) so continuity works across every harness without unbounded context growth.
 
 The column is indexed as `(contextKey, status)` for fast sibling lookup. Historical rows remain `null` — no backfill is performed.
 
@@ -146,6 +147,8 @@ Or on failure:
 ```
 store-progress(taskId: "...", status: "failed", failureReason: "Tests still failing after 3 attempts")
 ```
+
+For automatic or recurring tasks (schedules, heartbeat, monitors, digests), completion memories are skipped unless the task explicitly opts in with `persistMemory: true` on its final `store-progress` call.
 
 ## Graceful Shutdown & Resume
 

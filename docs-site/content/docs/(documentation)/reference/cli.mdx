@@ -143,6 +143,28 @@ bunx @desplega.ai/agent-swarm claude-managed-setup --api-url https://swarm.examp
 | `--api-key <key>` | Swarm API key (default: `API_KEY` or `123123`) |
 | `--force` | Recreate Anthropic-side resources even if already configured |
 
+### e2b
+
+Build Agent Swarm E2B templates and start API or worker sandboxes on demand for CI and Dockerless smoke tests.
+
+```bash
+bunx @desplega.ai/agent-swarm e2b build-template --role worker
+bunx @desplega.ai/agent-swarm e2b start-worker --api-url https://swarm.example.com --api-key "$SWARM_API_KEY"
+bunx @desplega.ai/agent-swarm e2b start-stack --workers 2 --api-key "$SWARM_API_KEY"
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `build-template --role api\|worker` | Build or rebuild an E2B template |
+| `delete-template <template...>` | Delete E2B templates |
+| `publish-template <template...>` | Publish E2B templates |
+| `unpublish-template <template...>` | Make E2B templates private |
+| `start-api --template <name>` | Start the API in an E2B sandbox |
+| `start-worker --api-url <url>` | Start a worker against a public API URL |
+| `start-stack` | Start an API plus one or more workers |
+| `list` | List active E2B sandboxes |
+| `kill <sandbox-id...>` | Stop one or more E2B sandboxes |
+
 ### docs
 
 Show the documentation URL. All pages are also available in markdown format by appending `.md` to the URL.

@@ -147,6 +147,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `YOLO` | No | `false` | Continue on errors |
 | `SYSTEM_PROMPT` | No | — | Custom system prompt text |
 | `SYSTEM_PROMPT_FILE` | No | — | Path to system prompt file |
+| `CONTEXT_MODE_DISABLED` | No | `false` | Set to `true` to disable the default context-mode MCP wiring for local Claude Code, Codex, and opencode workers. Leaves the worker running but hides/skips the `ctx_*` tools. |
 | `STARTUP_SCRIPT_STRICT` | No | `true` | Exit on startup script failure |
 | `SHUTDOWN_TIMEOUT` | No | `30000` | Grace period (ms) before pausing tasks |
 | `MAX_CONCURRENT_TASKS` | No | `1` | Maximum parallel tasks per worker |

@@ -34,6 +34,8 @@ HARNESS_PROVIDER=claude-managed  →  ClaudeManagedAdapter  →  opens SSE strea
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
 
+For local coding harnesses, Agent Swarm now wires in the `context-mode` MCP server by default for Claude Code, Codex, and opencode. That gives those providers the same `ctx_*` compressed-search / fetch-and-index tools out of the box. Set `CONTEXT_MODE_DISABLED=true` to opt a worker out.
+
 ---
 
 ## Claude Code (Default)
@@ -299,7 +301,7 @@ For full provider design rationale (why we don't `agents.create` at runtime, the
 | **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Minimal — CLI plus OpenRouter key | Requires API key(s) | One-time `claude-managed-setup` CLI; HTTPS-public `MCP_BASE_URL` |
 | **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via OpenRouter/Anthropic/OpenAI | Pay-per-token via API | Anthropic API tokens + $0.08/session-hour runtime fee |
 | **Model flexibility** | Claude models only | Codex/OpenAI models | 100+ models via OpenRouter | Any provider via OpenRouter | Claude models only |
-| **Session resume** | Built-in `--resume` support | Native CLI session support | Stateless — new session per task | Session persistence via SessionManager | Native — `events.list` + dedupe against live stream |
+| **Follow-up continuity** | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble |
 | **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | Auto-wired per-task via config file | HTTP-based tool discovery | Server-side on the Anthropic Agent |
 | **Where session runs** | Worker container | Worker container | Worker container | Worker container | Anthropic's managed cloud sandbox |
 | **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Early support (2026-05) | Community project, actively developed | Public beta (2026-04) |

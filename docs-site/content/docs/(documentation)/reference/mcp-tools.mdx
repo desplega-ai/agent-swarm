@@ -74,6 +74,7 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
 | `slackUserId` | string | No | Slack user ID of the original requester (auto-inherited if omitted) |
 | `requestedByUserId` | uuid | No | ID of the human user who originally requested this task chain. Auto-inherited from the caller's current task so attribution flows through multi-hop delegation (lead → worker → child tasks). |
+| `followUpConfig` | object | No | Control the lead follow-up created when this task finishes. Use `disabled: true` to suppress it, or `onCompleted` / `onFailed` to inject outcome-specific instructions for long-running flows. |
 
 Slack metadata and `requestedByUserId` are auto-inherited from the creator's current task via `X-Source-Task-Id` header. Explicit params override auto-inherited values when provided.
 
@@ -96,8 +97,8 @@ Store task progress, or mark a task as completed or failed.
 | `status` | string | No | Set to `completed` or `failed` |
 | `output` | string | No | Output (for completion). Validated against `outputSchema` if the task defines one |
 | `failureReason` | string | No | Reason (for failure) |
-| `costData` | object | No | Session cost tracking: `totalCostUsd` (required), `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `durationMs`, `numTurns`, `model` |
 | `attachments` | array | No | Pointer-based artifacts to attach to the task (max 20 per call). Each entry is one of: `{kind: "agent-fs", path, name, orgId?, driveId?, ...}`, `{kind: "url", url, name, ...}`, `{kind: "shared-fs", path, name, ...}`, `{kind: "page", pageId, name, ...}`. May be sent on any call (progress or completion); accumulates across calls; deduped by `sha256` when present, else by `(kind, pointer, name)`. No inline file data — upload to agent-fs first and attach by path. |
+| `persistMemory` | boolean | No | Opt in to task-completion memory persistence for automatic or recurring tasks. Manual tasks persist by default; scheduled, system, heartbeat, monitor, and digest tasks are skipped unless this is `true`. |
 
 ### cancel-task
 
