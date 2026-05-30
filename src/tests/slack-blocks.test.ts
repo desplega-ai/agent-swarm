@@ -821,6 +821,21 @@ describe("buildTreeBlocks", () => {
     expect(blocks.length).toBe(2);
   });
 
+  test("offered root shows offered icon without undefined text", () => {
+    const root: TreeNode = {
+      taskId: makeTaskId("loff0001"),
+      agentName: "OfferedAgent",
+      status: "offered",
+      children: [],
+    };
+
+    const blocks = buildTreeBlocks([root]);
+    const text = blocks[0].text.text;
+
+    expect(text).toContain("📨 *OfferedAgent*");
+    expect(text).not.toContain("undefined");
+  });
+
   test("cancelled root shows cancel icon with no cancel button", () => {
     const root: TreeNode = {
       taskId: makeTaskId("mmmm0001"),

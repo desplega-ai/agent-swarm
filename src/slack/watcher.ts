@@ -144,7 +144,7 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
         childNodes.push({
           taskId: child.id,
           agentName: childAgentName,
-          status: child.status as TreeNode["status"],
+          status: child.status,
           progress: child.progress ?? undefined,
           duration: childDuration,
           slackReplySent: child.slackReplySent,
@@ -164,7 +164,7 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
     nodes.push({
       taskId: task.id,
       agentName,
-      status: task.status as TreeNode["status"],
+      status: task.status,
       progress: task.progress ?? undefined,
       duration,
       slackReplySent: task.slackReplySent,
@@ -382,7 +382,7 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
   const initialNode: TreeNode = {
     taskId: task.id,
     agentName: agent.name,
-    status: task.status as TreeNode["status"],
+    status: task.status,
     progress: task.progress ?? undefined,
     children: [],
   };

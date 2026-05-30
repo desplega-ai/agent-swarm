@@ -5,7 +5,7 @@
  * across responses.ts, handlers.ts, thread-buffer.ts).
  */
 
-import type { TaskAttachment } from "../types";
+import type { AgentTaskStatus, TaskAttachment } from "../types";
 import { buildAgentFsLiveUrl, getAppUrl } from "../utils/constants";
 
 // Slack limits section text to 3000 chars; we use 2900 for safety
@@ -205,7 +205,7 @@ export function formatDuration(start: Date, end: Date): string {
 export interface TreeNode {
   taskId: string;
   agentName: string;
-  status: "pending" | "in_progress" | "completed" | "failed" | "cancelled";
+  status: AgentTaskStatus;
   progress?: string;
   duration?: string;
   slackReplySent?: boolean;
@@ -342,12 +342,20 @@ export function buildBufferFlushBlocks(opts: {
 
 // --- Tree rendering ---
 
-const STATUS_ICON: Record<TreeNode["status"], string> = {
+type TreeStatusIcon = TreeNode["status"] | "superseded";
+
+const STATUS_ICON: Record<TreeStatusIcon, string> = {
+  backlog: "🗂️",
+  unassigned: "📭",
+  offered: "📨",
+  reviewing: "👀",
   pending: "📡",
   in_progress: "⏳",
+  paused: "⏸️",
   completed: "✅",
   failed: "❌",
   cancelled: "🚫",
+  superseded: "↪️",
 };
 
 const MAX_VISIBLE_CHILDREN = 8;
@@ -368,7 +376,7 @@ function truncateOutput(text: string): string {
  * Render a single node line: icon + bold name + task link + optional duration.
  */
 function renderNodeLine(node: TreeNode): string {
-  const icon = STATUS_ICON[node.status];
+  const icon = STATUS_ICON[node.status] ?? "•";
   const taskLink = getTaskLink(node.taskId);
   let line = `${icon} *${node.agentName}* (${taskLink})`;
   if (node.duration) line += ` · ${node.duration}`;
