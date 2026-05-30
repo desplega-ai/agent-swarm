@@ -28,6 +28,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { taskIsRunning } from "@/lib/task-activity";
 import { normalizeNewlines } from "@/lib/utils";
 
 export interface TaskDetailSheetProps {
@@ -151,7 +152,11 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
             {logsLoading ? (
               <Skeleton className="h-32 w-full" />
             ) : logs && logs.length > 0 ? (
-              <SessionLogViewer logs={logs} compactionSnapshots={contextData?.snapshots} />
+              <SessionLogViewer
+                logs={logs}
+                compactionSnapshots={contextData?.snapshots}
+                isRunning={taskIsRunning(task?.status)}
+              />
             ) : (
               <p className="text-xs text-muted-foreground italic">No transcript yet.</p>
             )}

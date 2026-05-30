@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Session Logs — Option C · Structured Stream</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../demo-shared.css" />
+<style>
+:root{--page-max:1040px;--prose-max:80ch;--row-hover:color-mix(in oklch,var(--muted) 55%,transparent)}
+html.dark{--row-hover:color-mix(in oklch,var(--muted) 45%,transparent)}
+body{font-size:14.5px}
+
+/* toolbar replaces panel-head */
+.toolbar{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border);background:color-mix(in oklch,var(--muted) 26%,var(--card));flex-wrap:wrap}
+.toolbar .live{margin-left:0}
+.filters{display:inline-flex;background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:2px}
+.filters button{font:inherit;font-size:12px;font-weight:500;border:none;background:none;color:var(--muted-foreground);padding:4px 10px;border-radius:6px;cursor:pointer;transition:color .12s,background .12s}
+.filters button[aria-pressed=true]{background:var(--card);color:var(--foreground);box-shadow:0 1px 2px oklch(0 0 0 /.08)}
+.search{margin-left:auto;display:flex;align-items:center;gap:7px;border:1px solid var(--border);background:var(--card);border-radius:8px;padding:0 10px;height:30px;width:180px;transition:border-color .12s,box-shadow .12s}
+.search:focus-within{border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in oklch,var(--ring) 22%,transparent)}
+.search svg{width:14px;height:14px;color:var(--muted-foreground);flex:none}
+.search input{border:none;background:none;outline:none;font:inherit;font-size:12.5px;color:var(--foreground);width:100%}
+.search input::placeholder{color:var(--muted-foreground)}
+
+.body{display:grid;grid-template-columns:1fr 14px;position:relative}
+.viewport{height:min(70vh,680px);overflow-x:hidden}
+.viewport::-webkit-scrollbar{width:0}
+.minimap{position:relative}
+.minimap .tick{position:absolute;left:3px;right:3px;height:4px;border-radius:2px;cursor:pointer;opacity:.5;transition:opacity .12s,transform .12s}
+.minimap .tick:hover{opacity:1;transform:scaleX(1.5)}
+.tick.t-agent{background:var(--active)}.tick.t-tool{background:var(--info)}.tick.t-user{background:var(--neutral)}
+
+.iter{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:8px;padding:6px 14px;background:color-mix(in oklch,var(--background) 92%,transparent);backdrop-filter:blur(6px);border-bottom:1px solid var(--border)}
+.iter .lbl{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-foreground)}
+.iter .line{flex:1;height:1px;background:var(--border)}
+
+.row{display:grid;grid-template-columns:60px 22px minmax(0,1fr);align-items:start;column-gap:10px;padding:6px 14px 6px 8px;border-bottom:1px solid color-mix(in oklch,var(--border) 42%,transparent)}
+.row:hover{background:var(--row-hover)}
+.row.hidden{display:none}
+.row .time{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;text-align:right;padding-top:3px;user-select:none}
+.row .glyph{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;margin-top:1px}
+.row .glyph svg{width:13px;height:13px}
+.row.agent .glyph{background:color-mix(in oklch,var(--active) 15%,transparent);color:var(--active-strong)}
+.row.user .glyph{background:var(--muted);color:var(--muted-foreground)}
+.row.tool .glyph{background:color-mix(in oklch,var(--info) 14%,transparent);color:var(--info-strong)}
+.row.tool[data-kind=bash] .glyph{background:color-mix(in oklch,var(--foreground) 9%,transparent);color:var(--foreground)}
+.row.tool[data-kind=file] .glyph{background:var(--muted);color:var(--muted-foreground)}
+.content{min-width:0}
+.rowhead{display:flex;align-items:baseline;gap:8px}
+.rolelab{font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--muted-foreground);text-transform:uppercase}
+.row.agent .rolelab{color:var(--active-strong)}
+.model{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground)}
+.rowact{margin-left:auto;opacity:0;transition:opacity .12s}
+.row:hover .rowact{opacity:.7}
+.rowact button{border:none;background:none;color:var(--muted-foreground);cursor:pointer;padding:3px;border-radius:5px}
+.rowact button:hover{color:var(--foreground);background:var(--accent)}
+.rowact svg{width:13px;height:13px;display:block}
+.content .prose{margin-top:2px}
+
+.cmd{font-family:var(--font-mono);font-size:12.5px;display:flex;align-items:center;gap:8px;cursor:pointer;min-width:0}
+.cmd .chev{width:12px;height:12px;color:var(--muted-foreground);transition:transform .22s cubic-bezier(.25,1,.5,1);flex:none}
+.row.tool.open .cmd .chev{transform:rotate(90deg)}
+.cmd .name{color:var(--foreground);white-space:nowrap;flex:none}
+.cmd .name .dim{color:var(--muted-foreground)}
+.cmd .detail{color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.cmd .ok{color:var(--success-strong);flex:none}.cmd .err{color:var(--error-strong);flex:none}
+.cmd .badge2{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);border:1px solid var(--border);border-radius:5px;padding:0 5px;flex:none}
+.tool-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s cubic-bezier(.25,1,.5,1)}
+.row.tool.open .tool-body{grid-template-rows:1fr}
+.tool-body>.inner{overflow:hidden}
+.kv{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-foreground);padding:7px 0 2px}
+.tool-body pre{margin:2px 0 6px;padding:9px 11px;border-radius:8px;background:var(--code-bg);border:1px solid var(--border);font-family:var(--font-mono);font-size:11.5px;line-height:1.6;color:color-mix(in oklch,var(--foreground) 85%,var(--muted-foreground));white-space:pre-wrap;word-break:break-word}
+
+@media (max-width:640px){
+  .row{grid-template-columns:46px 18px 1fr;column-gap:7px;padding-left:6px}
+  .row .time{font-size:10px}
+  .minimap{display:none}
+  .body{grid-template-columns:1fr}
+  .search{width:120px}
+}
+</style>
+</head>
+<body>
+<div class="chrome">
+  <span class="badge">Mockup</span>
+  <h1>Session Logs <span>· C — Structured Stream</span></h1>
+  <div class="sp"></div>
+  <div class="controls">
+    <span class="counter" id="counter">0 / 0</span>
+    <button class="btn icon-btn" id="btn-play" title="Auto-play" aria-label="Auto-play"></button>
+    <select id="speed" class="speed" aria-label="Auto-play speed (messages per second)"><option value="1">1/s</option><option value="2" selected>2/s</option><option value="4">4/s</option><option value="8">8/s</option></select>
+    <button class="btn" id="btn-next" title="Stream the next event"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Push next</button>
+    <button class="btn" id="btn-all" title="Render everything"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 6 5 5 5-5M7 13l5 5 5-5"/></svg> Load all</button>
+    <button class="btn icon-btn" id="btn-reset" title="Reset" aria-label="Reset"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
+    <button class="btn icon-btn" id="theme" title="Toggle theme" aria-label="Toggle theme"></button>
+  </div>
+</div>
+
+<div class="page">
+  <div class="panel">
+    <div class="toolbar">
+      <span class="eyebrow">Session Logs</span>
+      <span class="live" id="live"><span class="pip"></span> <span class="ltext">Live</span></span>
+      <div class="filters" id="filters" role="group" aria-label="Filter by type">
+        <button data-f="all" aria-pressed="true">All</button>
+        <button data-f="agent" aria-pressed="false">Agent</button>
+        <button data-f="tool" aria-pressed="false">Tools</button>
+        <button data-f="user" aria-pressed="false">You</button>
+      </div>
+      <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input id="q" placeholder="Filter log…" aria-label="Filter log entries" /></div>
+    </div>
+    <div class="body">
+      <div class="viewport" id="vp">
+        <div class="stream" id="stream" aria-live="polite" aria-relevant="additions"></div>
+      </div>
+      <button class="jump" id="jump"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg><span id="jumplabel">New</span></button>
+      <div class="minimap" id="minimap"></div>
+    </div>
+    <div class="panel-foot"><div id="running"></div></div>
+  </div>
+</div>
+
+<script src="../demo-data.js"></script>
+<script src="../demo-runtime.js"></script>
+<script>
+const md=SwarmDemo.mdToHtml, esc=SwarmDemo.esc;
+function el(html){const t=document.createElement('template');t.innerHTML=html.trim();return t.content.firstElementChild;}
+const ICON={
+  bot:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>',
+  user:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+  bash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+  file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+  web:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+  task:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7M18 8.5A6 6 0 0 1 8.5 6"/><circle cx="18" cy="6" r="2.5"/></svg>',
+  mcp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7z"/></svg>',
+  other:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2-2z"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>',
+  chev:'<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>'
+};
+let lastIter=null,taskNo=0;
+function textRow(e){
+  const isU=e.role==='user';
+  return el('<div class="row '+(isU?'user':'agent')+'" data-type="'+(isU?'user':'agent')+'"><div class="time">'+e.time+'</div><div class="glyph">'+(isU?ICON.user:ICON.bot)+'</div>'+
+    '<div class="content"><div class="rowhead"><span class="rolelab">'+(isU?'You':'Agent')+'</span>'+(e.model&&!isU?'<span class="model">'+esc(e.model)+'</span>':'')+'<span class="rowact"><button class="copy" title="Copy" aria-label="Copy message">'+ICON.copy+'</button></span></div>'+
+    '<div class="prose">'+md(e.md)+'</div></div></div>');
+}
+function toolRow(e){
+  const ic=ICON[e.kind]||ICON.other;
+  const name=e.kind==='mcp'?'<span class="dim">mcp · '+esc(e.server)+'.</span>'+esc(e.name):'<span class="dim">'+esc(e.kind)+' · </span>'+esc(e.title);
+  const detail=e.detail?'<span class="detail">'+esc(e.detail)+'</span>':'<span class="detail"></span>';
+  const status=e.hasResult?'<span class="'+(e.ok?'ok':'err')+'">'+(e.ok?'✓':'✕')+'</span>':'';
+  let body='';
+  if(e.input&&e.input!=='{}')body+='<div class="kv">Input</div><pre>'+esc(e.input)+'</pre>';
+  if(e.body)body+='<div class="kv">Result</div><pre>'+esc(e.body)+'</pre>';
+  if(!body)body='<div class="kv">Result</div><pre>(no output)</pre>';
+  return el('<div class="row tool" data-type="tool" data-kind="'+e.kind+'"><div class="time">'+e.time+'</div><div class="glyph">'+ic+'</div>'+
+    '<div class="content"><div class="cmd">'+ICON.chev+'<span class="name">'+name+'</span>'+detail+status+'<span class="badge2">'+esc(e.preview)+'</span></div>'+
+    '<div class="tool-body"><div class="inner">'+body+'</div></div></div></div>');
+}
+function renderEntry(e){
+  const frag=document.createDocumentFragment();
+  if(e.iter!=null&&e.iter!==lastIter){lastIter=e.iter;frag.appendChild(el('<div class="iter"><span class="lbl">Stacked task '+(++taskNo)+'</span><span class="line"></span></div>'));}
+  frag.appendChild(e.type==='tool'?toolRow(e):textRow(e));
+  return frag;
+}
+
+let active='all', query='';
+const stream=document.getElementById('stream'), minimap=document.getElementById('minimap'), vp=document.getElementById('vp');
+function applyFilter(){
+  stream.querySelectorAll('.row').forEach(r=>{
+    const okType=active==='all'||r.dataset.type===active;
+    const okQ=!query||r.textContent.toLowerCase().includes(query);
+    r.classList.toggle('hidden',!(okType&&okQ));
+  });
+  buildMinimap();
+}
+function buildMinimap(){
+  minimap.innerHTML='';
+  const rows=[].slice.call(stream.querySelectorAll('.row:not(.hidden)'));
+  const H=(minimap.clientHeight||vp.clientHeight)-12;
+  rows.forEach((r,i)=>{
+    const t=document.createElement('div');
+    const ty=r.dataset.type;
+    t.className='tick '+(ty==='agent'?'t-agent':ty==='tool'?'t-tool':'t-user');
+    t.style.top=(6+(i/Math.max(rows.length,1))*H)+'px';
+    t.title=ty;
+    t.onclick=()=>r.scrollIntoView({behavior:'smooth',block:'center'});
+    minimap.appendChild(t);
+  });
+}
+function afterMount(scope){
+  scope.querySelectorAll('.row.tool .cmd').forEach(c=>{if(c._w)return;c._w=1;c.onclick=()=>c.closest('.row').classList.toggle('open');});
+  scope.querySelectorAll('.copy').forEach(b=>{if(b._w)return;b._w=1;b.onclick=(ev)=>{ev.stopPropagation();const p=b.closest('.content').querySelector('.prose');navigator.clipboard&&navigator.clipboard.writeText((p?p.innerText:'').trim());b.style.color='var(--success-strong)';setTimeout(()=>b.style.color='',1000);};});
+  applyFilter();
+}
+const filters=document.getElementById('filters');
+filters.querySelectorAll('button').forEach(b=>b.onclick=()=>{active=b.dataset.f;filters.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));applyFilter();});
+document.getElementById('q').addEventListener('input',e=>{query=e.target.value.toLowerCase();applyFilter();});
+window.addEventListener('resize',buildMinimap);
+SwarmDemo.init({renderEntry,afterMount,onReset:()=>{lastIter=null;taskNo=0;},initial:5});
+</script>
+</body>
+</html>

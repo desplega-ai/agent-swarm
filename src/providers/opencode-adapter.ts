@@ -176,6 +176,32 @@ function resolvePluginPath(): string {
   return join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
 }
 
+// context-mode is installed globally via `npm install -g` (Dockerfile.worker),
+// which places it under the npm global modules dir. opencode resolves bare
+// plugin names with `import(await Bun.resolve(name, ...))`, which does NOT walk
+// the npm global dir — a bare "context-mode" entry only resolves if Bun
+// auto-installs from the registry at runtime, which fails on network-sandboxed
+// workers. So we hand opencode the ABSOLUTE path to the package's built
+// opencode-plugin entry, which imports cleanly with no network.
+const CONTEXT_MODE_GLOBAL_ROOTS = ["/usr/lib/node_modules", "/usr/local/lib/node_modules"];
+const CONTEXT_MODE_PLUGIN_SUBPATH = "context-mode/build/adapters/opencode/plugin.js";
+
+/**
+ * Resolve the absolute path to context-mode's opencode plugin entry, or `null`
+ * if it can't be found on disk. `CONTEXT_MODE_OPENCODE_PLUGIN_PATH` overrides
+ * the lookup (and must itself exist). Returning `null` lets the caller skip the
+ * plugin gracefully instead of handing opencode an unresolvable entry.
+ */
+export function resolveContextModePluginPath(): string | null {
+  const override = process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH;
+  if (override) return existsSync(override) ? override : null;
+  for (const root of CONTEXT_MODE_GLOBAL_ROOTS) {
+    const candidate = join(root, CONTEXT_MODE_PLUGIN_SUBPATH);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 export class OpencodeSession implements ProviderSession {
   private _sessionId: string;
   private listeners: Array<(event: ProviderEvent) => void> = [];
@@ -588,6 +614,27 @@ export class OpencodeAdapter implements ProviderAdapter {
     // an accident, not a contract.
     const pluginPath = resolvePluginPath();
 
+    // context-mode ships as an in-process opencode plugin (NOT an MCP server).
+    // Its built plugin entry registers both the native ctx_* tools and the 5
+    // hook surrogates. It must NOT also appear in the `mcp` block — dual
+    // registration yields zero tools. We push the ABSOLUTE path to the globally
+    // installed package's opencode plugin entry, not the bare name (see
+    // resolveContextModePluginPath for why a bare name fails to resolve offline).
+    // Gated by CONTEXT_MODE_DISABLED so builds/deploys without it opt out.
+    const plugins = [pluginPath];
+    if (process.env.CONTEXT_MODE_DISABLED !== "true") {
+      const contextModePluginPath = resolveContextModePluginPath();
+      if (contextModePluginPath) {
+        plugins.push(contextModePluginPath);
+      } else {
+        console.warn(
+          "[opencode] context-mode is enabled but its opencode plugin entry was not found on disk; " +
+            "skipping it for this session. Set CONTEXT_MODE_OPENCODE_PLUGIN_PATH to override, or " +
+            "CONTEXT_MODE_DISABLED=true to silence.",
+        );
+      }
+    }
+
     // Build per-task opencode config (plugin field carries the swarm plugin)
     const opencodeConfig: Config & { plugin?: string[] } = {
       $schema: "https://opencode.ai/config.json",
@@ -600,7 +647,7 @@ export class OpencodeAdapter implements ProviderAdapter {
         doom_loop: "allow",
         external_directory: "allow",
       },
-      plugin: [pluginPath],
+      plugin: plugins,
     };
 
     // Write per-task config file

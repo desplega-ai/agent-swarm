@@ -90,10 +90,12 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 19 session/system templates registered", () => {
+  test("total of 20 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    expect(sessionSystem.length).toBe(19);
+    // 20 = the original 19 + `system.session.worker.pi` (a pi-specific worker
+    // composite that omits the context_mode block — see session-templates.ts).
+    expect(sessionSystem.length).toBe(20);
   });
 });
 

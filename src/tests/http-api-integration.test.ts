@@ -1257,6 +1257,119 @@ describe("Memory", () => {
     expect(body.memoryIds).toBeDefined();
   });
 
+  test("POST /api/memory/index — gates runner session summaries for automatic task classes", async () => {
+    const automaticCases = [
+      { label: "schedule source", source: "schedule", taskType: "maintenance", tags: [] },
+      { label: "system source", source: "system", taskType: "maintenance", tags: [] },
+      { label: "scheduled tag", source: "mcp", taskType: "maintenance", tags: ["scheduled"] },
+      { label: "schedule tag", source: "mcp", taskType: "maintenance", tags: ["schedule:test"] },
+      {
+        label: "auto-generated tag",
+        source: "mcp",
+        taskType: "maintenance",
+        tags: ["auto-generated"],
+      },
+      { label: "heartbeat", source: "mcp", taskType: "heartbeat", tags: [] },
+      { label: "heartbeat checklist", source: "mcp", taskType: "heartbeat-checklist", tags: [] },
+      { label: "boot triage", source: "mcp", taskType: "boot-triage", tags: [] },
+      { label: "health check", source: "mcp", taskType: "health-check", tags: [] },
+      {
+        label: "monitor suffix",
+        source: "mcp",
+        taskType: "claude-code-changelog-monitor",
+        tags: [],
+      },
+      { label: "digest suffix", source: "mcp", taskType: "daily-blocker-digest", tags: [] },
+    ];
+
+    for (const taskCase of automaticCases) {
+      const task = await post("/api/tasks", {
+        agentId: ids.leadAgent,
+        body: {
+          task: `Automatic memory integration test: ${taskCase.label}`,
+          agentId: ids.workerAgent,
+          source: taskCase.source,
+          taskType: taskCase.taskType,
+          tags: taskCase.tags,
+        },
+      });
+      expect(task.status).toBe(201);
+
+      const { status, body } = await post("/api/memory/index", {
+        agentId: ids.workerAgent,
+        body: {
+          content: `Runner summary that should not persist for ${taskCase.label}.`,
+          name: `automatic-session-summary-${taskCase.label}`,
+          scope: "agent",
+          source: "session_summary",
+          sourceTaskId: task.body.id,
+        },
+      });
+      expect(status).toBe(202);
+      expect(body.queued).toBe(false);
+      expect(body.memoryIds).toEqual([]);
+      expect(body.skipped).toBe("automatic_task_memory_disabled");
+    }
+  });
+
+  test("POST /api/memory/index — lets runner session summaries opt in for automatic tasks", async () => {
+    const task = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: {
+        task: "Scheduled memory integration opt-in test",
+        agentId: ids.workerAgent,
+        source: "schedule",
+        taskType: "daily-digest",
+        tags: ["schedule:test"],
+      },
+    });
+    expect(task.status).toBe(201);
+
+    const { status, body } = await post("/api/memory/index", {
+      agentId: ids.workerAgent,
+      body: {
+        content: "Runner summary with reusable learning that explicitly opts into persistence.",
+        name: "automatic-session-summary-opt-in",
+        scope: "agent",
+        source: "session_summary",
+        sourceTaskId: task.body.id,
+        persistMemory: true,
+      },
+    });
+    expect(status).toBe(202);
+    expect(body.queued).toBe(true);
+    expect(body.memoryIds.length).toBeGreaterThan(0);
+  });
+
+  test("POST /api/memory/index — keeps runner session summaries for manual tasks", async () => {
+    const task = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: {
+        task: "Manual memory integration test",
+        agentId: ids.workerAgent,
+      },
+    });
+    expect(task.status).toBe(201);
+
+    const { status, body } = await post("/api/memory/index", {
+      agentId: ids.workerAgent,
+      body: {
+        content: "Runner summary that should persist for a manual task.",
+        name: "manual-session-summary",
+        scope: "agent",
+        source: "session_summary",
+        sourceTaskId: task.body.id,
+      },
+    });
+    expect(status).toBe(202);
+    expect(body.queued).toBe(true);
+    expect(body.memoryIds.length).toBeGreaterThan(0);
+
+    const memory = await get(`/api/memory/${body.memoryIds[0]}`, { agentId: ids.workerAgent });
+    expect(memory.status).toBe(200);
+    expect(memory.body.memory.sourceTaskId).toBe(task.body.id);
+  });
+
   test("POST /api/memory/search — missing query returns 400", async () => {
     const { status } = await post("/api/memory/search", {
       body: {},

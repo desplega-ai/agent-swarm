@@ -3295,6 +3295,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       swarmUrl,
       capabilities,
       traits,
+      provider: adapter.name as ProviderName,
       name: agentProfileName,
       description: agentDescription,
       ...(traits.hasLocalEnvironment && {

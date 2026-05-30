@@ -256,6 +256,17 @@ export async function createSessionMcpConfig(
 
   if (Object.keys(mergedServers).length === 0 && !installedServers) return null;
 
+  // Inject the context-mode stdio MCP server so its `ctx_*` tools survive
+  // `--strict-mcp-config` (which restricts Claude to this file and structurally
+  // excludes plugin-provided MCP servers). The plugin's hooks still fire via the
+  // installed Claude plugin — strict-mcp-config only suppresses MCP servers, not
+  // hooks. Placed BEFORE mergeMcpConfig so an API-installed server can still
+  // override it (unlikely, but safe). Gated by CONTEXT_MODE_DISABLED so builds
+  // and deploys without context-mode don't break.
+  if (process.env.CONTEXT_MODE_DISABLED !== "true") {
+    mergedServers["context-mode"] = { command: "context-mode" };
+  }
+
   try {
     const config = mergeMcpConfig({ mcpServers: mergedServers }, installedServers ?? null, taskId);
     const sessionConfigPath = `/tmp/mcp-${taskId}.json`;

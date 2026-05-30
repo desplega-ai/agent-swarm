@@ -20,6 +20,7 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 | `MCP_BASE_URL` | `http://localhost:3013` | Public URL the workers/UI hit |
 | `APP_URL` | `http://localhost:5274` | Dashboard URL |
 | `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE` | unset | Set `=true` to disable each integration |
+| `CONTEXT_MODE_DISABLED` | unset (enabled) | Set `=true` to opt a worker out of context-mode. Default-enabled — the worker image bakes in context-mode, and the Claude/Codex/OpenCode adapters wire it in unless this is `true`. |
 | `HARNESS_PROVIDER` | `claude` | `claude`, `pi`, `codex`, `devin`, or `claude-managed` |
 | `TEMPLATE_ID` | unset | e.g. `official/coder` |
 | `TEMPLATE_REGISTRY_URL` | `https://templates.agent-swarm.dev` | |

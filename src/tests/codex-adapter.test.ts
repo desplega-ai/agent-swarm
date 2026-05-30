@@ -872,9 +872,21 @@ describe("computeCodexCostUsd", () => {
 describe("buildCodexConfig", () => {
   // Save and restore the global fetch so we don't leak mocks between tests.
   const originalFetch = globalThis.fetch;
+  // These tests assert the EXACT set of mcp_servers keys, which is only the
+  // installed-server merge logic. Disable the always-on context-mode entry so
+  // those exact-key assertions stay valid; a dedicated block below verifies
+  // the context-mode + features behavior. Save/restore the env to avoid leaks.
+  let prevContextModeDisabled: string | undefined;
+
+  beforeEach(() => {
+    prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
+    process.env.CONTEXT_MODE_DISABLED = "true";
+  });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (prevContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+    else process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
   });
 
   // Helper: build a ProviderSessionConfig pointed at a mock endpoint.
@@ -1095,6 +1107,83 @@ describe("buildCodexConfig", () => {
     globalThis.fetch = stubFetch({ servers: [] });
     const merged = await buildCodexConfig(cfg(), "gpt-5.3-codex", () => {});
     expect(merged.model).toBe("gpt-5.3-codex");
+  });
+});
+
+// ─── Phase 3: buildCodexConfig — context-mode MCP + hook feature flags ───────
+
+describe("buildCodexConfig — context-mode + features", () => {
+  const originalFetch = globalThis.fetch;
+  // Explicitly own CONTEXT_MODE_DISABLED here. Save the ambient value up front
+  // and restore it after every test so we never leak the mutation to siblings.
+  let prevContextModeDisabled: string | undefined;
+
+  beforeEach(() => {
+    prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (prevContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+    else process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
+  });
+
+  function cfg(overrides: Partial<ProviderSessionConfig> = {}): ProviderSessionConfig {
+    return {
+      prompt: "hello",
+      systemPrompt: "",
+      model: "gpt-5.4",
+      role: "worker",
+      agentId: "agent-mcp-test",
+      taskId: "task-mcp-test",
+      apiUrl: "http://test.invalid",
+      apiKey: "test-key",
+      cwd: "",
+      logFile: `/tmp/codex-ctx-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
+      ...overrides,
+    };
+  }
+
+  function stubFetch(body: unknown, status = 200): typeof globalThis.fetch {
+    return async (): Promise<Response> => {
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+  }
+
+  test("includes the 'context-mode' mcp_servers entry by default", async () => {
+    delete process.env.CONTEXT_MODE_DISABLED;
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp).sort()).toEqual(["agent-swarm", "context-mode"]);
+    expect(mcp["context-mode"]?.command).toBe("context-mode");
+    expect(mcp["context-mode"]?.enabled).toBe(true);
+    expect(mcp["context-mode"]?.startup_timeout_sec).toBe(30);
+    expect(mcp["context-mode"]?.tool_timeout_sec).toBe(120);
+  });
+
+  test("excludes the 'context-mode' entry when CONTEXT_MODE_DISABLED=true", async () => {
+    process.env.CONTEXT_MODE_DISABLED = "true";
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
+    expect(mcp["context-mode"]).toBeUndefined();
+  });
+
+  test("sets features.hooks and features.plugin_hooks to true", async () => {
+    delete process.env.CONTEXT_MODE_DISABLED;
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+
+    const features = merged.features as Record<string, unknown>;
+    expect(features.hooks).toBe(true);
+    expect(features.plugin_hooks).toBe(true);
   });
 });
 

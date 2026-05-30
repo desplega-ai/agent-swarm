@@ -1,7 +1,7 @@
 ---
 date: 2026-05-28T12:00:00Z
 topic: "Context-Mode MCP Wiring for Swarm Workers"
-status: approved
+status: completed
 autonomy: critical
 commit_per_phase: true
 ---
@@ -145,14 +145,14 @@ Add `context-mode` as a globally-installed npm package (version-pinned), pin the
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Docker build succeeds: `docker build -f Dockerfile.worker .`
-- [ ] `context-mode` binary is on PATH in the image: `docker run --rm <img> which context-mode`
-- [ ] `context-mode` package is importable: `docker run --rm <img> node -e "require('context-mode')"`
-- [ ] Existing tests pass: `bun test`
-- [ ] Type check passes: `bun run tsc:check`
+- [x] Docker build succeeds: `docker build -f Dockerfile.worker .`
+- [x] `context-mode` binary is on PATH in the image: `docker run --rm <img> which context-mode` → `/usr/bin/context-mode`
+- [x] `context-mode` package is importable <!-- NOTE: bare `require('context-mode')` is N/A — it's a global ESM package not resolvable by name from an arbitrary cwd. Verified `import()` of the absolute plugin entry works offline (`--network none`). -->
+- [x] Existing tests pass: `bun test`
+- [x] Type check passes: `bun run tsc:check`
 
 #### Automated QA:
-- [ ] Verify `context-mode --help` or `context-mode doctor` runs inside a fresh container
+- [x] Verify `context-mode --help` or `context-mode doctor` runs inside a fresh container
 
 #### Manual Verification:
 - [ ] Image size delta is acceptable (check `docker history` for the new layer)
@@ -189,13 +189,13 @@ Inject a `context-mode` stdio MCP server entry into the per-session config built
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun test src/tests/claude-adapter.test.ts`
-- [ ] All tests pass: `bun test`
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
+- [x] Tests pass: `bun test src/tests/claude-adapter.test.ts`
+- [x] All tests pass: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
 
 #### Automated QA:
-- [ ] `cat /tmp/mcp-<taskId>.json` in a test run shows the `context-mode` entry alongside `agent-swarm`
+- [x] `cat /tmp/mcp-<taskId>.json` in a test run shows the `context-mode` entry alongside `agent-swarm` <!-- covered by claude-adapter.test.ts unit assertions -->
 
 #### Manual Verification:
 - [ ] Start a Claude worker locally, verify `ctx stats` or `ctx doctor` tool is callable (requires Docker image from Phase 1)
@@ -255,13 +255,13 @@ Add a `context-mode` entry to the `mcp_servers` object built by `buildCodexConfi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun test src/tests/codex-adapter.test.ts`
-- [ ] All tests pass: `bun test`
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
+- [x] Tests pass: `bun test src/tests/codex-adapter.test.ts`
+- [x] All tests pass: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
 
 #### Automated QA:
-- [ ] Log/print the built Codex config in a test run and verify `context-mode` appears in `mcp_servers` and `features.hooks` is `true`
+- [x] Log/print the built Codex config in a test run and verify `context-mode` appears in `mcp_servers` and `features.hooks` is `true` <!-- covered by codex-adapter.test.ts unit assertions -->
 
 #### Manual Verification:
 - [ ] Start a Codex worker locally with Docker, verify `ctx_*` tools are available and hooks fire (check for routing instruction injection at session start)
@@ -302,13 +302,13 @@ Add `"context-mode"` to the `plugin` array in the OpenCode config (NOT the `mcp`
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun test src/tests/opencode-adapter.test.ts`
-- [ ] All tests pass: `bun test`
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
+- [x] Tests pass: `bun test src/tests/opencode-adapter.test.ts`
+- [x] All tests pass: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
 
 #### Automated QA:
-- [ ] Print the written `/tmp/opencode-<taskId>.json` and verify `context-mode` is in `plugin` but not in `mcp`
+- [x] Print the written `/tmp/opencode-<taskId>.json` and verify `context-mode` is in `plugin` but not in `mcp` <!-- covered by opencode-adapter.test.ts unit assertions -->
 
 #### Manual Verification:
 - [ ] Start an OpenCode worker locally with Docker, verify `ctx_*` tools load
@@ -340,13 +340,13 @@ Stop advertising `ctx_*` tools to pi workers since they can't use them (deferred
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun test src/tests/base-prompt.test.ts`
-- [ ] All tests pass: `bun test`
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint`
+- [x] Tests pass: `bun test src/tests/base-prompt.test.ts`
+- [x] All tests pass: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint`
 
 #### Automated QA:
-- [ ] Diff the generated system prompts for each provider and confirm context_mode presence/absence is correct
+- [x] Diff the generated system prompts for each provider and confirm context_mode presence/absence is correct <!-- covered by base-prompt.test.ts unit assertions -->
 
 #### Manual Verification:
 - [ ] None — automated checks sufficient
@@ -388,6 +388,16 @@ bun run start:http
 ```
 
 ---
+
+## Implementation Deviations
+
+Captured during implementation (autopilot, 2026-05-29):
+
+1. **Phase 4 (OpenCode) — absolute path instead of bare name.** The plan assumed `npm install -g context-mode` makes the package importable for OpenCode's in-process plugin. It does not: OpenCode resolves bare plugin names via `import(await Bun.resolve(name, …))`, which does not walk the npm global modules dir. A bare `"context-mode"` entry only resolves if Bun auto-installs from the registry at runtime (fails on network-sandboxed workers — verified with `--network none`). Fix: `opencode-adapter` now pushes the **absolute path** to the global install's built opencode plugin entry (`<npm root -g>/context-mode/build/adapters/opencode/plugin.js`), confirmed to import offline. Override via `CONTEXT_MODE_OPENCODE_PLUGIN_PATH`; skipped gracefully (with a warning) when not found.
+
+2. **Phase 1 (Claude plugin) — left unpinned.** The build-time `git checkout v<version>` in the marketplace clone fails (`git` rejects it with "dubious ownership" and the clone is shallow without tags). The hooks-providing plugin therefore tracks marketplace HEAD; the ctx_* **tools** are served by the version-pinned global CLI, so only the (backward-compatible) hook bundle floats. Accepted as low-risk.
+
+3. **Phase 5 (pi exclusion) — wider than 2 files.** No provider exclusion *set* existed; remote providers are excluded via composite *selection* in `getBasePrompt`. Implemented by threading `provider` through `getBasePrompt`/`runner.ts` and registering a `system.session.worker.pi` composite without the `context_mode` reference.
 
 ## Appendix
 

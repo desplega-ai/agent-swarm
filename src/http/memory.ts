@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { chunkContent } from "../be/chunking";
+import { getTaskById } from "../be/db";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
@@ -13,6 +14,7 @@ import {
 } from "../be/memory/raters/types";
 import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
+import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError, parseQueryParams } from "./utils";
@@ -34,6 +36,7 @@ const indexMemory = route({
     sourceTaskId: z.string().uuid().optional(),
     sourcePath: z.string().optional(),
     tags: z.array(z.string()).optional(),
+    persistMemory: z.boolean().optional(),
   }),
   responses: {
     202: { description: "Content queued for embedding" },
@@ -249,7 +252,16 @@ export async function handleMemory(
     const parsed = await indexMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    const { agentId, content, name, scope, source, sourceTaskId, sourcePath, tags } = parsed.body;
+    const { agentId, content, name, scope, source, sourceTaskId, sourcePath, tags, persistMemory } =
+      parsed.body;
+
+    if (source === "session_summary" && sourceTaskId) {
+      const sourceTask = getTaskById(sourceTaskId);
+      if (sourceTask && !shouldPersistAutomaticTaskMemory(sourceTask, persistMemory)) {
+        json(res, { queued: false, memoryIds: [], skipped: "automatic_task_memory_disabled" }, 202);
+        return true;
+      }
+    }
 
     // Chunk content and create memories
     const contentChunks = chunkContent(content);

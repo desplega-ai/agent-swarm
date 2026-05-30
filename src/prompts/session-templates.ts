@@ -586,6 +586,32 @@ registerTemplate({
   category: "session",
 });
 
+// Pi-specific worker composite. Identical to `system.session.worker` except it
+// OMITS the `system.agent.context_mode` block — pi has no context-mode MCP
+// wiring yet (deferred to DES-514), so advertising the `ctx_*` tools to pi
+// workers would point at phantom tools. `getBasePrompt` selects this composite
+// when `provider === 'pi'`; all other local providers (claude, codex, opencode)
+// keep the context_mode block via `system.session.worker`.
+registerTemplate({
+  eventType: "system.session.worker.pi",
+  header: "",
+  defaultBody: `{{@template[system.agent.role]}}
+
+{{@template[system.agent.register]}}
+{{@template[system.agent.worker]}}
+{{@template[system.agent.filesystem]}}
+{{@template[system.agent.self_awareness]}}
+
+{{@template[system.agent.system]}}
+{{@template[system.agent.share_urls]}}
+{{@template[system.agent.code_quality]}}`,
+  variables: [
+    { name: "role", description: "The agent's role" },
+    { name: "agentId", description: "The agent's unique identifier" },
+  ],
+  category: "session",
+});
+
 // ============================================================================
 // Remote provider templates (no MCP, no Docker container)
 // ============================================================================

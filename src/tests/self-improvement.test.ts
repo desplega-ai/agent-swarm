@@ -10,6 +10,11 @@ import {
   initDb,
 } from "../be/db";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import {
+  isAutomaticOrRecurringTaskCompletion,
+  isScheduledTaskCompletion,
+  shouldPersistTaskCompletionMemory,
+} from "../memory/automatic-task-gate";
 import { getBasePrompt } from "../prompts/base-prompt";
 
 const TEST_DB_PATH = "./test-self-improvement.sqlite";
@@ -142,6 +147,90 @@ describe("Self-Improvement Mechanisms", () => {
       const shortContent = "Task: X\n\nOutput:\n";
       expect(shortContent.length).toBeLessThan(30);
       // In store-progress, this would return early without creating memory
+    });
+
+    test("manual task completions persist memory by default", () => {
+      const task = createTaskExtended("Manual implementation task", {
+        agentId: workerId,
+        source: "mcp",
+        priority: 50,
+        tags: ["memory", "bug-fix"],
+      });
+
+      expect(isScheduledTaskCompletion(task)).toBe(false);
+      expect(shouldPersistTaskCompletionMemory(task)).toBe(true);
+    });
+
+    test("scheduled task completions skip memory by default", () => {
+      const task = createTaskExtended("Run heartbeat checklist", {
+        agentId: workerId,
+        source: "schedule",
+        priority: 50,
+        tags: ["scheduled", "schedule:heartbeat-checklist"],
+      });
+
+      expect(isScheduledTaskCompletion(task)).toBe(true);
+      expect(isAutomaticOrRecurringTaskCompletion(task)).toBe(true);
+      expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
+    });
+
+    test("heartbeat checklist completions skip memory without schedule tags", () => {
+      const task = createTaskExtended("Run heartbeat checklist", {
+        agentId: workerId,
+        source: "mcp",
+        priority: 60,
+        taskType: "heartbeat-checklist",
+        tags: ["checklist", "auto-generated"],
+      });
+
+      expect(isScheduledTaskCompletion(task)).toBe(false);
+      expect(isAutomaticOrRecurringTaskCompletion(task)).toBe(true);
+      expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
+    });
+
+    test("boot triage completions skip memory by default", () => {
+      const task = createTaskExtended("Triage reboot-interrupted work", {
+        agentId: workerId,
+        source: "mcp",
+        priority: 80,
+        taskType: "boot-triage",
+        tags: ["boot", "triage", "auto-generated"],
+      });
+
+      expect(isAutomaticOrRecurringTaskCompletion(task)).toBe(true);
+      expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
+    });
+
+    test("monitor and digest completions skip memory by default", () => {
+      const monitorTask = createTaskExtended("Check Claude Code changelog", {
+        agentId: workerId,
+        source: "schedule",
+        priority: 50,
+        taskType: "monitoring",
+        tags: ["health", "schedule:claude-code-changelog-monitor"],
+      });
+      const digestTask = createTaskExtended("Compile daily blocker digest", {
+        agentId: workerId,
+        source: "schedule",
+        priority: 50,
+        tags: ["scheduled", "schedule:daily-blocker-digest"],
+      });
+
+      expect(isAutomaticOrRecurringTaskCompletion(monitorTask)).toBe(true);
+      expect(shouldPersistTaskCompletionMemory(monitorTask)).toBe(false);
+      expect(isAutomaticOrRecurringTaskCompletion(digestTask)).toBe(true);
+      expect(shouldPersistTaskCompletionMemory(digestTask)).toBe(false);
+    });
+
+    test("scheduled task completions can opt in to memory persistence", () => {
+      const task = createTaskExtended("Daily digest found reusable incident pattern", {
+        agentId: workerId,
+        source: "schedule",
+        priority: 50,
+        tags: ["scheduled", "schedule:daily-blocker-digest"],
+      });
+
+      expect(shouldPersistTaskCompletionMemory(task, true)).toBe(true);
     });
   });
 

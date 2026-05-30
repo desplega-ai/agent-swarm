@@ -246,6 +246,21 @@ describe("mergeMcpConfig (issue #369)", () => {
     const merged = mergeMcpConfig({ mcpServers: {} }, {}, TASK_ID);
     expect(Object.keys(merged.mcpServers)).toHaveLength(0);
   });
+
+  test("preserves a context-mode entry through the merge", () => {
+    const base = {
+      mcpServers: {
+        "agent-swarm": {
+          type: "http",
+          url: "http://localhost:3013/mcp",
+          headers: { Authorization: "Bearer KEY", "X-Agent-ID": "a1" },
+        },
+        "context-mode": { command: "context-mode" },
+      },
+    };
+    const merged = mergeMcpConfig(base, null, TASK_ID);
+    expect(merged.mcpServers["context-mode"]).toEqual({ command: "context-mode" });
+  });
 });
 
 describe("createSessionMcpConfig", () => {
@@ -323,7 +338,13 @@ describe("createSessionMcpConfig", () => {
     const written = await readWritten(path!);
     expect(written.mcpServers["agent-swarm"]).toBeDefined();
     expect(written.mcpServers.Datadog).toBeDefined();
-    expect(Object.keys(written.mcpServers).sort()).toEqual(["Datadog", "agent-swarm"]);
+    // context-mode is injected by default (see CONTEXT_MODE_DISABLED gate); the
+    // two differently-named .mcp.json servers still merge alongside it.
+    expect(Object.keys(written.mcpServers).sort()).toEqual([
+      "Datadog",
+      "agent-swarm",
+      "context-mode",
+    ]);
   });
 
   test("ancestor wins over repo-local on agent-swarm key conflict", async () => {
@@ -401,5 +422,65 @@ describe("createSessionMcpConfig", () => {
     expect(path).toBe("/tmp/mcp-task-installed.json");
     const written = await readWritten(path!);
     expect(written.mcpServers["from-api"]).toBeDefined();
+  });
+
+  test("includes context-mode entry when CONTEXT_MODE_DISABLED is unset", async () => {
+    const prev = process.env.CONTEXT_MODE_DISABLED;
+    delete process.env.CONTEXT_MODE_DISABLED;
+    try {
+      await writeFile(
+        join(sandbox, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            "agent-swarm": {
+              type: "http",
+              url: "http://swarm/mcp",
+              headers: { Authorization: "Bearer SWARM", "X-Agent-ID": "a1" },
+            },
+          },
+        }),
+      );
+      const cwd = join(sandbox, "repos", "foo");
+      await mkdir(cwd, { recursive: true });
+
+      const path = await createSessionMcpConfig(cwd, "task-ctx-on");
+      const written = await readWritten(path!);
+      expect(written.mcpServers["context-mode"]).toEqual({ command: "context-mode" });
+      // Coexists with the swarm entry.
+      expect(written.mcpServers["agent-swarm"]).toBeDefined();
+    } finally {
+      if (prev === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+      else process.env.CONTEXT_MODE_DISABLED = prev;
+    }
+  });
+
+  test("excludes context-mode entry when CONTEXT_MODE_DISABLED='true'", async () => {
+    const prev = process.env.CONTEXT_MODE_DISABLED;
+    process.env.CONTEXT_MODE_DISABLED = "true";
+    try {
+      await writeFile(
+        join(sandbox, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            "agent-swarm": {
+              type: "http",
+              url: "http://swarm/mcp",
+              headers: { Authorization: "Bearer SWARM", "X-Agent-ID": "a1" },
+            },
+          },
+        }),
+      );
+      const cwd = join(sandbox, "repos", "foo");
+      await mkdir(cwd, { recursive: true });
+
+      const path = await createSessionMcpConfig(cwd, "task-ctx-off");
+      const written = await readWritten(path!);
+      expect(written.mcpServers["context-mode"]).toBeUndefined();
+      // The swarm entry is still present.
+      expect(written.mcpServers["agent-swarm"]).toBeDefined();
+    } finally {
+      if (prev === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+      else process.env.CONTEXT_MODE_DISABLED = prev;
+    }
   });
 });

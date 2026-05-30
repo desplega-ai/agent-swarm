@@ -1,7 +1,7 @@
 ---
 date: 2026-05-27T00:00:00+02:00
 planner: Claude
-git_commit: 5d34deaf8eb6872ea450f461007ab6cc8b7a5e02
+git_commit: 6e6d82c2f2411661af75174b3cccab1ed71c6f0b
 branch: main
 repository: agent-swarm
 topic: "Agent reasoning/effort runtime control implementation plan"
@@ -9,8 +9,9 @@ tags: [plan, runtime-settings, harness-providers, ui, reasoning-effort]
 status: draft
 autonomy: critical
 commit_per_phase: true
-last_updated: 2026-05-27
+last_updated: 2026-05-29
 last_updated_by: Claude
+ref_baseline_commit: 6e6d82c2f2411661af75174b3cccab1ed71c6f0b
 ---
 
 # Agent Reasoning/Effort Runtime Control Implementation Plan
@@ -20,20 +21,21 @@ last_updated_by: Claude
 Add per-agent reasoning/effort runtime control to the four local harnesses (`claude`, `codex`, `pi`, `opencode`) so users can pin an agent's reasoning intensity from the dashboard, persist it like the existing `MODEL_OVERRIDE`, and translate one normalized level into the harness-specific knob each tool actually accepts.
 
 - **Motivation**: Each harness already exposes a reasoning knob (`/effort` for Claude, `model_reasoning_effort` for Codex, `thinkingLevel` for Pi, provider-gated options for Opencode), but there is no agent-swarm-side surface to set, persist, or display it. Users want to dial up reasoning per agent without editing config files on workers.
-- **Related**: `thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md`, `src/http/agents.ts:82` (runtime route), `src/providers/types.ts:80` (`ProviderSessionConfig`), `ui/src/components/shared/agent-runtime-settings.tsx:44` (runtime editor).
+- **Related**: `thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md`, `src/http/agents.ts:84` (runtime route), `src/providers/types.ts:80` (`ProviderSessionConfig`), `ui/src/components/shared/agent-runtime-settings.tsx:62` (runtime editor).
 
 ## Current State Analysis
 
-- Runtime contract is model-only: `PATCH /api/agents/{id}/runtime` accepts `harness_provider`, `model`, `allow_custom_model` (`src/http/agents.ts:93-97`). No reasoning field anywhere in the request body, `ProviderSessionConfig` (`src/providers/types.ts:81`), or `AgentLatestModelSchema` (`src/types.ts:503-510`).
+- Runtime contract is model-only: `PATCH /api/agents/{id}/runtime` accepts `harness_provider`, `model`, `allow_custom_model` (body fields at `src/http/agents.ts:93-97`, route at `:84-104`). No reasoning field anywhere in the request body, `ProviderSessionConfig` (`src/providers/types.ts:80`), or `AgentLatestModelSchema` (`src/types.ts:537-544`).
 - The current runtime route requires a non-empty `model` string and always upserts — there is no way to clear `MODEL_OVERRIDE` via the API today. This is a latent gap we extend the fix for (see Phase 2 §5).
 - Each adapter wires `model` into the harness-specific shape but never sees a reasoning value:
-  - Claude — `--model` on `Bun.spawn` (`src/providers/claude-adapter.ts:756`).
-  - Codex — SDK thread options (`src/providers/codex-adapter.ts:1205`); `show_raw_agent_reasoning: false` pinned at `src/providers/codex-adapter.ts:353`.
-  - Pi — `createAgentSession` options (`src/providers/pi-mono-adapter.ts:712`).
+  - Claude — `--model` pushed onto the CLI argv (`src/providers/claude-adapter.ts:413`); spawn env built around `:382`.
+  - Codex — SDK thread options (`src/providers/codex-adapter.ts:1207`); `show_raw_agent_reasoning: false` pinned at `src/providers/codex-adapter.ts:362`.
+  - Pi — `createAgentSession` options built at `src/providers/pi-mono-adapter.ts:741-753`, call site `:763`.
   - Opencode — per-task `opencode.json` `model` field (`src/providers/opencode-adapter.ts:590`).
-- Runner resolves model precedence (task → `MODEL_OVERRIDE` → empty) at `src/commands/runner.ts:2158` and reports latest model via `buildLatestModelReport()` (`src/commands/provider-credentials.ts:471`) — no reasoning counterpart.
-- UI runtime editor (`ui/src/components/shared/agent-runtime-settings.tsx:44`) handles harness + model only; `ModelOption` in `ui/src/lib/agent-runtime-models.ts:27` ignores the `reasoning` field that already exists in `ui/src/lib/modelsdev-cache.json:12`.
-- Cost telemetry already exposes `reasoningOutputTokens` / `thinkingTokens` (`src/providers/types.ts:10`, `src/types.ts:705`) — orthogonal to the requested level and reused as-is.
+- Runner resolves model precedence (task → `MODEL_OVERRIDE` → empty) at `src/commands/runner.ts:2324` and reports latest model via `buildLatestModelReport()` (`src/commands/provider-credentials.ts:474`) — no reasoning counterpart.
+- UI runtime editor (`ui/src/components/shared/agent-runtime-settings.tsx:62`) handles harness + model only; `ModelOption` in `ui/src/lib/agent-runtime-models.ts:5-12` carries no reasoning data at all.
+- **The models.dev `reasoning` field is a boolean, not a level list.** Each model in the cache has `reasoning: true|false` (does the model support reasoning at all) — it does NOT enumerate `off/low/medium/high/xhigh`. The cache's canonical home is `src/be/modelsdev-cache.json`; `ui/src/lib/modelsdev-cache.json` is a **symlink** to it (per CLAUDE.md). So the effort *levels* must be authored by us (a static rule table); the cache only answers the yes/no gate.
+- Cost telemetry already exposes `reasoningOutputTokens` / `thinkingTokens` (`src/providers/types.ts:16`, `src/types.ts:705`) — orthogonal to the requested level and reused as-is.
 
 ## Desired End State
 
@@ -58,7 +60,7 @@ Add per-agent reasoning/effort runtime control to the four local harnesses (`cla
 ## Implementation Approach
 
 - Single normalized `ReasoningEffort` type and one helper module (`src/providers/reasoning-effort.ts`) own both capability lookup and per-harness translation — adapters consume a discriminated union and merge ~3 lines each.
-- Capability data: lift `reasoning` from `ui/src/lib/modelsdev-cache.json` (referenced on the server via a small loader) plus a static rule table for harness-level edges (`*-codex` rejects `minimal`, Opus 4.7 has no off, etc.).
+- Capability data — two layers, clearly separated: (1) the **effort levels** for each (harness, model) come from a **static rule table** in the helper (`*-codex` rejects `minimal`/`xhigh`, `gpt-5.1-codex-max` adds `xhigh`, Opus 4.7 has no `off`, etc.) — this is the source of truth for `levels`; (2) the models.dev `reasoning` **boolean** only gates whether a model supports reasoning at all (`reasoning: false` → no levels). The boolean is read from a slim server-side snapshot `src/providers/modelsdev-reasoning.json` (generated alongside the canonical `src/be/modelsdev-cache.json`); the boolean never produces the level list.
 - Persistence reuses the existing `swarm_config` pattern — new key `REASONING_EFFORT_OVERRIDE` upserted in the same transaction as `MODEL_OVERRIDE`; no schema migration needed.
 - Telemetry reuses `agents.cred_status` JSON column — `AgentLatestModelSchema` gets an optional `reasoningEffort` field; no migration.
 - UI duplicates a small capability lookup client-side (same trade-off we already accept for the harness/model registry); promote to a server endpoint later if it bites.
@@ -89,7 +91,7 @@ Create `src/providers/reasoning-effort.ts` exposing a normalized `ReasoningEffor
 **File**: `src/providers/reasoning-effort.ts` (new)
 **Changes**:
 - Export `REASONING_EFFORT_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh'] as const` and `ReasoningEffort` type.
-- Export `reasoningCapability(harness, model): { supported, levels, default }`. Derives `levels` from `modelsdev-cache.json` `reasoning` field plus a small static rule table for harness-level edges.
+- Export `reasoningCapability(harness, model): { supported, levels, default }`. `levels` come **entirely from the static rule table** (§2 below). The models.dev `reasoning` boolean only decides `supported`: a model with `reasoning: false` returns `{ supported: false, levels: [], default: null }` regardless of harness. The boolean is never mapped to a level list.
 - Export `applyReasoningEffort(harness, model, level)` returning a discriminated union: `claude-env { env }`, `codex-config { config }`, `pi-session { sessionOptions }`, `opencode-options { providerId, modelId, options }`, or `noop`.
 - Per-harness mapping documented inline (Claude `off` → `MAX_THINKING_TOKENS=0` env + unset effort; Codex `off` → `model_reasoning_effort: 'none'`; Pi `off` → `thinkingLevel: 'off'`; Opencode `off` → omit reasoning keys).
 
@@ -98,8 +100,8 @@ Create `src/providers/reasoning-effort.ts` exposing a normalized `ReasoningEffor
 **Files**: `src/providers/reasoning-effort.ts` + `src/providers/modelsdev-reasoning.json` (new slim snapshot) + `scripts/refresh-modelsdev-pricing.ts` (extend)
 **Changes**:
 - Static rule table encoding: Codex `*-codex` (non-`max`) → no `minimal`, no `xhigh`; `gpt-5.1-codex-max` adds `xhigh`; Claude Opus 4.7 → no `off` semantics (excluded from `levels`); Pi/Opencode follow underlying provider rules.
-- New `src/providers/modelsdev-reasoning.json` — slim subset of `ui/src/lib/modelsdev-cache.json` containing only `{ id, reasoning }` per model. Avoids the cross-boundary import of a UI asset from `src/providers/` (no other server module reaches into `ui/`).
-- Extend `scripts/refresh-modelsdev-pricing.ts` to write both `ui/src/lib/modelsdev-cache.json` and `src/providers/modelsdev-reasoning.json` from the same fetched data. Commit both snapshots together; CI drift check covers both.
+- New `src/providers/modelsdev-reasoning.json` — slim subset of the canonical `src/be/modelsdev-cache.json` (NOT the UI symlink) containing only `{ id, reasoning: boolean }` per model. `reasoning` here is the **boolean support-gate only** — the level set lives in the static rule table above, not in this file. A dedicated `src/providers/` snapshot keeps the helper self-contained: `src/providers/` reads neither `src/be/` nor `ui/` at runtime, and the helper has no DB import (runs on workers).
+- Extend `scripts/refresh-modelsdev-pricing.ts` — which already writes the canonical `src/be/modelsdev-cache.json` (path const at `scripts/refresh-modelsdev-pricing.ts:15`; the UI copy is a symlink, so it updates for free) — to ALSO emit `src/providers/modelsdev-reasoning.json` from the same fetched data. Commit both snapshots together; CI drift check covers both.
 - Helper loads `modelsdev-reasoning.json` lazily at module load (no DB import — runs on workers too).
 
 #### 3. Unit tests
@@ -110,6 +112,7 @@ Create `src/providers/reasoning-effort.ts` exposing a normalized `ReasoningEffor
 - `applyReasoningEffort` shape assertions per harness for each level, including `off` and `xhigh` gating.
 - `applyReasoningEffort` returns `noop` when `level` is `undefined`, OR when the `(harness, model)` pair has no capability data (custom-model strings, legacy stored configs predating the API validation in Phase 2). This is defense-in-depth — primary rejection lives at the API layer.
 - `reasoningCapability` returns `{ supported: false, levels: [], default: null }` for unsupported pairs (used by Phase 2 for 400 responses).
+- Boolean-gate test: a model whose snapshot entry is `reasoning: false` → `reasoningCapability` returns `{ supported: false, levels: [] }` for every harness, and `applyReasoningEffort` returns `noop`. Confirms the levels come from the rule table, gated by the boolean — never derived from it.
 
 ### Success Criteria:
 
@@ -152,16 +155,16 @@ Extend `PATCH /api/agents/{id}/runtime` to accept `reasoning_effort`, validate a
 
 **File**: `src/types.ts`
 **Changes**:
-- Extend `AgentLatestModelSchema` at `src/types.ts:503-510` with optional `reasoningEffort: ReasoningEffortSchema.optional()`.
+- Extend `AgentLatestModelSchema` at `src/types.ts:537-544` with optional `reasoningEffort: ReasoningEffortSchema.optional()`.
 - Add `ReasoningEffortSchema` (Zod enum mirroring the helper constant) exported from this module.
-- Extend `PUT /api/agents/{id}/credential-status` body to accept `reasoning_effort` inside `latest_model` (`src/http/agents.ts:216`); merge into `cred_status` without clobbering at `src/http/agents.ts:592`.
+- Extend `PUT /api/agents/{id}/credential-status` body to accept `reasoning_effort` inside `latest_model` (body schema at `src/http/agents.ts:212-226`); merge into `cred_status` without clobbering in the merge block at `src/http/agents.ts:580-600`.
 
 #### 3. Route tests
 
 **File**: `src/tests/agents-harness-provider.test.ts`
 **Changes**:
 - Happy path: PATCH with `reasoning_effort: 'high'` for a supported (harness, model) — assert 200, `swarm_config` row present, response echoes value.
-- Validation failure: PATCH `xhigh` on `gpt-5-codex` (non-max) — assert 400 with `allowed` array.
+- Validation failure: PATCH `xhigh` on `gpt-5.1-codex` (non-max) — assert 400 with `allowed` array.
 - Clearing: PATCH with `reasoning_effort: null` — assert `swarm_config` row removed.
 - Symmetric `MODEL_OVERRIDE` clearing: PATCH with `model: null` — assert `MODEL_OVERRIDE` row removed (regression coverage for the scope-expanded fix).
 - Credential-status echo: PUT `latest_model.reasoning_effort` — assert merged into `cred_status`.
@@ -175,7 +178,7 @@ Extend `PATCH /api/agents/{id}/runtime` to accept `reasoning_effort`, validate a
 
 **File**: `src/be/db.ts`
 **Changes**:
-- Add `deleteSwarmConfigByKey(scope: ConfigScope, scopeId: string, key: string): void` near `upsertSwarmConfig()` (around `src/be/db.ts:5329`). The existing `deleteSwarmConfig(id)` takes a row id, which the runtime handler doesn't have — this is the gap.
+- Add `deleteSwarmConfigByKey(scope: ConfigScope, scopeId: string, key: string): void` near `upsertSwarmConfig()` (`src/be/db.ts:5600`). The existing `deleteSwarmConfig(id)` (`src/be/db.ts:5712`) takes a row id, which the runtime handler doesn't have — this is the gap.
 - Used by the runtime handler for both `model: null` and `reasoning_effort: null`. The fix scope-expands to cover `MODEL_OVERRIDE` clearing, which was previously impossible via the API.
 - Unit-test the helper directly in `src/tests/agents-harness-provider.test.ts` (no-op on missing row, removes existing row).
 
@@ -207,23 +210,23 @@ Plumb `reasoningEffort` through `ProviderSessionConfig`, the runner's config res
 #### 1. ProviderSessionConfig
 
 **File**: `src/providers/types.ts`
-**Changes**: Add `reasoningEffort?: ReasoningEffort` to `ProviderSessionConfig` at line 81.
+**Changes**: Add `reasoningEffort?: ReasoningEffort` to `ProviderSessionConfig` at line 80.
 
 #### 2. Runner resolution + live reconciliation
 
 **File**: `src/commands/runner.ts`
 **Changes**:
-- After `MODEL_OVERRIDE` resolution at `src/commands/runner.ts:2158`, resolve `REASONING_EFFORT_OVERRIDE` from the same resolved-config blob.
-- Precedence: task field (if introduced later — currently always undefined) → `REASONING_EFFORT_OVERRIDE` → undefined. Pass into `ProviderSessionConfig.reasoningEffort` at `src/commands/runner.ts:2198`.
-- **Add `'REASONING_EFFORT_OVERRIDE'` to the `RELOADABLE_ENV_KEYS` set at `src/commands/runner.ts:327-330`.** Without this, hot reconciliation won't pick up effort changes — workers would need a restart between PATCH and the next session. Mirrors how `MODEL_OVERRIDE` is treated.
+- After `MODEL_OVERRIDE` resolution at `src/commands/runner.ts:2324`, resolve `REASONING_EFFORT_OVERRIDE` from the same resolved-config blob.
+- Precedence: task field (if introduced later — currently always undefined) → `REASONING_EFFORT_OVERRIDE` → undefined. Pass into `ProviderSessionConfig.reasoningEffort` at the config construction site `src/commands/runner.ts:2344`.
+- **Add `'REASONING_EFFORT_OVERRIDE'` to the `RELOADABLE_ENV_KEYS` set at `src/commands/runner.ts:328` (currently holds `MODEL_OVERRIDE` + `AGENT_FS_SHARED_ORG_ID`).** Without this, hot reconciliation won't pick up effort changes — workers would need a restart between PATCH and the next session. Mirrors how `MODEL_OVERRIDE` is treated.
 
 #### 3. Latest-model telemetry
 
 **File**: `src/commands/provider-credentials.ts`
 **Changes**:
-- Extend `buildLatestModelReport()` at line 471 to accept an optional `reasoningEffort` and include it in the payload.
-- Extend `reportLatestModel()` at line 448 to forward the field.
-- Runner calls at `src/commands/runner.ts:2259` and `src/commands/runner.ts:2504` pass the resolved level (initial report) and the adapter-applied level (post-result).
+- Extend `buildLatestModelReport()` at line 474 to accept an optional `reasoningEffort` and include it in the payload.
+- Extend `reportLatestModel()` at line 451 to forward the field.
+- Runner calls at `src/commands/runner.ts:2413` (initial report) and `src/commands/runner.ts:2660` (post-result) pass the resolved level and the adapter-applied level respectively.
 
 #### 4. Tests
 
@@ -263,20 +266,20 @@ Each adapter calls `applyReasoningEffort()` and merges the returned shape into i
 **Changes**:
 - Near `Bun.spawn` env construction (around line 382), call `applyReasoningEffort('claude', config.model, config.reasoningEffort)`; if `claude-env`, merge `app.env` into the spawn env (sets `CLAUDE_CODE_EFFORT_LEVEL` and optionally `MAX_THINKING_TOKENS=0` for `off` on legacy models).
 - No CLI flag changes — env-only path per research findings (`--effort` is buggy in `-p` mode).
-- **additionalArgs precedence**: `additionalArgs` is appended verbatim to the Claude CLI args at `src/providers/claude-adapter.ts:402-403`. If an operator puts `--effort high` in `additionalArgs` while also setting `reasoning_effort=low` in the runtime UI, the CLI flag wins over our `CLAUDE_CODE_EFFORT_LEVEL` env (Claude CLI's documented precedence). This matches the project's existing "additionalArgs is an escape hatch" philosophy; documented in Phase 6 runbook updates rather than enforced in code.
+- **additionalArgs precedence**: `additionalArgs` is appended verbatim to the Claude CLI args at `src/providers/claude-adapter.ts:426-427` (the `--model` flag itself is pushed at `:413`). If an operator puts `--effort high` in `additionalArgs` while also setting `reasoning_effort=low` in the runtime UI, the CLI flag wins over our `CLAUDE_CODE_EFFORT_LEVEL` env (Claude CLI's documented precedence). This matches the project's existing "additionalArgs is an escape hatch" philosophy; documented in Phase 6 runbook updates rather than enforced in code.
 
 #### 2. Codex adapter
 
 **File**: `src/providers/codex-adapter.ts`
 **Changes**:
-- Where SDK `config` is built (around the `show_raw_agent_reasoning` pin at line 353, and thread options at line 1205), call `applyReasoningEffort('codex', ...)`; if `codex-config`, spread `app.config` into the SDK config map (sets `model_reasoning_effort`).
+- Where SDK `config` is built (around the `show_raw_agent_reasoning` pin at line 362, and thread options at line 1207), call `applyReasoningEffort('codex', ...)`; if `codex-config`, spread `app.config` into the SDK config map (sets `model_reasoning_effort`).
 - **Reasoning-trace visibility note**: `show_raw_agent_reasoning` stays pinned `false`. Operators setting `reasoning_effort=high` get the cost of reasoning tokens but no visible trace in the UI (only the `reasoning_output_tokens` count surfaces in cost telemetry). Flag in the Phase 6 docs. Surfacing the raw trace is a separate follow-up runtime field, out of scope here.
 
 #### 3. Pi adapter
 
 **File**: `src/providers/pi-mono-adapter.ts`
 **Changes**:
-- Before `createAgentSession` call at line 712, call `applyReasoningEffort('pi', ...)`; if `pi-session`, merge `app.sessionOptions` into the session options (sets `thinkingLevel`).
+- Where the `createAgentSession` options object is built (`src/providers/pi-mono-adapter.ts:741-753`, call site `:763`), call `applyReasoningEffort('pi', ...)`; if `pi-session`, merge `app.sessionOptions` into the session options (sets `thinkingLevel`).
 - `thinkingLevel` is top-level on `createAgentSession` options per `node_modules/@mariozechner/pi-coding-agent/dist/core/sdk.d.ts` (`thinkingLevel?: ThinkingLevel`) and `core/agent-session.d.ts` — no nesting under `sessionConfig` needed. (Reviewer-verified; previously a research open question.)
 
 #### 4. Opencode adapter
@@ -290,9 +293,9 @@ Each adapter calls `applyReasoningEffort()` and merges the returned shape into i
 
 **File**: `src/providers/types.ts` + each adapter
 **Changes**:
-- Extend `ProviderResult` (the adapter return type, not `ProviderSessionConfig`) with `appliedReasoningEffort?: ReasoningEffort | null`. Mutating the input config to return data is an anti-pattern; the pattern mirrors how `event.cost.model` flows back at `src/commands/runner.ts:2504`.
+- Extend `ProviderResult` (the adapter return type at `src/providers/types.ts:121-137`, not `ProviderSessionConfig`) with `appliedReasoningEffort?: ReasoningEffort | null`. Mutating the input config to return data is an anti-pattern; the pattern mirrors how `event.cost.model` flows back at `src/commands/runner.ts:2660`.
 - Each adapter, when `applyReasoningEffort` returned a non-noop application, sets `appliedReasoningEffort` to the value it actually used on its session/spawn. `noop` cases set `null` (signals "didn't apply, capability rejected or no input").
-- Runner reads `result.appliedReasoningEffort` and passes it into `reportLatestModel()` at `src/commands/runner.ts:2504` (post-result report). Initial report at `src/commands/runner.ts:2259` uses the resolved value from `ProviderSessionConfig.reasoningEffort`.
+- Runner reads `result.appliedReasoningEffort` and passes it into `reportLatestModel()` at `src/commands/runner.ts:2660` (post-result report). Initial report at `src/commands/runner.ts:2413` uses the resolved value from `ProviderSessionConfig.reasoningEffort`.
 
 #### 6. Adapter tests
 
@@ -334,26 +337,26 @@ Add an effort selector to `AgentRuntimeSettings` next to the model picker, with 
 
 **File**: `ui/src/lib/agent-runtime-models.ts`
 **Changes**:
-- Extend `ModelOption` (around line 27) with `reasoningLevels?: ReadonlyArray<'off'|'low'|'medium'|'high'|'xhigh'>`.
-- When mapping from `modelsdev-cache.json`, fill `reasoningLevels` from the `reasoning` field (only models that support reasoning get non-empty arrays).
+- Extend `ModelOption` (defined at `ui/src/lib/agent-runtime-models.ts:5-12`) with `reasoningLevels?: ReadonlyArray<'off'|'low'|'medium'|'high'|'xhigh'>`.
+- Populate `reasoningLevels` from a **client-side mirror of the server's static rule table** (same level data, kept in sync), gated by the cache's boolean `reasoning` field: models with `reasoning: false` get `[]`. The boolean does NOT supply the levels — it only decides whether the model gets any. (Same load-bearing point as Phase 1 §1.)
 - Direct registry entries (Claude/Codex) and snapshot-backed groups (Pi/Opencode) both populated. Apply harness-level rules client-side (mirror the server-side table to keep grey-out accurate).
 
 #### 2. Effort selector component
 
 **File**: `ui/src/components/shared/agent-runtime-settings.tsx`
 **Changes**:
-- Add `effort` to the editor state alongside `harness`/`model`/`customMode` (around line 84).
+- Add `effort` to the editor state alongside `harness`/`model`/`customMode` (the `useState` block at `ui/src/components/shared/agent-runtime-settings.tsx:66-68`).
 - Render a 5-segment toggle (off / low / medium / high / xhigh) between the model picker and the save button. Greys out segments not in the selected model's `reasoningLevels` with a tooltip explaining why (e.g. "Claude Opus 4.7 doesn't support 'off' — use 'low' instead").
 - When the selected model changes and the current effort isn't in its `reasoningLevels`, clear the effort field (don't auto-coerce silently).
-- Display the configured + last-used effort below the picker (mirror the existing model display at line 183).
+- Display the configured + last-used effort below the picker (mirror the existing "Last used" model display at `ui/src/components/shared/agent-runtime-settings.tsx:188-192`).
 
 #### 3. Mutation payload
 
 **File**: `ui/src/api/client.ts` + `ui/src/api/hooks/use-agents.ts`
 **Changes**:
 - Extend the runtime route body in `ui/src/api/client.ts:215` with `reasoning_effort`.
-- `useUpdateAgentRuntime` (`ui/src/components/shared/agent-runtime-settings.tsx:92`) passes the new field.
-- React Query cache invalidations in `ui/src/api/hooks/use-agents.ts:64` already cover `agents`/`agent`/`configs` — no change needed.
+- `useUpdateAgentRuntime` (consumed in `ui/src/components/shared/agent-runtime-settings.tsx:62`) passes the new field.
+- React Query cache invalidations in `useUpdateAgentRuntime` (`ui/src/api/hooks/use-agents.ts:61`) already cover `agents`/`agent`/`configs` — no change needed.
 
 ### Success Criteria:
 
@@ -381,16 +384,16 @@ Cross-cutting visual evidence across all four harnesses + multiple models warran
 
 ### Overview
 
-Surface last-used effort in the agent list (or its tooltip), update runbooks/docs, regenerate OpenAPI one more time after any final tweaks, and update the runtime-model-control memory entry with the new persistence key.
+Surface last-used effort in the agent list Model column, update runbooks/docs, regenerate OpenAPI one more time after any final tweaks, and update the runtime-model-control memory entry with the new persistence key.
 
 ### Changes Required:
 
-#### 1. Agent list / harness cell
+#### 1. Agent list model display
 
-**File**: `ui/src/pages/agents/page.tsx` + `ui/src/components/shared/harness-cell.tsx`
+**File**: `ui/src/lib/agents-list-model-display.ts` + `ui/src/pages/agents/page.tsx`
 **Changes**:
-- Extend the `Model` column tooltip (or add a small badge) to include `latestModel.reasoningEffort` when present. Reuse `findKnownModel` lookup for label rendering.
-- `HarnessCell` tooltip (`ui/src/components/shared/harness-cell.tsx:60`) gains a "Effort" line below the existing model/source rows.
+- The agents-list `Model` column renders via `getAgentModelDisplay()` / `getAgentModelPresentation()` (`ui/src/lib/agents-list-model-display.ts`), called from `ui/src/pages/agents/page.tsx:68` and `:86` with `agent.credStatus?.latestModel?.model`. Thread `latestModel.reasoningEffort` through the same helper and render it as a suffix/badge next to the model label (e.g. `gpt-5.1-codex · high`) when present.
+- **Do NOT use the `HarnessCell` tooltip.** `ui/src/components/shared/harness-cell.tsx` renders a `CredBreakdown` (credential-status panel), not model/source rows — there is no model row to sit below. The agents-list model display is the correct surface for last-used effort. (Corrected during review; see Errata — Second Pass.)
 
 #### 2. Docs
 
@@ -463,10 +466,43 @@ _Reviewed: 2026-05-27 by Claude (gap analysis via `desplega:reviewing`, Auto-app
 - [x] **Important #3**: Added Codex `show_raw_agent_reasoning` interaction note (Phase 4 §2, Phase 6 docs) — high effort costs reasoning tokens but produces no visible trace in the dashboard.
 - [x] **Important #4**: Replaced the redundant Phase 6 §4 OpenAPI regen with a no-drift check (phases 3-5 don't touch routes).
 - [x] **Important #5**: Closed the Pi `thinkingLevel` placement open question — reviewer verified it's top-level on `createAgentSession` options per the installed `.d.ts`. Phase 4 §3 and Appendix updated.
-- [x] **Important #6**: Reframed Phase 4 §5 telemetry feedback path. Adapter return type (`ProviderResult.appliedReasoningEffort`) carries the applied level rather than mutating the input config — mirrors the existing `event.cost.model` flow at `src/commands/runner.ts:2504`.
+- [x] **Important #6**: Reframed Phase 4 §5 telemetry feedback path. Adapter return type (`ProviderResult.appliedReasoningEffort`) carries the applied level rather than mutating the input config — mirrors the existing `event.cost.model` flow at `src/commands/runner.ts:2660`.
 - [x] **Important #7**: Added a Phase 2 §1 note that PATCH'd `REASONING_EFFORT_OVERRIDE` is a silent no-op until Phase 3 ships (runner doesn't read it yet). Acceptable per contract-first phasing; flagged for the commit message.
 - [x] **Minor**: Standardized the Pi model example to `openrouter/google/gemini-3-flash-preview` (matches the research doc default). Removed the inconsistent `openrouter/anthropic/claude-sonnet-4-6` example.
 
 ### Scope expansion note
 
 Critical #1 fix scope-expanded: the new `deleteSwarmConfigByKey` helper plus the `model: nullable()` schema change also fix the latent `MODEL_OVERRIDE` clear gap (today you can set it but not unset it via the API). Adds one extra test case to Phase 2 §3 but no extra phases. Documented in the Appendix derail notes.
+
+---
+
+## Review Errata — Second Pass
+
+_Reviewed: 2026-05-29 by Claude (`desplega:reviewing`, Autopilot mode). Verified against codebase at HEAD `6e6d82c2`; this plan was authored at `5d34deaf`, so the tree has moved underneath it._
+
+### Critical — Resolved
+
+- [x] **Core capability data source was misunderstood: `reasoning` in modelsdev-cache is a boolean, not a level enumeration.** Resolved: Phase 1 §1/§2 and Phase 5 §1 now state the **static rule table is the sole source of levels**, with the models.dev `reasoning` boolean used only as a "supports reasoning at all" gate (`reasoning: false` → `{ supported: false, levels: [] }`). Current State Analysis and Implementation Approach reframed to match. Added a Phase 1 §3 boolean-gate test asserting levels are never derived from the boolean.
+
+### Important — Resolved
+
+- [x] **modelsdev-cache source-of-truth and refresh path were wrong (undermined prior Important #2).** Resolved: kept the slim server-side snapshot approach but corrected the source — `src/providers/modelsdev-reasoning.json` is now generated from the canonical `src/be/modelsdev-cache.json` (the UI file is a symlink). `refresh-modelsdev-pricing.ts` already writes `src/be/...:15`; the plan now says to *also* emit the slim snapshot from it. Rationale updated from "avoid import into `ui/`" to "keep `src/providers/` self-contained (reads neither `src/be/` nor `ui/` at runtime)." Current State Analysis, Implementation Approach, and Phase 1 §2 updated.
+- [x] **Pervasive line-number drift (~30 refs) re-baselined to HEAD `6e6d82c2`.** Frontmatter `git_commit` bumped to `6e6d82c2…` and `ref_baseline_commit` added. Corrections applied throughout: runner `MODEL_OVERRIDE` `2158`→`2324`, config construction `2198`→`2344`, `reportLatestModel()` sites `2259`/`2504`→`2413`/`2660`, `RELOADABLE_ENV_KEYS` `327-330`→`328`; `upsertSwarmConfig()` `5329`→`5600` (+`deleteSwarmConfig` `5712`); `AgentLatestModelSchema` `503-510`→`537-544`; `ProviderSessionConfig` `81`→`80`; `CostData.reasoningOutputTokens` `10`→`16`; `buildLatestModelReport()`/`reportLatestModel()` `471`/`448`→`474`/`451`; Claude `additionalArgs` `402-403`→`426-427`; Codex `353`/`1205`→`362`/`1207`; Pi `712`→`741-753`/`763`; credential-status body `216`→`212-226`, merge `592`→`580-600`; `ModelOption` `27`→`5-12`; `agent-runtime-settings.tsx` `44/84/92/183`→`62`/`66-68`/`62`/`188-192`; `use-agents.ts` `64`→`61`.
+- [x] **One ref was wrong, not merely drifted.** Resolved: Current State Analysis now cites `claude-adapter.ts:413` for the `--model` argv push (line 756 was credential validation); spawn env construction noted at `:382`.
+- [x] **harness-cell tooltip content mismatch.** Resolved: Phase 6 §1 retargeted from the `HarnessCell` tooltip (which renders a `CredBreakdown`, not model/source rows) to the agents-list model display — `getAgentModelDisplay()`/`getAgentModelPresentation()` in `ui/src/lib/agents-list-model-display.ts`, called from `page.tsx:68`/`:86`. Effort renders as a suffix/badge on the model label.
+
+### Resolved (auto-fixed)
+
+- [x] **Minor**: Phase 2 §3 negative test used `gpt-5-codex`; standardized to `gpt-5.1-codex` to match the model used everywhere else in the plan (Phase 1 §3, Phase 4 §6).
+
+### Confirmed correct (premises that hold against current code)
+
+- [x] Runtime `model` field IS `z.string().trim().min(1)` today → the "can't clear `MODEL_OVERRIDE`" gap is real and the `deleteSwarmConfigByKey` fix (Phase 2 §5) is valid. Only `deleteSwarmConfig(id)` (row-id) exists today.
+- [x] `RELOADABLE_ENV_KEYS` contains `MODEL_OVERRIDE` but **not** `REASONING_EFFORT_OVERRIDE` → first-pass Critical #2's addition is genuinely needed.
+- [x] No `reasoningEffort` on `ProviderSessionConfig` / `AgentLatestModelSchema`; no `appliedReasoningEffort` on `ProviderResult`; no `ReasoningEffortSchema` anywhere — all net-new as the plan assumes.
+- [x] Pi `thinkingLevel` is a **top-level** `createAgentSession` option; `ThinkingLevel` union is `off | minimal | low | medium | high | xhigh` — matches Phase 4 §3 / first-pass Important #5.
+- [x] `swarm_config` is the `MODEL_OVERRIDE` / `HARNESS_PROVIDER` persistence mechanism; new key needs no migration, as planned.
+
+### Not verifiable from this repo
+
+- The Codex level gating (`*-codex` rejects `minimal`/`xhigh`, `gpt-5.1-codex-max` adds `xhigh`) is an external-SDK claim sourced from the research doc, not checkable in-tree. Treat as an assumption to confirm against live Codex during Phase 4 QA.

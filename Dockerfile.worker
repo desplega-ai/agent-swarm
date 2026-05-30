@@ -91,6 +91,7 @@ ARG CLAUDE_CODE_VERSION=2.1.156
 RUN sudo npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # Verify claude binary is findable after install
 RUN which claude && claude --version
+ENV DISABLE_AUTOUPDATER=1
 ENV PATH="/home/worker/.local/bin:$PATH"
 
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
@@ -126,8 +127,18 @@ RUN mkdir -p /home/worker/.codex && \
       'sandbox_mode = "danger-full-access"' \
       'skip_git_repo_check = true' \
       'show_raw_agent_reasoning = false' \
+      '' \
+      '[features]' \
+      'hooks = true' \
+      'plugin_hooks = true' \
       > /home/worker/.codex/config.toml && \
     chown -R worker:worker /home/worker/.codex
+
+# Install the context-mode Codex plugin (provides the ctx_* hooks for the Codex
+# harness). The [features] block above enables hooks + plugin-provided hooks.
+# Guarded with || true so a marketplace/registry hiccup can't fail the build.
+RUN codex plugin marketplace add mksglu/context-mode || true \
+    && codex plugin install context-mode@context-mode || true
 
 # Install opencode CLI + SDK (alternative harness, selected via HARNESS_PROVIDER=opencode)
 # CLI version must match SDK version — the SDK spawns `opencode serve` and parses
@@ -141,6 +152,15 @@ ENV PATH="/home/worker/.opencode/bin:$PATH"
 ARG OPENCODE_SDK_VERSION=1.15.12
 RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
 
+# Install context-mode CLI globally (context-window compression tools for all
+# harnesses). The global install puts `context-mode` on PATH (for Claude/Codex
+# stdio MCP) AND makes the package importable (for the OpenCode in-process
+# plugin). The Claude/Codex plugin installs provide the hooks; this provides
+# the CLI binary + package importability. Disable per-worker via
+# CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
+ARG CONTEXT_MODE_VERSION=1.0.151
+RUN sudo npm install -g context-mode@${CONTEXT_MODE_VERSION}
+
 # Install Claude marketplace plugins (build-time cache)
 RUN mkdir -p /home/worker/.claude \
     # Main desplega toolbox plugin
@@ -151,7 +171,14 @@ RUN mkdir -p /home/worker/.claude \
     # desplega.ai qa-use CLI
     && claude plugin marketplace add desplega-ai/qa-use || true \
     && claude plugin install qa-use@desplega.ai --scope user || true \
-    # context-mode to improve the
+    # context-mode to improve context-window usage. NOTE: this plugin (which
+    # provides the ctx_* HOOKS) tracks the marketplace HEAD and is NOT version-
+    # pinned. A build-time `git checkout v${CONTEXT_MODE_VERSION}` in the
+    # marketplace clone does not work (git rejects it with "dubious ownership"
+    # and the clone is shallow without tags), so we don't attempt it. The ctx_*
+    # TOOLS are served by the globally-installed CLI (npm i -g
+    # context-mode@${CONTEXT_MODE_VERSION} above), which IS pinned; only the
+    # hook bundle floats — acceptable since the hooks are backward-compatible.
     && claude plugin marketplace add mksglu/claude-context-mode || true \
     && claude plugin install context-mode@context-mode --scope user || true \
     # agent-fs goodies

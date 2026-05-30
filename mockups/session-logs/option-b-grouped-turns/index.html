@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Session Logs — Option B · Grouped Turns</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../demo-shared.css" />
+<style>
+:root{--page-max:860px;--prose-max:64ch;
+  --agent-surface:color-mix(in oklch,var(--active) 5%,var(--card));
+  --agent-border:color-mix(in oklch,var(--active) 16%,var(--border));}
+html.dark{--agent-surface:color-mix(in oklch,var(--active) 6%,var(--card));--agent-border:color-mix(in oklch,var(--active) 20%,var(--border));}
+.stream{padding:4px 20px 12px}
+
+.iter{position:sticky;top:0;z-index:5;display:flex;justify-content:center;padding:12px 0 6px;pointer-events:none}
+.iter span{pointer-events:auto;font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted-foreground);background:color-mix(in oklch,var(--background) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);border-radius:999px;padding:3px 11px}
+
+.turn{display:grid;grid-template-columns:34px 1fr;gap:12px;padding:9px 2px}
+.avatar{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none}
+.avatar svg{width:18px;height:18px}
+.turn.assistant .avatar{background:color-mix(in oklch,var(--active) 16%,transparent);color:var(--active-strong);box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--active) 24%,transparent)}
+.turn.user .avatar{background:var(--muted);color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border)}
+.turn.tool .avatar{width:26px;height:26px;margin:4px auto 0;border-radius:8px;background:var(--muted);color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border)}
+.turn.tool .avatar svg{width:14px;height:14px}
+.turn.tool[data-kind=mcp] .avatar{background:color-mix(in oklch,var(--info) 13%,transparent);color:var(--info-strong)}
+.thead{display:flex;align-items:center;gap:8px;margin-bottom:5px;min-height:34px}
+.who{font-size:13.5px;font-weight:600;letter-spacing:-.01em}
+.model{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);background:var(--muted);padding:1px 6px;border-radius:5px}
+.ts{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.copy{opacity:0;border:none;background:none;color:var(--muted-foreground);cursor:pointer;padding:3px;border-radius:5px;transition:opacity .12s,color .12s}
+.turn:hover .copy{opacity:.6}
+.copy:hover{color:var(--foreground);background:var(--accent)}
+.copy svg{width:13px;height:13px;display:block}
+.bubble{background:var(--agent-surface);border:1px solid var(--agent-border);border-radius:13px;padding:12px 15px}
+.turn.user .bubble{background:transparent;border-color:var(--border)}
+
+/* tool card */
+.tool-card{padding:0;overflow:hidden;background:var(--card);border:1px solid var(--border)}
+.tool-card:hover{border-color:color-mix(in oklch,var(--border) 55%,var(--foreground) 16%)}
+.tool-trigger{display:flex;align-items:center;gap:9px;width:100%;font:inherit;text-align:left;cursor:pointer;border:none;background:none;color:inherit;padding:9px 12px;min-width:0}
+.tool-trigger .chev{width:12px;height:12px;color:var(--muted-foreground);transition:transform .22s cubic-bezier(.25,1,.5,1);flex:none}
+.tool-card.open .tool-trigger .chev{transform:rotate(90deg)}
+.kind{flex:none;width:20px;height:20px;border-radius:6px;display:grid;place-items:center}
+.kind svg{width:12px;height:12px}
+.tool-card[data-kind=mcp] .kind{background:color-mix(in oklch,var(--info) 14%,transparent);color:var(--info-strong)}
+.tool-card[data-kind=bash] .kind{background:color-mix(in oklch,var(--foreground) 9%,transparent);color:var(--foreground)}
+.tool-card[data-kind=file] .kind{background:var(--muted);color:var(--muted-foreground)}
+.tlabel{font-family:var(--font-mono);font-size:12.5px;color:var(--foreground);flex:none;white-space:nowrap}
+.tlabel .dim{color:var(--muted-foreground)}
+.tdetail{font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.tstatus{flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+.tstatus .ok{color:var(--success-strong)}.tstatus .err{color:var(--error-strong)}
+.tool-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .3s cubic-bezier(.25,1,.5,1)}
+.tool-card.open .tool-body{grid-template-rows:1fr}
+.tool-body>.inner{overflow:hidden;border-top:1px solid var(--border)}
+.kv{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-foreground);padding:8px 13px 0}
+.tool-body pre{margin:4px 0 0;padding:4px 13px 11px;font-family:var(--font-mono);font-size:11.5px;line-height:1.6;color:color-mix(in oklch,var(--foreground) 85%,var(--muted-foreground));white-space:pre-wrap;word-break:break-word}
+
+@media (max-width:640px){
+  .stream{padding:4px 12px 12px}
+  .turn{grid-template-columns:28px 1fr;gap:9px}
+  .avatar{width:28px;height:28px}
+  .tdetail{display:none}
+}
+</style>
+</head>
+<body>
+<div class="chrome">
+  <span class="badge">Mockup</span>
+  <h1>Session Logs <span>· B — Grouped Turns</span></h1>
+  <div class="sp"></div>
+  <div class="controls">
+    <span class="counter" id="counter">0 / 0</span>
+    <button class="btn icon-btn" id="btn-play" title="Auto-play" aria-label="Auto-play"></button>
+    <select id="speed" class="speed" aria-label="Auto-play speed (messages per second)"><option value="1">1/s</option><option value="2" selected>2/s</option><option value="4">4/s</option><option value="8">8/s</option></select>
+    <button class="btn" id="btn-next" title="Stream the next event"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Push next</button>
+    <button class="btn" id="btn-all" title="Render everything"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 6 5 5 5-5M7 13l5 5 5-5"/></svg> Load all</button>
+    <button class="btn icon-btn" id="btn-reset" title="Reset" aria-label="Reset"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
+    <button class="btn icon-btn" id="theme" title="Toggle theme" aria-label="Toggle theme"></button>
+  </div>
+</div>
+
+<div class="page">
+  <div class="panel">
+    <div class="panel-head">
+      <span class="eyebrow">Session Logs</span>
+      <span class="sep"></span><span class="meta">claude-opus-4-8</span>
+      <span class="live" id="live"><span class="pip"></span> <span class="ltext">Live</span></span>
+    </div>
+    <div class="vpwrap">
+      <div class="viewport" id="vp">
+        <div class="stream" id="stream" aria-live="polite" aria-relevant="additions"></div>
+      </div>
+      <button class="jump" id="jump"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg><span id="jumplabel">New</span></button>
+    </div>
+    <div class="panel-foot"><div id="running"></div></div>
+  </div>
+</div>
+
+<script src="../demo-data.js"></script>
+<script src="../demo-runtime.js"></script>
+<script>
+const md=SwarmDemo.mdToHtml, esc=SwarmDemo.esc;
+function el(html){const t=document.createElement('template');t.innerHTML=html.trim();return t.content.firstElementChild;}
+const ICON={
+  bot:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>',
+  user:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+  bash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+  file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+  web:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+  task:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7M18 8.5A6 6 0 0 1 8.5 6"/><circle cx="18" cy="6" r="2.5"/></svg>',
+  mcp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7z"/></svg>',
+  other:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2-2z"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>',
+  chev:'<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>'
+};
+let lastIter=null,taskNo=0;
+function textTurn(e){
+  const isU=e.role==='user';
+  return el('<article class="turn '+(isU?'user':'assistant')+'"><div class="avatar">'+(isU?ICON.user:ICON.bot)+'</div>'+
+    '<div><div class="thead"><span class="who">'+(isU?'You':'Agent')+'</span>'+(e.model&&!isU?'<span class="model">'+esc(e.model)+'</span>':'')+'<span class="ts">'+e.time+'</span><button class="copy" title="Copy" aria-label="Copy message">'+ICON.copy+'</button></div>'+
+    '<div class="bubble"><div class="prose">'+md(e.md)+'</div></div></div></article>');
+}
+function toolTurn(e){
+  const ic=ICON[e.kind]||ICON.other;
+  const label=e.kind==='mcp'?'<span class="dim">'+esc(e.server)+' · </span>'+esc(e.name):esc(e.title);
+  const detail=e.detail?'<span class="tdetail">'+esc(e.detail)+'</span>':'<span class="tdetail"></span>';
+  const status=e.hasResult?'<span class="tstatus"><span class="'+(e.ok?'ok':'err')+'">'+(e.ok?'✓':'✕')+'</span> '+esc(e.preview)+'</span>':'<span class="tstatus">'+esc(e.preview)+'</span>';
+  let body='';
+  if(e.input&&e.input!=='{}')body+='<div class="kv">Input</div><pre>'+esc(e.input)+'</pre>';
+  if(e.body)body+='<div class="kv">Result</div><pre>'+esc(e.body)+'</pre>';
+  if(!body)body='<div class="kv">Result</div><pre>(no output)</pre>';
+  return el('<article class="turn tool" data-kind="'+e.kind+'"><div class="avatar">'+ic+'</div>'+
+    '<div class="tool-card bubble" data-kind="'+e.kind+'"><button class="tool-trigger"><span class="kind">'+ic+'</span><span class="tlabel">'+label+'</span>'+detail+status+ICON.chev+'</button>'+
+    '<div class="tool-body"><div class="inner">'+body+'</div></div></div></article>');
+}
+function renderEntry(e){
+  const frag=document.createDocumentFragment();
+  if(e.iter!=null&&e.iter!==lastIter){lastIter=e.iter;const d=el('<div class="iter"><span>Stacked task '+(++taskNo)+'</span></div>');frag.appendChild(d);}
+  frag.appendChild(e.type==='tool'?toolTurn(e):textTurn(e));
+  return frag;
+}
+function afterMount(scope){
+  scope.querySelectorAll('.tool-trigger').forEach(b=>{if(b._w)return;b._w=1;b.onclick=()=>b.closest('.tool-card').classList.toggle('open');});
+  scope.querySelectorAll('.copy').forEach(b=>{if(b._w)return;b._w=1;b.onclick=()=>{const p=b.closest('.turn').querySelector('.prose');navigator.clipboard&&navigator.clipboard.writeText((p?p.innerText:'').trim());b.style.color='var(--success-strong)';setTimeout(()=>b.style.color='',1000);};});
+}
+SwarmDemo.init({renderEntry,afterMount,onReset:()=>{lastIter=null;taskNo=0;},initial:4});
+</script>
+</body>
+</html>

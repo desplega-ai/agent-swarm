@@ -77,11 +77,13 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
 import { progressBarTone } from "@/lib/percent-progress-tone";
 import { statusTextClass } from "@/lib/status-tone";
+import { taskIsRunning } from "@/lib/task-activity";
 import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 
 function logDotColor(eventType: string, newValue?: string): string {
@@ -497,12 +499,14 @@ export default function TaskDetailPage() {
   // Phase 17 — collapsible right rail (Activity feed). Persists to
   // localStorage so the choice survives reloads and route changes.
   const [railCollapsed, setRailCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("agent-swarm-task-rail-collapsed") === "1";
+    if (typeof window === "undefined") return true;
+    // Collapsed by default on first visit; respect a stored preference thereafter.
+    const stored = window.localStorage.getItem("agent-swarm-task-rail-collapsed-v2");
+    return stored === null ? true : stored === "1";
   });
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem("agent-swarm-task-rail-collapsed", railCollapsed ? "1" : "0");
+    window.localStorage.setItem("agent-swarm-task-rail-collapsed-v2", railCollapsed ? "1" : "0");
   }, [railCollapsed]);
 
   if (isLoading) {
@@ -827,6 +831,7 @@ export default function TaskDetailPage() {
     <SessionLogViewer
       logs={sessionLogs}
       compactionSnapshots={contextData?.snapshots}
+      isRunning={taskIsRunning(task.status)}
       className="flex-1 min-h-0"
     />
   ) : (
@@ -1061,6 +1066,7 @@ export default function TaskDetailPage() {
               <SessionLogViewer
                 logs={sessionLogs}
                 compactionSnapshots={contextData?.snapshots}
+                isRunning={taskIsRunning(task.status)}
                 className="flex-1 min-h-0"
               />
             ) : (
@@ -1090,21 +1096,28 @@ export default function TaskDetailPage() {
               while the heading still covers timeline rows scrolling past it.
               The h4's `pr-10` reserves visual room for the chevron so they
               don't overlap horizontally even with the higher z-index. */}
-          <button
-            type="button"
-            onClick={() => setRailCollapsed((v) => !v)}
-            aria-label={railCollapsed ? "Expand activity rail" : "Collapse activity rail"}
-            className={cn(
-              "absolute z-40 top-2 h-6 w-6 inline-flex items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",
-              railCollapsed ? "left-1/2 -translate-x-1/2" : "right-2",
-            )}
-          >
-            {railCollapsed ? (
-              <ChevronLeft className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
-            )}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setRailCollapsed((v) => !v)}
+                aria-label={railCollapsed ? "Expand activity rail" : "Collapse activity rail"}
+                className={cn(
+                  "absolute z-40 top-2 h-6 w-6 inline-flex cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",
+                  railCollapsed ? "left-1/2 -translate-x-1/2" : "right-2",
+                )}
+              >
+                {railCollapsed ? (
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              {railCollapsed ? "Activity" : "Collapse activity"}
+            </TooltipContent>
+          </Tooltip>
           {!railCollapsed && rightRailContent}
         </aside>
       </div>

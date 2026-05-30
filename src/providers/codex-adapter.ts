@@ -351,15 +351,34 @@ export async function buildCodexConfig(
     }
   }
 
+  // (4) context-mode — pre-installed stdio MCP server providing the `ctx_*`
+  // context-compression tools. Gated by `CONTEXT_MODE_DISABLED` so builds /
+  // deploys without the `context-mode` binary on PATH don't break the session.
+  // Same entry shape as the swarm + installed-server stdio entries above.
+  if (process.env.CONTEXT_MODE_DISABLED !== "true") {
+    mcpServers["context-mode"] = {
+      command: "context-mode",
+      enabled: true,
+      startup_timeout_sec: 30,
+      tool_timeout_sec: 120,
+    };
+  }
+
   // (1) Baseline overrides. Keep these aligned with the Dockerfile baseline
   // at `~/.codex/config.toml` (Phase 6). Repeating them here makes local dev
   // (no baseline file) behave identically to the Docker worker.
+  //
+  // `features.hooks` / `features.plugin_hooks` enable Codex's hook system and
+  // the hooks contributed by installed Codex plugins (context-mode's plugin:
+  // routing injection, PreToolUse safety blocks, output capture). The SDK
+  // flattens these to `--config features.hooks=true` / `features.plugin_hooks=true`.
   return {
     model,
     approval_policy: "never",
     sandbox_mode: "danger-full-access",
     skip_git_repo_check: true,
     show_raw_agent_reasoning: false,
+    features: { hooks: true, plugin_hooks: true },
     mcp_servers: mcpServers as CodexConfig,
   };
 }
