@@ -284,6 +284,30 @@ body {
   animation: sl-flash 1.3s ease-out;
 }
 
+/* Streamed-in highlight — a row that arrives while the viewer is following the
+ * tail slides in and gets a brief, light primary glow that settles. Folds in
+ * the sl-enter motion so only one `animation` runs on the element. */
+@keyframes sl-stream {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+    background-color: color-mix(in oklch, var(--color-primary) 14%, transparent);
+  }
+  28% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    background-color: transparent;
+  }
+}
+
+.sl-stream {
+  animation: sl-stream 1.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
 @keyframes sl-orb {
   0% {
     box-shadow: 0 0 0 0 color-mix(in oklch, var(--color-status-active) 55%, transparent);
@@ -303,6 +327,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .sl-enter,
   .sl-flash,
+  .sl-stream,
   .sl-orb {
     animation: none;
   }
@@ -422,4 +447,22 @@ body {
 }
 .prose-session-log li > p + p {
   margin-top: 0.25em;
+}
+
+/* Session-log fenced code blocks (LogCodeBlock). These scoped selectors outrank
+ * the generic `.prose-* pre` rules above (extra class = higher specificity), so
+ * the inner <pre> is reset flat — no background, no radius, no double padding —
+ * and the single clean container around it owns the styling. Color is left to
+ * inherit so code reads as foreground in messages and muted in thinking blocks. */
+.prose-chat pre.sl-code-pre,
+.prose-session-log pre.sl-code-pre {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0;
+  background: transparent;
+  max-height: 26rem;
+  overflow: auto;
+  font-family: "Space Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
 }

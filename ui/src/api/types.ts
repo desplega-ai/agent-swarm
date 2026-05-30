@@ -10,7 +10,8 @@ export type AgentTaskStatus =
   | "paused"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "superseded";
 export type AgentTaskSource =
   | "mcp"
   | "slack"

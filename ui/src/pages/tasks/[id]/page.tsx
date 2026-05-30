@@ -444,8 +444,10 @@ function TaskContextSection({
           </span>
         </div>
         <MetaRow icon={Cpu} label="Used">
-          <span className="text-xs font-mono inline-flex items-center gap-1.5">
-            {formatTokens(usedTokens)} / {formatTokens(totalTokens)}
+          <span className="flex flex-col items-start gap-1 font-mono text-xs">
+            <span className="whitespace-nowrap">
+              {formatTokens(usedTokens)} / {formatTokens(totalTokens)}
+            </span>
             {latestSnapshot?.contextFormula && latestSnapshot.contextFormula !== "unknown" && (
               <Badge
                 variant="outline"

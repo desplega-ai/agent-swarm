@@ -1,5 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, Brain, Check, ChevronRight, Copy, Scissors, Search } from "lucide-react";
+import { Highlight, themes } from "prism-react-renderer";
 import {
   type CSSProperties,
   memo,
@@ -18,6 +19,7 @@ import "streamdown/styles.css";
 import type { ContextSnapshot, SessionLog } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTheme } from "@/hooks/use-theme";
 import { formatTokens } from "@/lib/format-tokens";
 import { cn, normalizeNewlines } from "@/lib/utils";
 
@@ -670,9 +672,17 @@ function previewOf(body: string): string {
   return truncate(s.replace(/\s+/g, " "), 52) || "ok";
 }
 
-/** Normalize Unicode bullets at line-start to markdown lists, then paragraph-fix. */
+/** Normalize Unicode bullets at line-start to markdown lists, then paragraph-fix.
+ * Fenced code blocks are split out and passed through verbatim — running the
+ * single→double newline paragraph fix inside a ``` fence would double-space
+ * every code line. Handles unclosed fences (streaming) by matching to EOL. */
 function tidyMarkdown(text: string): string {
-  return normalizeNewlines(text.replace(/^([ \t]*)[•·▪]\s+/gm, "$1- "));
+  return text
+    .split(/(```[\s\S]*?(?:```|$))/g)
+    .map((part, i) =>
+      i % 2 === 1 ? part : normalizeNewlines(part.replace(/^([ \t]*)[•·▪]\s+/gm, "$1- ")),
+    )
+    .join("");
 }
 
 function buildStream(
@@ -907,6 +917,124 @@ function CopyIconButton({
   );
 }
 
+// --- Markdown code blocks -------------------------------------------------
+// Agent output frequently embeds fenced code (```bash, ```json, …). Streamdown's
+// built-in CodeBlock renders a heavy, double-bordered box whose copy/download
+// controls fight the surrounding .prose-* styles (and didn't reliably work). We
+// override `code`/`pre` — the same pattern as markdown-view.tsx's Monaco
+// override, but lightweight (no editor instances, safe inside the virtualized
+// log) — to render one clean terminal-style block with a single working Copy
+// button and no download.
+// Markdown fence label → Prism language id (Prism's bundled grammars use a few
+// different names; unknowns fall through and render as plain, uncolored code).
+const PRISM_LANG_ALIASES: Record<string, string> = {
+  sh: "bash",
+  shell: "bash",
+  zsh: "bash",
+  console: "bash",
+  ts: "typescript",
+  js: "javascript",
+  yml: "yaml",
+  py: "python",
+  rb: "ruby",
+  md: "markdown",
+  dockerfile: "docker",
+};
+
+const LogCodeBlock = memo(function LogCodeBlock({
+  language,
+  value,
+}: {
+  language: string;
+  value: string;
+}) {
+  const { theme } = useTheme();
+  const lang = language && language.toLowerCase() !== "text" ? language.toLowerCase() : null;
+  const prismLang = lang ? (PRISM_LANG_ALIASES[lang] ?? lang) : "text";
+  return (
+    <div className="sl-code group/code relative my-2 overflow-hidden rounded-lg border border-border/70 bg-muted/40">
+      {lang ? (
+        <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/50 py-1 pl-3 pr-1">
+          <span className="select-none font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            {lang}
+          </span>
+          <CopyIconButton text={value} label="Copy code" className="size-6" />
+        </div>
+      ) : (
+        <CopyIconButton
+          text={value}
+          label="Copy code"
+          className="absolute right-1.5 top-1.5 z-10 bg-muted/80 opacity-0 backdrop-blur transition-opacity group-hover/code:opacity-100 focus-visible:opacity-100"
+        />
+      )}
+      {/* Prism highlights synchronously (no async flash, safe in the virtualized
+          list). We drop the theme's own background so our container surface shows
+          through and only keep the per-token colors. */}
+      <Highlight
+        code={value}
+        language={prismLang}
+        theme={theme === "dark" ? themes.vsDark : themes.github}
+      >
+        {({ tokens, getLineProps, getTokenProps }) => (
+          <pre className="sl-code-pre">
+            {tokens.map((line, i) => (
+              <div key={i} {...getLineProps({ line })}>
+                {line.map((token, k) => (
+                  <span key={k} {...getTokenProps({ token })} />
+                ))}
+              </div>
+            ))}
+          </pre>
+        )}
+      </Highlight>
+    </div>
+  );
+});
+
+// Streamdown component overrides shared by every session-log markdown surface.
+const LOG_MD_COMPONENTS = {
+  code({
+    className,
+    children,
+    node: _node,
+    ...rest
+  }: {
+    className?: string;
+    children?: ReactNode;
+    node?: unknown;
+  }) {
+    const m = /language-([\w-]+)/.exec(className ?? "");
+    const raw = Array.isArray(children) ? children.join("") : String(children ?? "");
+    // Treat as a block when fenced with a language OR multi-line (inline
+    // markdown code is always single-line). Everything else is an inline chip
+    // styled by the .prose-* rules.
+    if (!m && !raw.includes("\n")) {
+      return (
+        <code className={className} {...rest}>
+          {children}
+        </code>
+      );
+    }
+    return <LogCodeBlock language={m?.[1] ?? ""} value={raw.replace(/\n$/, "")} />;
+  },
+  // Our block brings its own container — unwrap Streamdown's <pre> so we don't
+  // nest a styled block inside a styled <pre>.
+  pre({ children }: { children?: ReactNode }) {
+    return <>{children}</>;
+  },
+};
+
+// Single entry point for session-log markdown: tidies bullets/newlines, disables
+// Streamdown's floating table/code controls, and routes fenced code through the
+// clean LogCodeBlock above.
+function LogMarkdown({ children }: { children: string }) {
+  return (
+    <Streamdown components={LOG_MD_COMPONENTS} controls={false}>
+      {tidyMarkdown(children)}
+    </Streamdown>
+  );
+}
+
 const PROVIDER_STATUS_STYLES: Record<string, { label: string; bg: string; text: string }> = {
   running: { label: "Running", bg: "bg-status-paused/15", text: "text-status-paused-strong" },
   working: { label: "Working", bg: "bg-status-paused/15", text: "text-status-paused-strong" },
@@ -983,7 +1111,7 @@ function ProviderMetaBubble({ block }: { block: ProviderMetaBlock }) {
       {summary && <p className="text-xs text-muted-foreground">{summary}</p>}
       {output && (
         <div className="prose-chat prose-session-log text-sm text-foreground">
-          <Streamdown>{tidyMarkdown(output)}</Streamdown>
+          <LogMarkdown>{output}</LogMarkdown>
         </div>
       )}
     </div>
@@ -996,12 +1124,18 @@ function RowShell({
   iso,
   flash,
   isNew,
+  highlight,
+  streamDelayMs,
   children,
 }: {
   time: string;
   iso: string;
   flash?: boolean;
   isNew?: boolean;
+  /** Row streamed in while the viewer was following — slide in + light highlight. */
+  highlight?: boolean;
+  /** Delay (ms) before the entrance plays — drives the one-by-one staggered reveal. */
+  streamDelayMs?: number;
   children: ReactNode;
 }) {
   return (
@@ -1009,8 +1143,12 @@ function RowShell({
       className={cn(
         "group grid grid-cols-[46px_minmax(0,1fr)] items-start gap-x-3 border-b border-border/40 py-[7px] transition-colors hover:bg-muted/50 sm:grid-cols-[54px_minmax(0,1fr)] sm:gap-x-[18px]",
         flash && "sl-flash",
-        isNew && "sl-enter",
+        // One animation per element (the `animation` shorthands would clobber
+        // each other): a row that arrives while following slides in AND glows;
+        // otherwise it just slides in.
+        highlight ? "sl-stream" : isNew && "sl-enter",
       )}
+      style={streamDelayMs ? { animationDelay: `${streamDelayMs}ms` } : undefined}
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -1252,6 +1390,13 @@ const MinimapRail = memo(function MinimapRail({
 
 const VIRTUALIZE_THRESHOLD = 120;
 
+// Staggered-reveal tuning: when a poll appends a small batch of new rows while
+// following, each row after the first is delayed by STAGGER_STEP_MS so they
+// cascade in one-by-one. Batches larger than STAGGER_MAX_ROWS (catch-up /
+// initial load) skip the stagger and appear together.
+const STAGGER_MAX_ROWS = 6;
+const STAGGER_STEP_MS = 100;
+
 interface SessionLogViewerProps {
   logs: SessionLog[];
   compactionSnapshots?: ContextSnapshot[];
@@ -1360,6 +1505,7 @@ export function SessionLogViewer({
 
   // --- Scroll plumbing (virtualizer + stick-to-bottom + jump pill) ---
   const parentRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const atBottomRef = useRef(true);
   const [pending, setPending] = useState(0);
@@ -1405,15 +1551,25 @@ export function SessionLogViewer({
       if (ab) setPending(0);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
+    // Don't compute atBottom synchronously here: on first mount scrollTop is 0
+    // while content overflows, which would latch "not at bottom" and defeat the
+    // initial pin below. The pin establishes the at-bottom state; real scroll
+    // events take over from there.
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
   const stickToBottom = useCallback(() => {
     const el = parentRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    // In virtualized mode getTotalSize() is an estimate until rows measure, so a
+    // bare scrollTop can undershoot the real bottom. scrollToIndex forces the
+    // tail to render + measure; the scrollTop assignment then lands flush.
+    if (virtualize && visibleRows.length > 0) {
+      virtualizer.scrollToIndex(visibleRows.length - 1, { align: "end" });
+    }
+    el.scrollTop = el.scrollHeight;
     setPending(0);
-  }, []);
+  }, [virtualize, virtualizer, visibleRows.length]);
 
   // Keep pinned to the bottom as content grows/measures (only when already there).
   const totalSize = virtualize ? virtualizer.getTotalSize() : 0;
@@ -1421,6 +1577,52 @@ export function SessionLogViewer({
   useEffect(() => {
     if (atBottomRef.current) requestAnimationFrame(stickToBottom);
   }, [totalSize, visibleRows.length, stickToBottom]);
+
+  // Land at the newest event when the viewer first populates, and re-pin across
+  // a few frames while async content (virtualizer measurement, Streamdown,
+  // fonts) settles. Conventional log/chat behavior: opening a task drops you at
+  // the bottom whether the agent is still streaming or already finished — fixes
+  // both "doesn't auto-follow on open" and "completed task opens at the top".
+  const didInitialPin = useRef(false);
+  const hasRows = visibleRows.length > 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot on first content; intentionally re-pins across frames without re-subscribing.
+  useLayoutEffect(() => {
+    if (didInitialPin.current || !hasRows) return;
+    didInitialPin.current = true;
+    atBottomRef.current = true;
+    setAtBottom(true);
+    const lastIndex = visibleRows.length - 1;
+    const landAtBottom = () => {
+      const el = parentRef.current;
+      if (!el) return;
+      if (virtualize && lastIndex >= 0) {
+        virtualizer.scrollToIndex(lastIndex, { align: "end" });
+      }
+      el.scrollTop = el.scrollHeight;
+    };
+    landAtBottom();
+    let frame = 0;
+    let raf = requestAnimationFrame(function settle() {
+      landAtBottom();
+      if (++frame < 12) raf = requestAnimationFrame(settle);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [hasRows]);
+
+  // Re-pin to the bottom whenever the content grows while we're in follow mode.
+  // The growth-stick effect above only reacts to row-count / virtualizer-total
+  // changes; it misses a row whose own height grows after it's added (streaming
+  // text, async markdown + Prism layout). Observing the content box catches all
+  // of those — this is what actually keeps the log auto-following.
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (atBottomRef.current) stickToBottom();
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [stickToBottom]);
 
   // Track newly-appended events for the "N new" pill when scrolled up.
   useEffect(() => {
@@ -1451,22 +1653,46 @@ export function SessionLogViewer({
     [virtualize, virtualizer, flashRow, openGroup],
   );
 
+  // Staggered reveal — when a poll appends a small batch of new rows while we're
+  // following the tail, give each row after the first an incremental
+  // animation-delay so they cascade in one-by-one instead of popping in all at
+  // once. Excluded: scrolled-up state and large/initial batches (appear at
+  // once). Map: row id → delay (ms).
+  const staggerById = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!atBottomRef.current) return m;
+    const fresh = visibleRows.filter((r) => r.type !== "compaction" && r.isNew);
+    if (fresh.length === 0 || fresh.length > STAGGER_MAX_ROWS) return m;
+    fresh.forEach((r, i) => {
+      if (i > 0) m.set(r.id, i * STAGGER_STEP_MS);
+    });
+    return m;
+  }, [visibleRows]);
+
   const renderRow = useCallback(
     (row: StreamRow) => {
       const flash = flashId === row.id;
       if (row.type === "compaction") return <CompactionDivider snapshot={row.snapshot} />;
+      const streamDelayMs = staggerById.get(row.id) ?? 0;
       if (row.type === "agent") {
         const isUser = row.role === "user";
         const isSystem = row.role === "system";
         return (
-          <RowShell time={row.time} iso={row.iso} flash={flash} isNew={row.isNew}>
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
             {(isUser || isSystem) && (
               <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
                 {isUser ? "You" : "System"}
               </span>
             )}
             <div className="prose-chat prose-session-log mt-[3px] break-words text-foreground">
-              <Streamdown>{tidyMarkdown(row.md)}</Streamdown>
+              <LogMarkdown>{row.md}</LogMarkdown>
             </div>
             <CopyIconButton
               text={row.md}
@@ -1477,14 +1703,28 @@ export function SessionLogViewer({
       }
       if (row.type === "thinking") {
         return (
-          <RowShell time={row.time} iso={row.iso} flash={flash} isNew={row.isNew}>
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
             <ThinkingRow text={row.text} />
           </RowShell>
         );
       }
       if (row.type === "meta") {
         return (
-          <RowShell time={row.time} iso={row.iso} flash={flash} isNew={row.isNew}>
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
             <ProviderMetaBubble block={row.block} />
           </RowShell>
         );
@@ -1492,7 +1732,13 @@ export function SessionLogViewer({
       const open = isGroupOpen(row);
       const dur = formatDur(row.durMs);
       return (
-        <RowShell time={row.time} iso={row.iso} flash={flash} isNew={row.isNew}>
+        <RowShell
+          time={row.time}
+          iso={row.iso}
+          flash={flash}
+          isNew={row.isNew}
+          highlight={row.isNew && atBottomRef.current}
+        >
           <button
             type="button"
             onClick={() => toggleGroup(row.id, open)}
@@ -1531,7 +1777,16 @@ export function SessionLogViewer({
         </RowShell>
       );
     },
-    [flashId, isGroupOpen, openOutputs, openTools, toggleGroup, toggleOutput, toggleTool],
+    [
+      flashId,
+      isGroupOpen,
+      openOutputs,
+      openTools,
+      toggleGroup,
+      toggleOutput,
+      toggleTool,
+      staggerById,
+    ],
   );
 
   const virtualItems = virtualizer.getVirtualItems();
@@ -1567,44 +1822,46 @@ export function SessionLogViewer({
             ref={parentRef}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 [overflow-anchor:none]"
           >
-            {visibleRows.length === 0 ? (
-              <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
-                {rows.length === 0 ? "No session data" : "No matching events"}
-              </div>
-            ) : virtualize ? (
-              <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-                {virtualItems.map((vi) => {
-                  const row = visibleRows[vi.index];
-                  if (!row) return null;
-                  const style: CSSProperties = {
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${vi.start}px)`,
-                  };
-                  return (
-                    <div
-                      key={vi.key}
-                      ref={virtualizer.measureElement}
-                      data-index={vi.index}
-                      data-row-id={row.id}
-                      style={style}
-                    >
+            <div ref={contentRef}>
+              {visibleRows.length === 0 ? (
+                <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
+                  {rows.length === 0 ? "No session data" : "No matching events"}
+                </div>
+              ) : virtualize ? (
+                <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+                  {virtualItems.map((vi) => {
+                    const row = visibleRows[vi.index];
+                    if (!row) return null;
+                    const style: CSSProperties = {
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${vi.start}px)`,
+                    };
+                    return (
+                      <div
+                        key={vi.key}
+                        ref={virtualizer.measureElement}
+                        data-index={vi.index}
+                        data-row-id={row.id}
+                        style={style}
+                      >
+                        {renderRow(row)}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex flex-col">
+                  {visibleRows.map((row) => (
+                    <div key={row.id} data-row-id={row.id}>
                       {renderRow(row)}
                     </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="flex flex-col">
-                {visibleRows.map((row) => (
-                  <div key={row.id} data-row-id={row.id}>
-                    {renderRow(row)}
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Minimap rail */}
@@ -1667,7 +1924,7 @@ function ThinkingRow({ text }: { text: string }) {
       {open && (
         <div className="border-t border-border/60 px-2.5 py-2">
           <div className="prose-chat prose-session-log text-xs text-muted-foreground">
-            <Streamdown>{tidyMarkdown(text)}</Streamdown>
+            <LogMarkdown>{text}</LogMarkdown>
           </div>
         </div>
       )}

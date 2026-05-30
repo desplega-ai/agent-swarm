@@ -66,6 +66,7 @@ const statusConfig: Record<string, StatusConfig> = {
   },
   failed: { label: "FAILED", dot: "bg-status-error", text: "text-status-error-strong" },
   cancelled: { label: "CANCELLED", dot: "bg-status-neutral", text: "text-status-neutral" },
+  superseded: { label: "SUPERSEDED", dot: "bg-status-neutral", text: "text-status-neutral" },
 
   // Service statuses
   starting: {
