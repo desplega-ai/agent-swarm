@@ -1,0 +1,1 @@
+qa-grp	3 sandbox(es)	1 api, 1 lead, 1 worker	expires in 28m

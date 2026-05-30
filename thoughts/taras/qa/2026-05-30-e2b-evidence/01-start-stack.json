@@ -1,0 +1,39 @@
+swarm: qa-grp
+{
+  "api": {
+    "role": "api",
+    "sandbox": {
+      "alias": "agent-swarm-api",
+      "clientID": "6532622b",
+      "envdVersion": "0.6.1",
+      "sandboxID": "ijo643hj9oah3x4xfbfap",
+      "templateID": "639ii6l7qwmhwm6v57rw",
+      "expiresAt": "2026-05-30T10:04:47.189Z"
+    },
+    "url": "https://3013-ijo643hj9oah3x4xfbfap.e2b.app"
+  },
+  "lead": {
+    "role": "worker",
+    "sandbox": {
+      "alias": "agent-swarm-worker",
+      "clientID": "6532622b",
+      "envdVersion": "0.6.1",
+      "sandboxID": "iadbgy5o9kho9gesiw5s9",
+      "templateID": "g04wd8s84g38wjfttrrb",
+      "expiresAt": "2026-05-30T10:05:02.584Z"
+    }
+  },
+  "workers": [
+    {
+      "role": "worker",
+      "sandbox": {
+        "alias": "agent-swarm-worker",
+        "clientID": "6532622b",
+        "envdVersion": "0.6.1",
+        "sandboxID": "ijre659oast22u7rcrqqh",
+        "templateID": "g04wd8s84g38wjfttrrb",
+        "expiresAt": "2026-05-30T10:05:12.701Z"
+      }
+    }
+  ]
+}

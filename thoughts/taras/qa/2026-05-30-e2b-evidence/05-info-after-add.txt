@@ -1,0 +1,11 @@
+swarm: qa-grp
+sandboxes: 4 (1 api, 1 lead, 2 worker)
+api url: https://3013-ijo643hj9oah3x4xfbfap.e2b.app
+api key: **** (from API_KEY)
+  api    ijo643hj9oah3x4xfbfap  expires in 38m
+  lead   iadbgy5o9kho9gesiw5s9  e2b-lead-iadbgy5o9kho9gesiw5s9  expires in 38m
+  worker ij6o05u88ezbn9pnesawd  e2b-ij6o05u88ezbn9pnesawd  expires in 38m
+  worker ijre659oast22u7rcrqqh  e2b-ijre659oast22u7rcrqqh  expires in 38m
+health: up (200 OK)
+dashboard: http://localhost:5175?apiKey=<hidden — pass --reveal-key>&apiUrl=https%3A%2F%2F3013-ijo643hj9oah3x4xfbfap.e2b.app&name=qa-grp
+  (pass --reveal-key to embed the swarm API key for one-click connect)
