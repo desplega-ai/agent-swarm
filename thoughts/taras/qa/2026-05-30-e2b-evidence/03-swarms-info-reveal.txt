@@ -1,0 +1,11 @@
+swarm: qa-grp
+sandboxes: 3 (1 api, 1 lead, 1 worker)
+api url: https://3013-ijo643hj9oah3x4xfbfap.e2b.app
+api key: **** (from API_KEY)
+  api    ijo643hj9oah3x4xfbfap  expires in 28m
+  lead   iadbgy5o9kho9gesiw5s9  e2b-lead-iadbgy5o9kho9gesiw5s9  expires in 28m
+  worker ijre659oast22u7rcrqqh  e2b-ijre659oast22u7rcrqqh  expires in 28m
+health: up (200 OK)
+
+⚠ secret: the URL below embeds the swarm API key — do not share or paste it.
+dashboard: http://localhost:5175?apiKey=123123&apiUrl=https%3A%2F%2F3013-ijo643hj9oah3x4xfbfap.e2b.app&name=qa-grp

@@ -103,6 +103,63 @@ bun run src/cli.tsx e2b publish-template agent-swarm-worker-latest
 Publishing/unpublishing uses the E2B template update API and only requires
 `E2B_API_KEY`.
 
+## Native Log Capture & `swarms logs`
+
+The entrypoint is launched as an **envd-tracked background command**
+(`sandbox.commands.run('bash -lc "set -o pipefail; <entrypoint> 2>&1 | tee
+/tmp/agent-swarm-e2b-<role>.log"', { background: true })`), not the old
+`nohup … >file & sleep 2; kill -0` detach. Consequences:
+
+- envd owns and streams the process, so it survives the controller (your laptop)
+  disconnecting and is visible to E2B's native log surfaces / dashboard.
+- The background handle returns the PID immediately; the launcher polls the
+  handle's `exitCode` once after a short grace period (`undefined` = still
+  running) and surfaces a non-zero early exit as a launch failure. `pipefail`
+  makes the pipeline's exit reflect the entrypoint, not `tee`.
+- `tee` keeps a deterministic file copy at `/tmp/agent-swarm-e2b-<role>.log`
+  (E2B `role` is `api` or `worker` — a lead is `worker`). This file is the
+  source of truth for **full history**, because the SDK's `commands.connect(pid)`
+  only streams output forward from the connect instant (no historical replay).
+
+Stream a swarm's logs by slug:
+
+```bash
+# History (last 200 lines) of the API sandbox (default --role api):
+bun run src/cli.tsx e2b swarms logs my-swarm
+
+# A worker's log, last 500 lines:
+bun run src/cli.tsx e2b swarms logs my-swarm --role worker --tail 500
+
+# Follow live (Ctrl-C to stop); needs a single target sandbox:
+bun run src/cli.tsx e2b swarms logs my-swarm --role api --follow
+```
+
+- `--role api|lead|worker` selects which sandbox's tee'd log to read (default
+  `api`). `lead` and `worker` map to the same on-disk path (`…-worker.log`) but
+  are resolved to distinct sandboxes via the swarm grouping metadata.
+- `--tail <n>` sets how many trailing history lines to emit (default 200).
+- `--follow` tails live (`tail -F`); it refuses to run against multiple matching
+  sandboxes (the two streams would interleave ambiguously) — omit `--follow` for
+  history across all matches.
+- No PID bookkeeping is used: reads key off the deterministic per-role log path,
+  so logs survive a fresh CLI process and sandbox reconnects.
+- **First-call race (known quirk):** the *native* `e2b sandbox logs <id>` stream can
+  return header-only (~2 lines) on the very first call right after launch, due to a
+  stream-flush timing race; an immediate re-run returns full history. The tee'd file
+  (`/tmp/agent-swarm-e2b-<role>.log`) is the source of truth and is what `swarms logs`
+  reads, so no history is lost — just re-run if a first native read looks truncated.
+- **Secret hygiene:** entrypoint output is untrusted and can embed tokens, so
+  every streamed chunk is routed through `redactWithEnv` (→ `scrubSecrets`)
+  before it reaches your terminal. The redaction set covers: known token shapes
+  (`scrubSecrets`), the controller env, and any launch secrets you re-supply on
+  the `swarms logs` call (`--secret`, `--env-file`, `--inherit-env`, `--api-key`
+  are resolved the same way the launch path does and folded into the redaction
+  env). **Residual limitation:** an arbitrary secret that was only known to a
+  prior launch — never re-supplied here and not matching a known shape — is
+  unrecoverable and may stream raw. To scrub it, re-pass the same
+  `--secret`/`--env-file`/`--api-key` to `swarms logs`, or treat the logs as
+  sensitive.
+
 ## GitHub Actions Shape
 
 Store `E2B_API_KEY` plus provider credentials as repository secrets, then run:

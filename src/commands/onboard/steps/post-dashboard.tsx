@@ -1,10 +1,12 @@
 import { Select } from "@inkjs/ui";
 import { Box, Text } from "ink";
+import { buildOnboardDashboardUrl } from "../dashboard-url.ts";
 import type { StepProps } from "../types.ts";
 
 export function PostDashboardStep({ state, addLog, goToNext }: StepProps) {
   const apiUrl = `http://localhost:${state.apiPort || 3013}`;
-  const dashboardUrl = `https://app.agent-swarm.dev?api_url=${apiUrl}&api_key=${state.apiKey}`;
+  // camelCase params — the SPA ignores snake_case (see dashboard-url.ts).
+  const dashboardUrl = buildOnboardDashboardUrl({ apiUrl, apiKey: state.apiKey });
 
   return (
     <Box flexDirection="column" padding={1}>

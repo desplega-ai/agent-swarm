@@ -1,8 +1,10 @@
 ---
 date: 2026-05-29T00:00:00Z
 topic: "E2B Dispatch CLI — Lead Stacks, Swarm Grouping, Lifecycle Control"
-status: draft
+status: completed-v1
 autonomy: autopilot
+last_updated: 2026-05-30T00:00:00Z
+last_updated_by: implementing (v1 = Phases 1-5; v2 = Phases 6-7 deferred)
 ---
 
 # E2B Dispatch CLI — Lead Stacks, Swarm Grouping, Lifecycle Control: Implementation Plan
@@ -76,10 +78,10 @@ Extend the E2B dispatch CLI so an operator can launch a complete, long-lived swa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Unit tests pass (add a `ttlRemaining` test for populated/absent `endAt`): `bun test src/tests/e2b-dispatch.test.ts`
-- [ ] Help lists the new commands: `bun run src/cli.tsx e2b extend --help` and `bun run src/cli.tsx e2b kill --help`
-- [ ] Dry-run does not touch E2B: `bun run src/cli.tsx e2b extend dry --timeout-sec 60 --dry-run`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Unit tests pass (add a `ttlRemaining` test for populated/absent `endAt`): `bun test src/tests/e2b-dispatch.test.ts`
+- [x] Help lists the new commands: `bun run src/cli.tsx e2b extend --help` and `bun run src/cli.tsx e2b kill --help`
+- [x] Dry-run does not touch E2B: `bun run src/cli.tsx e2b extend dry --timeout-sec 60 --dry-run`
 
 #### Automated QA:
 - [ ] Agent starts a short-TTL API sandbox, runs `e2b extend <id> --timeout-sec 3600`, and confirms `endAt` moved out (via `e2b list --json`).
@@ -107,12 +109,12 @@ Extend the E2B dispatch CLI so an operator can launch a complete, long-lived swa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] New isolation tests pass: `--worker-secret FOO=x` appears in worker runtime but **not** lead/API; shared `--secret BAR=y` appears in all three; existing tests stay green — `bun test src/tests/e2b-dispatch.test.ts`
-- [ ] API-key boundary intact: `bash scripts/check-api-key-boundary.sh`
+- [x] Type check passes: `bun run tsc:check`
+- [x] New isolation tests pass: `--worker-secret FOO=x` appears in worker runtime but **not** lead/API; shared `--secret BAR=y` appears in all three; existing tests stay green — `bun test src/tests/e2b-dispatch.test.ts`
+- [x] API-key boundary intact: `bash scripts/check-api-key-boundary.sh`
 
 #### Automated QA:
-- [ ] Agent runs `start-worker --dry-run --agent-role lead --lead-secret K=v` and confirms (via dry-run output / a debug print) the spec resolves `AGENT_ROLE=lead` and `K=v` only in that role's env.
+- [ ] Agent runs `start-worker --dry-run --agent-role lead --lead-secret K=v` and confirms (via dry-run output / a debug print) the spec resolves `AGENT_ROLE=lead` and `K=v` only in that role's env. <!-- Covered via unit tests: dry-run JSON intentionally does NOT surface resolved env (it carries secrets), so per the plan's guidance the proof lives in src/tests/e2b-dispatch.test.ts ("AGENT_ROLE comes from the spec…", fallback test, and "--lead-secret lands only in the lead scope") rather than via noisy debug prints. The literal command runs cleanly (exit 0). -->
 
 #### Manual Verification:
 - [ ] None (fully covered by automated checks).
@@ -140,11 +142,11 @@ Extend the E2B dispatch CLI so an operator can launch a complete, long-lived swa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Dry-run shows API + lead + N workers: `bun run src/cli.tsx e2b start-stack --dry-run --yes --workers 2 --swarm test` (JSON has `api`, `lead`, 2 `workers`)
-- [ ] Help lists new flags: `bun run src/cli.tsx e2b start-stack --help`
-- [ ] Non-TTY never prompts (piped): `echo | bun run src/cli.tsx e2b start-stack --dry-run --swarm test` exits without hanging
-- [ ] Unit tests pass: `bun test src/tests/e2b-dispatch.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Dry-run shows API + lead + N workers: `bun run src/cli.tsx e2b start-stack --dry-run --yes --workers 2 --swarm test` (JSON has `api`, `lead`, 2 `workers`)
+- [x] Help lists new flags: `bun run src/cli.tsx e2b start-stack --help`
+- [x] Non-TTY never prompts (piped): `echo | bun run src/cli.tsx e2b start-stack --dry-run --swarm test` exits without hanging
+- [x] Unit tests pass: `bun test src/tests/e2b-dispatch.test.ts`
 
 #### Automated QA:
 - [ ] Agent runs `start-stack --yes --swarm qa --workers 1 --timeout-sec 1800 --json` against real E2B, then queries `${apiUrl}/api/agents` and confirms exactly one `isLead:true` agent + one worker registered, API `/health` 200.
@@ -179,10 +181,10 @@ Every launch is tagged with a shared swarm slug; `e2b swarms list|info|kill|add`
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Metadata carried (dry-run prints fake sandbox metadata): `bun run src/cli.tsx e2b start-stack --dry-run --yes --swarm demo` shows `swarm`/`swarmRole`
-- [ ] Deep-link unit test passes (camelCase params; onboarding builders now camelCase): `bun test src/tests/e2b-dispatch.test.ts`
-- [ ] Help lists swarms subcommands: `bun run src/cli.tsx e2b swarms --help`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Metadata carried (dry-run prints fake sandbox metadata): `bun run src/cli.tsx e2b start-stack --dry-run --yes --swarm demo` shows `swarm`/`swarmRole`
+- [x] Deep-link unit test passes (camelCase params; onboarding builders now camelCase): `bun test src/tests/e2b-dispatch.test.ts`
+- [x] Help lists swarms subcommands: `bun run src/cli.tsx e2b swarms --help`
 
 #### Automated QA:
 - [ ] Agent starts a real swarm `--swarm qa-grp`, runs `swarms list` (group present), `swarms info qa-grp` (correct API URL, key source, lead+worker, health 200, TTL), `swarms info qa-grp --reveal-key` (deep-link contains the resolved key), then `swarms add qa-grp --workers 1` (worker count grows), then `swarms kill qa-grp` (0 remain).
@@ -213,9 +215,9 @@ The entrypoint becomes an envd-tracked process so its output reaches E2B's nativ
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Unit tests pass: `bun test src/tests/e2b-dispatch.test.ts`
-- [ ] Help lists the logs command: `bun run src/cli.tsx e2b swarms logs --help`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Unit tests pass: `bun test src/tests/e2b-dispatch.test.ts`
+- [x] Help lists the logs command: `bun run src/cli.tsx e2b swarms logs --help`
 
 #### Automated QA:
 - [ ] Agent starts a real swarm, then `e2b swarms logs <slug> --role api` shows entrypoint output (API boot lines), and `e2b sandbox logs <api-id>` (native CLI) is no longer empty.
