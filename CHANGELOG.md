@@ -84,6 +84,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Telemetry: `is_cloud` emitted on every event** (#476) — the telemetry initializer attaches an `is_cloud` flag derived from the runtime environment to every event so downstream pipelines can filter cloud vs self-hosted traffic without joining to a separate dimension.
 
 ### Changed
+- **Slack task-tree status icons now cover every task lifecycle state** (#604) — tree messages in Slack no longer drop the icon when a node is `backlog`, `unassigned`, `offered`, `reviewing`, `paused`, or `superseded`. The renderer now accepts the full `AgentTaskStatus` union and falls back safely for unknown future states, so parent/child trees stay readable across the full lifecycle.
 - **Pages public renderer CSP: allowlist `jsdelivr.net` + `unpkg.com` for `script-src`** (#480) — published HTML pages can now load CDN-hosted libraries from the two most common JS CDNs without inline-script workarounds. CSP otherwise unchanged.
 - **`pi-coding-agent` migrated to `@earendil-works` scope @ 0.74.0** (#459) — `Dockerfile.worker`, provider credential plumbing, and the `harness-providers` docs page were updated to the new package name. Existing installs on the old scope continue to work; new builds pull from `@earendil-works/pi-coding-agent`.
 

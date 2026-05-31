@@ -96,11 +96,11 @@ Tasks that spawn subtasks are rendered as a visual tree in a single evolving Sla
 ```
 ✅ Research phase (3m)
 ├─ ✅ Analyze codebase — Found 12 relevant files
-├─ ✅ Review dependencies — All up to date
-└─ 🔄 Write report
+├─ 👀 Review dependencies — awaiting reviewer feedback
+└─ ⏳ Write report
 ```
 
-Status icons: ⏳ pending, 🔄 in progress, ✅ completed, ❌ failed, 🚫 cancelled. Trees show up to 8 children per node with an overflow indicator for larger task graphs.
+Status icons cover the full task lifecycle: 🗂️ `backlog`, 📭 `unassigned`, 📨 `offered`, 👀 `reviewing`, 📡 `pending`, ⏳ `in_progress`, ⏸️ `paused`, ✅ `completed`, ❌ `failed`, 🚫 `cancelled`, and ↪️ `superseded`. Trees show up to 8 children per node with an overflow indicator for larger task graphs.
 
 ### Message Deduplication
 
