@@ -369,6 +369,10 @@ describe("checkProviderCredentials dispatcher", () => {
         )
       ).ready,
     ).toBe(true);
+
+    const acpStatus = await checkProviderCredentials("acp", {});
+    expect(acpStatus.ready).toBe(true);
+    expect(acpStatus.satisfiedBy).toBe("sdk-delegated");
   });
 
   test("throws on unknown provider", async () => {
@@ -419,11 +423,19 @@ describe("snapshot: every provider", () => {
 
 describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
   test("covers every supported provider", () => {
-    const providers = ["claude", "claude-managed", "codex", "devin", "opencode", "pi"] as const;
+    const providers = [
+      "claude",
+      "claude-managed",
+      "codex",
+      "devin",
+      "opencode",
+      "pi",
+      "acp",
+    ] as const;
     for (const p of providers) {
       expect(REQUIRED_CRED_VARS_BY_PROVIDER[p]).toBeDefined();
-      expect(REQUIRED_CRED_VARS_BY_PROVIDER[p].length).toBeGreaterThan(0);
     }
+    expect(REQUIRED_CRED_VARS_BY_PROVIDER.acp).toEqual([]);
   });
 });
 
