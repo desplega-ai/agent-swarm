@@ -28,7 +28,7 @@ export async function refreshSkillsIfChanged(
   ctx: SkillsRefreshContext,
   lastHashRef: { current: string | null },
 ): Promise<SkillsRefreshResult> {
-  const { apiUrl, swarmUrl, apiKey, agentId, role } = ctx;
+  const { apiUrl, apiKey, agentId, role } = ctx;
   const authHeaders: Record<string, string> = { "X-Agent-ID": agentId };
   if (apiKey) authHeaders.Authorization = `Bearer ${apiKey}`;
 
@@ -83,7 +83,7 @@ export async function refreshSkillsIfChanged(
       "X-Agent-ID": agentId,
     };
     if (apiKey) syncHeaders.Authorization = `Bearer ${apiKey}`;
-    const syncRes = await fetch(`${swarmUrl}/api/skills/sync-filesystem`, {
+    const syncRes = await fetch(`${apiUrl}/api/skills/sync-filesystem`, {
       method: "POST",
       headers: syncHeaders,
     });
