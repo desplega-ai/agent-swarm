@@ -222,7 +222,7 @@ bunx @desplega.ai/agent-swarm <command>
 | `api`     | Start the API + MCP HTTP server |
 | `worker`  | Run a worker agent |
 | `lead`    | Run a lead agent |
-| `e2b`     | Build E2B templates and start API/worker sandboxes |
+| `e2b`     | Build E2B templates and launch/manage grouped API + lead + worker swarms |
 | `docs`    | Open documentation (`--open` to launch in browser) |
 
 ## Deployment

@@ -20,7 +20,7 @@ agent-swarm <command>
 
 ### onboard
 
-Set up a new swarm from scratch using Docker Compose. Interactive wizard that collects credentials, generates `docker-compose.yml` + `.env`, starts the stack, and verifies health.
+Set up a new swarm from scratch using Docker Compose. The interactive wizard collects credentials, generates `docker-compose.yml` + `.env`, starts the stack, verifies health, and prints a dashboard deep-link that auto-connects with the generated API URL and key.
 
 ```bash
 bunx @desplega.ai/agent-swarm onboard
@@ -37,7 +37,7 @@ ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=so
 
 ### connect
 
-Connect this project to an existing swarm. Creates `.mcp.json` and `.claude/settings.local.json` with server URL and API key. Auto-reads `API_KEY` from `.env` if present.
+Connect this project to an existing swarm. Creates `.mcp.json` and `.claude/settings.local.json` with server URL and API key. Auto-reads `AGENT_SWARM_API_KEY` (or legacy `API_KEY`) from `.env` if present.
 
 ```bash
 bunx @desplega.ai/agent-swarm connect
@@ -145,12 +145,14 @@ bunx @desplega.ai/agent-swarm claude-managed-setup --api-url https://swarm.examp
 
 ### e2b
 
-Build Agent Swarm E2B templates and start API or worker sandboxes on demand for CI and Dockerless smoke tests.
+Build Agent Swarm E2B templates and launch or manage grouped E2B swarms on demand for CI, Dockerless smoke tests, and ephemeral staging environments.
 
 ```bash
 bunx @desplega.ai/agent-swarm e2b build-template --role worker
 bunx @desplega.ai/agent-swarm e2b start-worker --api-url https://swarm.example.com --api-key "$SWARM_API_KEY"
-bunx @desplega.ai/agent-swarm e2b start-stack --workers 2 --api-key "$SWARM_API_KEY"
+bunx @desplega.ai/agent-swarm e2b start-stack --yes --swarm demo --workers 2 --api-key "$SWARM_API_KEY"
+bunx @desplega.ai/agent-swarm e2b swarms info demo
+bunx @desplega.ai/agent-swarm e2b swarms logs demo --role api --follow
 ```
 
 | Subcommand | Description |
@@ -161,9 +163,31 @@ bunx @desplega.ai/agent-swarm e2b start-stack --workers 2 --api-key "$SWARM_API_
 | `unpublish-template <template...>` | Make E2B templates private |
 | `start-api --template <name>` | Start the API in an E2B sandbox |
 | `start-worker --api-url <url>` | Start a worker against a public API URL |
-| `start-stack` | Start an API plus one or more workers |
+| `start-stack` | Launch a grouped API + lead + N worker swarm; opens an Ink wizard on a TTY unless `--yes` / headless |
 | `list` | List active E2B sandboxes |
-| `kill <sandbox-id...>` | Stop one or more E2B sandboxes |
+| `extend <sandbox-id...>` | Extend or reduce one or more sandbox TTLs with `--timeout-sec <seconds>` |
+| `swarms list` | Group dispatcher-owned sandboxes by `metadata.swarm` slug |
+| `swarms info <slug>` | Show API URL, key source, TTLs, health, and dashboard deep-link for a swarm |
+| `swarms add <slug>` | Add workers or `--add-lead` to an existing swarm and re-sync their TTL to the group's current end |
+| `swarms logs <slug>` | Stream tee'd entrypoint logs for the API, lead, or worker role; `--follow` tails live output |
+| `swarms kill <slug> \| --all` | Tear down one grouped swarm or sweep every dispatcher-owned swarm |
+| `kill <sandbox-id...> \| --all` | Stop one or more E2B sandboxes, or every dispatcher-owned sandbox |
+
+Key E2B options:
+
+| Option | Description |
+|--------|-------------|
+| `--swarm <slug>` | Set the group slug used by `start-stack` and the `swarms` commands |
+| `--workers <n>` | Number of workers to start or add (default `1`) |
+| `--no-lead` | Legacy topology: start only the API plus workers |
+| `--provider <name>` | Worker harness provider (default `claude`) |
+| `--timeout-sec <seconds>` | Sandbox TTL; for `extend`, the new TTL counted from now |
+| `--env-file`, `--secret`, `--inherit-env` | Shared runtime configuration applied to all roles |
+| `--api-env-file`, `--lead-env-file`, `--worker-env-file` | Role-scoped env layers added on top of the shared config |
+| `--api-secret`, `--lead-secret`, `--worker-secret` | Role-scoped secrets layered on top of the shared config |
+| `--json` | Machine-readable output for automation |
+
+`start-stack` now defaults to the full API + lead + workers topology. It runs interactively on a TTY, but switches to headless mode automatically under `--yes`, `--non-interactive`, `--dry-run`, or any non-TTY invocation. The `swarms logs` output is secret-scrubbed before it hits stdout, and `swarms info` can optionally embed the API key into the dashboard deep-link with `--reveal-key` when you explicitly need a copy-pasteable URL.
 
 ### docs
 
