@@ -1,0 +1,31 @@
+---
+title: "Release Notes — Week of May 25-June 1, 2026"
+description: "Self-serve E2B swarm operations, better follow-up continuity, broader messaging reach, and a round of reliability hardening."
+---
+
+## Highlights
+
+This week’s release is about operational leverage. The headline change is a new self-serve workflow for running E2B-backed swarms: teams can now launch, inspect, extend, group, and shut down swarm stacks with native logs instead of stitching together lower-level dispatch steps. In practice, that means less operator glue between “I want a sandbox swarm” and “I can see what it’s doing and control its lifecycle.” That work landed in `300a5ad7` / #601.
+
+Two other changes make that story more complete:
+
+- **Follow-up work now carries context more reliably across harnesses.** Universal context preambles and `ctx_*` tooling now span Claude, Codex, and OpenCode, so resumed or handed-off tasks start with more of the right state and less manual re-briefing. That came in `e34f8324` / #567 and `0d2b4537` / #599.
+- **Messaging workflows got closer to production-ready.** Native Kapso/WhatsApp integration plus inbound acknowledgement support means the swarm can both receive and respond through a more complete messaging loop. That shipped in `f8a60508` / #560 and `ee6b0924` / #607.
+
+Across the week, `agent-swarm` shipped 109 commits. The pattern behind them is consistent: fewer manual steps for operators, fewer dropped threads for agents, and better visibility when workflows hit real infrastructure.
+
+## Improvements
+
+- **E2B swarm management moved up a level.** Instead of treating E2B as a low-level dispatch surface, the platform now exposes swarm stack lifecycle controls, stack grouping, and native logs in a more operator-friendly workflow. For CTOs and ICs, the value is straightforward: sandbox swarms are easier to start, reason about, and clean up without custom runbooks. Primary reference: `300a5ad7` / #601.
+- **Task control is getting more deliberate.** Graceful pause/resume via supersede-and-follow-up and per-task follow-up controls make it easier to interrupt work without losing continuity or spawning messy task trees. This is useful both for human-led review loops and for agents that need a clear continuation path. See `67321c79` / #594 and `aac03da9` / #587.
+- **The operator UI is more informative during live sessions.** Session logs now render code blocks more cleanly, stream better, and auto-follow more predictably, reducing the amount of log friction during active debugging or long-running workflows. That polish landed in `8b3e570d` / #606.
+- **Templates are easier to evaluate before you run them.** The templates UI now surfaces skills, schedules, and workflows directly, and adds a “prompt for the lead” affordance on detail pages. That reduces the gap between discovering a template and understanding how to use it. See `332a142b` / #580.
+- **Model and integration coverage expanded.** The platform added a user-facing MCP token flow, an Amazon Bedrock integration card, and Claude Opus 4.8 plus 4.6 in model registries. For teams standardizing on mixed provider stacks, this lowers setup friction and makes provider choice more visible in-product. References: `5fbab82f` / #536, `0d294b78` / #572, and `39ef95ff` / #582.
+
+## Bug Fixes
+
+- **Codex and runner stability got meaningful hardening.** Several fixes targeted subprocess reliability directly: isolating the Codex SDK into a subprocess, tightening spawn argument budgets, lazy-loading provider adapters to avoid startup crashes, and cleaning up subprocess error propagation and TTY noise. These changes matter because they reduce the class of failures where agents die before work starts or fail without actionable diagnostics. See `4d00d64e` / #581, `91158c8d` / #585, and `6a3e52da` / #584.
+- **Rate-limit and workflow behavior became more predictable.** The runner now detects qualified cooldown messages more accurately, scheduled task memories are gated correctly, and derived tasks no longer inherit a parent’s concrete model by mistake. Those changes reduce surprising retry behavior and keep workflow state cleaner over time. References: `cf8c7e1e`, `210214c8` / #597, and `d19c8094` / #595.
+- **OAuth and integration state handling improved.** Refresh token persistence was fixed for OAuth flows, rotated Jira OAuth tokens now persist correctly, and Kapso sender-to-user mapping was corrected. These are the kinds of fixes that remove slow-burn operational support issues rather than flashy product bugs. See `a911f52c`, `2a804249`, and `e4ee85ab` / #563.
+- **UI trust issues were cleaned up.** Task pricing now renders consistently with GPT-5.5 backfill, and Slack task trees render icons for all statuses. Small surface-area fixes like these matter because they improve operator confidence that what the UI shows is complete and current. References: `a4a8d6e8` / #577 and `8df69e4d` / #604.
+- **Config and telemetry edge cases were tightened.** Env-var export now skips non-identifier keys, and telemetry defaults to production where expected, reducing avoidable misconfiguration noise. See `398c5549` / #573 and `cb8b8f05` / #591.
