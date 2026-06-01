@@ -9,7 +9,8 @@
   <sub>Built by <a href="https://desplega.sh">desplega.sh</a> — by builders, for builders.</sub>
 </p>
 
-> [!TIP] **This repo evolves every single day.** [Watch now →](https://github.com/desplega-ai/agent-swarm/subscription)
+> [!TIP]
+> **This repo evolves every single day.** [Watch now →](https://github.com/desplega-ai/agent-swarm/subscription)
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/e220712e-c54d-4f46-b059-bac04639d229" controls muted playsinline width="720"></video>
