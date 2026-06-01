@@ -48,7 +48,7 @@ let lastCreateOpencodeConfig: unknown;
 async function driveSession(
   events: OpencodeEvent[],
   cfg: ProviderSessionConfig = testConfig(),
-): Promise<{ emitted: ProviderEvent[]; result: ProviderResult }> {
+): Promise<{ emitted: ProviderEvent[]; result: ProviderResult; serverCloseCalls: () => number }> {
   const emitted: ProviderEvent[] = [];
 
   // Build the fake client/server pair used by the mock
@@ -68,7 +68,8 @@ async function driveSession(
     },
   };
 
-  const fakeServer = { url: "http://127.0.0.1:12345", close: mock(() => {}) };
+  const closeServer = mock(() => {});
+  const fakeServer = { url: "http://127.0.0.1:12345", close: closeServer };
 
   // Install mock BEFORE importing the adapter (Bun hoists mock.module)
   mock.module("@opencode-ai/sdk", () => ({
@@ -88,7 +89,54 @@ async function driveSession(
   await new Promise((r) => setTimeout(r, 0));
 
   const result = await session.waitForCompletion();
-  return { emitted, result };
+  return { emitted, result, serverCloseCalls: () => closeServer.mock.calls.length };
+}
+
+async function inspectSessionBeforeIdle(
+  cfg: ProviderSessionConfig,
+  inspect: () => Promise<void>,
+): Promise<void> {
+  const fakeSessionId = "sess-abc-123";
+  let releaseIdle!: () => void;
+  const idleReleased = new Promise<void>((resolve) => {
+    releaseIdle = resolve;
+  });
+
+  const fakeClient = {
+    session: {
+      create: async () => ({ data: { id: fakeSessionId }, error: undefined }),
+      prompt: async (args: unknown) => {
+        lastPromptArgs = args;
+        return { data: {}, error: undefined };
+      },
+    },
+    event: {
+      subscribe: async () => ({
+        stream: (async function* (): AsyncGenerator<OpencodeEvent> {
+          await idleReleased;
+          yield { type: "session.idle", properties: { sessionID: fakeSessionId } };
+        })(),
+      }),
+    },
+  };
+
+  const fakeServer = { url: "http://127.0.0.1:12345", close: mock(() => {}) };
+
+  mock.module("@opencode-ai/sdk", () => ({
+    createOpencode: async (opts: unknown) => {
+      lastCreateOpencodeConfig = opts;
+      return { client: fakeClient, server: fakeServer };
+    },
+  }));
+
+  const { OpencodeAdapter } = await import("../providers/opencode-adapter");
+  const adapter = new OpencodeAdapter();
+  const session = await adapter.createSession(cfg);
+  session.onEvent(() => {});
+  await new Promise((r) => setTimeout(r, 0));
+  await inspect();
+  releaseIdle();
+  await session.waitForCompletion();
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -106,7 +154,7 @@ describe("OpencodeSession — SSE→ProviderEvent mapping", () => {
         properties: { sessionID: "sess-abc-123" },
       },
     ];
-    const { emitted, result } = await driveSession(events);
+    const { emitted, result, serverCloseCalls } = await driveSession(events);
 
     const resultEvent = emitted.find((e) => e.type === "result");
     expect(resultEvent).toBeDefined();
@@ -118,6 +166,21 @@ describe("OpencodeSession — SSE→ProviderEvent mapping", () => {
     expect(result.isError).toBe(false);
     expect(result.exitCode).toBe(0);
     expect(result.sessionId).toBe("sess-abc-123");
+    expect(serverCloseCalls()).toBe(1);
+  });
+
+  test("session.idle closes the server and drops later heartbeat events", async () => {
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+      { type: "server.heartbeat", properties: {} } as OpencodeEvent,
+    ];
+    const { emitted, serverCloseCalls } = await driveSession(events);
+
+    expect(serverCloseCalls()).toBe(1);
+    const rawLogContents = emitted
+      .filter((e): e is Extract<ProviderEvent, { type: "raw_log" }> => e.type === "raw_log")
+      .map((e) => e.content);
+    expect(rawLogContents.some((content) => content.includes("server.heartbeat"))).toBe(false);
   });
 
   test("session.error → emits error event and fails result", async () => {
@@ -130,7 +193,7 @@ describe("OpencodeSession — SSE→ProviderEvent mapping", () => {
         },
       },
     ];
-    const { emitted, result } = await driveSession(events);
+    const { emitted, result, serverCloseCalls } = await driveSession(events);
 
     const errorEvent = emitted.find((e) => e.type === "error");
     expect(errorEvent).toBeDefined();
@@ -140,6 +203,7 @@ describe("OpencodeSession — SSE→ProviderEvent mapping", () => {
     expect(result.isError).toBe(true);
     expect(result.exitCode).toBe(1);
     expect(result.failureReason).toContain("provider overloaded");
+    expect(serverCloseCalls()).toBe(1);
   });
 
   test("prompt Model not found refreshes OpenRouter cache and retries once", async () => {
@@ -600,42 +664,38 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
   });
 
   test("per-task agent file is written with system prompt", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
     const cwd = `/tmp/opencode-test-agent-${Date.now()}`;
     await Bun.$`mkdir -p ${cwd}`.quiet();
     const cfg = testConfig({ taskId: "task-agent-file", systemPrompt: "be a coder", cwd });
-    await driveSession(events, cfg);
+    await inspectSessionBeforeIdle(cfg, async () => {
+      const agentFile = Bun.file(join(cwd, ".opencode", "agents", "swarm-task-agent-file.md"));
+      const exists = await agentFile.exists();
+      expect(exists).toBe(true);
+      if (exists) {
+        const content = await agentFile.text();
+        expect(content).toContain("be a coder");
+      }
+    });
 
-    const agentFile = Bun.file(join(cwd, ".opencode", "agents", "swarm-task-agent-file.md"));
-    const exists = await agentFile.exists();
-    expect(exists).toBe(true);
-    if (exists) {
-      const content = await agentFile.text();
-      expect(content).toContain("be a coder");
-    }
     // Cleanup
     await Bun.$`rm -rf ${cwd}`.quiet().nothrow();
   });
 
   test("per-task config file is written as valid JSON", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
     const cfg = testConfig({ taskId: "task-cfg-json" });
-    await driveSession(events, cfg);
+    await inspectSessionBeforeIdle(cfg, async () => {
+      const configFile = Bun.file("/tmp/opencode-task-cfg-json.json");
+      const exists = await configFile.exists();
+      expect(exists).toBe(true);
+      if (exists) {
+        const text = await configFile.text();
+        expect(() => JSON.parse(text)).not.toThrow();
+        const parsed = JSON.parse(text) as { mcp?: unknown; permission?: unknown };
+        expect(parsed.mcp).toBeDefined();
+        expect(parsed.permission).toBeDefined();
+      }
+    });
 
-    const configFile = Bun.file("/tmp/opencode-task-cfg-json.json");
-    const exists = await configFile.exists();
-    expect(exists).toBe(true);
-    if (exists) {
-      const text = await configFile.text();
-      expect(() => JSON.parse(text)).not.toThrow();
-      const parsed = JSON.parse(text) as { mcp?: unknown; permission?: unknown };
-      expect(parsed.mcp).toBeDefined();
-      expect(parsed.permission).toBeDefined();
-    }
     // Cleanup
     await Bun.$`rm -f /tmp/opencode-task-cfg-json.json`.quiet().nothrow();
     await Bun.$`rm -rf /tmp/opencode-data-task-cfg-json`.quiet().nothrow();

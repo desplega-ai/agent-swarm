@@ -219,6 +219,7 @@ export class OpencodeSession implements ProviderSession {
   private completionPromise: Promise<ProviderResult>;
   private server: { url: string; close(): void };
   private aborted = false;
+  private completed = false;
 
   // Running cost accumulators
   private totalCostUsd = 0;
@@ -271,6 +272,10 @@ export class OpencodeSession implements ProviderSession {
 
   get sessionId(): string {
     return this._sessionId;
+  }
+
+  get isFinished(): boolean {
+    return this.completed;
   }
 
   /** Emit the synthetic session_init event. Called by the adapter immediately
@@ -358,7 +363,7 @@ export class OpencodeSession implements ProviderSession {
 
   /** Process a single opencode SSE event */
   handleOpencodeEvent(ev: OpencodeEvent): void {
-    if (this.aborted) return;
+    if (this.aborted || this.completed) return;
 
     // Always emit the raw event as a scrubbed raw_log
     const rawContent = scrubSecrets(JSON.stringify(ev));
@@ -471,7 +476,7 @@ export class OpencodeSession implements ProviderSession {
         for (const l of this.listeners) l(resultEvent);
         const raw = scrubSecrets(JSON.stringify(resultEvent));
         this.emitDirect({ type: "raw_log", content: raw });
-        this.completionResolve({
+        void this.finish({
           exitCode: 0,
           sessionId: this._sessionId,
           cost,
@@ -515,7 +520,7 @@ export class OpencodeSession implements ProviderSession {
     const raw = scrubSecrets(JSON.stringify(errorEvent));
     this.emitDirect({ type: "raw_log", content: raw });
     const cost = this.buildCostData(true);
-    this.completionResolve({
+    void this.finish({
       exitCode: 1,
       sessionId: this._sessionId,
       cost,
@@ -546,12 +551,22 @@ export class OpencodeSession implements ProviderSession {
     return this.completionPromise;
   }
 
+  private async finish(result: ProviderResult): Promise<void> {
+    if (this.completed) return;
+    this.completed = true;
+    try {
+      this.server.close();
+    } catch {
+      // best-effort
+    }
+    await this.cleanupFiles();
+    this.completionResolve(result);
+  }
+
   async abort(): Promise<void> {
     if (this.aborted) return;
     this.aborted = true;
-    this.server.close();
-    await this.cleanupFiles();
-    this.completionResolve({
+    await this.finish({
       exitCode: 1,
       sessionId: this._sessionId,
       isError: true,
@@ -760,6 +775,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       .then(async ({ stream }) => {
         for await (const event of stream) {
           session.handleOpencodeEvent(event as OpencodeEvent);
+          if (session.isFinished) break;
         }
         // Stream ended without session.idle — treat as completion
       })
