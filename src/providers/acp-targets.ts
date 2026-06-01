@@ -1,7 +1,8 @@
 import { join } from "node:path";
+import { writeCodexAgentsMd } from "./codex-agents-md";
 import type { ProviderSessionConfig } from "./types";
 
-export type AcpTarget = "custom";
+export type AcpTarget = "custom" | "codex-acp";
 
 export interface AcpTargetProfile {
   readonly target: AcpTarget;
@@ -30,6 +31,17 @@ const BASE_ENV_KEYS = [
   "LC_ALL",
   "BUN_INSTALL",
   "NODE_PATH",
+  "NODE_EXTRA_CA_CERTS",
+] as const;
+
+const CODEX_ACP_ENV_KEYS = [
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "OPENAI_ORG_ID",
+  "OPENAI_PROJECT_ID",
+  "CODEX_OAUTH",
+  "CODEX_HOME",
+  "CODEX_PATH_OVERRIDE",
 ] as const;
 
 function readEnv(config: ProviderSessionConfig, key: string): string | undefined {
@@ -68,6 +80,22 @@ function parseCommand(command: string, args: string | undefined): string[] {
   return trimmed.split(/\s+/).filter(Boolean);
 }
 
+function copyConfiguredEnv(
+  config: ProviderSessionConfig,
+  env: Record<string, string>,
+  keys: readonly string[],
+): void {
+  for (const key of keys) {
+    const value = readEnv(config, key);
+    if (value) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(config.env ?? {})) {
+    if (/^codex_oauth_\d+$/.test(key) && value) {
+      env[key] = value;
+    }
+  }
+}
+
 const customTargetProfile: AcpTargetProfile = {
   target: "custom",
   command(config) {
@@ -90,14 +118,35 @@ const customTargetProfile: AcpTargetProfile = {
   },
 };
 
+const codexAcpTargetProfile: AcpTargetProfile = {
+  target: "codex-acp",
+  command(config) {
+    const command = readEnv(config, "ACP_TARGET_COMMAND") ?? readEnv(config, "ACP_COMMAND");
+    if (command) {
+      return parseCommand(command, readEnv(config, "ACP_TARGET_ARGS"));
+    }
+    return ["codex-acp"];
+  },
+  env(config) {
+    const env = baseTargetEnv(config);
+    copyConfiguredEnv(config, env, CODEX_ACP_ENV_KEYS);
+    return env;
+  },
+  async writeSystemPromptArtifact(config) {
+    await writeCodexAgentsMd(config.cwd, config.systemPrompt);
+  },
+};
+
 export function resolveAcpTarget(config: ProviderSessionConfig): AcpTargetProfile {
   const target = readEnv(config, "ACP_TARGET") ?? "custom";
   switch (target) {
     case "custom":
       return customTargetProfile;
+    case "codex-acp":
+      return codexAcpTargetProfile;
     default:
       throw new AcpTargetResolutionError(
-        `Unsupported ACP target "${target}". Slice 0 only includes the custom target resolver; target-specific profiles are added by later ACPHarness slices.`,
+        `Unsupported ACP target "${target}". Supported ACP targets: custom, codex-acp.`,
       );
   }
 }

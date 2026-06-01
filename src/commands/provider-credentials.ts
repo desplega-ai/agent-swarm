@@ -59,6 +59,10 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   acp: [],
 };
 
+function getAcpTarget(env: Record<string, string | undefined>): string {
+  return env.ACP_TARGET ?? "custom";
+}
+
 /**
  * Run the predicate for `provider`. Unknown providers throw — call sites
  * should treat that as a configuration bug, not a user-correctable state.
@@ -88,6 +92,9 @@ export async function checkProviderCredentials(
       return checkPiMonoCredentials(env, opts);
     }
     case "acp":
+      if (getAcpTarget(env) === "codex-acp") {
+        return checkCodexCredentials(env, opts);
+      }
       return { ready: true, missing: [], satisfiedBy: "sdk-delegated" };
     default:
       throw new Error(
@@ -361,6 +368,9 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
         };
       }
       case "acp":
+        if (getAcpTarget(env) === "codex-acp") {
+          return validateProviderCredentials("codex");
+        }
         return presenceCheckOk();
       default:
         return {
