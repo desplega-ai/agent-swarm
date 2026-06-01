@@ -33,6 +33,11 @@ import type {
   McpServersResponse,
   McpUserConfigResponse,
   MessagesResponse,
+  Metric,
+  MetricRunResult,
+  MetricSaveInput,
+  MetricSaveResponse,
+  MetricsListResponse,
   MintTokenResponse,
   PageListItem,
   PageMetadata,
@@ -1974,6 +1979,60 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/pages${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`listPages: ${res.status}`);
+    return res.json();
+  }
+
+  async listMetrics(opts?: {
+    agentId?: string;
+    limit?: number;
+    offset?: number;
+    fields?: "full" | "slim";
+  }): Promise<MetricsListResponse> {
+    const params = new URLSearchParams();
+    if (opts?.agentId) params.set("agentId", opts.agentId);
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts?.offset !== undefined) params.set("offset", String(opts.offset));
+    if (opts?.fields) params.set("fields", opts.fields);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/metrics/definitions${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`listMetrics: ${res.status}`);
+    return res.json();
+  }
+
+  async getMetric(id: string): Promise<Metric> {
+    const url = `${this.getBaseUrl()}/api/metrics/definitions/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`getMetric ${id}: ${res.status}`);
+    return res.json();
+  }
+
+  async createMetric(input: MetricSaveInput): Promise<MetricSaveResponse> {
+    const url = `${this.getBaseUrl()}/api/metrics/definitions`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) throw new Error(`createMetric: ${res.status}`);
+    return res.json();
+  }
+
+  async updateMetric(id: string, input: Partial<MetricSaveInput>): Promise<MetricSaveResponse> {
+    const url = `${this.getBaseUrl()}/api/metrics/definitions/${encodeURIComponent(id)}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) throw new Error(`updateMetric ${id}: ${res.status}`);
+    return res.json();
+  }
+
+  async runMetric(id: string): Promise<MetricRunResult> {
+    const url = `${this.getBaseUrl()}/api/metrics/definitions/${encodeURIComponent(id)}/run`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`runMetric ${id}: ${res.status}`);
     return res.json();
   }
 }

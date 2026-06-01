@@ -36,6 +36,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
   { label: "Agents", path: "/agents", icon: Bot },
   { label: "Tasks", path: "/tasks", icon: ClipboardList },
+  { label: "Metrics", path: "/metrics", icon: BarChart3 },
   { label: "Chat", path: "/chat", icon: MessageSquare },
   { label: "Schedules", path: "/schedules", icon: Clock },
   { label: "Usage", path: "/usage", icon: BarChart3 },

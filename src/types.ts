@@ -1390,6 +1390,80 @@ export const PageVersionSchema = z.object({
 });
 export type PageVersion = z.infer<typeof PageVersionSchema>;
 
+// ---------------------------------------------------------------------------
+// Metrics
+// ---------------------------------------------------------------------------
+
+const MetricParamSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+export const MetricFormatSchema = z.enum(["number", "integer", "currency", "percent", "duration"]);
+export type MetricFormat = z.infer<typeof MetricFormatSchema>;
+
+export const MetricVisualizationSchema = z.enum(["stat", "timeseries", "bar", "table"]);
+export type MetricVisualization = z.infer<typeof MetricVisualizationSchema>;
+
+export const MetricDefinitionSchema = z.object({
+  version: z.literal(1),
+  viz: MetricVisualizationSchema,
+  query: z.object({
+    sql: z.string().min(1).max(10_000),
+    params: z.array(MetricParamSchema).optional(),
+    maxRows: z.number().int().min(1).max(500).optional(),
+  }),
+  columns: z
+    .object({
+      x: z.string().optional(),
+      y: z.string().optional(),
+      label: z.string().optional(),
+      value: z.string().optional(),
+      series: z.string().optional(),
+      table: z
+        .array(
+          z.object({
+            key: z.string(),
+            label: z.string().optional(),
+            format: MetricFormatSchema.optional(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
+  format: MetricFormatSchema.optional(),
+  refreshSeconds: z.number().int().min(5).max(3600).optional(),
+});
+export type MetricDefinition = z.infer<typeof MetricDefinitionSchema>;
+
+export const MetricSnapshotSchema = z.object({
+  title: z.string(),
+  description: z.string().optional(),
+  definition: MetricDefinitionSchema,
+});
+export type MetricSnapshot = z.infer<typeof MetricSnapshotSchema>;
+
+export const MetricSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  slug: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  definition: MetricDefinitionSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Metric = z.infer<typeof MetricSchema>;
+
+export type MetricSummary = Omit<Metric, "definition">;
+
+export const MetricVersionSchema = z.object({
+  id: z.string(),
+  metricId: z.string(),
+  version: z.number().int().min(1),
+  snapshot: MetricSnapshotSchema,
+  changedByAgentId: z.string().optional(),
+  createdAt: z.string(),
+});
+export type MetricVersion = z.infer<typeof MetricVersionSchema>;
+
 // --- Workflow Run ---
 
 export const WorkflowRunStatusSchema = z.enum([

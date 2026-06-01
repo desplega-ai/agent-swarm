@@ -85,6 +85,7 @@ const navGroups: NavGroup[] = [
       { title: "Home", path: "/", icon: Home },
       { title: "Tasks", path: "/tasks", icon: ListTodo },
       { title: "Sessions", path: "/sessions", icon: MessageSquare, gate: { minVersion: "1.76.0" } },
+      { title: "Metrics", path: "/metrics", icon: BarChart3 },
       { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
     ],
   },

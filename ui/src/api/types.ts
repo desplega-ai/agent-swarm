@@ -1501,6 +1501,73 @@ export interface PagesListResponse {
   total: number;
 }
 
+export type MetricVisualization = "stat" | "timeseries" | "bar" | "table";
+export type MetricFormat = "number" | "integer" | "currency" | "percent" | "duration";
+
+export interface MetricDefinition {
+  version: 1;
+  viz: MetricVisualization;
+  query: {
+    sql: string;
+    params?: Array<string | number | boolean | null>;
+    maxRows?: number;
+  };
+  columns?: {
+    x?: string;
+    y?: string;
+    label?: string;
+    value?: string;
+    series?: string;
+    table?: Array<{ key: string; label?: string; format?: MetricFormat }>;
+  };
+  format?: MetricFormat;
+  refreshSeconds?: number;
+}
+
+export interface Metric {
+  id: string;
+  agentId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  definition: MetricDefinition;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MetricListItem = Omit<Metric, "definition"> & { definition?: MetricDefinition };
+
+export interface MetricsListResponse {
+  metrics: MetricListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface MetricRunResult {
+  metric: Metric;
+  result: {
+    columns: string[];
+    rows: Record<string, unknown>[];
+    elapsed: number;
+    total: number;
+    truncated: boolean;
+    maxRows: number;
+  };
+}
+
+export interface MetricSaveInput {
+  slug?: string;
+  title: string;
+  description?: string | null;
+  definition: MetricDefinition;
+}
+
+export interface MetricSaveResponse {
+  id: string;
+  version: number;
+}
+
 /**
  * Lightweight swarm-wide counts from `GET /api/metrics` (API >= the
  * generic-metrics release). Pure `COUNT(*)` aggregates — no cost/usage data.

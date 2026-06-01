@@ -47,6 +47,7 @@ const PeoplePage = lazy(() => import("@/pages/people/page"));
 const PersonDetailPage = lazy(() => import("@/pages/people/[id]/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
 const MemoryPage = lazy(() => import("@/pages/memory/page"));
+const MetricsPage = lazy(() => import("@/pages/metrics/page"));
 const PageDetailPage = lazy(() => import("@/pages/pages/[id]/page"));
 const PagesListingPage = lazy(() => import("@/pages/pages/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
@@ -137,6 +138,7 @@ export const router = createBrowserRouter([
       { path: "people/unmapped", element: <PeoplePage /> },
       { path: "people/:id", element: <PersonDetailPage /> },
       { path: "memory", element: <MemoryPage /> },
+      { path: "metrics", element: <MetricsPage /> },
       { path: "pages", element: <PagesListingPage /> },
       { path: "pages/:id", element: <PageDetailPage /> },
       ...redirectRoutes,

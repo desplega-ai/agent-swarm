@@ -11,6 +11,25 @@ export interface DbQueryResult {
   total: number;
 }
 
+function stripTrailingSemicolon(sql: string): string {
+  return sql.trim().replace(/;\s*$/, "").trim();
+}
+
+function assertSingleStatement(sql: string): void {
+  const stripped = stripTrailingSemicolon(sql);
+  if (stripped.includes(";")) {
+    throw new Error("Only one SQL statement is allowed");
+  }
+}
+
+export function assertSelectOnlyQuery(sql: string): void {
+  assertSingleStatement(sql);
+  const normalized = stripTrailingSemicolon(sql).toLowerCase();
+  if (!normalized.startsWith("select ") && !normalized.startsWith("with ")) {
+    throw new Error("Metric queries must start with SELECT or WITH");
+  }
+}
+
 /**
  * Execute a read-only SQL query against the swarm database.
  * Detects write statements via bun:sqlite's columnNames (empty for INSERT/UPDATE/DELETE/DROP).
@@ -20,6 +39,7 @@ export function executeReadOnlyQuery(
   params: unknown[] = [],
   maxRows?: number,
 ): DbQueryResult {
+  assertSingleStatement(sql);
   const stmt = getDb().prepare(sql);
 
   // bun:sqlite: columnNames is empty for write statements, populated for SELECT/PRAGMA/EXPLAIN

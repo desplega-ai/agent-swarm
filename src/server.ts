@@ -6,6 +6,7 @@ import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
 import { registerCreateChannelTool } from "./tools/create-channel";
+import { registerCreateMetricTool } from "./tools/create-metric";
 import { registerCreatePageTool } from "./tools/create-page";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
@@ -146,7 +147,7 @@ import {
 // Capability-based feature flags
 // Default: all capabilities enabled
 const DEFAULT_CAPABILITIES =
-  "core,task-pool,profiles,services,scheduling,memory,workflows,pages,kv";
+  "core,task-pool,profiles,services,scheduling,memory,workflows,pages,metrics,kv";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -336,6 +337,10 @@ export function createServer() {
   // `CAPABILITIES=...` env without `pages`.
   if (hasCapability("pages")) {
     registerCreatePageTool(server);
+  }
+
+  if (hasCapability("metrics")) {
+    registerCreateMetricTool(server);
   }
 
   // KV capability — namespaced Redis-like key/value (see src/be/migrations/061_kv_store.sql).
