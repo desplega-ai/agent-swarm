@@ -1,4 +1,4 @@
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -109,6 +109,16 @@ export default function SkillDetailPage() {
             >
               {skill.isEnabled ? "Enabled" : "Disabled"}
             </Badge>
+            {skill.systemDefault && (
+              <Badge
+                variant="outline"
+                size="tag"
+                className="border-status-info/30 text-status-info inline-flex items-center gap-1"
+              >
+                <ShieldCheck className="h-3 w-3" />
+                System Default
+              </Badge>
+            )}
           </div>
         }
         action={
@@ -188,6 +198,7 @@ export default function SkillDetailPage() {
               {skill.model && <QuickStat label="Model" value={skill.model} mono />}
               {skill.allowedTools && <QuickStat label="Allowed Tools" value={skill.allowedTools} />}
               <QuickStat label="Complex" value={skill.isComplex ? "Yes" : "No"} />
+              <QuickStat label="System Default" value={skill.systemDefault ? "Yes" : "No"} />
               <QuickStat label="User Invocable" value={skill.userInvocable ? "Yes" : "No"} />
             </QuickStats>
 

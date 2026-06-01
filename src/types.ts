@@ -1600,6 +1600,7 @@ export const SkillSchema = z.object({
   userInvocable: z.boolean(),
   version: z.number(),
   isEnabled: z.boolean(),
+  systemDefault: z.boolean(),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
   lastFetchedAt: z.string().nullable(),

@@ -7623,6 +7623,9 @@
                   },
                   "ownerAgentId": {
                     "type": "string"
+                  },
+                  "systemDefault": {
+                    "type": "boolean"
                   }
                 },
                 "required": [

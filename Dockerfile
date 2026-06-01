@@ -12,6 +12,7 @@ RUN bun install --frozen-lockfile
 
 # Copy source files
 COPY src/ ./src/
+COPY templates/ ./templates/
 COPY tsconfig.json ./
 
 # Pre-bundle script runtime files into self-contained JS bundles.

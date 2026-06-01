@@ -67,6 +67,7 @@ const createSkillRoute = route({
     type: z.string().optional(),
     scope: z.string().optional(),
     ownerAgentId: z.string().optional(),
+    systemDefault: z.boolean().optional(),
   }),
   responses: {
     201: { description: "Skill created" },
@@ -452,6 +453,7 @@ export async function handleSkills(
         agent: pm.agent,
         disableModelInvocation: pm.disableModelInvocation,
         userInvocable: pm.userInvocable,
+        systemDefault: parsed.body.systemDefault,
       });
       json(res, { skill }, 201);
     } catch (err) {

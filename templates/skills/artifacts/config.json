@@ -9,5 +9,6 @@
   "category": "skills",
   "placeholders": [],
   "runAllSeedersCandidate": true,
+  "systemDefault": true,
   "tags": ["artifacts", "evidence", "qa"]
 }

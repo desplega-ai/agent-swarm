@@ -9,6 +9,7 @@
   "category": "skills",
   "placeholders": [],
   "runAllSeedersCandidate": true,
+  "systemDefault": true,
   "tags": [
     "pages",
     "reporting",
