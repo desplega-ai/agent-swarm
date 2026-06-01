@@ -272,6 +272,41 @@ describe("getBasePrompt — repoContext", () => {
     expect(result).toContain("Repository Guidelines (MANDATORY)");
     expect(result).toContain("Auto-merge: Allowed");
   });
+
+  test("surfaces swarm-autostash entries when present", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        autoStashes: [
+          {
+            ref: "stash@{0}",
+            message: "On main: swarm-autostash main 2026-06-01T13:00:00.000Z",
+          },
+        ],
+      },
+    });
+
+    expect(result).toContain("Pending auto-stashed work exists in this repo");
+    expect(result).toContain("stash@{0}: On main: swarm-autostash main");
+    expect(result).toContain("git stash apply <ref>");
+    expect(result).toContain("git stash pop <ref>");
+  });
+
+  test("does not mention auto-stashed work when no swarm-autostash entries exist", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        autoStashes: [],
+      },
+    });
+
+    expect(result).not.toContain("Pending auto-stashed work exists in this repo");
+    expect(result).not.toContain("git stash apply <ref>");
+  });
 });
 
 // ---------------------------------------------------------------------------

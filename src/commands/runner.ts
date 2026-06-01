@@ -126,14 +126,88 @@ async function readClaudeMd(clonePath: string, role: string): Promise<string | n
   return null;
 }
 
+export type SwarmAutostash = { ref: string; message: string };
+
+async function listSwarmAutostashes(clonePath: string, role: string): Promise<SwarmAutostash[]> {
+  try {
+    const result = await Bun.$`cd ${clonePath} && git stash list --format=%gd%x09%s`.quiet();
+    return result
+      .text()
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.includes("swarm-autostash"))
+      .flatMap((line) => {
+        const [ref, ...messageParts] = line.split("\t");
+        if (!ref) return [];
+        return [{ ref, message: messageParts.join("\t") || line }];
+      });
+  } catch (err) {
+    console.warn(
+      `[${role}] Could not inspect git stashes for ${clonePath}: ${scrubSecrets((err as Error).message)}`,
+    );
+    return [];
+  }
+}
+
+async function refreshExistingRepoForTask(
+  repoConfig: { name: string; clonePath: string; defaultBranch: string },
+  role: string,
+): Promise<string | null> {
+  const { name, clonePath, defaultBranch } = repoConfig;
+  const statusResult = await Bun.$`cd ${clonePath} && git status --porcelain`.quiet();
+  const statusOutput = statusResult.text().trim();
+  let stashMessage: string | null = null;
+
+  if (statusOutput !== "") {
+    stashMessage = `swarm-autostash ${defaultBranch} ${new Date().toISOString()}`;
+    try {
+      console.log(`[${role}] Auto-stashing pending work in ${name}: ${stashMessage}`);
+      await Bun.$`cd ${clonePath} && git stash push --include-untracked -m ${stashMessage}`.quiet();
+      console.log(`[${role}] Auto-stashed pending work in ${name}`);
+    } catch (err) {
+      const errorMsg = scrubSecrets((err as Error).message);
+      console.warn(`[${role}] Could not auto-stash ${name}, skipping pull: ${errorMsg}`);
+      return `The repo "${name}" at ${clonePath} has uncommitted changes, but auto-stash failed: ${errorMsg}. A git pull was skipped to avoid losing work.`;
+    }
+  }
+
+  try {
+    console.log(`[${role}] Refreshing ${name} from origin/${defaultBranch}...`);
+    const fetchSpec = `${defaultBranch}:refs/remotes/origin/${defaultBranch}`;
+    const remoteRef = `refs/remotes/origin/${defaultBranch}`;
+    await Bun.$`cd ${clonePath} && git fetch origin ${fetchSpec}`.quiet();
+    await Bun.$`cd ${clonePath} && git merge --no-edit --no-stat ${remoteRef}`.quiet();
+    console.log(`[${role}] Refreshed ${name}`);
+    return null;
+  } catch (err) {
+    const errorMsg = scrubSecrets((err as Error).message);
+    console.warn(`[${role}] Could not refresh ${name}: ${errorMsg}`);
+    try {
+      await Bun.$`cd ${clonePath} && git merge --abort`.quiet();
+    } catch {
+      // No merge in progress, or abort failed. The original refresh warning is
+      // the actionable signal; repo setup remains best-effort.
+    }
+    const stashNote = stashMessage
+      ? ` Pending work was preserved in git stash "${stashMessage}".`
+      : "";
+    return `The repo "${name}" at ${clonePath} could not be refreshed from origin/${defaultBranch}: ${errorMsg}.${stashNote}`;
+  }
+}
+
 /**
  * Ensure a repo is cloned and up-to-date for a task.
  * Returns { clonePath, claudeMd, warning }.
  */
-async function ensureRepoForTask(
+export async function ensureRepoForTask(
   repoConfig: { url: string; name: string; clonePath: string; defaultBranch: string },
   role: string,
-): Promise<{ clonePath: string; claudeMd: string | null; warning: string | null }> {
+): Promise<{
+  clonePath: string;
+  claudeMd: string | null;
+  warning: string | null;
+  autoStashes: SwarmAutostash[];
+}> {
   const { url, name, clonePath, defaultBranch } = repoConfig;
 
   try {
@@ -158,28 +232,20 @@ async function ensureRepoForTask(
       console.log(`[${role}] Cloned ${name}`);
     } else {
       console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
-      const statusResult = await Bun.$`cd ${clonePath} && git status --porcelain`.quiet();
-      const statusOutput = statusResult.text().trim();
-
-      if (statusOutput === "") {
-        console.log(`[${role}] Pulling ${name} (${defaultBranch})...`);
-        await Bun.$`cd ${clonePath} && git pull origin ${defaultBranch} --ff-only`.quiet();
-        console.log(`[${role}] Pulled ${name}`);
-      } else {
-        console.warn(`[${role}] Repo ${name} has uncommitted changes, skipping pull`);
-        warning = `The repo "${name}" at ${clonePath} has uncommitted changes. A git pull was skipped to avoid losing work. You may need to commit or stash changes before pulling updates.`;
-      }
+      warning = await refreshExistingRepoForTask({ name, clonePath, defaultBranch }, role);
     }
 
     const claudeMd = await readClaudeMd(clonePath, role);
-    return { clonePath, claudeMd, warning };
+    const autoStashes = await listSwarmAutostashes(clonePath, role);
+    return { clonePath, claudeMd, warning, autoStashes };
   } catch (err) {
-    const errorMsg = (err as Error).message;
+    const errorMsg = scrubSecrets((err as Error).message);
     console.warn(`[${role}] Error setting up repo ${name}: ${errorMsg}`);
     const warning = `Failed to clone/setup repo "${name}" at ${clonePath}: ${errorMsg}. The repo may not be available. You may need to clone it manually.`;
     // Only return clonePath if the directory actually exists (clone may have failed)
     const cloneExists = existsSync(clonePath);
-    return { clonePath: cloneExists ? clonePath : "", claudeMd: null, warning };
+    const autoStashes = cloneExists ? await listSwarmAutostashes(clonePath, role) : [];
+    return { clonePath: cloneExists ? clonePath : "", claudeMd: null, warning, autoStashes };
   }
 }
 

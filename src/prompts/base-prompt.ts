@@ -72,6 +72,7 @@ export type BasePromptArgs = {
     claudeMd?: string | null;
     clonePath: string;
     warning?: string | null;
+    autoStashes?: { ref: string; message: string }[];
     guidelines?: {
       prChecks: string[];
       mergeChecks: string[];
@@ -196,6 +197,13 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
         )}\n`;
       } else if (!args.repoContext.warning) {
         prompt += `Repository is cloned at \`${args.repoContext.clonePath}\` but has no CLAUDE.md file.\n`;
+      }
+
+      if (args.repoContext.autoStashes && args.repoContext.autoStashes.length > 0) {
+        const stashes = args.repoContext.autoStashes
+          .map((stash) => `- ${stash.ref}: ${stash.message}`)
+          .join("\n");
+        prompt += `\nPending auto-stashed work exists in this repo:\n${stashes}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
       }
     }
 
