@@ -1272,6 +1272,31 @@ export function getPendingTaskForAgent(agentId: string): AgentTask | null {
   return null;
 }
 
+export function assignUnassignedTaskPending(taskId: string, agentId: string): AgentTask | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?
+       WHERE id = ? AND status = 'unassigned' RETURNING *`,
+    )
+    .get(agentId, now, taskId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        agentId,
+        taskId,
+        oldValue: "unassigned",
+        newValue: "pending",
+        metadata: { pendingDispatch: true },
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
 export function startTask(taskId: string): AgentTask | null {
   const oldTask = getTaskById(taskId);
   if (!oldTask) return null;
@@ -2256,6 +2281,67 @@ export function getPausedTasksForAgent(agentId: string): AgentTask[] {
        ORDER BY createdAt ASC, rowid ASC`,
     )
     .all(agentId);
+  return rows.map(rowToAgentTask);
+}
+
+export function getOrphanedInProgressTasksForAgent(
+  agentId: string,
+  minAgeSeconds = 60,
+): AgentTask[] {
+  const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
+  const rows = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT t.* FROM agent_tasks t
+       LEFT JOIN active_sessions s ON s.taskId = t.id
+       WHERE t.agentId = ?
+         AND t.status = 'in_progress'
+         AND t.claudeSessionId IS NULL
+         AND t.lastUpdatedAt < ?
+         AND s.id IS NULL
+         AND t.finishedAt IS NULL
+       ORDER BY t.createdAt ASC, t.rowid ASC`,
+    )
+    .all(agentId, cutoff);
+  return rows.map(rowToAgentTask);
+}
+
+export function resetOrphanedInProgressTasksForAgent(
+  agentId: string,
+  minAgeSeconds = 60,
+): AgentTask[] {
+  const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
+  const rows = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `UPDATE agent_tasks
+       SET status = 'pending',
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id IN (
+         SELECT t.id FROM agent_tasks t
+         LEFT JOIN active_sessions s ON s.taskId = t.id
+         WHERE t.agentId = ?
+           AND t.status = 'in_progress'
+           AND t.claudeSessionId IS NULL
+           AND t.lastUpdatedAt < ?
+           AND s.id IS NULL
+           AND t.finishedAt IS NULL
+       )
+       RETURNING *`,
+    )
+    .all(agentId, cutoff);
+
+  for (const row of rows) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId: row.id,
+        agentId,
+        oldValue: "in_progress",
+        newValue: "pending",
+        metadata: { orphanedInProgressRecovery: true },
+      });
+    } catch {}
+  }
+
   return rows.map(rowToAgentTask);
 }
 

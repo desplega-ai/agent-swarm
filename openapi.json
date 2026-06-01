@@ -277,6 +277,46 @@
         }
       }
     },
+    "/api/active-sessions/recover-orphaned-tasks": {
+      "post": {
+        "summary": "Recover orphaned in-progress tasks for an agent",
+        "tags": [
+          "Active Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minAgeSeconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "agentId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recovery result"
+          }
+        }
+      }
+    },
     "/api/agents": {
       "post": {
         "summary": "Register or re-register an agent",
