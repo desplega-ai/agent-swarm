@@ -1074,6 +1074,7 @@ export interface Skill {
   userInvocable: boolean;
   version: number;
   isEnabled: boolean;
+  systemDefault: boolean;
   createdAt: string;
   lastUpdatedAt: string;
   lastFetchedAt: string | null;

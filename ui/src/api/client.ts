@@ -1128,6 +1128,7 @@ class ApiClient {
     type?: string;
     scope?: string;
     ownerAgentId?: string;
+    systemDefault?: boolean;
   }): Promise<{ skill: Skill }> {
     const url = `${this.getBaseUrl()}/api/skills`;
     const res = await fetch(url, {

@@ -16,6 +16,9 @@ import { computeAgentSkillsSignature, syncSkillsToFilesystem } from "../be/skill
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
+const SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE =
+  "This skill is system-managed and cannot be edited from the UI; it is re-seeded on each start. Fork it under a new name to customize.";
+
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
 const listSkillsRoute = route({
@@ -67,6 +70,7 @@ const createSkillRoute = route({
     type: z.string().optional(),
     scope: z.string().optional(),
     ownerAgentId: z.string().optional(),
+    systemDefault: z.boolean().optional(),
   }),
   responses: {
     201: { description: "Skill created" },
@@ -85,6 +89,7 @@ const updateSkillRoute = route({
   body: z.record(z.string(), z.unknown()),
   responses: {
     200: { description: "Skill updated" },
+    403: { description: "System-managed skills cannot be edited" },
     404: { description: "Skill not found" },
   },
 });
@@ -99,6 +104,7 @@ const deleteSkillRoute = route({
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Skill deleted" },
+    403: { description: "System-managed skills cannot be deleted" },
     404: { description: "Skill not found" },
   },
 });
@@ -452,6 +458,7 @@ export async function handleSkills(
         agent: pm.agent,
         disableModelInvocation: pm.disableModelInvocation,
         userInvocable: pm.userInvocable,
+        systemDefault: parsed.body.systemDefault,
       });
       json(res, { skill }, 201);
     } catch (err) {
@@ -464,6 +471,42 @@ export async function handleSkills(
   if (updateSkillRoute.match(req.method, pathSegments)) {
     const parsed = await updateSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+
+    const existing = getSkillById(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "Skill not found", 404);
+      return true;
+    }
+
+    const protectedSystemDefaultFields = [
+      "content",
+      "name",
+      "description",
+      "type",
+      "scope",
+      "ownerAgentId",
+      "sourceUrl",
+      "sourceRepo",
+      "sourcePath",
+      "sourceBranch",
+      "sourceHash",
+      "isComplex",
+      "allowedTools",
+      "model",
+      "effort",
+      "context",
+      "agent",
+      "disableModelInvocation",
+      "userInvocable",
+      "systemDefault",
+    ];
+    if (
+      existing.systemDefault &&
+      protectedSystemDefaultFields.some((field) => Object.hasOwn(parsed.body, field))
+    ) {
+      jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
+      return true;
+    }
 
     const updates: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(parsed.body)) {
@@ -497,6 +540,16 @@ export async function handleSkills(
   if (deleteSkillRoute.match(req.method, pathSegments)) {
     const parsed = await deleteSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+
+    const existing = getSkillById(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    if (existing.systemDefault) {
+      jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
+      return true;
+    }
 
     const deleted = deleteSkill(parsed.params.id);
     if (!deleted) {

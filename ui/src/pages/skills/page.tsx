@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ShieldCheck } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -36,6 +36,19 @@ function ScopeBadge({ scope }: { scope: string }) {
   return (
     <Badge variant="outline" size="tag" className={`${colors[scope] || ""}`}>
       {scope}
+    </Badge>
+  );
+}
+
+function SystemDefaultBadge() {
+  return (
+    <Badge
+      variant="outline"
+      size="tag"
+      className="border-status-info/30 text-status-info inline-flex items-center gap-1"
+    >
+      <ShieldCheck className="h-3 w-3" />
+      System
     </Badge>
   );
 }
@@ -81,6 +94,13 @@ export default function SkillsPage() {
         width: 100,
         cellRenderer: (params: ICellRendererParams<Skill>) =>
           params.value ? <ScopeBadge scope={params.value} /> : null,
+      },
+      {
+        field: "systemDefault",
+        headerName: "Default",
+        width: 105,
+        cellRenderer: (params: ICellRendererParams<Skill>) =>
+          params.value ? <SystemDefaultBadge /> : null,
       },
       {
         field: "description",
@@ -175,6 +195,12 @@ export default function SkillsPage() {
           </SelectContent>
         </Select>
       </div>
+      {skills.some((skill) => skill.systemDefault) && (
+        <p className="text-xs text-muted-foreground shrink-0">
+          System skills are managed by the swarm and re-seeded on start. Fork one under a new name
+          to customize its content.
+        </p>
+      )}
 
       <DataGrid
         rowData={skills}

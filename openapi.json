@@ -7623,6 +7623,9 @@
                   },
                   "ownerAgentId": {
                     "type": "string"
+                  },
+                  "systemDefault": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -7706,6 +7709,9 @@
           "200": {
             "description": "Skill updated"
           },
+          "403": {
+            "description": "System-managed skills cannot be edited"
+          },
           "404": {
             "description": "Skill not found"
           }
@@ -7734,6 +7740,9 @@
         "responses": {
           "200": {
             "description": "Skill deleted"
+          },
+          "403": {
+            "description": "System-managed skills cannot be deleted"
           },
           "404": {
             "description": "Skill not found"

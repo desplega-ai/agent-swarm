@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "swarm-scripts",
+  "displayName": "Swarm Scripts",
+  "slug": "swarm-scripts",
+  "title": "Swarm Scripts",
+  "description": "Use swarm scripts for bulk SDK calls, repetitive fan-out, and context-efficient data processing.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["scripts", "automation", "context"]
+}

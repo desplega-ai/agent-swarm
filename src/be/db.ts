@@ -692,6 +692,14 @@ export function createAgent(
     );
   if (!row) throw new Error("Failed to create agent");
   try {
+    installSystemDefaultSkillsForAgent(id);
+  } catch (err) {
+    console.warn(
+      "[db] Failed to install system-default skills for new agent:",
+      (err as Error).message,
+    );
+  }
+  try {
     createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
   } catch {}
   return rowToAgent(row);
@@ -8247,6 +8255,7 @@ type SkillRow = {
   userInvocable: number;
   version: number;
   isEnabled: number;
+  systemDefault: number;
   createdAt: string;
   lastUpdatedAt: string;
   lastFetchedAt: string | null;
@@ -8276,6 +8285,7 @@ function rowToSkill(row: SkillRow): Skill {
     userInvocable: row.userInvocable === 1,
     version: row.version,
     isEnabled: row.isEnabled === 1,
+    systemDefault: row.systemDefault === 1,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     lastFetchedAt: row.lastFetchedAt,
@@ -8300,7 +8310,12 @@ function rowToAgentSkill(row: AgentSkillRow): AgentSkill {
   };
 }
 
-type SkillWithInstallRow = SkillRow & { isActive: number; installedAt: string };
+type SkillWithInstallRow = SkillRow & {
+  isActive: number;
+  installedAt: string;
+  sourceRank?: number;
+  typeRank?: number;
+};
 
 function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
   return {
@@ -8330,6 +8345,7 @@ export interface SkillInsert {
   agent?: string;
   disableModelInvocation?: boolean;
   userInvocable?: boolean;
+  systemDefault?: boolean;
 }
 
 export function createSkill(data: SkillInsert): Skill {
@@ -8342,8 +8358,8 @@ export function createSkill(data: SkillInsert): Skill {
         id, name, description, content, type, scope, ownerAgentId,
         sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex,
         allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable,
-        version, isEnabled, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
+        version, isEnabled, systemDefault, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -8366,6 +8382,7 @@ export function createSkill(data: SkillInsert): Skill {
       data.agent ?? null,
       data.disableModelInvocation ? 1 : 0,
       data.userInvocable === false ? 0 : 1,
+      data.systemDefault ? 1 : 0,
       now,
       now,
     );
@@ -8404,6 +8421,10 @@ export function updateSkill(
   if (updates.isEnabled !== undefined) {
     sets.push("isEnabled = ?");
     params.push(updates.isEnabled ? 1 : 0);
+  }
+  if (updates.systemDefault !== undefined) {
+    sets.push("systemDefault = ?");
+    params.push(updates.systemDefault ? 1 : 0);
   }
   if (updates.allowedTools !== undefined) {
     sets.push("allowedTools = ?");
@@ -8516,7 +8537,7 @@ export interface SkillFilters {
  * which is replaced with an empty string so the row still satisfies `Skill`.
  */
 const SKILL_SLIM_COLUMNS =
-  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
+  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
 
 export function listSkills(filters?: SkillFilters): Skill[] {
   const columns = filters?.includeContent === false ? SKILL_SLIM_COLUMNS : "*";
@@ -8586,6 +8607,19 @@ export function installSkill(agentId: string, skillId: string): AgentSkill {
   return rowToAgentSkill(row);
 }
 
+export function getSystemDefaultSkills(): Skill[] {
+  return getDb()
+    .prepare<SkillRow, []>(
+      "SELECT * FROM skills WHERE systemDefault = 1 AND isEnabled = 1 ORDER BY name ASC",
+    )
+    .all()
+    .map(rowToSkill);
+}
+
+export function installSystemDefaultSkillsForAgent(agentId: string): AgentSkill[] {
+  return getSystemDefaultSkills().map((skill) => installSkill(agentId, skill.id));
+}
+
 export function uninstallSkill(agentId: string, skillId: string): boolean {
   const result = getDb()
     .prepare("DELETE FROM agent_skills WHERE agentId = ? AND skillId = ?")
@@ -8595,15 +8629,23 @@ export function uninstallSkill(agentId: string, skillId: string): boolean {
 
 export function getAgentSkills(agentId: string, activeOnly = true): SkillWithInstallInfo[] {
   const query = `
-    SELECT s.*, as2.isActive, as2.installedAt
+    SELECT s.*, as2.isActive, as2.installedAt, 0 as sourceRank,
+      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
     FROM skills s
     JOIN agent_skills as2 ON s.id = as2.skillId
     WHERE as2.agentId = ?
       ${activeOnly ? "AND as2.isActive = 1" : ""}
       AND s.isEnabled = 1
+    UNION ALL
+    SELECT s.*, 1 as isActive, s.createdAt as installedAt, 1 as sourceRank,
+      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
+    FROM skills s
+    WHERE s.systemDefault = 1
+      AND s.isEnabled = 1
     ORDER BY
-      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END,
-      s.name
+      sourceRank,
+      typeRank,
+      name
   `;
 
   const rows = getDb().prepare<SkillWithInstallRow, [string]>(query).all(agentId);

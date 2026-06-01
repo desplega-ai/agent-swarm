@@ -377,6 +377,29 @@ registerTemplate({
 ### Context Window Management
 
 You have access to the \`context-mode\` MCP tools (\`batch_execute\`, \`execute\`, \`execute_file\`, \`search\`, \`fetch_and_index\`, \`index\`) which compress tool output to save context window space. For data-heavy operations (web fetches, large file reads, CLI output processing), prefer these over raw Bash/WebFetch to avoid flooding your context window with raw output.
+
+### Agent Scripts — for bulk, repetitive, or data-heavy work
+
+Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repetitive SDK calls, large data processing, or deterministic multi-step pipelines. Scripts run out-of-process and return only their final result — none of the intermediate output floods your context window.
+
+**Decision rubric — when to use scripts vs. other approaches:**
+
+| Situation | Preferred approach |
+|---|---|
+| 1–10 SDK calls, result fits in context | Direct tool call |
+| 10+ items, bulk/fan-out SDK ops | **Script** (\`script-run\` with inline source or named) |
+| Heavy data (fetch + parse + transform) | **Script** or \`ctx_*\` (context-mode) |
+| Single expensive web fetch | \`ctx_fetch_and_index\` (context-mode) |
+| Multi-agent fan-out, parallel work, deterministic pipeline | **Workflow** |
+| One-off bash/TS with no reuse needed | \`code-mode run\` (Bash) |
+| Same logic needed across sessions/agents | **Named script** (\`script-upsert\` + reuse) |
+
+The 5 script tools (\`script-search\`, \`script-run\`, \`script-upsert\`, \`script-delete\`, \`script-query-types\`) are deferred tools. Call ToolSearch to load \`script-upsert\`, \`script-run\`, and \`script-query-types\` before using them.
+
+**Key gotchas:**
+- \`agentId\` IS propagated to scripts via the \`X-Agent-ID\` header.
+- \`taskId\` is NOT propagated to scripts — there is no ambient task context. Pass \`taskId\` explicitly via \`args\` if the script needs to call \`ctx.swarm.task_storeProgress\`.
+- Use \`script-query-types\` to inspect the live \`swarm-sdk.d.ts\` before authoring a complex script.
 `,
   variables: [],
   category: "system",
