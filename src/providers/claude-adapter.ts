@@ -16,6 +16,7 @@ import {
 } from "../utils/error-tracker";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
 import type {
   CostData,
@@ -416,9 +417,7 @@ class ClaudeSession implements ProviderSession {
         ...(sourceEnv.CLAUDE_CODE_OAUTH_TOKEN
           ? { AGENT_SWARM_CLAUDE_OAUTH_TOKEN: sourceEnv.CLAUDE_CODE_OAUTH_TOKEN }
           : {}),
-        // context-mode plugin nudge cadence: fire external-MCP guidance every 3
-        // matching tool calls (default 10 is too sparse for adoption).
-        CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: "3",
+        CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
       } as Record<string, string>,
       stdout: "pipe",
       stderr: "pipe",

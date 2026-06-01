@@ -259,7 +259,9 @@ describe("mergeMcpConfig (issue #369)", () => {
       },
     };
     const merged = mergeMcpConfig(base, null, TASK_ID);
-    expect(merged.mcpServers["plugin_context-mode_context-mode"]).toEqual({ command: "context-mode" });
+    expect(merged.mcpServers["plugin_context-mode_context-mode"]).toEqual({
+      command: "context-mode",
+    });
   });
 });
 
@@ -445,7 +447,9 @@ describe("createSessionMcpConfig", () => {
 
       const path = await createSessionMcpConfig(cwd, "task-ctx-on");
       const written = await readWritten(path!);
-      expect(written.mcpServers["plugin_context-mode_context-mode"]).toEqual({ command: "context-mode" });
+      expect(written.mcpServers["plugin_context-mode_context-mode"]).toEqual({
+        command: "context-mode",
+      });
       // Coexists with the swarm entry.
       expect(written.mcpServers["agent-swarm"]).toBeDefined();
     } finally {
