@@ -36,6 +36,7 @@ describe("system-default skills", () => {
     const skills = loadSeedSkills();
     const names = skills.map((skill) => skill.name);
 
+    expect(names).not.toContain("attio-interaction");
     expect(names).toContain("swarm-scripts");
     expect(skills.find((skill) => skill.name === "swarm-scripts")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "kv-storage")?.systemDefault).toBe(true);
@@ -45,6 +46,7 @@ describe("system-default skills", () => {
     expect(result.failed).toEqual([]);
 
     const defaults = getSystemDefaultSkills().map((skill) => skill.name);
+    expect(defaults).not.toContain("attio-interaction");
     expect(defaults).toContain("swarm-scripts");
     expect(defaults).toContain("kv-storage");
     expect(defaults).toContain("pages");
