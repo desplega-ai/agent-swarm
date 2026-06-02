@@ -7,10 +7,12 @@ import {
   type FileReader,
   IDENTITY_MD_PATH,
   postProfileUpdate,
+  resolveClaudeMdPath,
   SETUP_SCRIPT_PATH,
   SOUL_MD_PATH,
   syncProfileFilesToServer,
   TOOLS_MD_PATH,
+  WORKSPACE_CLAUDE_MD_PATH,
 } from "../commands/profile-sync";
 
 const MARKER_START = "# === Agent-managed setup (from DB) ===";
@@ -138,6 +140,49 @@ describe("collectProfilePayloads (field gate)", () => {
     const files = reader({ [TOOLS_MD_PATH]: "tools" });
     const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
     expect(payloads[0]?.body.changeSource).toBe("self_edit");
+  });
+
+  test("non-Claude providers sync /workspace/CLAUDE.md, not the personal file", async () => {
+    // A codex/pi/opencode session edits the runner-materialized workspace file;
+    // the Claude personal file (~/.claude/CLAUDE.md) is absent for them.
+    const files = reader({ [WORKSPACE_CLAUDE_MD_PATH]: "workspace claude md edit" });
+
+    const payloads = await collectProfilePayloads(
+      ["claude"],
+      "session_sync",
+      files,
+      WORKSPACE_CLAUDE_MD_PATH,
+    );
+    expect(payloads.map((p) => p.label)).toEqual(["claude"]);
+    expect(payloads[0]?.body).toEqual({
+      claudeMd: "workspace claude md edit",
+      changeSource: "session_sync",
+    });
+  });
+
+  test("Claude's default path never reads the workspace materialization", async () => {
+    // Guard against reverting a real Claude personal-file edit: with the default
+    // (personal-file) path, content sitting only at /workspace/CLAUDE.md — the
+    // stale boot materialization — must NOT be picked up as a claude payload.
+    const files = reader({ [WORKSPACE_CLAUDE_MD_PATH]: "stale workspace materialization" });
+
+    const payloads = await collectProfilePayloads(["claude"], "session_sync", files);
+    expect(payloads).toEqual([]);
+  });
+});
+
+describe("resolveClaudeMdPath (per-batch provider routing)", () => {
+  test("an all-Claude batch uses the personal-file path (Stop-hook backstop)", () => {
+    expect(resolveClaudeMdPath(["claude"])).toBe(CLAUDE_MD_PATH);
+    expect(resolveClaudeMdPath(["claude", "claude"])).toBe(CLAUDE_MD_PATH);
+  });
+
+  test("any non-Claude local session routes to the workspace file", () => {
+    expect(resolveClaudeMdPath(["codex"])).toBe(WORKSPACE_CLAUDE_MD_PATH);
+    expect(resolveClaudeMdPath(["pi"])).toBe(WORKSPACE_CLAUDE_MD_PATH);
+    expect(resolveClaudeMdPath(["opencode"])).toBe(WORKSPACE_CLAUDE_MD_PATH);
+    // Mixed batch: a non-Claude edit means the workspace file is authoritative.
+    expect(resolveClaudeMdPath(["claude", "codex"])).toBe(WORKSPACE_CLAUDE_MD_PATH);
   });
 });
 
