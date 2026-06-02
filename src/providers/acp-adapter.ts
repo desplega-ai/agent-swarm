@@ -1,6 +1,7 @@
 import {
   type Client,
   ClientSideConnection,
+  type ContentBlock,
   ndJsonStream,
   PROTOCOL_VERSION,
   type RequestPermissionRequest,
@@ -8,8 +9,8 @@ import {
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { translateAcpSessionNotification } from "./acp-swarm-events";
-import { resolveAcpTarget } from "./acp-targets";
+import { extractAcpUsageMetrics, translateAcpSessionNotification } from "./acp-swarm-events";
+import { type AcpCostProvider, resolveAcpTarget } from "./acp-targets";
 import type {
   CostData,
   ProviderAdapter,
@@ -21,6 +22,18 @@ import type {
 } from "./types";
 
 type EventListener = (event: ProviderEvent) => void;
+type AcpUsageAccumulator = Partial<
+  Pick<
+    CostData,
+    | "inputTokens"
+    | "outputTokens"
+    | "cacheReadTokens"
+    | "cacheWriteTokens"
+    | "reasoningOutputTokens"
+    | "thinkingTokens"
+    | "totalCostUsd"
+  >
+>;
 
 class SwarmAcpClient implements Client {
   constructor(private readonly emit: (event: ProviderEvent) => void) {}
@@ -50,6 +63,7 @@ class ACPSession implements ProviderSession {
   private completed = false;
   private aborted = false;
   private output = "";
+  private usage: AcpUsageAccumulator = {};
   private completionPromise: Promise<ProviderResult>;
   private completionResolve!: (result: ProviderResult) => void;
 
@@ -57,14 +71,18 @@ class ACPSession implements ProviderSession {
     private readonly connection: ClientSideConnection,
     private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">,
     private readonly config: ProviderSessionConfig,
+    private readonly diagnostics: AcpProcessDiagnostics,
+    private readonly costProvider: AcpCostProvider,
+    private readonly prompt: ContentBlock[],
     sessionId: string,
   ) {
     this.sessionId = sessionId;
     this.completionPromise = new Promise((resolve) => {
       this.completionResolve = resolve;
     });
-    this.consumeStderr();
+    this.diagnostics.onStderr((content) => this.emit({ type: "raw_stderr", content }));
     this.emit({ type: "session_init", sessionId, provider: "acp" });
+    this.emit({ type: "raw_log", content: "ACP session ready; starting session/prompt." });
     void this.runPrompt();
   }
 
@@ -108,6 +126,9 @@ class ACPSession implements ProviderSession {
     if (event.type === "message" && event.role === "assistant") {
       this.output += event.content;
     }
+    if (event.type === "custom" && event.name === "acp_usage_update") {
+      this.recordUsage(event.data);
+    }
     if (this.listeners.size === 0) {
       this.pendingEvents.push(event);
       return;
@@ -121,7 +142,12 @@ class ACPSession implements ProviderSession {
     try {
       const response = await this.connection.prompt({
         sessionId: this.sessionId,
-        prompt: [{ type: "text", text: this.config.prompt }],
+        prompt: this.prompt,
+      });
+      this.recordUsage(response);
+      this.emit({
+        type: "raw_log",
+        content: scrubSecrets(`ACP session/prompt finished with stopReason=${response.stopReason}`),
       });
       const isError = response.stopReason === "refusal" || response.stopReason === "cancelled";
       const cost = this.buildCostData(isError);
@@ -149,22 +175,12 @@ class ACPSession implements ProviderSession {
     }
   }
 
-  private async consumeStderr(): Promise<void> {
-    const stderr = this.process.stderr;
-    if (!stderr) return;
-    const reader = stderr.getReader();
-    const decoder = new TextDecoder();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value.length > 0) {
-          this.emit({ type: "raw_stderr", content: scrubSecrets(decoder.decode(value)) });
-        }
-      }
-    } catch {
-      // Process teardown can close stderr while a read is pending.
-    }
+  private recordUsage(data: unknown): void {
+    const metrics =
+      data && typeof data === "object" && "metrics" in data
+        ? (data as { metrics?: unknown }).metrics
+        : data;
+    this.usage = { ...this.usage, ...extractAcpUsageMetrics(metrics) };
   }
 
   private buildCostData(isError: boolean): CostData {
@@ -172,12 +188,18 @@ class ACPSession implements ProviderSession {
       sessionId: this.sessionId,
       taskId: this.config.taskId,
       agentId: this.config.agentId,
-      totalCostUsd: 0,
+      totalCostUsd: this.usage.totalCostUsd ?? 0,
       durationMs: Date.now() - this.startedAt,
       numTurns: 1,
       model: this.config.model,
       isError,
-      provider: "acp",
+      provider: this.costProvider as CostData["provider"],
+      inputTokens: this.usage.inputTokens,
+      outputTokens: this.usage.outputTokens,
+      cacheReadTokens: this.usage.cacheReadTokens,
+      cacheWriteTokens: this.usage.cacheWriteTokens,
+      reasoningOutputTokens: this.usage.reasoningOutputTokens,
+      thinkingTokens: this.usage.thinkingTokens,
     };
   }
 
@@ -200,6 +222,8 @@ export class ACPAdapter implements ProviderAdapter {
     const target = resolveAcpTarget(config);
     await target.writeSystemPromptArtifact(config);
     const command = target.command(config);
+    const prompt = target.prompt(config);
+    const costProvider = target.costProvider(config);
     const proc = Bun.spawn(command, {
       cwd: config.cwd,
       env: target.env(config),
@@ -207,18 +231,28 @@ export class ACPAdapter implements ProviderAdapter {
       stdout: "pipe",
       stderr: "pipe",
     });
+    const diagnostics = new AcpProcessDiagnostics(proc.stderr);
 
     let session: ACPSession | null = null;
-    const client = new SwarmAcpClient((event) => session?.emitFromAcp(event));
+    const startupEvents: ProviderEvent[] = [];
+    const client = new SwarmAcpClient((event) => {
+      if (session) {
+        session.emitFromAcp(event);
+      } else {
+        startupEvents.push(event);
+      }
+    });
     const stream = ndJsonStream(fileSinkWritableStream(proc.stdin), proc.stdout);
     const connection = new ClientSideConnection(() => client, stream);
 
+    let startupStep = "initialize";
     try {
       await connection.initialize({
         protocolVersion: PROTOCOL_VERSION,
         clientInfo: { name: "agent-swarm", version: "1.88.0" },
         clientCapabilities: {},
       });
+      startupStep = "session/new";
       const newSession = await connection.newSession({
         cwd: config.cwd,
         mcpServers: [
@@ -234,11 +268,25 @@ export class ACPAdapter implements ProviderAdapter {
           },
         ],
       });
-      session = new ACPSession(connection, proc, config, newSession.sessionId);
+      session = new ACPSession(
+        connection,
+        proc,
+        config,
+        diagnostics,
+        costProvider,
+        prompt,
+        newSession.sessionId,
+      );
+      for (const event of startupEvents.splice(0)) {
+        session.emitFromAcp(event);
+      }
       return session;
     } catch (err) {
       proc.kill();
-      throw new Error(`ACP target failed during startup: ${scrubSecrets(formatError(err))}`);
+      diagnostics.close();
+      throw new Error(
+        `ACP target failed during ${startupStep}: ${scrubSecrets(formatError(err))}${diagnostics.errorSuffix()}`,
+      );
     }
   }
 
@@ -248,6 +296,54 @@ export class ACPAdapter implements ProviderAdapter {
 
   formatCommand(commandName: string): string {
     return `/${commandName}`;
+  }
+}
+
+class AcpProcessDiagnostics {
+  private readonly listeners = new Set<(content: string) => void>();
+  private readonly stderrChunks: string[] = [];
+  private closed = false;
+
+  constructor(stderr: ReadableStream<Uint8Array> | null) {
+    if (stderr) void this.consume(stderr);
+  }
+
+  onStderr(listener: (content: string) => void): void {
+    this.listeners.add(listener);
+    for (const chunk of this.stderrChunks) {
+      listener(chunk);
+    }
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  errorSuffix(): string {
+    const tail = this.stderrChunks.join("").slice(-2000).trim();
+    return tail ? `; stderr tail: ${tail}` : "";
+  }
+
+  private async consume(stderr: ReadableStream<Uint8Array>): Promise<void> {
+    const reader = stderr.getReader();
+    const decoder = new TextDecoder();
+    try {
+      while (!this.closed) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value.length === 0) continue;
+        const content = scrubSecrets(decoder.decode(value));
+        this.stderrChunks.push(content);
+        while (this.stderrChunks.join("").length > 4000) {
+          this.stderrChunks.shift();
+        }
+        for (const listener of this.listeners) {
+          listener(content);
+        }
+      }
+    } catch {
+      // Process teardown can close stderr while a read is pending.
+    }
   }
 }
 

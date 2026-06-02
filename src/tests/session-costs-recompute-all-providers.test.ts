@@ -121,6 +121,7 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
     "opencode",
     "devin",
     "gemini",
+    "acp",
   ] as const) {
     test(`provider=${provider} with seeded rows → costSource='pricing-table'`, async () => {
       seedTwoClassRates(provider, `${provider}-test-model`, 2, 10);

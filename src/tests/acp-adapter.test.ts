@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProviderAdapter } from "../providers";
@@ -55,9 +55,65 @@ describe("ACPAdapter", () => {
     );
   });
 
+  test("parses custom command, JSON args, ACP_ENV passthrough, cost provider, and system prompt artifact", async () => {
+    const cwd = makeTempDir();
+    const config = baseConfig({
+      cwd,
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        ACP_COMMAND: "bun",
+        ACP_ARGS: JSON.stringify(["fake-agent.ts", "--stdio"]),
+        ACP_ENV_FAKE_TOKEN: "token-value",
+        ACP_SYSTEM_PROMPT_ARTIFACT_PATH: "nested/system-prompt.txt",
+        ACP_COST_PROVIDER: "codex",
+      },
+    });
+    const target = resolveAcpTarget(config);
+
+    expect(target.command(config)).toEqual(["bun", "fake-agent.ts", "--stdio"]);
+    expect(target.env(config).FAKE_TOKEN).toBe("token-value");
+    expect(target.costProvider(config)).toBe("codex");
+
+    await target.writeSystemPromptArtifact(config);
+    const artifactPath = join(cwd, "nested/system-prompt.txt");
+    expect(existsSync(artifactPath)).toBe(true);
+    expect(readFileSync(artifactPath, "utf8")).toBe("system");
+  });
+
+  test("supports explicit user-message system prompt fallback only when configured", () => {
+    const fallbackConfig = baseConfig({
+      env: { ACP_COMMAND: "bun", ACP_SYSTEM_PROMPT_FALLBACK: "user_message" },
+    });
+    expect(resolveAcpTarget(fallbackConfig).prompt(fallbackConfig)).toEqual([
+      { type: "text", text: "system" },
+      { type: "text", text: "hello" },
+    ]);
+
+    const defaultConfig = baseConfig({ env: { ACP_COMMAND: "bun" } });
+    expect(resolveAcpTarget(defaultConfig).prompt(defaultConfig)).toEqual([
+      { type: "text", text: "hello" },
+    ]);
+  });
+
+  test("fails clearly for invalid JSON args and invalid cost provider", () => {
+    const invalidArgsConfig = baseConfig({ env: { ACP_COMMAND: "bun", ACP_ARGS: "[not-json" } });
+    expect(() => resolveAcpTarget(invalidArgsConfig).command(invalidArgsConfig)).toThrow(
+      "Invalid ACP_ARGS JSON",
+    );
+
+    const invalidProviderConfig = baseConfig({
+      env: { ACP_COMMAND: "bun", ACP_COST_PROVIDER: "unknown" },
+    });
+    expect(() =>
+      resolveAcpTarget(invalidProviderConfig).costProvider(invalidProviderConfig),
+    ).toThrow("Unsupported ACP_COST_PROVIDER");
+  });
+
   test("runs a configured ACP target through initialize, session/new, and session/prompt", async () => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
+    const promptLog = join(cwd, "prompt.json");
     const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
     await Bun.write(
       agentPath,
@@ -86,11 +142,22 @@ class FakeAgent {
   }
 
   async prompt(params) {
+    await Bun.write(process.env.PROMPT_LOG, JSON.stringify(params.prompt));
     await this.connection.sessionUpdate({
       sessionId: params.sessionId,
       update: {
         sessionUpdate: "agent_message_chunk",
         content: { type: "text", text: "done" },
+      },
+    });
+    await this.connection.sessionUpdate({
+      sessionId: params.sessionId,
+      update: {
+        sessionUpdate: "usage_update",
+        used: 120,
+        size: 1000,
+        cost: { amount: 0.01, currency: "USD" },
+        _meta: { outputTokens: 20 },
       },
     });
     await this.connection.sessionUpdate({
@@ -113,7 +180,14 @@ class FakeAgent {
         rawOutput: "ok",
       },
     });
-    return { stopReason: "end_turn" };
+    return {
+      stopReason: "end_turn",
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        totalTokens: 120,
+      },
+    };
   }
 
   async cancel() {}
@@ -130,11 +204,16 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     const session = await adapter.createSession(
       baseConfig({
         cwd,
+        systemPrompt: "system from config",
+        model: "gpt-5.5",
         env: {
           PATH: process.env.PATH ?? "",
           HOME: process.env.HOME ?? "",
-          ACP_TARGET_COMMAND: "bun",
-          ACP_TARGET_ARGS: JSON.stringify([agentPath]),
+          ACP_COMMAND: "bun",
+          ACP_ARGS: JSON.stringify([agentPath]),
+          ACP_ENV_PROMPT_LOG: promptLog,
+          ACP_COST_PROVIDER: "codex",
+          ACP_SYSTEM_PROMPT_FALLBACK: "user_message",
         },
       }),
     );
@@ -149,10 +228,57 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       output: "done",
       isError: false,
     });
+    expect(result.cost).toMatchObject({
+      provider: "codex",
+      model: "gpt-5.5",
+      inputTokens: 100,
+      outputTokens: 20,
+      totalCostUsd: 0.01,
+    });
+    expect(JSON.parse(readFileSync(promptLog, "utf8"))).toEqual([
+      { type: "text", text: "system from config" },
+      { type: "text", text: "hello" },
+    ]);
     expect(events.some((event) => event.type === "session_init")).toBe(true);
+    expect(events.some((event) => event.type === "raw_log")).toBe(true);
     expect(events.some((event) => event.type === "message" && event.content === "done")).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "context_usage" &&
+          event.contextUsedTokens === 120 &&
+          event.contextPercent === 12,
+      ),
+    ).toBe(true);
     expect(events.some((event) => event.type === "tool_start")).toBe(true);
     expect(events.some((event) => event.type === "tool_end")).toBe(true);
     expect(events.some((event) => event.type === "result")).toBe(true);
+  });
+
+  test("startup failures include scrubbed stderr tail", async () => {
+    const cwd = makeTempDir();
+    const agentPath = join(cwd, "bad-acp-agent.ts");
+    await Bun.write(
+      agentPath,
+      `
+console.error("initialize failed for sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa");
+process.exit(1);
+`,
+    );
+
+    const adapter = new ACPAdapter();
+    await expect(
+      adapter.createSession(
+        baseConfig({
+          cwd,
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            ACP_COMMAND: "bun",
+            ACP_ARGS: JSON.stringify([agentPath]),
+          },
+        }),
+      ),
+    ).rejects.toThrow(/stderr tail: initialize failed for \[REDACTED:openai_proj_key\]/);
   });
 });
