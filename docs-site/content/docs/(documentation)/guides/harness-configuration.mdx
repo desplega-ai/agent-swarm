@@ -15,6 +15,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
 | **Devin** | `devin` | Cognition's Devin via the `/sessions` API — session executes in Devin's managed cloud, ACU-based cost tracking |
 | **Claude Managed Agents** | `claude-managed` | Anthropic's managed cloud sandbox — sessions execute outside the worker. Requires one-time setup CLI to create the Anthropic-side Agent + Environment |
+| **ACP** | `acp` | Any [ACP-compatible](https://github.com/zed-industries/agent-client-protocol) agent. Target selected by `ACP_TARGET`: `gemini`, `claude-agent-acp`, `codex-acp`, or `custom` (operator-provided binary) |
 
 ## How It Works
 
@@ -30,6 +31,8 @@ HARNESS_PROVIDER=devin           →  DevinAdapter          →  POSTs /sessions
 HARNESS_PROVIDER=claude-managed  →  ClaudeManagedAdapter  →  opens SSE stream against
                                                             Anthropic's managed sandbox
                                                             (session executes server-side)
+HARNESS_PROVIDER=acp             →  ACPAdapter            →  spawns ACP target binary,
+                                                            bidirectional JSON-RPC via stdio
 ```
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.

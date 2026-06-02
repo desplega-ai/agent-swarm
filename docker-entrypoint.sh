@@ -95,6 +95,45 @@ elif [ "$HARNESS_PROVIDER" = "devin" ]; then
     else
         echo "Devin API: configured (org: ${DEVIN_ORG_ID})"
     fi
+elif [ "$HARNESS_PROVIDER" = "acp" ]; then
+    # ACP harness — credential requirements depend on the underlying target.
+    # ACP_TARGET selects a built-in target profile (gemini, claude-agent-acp,
+    # codex-acp) or "custom" (operator-provided binary). Defaults to "custom".
+    ACP_TARGET="${ACP_TARGET:-custom}"
+
+    case "$ACP_TARGET" in
+        gemini)
+            if [ -z "$GOOGLE_API_KEY" ] && [ -z "$GEMINI_API_KEY" ]; then
+                echo "Warning: acp/gemini target has no credentials yet (GOOGLE_API_KEY / GEMINI_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+            else
+                echo "ACP target: gemini (credentials present)"
+            fi
+            ;;
+        claude-agent-acp)
+            if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+                echo "Warning: acp/claude-agent-acp target has no credentials yet (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+            else
+                echo "ACP target: claude-agent-acp (credentials present)"
+            fi
+            ;;
+        codex-acp)
+            if [ -z "$OPENAI_API_KEY" ] && [ ! -f "/home/worker/.codex/auth.json" ]; then
+                echo "Warning: acp/codex-acp target has no credentials yet (OPENAI_API_KEY / ~/.codex/auth.json). Worker will park in credential-wait until creds appear in swarm_config."
+            else
+                echo "ACP target: codex-acp (credentials present)"
+            fi
+            ;;
+        custom)
+            if [ -z "$ACP_TARGET_COMMAND" ] && [ -z "$ACP_COMMAND" ]; then
+                echo "Warning: acp/custom target has no command set (ACP_TARGET_COMMAND). Worker will fail at session start unless a command is configured in swarm_config."
+            else
+                echo "ACP target: custom (command: ${ACP_TARGET_COMMAND:-$ACP_COMMAND})"
+            fi
+            ;;
+        *)
+            echo "Warning: unknown ACP_TARGET=\"$ACP_TARGET\" — falling back to custom resolution at runtime."
+            ;;
+    esac
 elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     WORKER_CODEX_HOME="/home/worker/.codex"
 
@@ -198,6 +237,54 @@ elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     echo "Claude Managed Agents: no local CLI required (sessions run in Anthropic cloud)"
 elif [ "$HARNESS_PROVIDER" = "devin" ]; then
     echo "Devin: cloud API (no local binary required)"
+elif [ "$HARNESS_PROVIDER" = "acp" ]; then
+    # ACP binary verification is target-dependent.
+    ACP_TARGET="${ACP_TARGET:-custom}"
+    case "$ACP_TARGET" in
+        gemini)
+            if ! command -v gemini > /dev/null 2>&1; then
+                echo "FATAL: gemini CLI not found on PATH (required for ACP target 'gemini')"
+                echo "  Install: npm install -g @google/gemini-cli"
+                echo "  PATH=$PATH"
+                exit 1
+            fi
+            echo "ACP target binary: $(command -v gemini) (gemini)"
+            ;;
+        claude-agent-acp)
+            if ! command -v claude-agent-acp > /dev/null 2>&1; then
+                echo "FATAL: claude-agent-acp not found on PATH (required for ACP target 'claude-agent-acp')"
+                echo "  Install: npm install -g @zed-industries/claude-agent-acp"
+                echo "  PATH=$PATH"
+                exit 1
+            fi
+            echo "ACP target binary: $(command -v claude-agent-acp) (claude-agent-acp)"
+            ;;
+        codex-acp)
+            if ! command -v codex-acp > /dev/null 2>&1; then
+                echo "FATAL: codex-acp not found on PATH (required for ACP target 'codex-acp')"
+                echo "  Install: cargo install codex-acp (from zed-industries/codex-acp)"
+                echo "  PATH=$PATH"
+                exit 1
+            fi
+            echo "ACP target binary: $(command -v codex-acp) (codex-acp)"
+            ;;
+        custom)
+            ACP_CMD="${ACP_TARGET_COMMAND:-${ACP_COMMAND:-}}"
+            if [ -n "$ACP_CMD" ]; then
+                ACP_CMD_EXEC=$(echo "$ACP_CMD" | awk '{print $1}')
+                if ! command -v "$ACP_CMD_EXEC" > /dev/null 2>&1; then
+                    echo "Warning: ACP_TARGET_COMMAND binary not found: '$ACP_CMD_EXEC'"
+                    echo "  PATH=$PATH"
+                    echo "  The command must be available before a task session starts."
+                fi
+            else
+                echo "ACP target: custom (command will be resolved from ACP_TARGET_COMMAND at session start)"
+            fi
+            ;;
+        *)
+            echo "Warning: unknown ACP_TARGET=\"$ACP_TARGET\" — binary check skipped, will resolve at runtime."
+            ;;
+    esac
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     OPENCODE_BIN="${OPENCODE_BINARY:-opencode}"
     if ! command -v "$OPENCODE_BIN" > /dev/null 2>&1; then

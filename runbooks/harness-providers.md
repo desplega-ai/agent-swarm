@@ -12,6 +12,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
+| ACP | `acp` | `ACPAdapter` | Any ACP-compatible agent via `@agentclientprotocol/sdk`; target-keyed by `ACP_TARGET` |
 
 ## `HARNESS_PROVIDER` resolution + live re-assignment
 
@@ -46,10 +47,39 @@ Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOption
 | `opencode` | Yes | Via MCP |
 | `pi` (`pi-mono`) | Yes | Via MCP |
 | `devin` | Conditional | Only when `HAS_MCP=true`. In default mode the schema is **not** enforced — Devin's free-form output is stored as-is. |
+| `acp` | Yes | Via MCP (swarm tools delivered over `session/new.mcpServers`). Target must support MCP passthrough. |
 
 When supported, validation happens in the `store-progress` MCP tool (see `src/tools/store-progress.ts:159-190`). When the schema is missing or violated, the tool call fails and the agent is asked to retry.
 
 **Caveat for default-mode Devin:** `ensureTaskFinished` in `src/commands/runner.ts` writes Devin's `providerOutput` directly into `task.output` without schema validation. Callers consuming a schema'd task's output should not assume `JSON.parse(task.output)` will succeed when the task ran on default-mode Devin.
+
+## ACP target matrix
+
+The ACP harness (`HARNESS_PROVIDER=acp`) delegates to a concrete agent process selected by `ACP_TARGET`. Each target is an ACP-compatible CLI that the adapter spawns and talks to over stdio JSON-RPC.
+
+| `ACP_TARGET` | Underlying agent | Binary | Credential env vars | Bundled in worker image |
+|---|---|---|---|---|
+| `custom` (default) | Operator-provided | `ACP_TARGET_COMMAND` | None (target's own) | No |
+| `gemini` | Gemini CLI (native ACP) | `gemini` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Yes |
+| `claude-agent-acp` | Claude Code via Zed wrapper | `claude-agent-acp` | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | Yes |
+| `codex-acp` | Codex CLI via Zed wrapper (Rust) | `codex-acp` | `OPENAI_API_KEY` or `~/.codex/auth.json` | No (too large; install separately) |
+
+### ACP env vars
+
+| Env var | Description |
+|---|---|
+| `ACP_TARGET` | Target selector (default: `custom`). |
+| `ACP_TARGET_COMMAND` | Executable for `custom` target (required when `ACP_TARGET=custom`). Whitespace-split or JSON array via `ACP_TARGET_ARGS`. |
+| `ACP_TARGET_ARGS` | Extra arguments for `ACP_TARGET_COMMAND`. JSON array or whitespace-separated string. |
+| `ACP_SYSTEM_PROMPT_PATH` | Optional file path where the adapter writes the system prompt for targets that read it from disk. |
+| `ACP_COMMAND` | Legacy alias for `ACP_TARGET_COMMAND`. |
+
+### Known limitations
+
+- **No Claude hooks.** ACP's protocol has no hook framework, so `SessionStart`, `PreToolUse`, `PostToolUse`, `PreCompact`, `Stop` hooks don't fire under ACP. Hook-dependent features (tool-loop detection, goal-reminder injection at compact, heartbeat updates, identity-file sync, memory auto-indexing) are unavailable.
+- **No first-class system prompt.** ACP has no `system_prompt` field on `session/new`. The adapter writes the system prompt to a file (`ACP_SYSTEM_PROMPT_PATH`) or relies on target-specific injection (e.g., `AGENTS.md` for codex-acp).
+- **Resume only if the target supports `loadSession`.** The adapter checks `agentCapabilities.loadSession` at `initialize` time; targets that don't advertise it get `canResume() → false`.
+- **Cost/context best-effort.** ACP does not standardize cost or token-usage reporting. The adapter falls back to the pricing-table recompute (`costSource: 'pricing-table'`) and `peak-proxy` context formula.
 
 ## pi-mono + Amazon Bedrock auth
 

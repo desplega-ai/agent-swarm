@@ -14,7 +14,7 @@ A *harness provider* is the runtime that actually drives an LLM: it owns the sub
   For **configuring** an existing provider, see [Harness Configuration](/docs/guides/harness-configuration). This guide is for **implementing a new one**.
 </Callout>
 
-**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK hosted inside a per-task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping; experimental, rolling out across DES-295 → DES-299).
+**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK hosted inside a per-task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping; experimental, rolling out across DES-295 → DES-299), `acp` (any [ACP-compatible](https://github.com/zed-industries/agent-client-protocol) agent via `@agentclientprotocol/sdk` — target selected by `ACP_TARGET`).
 
 ---
 
@@ -103,6 +103,7 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `MODEL_OVERRIDE=amazon-bedrock/*`, anything the AWS SDK default chain accepts (see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`, sends session config over stdin, and receives line-delimited events/results over stdout; the child hosts `@openai/codex-sdk` `Codex` / `Thread` and streams `ThreadEvent`s back | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
+| [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) | `Bun.spawn` of ACP target binary; bidirectional stdio JSON-RPC via `@agentclientprotocol/sdk` `ClientSideConnection` | Target-dependent — `GOOGLE_API_KEY`/`GEMINI_API_KEY` (gemini), `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` (claude-agent-acp), `OPENAI_API_KEY` (codex-acp), operator-supplied (custom) |
 
 ### pi-mono + Amazon Bedrock auth
 
