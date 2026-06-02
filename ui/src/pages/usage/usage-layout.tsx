@@ -1,4 +1,11 @@
-import { BarChart3, type LucideIcon, PanelLeftClose, PanelLeftOpen, Wallet } from "lucide-react";
+import {
+  BarChart3,
+  LayoutDashboard,
+  type LucideIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Wallet,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -23,6 +30,7 @@ interface UsageNavItem {
 const USAGE_NAV: UsageNavItem[] = [
   { title: "Usage", path: "/usage", icon: BarChart3, end: true },
   { title: "Budgets", path: "/usage/budgets", icon: Wallet },
+  { title: "Metrics", path: "/usage/metrics", icon: LayoutDashboard },
 ];
 
 const RAIL_COLLAPSED_KEY = "agent-swarm:usage-rail-collapsed";

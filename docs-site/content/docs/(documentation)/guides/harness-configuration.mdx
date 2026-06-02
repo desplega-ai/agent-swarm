@@ -34,7 +34,9 @@ HARNESS_PROVIDER=claude-managed  →  ClaudeManagedAdapter  →  opens SSE strea
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
 
-For local coding harnesses, Agent Swarm now wires in the `context-mode` MCP server by default for Claude Code, Codex, and opencode. That gives those providers the same `ctx_*` compressed-search / fetch-and-index tools out of the box. Set `CONTEXT_MODE_DISABLED=true` to opt a worker out.
+For local coding harnesses, Agent Swarm now wires in the `context-mode` MCP server by default for Claude Code, Codex, and opencode. That gives those providers the same `ctx_*` compressed-search / fetch-and-index tools out of the box. Hook guidance now nudges agents toward `ctx_execute` / `ctx_batch_execute` after every 3 qualifying external-MCP calls by default (override with `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY`). Set `CONTEXT_MODE_DISABLED=true` to opt a worker out.
+
+When the runner refreshes an already-cloned repo for a new task, dirty working trees are auto-stashed instead of forcing a skipped pull. Any resulting `swarm-autostash` refs are appended to the composed prompt so the agent can restore them intentionally with `git stash apply <ref>` or `git stash pop <ref>` when that work matters to the current task.
 
 ---
 

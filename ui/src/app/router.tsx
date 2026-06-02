@@ -47,6 +47,7 @@ const PeoplePage = lazy(() => import("@/pages/people/page"));
 const PersonDetailPage = lazy(() => import("@/pages/people/[id]/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
 const MemoryPage = lazy(() => import("@/pages/memory/page"));
+const MetricsPage = lazy(() => import("@/pages/metrics/page"));
 const PageDetailPage = lazy(() => import("@/pages/pages/[id]/page"));
 const PagesListingPage = lazy(() => import("@/pages/pages/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
@@ -65,6 +66,7 @@ const REDIRECTS: Record<string, string> = {
   integrations: "/settings/integrations",
   repos: "/settings/repos",
   debug: "/settings/debug",
+  metrics: "/usage/metrics",
 };
 
 const redirectRoutes: RouteObject[] = [
@@ -108,6 +110,8 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <UsageContent /> },
           { path: "budgets", element: <BudgetsPage /> },
+          { path: "metrics", element: <MetricsPage /> },
+          { path: "metrics/:id", element: <MetricsPage /> },
         ],
       },
       {

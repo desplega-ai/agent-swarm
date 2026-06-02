@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "attio-interaction",
+  "displayName": "Attio Interaction",
+  "slug": "attio-interaction",
+  "title": "Attio Interaction",
+  "description": "Generic Attio CRM REST API v2 recipes for querying records, upserting companies/people/deals, writing notes/tasks/comments, managing lists, and handling webhooks.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["ATTIO_API_KEY"],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["attio", "crm", "sales"]
+}

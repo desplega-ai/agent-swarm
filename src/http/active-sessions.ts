@@ -8,6 +8,7 @@ import {
   getActiveSessions,
   heartbeatActiveSession,
   insertActiveSession,
+  resetOrphanedInProgressTasksForAgent,
   updateActiveSessionProviderSessionId,
 } from "../be/db";
 import { route } from "./route-def";
@@ -115,6 +116,21 @@ const cleanupSessions = route({
   },
 });
 
+const recoverOrphanedTasks = route({
+  method: "post",
+  path: "/api/active-sessions/recover-orphaned-tasks",
+  pattern: ["api", "active-sessions", "recover-orphaned-tasks"],
+  summary: "Recover orphaned in-progress tasks for an agent",
+  tags: ["Active Sessions"],
+  body: z.object({
+    agentId: z.string().min(1),
+    minAgeSeconds: z.number().int().positive().optional(),
+  }),
+  responses: {
+    200: { description: "Recovery result" },
+  },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleActiveSessions(
@@ -122,7 +138,7 @@ export async function handleActiveSessions(
   res: ServerResponse,
   pathSegments: string[],
   queryParams: URLSearchParams,
-  _myAgentId: string | undefined,
+  myAgentId: string | undefined,
 ): Promise<boolean> {
   if (listActiveSessions.match(req.method, pathSegments)) {
     const parsed = await listActiveSessions.parse(req, res, pathSegments, queryParams);
@@ -192,6 +208,21 @@ export async function handleActiveSessions(
       cleaned = cleanupStaleSessions(parsed.body?.maxAgeMinutes ?? 30);
     }
     json(res, { cleaned });
+    return true;
+  }
+
+  if (recoverOrphanedTasks.match(req.method, pathSegments)) {
+    const parsed = await recoverOrphanedTasks.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!myAgentId || parsed.body.agentId !== myAgentId) {
+      json(res, { error: "Can only recover orphaned tasks for the calling agent" }, 403);
+      return true;
+    }
+    const tasks = resetOrphanedInProgressTasksForAgent(
+      parsed.body.agentId,
+      parsed.body.minAgeSeconds ?? 60,
+    );
+    json(res, { recovered: tasks.length, tasks });
     return true;
   }
 

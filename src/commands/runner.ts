@@ -1758,6 +1758,31 @@ async function cleanupActiveSessions(config: ApiConfig): Promise<void> {
   }
 }
 
+/** Reset orphaned in-progress tasks for this agent back to pending dispatch. */
+async function recoverOrphanedInProgressTasks(config: ApiConfig): Promise<number> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Agent-ID": config.agentId,
+  };
+  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+  try {
+    const response = await fetch(`${config.apiUrl}/api/active-sessions/recover-orphaned-tasks`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ agentId: config.agentId, minAgeSeconds: 60 }),
+    });
+    if (!response.ok) {
+      console.warn(`[runner] Failed to recover orphaned tasks: ${response.status}`);
+      return 0;
+    }
+    const data = (await response.json()) as { recovered?: number };
+    return data.recovered ?? 0;
+  } catch (error) {
+    console.warn(`[runner] Error recovering orphaned tasks: ${error}`);
+    return 0;
+  }
+}
+
 /** Trigger a heartbeat sweep via the API (lead startup self-check) */
 async function triggerHeartbeatSweep(config: ApiConfig): Promise<boolean> {
   try {
@@ -1809,7 +1834,7 @@ interface Trigger {
     text?: string;
   }>;
   cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
-  requestedBy?: { name: string; email?: string };
+  requestedBy?: { name: string; email?: string; role?: string; notes?: string };
   // Phase 4 — budget_refused fields. The server emits this envelope from
   // /api/poll and MCP task-action accept when an admission gate refuses to
   // let the agent claim a task. Worker reads cause + reset/spend/budget for
@@ -1830,6 +1855,26 @@ interface PollOptions {
   pollInterval: number;
   pollTimeout: number;
   since?: string; // Optional: for filtering finished tasks
+}
+
+type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
+
+export async function buildRequesterProfilePrompt(
+  requestedBy: RequesterProfile | undefined,
+): Promise<string> {
+  if (!requestedBy?.role && !requestedBy?.notes) return "";
+
+  const notes = requestedBy.notes?.trim();
+  const notesSection = notes
+    ? `\nTheir stated notes for how you should respond and act:\n${notes}`
+    : "";
+  const result = await resolveTemplateAsync("task.requester.profile", {
+    requester_name: requestedBy.name,
+    requester_role_suffix: requestedBy.role ? ` (${requestedBy.role})` : "",
+    requester_notes_section: notesSection,
+  });
+
+  return result.skipped ? "" : result.text.trim();
 }
 
 /** Register agent via HTTP API */
@@ -3674,6 +3719,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Clean up any stale active sessions from previous runs (crash recovery)
   await cleanupActiveSessions(apiConfig);
   console.log(`[${role}] Cleaned up stale active sessions`);
+  const startupRecoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
+  if (startupRecoveredOrphans > 0) {
+    console.log(
+      `[${role}] Recovered ${startupRecoveredOrphans} orphaned in-progress task(s) to pending`,
+    );
+  }
 
   // Fetch full agent profile to get soul/identity content
   try {
@@ -4150,7 +4201,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // state persists across iterations.
   let consecutiveBudgetRefusals = 0;
 
-  // Track last finished task check for leads (to avoid re-processing)
+  // Throttle orphan recovery so it runs periodically while the worker is idle or under capacity.
+  let lastOrphanRecoveryAt = 0;
+  const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
+
   while (true) {
     // Ping server on each iteration to keep status updated
     await pingServer(apiConfig, role);
@@ -4246,6 +4300,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
     // Only poll if we have capacity
     if (state.activeTasks.size < state.maxConcurrent) {
+      if (Date.now() - lastOrphanRecoveryAt > ORPHAN_RECOVERY_INTERVAL_MS) {
+        lastOrphanRecoveryAt = Date.now();
+        const recoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
+        if (recoveredOrphans > 0) {
+          console.log(
+            `[${role}] Recovered ${recoveredOrphans} orphaned in-progress task(s) to pending`,
+          );
+        }
+      }
+
       console.log(
         `[${role}] Polling for triggers (${state.activeTasks.size}/${state.maxConcurrent} active)...`,
       );
@@ -4485,10 +4549,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Rebuild system prompt with per-task repo context
         const taskBasePrompt = await buildSystemPrompt();
-        const taskSystemPrompt =
-          (additionalSystemPrompt
-            ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`
-            : taskBasePrompt) + cwdWarning;
+        const requesterProfilePrompt = await buildRequesterProfilePrompt(trigger.requestedBy);
+        const taskPromptParts = [taskBasePrompt, requesterProfilePrompt, additionalSystemPrompt]
+          .filter((part): part is string => Boolean(part))
+          .join("\n\n");
+        const taskSystemPrompt = taskPromptParts + cwdWarning;
 
         iteration++;
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");

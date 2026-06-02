@@ -7,13 +7,17 @@ import {
   getActiveSessionForTask,
   getDb,
   getIdleWorkersWithCapacity,
+  getOrphanedInProgressTasksForAgent,
+  getPendingTaskForAgent,
   getStalledInProgressTasks,
   getTaskById,
   getUnassignedPoolTasks,
   initDb,
   insertActiveSession,
+  resetOrphanedInProgressTasksForAgent,
   startTask,
   updateAgentStatus,
+  updateTaskClaudeSessionId,
 } from "../be/db";
 import {
   codeLevelTriage,
@@ -154,6 +158,60 @@ describe("Heartbeat Triage", () => {
     test("returns null when no session exists", () => {
       const session = getActiveSessionForTask("non-existent-task-id");
       expect(session).toBeNull();
+    });
+  });
+
+  describe("orphaned in_progress recovery", () => {
+    test("resets stale in_progress task with no session and no claudeSessionId to pending", () => {
+      const agent = createAgent({ name: "orphan-worker", isLead: false, status: "idle" });
+      const task = createTaskExtended("Orphaned task", { agentId: agent.id });
+      startTask(task.id);
+
+      const oldTime = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+
+      const orphaned = getOrphanedInProgressTasksForAgent(agent.id, 60);
+      expect(orphaned.map((t) => t.id)).toContain(task.id);
+
+      const reset = resetOrphanedInProgressTasksForAgent(agent.id, 60);
+      expect(reset.map((t) => t.id)).toContain(task.id);
+
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("pending");
+      expect(getPendingTaskForAgent(agent.id)?.id).toBe(task.id);
+    });
+
+    test("does not reset tasks with active session, provider session, or fresh update", () => {
+      const agent = createAgent({ name: "live-worker", isLead: false, status: "idle" });
+      const withActiveSession = createTaskExtended("Live session task", { agentId: agent.id });
+      const withProviderSession = createTaskExtended("Provider session task", {
+        agentId: agent.id,
+      });
+      const fresh = createTaskExtended("Fresh task", { agentId: agent.id });
+
+      startTask(withActiveSession.id);
+      startTask(withProviderSession.id);
+      startTask(fresh.id);
+
+      const oldTime = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id IN (?, ?)", [
+        oldTime,
+        withActiveSession.id,
+        withProviderSession.id,
+      ]);
+      insertActiveSession({
+        agentId: agent.id,
+        taskId: withActiveSession.id,
+        triggerType: "task_assigned",
+      });
+      updateTaskClaudeSessionId(withProviderSession.id, "claude-live-session");
+
+      const reset = resetOrphanedInProgressTasksForAgent(agent.id, 60);
+      expect(reset.length).toBe(0);
+
+      expect(getTaskById(withActiveSession.id)?.status).toBe("in_progress");
+      expect(getTaskById(withProviderSession.id)?.status).toBe("in_progress");
+      expect(getTaskById(fresh.id)?.status).toBe("in_progress");
     });
   });
 
@@ -306,10 +364,13 @@ describe("Heartbeat Triage", () => {
       expect(findings.autoAssigned.length).toBe(1);
       expect(findings.autoAssigned[0]!.agentId).toBe(worker.id);
 
-      // Verify task is now in_progress
+      // Verify task is pending so the worker's normal poll returns task_assigned.
       const task = getTaskById(findings.autoAssigned[0]!.taskId);
-      expect(task?.status).toBe("in_progress");
+      expect(task?.status).toBe("pending");
       expect(task?.agentId).toBe(worker.id);
+
+      const dispatchable = getPendingTaskForAgent(worker.id);
+      expect(dispatchable?.id).toBe(task?.id);
     });
 
     test("auto-assignment skips lead agents", async () => {
@@ -338,6 +399,26 @@ describe("Heartbeat Triage", () => {
 
       const findings = await codeLevelTriage();
       expect(findings.autoAssigned.length).toBe(0);
+    });
+
+    test("auto-assignment counts pending reservations when assigning pool tasks", async () => {
+      const worker = createAgent({ name: "single-slot-worker", isLead: false, status: "idle" });
+      createTaskExtended("Pool task 1");
+      createTaskExtended("Pool task 2");
+
+      const findings = await codeLevelTriage();
+      expect(findings.autoAssigned.length).toBe(1);
+      expect(findings.autoAssigned[0]!.agentId).toBe(worker.id);
+
+      const assigned = getDb()
+        .query("SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'pending'")
+        .get(worker.id) as { count: number };
+      const remaining = getDb()
+        .query("SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'")
+        .get() as { count: number };
+
+      expect(assigned.count).toBe(1);
+      expect(remaining.count).toBe(1);
     });
 
     test("fixes worker with busy status but no active tasks", async () => {
@@ -408,7 +489,7 @@ describe("Heartbeat Triage", () => {
 
       // Verify task was auto-assigned
       const tasks = getDb()
-        .query("SELECT * FROM agent_tasks WHERE status = 'in_progress' AND agentId = ?")
+        .query("SELECT * FROM agent_tasks WHERE status = 'pending' AND agentId = ?")
         .all(worker.id) as Array<{ id: string }>;
       expect(tasks.length).toBe(1);
     });

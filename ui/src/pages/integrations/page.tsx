@@ -22,6 +22,7 @@ const QUICK_PICK_IDS = ["slack", "github", "anthropic"] as const;
 const CATEGORY_LABELS: Record<IntegrationCategory, string> = {
   comm: "Communication",
   issues: "Issues & VCS",
+  crm: "CRM",
   llm: "LLM providers",
   observability: "Observability",
   payments: "Payments",

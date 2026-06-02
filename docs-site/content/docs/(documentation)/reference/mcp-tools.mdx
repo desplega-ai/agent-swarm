@@ -630,7 +630,7 @@ Remove a skill from an agent.
 
 ### skill-update
 
-Update a skill's content or settings. Re-parses frontmatter if content changes.
+Update a skill's content or settings. Re-parses frontmatter if content changes. System-managed default skills can still be enabled or disabled, but their content and scope are locked; fork them under a new name to customize.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -649,7 +649,7 @@ Publish a personal skill to swarm scope. Creates an approval task for the lead a
 
 ### skill-delete
 
-Delete a skill. Only the owning agent or lead can delete.
+Delete a skill. Only the owning agent or lead can delete. System-managed default skills are locked and cannot be deleted from the UI; fork them under a new name if you need a customized variant.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

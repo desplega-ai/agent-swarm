@@ -43,6 +43,7 @@ export interface IntegrationConfigGroup {
 export type IntegrationCategory =
   | "comm"
   | "issues"
+  | "crm"
   | "llm"
   | "observability"
   | "payments"
@@ -107,6 +108,8 @@ export interface IntegrationDef {
   category: IntegrationCategory;
   /** Maps to a lucide-react icon name at render time. */
   iconKey: string;
+  /** Optional brand/logo asset path. Falls back to iconKey when unset. */
+  logoSrc?: string;
   /** External docs URL or in-repo docs path. */
   docsUrl: string;
   fields: IntegrationField[];
@@ -537,6 +540,43 @@ export const INTEGRATIONS: IntegrationDef[] = [
         placeholder: "https://api.example.com/api/trackers/jira/callback",
         helpText:
           "Optional. Override the OAuth callback URL Atlassian redirects to after authorization. Leave blank to derive it from MCP_BASE_URL. Must match exactly what's registered in your Atlassian app.",
+        affectsRestart: true,
+      },
+    ],
+  },
+
+  // ---------------------------------------------------------------- Attio
+  {
+    id: "attio",
+    name: "Attio",
+    description:
+      "Connect agents to Attio CRM records, notes, tasks, lists, and pipeline workflows.",
+    category: "crm",
+    iconKey: "square-check-big",
+    logoSrc: "/provider-logos/attio.svg",
+    docsUrl: "https://docs.attio.com/docs/overview",
+    restartRequired: true,
+    recommendedSkills: [
+      {
+        name: "attio-interaction",
+        source: "template",
+        templateRepo: "desplega-ai/agent-swarm",
+        templatePath: "templates/skills/attio-interaction",
+        roles: ["lead", "worker"],
+        reason:
+          "Canonical recipes for Attio REST API v2 reads/writes, including record query, safe upsert, notes, tasks, lists, webhooks, and rate limits.",
+        installOnSetup: true,
+      },
+    ],
+    fields: [
+      {
+        key: "ATTIO_API_KEY",
+        label: "API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        helpText:
+          "Attio workspace access token used as the bearer token for Attio API calls. Generate one in Workspace settings -> Developers.",
         affectsRestart: true,
       },
     ],

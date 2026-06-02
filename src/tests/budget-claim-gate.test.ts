@@ -11,6 +11,7 @@ import {
   createAgent,
   createSessionCost,
   createTaskExtended,
+  createUser,
   getAgentById,
   getDb,
   incrementEmptyPollCount,
@@ -127,6 +128,31 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
     if ("error" in body) throw new Error("unexpected error response");
     expect(body.trigger?.type).toBe("task_assigned");
     expect((body.trigger as { taskId: string }).taskId).toBe(task.id);
+  });
+
+  test("pending task trigger includes requester role and notes", async () => {
+    const worker = createAgent({ name: "w-requester", isLead: false, status: "idle", maxTasks: 1 });
+    const requester = createUser({
+      name: "Requester One",
+      email: "requester@example.com",
+      role: "engineering manager",
+      notes: "Include implementation detail and test coverage.",
+    });
+    createTaskExtended("profile-aware task", {
+      agentId: worker.id,
+      requestedByUserId: requester.id,
+    });
+
+    const { status, body } = await callPoll(worker.id);
+    expect(status).toBe(200);
+    if ("error" in body) throw new Error("unexpected error response");
+    expect(body.trigger?.type).toBe("task_assigned");
+    expect(body.trigger?.requestedBy).toEqual({
+      name: "Requester One",
+      email: "requester@example.com",
+      role: "engineering manager",
+      notes: "Include implementation detail and test coverage.",
+    });
   });
 
   test("no budgets configured + no work → trigger=null", async () => {

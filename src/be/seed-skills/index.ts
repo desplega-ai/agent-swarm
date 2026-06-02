@@ -11,6 +11,12 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import artifactsConfig from "../../../templates/skills/artifacts/config.json" with { type: "text" };
 import artifactsContent from "../../../templates/skills/artifacts/content.md" with { type: "text" };
+import attioInteractionConfig from "../../../templates/skills/attio-interaction/config.json" with {
+  type: "text",
+};
+import attioInteractionContent from "../../../templates/skills/attio-interaction/content.md" with {
+  type: "text",
+};
 import kvStorageConfig from "../../../templates/skills/kv-storage/config.json" with {
   type: "text",
 };
@@ -61,6 +67,7 @@ export type SeedSkill = {
 };
 
 const BUILT_IN_SKILL_SOURCES = [
+  { config: attioInteractionConfig, body: attioInteractionContent },
   { config: artifactsConfig, body: artifactsContent },
   { config: kvStorageConfig, body: kvStorageContent },
   { config: pagesConfig, body: pagesContent },

@@ -62,6 +62,16 @@ interface IntegrationCardProps {
 
 export function IntegrationCard({ def, status, className }: IntegrationCardProps) {
   const Icon = resolveIcon(def.iconKey);
+  const logo = def.logoSrc ? (
+    <img
+      src={def.logoSrc}
+      alt=""
+      className="h-5 w-5 object-contain dark:invert"
+      aria-hidden="true"
+    />
+  ) : (
+    <Icon className="h-5 w-5 text-foreground" aria-hidden="true" />
+  );
 
   return (
     <Card
@@ -75,7 +85,7 @@ export function IntegrationCard({ def, status, className }: IntegrationCardProps
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <div className="flex h-9 w-9 items-center justify-center rounded-md bg-muted/50 shrink-0">
-              <Icon className="h-5 w-5 text-foreground" aria-hidden="true" />
+              {logo}
             </div>
             <h3 className="text-sm font-semibold truncate">{def.name}</h3>
           </div>

@@ -122,6 +122,9 @@ export const DEFERRED_TOOLS = new Set([
   // Debug (1)
   "db-query",
 
+  // Metrics (1)
+  "create_metric",
+
   // Approval Requests (1)
   "request-human-input",
 

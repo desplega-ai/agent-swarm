@@ -185,6 +185,8 @@ Current worker-image defaults in `Dockerfile.worker`:
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
+Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
+
 ### Run
 
 ```bash

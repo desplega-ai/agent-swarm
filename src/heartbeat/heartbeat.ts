@@ -1,5 +1,5 @@
 import {
-  claimTask,
+  assignUnassignedTaskPending,
   cleanupStaleSessions,
   createTaskExtended,
   deleteActiveSession,
@@ -461,7 +461,7 @@ function checkWorkerHealth(findings: HeartbeatFindings): void {
 
 /**
  * Auto-assign unassigned pool tasks to idle workers with capacity.
- * Uses atomic claimTask() to prevent races.
+ * Leaves tasks pending so the assigned worker's normal poll dispatches them.
  */
 function autoAssignPoolTasks(findings: HeartbeatFindings): void {
   getDb().transaction(() => {
@@ -472,16 +472,37 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
     if (poolTasks.length === 0) return;
 
     let workerIndex = 0;
+    const reservedByWorker = new Map<string, number>();
+    const reservedForWorker = (agentId: string): number => {
+      const cached = reservedByWorker.get(agentId);
+      if (cached !== undefined) return cached;
+      const row = getDb()
+        .prepare<{ count: number }, [string]>(
+          "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')",
+        )
+        .get(agentId);
+      const reserved = row?.count ?? 0;
+      reservedByWorker.set(agentId, reserved);
+      return reserved;
+    };
+
     for (const task of poolTasks) {
       if (workerIndex >= idleWorkers.length) break;
 
       const worker = idleWorkers[workerIndex]!;
-      const claimed = claimTask(task.id, worker.id);
+      const maxTasks = worker.maxTasks ?? 1;
+      if (reservedForWorker(worker.id) >= maxTasks) {
+        workerIndex++;
+        continue;
+      }
 
-      if (claimed) {
+      const assigned = assignUnassignedTaskPending(task.id, worker.id);
+
+      if (assigned) {
         findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
+        reservedByWorker.set(worker.id, reservedForWorker(worker.id) + 1);
         // Check if this worker still has capacity for more
-        const remaining = (worker.maxTasks ?? 1) - getActiveTaskCount(worker.id);
+        const remaining = maxTasks - reservedForWorker(worker.id);
         if (remaining <= 0) {
           workerIndex++;
         }

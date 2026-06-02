@@ -1501,6 +1501,116 @@ export interface PagesListResponse {
   total: number;
 }
 
+export type MetricVisualization = "stat" | "table" | "bar" | "line" | "multi-bar" | "multi-line";
+export type MetricFormat = "number" | "integer" | "currency" | "percent" | "duration";
+export type MetricParam = string | number | boolean | null;
+export type MetricVariableType = "text" | "number" | "select";
+
+export interface MetricVariable {
+  key: string;
+  label?: string;
+  type?: MetricVariableType;
+  defaultValue?: MetricParam;
+  options?: Array<{
+    label: string;
+    value: MetricParam;
+  }>;
+}
+
+export interface MetricVizColumn {
+  key: string;
+  label?: string;
+  format?: MetricFormat;
+}
+
+export interface MetricWidget {
+  id: string;
+  title: string;
+  description?: string;
+  query: {
+    sql: string;
+    params?: Array<string | number | boolean | null>;
+    maxRows?: number;
+  };
+  viz: {
+    type: MetricVisualization;
+    x?: string;
+    y?: string;
+    series?: string[];
+    label?: string;
+    value?: string;
+    columns?: MetricVizColumn[];
+    format?: MetricFormat;
+  };
+}
+
+export interface MetricDefinition {
+  version: 1;
+  widgets: MetricWidget[];
+  variables?: MetricVariable[];
+  layout?: {
+    columns?: number;
+  };
+  refreshSeconds?: number;
+}
+
+export interface Metric {
+  id: string;
+  agentId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  definition: MetricDefinition;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MetricListItem = Omit<Metric, "definition"> & { definition?: MetricDefinition };
+
+export interface MetricsListResponse {
+  metrics: MetricListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface MetricRunResult {
+  metric: Metric;
+  variables?: Record<string, MetricParam>;
+  widgets: Array<{
+    widget: MetricWidget;
+    result: {
+      columns: string[];
+      rows: Record<string, unknown>[];
+      elapsed: number;
+      total: number;
+      truncated: boolean;
+      maxRows: number;
+    };
+  }>;
+  /** First widget result, kept for older callers during rollout. */
+  result: {
+    columns: string[];
+    rows: Record<string, unknown>[];
+    elapsed: number;
+    total: number;
+    truncated: boolean;
+    maxRows: number;
+  };
+}
+
+export interface MetricSaveInput {
+  slug?: string;
+  title: string;
+  description?: string | null;
+  definition: MetricDefinition;
+}
+
+export interface MetricSaveResponse {
+  id: string;
+  version: number;
+}
+
 /**
  * Lightweight swarm-wide counts from `GET /api/metrics` (API >= the
  * generic-metrics release). Pure `COUNT(*)` aggregates — no cost/usage data.

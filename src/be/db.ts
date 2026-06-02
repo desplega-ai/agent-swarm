@@ -42,6 +42,11 @@ import type {
   McpServerScope,
   McpServerTransport,
   McpServerWithInstallInfo,
+  Metric,
+  MetricDefinition,
+  MetricSnapshot,
+  MetricSummary,
+  MetricVersion,
   Page,
   PageAuthMode,
   PageContentType,
@@ -1273,6 +1278,31 @@ export function getPendingTaskForAgent(agentId: string): AgentTask | null {
   return null;
 }
 
+export function assignUnassignedTaskPending(taskId: string, agentId: string): AgentTask | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?
+       WHERE id = ? AND status = 'unassigned' RETURNING *`,
+    )
+    .get(agentId, now, taskId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        agentId,
+        taskId,
+        oldValue: "unassigned",
+        newValue: "pending",
+        metadata: { pendingDispatch: true },
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
 export function startTask(taskId: string): AgentTask | null {
   const oldTask = getTaskById(taskId);
   if (!oldTask) return null;
@@ -2257,6 +2287,67 @@ export function getPausedTasksForAgent(agentId: string): AgentTask[] {
        ORDER BY createdAt ASC, rowid ASC`,
     )
     .all(agentId);
+  return rows.map(rowToAgentTask);
+}
+
+export function getOrphanedInProgressTasksForAgent(
+  agentId: string,
+  minAgeSeconds = 60,
+): AgentTask[] {
+  const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
+  const rows = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT t.* FROM agent_tasks t
+       LEFT JOIN active_sessions s ON s.taskId = t.id
+       WHERE t.agentId = ?
+         AND t.status = 'in_progress'
+         AND t.claudeSessionId IS NULL
+         AND t.lastUpdatedAt < ?
+         AND s.id IS NULL
+         AND t.finishedAt IS NULL
+       ORDER BY t.createdAt ASC, t.rowid ASC`,
+    )
+    .all(agentId, cutoff);
+  return rows.map(rowToAgentTask);
+}
+
+export function resetOrphanedInProgressTasksForAgent(
+  agentId: string,
+  minAgeSeconds = 60,
+): AgentTask[] {
+  const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
+  const rows = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `UPDATE agent_tasks
+       SET status = 'pending',
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id IN (
+         SELECT t.id FROM agent_tasks t
+         LEFT JOIN active_sessions s ON s.taskId = t.id
+         WHERE t.agentId = ?
+           AND t.status = 'in_progress'
+           AND t.claudeSessionId IS NULL
+           AND t.lastUpdatedAt < ?
+           AND s.id IS NULL
+           AND t.finishedAt IS NULL
+       )
+       RETURNING *`,
+    )
+    .all(agentId, cutoff);
+
+  for (const row of rows) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId: row.id,
+        agentId,
+        oldValue: "in_progress",
+        newValue: "pending",
+        metadata: { orphanedInProgressRecovery: true },
+      });
+    } catch {}
+  }
+
   return rows.map(rowToAgentTask);
 }
 
@@ -7214,6 +7305,234 @@ export function getPageVersion(pageId: string, version: number): PageVersion | n
     )
     .get(pageId, version);
   return row ? rowToPageVersion(row) : null;
+}
+
+// ============================================================================
+// Metrics CRUD + version history
+// ----------------------------------------------------------------------------
+// Config-driven metrics mirror Pages: parent table `metrics` holds the current
+// JSON definition, and `metric_versions` holds pre-update snapshots.
+// ============================================================================
+
+type MetricRow = {
+  id: string;
+  agentId: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  definition: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function rowToMetric(row: MetricRow): Metric {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    slug: row.slug,
+    title: row.title,
+    description: row.description ?? undefined,
+    definition: JSON.parse(row.definition) as MetricDefinition,
+    createdAt: normalizeDateRequired(row.createdAt),
+    updatedAt: normalizeDateRequired(row.updatedAt),
+  };
+}
+
+function rowToMetricSummary(row: MetricRow): MetricSummary {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    slug: row.slug,
+    title: row.title,
+    description: row.description ?? undefined,
+    createdAt: normalizeDateRequired(row.createdAt),
+    updatedAt: normalizeDateRequired(row.updatedAt),
+  };
+}
+
+export function createMetric(data: {
+  agentId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  definition: MetricDefinition;
+}): Metric {
+  const row = getDb()
+    .prepare<MetricRow, [string, string, string, string | null, string]>(
+      `INSERT INTO metrics (agentId, slug, title, description, definition)
+       VALUES (?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      data.agentId,
+      data.slug,
+      data.title,
+      data.description ?? null,
+      JSON.stringify(data.definition),
+    );
+  if (!row) throw new Error("Failed to create metric");
+  return rowToMetric(row);
+}
+
+export function getMetric(id: string): Metric | null {
+  const row = getDb().prepare<MetricRow, [string]>("SELECT * FROM metrics WHERE id = ?").get(id);
+  return row ? rowToMetric(row) : null;
+}
+
+export function getMetricBySlug(agentId: string, slug: string): Metric | null {
+  const row = getDb()
+    .prepare<MetricRow, [string, string]>("SELECT * FROM metrics WHERE agentId = ? AND slug = ?")
+    .get(agentId, slug);
+  return row ? rowToMetric(row) : null;
+}
+
+export function listMetricsByAgent(agentId: string, limit?: number, offset?: number): Metric[];
+export function listMetricsByAgent(
+  agentId: string,
+  limit: number | undefined,
+  offset: number | undefined,
+  opts: { slim: true },
+): MetricSummary[];
+export function listMetricsByAgent(
+  agentId: string,
+  limit = 100,
+  offset = 0,
+  opts?: { slim?: boolean },
+): Metric[] | MetricSummary[] {
+  const rows = getDb()
+    .prepare<MetricRow, [string, number, number]>(
+      "SELECT * FROM metrics WHERE agentId = ? ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
+    )
+    .all(agentId, limit, offset);
+  return opts?.slim ? rows.map(rowToMetricSummary) : rows.map(rowToMetric);
+}
+
+export function listAllMetrics(limit?: number, offset?: number): Metric[];
+export function listAllMetrics(
+  limit: number | undefined,
+  offset: number | undefined,
+  opts: { slim: true },
+): MetricSummary[];
+export function listAllMetrics(
+  limit = 100,
+  offset = 0,
+  opts?: { slim?: boolean },
+): Metric[] | MetricSummary[] {
+  const rows = getDb()
+    .prepare<MetricRow, [number, number]>(
+      "SELECT * FROM metrics ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
+    )
+    .all(limit, offset);
+  return opts?.slim ? rows.map(rowToMetricSummary) : rows.map(rowToMetric);
+}
+
+export function countAllMetrics(): number {
+  const row = getDb().prepare<{ count: number }, []>("SELECT COUNT(*) AS count FROM metrics").get();
+  return row?.count ?? 0;
+}
+
+export function countMetricsByAgent(agentId: string): number {
+  const row = getDb()
+    .prepare<{ count: number }, [string]>("SELECT COUNT(*) AS count FROM metrics WHERE agentId = ?")
+    .get(agentId);
+  return row?.count ?? 0;
+}
+
+export function updateMetric(
+  id: string,
+  data: {
+    title?: string;
+    description?: string | null;
+    definition?: MetricDefinition;
+    slug?: string;
+  },
+): Metric | null {
+  const updates: string[] = [];
+  const params: (string | null)[] = [];
+  if (data.title !== undefined) {
+    updates.push("title = ?");
+    params.push(data.title);
+  }
+  if (data.description !== undefined) {
+    updates.push("description = ?");
+    params.push(data.description ?? null);
+  }
+  if (data.definition !== undefined) {
+    updates.push("definition = ?");
+    params.push(JSON.stringify(data.definition));
+  }
+  if (data.slug !== undefined) {
+    updates.push("slug = ?");
+    params.push(data.slug);
+  }
+  if (updates.length === 0) return getMetric(id);
+  updates.push("updatedAt = ?");
+  params.push(new Date().toISOString());
+  params.push(id);
+  const row = getDb()
+    .prepare<MetricRow, (string | null)[]>(
+      `UPDATE metrics SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+  return row ? rowToMetric(row) : null;
+}
+
+export function deleteMetric(id: string): boolean {
+  const result = getDb().run("DELETE FROM metrics WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+type MetricVersionRow = {
+  id: string;
+  metricId: string;
+  version: number;
+  snapshot: string;
+  changedByAgentId: string | null;
+  createdAt: string;
+};
+
+function rowToMetricVersion(row: MetricVersionRow): MetricVersion {
+  return {
+    id: row.id,
+    metricId: row.metricId,
+    version: row.version,
+    snapshot: JSON.parse(row.snapshot) as MetricSnapshot,
+    changedByAgentId: row.changedByAgentId ?? undefined,
+    createdAt: normalizeDateRequired(row.createdAt),
+  };
+}
+
+export function createMetricVersion(data: {
+  metricId: string;
+  version: number;
+  snapshot: MetricSnapshot;
+  changedByAgentId?: string;
+}): MetricVersion {
+  const row = getDb()
+    .prepare<MetricVersionRow, [string, number, string, string | null]>(
+      `INSERT INTO metric_versions (metricId, version, snapshot, changedByAgentId)
+       VALUES (?, ?, ?, ?) RETURNING *`,
+    )
+    .get(data.metricId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null);
+  if (!row) throw new Error("Failed to create metric version");
+  return rowToMetricVersion(row);
+}
+
+export function getMetricVersions(metricId: string): MetricVersion[] {
+  return getDb()
+    .prepare<MetricVersionRow, [string]>(
+      "SELECT * FROM metric_versions WHERE metricId = ? ORDER BY version DESC",
+    )
+    .all(metricId)
+    .map(rowToMetricVersion);
+}
+
+export function getMetricVersion(metricId: string, version: number): MetricVersion | null {
+  const row = getDb()
+    .prepare<MetricVersionRow, [string, number]>(
+      "SELECT * FROM metric_versions WHERE metricId = ? AND version = ?",
+    )
+    .get(metricId, version);
+  return row ? rowToMetricVersion(row) : null;
 }
 
 // ============================================================================

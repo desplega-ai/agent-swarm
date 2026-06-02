@@ -46,6 +46,7 @@ import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from ".
 import { handleMcpServers } from "./mcp-servers";
 import { handleMcpUser } from "./mcp-user";
 import { handleMemory } from "./memory";
+import { handleMetrics } from "./metrics";
 import { handlePageProxy } from "./page-proxy";
 import { handlePages } from "./pages";
 import { handlePagesPublic } from "./pages-public";
@@ -229,6 +230,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleIntegrations(req, res, pathSegments),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),
         () => handleDbQuery(req, res, pathSegments, queryParams),
+        () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
         () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
