@@ -18,6 +18,7 @@
  * runs the predicate itself — it just reads the agent row.
  */
 
+import { existsSync } from "node:fs";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
@@ -56,7 +57,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   devin: ["DEVIN_API_KEY", "DEVIN_ORG_ID"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
-  acp: [],
+  acp: ["target-specific; gemini-cli accepts GEMINI_API_KEY or Vertex AI credentials"],
 };
 
 /**
@@ -88,12 +89,49 @@ export async function checkProviderCredentials(
       return checkPiMonoCredentials(env, opts);
     }
     case "acp":
-      return { ready: true, missing: [], satisfiedBy: "sdk-delegated" };
+      return checkAcpCredentials(env, opts);
     default:
       throw new Error(
         `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
       );
   }
+}
+
+function checkAcpCredentials(
+  env: Record<string, string | undefined>,
+  opts: CredCheckOptions = {},
+): CredStatus {
+  const target = env.ACP_TARGET ?? "custom";
+  if (target !== "gemini-cli") {
+    return { ready: true, missing: [], satisfiedBy: "sdk-delegated" };
+  }
+
+  if (env.GEMINI_API_KEY) return { ready: true, missing: [], satisfiedBy: "env" };
+  if (env.GOOGLE_GENAI_USE_VERTEXAI === "true" && env.GOOGLE_API_KEY) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  if (
+    env.GOOGLE_GENAI_USE_VERTEXAI === "true" &&
+    env.GOOGLE_APPLICATION_CREDENTIALS &&
+    env.GOOGLE_CLOUD_PROJECT &&
+    env.GOOGLE_CLOUD_LOCATION
+  ) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  if (geminiOAuthFileExists(env, opts)) {
+    return { ready: true, missing: [], satisfiedBy: "file" };
+  }
+
+  return {
+    ready: false,
+    missing: [
+      "GEMINI_API_KEY",
+      "GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_API_KEY",
+      "GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_APPLICATION_CREDENTIALS + GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION",
+      "~/.gemini/oauth_creds.json",
+    ],
+    hint: "ACP target gemini-cli needs Gemini CLI auth before startup. Set GEMINI_API_KEY, configure Vertex AI credentials, or run `gemini` login so ~/.gemini/oauth_creds.json exists.",
+  };
 }
 
 // ─── Live "Test connection" dispatcher ───────────────────────────────────────
@@ -221,6 +259,15 @@ function codexAuthFileExists(env: Record<string, string | undefined>): boolean {
   // Delegate to the adapter's own check so the auth.json path stays in one
   // place. `satisfiedBy === "file"` is set iff the file exists on disk.
   return checkCodexCredentials(env).satisfiedBy === "file";
+}
+
+function geminiOAuthFileExists(
+  env: Record<string, string | undefined>,
+  opts: CredCheckOptions,
+): boolean {
+  const homeDir = opts.homeDir ?? env.HOME;
+  if (!homeDir) return false;
+  return (opts.fs ?? { existsSync }).existsSync(`${homeDir}/.gemini/oauth_creds.json`);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProviderAdapter } from "../providers";
@@ -53,6 +53,57 @@ describe("ACPAdapter", () => {
     expect(() => resolveAcpTarget(baseConfig()).command(baseConfig())).toThrow(
       "No ACP target configured",
     );
+  });
+
+  test("resolves gemini-cli target with default ACP command, scoped env, and GEMINI.md", async () => {
+    const cwd = makeTempDir();
+    const config = baseConfig({
+      cwd,
+      env: {
+        PATH: "/bin",
+        HOME: "/home/gemini",
+        ACP_TARGET: "gemini-cli",
+        GEMINI_API_KEY: "gemini-key",
+        GOOGLE_CLOUD_PROJECT: "project-1",
+        ANTHROPIC_API_KEY: "not-for-gemini",
+      },
+    });
+
+    const target = resolveAcpTarget(config);
+    expect(target.target).toBe("gemini-cli");
+    expect(target.command(config)).toEqual(["gemini", "--acp"]);
+    expect(target.env(config)).toMatchObject({
+      PATH: "/bin",
+      HOME: "/home/gemini",
+      GEMINI_API_KEY: "gemini-key",
+      GOOGLE_CLOUD_PROJECT: "project-1",
+    });
+    expect(target.env(config).ANTHROPIC_API_KEY).toBeUndefined();
+
+    await target.writeSystemPromptArtifact(config);
+    expect(await Bun.file(join(cwd, "GEMINI.md")).text()).toBe("system");
+  });
+
+  test("lets gemini-cli command, args, and prompt artifact path be overridden", async () => {
+    const cwd = makeTempDir();
+    const config = baseConfig({
+      cwd,
+      env: {
+        PATH: "/bin",
+        HOME: "/home/gemini",
+        ACP_TARGET: "gemini-cli",
+        ACP_GEMINI_COMMAND: "/opt/bin/gemini",
+        ACP_GEMINI_ARGS: JSON.stringify(["--acp", "--debug"]),
+        ACP_GEMINI_SYSTEM_PROMPT_PATH: ".gemini/GEMINI.md",
+      },
+    });
+    mkdirSync(join(cwd, ".gemini"));
+
+    const target = resolveAcpTarget(config);
+    expect(target.command(config)).toEqual(["/opt/bin/gemini", "--acp", "--debug"]);
+
+    await target.writeSystemPromptArtifact(config);
+    expect(await Bun.file(join(cwd, ".gemini/GEMINI.md")).text()).toBe("system");
   });
 
   test("runs a configured ACP target through initialize, session/new, and session/prompt", async () => {

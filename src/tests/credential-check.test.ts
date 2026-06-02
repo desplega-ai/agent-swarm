@@ -370,9 +370,57 @@ describe("checkProviderCredentials dispatcher", () => {
       ).ready,
     ).toBe(true);
 
-    const acpStatus = await checkProviderCredentials("acp", {});
+    const acpStatus = await checkProviderCredentials("acp", {}, { homeDir: HOME, fs: noFiles });
     expect(acpStatus.ready).toBe(true);
     expect(acpStatus.satisfiedBy).toBe("sdk-delegated");
+  });
+
+  test("checks Gemini CLI credentials when acp target is gemini-cli", async () => {
+    const missing = await checkProviderCredentials(
+      "acp",
+      { ACP_TARGET: "gemini-cli" },
+      { homeDir: HOME, fs: noFiles },
+    );
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("GEMINI_API_KEY");
+    expect(missing.hint).toContain("gemini-cli");
+
+    expect(
+      (
+        await checkProviderCredentials(
+          "acp",
+          { ACP_TARGET: "gemini-cli", GEMINI_API_KEY: "key" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
+    ).toBe(true);
+
+    expect(
+      (
+        await checkProviderCredentials(
+          "acp",
+          {
+            ACP_TARGET: "gemini-cli",
+            GOOGLE_GENAI_USE_VERTEXAI: "true",
+            GOOGLE_APPLICATION_CREDENTIALS: "/creds.json",
+            GOOGLE_CLOUD_PROJECT: "project",
+            GOOGLE_CLOUD_LOCATION: "us-central1",
+          },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
+    ).toBe(true);
+
+    const withOAuthFile = await checkProviderCredentials(
+      "acp",
+      { ACP_TARGET: "gemini-cli" },
+      {
+        homeDir: HOME,
+        fs: fsWith(new Set([`${HOME}/.gemini/oauth_creds.json`])),
+      },
+    );
+    expect(withOAuthFile.ready).toBe(true);
+    expect(withOAuthFile.satisfiedBy).toBe("file");
   });
 
   test("throws on unknown provider", async () => {
@@ -435,7 +483,7 @@ describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
     for (const p of providers) {
       expect(REQUIRED_CRED_VARS_BY_PROVIDER[p]).toBeDefined();
     }
-    expect(REQUIRED_CRED_VARS_BY_PROVIDER.acp).toEqual([]);
+    expect(REQUIRED_CRED_VARS_BY_PROVIDER.acp[0]).toContain("target-specific");
   });
 });
 
