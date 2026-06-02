@@ -1,0 +1,21 @@
+{
+  "kind": "workflow",
+  "name": "linear-drain-loop",
+  "displayName": "Linear Drain Loop",
+  "slug": "linear-drain-loop",
+  "title": "Linear Drain Loop",
+  "description": "Break down a Linear parent issue and process ready child issues through workers.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": [
+    "LINEAR_PROJECT_ID",
+    "REPO_URL"
+  ],
+  "runAllSeedersCandidate": false,
+  "tags": [
+    "workflow",
+    "linear",
+    "triage"
+  ],
+  "must": true
+}

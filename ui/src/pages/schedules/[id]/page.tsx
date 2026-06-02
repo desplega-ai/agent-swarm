@@ -75,7 +75,11 @@ function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
     return m;
   }, [agents]);
 
-  const columns = useTasksColumns({ storageKey: "schedule-tasks" });
+  const columns = useTasksColumns({
+    storageKey: "schedule-tasks",
+    defaultHiddenColumns: ["cost", "deps", "tags"],
+    defaultHiddenForNewColumns: ["cost"],
+  });
 
   const onRowClicked = useMemo(
     () =>

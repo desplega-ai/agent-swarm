@@ -65,17 +65,25 @@ export async function getTaskDetailsHandler(
     ? { name: requestedByUser.name, email: requestedByUser.email }
     : undefined;
 
+  const structuredContent = {
+    yourAgentId: agentId,
+    success: true,
+    message: `Task "${taskId}" details retrieved.`,
+    task,
+    requestedBy,
+    logs,
+    attachments,
+  };
+
   return {
-    content: [{ type: "text", text: `Task "${taskId}" details retrieved.` }],
-    structuredContent: {
-      yourAgentId: agentId,
-      success: true,
-      message: `Task "${taskId}" details retrieved.`,
-      task,
-      requestedBy,
-      logs,
-      attachments,
-    },
+    content: [
+      { type: "text", text: `Task "${taskId}" details retrieved.` },
+      {
+        type: "text",
+        text: JSON.stringify(structuredContent),
+      },
+    ],
+    structuredContent,
   };
 }
 

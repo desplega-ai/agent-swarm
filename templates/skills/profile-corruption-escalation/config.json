@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "profile-corruption-escalation",
+  "displayName": "Profile Corruption Escalation",
+  "slug": "profile-corruption-escalation",
+  "title": "Profile Corruption Escalation",
+  "description": "Diagnose and escalate corrupted agent profile, identity, or setup files.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": false,
+  "tags": ["operations", "recovery", "profiles"]
+}

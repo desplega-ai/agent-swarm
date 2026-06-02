@@ -6,6 +6,9 @@ import type { Metadata } from "next";
 import type { MDXContent } from "mdx/types";
 import type { TOCItemType } from "fumadocs-core/toc";
 
+const docsOgImage =
+  "https://www.agent-swarm.dev/api/og?title=Agent+Swarm+Documentation&subtitle=Reference+guides%2C+architecture%2C+and+operating+manuals+for+multi-agent+AI+coding+teams.";
+
 interface DocsPageData {
   title: string;
   description?: string;
@@ -63,7 +66,7 @@ export async function generateMetadata(props: {
       type: "article",
       images: [
         {
-          url: "https://agent-swarm.dev/og-image.png",
+          url: docsOgImage,
           width: 1200,
           height: 630,
           alt: `${title} — Agent Swarm Documentation`,
@@ -74,7 +77,7 @@ export async function generateMetadata(props: {
       card: "summary_large_image",
       title: `${title} | Agent Swarm`,
       description,
-      images: ["https://agent-swarm.dev/og-image.png"],
+      images: [docsOgImage],
     },
   };
 }

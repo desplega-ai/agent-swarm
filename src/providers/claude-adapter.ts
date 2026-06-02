@@ -16,6 +16,7 @@ import {
 } from "../utils/error-tracker";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
 import type {
   CostData,
@@ -256,6 +257,23 @@ export async function createSessionMcpConfig(
 
   if (Object.keys(mergedServers).length === 0 && !installedServers) return null;
 
+  // Inject the context-mode stdio MCP server so its `ctx_*` tools survive
+  // `--strict-mcp-config` (which restricts Claude to this file and structurally
+  // excludes plugin-provided MCP servers). The plugin's hooks still fire via the
+  // installed Claude plugin — strict-mcp-config only suppresses MCP servers, not
+  // hooks. Placed BEFORE mergeMcpConfig so an API-installed server can still
+  // override it (unlikely, but safe). Gated by CONTEXT_MODE_DISABLED so builds
+  // and deploys without context-mode don't break.
+  //
+  // Server key uses the plugin naming convention (`plugin_context-mode_context-mode`)
+  // so that the resulting tool names (`mcp__plugin_context-mode_context-mode__ctx_*`)
+  // match the names the plugin's hooks reference in guidance text. With the bare
+  // key `context-mode`, the tools would be `mcp__context-mode__ctx_*` — callable,
+  // but invisible to the hook nudges that point agents at the plugin-prefixed name.
+  if (process.env.CONTEXT_MODE_DISABLED !== "true") {
+    mergedServers["plugin_context-mode_context-mode"] = { command: "context-mode" };
+  }
+
   try {
     const config = mergeMcpConfig({ mcpServers: mergedServers }, installedServers ?? null, taskId);
     const sessionConfigPath = `/tmp/mcp-${taskId}.json`;
@@ -318,6 +336,30 @@ export function buildClaudeCodeOtelEnv(
   return otelEnv;
 }
 
+/**
+ * Resolve the path at which the per-task system prompt is staged on disk.
+ *
+ * Pushing the prompt as `--append-system-prompt <value>` makes the entire
+ * prompt one argv element. Linux's per-arg limit is `MAX_ARG_STRLEN = 131072`
+ * bytes — and the system prompt (CLAUDE.md + TOOLS.md + identity files +
+ * repo CLAUDE.md) routinely runs 50–80 KB. A few growth nudges push us
+ * across the cliff and `posix_spawn` returns E2BIG, killing the worker
+ * (Picateclas attempts 4-6, 2026-05-28).
+ *
+ * `claude --append-system-prompt-file <path>` reads the prompt from disk,
+ * so the argv stays bounded by the filename length and the system prompt
+ * size is decoupled from the kernel's argv ceiling.
+ *
+ * Exported for unit testing.
+ */
+export function getSystemPromptFilePath(taskId: string): string {
+  // The taskId is a UUID; safe to embed in a /tmp filename. Mirrors the
+  // existing /tmp/agent-swarm-task-${pid}.json + /tmp/mcp-${taskId}.json
+  // convention so a janitor sweeping /tmp can find all session-scoped state
+  // under the same prefix.
+  return `/tmp/agent-swarm-system-prompt-${taskId}.txt`;
+}
+
 class ClaudeSession implements ProviderSession {
   private proc: ReturnType<typeof Bun.spawn>;
   private listeners: Array<(event: ProviderEvent) => void> = [];
@@ -327,6 +369,8 @@ class ClaudeSession implements ProviderSession {
   private errorTracker = new SessionErrorTracker();
   private taskFilePid: number;
   private contextWindowSize: number;
+  /** Path to the system-prompt temp file when one was staged for this session. */
+  private systemPromptFile: string | null;
 
   constructor(
     private config: ProviderSessionConfig,
@@ -335,9 +379,11 @@ class ClaudeSession implements ProviderSession {
     taskFilePid: number,
     private sessionMcpConfig: string | null = null,
     private claudeBinaryArgv: readonly string[] = ["claude"],
+    systemPromptFile: string | null = null,
   ) {
     this.taskFilePid = taskFilePid;
     this.contextWindowSize = getContextWindowSize(model);
+    this.systemPromptFile = systemPromptFile;
     const cmd = this.buildCommand();
 
     console.log(
@@ -371,6 +417,7 @@ class ClaudeSession implements ProviderSession {
         ...(sourceEnv.CLAUDE_CODE_OAUTH_TOKEN
           ? { AGENT_SWARM_CLAUDE_OAUTH_TOKEN: sourceEnv.CLAUDE_CODE_OAUTH_TOKEN }
           : {}),
+        CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
       } as Record<string, string>,
       stdout: "pipe",
       stderr: "pipe",
@@ -395,15 +442,17 @@ class ClaudeSession implements ProviderSession {
       this.config.prompt,
     ];
 
-    if (this.config.resumeSessionId) {
-      cmd.push("--resume", this.config.resumeSessionId);
-    }
-
     if (this.config.additionalArgs?.length) {
       cmd.push(...this.config.additionalArgs);
     }
 
-    if (this.config.systemPrompt) {
+    // System prompt is staged on disk and read via the file-flag — see
+    // `getSystemPromptFilePath` for the rationale (argv E2BIG hardening,
+    // Picateclas spawn-OOM, 2026-05-28). The legacy inline form is kept as
+    // a fallback for the (unlikely) case where the file couldn't be staged.
+    if (this.systemPromptFile) {
+      cmd.push("--append-system-prompt-file", this.systemPromptFile);
+    } else if (this.config.systemPrompt) {
       cmd.push("--append-system-prompt", this.config.systemPrompt);
     }
 
@@ -490,11 +539,18 @@ class ClaudeSession implements ProviderSession {
     await logFileHandle.end();
     const exitCode = await this.proc.exited;
 
-    // Cleanup task file and per-session MCP config
+    // Cleanup task file, per-session MCP config, and per-task system prompt
     await cleanupTaskFile(this.taskFilePid);
     if (this.sessionMcpConfig) {
       try {
         await unlink(this.sessionMcpConfig);
+      } catch {
+        // ignore — temp file may already be gone
+      }
+    }
+    if (this.systemPromptFile) {
+      try {
+        await unlink(this.systemPromptFile);
       } catch {
         // ignore — temp file may already be gone
       }
@@ -687,61 +743,7 @@ class ClaudeSession implements ProviderSession {
   }
 
   async waitForCompletion(): Promise<ProviderResult> {
-    const result = await this.completionPromise;
-
-    // Stale session retry: if process failed because session not found and we used --resume,
-    // strip --resume and retry with a fresh session
-    if (result.exitCode !== 0 && this.errorTracker.isSessionNotFound()) {
-      const hasResume =
-        !!this.config.resumeSessionId || (this.config.additionalArgs || []).includes("--resume");
-      if (hasResume) {
-        console.log(
-          `\x1b[33m[${this.config.role}] Session resume failed for task ${this.config.taskId.slice(0, 8)} — retrying without --resume\x1b[0m`,
-        );
-
-        const freshArgs = (this.config.additionalArgs || []).filter((arg, idx, arr) => {
-          if (arg === "--resume") return false;
-          if (idx > 0 && arr[idx - 1] === "--resume") return false;
-          return true;
-        });
-
-        const logDir = this.config.logFile.substring(0, this.config.logFile.lastIndexOf("/"));
-        const retryTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const retryLogFile = `${logDir}/${retryTimestamp}-retry-${this.config.taskId.slice(0, 8)}.jsonl`;
-
-        const retryConfig: ProviderSessionConfig = {
-          ...this.config,
-          additionalArgs: freshArgs,
-          logFile: retryLogFile,
-          resumeSessionId: undefined,
-        };
-
-        // Write new task file for retry
-        const taskFilePath = await writeTaskFile(this.taskFilePid, {
-          taskId: this.config.taskId,
-          agentId: this.config.agentId,
-          startedAt: new Date().toISOString(),
-        });
-
-        const retrySession = new ClaudeSession(
-          retryConfig,
-          this.model,
-          taskFilePath,
-          this.taskFilePid,
-          null,
-          this.claudeBinaryArgv,
-        );
-
-        // Forward events from retry to our listeners
-        for (const listener of this.listeners) {
-          retrySession.onEvent(listener);
-        }
-
-        return retrySession.waitForCompletion();
-      }
-    }
-
-    return result;
+    return this.completionPromise;
   }
 
   async abort(): Promise<void> {
@@ -754,6 +756,15 @@ export class ClaudeAdapter implements ProviderAdapter {
   readonly traits = { hasMcp: true, hasLocalEnvironment: true };
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
+    // Native resume is deprecated. Follow-up continuity is delivered via the
+    // context preamble (see src/commands/context-preamble.ts). Any stray
+    // resumeSessionId is logged and ignored — we always spawn a fresh session.
+    if (config.resumeSessionId) {
+      console.warn(
+        "[claude-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
+      );
+    }
+
     const model = config.model || "opus";
 
     const credType = validateClaudeCredentials(config.env || process.env);
@@ -832,6 +843,28 @@ export class ClaudeAdapter implements ProviderAdapter {
       installedServers,
     );
 
+    // Stage the system prompt on disk so it can be passed as a file path
+    // instead of one giant argv element. This is the structural fix for
+    // posix_spawn E2BIG once the prompt grows past MAX_ARG_STRLEN (131,072
+    // bytes) — see `getSystemPromptFilePath` and PR description for the
+    // Picateclas spawn-OOM saga. Soft-fail (`systemPromptFile = null`) makes
+    // the session fall back to the inline `--append-system-prompt` argv;
+    // good enough since `BOOTSTRAP_TOTAL_MAX_CHARS` (now 120,000) already
+    // caps the worst-case argv element below the kernel limit even without
+    // the file path.
+    let systemPromptFile: string | null = null;
+    if (config.systemPrompt) {
+      const candidate = getSystemPromptFilePath(config.taskId);
+      try {
+        await writeFile(candidate, config.systemPrompt);
+        systemPromptFile = candidate;
+      } catch (err) {
+        console.warn(
+          `\x1b[33m[claude]\x1b[0m Failed to stage system prompt to ${candidate} (${err}); falling back to --append-system-prompt argv. Argv may approach MAX_ARG_STRLEN if the prompt is large.`,
+        );
+      }
+    }
+
     return new ClaudeSession(
       config,
       model,
@@ -839,6 +872,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       taskFilePid,
       sessionMcpConfig,
       claudeBinaryArgv,
+      systemPromptFile,
     );
   }
 

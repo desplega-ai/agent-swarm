@@ -1,0 +1,13 @@
+{
+  "kind": "workflow",
+  "name": "autopilot",
+  "displayName": "Autopilot Feature Pipeline",
+  "slug": "autopilot",
+  "title": "Autopilot Feature Pipeline",
+  "description": "Research, review, plan, implement, and verify a feature request through staged agents.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": ["REPO_URL"],
+  "runAllSeedersCandidate": true,
+  "tags": ["workflow", "implementation", "review"]
+}

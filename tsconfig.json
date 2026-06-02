@@ -43,6 +43,7 @@
     "logs",
     "plugin",
     "docs-site",
-    "assets/video-source"
+    "assets/video-source",
+    "mockups"
   ]
 }

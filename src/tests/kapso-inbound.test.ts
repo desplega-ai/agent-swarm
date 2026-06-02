@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { closeDb, createAgent, getTaskById, initDb } from "../be/db";
+import { closeDb, createAgent, createUser, getKv, getTaskById, initDb } from "../be/db";
+import { findUserByExternalId, linkIdentity } from "../be/users";
 import { handleWebhooks } from "../http/webhooks";
 import { putKapsoNumberMapping } from "../integrations/kapso/config";
 import { routeKapsoInbound } from "../integrations/kapso/inbound";
@@ -10,6 +11,7 @@ const TEST_DB_PATH = "./test-kapso-inbound.sqlite";
 const HMAC_SECRET = "kapso-test-hmac-secret";
 
 let agentId: string;
+const originalFetch = globalThis.fetch;
 
 function makePayload(opts: {
   phoneNumberId: string;
@@ -76,13 +78,21 @@ beforeAll(() => {
   }
   initDb(TEST_DB_PATH);
   process.env.KAPSO_WEBHOOK_HMAC_SECRET = HMAC_SECRET;
+  process.env.KAPSO_API_KEY = "kapso-test-api-key";
+  process.env.KAPSO_API_BASE_URL = "https://kapso.test";
   const agent = createAgent({ name: "KapsoWorker", isLead: false, status: "idle" });
   agentId = agent.id;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
 afterAll(() => {
   closeDb();
   delete process.env.KAPSO_WEBHOOK_HMAC_SECRET;
+  delete process.env.KAPSO_API_KEY;
+  delete process.env.KAPSO_API_BASE_URL;
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       require("node:fs").unlinkSync(`${TEST_DB_PATH}${suffix}`);
@@ -105,6 +115,64 @@ describe("routeKapsoInbound", () => {
     expect(task!.taskType).toBe("kapso-inbound");
     expect(task!.agentId).toBe(agentId);
     expect(task!.task).toContain("## Source: WhatsApp (Kapso)");
+  });
+
+  test("known Kapso sender → populates requestedByUserId and skips unmapped tracker", () => {
+    putKapsoNumberMapping({
+      phoneNumberId: "pn-known-sender",
+      agentId,
+      createdAt: new Date().toISOString(),
+    });
+    const user = createUser({ name: "Known WhatsApp Sender" });
+    linkIdentity(user.id, "kapso", "34679077778", { kind: "system", id: "test-fixture" });
+
+    const routing = routeKapsoInbound(
+      makePayload({
+        phoneNumberId: "pn-known-sender",
+        messageId: "wamid.KNOWN_SENDER",
+        from: "+34 679 077 778",
+        conversationId: "conv-known-sender",
+      }),
+    );
+
+    expect(routing.kind).toBe("task");
+    if (routing.kind !== "task") throw new Error("expected task");
+    const task = getTaskById(routing.taskId);
+    expect(task!.requestedByUserId).toBe(user.id);
+    expect(getKv("integration:unmapped:kapso", "34679077778:meta")).toBeNull();
+  });
+
+  test("unknown Kapso sender → records unmapped identity and leaves task unowned", () => {
+    putKapsoNumberMapping({
+      phoneNumberId: "pn-unknown-sender",
+      agentId,
+      createdAt: new Date().toISOString(),
+    });
+    expect(findUserByExternalId("kapso", "34679077779")).toBeNull();
+
+    const routing = routeKapsoInbound(
+      makePayload({
+        phoneNumberId: "pn-unknown-sender",
+        messageId: "wamid.UNKNOWN_SENDER",
+        from: "+34 679 077 779",
+        conversationId: "conv-unknown-sender",
+      }),
+    );
+
+    expect(routing.kind).toBe("task");
+    if (routing.kind !== "task") throw new Error("expected task");
+    const task = getTaskById(routing.taskId);
+    expect(task!.requestedByUserId).toBeUndefined();
+
+    const meta = getKv("integration:unmapped:kapso", "34679077779:meta");
+    expect(meta?.valueType).toBe("json");
+    expect(meta?.value).toMatchObject({
+      sampleEventType: "kapso.message.received",
+    });
+    expect(String(meta?.value.sampleContext)).toContain("contact=Taras");
+    expect(String(meta?.value.sampleContext)).toContain("message=wamid.UNKNOWN_SENDER");
+    const count = getKv("integration:unmapped:kapso", "34679077779:count");
+    expect(count?.value).toBe(1);
   });
 
   test("no mapping → no_mapping (does not break, no task)", () => {
@@ -146,12 +214,18 @@ describe("routeKapsoInbound", () => {
 });
 
 describe("handleWebhooks — Kapso HMAC gate", () => {
-  test("valid HMAC + mapping hit → 200 and task routing", async () => {
+  test("valid HMAC + mapping hit → auto-acknowledges inbound, then 200 and task routing", async () => {
     putKapsoNumberMapping({
       phoneNumberId: "pn-http",
       agentId,
       createdAt: new Date().toISOString(),
     });
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, body: JSON.parse(init.body as string) });
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }) as typeof fetch;
+
     const rawBody = JSON.stringify(
       makePayload({ phoneNumberId: "pn-http", messageId: "wamid.HTTP_OK" }),
     );
@@ -162,9 +236,52 @@ describe("handleWebhooks — Kapso HMAC gate", () => {
     expect(handled).toBe(true);
     expect(captured.status).toBe(200);
     expect(JSON.parse(captured.body)).toMatchObject({ received: true, routing: "task" });
+    expect(calls).toHaveLength(2);
+    expect(
+      calls.every((call) => call.url === "https://kapso.test/meta/whatsapp/v24.0/pn-http/messages"),
+    ).toBe(true);
+    expect(calls.map((call) => call.body)).toContainEqual({
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: "wamid.HTTP_OK",
+      typing_indicator: { type: "text" },
+    });
+    expect(calls.map((call) => call.body)).toContainEqual({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "34679077777",
+      type: "reaction",
+      reaction: { message_id: "wamid.HTTP_OK", emoji: "👀" },
+    });
+  });
+
+  test("Kapso acknowledgement failures do not block webhook success", async () => {
+    putKapsoNumberMapping({
+      phoneNumberId: "pn-http-ack-fail",
+      agentId,
+      createdAt: new Date().toISOString(),
+    });
+    globalThis.fetch = (async () => {
+      throw new Error("kapso unavailable");
+    }) as typeof fetch;
+
+    const rawBody = JSON.stringify(
+      makePayload({ phoneNumberId: "pn-http-ack-fail", messageId: "wamid.HTTP_ACK_FAIL" }),
+    );
+    const { req, res, captured } = fakeReqRes(rawBody, {
+      "x-webhook-signature": sign(HMAC_SECRET, rawBody),
+    });
+    const handled = await handleWebhooks(req, res, KAPSO_PATH);
+
+    expect(handled).toBe(true);
+    expect(captured.status).toBe(200);
+    expect(JSON.parse(captured.body)).toMatchObject({ received: true, routing: "task" });
   });
 
   test("valid HMAC + no mapping → 200 no_mapping (fallback, does not break)", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ success: true }), { status: 200 })) as typeof fetch;
+
     const rawBody = JSON.stringify(
       makePayload({ phoneNumberId: "pn-http-unmapped", messageId: "wamid.HTTP_NOMAP" }),
     );

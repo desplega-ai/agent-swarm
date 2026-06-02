@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
+  cancelTask,
   closeDb,
   completeTask,
   createAgent,
   createTaskExtended,
+  failTask,
   findCompletedTaskInThread,
+  findRecentCancelledTaskInThread,
   getDb,
   getTaskById,
   initDb,
@@ -227,6 +230,168 @@ describe("follow-up re-delegation guard logic", () => {
     expect(recentCompleted).toBeNull();
 
     // → Guard does NOT block: first-time delegation is fine
+  });
+
+  test("findRecentCancelledTaskInThread finds tasks with status='cancelled'", () => {
+    const agent = createAgent({
+      name: "cancel-thread-worker-1",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("cancelled work", {
+      agentId: agent.id,
+      slackChannelId: "C_CANCEL_1",
+      slackThreadTs: "9000.0001",
+    });
+    cancelTask(task.id, "user cancelled");
+
+    const result = findRecentCancelledTaskInThread("C_CANCEL_1", "9000.0001", 2880);
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe(task.id);
+    expect(result!.status).toBe("cancelled");
+  });
+
+  test("findRecentCancelledTaskInThread finds failed tasks with 'cancelled' failureReason", () => {
+    const agent = createAgent({
+      name: "cancel-thread-worker-2",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("aborted work", {
+      agentId: agent.id,
+      slackChannelId: "C_CANCEL_2",
+      slackThreadTs: "9000.0002",
+    });
+    failTask(task.id, "cancelled");
+
+    const result = findRecentCancelledTaskInThread("C_CANCEL_2", "9000.0002", 2880);
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe(task.id);
+    expect(result!.failureReason).toBe("cancelled");
+  });
+
+  test("findRecentCancelledTaskInThread finds failed tasks with 'exit 130' failureReason", () => {
+    const agent = createAgent({
+      name: "cancel-thread-worker-3",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("aborted work via SIGINT", {
+      agentId: agent.id,
+      slackChannelId: "C_CANCEL_3",
+      slackThreadTs: "9000.0003",
+    });
+    failTask(task.id, "exit 130: aborted by user");
+
+    const result = findRecentCancelledTaskInThread("C_CANCEL_3", "9000.0003", 2880);
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe(task.id);
+  });
+
+  test("findRecentCancelledTaskInThread ignores plain failed tasks (no cancellation marker)", () => {
+    const agent = createAgent({
+      name: "cancel-thread-worker-4",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("genuinely failed work", {
+      agentId: agent.id,
+      slackChannelId: "C_CANCEL_4",
+      slackThreadTs: "9000.0004",
+    });
+    failTask(task.id, "TypeError: cannot read property of undefined");
+
+    const result = findRecentCancelledTaskInThread("C_CANCEL_4", "9000.0004", 2880);
+    expect(result).toBeNull();
+  });
+
+  test("guard bypasses re-delegation block when cancellation is more recent than completion", () => {
+    const channel = "C_BYPASS_1";
+    const thread = "10000.0001";
+
+    // Step 1: An old completed task in the thread
+    const completedTask = createTaskExtended("first attempt — completed", {
+      agentId: workerAgent.id,
+      slackChannelId: channel,
+      slackThreadTs: thread,
+    });
+    completeTask(completedTask.id, "first attempt done");
+
+    // Backdate to 30 minutes ago so the cancellation is more recent.
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      thirtyMinAgo,
+      completedTask.id,
+    ]);
+
+    // Step 2: A more-recent cancellation in the same thread
+    const cancelledTask = createTaskExtended("second attempt — cancelled mid-work", {
+      agentId: workerAgent.id,
+      slackChannelId: channel,
+      slackThreadTs: thread,
+    });
+    cancelTask(cancelledTask.id, "cancelled");
+
+    // Guard checks:
+    const recentCompleted = findCompletedTaskInThread(channel, thread, 2880);
+    const recentCancelled = findRecentCancelledTaskInThread(channel, thread, 2880);
+    expect(recentCompleted).not.toBeNull();
+    expect(recentCancelled).not.toBeNull();
+
+    // The bypass condition: cancellation is more recent than completion.
+    const cancelledMoreRecent =
+      recentCancelled &&
+      new Date(recentCancelled.lastUpdatedAt).getTime() >
+        new Date(recentCompleted!.lastUpdatedAt).getTime();
+    expect(cancelledMoreRecent).toBe(true);
+
+    // → Guard does NOT block: re-delegation is allowed.
+  });
+
+  test("guard still blocks when completion is more recent than any cancellation", () => {
+    const channel = "C_BYPASS_2";
+    const thread = "11000.0001";
+
+    // Step 1: A cancelled task (older)
+    const cancelledTask = createTaskExtended("attempt 1 — cancelled", {
+      agentId: workerAgent.id,
+      slackChannelId: channel,
+      slackThreadTs: thread,
+    });
+    cancelTask(cancelledTask.id, "cancelled");
+
+    // Backdate the cancellation to 30 minutes ago
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      thirtyMinAgo,
+      cancelledTask.id,
+    ]);
+
+    // Step 2: A more-recent completion (the retry succeeded)
+    const completedTask = createTaskExtended("attempt 2 — completed", {
+      agentId: workerAgent.id,
+      slackChannelId: channel,
+      slackThreadTs: thread,
+    });
+    completeTask(completedTask.id, "retry succeeded");
+
+    // Guard:
+    const recentCompleted = findCompletedTaskInThread(channel, thread, 2880);
+    const recentCancelled = findRecentCancelledTaskInThread(channel, thread, 2880);
+    expect(recentCompleted).not.toBeNull();
+    expect(recentCancelled).not.toBeNull();
+
+    const cancelledMoreRecent =
+      recentCancelled &&
+      new Date(recentCancelled.lastUpdatedAt).getTime() >
+        new Date(recentCompleted!.lastUpdatedAt).getTime();
+    expect(cancelledMoreRecent).toBe(false);
+
+    // → Guard BLOCKS as before: the work was already redone successfully.
   });
 
   test("allows delegation when source task is a follow-up but completed work is outside time window", () => {

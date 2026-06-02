@@ -48,7 +48,9 @@ import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
+import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { interpolate } from "../workflows/template.ts";
+import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
 import {
   buildCredStatusReport,
@@ -124,14 +126,88 @@ async function readClaudeMd(clonePath: string, role: string): Promise<string | n
   return null;
 }
 
+export type SwarmAutostash = { ref: string; message: string };
+
+async function listSwarmAutostashes(clonePath: string, role: string): Promise<SwarmAutostash[]> {
+  try {
+    const result = await Bun.$`cd ${clonePath} && git stash list --format=%gd%x09%s`.quiet();
+    return result
+      .text()
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.includes("swarm-autostash"))
+      .flatMap((line) => {
+        const [ref, ...messageParts] = line.split("\t");
+        if (!ref) return [];
+        return [{ ref, message: messageParts.join("\t") || line }];
+      });
+  } catch (err) {
+    console.warn(
+      `[${role}] Could not inspect git stashes for ${clonePath}: ${scrubSecrets((err as Error).message)}`,
+    );
+    return [];
+  }
+}
+
+async function refreshExistingRepoForTask(
+  repoConfig: { name: string; clonePath: string; defaultBranch: string },
+  role: string,
+): Promise<string | null> {
+  const { name, clonePath, defaultBranch } = repoConfig;
+  const statusResult = await Bun.$`cd ${clonePath} && git status --porcelain`.quiet();
+  const statusOutput = statusResult.text().trim();
+  let stashMessage: string | null = null;
+
+  if (statusOutput !== "") {
+    stashMessage = `swarm-autostash ${defaultBranch} ${new Date().toISOString()}`;
+    try {
+      console.log(`[${role}] Auto-stashing pending work in ${name}: ${stashMessage}`);
+      await Bun.$`cd ${clonePath} && git stash push --include-untracked -m ${stashMessage}`.quiet();
+      console.log(`[${role}] Auto-stashed pending work in ${name}`);
+    } catch (err) {
+      const errorMsg = scrubSecrets((err as Error).message);
+      console.warn(`[${role}] Could not auto-stash ${name}, skipping pull: ${errorMsg}`);
+      return `The repo "${name}" at ${clonePath} has uncommitted changes, but auto-stash failed: ${errorMsg}. A git pull was skipped to avoid losing work.`;
+    }
+  }
+
+  try {
+    console.log(`[${role}] Refreshing ${name} from origin/${defaultBranch}...`);
+    const fetchSpec = `${defaultBranch}:refs/remotes/origin/${defaultBranch}`;
+    const remoteRef = `refs/remotes/origin/${defaultBranch}`;
+    await Bun.$`cd ${clonePath} && git fetch origin ${fetchSpec}`.quiet();
+    await Bun.$`cd ${clonePath} && git merge --no-edit --no-stat ${remoteRef}`.quiet();
+    console.log(`[${role}] Refreshed ${name}`);
+    return null;
+  } catch (err) {
+    const errorMsg = scrubSecrets((err as Error).message);
+    console.warn(`[${role}] Could not refresh ${name}: ${errorMsg}`);
+    try {
+      await Bun.$`cd ${clonePath} && git merge --abort`.quiet();
+    } catch {
+      // No merge in progress, or abort failed. The original refresh warning is
+      // the actionable signal; repo setup remains best-effort.
+    }
+    const stashNote = stashMessage
+      ? ` Pending work was preserved in git stash "${stashMessage}".`
+      : "";
+    return `The repo "${name}" at ${clonePath} could not be refreshed from origin/${defaultBranch}: ${errorMsg}.${stashNote}`;
+  }
+}
+
 /**
  * Ensure a repo is cloned and up-to-date for a task.
  * Returns { clonePath, claudeMd, warning }.
  */
-async function ensureRepoForTask(
+export async function ensureRepoForTask(
   repoConfig: { url: string; name: string; clonePath: string; defaultBranch: string },
   role: string,
-): Promise<{ clonePath: string; claudeMd: string | null; warning: string | null }> {
+): Promise<{
+  clonePath: string;
+  claudeMd: string | null;
+  warning: string | null;
+  autoStashes: SwarmAutostash[];
+}> {
   const { url, name, clonePath, defaultBranch } = repoConfig;
 
   try {
@@ -156,28 +232,20 @@ async function ensureRepoForTask(
       console.log(`[${role}] Cloned ${name}`);
     } else {
       console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
-      const statusResult = await Bun.$`cd ${clonePath} && git status --porcelain`.quiet();
-      const statusOutput = statusResult.text().trim();
-
-      if (statusOutput === "") {
-        console.log(`[${role}] Pulling ${name} (${defaultBranch})...`);
-        await Bun.$`cd ${clonePath} && git pull origin ${defaultBranch} --ff-only`.quiet();
-        console.log(`[${role}] Pulled ${name}`);
-      } else {
-        console.warn(`[${role}] Repo ${name} has uncommitted changes, skipping pull`);
-        warning = `The repo "${name}" at ${clonePath} has uncommitted changes. A git pull was skipped to avoid losing work. You may need to commit or stash changes before pulling updates.`;
-      }
+      warning = await refreshExistingRepoForTask({ name, clonePath, defaultBranch }, role);
     }
 
     const claudeMd = await readClaudeMd(clonePath, role);
-    return { clonePath, claudeMd, warning };
+    const autoStashes = await listSwarmAutostashes(clonePath, role);
+    return { clonePath, claudeMd, warning, autoStashes };
   } catch (err) {
-    const errorMsg = (err as Error).message;
+    const errorMsg = scrubSecrets((err as Error).message);
     console.warn(`[${role}] Error setting up repo ${name}: ${errorMsg}`);
     const warning = `Failed to clone/setup repo "${name}" at ${clonePath}: ${errorMsg}. The repo may not be available. You may need to clone it manually.`;
     // Only return clonePath if the directory actually exists (clone may have failed)
     const cloneExists = existsSync(clonePath);
-    return { clonePath: cloneExists ? clonePath : "", claudeMd: null, warning };
+    const autoStashes = cloneExists ? await listSwarmAutostashes(clonePath, role) : [];
+    return { clonePath: cloneExists ? clonePath : "", claudeMd: null, warning, autoStashes };
   }
 }
 
@@ -703,6 +771,56 @@ Extract the structured data from the progress updates above. Return ONLY valid J
   }
 }
 
+async function validateProviderOutputIfNeeded(
+  config: ApiConfig,
+  taskId: string,
+  providerOutput: string,
+): Promise<{ ok: true } | { ok: false; failReason: string }> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    const taskRes = await fetch(`${config.apiUrl}/api/tasks/${taskId}`, { headers });
+    if (!taskRes.ok) {
+      return { ok: true };
+    }
+
+    const taskData = (await taskRes.json()) as {
+      outputSchema?: Record<string, unknown>;
+    };
+    if (!taskData.outputSchema || typeof taskData.outputSchema !== "object") {
+      return { ok: true };
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(providerOutput);
+    } catch {
+      return {
+        ok: false,
+        failReason:
+          "Structured output required by outputSchema but provider output was not valid JSON",
+      };
+    }
+
+    const validationErrors = validateJsonSchema(taskData.outputSchema, parsed);
+    if (validationErrors.length > 0) {
+      return {
+        ok: false,
+        failReason: `Structured output did not match outputSchema: ${validationErrors.join("; ")}`,
+      };
+    }
+  } catch {
+    return { ok: true };
+  }
+
+  return { ok: true };
+}
+
 export async function ensureTaskFinished(
   config: ApiConfig,
   role: string,
@@ -733,12 +851,14 @@ export async function ensureTaskFinished(
   if (status === "failed") {
     body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
   } else if (providerOutput) {
-    // Provider already supplied structured output (e.g. Devin) — use directly.
-    // NOTE: providerOutput is NOT validated against task.outputSchema here.
-    // Known gap for default-mode Devin; see runbooks/harness-providers.md
-    // ("Per-task outputSchema support"). Schema enforcement only happens on
-    // the MCP path via store-progress.
-    body.output = providerOutput;
+    const validation = await validateProviderOutputIfNeeded(config, taskId, providerOutput);
+    if (validation.ok) {
+      body.output = providerOutput;
+    } else {
+      status = "failed";
+      body.status = "failed";
+      body.failureReason = validation.failReason;
+    }
   } else {
     // Try structured output fallback if the task has an outputSchema
     const adapterType = provider ?? process.env.HARNESS_PROVIDER ?? "claude";
@@ -958,6 +1078,84 @@ async function reportKeyRateLimit(
 }
 
 /**
+ * Supersede a task via the API (for graceful shutdown / context-limit /
+ * operator-triggered). Returns `{ ok: true, resumeTaskId }` on success.
+ * On 5xx / network failure returns `{ ok: false }` so the caller can fall
+ * back to the legacy `pauseTaskViaAPI` (handles partial-deploy windows where
+ * the API is older than the worker).
+ */
+async function supersedeTaskViaAPI(
+  config: ApiConfig,
+  role: string,
+  taskId: string,
+  reason: "graceful_shutdown" | "context_limits" | "manual_supersede",
+): Promise<{ ok: true; resumeTaskId: string | null; kind: string } | { ok: false }> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": config.agentId,
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/supersede`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ reason }),
+    });
+
+    if (response.ok) {
+      const body = (await response.json().catch(() => null)) as {
+        resumeTaskId?: string | null;
+        kind?: string;
+      } | null;
+      const resumeTaskId = body?.resumeTaskId ?? null;
+      const kind = body?.kind ?? "resumed";
+      console.log(
+        `[${role}] Task ${taskId.slice(0, 8)} superseded (kind=${kind}, resume=${
+          resumeTaskId ? resumeTaskId.slice(0, 8) : "none"
+        })`,
+      );
+      return { ok: true, resumeTaskId, kind };
+    }
+
+    // 404 / 405 — the route doesn't exist on this API server. Happens during
+    // partial deploys (new worker rolled out before new API). Fall back to
+    // legacy pause so the task isn't left orphaned in_progress until heartbeat
+    // recovery picks it up minutes later.
+    if (response.status === 404 || response.status === 405) {
+      console.warn(
+        `[${role}] Supersede route missing for task ${taskId.slice(0, 8)} (${response.status}); falling back to pause`,
+      );
+      return { ok: false };
+    }
+
+    // Other 4xx → deliberate rejection from a current API (bad request,
+    // idempotent no-op, forbidden, conflict). Do NOT fall back to legacy
+    // pause — the API actively rejected the supersede, retrying via pause
+    // would be wrong.
+    if (response.status >= 400 && response.status < 500) {
+      const error = await response.text();
+      console.warn(
+        `[${role}] Supersede rejected for task ${taskId.slice(0, 8)}: ${response.status} ${error}`,
+      );
+      return { ok: true, resumeTaskId: null, kind: "rejected" };
+    }
+
+    // 5xx → fall through to legacy pause.
+    const error = await response.text();
+    console.warn(
+      `[${role}] Supersede failed for task ${taskId.slice(0, 8)}: ${response.status} ${error}`,
+    );
+    return { ok: false };
+  } catch (err) {
+    console.warn(`[${role}] Error superseding task ${taskId.slice(0, 8)}: ${err}`);
+    return { ok: false };
+  }
+}
+
+/**
  * Pause a task via the API (for graceful shutdown).
  * Unlike marking as failed, paused tasks can be resumed after container restart.
  */
@@ -1127,21 +1325,35 @@ function setupShutdownHandlers(
         }
       }
 
-      // Force kill remaining tasks and mark them as paused (for graceful resume after restart)
+      // Force kill remaining tasks and supersede them so a fresh "resume"
+      // follow-up can pick up the work on any worker. Fallback chain:
+      //   1. supersedeTaskViaAPI (primary)
+      //   2. pauseTaskViaAPI (legacy — preserves graceful behavior during
+      //      partial-deploy windows where the API server is older than the
+      //      worker)
+      //   3. ensureTaskFinished (mark as failed — last resort)
       if (state.activeTasks.size > 0) {
         console.log(
-          `[${role}] Pausing ${state.activeTasks.size} remaining task(s) for resume after restart...`,
+          `[${role}] Superseding ${state.activeTasks.size} remaining task(s) for resume after restart...`,
         );
         for (const [taskId, task] of state.activeTasks) {
-          console.log(`[${role}] Pausing task ${taskId.slice(0, 8)}`);
+          console.log(`[${role}] Superseding task ${taskId.slice(0, 8)}`);
           task.session.abort().catch(() => {});
-          // Mark as paused for graceful resume (instead of failed)
           if (apiConfig) {
+            const supersede = await supersedeTaskViaAPI(
+              apiConfig,
+              role,
+              taskId,
+              "graceful_shutdown",
+            );
+            if (supersede.ok) {
+              continue;
+            }
+            // 5xx / network failure → try legacy pause for partial-deploy windows.
             const paused = await pauseTaskViaAPI(apiConfig, role, taskId);
             if (!paused) {
-              // Fallback to marking as failed if pause fails
               console.warn(
-                `[${role}] Failed to pause task ${taskId.slice(0, 8)}, marking as failed instead`,
+                `[${role}] Both supersede and pause failed for task ${taskId.slice(0, 8)}, marking as failed instead`,
               );
               await ensureTaskFinished(
                 apiConfig,
@@ -2128,7 +2340,7 @@ export function implicitCloseActiveToolSpans(
 }
 
 async function spawnProviderProcess(
-  adapter: ReturnType<typeof createProviderAdapter>,
+  adapter: Awaited<ReturnType<typeof createProviderAdapter>>,
   opts: {
     prompt: string;
     logFile: string;
@@ -3067,7 +3279,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Create provider adapter using the resolved value. `let` so the poll-loop
   // reconciliation block (Section 4) can swap it live when an operator changes
   // HARNESS_PROVIDER in swarm_config — call sites read the current binding.
-  let adapter = createProviderAdapter(bootProvider);
+  let adapter = await createProviderAdapter(bootProvider);
 
   // Configure HTTP-based template resolution (workers resolve via API, not local DB)
   if (apiKey) {
@@ -3149,6 +3361,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       swarmUrl,
       capabilities,
       traits,
+      provider: adapter.name as ProviderName,
       name: agentProfileName,
       description: agentDescription,
       ...(traits.hasLocalEnvironment && {
@@ -3314,7 +3527,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       const previous = state.harnessProvider;
       console.log(`[${role}] [harness] Reconciling adapter: ${previous} → ${resolvedProvider}`);
       try {
-        adapter = createProviderAdapter(resolvedProvider);
+        adapter = await createProviderAdapter(resolvedProvider);
         state.harnessProvider = resolvedProvider;
         basePrompt = await buildSystemPrompt();
         resolvedSystemPrompt = additionalSystemPrompt
@@ -3700,7 +3913,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   }
 
   // ========== Resume paused tasks with PRIORITY ==========
-  // Check for paused tasks from previous shutdown and resume them before normal polling
+  // LEGACY SAFETY NET — kept for tasks that were paused by older worker
+  // builds during partial-deploy windows (when the API server already
+  // accepted /pause but the new worker has rolled out /supersede). New
+  // graceful-shutdown writes go through the supersede path (see
+  // supersedeTaskViaAPI + the SIGTERM handler) and create a fresh
+  // "resume" follow-up task instead of mutating the original. Cleanup of
+  // this entire block is tracked in the "Legacy paused-task cleanup"
+  // follow-up plan — remove once no new `paused` tasks have been created
+  // for one full quarter.
   try {
     console.log(`[${role}] Checking for paused tasks to resume...`);
     const pausedTasks = await getPausedTasksFromAPI(apiConfig);
@@ -3750,6 +3971,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         if (resumeMemoryContext) {
           resumePrompt += resumeMemoryContext;
           console.log(`[${role}] Injected relevant memories into resumed task prompt`);
+        }
+
+        // Universal context preamble: inject for all providers when task is a follow-up.
+        // Gives non-resumable providers (opencode/pi/devin) prior-task context; also
+        // acts as a bounded safety net for resumable ones (claude/codex).
+        if (task.parentTaskId && apiUrl) {
+          const contextPreamble = await buildContextPreamble(apiUrl, apiKey, task.parentTaskId);
+          if (contextPreamble) {
+            resumePrompt = contextPreamble + resumePrompt;
+            console.log(
+              `[${role}] Injected context preamble into resumed follow-up task prompt (parent: ${task.parentTaskId.slice(0, 8)})`,
+            );
+          }
         }
 
         // Resolve provider-aware resume: prefer own session, then parent.
@@ -3842,7 +4076,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               logFile,
               systemPrompt: resolvedSystemPrompt,
               additionalArgs: opts.additionalArgs,
-              resumeSessionId: resumeResolution.resumeSessionId,
+              // Native resume deprecated: always undefined. Follow-up continuity flows through
+              // the context preamble injected above (see context-preamble.ts).
+              // resumeResolution is still computed for observability via logResumeResolution.
+              resumeSessionId: undefined,
               role,
               apiUrl,
               apiKey,
@@ -4107,9 +4344,29 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
+        // Universal context preamble: inject for all providers when task is a follow-up.
+        // Gives non-resumable providers (opencode/pi/devin) prior-task context; also
+        // acts as a bounded safety net for resumable ones (claude/codex).
+        // For taskType="resume" (created by supersedeTaskViaAPI), use the
+        // larger resume preamble that includes a session-log tool-call summary.
+        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
+        if (taskObj?.parentTaskId && apiUrl) {
+          const isResumeTask = taskObj.taskType === "resume";
+          const contextPreamble = isResumeTask
+            ? await buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+            : await buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId);
+          if (contextPreamble) {
+            triggerPrompt = contextPreamble + triggerPrompt;
+            console.log(
+              `[${role}] Injected ${isResumeTask ? "resume" : "context"} preamble for ${
+                isResumeTask ? "resume" : "follow-up"
+              } task (parent: ${taskObj.parentTaskId.slice(0, 8)})`,
+            );
+          }
+        }
+
         // Resolve provider-aware resume for child tasks with parentTaskId.
         let resumeSessionId: string | undefined;
-        const taskObj = trigger.task as { parentTaskId?: string } | undefined;
         if (taskObj?.parentTaskId) {
           const parentSession = await fetchProviderSessionInfo(
             apiUrl,
@@ -4127,7 +4384,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               },
             ]);
             logResumeResolution(role, resumeResolution);
-            resumeSessionId = resumeResolution.resumeSessionId;
+            // Native resume deprecated: keep `resumeSessionId` undefined so a fresh
+            // session is spawned. Follow-up continuity flows via the context preamble
+            // injected above (see context-preamble.ts).
           } else {
             console.log(`[${role}] Child task — parent session ID not found, starting fresh`);
           }

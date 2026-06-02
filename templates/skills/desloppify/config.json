@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "desloppify",
+  "displayName": "Code Health Scan",
+  "slug": "desloppify",
+  "title": "Code Health Scan",
+  "description": "Run a multi-language code health scan and publish prioritized findings.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["REPO_URL"],
+  "runAllSeedersCandidate": false,
+  "tags": ["code-quality", "audit", "reporting"]
+}

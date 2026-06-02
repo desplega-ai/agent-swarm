@@ -16,6 +16,7 @@ import { closeDb, getDb, getLogsByEventType, initDb } from "../be/db";
 import { handleCore } from "../http/core";
 import { handlePricing } from "../http/pricing";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { CODEX_MODEL_PRICING } from "../providers/codex-models";
 
 const TEST_DB_PATH = "./test-pricing-routes.sqlite";
 const API_KEY = "test-pricing-secret-key";
@@ -71,7 +72,7 @@ afterAll(async () => {
 afterEach(() => {
   const db = getDb();
   // Remove every non-seed pricing row so each test starts from the migration
-  // 044 seed (effective_from=0). The seed uses literal 0 for effective_from.
+  // seed rows (effective_from=0). The seed uses literal 0 for effective_from.
   db.prepare("DELETE FROM pricing WHERE effective_from > 0").run();
   db.prepare("DELETE FROM agent_log WHERE eventType LIKE 'pricing.%'").run();
 });
@@ -103,18 +104,18 @@ describe("Phase 6 — /api/pricing REST surface", () => {
   });
 
   describe("read endpoints", () => {
-    test("GET /api/pricing lists every row including the migration 044 seed", async () => {
+    test("GET /api/pricing lists every row including codex seed rows", async () => {
       const res = await authedFetch(`/api/pricing`);
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.rows).toBeInstanceOf(Array);
-      // Migration 044 seeds 12 codex rows with effective_from=0. They should
-      // all be present here.
+      // Codex seed rows include the migration 046 baseline plus later model
+      // backfills. They should all be present here.
       const seedRows = body.rows.filter(
         (r: { provider: string; effectiveFrom: number }) =>
           r.provider === "codex" && r.effectiveFrom === 0,
       );
-      expect(seedRows.length).toBe(12);
+      expect(seedRows.length).toBe(Object.keys(CODEX_MODEL_PRICING).length * 3);
     });
 
     test("GET /api/pricing/{provider}/{model}/{tokenClass} returns rows latest-first", async () => {

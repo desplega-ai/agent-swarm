@@ -1,0 +1,74 @@
+---
+title: UX Command Center
+description: A standing UX agent that keeps your product usable — weekly audits against your design system, agentic browser session recording, and proactive UX-improvement proposals from user telemetry. Creates a Linear umbrella with one sub-issue per finding.
+---
+
+<JsonLd
+  data={{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "Run a weekly UX audit and convert findings into Linear tickets",
+    description:
+      "How to use a UX-focused agent to walk the frontend, audit against UX principles and a design system, and create a Linear umbrella with one sub-issue per finding.",
+    step: [
+      { "@type": "HowToStep", name: "Audit", text: "Clone the frontend repo and run a UX-principles audit against your design system." },
+      { "@type": "HowToStep", name: "Reproduce", text: "Use qa-use to reproduce problematic flows; cross-reference PostHog funnels and Sentry errors." },
+      { "@type": "HowToStep", name: "Create umbrella", text: "Create a Linear umbrella ticket with one sub-issue per finding, scoped to a single component." },
+      { "@type": "HowToStep", name: "Notify", text: "Post the umbrella URL to Slack so humans see the curated todo list." }
+    ]
+  }}
+/>
+
+A UX-focused agent walks your frontend every week, audits against UX principles and your design system, and creates a [Linear](https://linear.app) umbrella ticket with one sub-issue per finding — so humans process a curated todo list, not a fire-hose audit report.
+
+<Mermaid chart={`flowchart LR
+  C["Cron: weekly"] --> UX["UX Principles Agent"]
+  UX --> A["Audit FE vs.<br/>design system"]
+  A --> B["qa-use repro +<br/>PostHog signals"]
+  B --> LI["Linear umbrella<br/>+ sub-issues"]
+  LI --> SL["Slack notify"]
+`} />
+
+## What it does
+
+A UX agent walks the frontend weekly, audits against [UX principles + your design system](https://templates.agent-swarm.dev/official/ux-principles), and **creates a [Linear](https://linear.app) umbrella ticket with one sub-issue per finding** — so humans process a curated todo list. The same agent records agentic browser sessions ([qa-use](https://github.com/desplega-ai/qa-use)) and pulls user-behavior signals from product analytics.
+
+## Agents
+
+- **[UX Principles Agent](https://templates.agent-swarm.dev/official/ux-principles)** — React / [MUI](https://mui.com/) component analysis, design-system adherence checks, accessibility, frontend code review. Domain-trained on your design system.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **[agent-fs](https://github.com/desplega-ai/agent-fs)** — audit reports persisted here for human review across sessions.
+- **[Linear](https://linear.app) integration** — inbound sync. See [Linear integration](/docs/integrations/linear).
+- **`slack-post`** — the weekly audit-complete notification.
+- **`investigate-sentry-issue`** — cross-references UX issues that throw [Sentry](https://sentry.io/) errors.
+
+### Custom (swarm-managed)
+
+- **`linear-interaction`** — outbound [Linear](https://linear.app) writes (creating the umbrella + sub-issues programmatically).
+- **`posthog-interaction`** — funnel/cohort data from [PostHog](https://posthog.com/) via the HogQL API.
+
+### Third-party providers
+
+- **[qa-use](https://github.com/desplega-ai/qa-use)** — agent-first browser-automation CLI. The agent drives it to reproduce a problematic flow and embeds the recording in the sub-issue.
+- **[PostHog](https://posthog.com/)** — funnel/cohort/event data for "users are dropping off here" cross-references.
+- **[Sentry](https://sentry.io/)** — cross-reference UX issues that throw errors.
+
+## Workflows / Schedules
+
+- **`weekly-ux-audit`** — weekly. Clones the frontend repo, runs a full UX-principles audit, creates a [Linear](https://linear.app) umbrella ticket with sub-issues for each finding, posts the umbrella URL to Slack. Each sub-issue is single-component-scoped so it's individually fixable.
+
+## Patterns used
+
+- [**Drain Loops**](/docs/playbooks/patterns/drain-loops) — the umbrella's sub-issues can feed a drain loop to auto-fix the low-risk ones.
+
+## Tips for new swarm users
+
+- **Scope each audit to one app/dir.** Frontend audits compound when focused; running against the whole monorepo every week burns tokens and produces unactionable noise.
+- **Create Linear sub-issues, not a markdown dump.** Humans process work, not raw reports. One sub-issue per finding turns "we should fix UX" into a concrete backlog.
+- **Pair the UX agent with [qa-use](https://github.com/desplega-ai/qa-use)** for "show me where this UI feels broken" loops. The agent reasons; qa-use reproduces.
+- **Cross-reference behavioral data.** A claim like "users are confused by X" is far more credible with a [PostHog](https://posthog.com/) funnel showing the drop-off.
+- **Cap audit-round complexity.** If a sub-issue takes more than ~3 review rounds, escalate to a human — it's a design decision, not a UX nit.

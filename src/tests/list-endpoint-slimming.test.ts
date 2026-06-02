@@ -5,6 +5,7 @@ import {
   createAgent,
   createPage,
   createScheduledTask,
+  createSessionCost,
   createTaskExtended,
   createWorkflow,
   getAllAgents,
@@ -145,7 +146,25 @@ describe("list-endpoint slimming", () => {
 
   test("getAllTasks — slim truncates task text and drops heavy blobs", () => {
     const longText = "Z".repeat(2000);
-    createTaskExtended(longText, { agentId: "slim-agent-1" });
+    const task = createTaskExtended(longText, { agentId: "slim-agent-1" });
+    createSessionCost({
+      sessionId: "slim-cost-session-1",
+      taskId: task.id,
+      agentId: "slim-agent-1",
+      totalCostUsd: 0.0123,
+      durationMs: 1000,
+      numTurns: 1,
+      model: "test-model",
+    });
+    createSessionCost({
+      sessionId: "slim-cost-session-2",
+      taskId: task.id,
+      agentId: "slim-agent-1",
+      totalCostUsd: 0.0045,
+      durationMs: 1000,
+      numTurns: 1,
+      model: "test-model",
+    });
 
     const slim = getAllTasks({}, { slim: true });
     const slimTask = slim.find((t) => t.task.startsWith("Z"));
@@ -155,10 +174,12 @@ describe("list-endpoint slimming", () => {
     expect("output" in slimTask!).toBe(false);
     expect("failureReason" in slimTask!).toBe(false);
     expect("providerMeta" in slimTask!).toBe(false);
+    expect(slimTask?.totalCostUsd).toBeCloseTo(0.0168, 6);
 
     const full = getAllTasks({}).find((t) => t.task === longText);
     expect(full).toBeDefined();
     expect(full?.task).toBe(longText);
+    expect(full?.totalCostUsd).toBeCloseTo(0.0168, 6);
   });
 
   test("listRecentSessions — slim root is a truncated task summary", () => {

@@ -1,0 +1,39 @@
+---
+title: 'Pattern: Per-Customer Working Directories'
+description: Give each top account a persistent folder in agent-fs where agents accumulate context across months. A 6-month-old note like "they care about EU data residency" is what makes the next report feel personal.
+---
+
+Give each top account a persistent folder in the shared filesystem ([agent-fs](https://github.com/desplega-ai/agent-fs)) where agents accumulate context across months — not just within a single session.
+
+<Mermaid chart={`flowchart LR
+  M["Meeting transcript"] --> WD[("agent-fs:<br/>customers/&lt;account&gt;/")]
+  U["Usage / behavior data"] --> WD
+  N["Running notes +<br/>integration history"] --> WD
+  WD --> R["Any agent, any session<br/>pulls full context"]
+  R --> OUT["Personalized report /<br/>'what changed?' briefing"]
+`} />
+
+## What it is
+
+A durable directory per account (e.g. `customers/<account>/`) in [agent-fs](https://github.com/desplega-ai/agent-fs), holding running notes, integration history, open questions, recent activity, and meeting transcripts. Any agent in any future session can read it to answer "what's the state of this account?" without re-deriving everything.
+
+## Where we use it
+
+- **[Proactive customer support](/docs/playbooks/proactive-customer-support)** — each top account has a directory. A post-call [Granola](https://www.granola.ai/) transcript appends automatically; the next report-generation task reads months of accumulated context.
+
+## Why it works
+
+- Agent *memory* is good for swarm-wide learnings; a *working directory* is better for account-specific, document-shaped context (notes, transcripts, history) that you want to read and edit as files.
+- It turns "what changed since their last touchpoint?" from an impossible question into a diff against the directory.
+- It survives session resets, model changes, and agent hand-offs — the context lives in files, not in one agent's head.
+
+## How to apply
+
+- One directory per account, predictable path. Keep a short `README`/`index` at the root summarizing current state.
+- Append, don't overwrite — transcripts and notes are an audit trail.
+- Separate internal notes from customer-facing drafts so a redaction pass is easy.
+- Pair with the [HITL gate](/docs/playbooks/patterns/hitl-gates): the directory feeds the draft; a human approves the send.
+
+## Used in
+
+- [Proactive Customer Support](/docs/playbooks/proactive-customer-support)

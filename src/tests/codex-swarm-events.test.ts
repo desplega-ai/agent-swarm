@@ -97,6 +97,41 @@ describe("createCodexSwarmEventHandler", () => {
       expect(controller.signal.aborted).toBe(true);
     });
 
+    test("logs the abort reason when /cancelled-tasks reports the task", async () => {
+      installFetchStub((url) => {
+        if (url.includes("/cancelled-tasks")) {
+          return new Response(
+            JSON.stringify({ cancelled: [{ id: "task-1", failureReason: "user request" }] }),
+            { status: 200 },
+          );
+        }
+        return new Response("{}", { status: 200 });
+      });
+      const logs: string[] = [];
+      const origLog = console.log;
+      console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
+      try {
+        const controller = new AbortController();
+        const handler = createCodexSwarmEventHandler(
+          buildOpts({ abortRef: { current: controller }, taskId: "task-1" }),
+        );
+        handler({
+          type: "tool_start",
+          toolCallId: "call-1",
+          toolName: "bash",
+          args: { command: "sleep 9999" },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      } finally {
+        console.log = origLog;
+      }
+      // The log MUST include the literal taskId (not the `${taskId}` template).
+      const abortLog = logs.find((l) =>
+        l.includes("aborting task task-1: cancelled via /cancelled-tasks poll"),
+      );
+      expect(abortLog).toBeDefined();
+    });
+
     test("throttles the cancellation check across rapid tool_start events", async () => {
       const { calls } = installFetchStub(
         () => new Response(JSON.stringify({ cancelled: [] }), { status: 200 }),

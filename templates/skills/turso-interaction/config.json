@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "turso-interaction",
+  "displayName": "Turso / LibSQL Interaction",
+  "slug": "turso-interaction",
+  "title": "Turso / LibSQL Interaction",
+  "description": "Safely inspect and update LibSQL databases from agent workflows.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["TURSO_DATABASE_URL"],
+  "runAllSeedersCandidate": false,
+  "tags": ["database", "libsql", "turso"]
+}

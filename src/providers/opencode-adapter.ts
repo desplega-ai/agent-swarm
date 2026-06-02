@@ -20,6 +20,7 @@ import {
 import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import type {
   CostData,
   CredCheckOptions,
@@ -176,6 +177,32 @@ function resolvePluginPath(): string {
   return join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
 }
 
+// context-mode is installed globally via `npm install -g` (Dockerfile.worker),
+// which places it under the npm global modules dir. opencode resolves bare
+// plugin names with `import(await Bun.resolve(name, ...))`, which does NOT walk
+// the npm global dir — a bare "context-mode" entry only resolves if Bun
+// auto-installs from the registry at runtime, which fails on network-sandboxed
+// workers. So we hand opencode the ABSOLUTE path to the package's built
+// opencode-plugin entry, which imports cleanly with no network.
+const CONTEXT_MODE_GLOBAL_ROOTS = ["/usr/lib/node_modules", "/usr/local/lib/node_modules"];
+const CONTEXT_MODE_PLUGIN_SUBPATH = "context-mode/build/adapters/opencode/plugin.js";
+
+/**
+ * Resolve the absolute path to context-mode's opencode plugin entry, or `null`
+ * if it can't be found on disk. `CONTEXT_MODE_OPENCODE_PLUGIN_PATH` overrides
+ * the lookup (and must itself exist). Returning `null` lets the caller skip the
+ * plugin gracefully instead of handing opencode an unresolvable entry.
+ */
+export function resolveContextModePluginPath(): string | null {
+  const override = process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH;
+  if (override) return existsSync(override) ? override : null;
+  for (const root of CONTEXT_MODE_GLOBAL_ROOTS) {
+    const candidate = join(root, CONTEXT_MODE_PLUGIN_SUBPATH);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 export class OpencodeSession implements ProviderSession {
   private _sessionId: string;
   private listeners: Array<(event: ProviderEvent) => void> = [];
@@ -192,6 +219,7 @@ export class OpencodeSession implements ProviderSession {
   private completionPromise: Promise<ProviderResult>;
   private server: { url: string; close(): void };
   private aborted = false;
+  private completed = false;
 
   // Running cost accumulators
   private totalCostUsd = 0;
@@ -244,6 +272,10 @@ export class OpencodeSession implements ProviderSession {
 
   get sessionId(): string {
     return this._sessionId;
+  }
+
+  get isFinished(): boolean {
+    return this.completed;
   }
 
   /** Emit the synthetic session_init event. Called by the adapter immediately
@@ -331,7 +363,7 @@ export class OpencodeSession implements ProviderSession {
 
   /** Process a single opencode SSE event */
   handleOpencodeEvent(ev: OpencodeEvent): void {
-    if (this.aborted) return;
+    if (this.aborted || this.completed) return;
 
     // Always emit the raw event as a scrubbed raw_log
     const rawContent = scrubSecrets(JSON.stringify(ev));
@@ -444,7 +476,7 @@ export class OpencodeSession implements ProviderSession {
         for (const l of this.listeners) l(resultEvent);
         const raw = scrubSecrets(JSON.stringify(resultEvent));
         this.emitDirect({ type: "raw_log", content: raw });
-        this.completionResolve({
+        void this.finish({
           exitCode: 0,
           sessionId: this._sessionId,
           cost,
@@ -488,7 +520,7 @@ export class OpencodeSession implements ProviderSession {
     const raw = scrubSecrets(JSON.stringify(errorEvent));
     this.emitDirect({ type: "raw_log", content: raw });
     const cost = this.buildCostData(true);
-    this.completionResolve({
+    void this.finish({
       exitCode: 1,
       sessionId: this._sessionId,
       cost,
@@ -519,12 +551,22 @@ export class OpencodeSession implements ProviderSession {
     return this.completionPromise;
   }
 
+  private async finish(result: ProviderResult): Promise<void> {
+    if (this.completed) return;
+    this.completed = true;
+    try {
+      this.server.close();
+    } catch {
+      // best-effort
+    }
+    await this.cleanupFiles();
+    this.completionResolve(result);
+  }
+
   async abort(): Promise<void> {
     if (this.aborted) return;
     this.aborted = true;
-    this.server.close();
-    await this.cleanupFiles();
-    this.completionResolve({
+    await this.finish({
       exitCode: 1,
       sessionId: this._sessionId,
       isError: true,
@@ -588,6 +630,27 @@ export class OpencodeAdapter implements ProviderAdapter {
     // an accident, not a contract.
     const pluginPath = resolvePluginPath();
 
+    // context-mode ships as an in-process opencode plugin (NOT an MCP server).
+    // Its built plugin entry registers both the native ctx_* tools and the 5
+    // hook surrogates. It must NOT also appear in the `mcp` block — dual
+    // registration yields zero tools. We push the ABSOLUTE path to the globally
+    // installed package's opencode plugin entry, not the bare name (see
+    // resolveContextModePluginPath for why a bare name fails to resolve offline).
+    // Gated by CONTEXT_MODE_DISABLED so builds/deploys without it opt out.
+    const plugins = [pluginPath];
+    if (process.env.CONTEXT_MODE_DISABLED !== "true") {
+      const contextModePluginPath = resolveContextModePluginPath();
+      if (contextModePluginPath) {
+        plugins.push(contextModePluginPath);
+      } else {
+        console.warn(
+          "[opencode] context-mode is enabled but its opencode plugin entry was not found on disk; " +
+            "skipping it for this session. Set CONTEXT_MODE_OPENCODE_PLUGIN_PATH to override, or " +
+            "CONTEXT_MODE_DISABLED=true to silence.",
+        );
+      }
+    }
+
     // Build per-task opencode config (plugin field carries the swarm plugin)
     const opencodeConfig: Config & { plugin?: string[] } = {
       $schema: "https://opencode.ai/config.json",
@@ -600,7 +663,7 @@ export class OpencodeAdapter implements ProviderAdapter {
         doom_loop: "allow",
         external_directory: "allow",
       },
-      plugin: [pluginPath],
+      plugin: plugins,
     };
 
     // Write per-task config file
@@ -626,6 +689,7 @@ export class OpencodeAdapter implements ProviderAdapter {
     process.env.SWARM_AGENT_ID = config.agentId;
     process.env.SWARM_TASK_ID = config.taskId;
     process.env.SWARM_IS_LEAD = config.role === "lead" ? "true" : "false";
+    process.env.CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY = CTX_MODE_NUDGE_EVERY;
 
     // Set OPENCODE_CONFIG scoped to the spawn call (save + restore)
     const prevOpencodeConfig = process.env.OPENCODE_CONFIG;
@@ -711,6 +775,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       .then(async ({ stream }) => {
         for await (const event of stream) {
           session.handleOpencodeEvent(event as OpencodeEvent);
+          if (session.isFinished) break;
         }
         // Stream ended without session.idle — treat as completion
       })

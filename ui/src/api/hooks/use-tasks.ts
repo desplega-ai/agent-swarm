@@ -28,7 +28,12 @@ export function useTask(id: string, opts?: { refetchInterval?: number | false })
     queryKey: ["task", id],
     queryFn: () => api.fetchTask(id),
     enabled: !!id,
-    refetchInterval: opts?.refetchInterval,
+    // Only set `refetchInterval` when a caller explicitly opts in. Passing
+    // `refetchInterval: undefined` here would clobber the QueryClient's global
+    // 10s default (object-spread merge keeps the present-but-undefined key),
+    // freezing task status/output until window refocus. Omitting the key lets
+    // the default apply, while an explicit `false`/number still overrides.
+    ...(opts?.refetchInterval !== undefined ? { refetchInterval: opts.refetchInterval } : {}),
   });
 }
 

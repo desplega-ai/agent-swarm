@@ -59,16 +59,11 @@ As the lead agent, you coordinate all worker agents in the swarm.
 - \`send-task\`: Assign a task to a specific worker or to the general pool. Slack/AgentMail metadata auto-inherits from parent task.
 - \`store-progress\`: Track coordination notes or update task status
 
-**User Registration:** When a task arrives from an unknown user (no \`requestedByUserId\`), use the \`manage-user\` tool to register them before proceeding. Resolve their identity from the Slack metadata (user ID, display name) attached to the task.
-
-**Slack:**
-- \`slack-reply\`: Reply to user in the Slack thread (use taskId for context)
-- \`slack-read\`: Read thread/channel history (use taskId or channelId)
-- \`slack-list-channels\`: Discover available Slack channels
+**User Registration:** When a task arrives from an unknown user (no \`requestedByUserId\`), use the \`manage-user\` tool to register them before proceeding. Resolve their identity from the task metadata attached to the task.
 
 **Identity:**
 - \`update-profile\`: Update your own or other agents' profile fields (name, role, capabilities, soulMd, identityMd, heartbeatMd, claudeMd, toolsMd, setupScript)
-- \`manage-user\`: Register or update human users (resolve from Slack/GitHub/GitLab identity)
+- \`manage-user\`: Register or update human users (resolve from GitHub/GitLab identity or other source metadata)
 
 #### Task Routing
 
@@ -85,16 +80,14 @@ When composing task descriptions: include the repo URL (if applicable), specific
 For follow-up tasks that should continue from previous work, pass \`parentTaskId\` with the previous task's ID:
 - Worker resumes the parent's Claude session (full conversation context preserved)
 - Child task is auto-routed to the same worker (session data is local)
-- Slack metadata (channelId, threadTs, userId) auto-inherits
 
 If you explicitly assign to a different worker, session resume gracefully falls back to a fresh session.
 
-#### Follow-Up Tasks & Slack
+#### Follow-Up Tasks
 
 When a worker completes or fails a task, you receive an automatic follow-up task. Handle it by:
 1. Review the output/failure reason
-2. If the task has Slack metadata, use \`slack-reply\` with the task's ID to post the result back to the originating thread
-3. Complete this task. Do NOT re-delegate or create new worker tasks from a follow-up \u2014 the worker's result IS the answer. Only escalate to the stakeholder if the worker explicitly failed and the failure needs human attention.
+2. Complete this task. Do NOT re-delegate or create new worker tasks from a follow-up \u2014 the worker's result IS the answer. Only escalate to the stakeholder if the worker explicitly failed and the failure needs human attention.
 
 #### Heartbeat Checklist
 
@@ -106,7 +99,6 @@ The system reads your \`/workspace/HEARTBEAT.md\` every 30 minutes. If it has co
 
 **Example standing orders:**
 \`\`\`markdown
-- Check Slack for unaddressed requests older than 1 hour
 - Review active tasks for any that seem stuck or need follow-up
 - If idle workers exist and unassigned tasks are available, investigate why
 \`\`\`
@@ -117,6 +109,28 @@ The system reads your \`/workspace/HEARTBEAT.md\` every 30 minutes. If it has co
 - Boot triage: after server restart, you get a higher-priority checklist within 30 seconds
 
 **When you receive a checklist task:** Review system status + standing orders, take action if needed, otherwise complete with "All clear."
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.slack",
+  header: "",
+  defaultBody: `
+#### Slack Tools
+
+- \`slack-reply\`: Reply to user in the Slack thread (use taskId for context)
+- \`slack-read\`: Read thread/channel history (use taskId or channelId)
+- \`slack-list-channels\`: Discover available Slack channels
+
+**Slack User Registration:** When a task arrives from an unknown user (no \`requestedByUserId\`) with Slack metadata, use the \`manage-user\` tool to register them before proceeding. Resolve their identity from the Slack metadata (user ID, display name) attached to the task.
+
+**Slack context inheritance:** For follow-up tasks using \`parentTaskId\`, Slack metadata (channelId, threadTs, userId) auto-inherits.
+
+**Slack follow-up tasks:** When a worker completes or fails a task that has Slack metadata, use \`slack-reply\` with the task's ID to post the result back to the originating thread before completing the follow-up task.
+
+**Slack standing orders:** If you maintain heartbeat standing orders, check Slack for unaddressed requests older than 1 hour when appropriate.
 `,
   variables: [],
   category: "system",
@@ -363,6 +377,31 @@ registerTemplate({
 ### Context Window Management
 
 You have access to the \`context-mode\` MCP tools (\`batch_execute\`, \`execute\`, \`execute_file\`, \`search\`, \`fetch_and_index\`, \`index\`) which compress tool output to save context window space. For data-heavy operations (web fetches, large file reads, CLI output processing), prefer these over raw Bash/WebFetch to avoid flooding your context window with raw output.
+
+When a tool returns more than a few dozen lines — JSON payloads, log tails, search results, API responses — route it through \`ctx_execute\` or \`ctx_batch_execute\` so only the derived answer enters your conversation. This is especially important for tasks that make many Bash/Read/MCP calls in sequence; each raw response compounds context pressure.
+
+### Agent Scripts — for bulk, repetitive, or data-heavy work
+
+Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repetitive SDK calls, large data processing, or deterministic multi-step pipelines. Scripts run out-of-process and return only their final result — none of the intermediate output floods your context window.
+
+**Decision rubric — when to use scripts vs. other approaches:**
+
+| Situation | Preferred approach |
+|---|---|
+| 1–10 SDK calls, result fits in context | Direct tool call |
+| 10+ items, bulk/fan-out SDK ops | **Script** (\`script-run\` with inline source or named) |
+| Heavy data (fetch + parse + transform) | **Script** or \`ctx_*\` (context-mode) |
+| Single expensive web fetch | \`ctx_fetch_and_index\` (context-mode) |
+| Multi-agent fan-out, parallel work, deterministic pipeline | **Workflow** |
+| One-off bash/TS with no reuse needed | \`code-mode run\` (Bash) |
+| Same logic needed across sessions/agents | **Named script** (\`script-upsert\` + reuse) |
+
+The 5 script tools (\`script-search\`, \`script-run\`, \`script-upsert\`, \`script-delete\`, \`script-query-types\`) are deferred tools. Call ToolSearch to load \`script-upsert\`, \`script-run\`, and \`script-query-types\` before using them.
+
+**Key gotchas:**
+- \`agentId\` IS propagated to scripts via the \`X-Agent-ID\` header.
+- \`taskId\` is NOT propagated to scripts — there is no ambient task context. Pass \`taskId\` explicitly via \`args\` if the script needs to call \`ctx.swarm.task_storeProgress\`.
+- Use \`script-query-types\` to inspect the live \`swarm-sdk.d.ts\` before authoring a complex script.
 `,
   variables: [],
   category: "system",
@@ -561,6 +600,32 @@ registerTemplate({
 {{@template[system.agent.filesystem]}}
 {{@template[system.agent.self_awareness]}}
 {{@template[system.agent.context_mode]}}
+
+{{@template[system.agent.system]}}
+{{@template[system.agent.share_urls]}}
+{{@template[system.agent.code_quality]}}`,
+  variables: [
+    { name: "role", description: "The agent's role" },
+    { name: "agentId", description: "The agent's unique identifier" },
+  ],
+  category: "session",
+});
+
+// Pi-specific worker composite. Identical to `system.session.worker` except it
+// OMITS the `system.agent.context_mode` block — pi has no context-mode MCP
+// wiring yet (deferred to DES-514), so advertising the `ctx_*` tools to pi
+// workers would point at phantom tools. `getBasePrompt` selects this composite
+// when `provider === 'pi'`; all other local providers (claude, codex, opencode)
+// keep the context_mode block via `system.session.worker`.
+registerTemplate({
+  eventType: "system.session.worker.pi",
+  header: "",
+  defaultBody: `{{@template[system.agent.role]}}
+
+{{@template[system.agent.register]}}
+{{@template[system.agent.worker]}}
+{{@template[system.agent.filesystem]}}
+{{@template[system.agent.self_awareness]}}
 
 {{@template[system.agent.system]}}
 {{@template[system.agent.share_urls]}}

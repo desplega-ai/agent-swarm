@@ -6,7 +6,8 @@
  *
  *   Phase 1 — factory wiring + skeleton classes.
  *   Phase 2 — event stream normalization, CostData, AbortController, log file,
- *             AGENTS.md system-prompt injection, canResume via resumeThread.
+ *             AGENTS.md system-prompt injection. (Native resume was removed in
+ *             the 2026-05-28 deprecate-native-resume plan — see context-preamble.ts.)
  *   Phase 3 — per-session MCP config builder + model catalogue wiring. The
  *             baseline Codex config (`~/.codex/config.toml`) is written at
  *             Docker image build time (deferred to Phase 6). For local dev
@@ -66,6 +67,7 @@ import {
   type WebSearchItem,
 } from "@openai/codex-sdk";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
+import { getApiKey } from "../utils/api-key";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -80,6 +82,7 @@ import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
 import { getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
+import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { buildOtelTraceparentEnv } from "./otel-env";
 import type {
   CostData,
@@ -349,15 +352,34 @@ export async function buildCodexConfig(
     }
   }
 
+  // (4) context-mode — pre-installed stdio MCP server providing the `ctx_*`
+  // context-compression tools. Gated by `CONTEXT_MODE_DISABLED` so builds /
+  // deploys without the `context-mode` binary on PATH don't break the session.
+  // Same entry shape as the swarm + installed-server stdio entries above.
+  if (process.env.CONTEXT_MODE_DISABLED !== "true") {
+    mcpServers["context-mode"] = {
+      command: "context-mode",
+      enabled: true,
+      startup_timeout_sec: 30,
+      tool_timeout_sec: 120,
+    };
+  }
+
   // (1) Baseline overrides. Keep these aligned with the Dockerfile baseline
   // at `~/.codex/config.toml` (Phase 6). Repeating them here makes local dev
   // (no baseline file) behave identically to the Docker worker.
+  //
+  // `features.hooks` / `features.plugin_hooks` enable Codex's hook system and
+  // the hooks contributed by installed Codex plugins (context-mode's plugin:
+  // routing injection, PreToolUse safety blocks, output capture). The SDK
+  // flattens these to `--config features.hooks=true` / `features.plugin_hooks=true`.
   return {
     model,
     approval_policy: "never",
     sandbox_mode: "danger-full-access",
     skip_git_repo_check: true,
     show_raw_agent_reasoning: false,
+    features: { hooks: true, plugin_hooks: true },
     mcp_servers: mcpServers as CodexConfig,
   };
 }
@@ -383,7 +405,7 @@ export interface SummarizeSessionForCodexDeps {
 }
 
 /** Running session backed by a Codex `Thread`. */
-class CodexSession implements ProviderSession {
+export class CodexSession implements ProviderSession {
   private readonly thread: Thread;
   private readonly config: ProviderSessionConfig;
   private readonly agentsMdHandle: CodexAgentsMdHandle;
@@ -1036,12 +1058,24 @@ class CodexSession implements ProviderSession {
       // preserve. Wrapped in its own try/catch so summary failure must NOT
       // block the existing log/AGENTS.md cleanup below. Gate `SKIP_SESSION_SUMMARY=1`
       // matches the parity convention used by the claude Stop hook + pi/opencode.
-      if (process.env.SKIP_SESSION_SUMMARY !== "1") {
+      //
+      // Skip the summary entirely when the session was aborted. The transcript
+      // is incomplete, the LLM call would retry 3× through openrouter and
+      // spam stderr with structured-output failures (red-herring noise we
+      // saw in the templates-ui incident, 2026-05-28). Losing the summary
+      // on abort is acceptable — it's cleanup, not load-bearing.
+      const sessionWasAborted =
+        this.aborted ||
+        this.abortController?.signal.aborted === true ||
+        this.pendingResult?.exitCode === 130;
+      if (process.env.SKIP_SESSION_SUMMARY !== "1" && !sessionWasAborted) {
         try {
           await this.summarizeAtEnd();
         } catch (err) {
           console.error("session_summary failed (codex):", err);
         }
+      } else if (sessionWasAborted) {
+        console.debug("[codex] session aborted — skipping session_summary");
       }
 
       // Detach the abort controller now that the turn has settled.
@@ -1171,6 +1205,388 @@ class CodexSession implements ProviderSession {
   }
 }
 
+/**
+ * Build a `CodexSession` running in the *current* process (no subprocess
+ * isolation). Production sessions are now spawned through
+ * `CodexSubprocessSession` to keep the runner's heap bounded across many
+ * task completions (Picateclas spawn-OOM, 2026-05-28). This helper is the
+ * core in-process creation logic — used by:
+ *
+ *   1. `CodexAdapter.createSession` when `bypassSubprocess: true`
+ *      (unit tests that monkey-patch the SDK prototype).
+ *   2. `runCodexSessionRunner` (the spawned subprocess entry point in
+ *      `src/commands/codex-session-runner.ts`).
+ *
+ * Exported so the subprocess runner — which IS a fresh process — can build
+ * its session via the same path the tests exercise.
+ */
+export async function createInProcessCodexSession(
+  config: ProviderSessionConfig,
+  opts: { skillsDir?: string; summarizeDeps?: SummarizeSessionForCodexDeps } = {},
+): Promise<CodexSession> {
+  // Codex ingests per-session instructions via AGENTS.md in the cwd. Write
+  // (or refresh) the managed block before we spin up the thread.
+  const agentsMdHandle = await writeCodexAgentsMd(config.cwd, config.systemPrompt);
+
+  try {
+    // Resolve the model once and thread it through. Claude shortnames map
+    // to Codex equivalents; everything else passes through verbatim — the
+    // SDK is the source of truth for what's valid.
+    const resolvedModel = resolveCodexModel(config.model);
+
+    // Buffer warnings emitted during config-building so they're not lost
+    // before `CodexSession.onEvent` attaches a listener. The buffer is
+    // replayed into the session's event stream right after construction
+    // via the `initialEvents` constructor parameter.
+    const preSessionEvents: ProviderEvent[] = [];
+    const bufferedEmit = (event: ProviderEvent) => {
+      preSessionEvents.push(event);
+    };
+
+    const mergedConfig = await buildCodexConfig(config, resolvedModel, bufferedEmit);
+
+    // Auth resolution. `codex_oauth` (in the swarm config store) wins over
+    // `OPENAI_API_KEY` so users can keep an OpenAI key set for embeddings
+    // without it shadowing their ChatGPT login. The entrypoint already runs
+    // this same precedence at boot — this block handles local dev (where
+    // the entrypoint didn't run) and any case where auth.json is stale.
+    const authMode = await resolveCodexAuthMode(config, bufferedEmit);
+
+    // `CodexOptions.env` does NOT inherit from `process.env`. Construct a
+    // minimal env explicitly so the spawned Codex CLI can find its binary
+    // (PATH) and HOME (for ~/.codex/auth.json). `OPENAI_API_KEY` is only
+    // forwarded when auth.json is NOT in chatgpt mode — otherwise it would
+    // override the OAuth login at the Codex CLI layer.
+    const env: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME ?? "",
+      ...(authMode !== "chatgpt" && process.env.OPENAI_API_KEY
+        ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY }
+        : {}),
+      ...(process.env.NODE_EXTRA_CA_CERTS
+        ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
+        : {}),
+      CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
+      ...(config.env ?? {}),
+      // Gated cross-service OTel linking: when SWARM_ENABLE_HARNESS_OTEL (or
+      // the deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias) is on, inject
+      // TRACEPARENT from the active worker span so Codex's spans nest under
+      // our worker.session trace. Codex's Rust OTEL SDK reads W3C trace
+      // context from the env via the default tracecontext propagator.
+      // Returns {} (no-op) when off; spread last so the computed value wins.
+      ...buildOtelTraceparentEnv(config.env ?? process.env),
+    };
+
+    // The SDK's default `findCodexPath()` does `require.resolve("@openai/codex")`
+    // from the SDK's own module. When agent-swarm runs as a Bun single-file
+    // compiled executable, the bundled SDK can't resolve `@openai/codex` at
+    // runtime because it's not part of the bundle — it lives in a global
+    // install (`/usr/lib/node_modules/@openai/codex` in the Docker worker
+    // image). Honor `CODEX_PATH_OVERRIDE` so Docker can point us at the CLI
+    // wrapper (or native binary) directly. Fall back to undefined so local
+    // dev with `@openai/codex-sdk` installed as a regular node_modules
+    // dependency keeps working via the SDK's own resolver.
+    const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
+
+    const codex = new Codex({
+      ...(codexPathOverride ? { codexPathOverride } : {}),
+      env,
+      config: mergedConfig,
+    });
+
+    const threadOptions: ThreadOptions = {
+      workingDirectory: config.cwd,
+      skipGitRepoCheck: true,
+      sandboxMode: "danger-full-access",
+      approvalPolicy: "never",
+      model: resolvedModel,
+    };
+
+    // Native resume is deprecated. Follow-up continuity is delivered via the
+    // context preamble (see src/commands/context-preamble.ts). Any stray
+    // resumeSessionId is logged and ignored — we always start a fresh thread.
+    if (config.resumeSessionId) {
+      console.warn(
+        "[codex-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
+      );
+    }
+    const thread = codex.startThread(threadOptions);
+
+    return new CodexSession(
+      thread,
+      config,
+      agentsMdHandle,
+      resolvedModel,
+      preSessionEvents,
+      opts.skillsDir,
+      opts.summarizeDeps ?? {},
+    );
+  } catch (err) {
+    // If we failed to construct the thread, clean up the managed AGENTS.md
+    // block so we don't leak state on the filesystem.
+    await agentsMdHandle.cleanup();
+    throw err;
+  }
+}
+
+/**
+ * Resolve the argv used to re-launch agent-swarm as a subprocess.
+ *
+ * The codex subprocess runner (`src/commands/codex-session-runner.ts`) is
+ * invoked via the `codex-session-runner` CLI subcommand. Compiled and dev
+ * modes differ in how `process.argv` is laid out:
+ *
+ *   - Compiled (`./agent-swarm worker ...`): argv = ["./agent-swarm", "worker", ...]
+ *     → re-launch is just [process.execPath, "codex-session-runner"].
+ *   - Dev (`bun src/cli.tsx worker ...`): argv = ["bun", ".../cli.tsx", "worker", ...]
+ *     → re-launch is [process.execPath, ".../cli.tsx", "codex-session-runner"].
+ *
+ * We pick the dev path when argv[1] looks like a .ts/.tsx/.js/.jsx file (i.e.
+ * a path the runtime is interpreting); otherwise we assume compiled.
+ * `AGENT_SWARM_CODEX_RUNNER_ARGV` lets operators / tests override the prefix
+ * (JSON-encoded string array).
+ *
+ * Exported for unit testing.
+ */
+export function resolveCodexRunnerArgv(): string[] {
+  const override = process.env.AGENT_SWARM_CODEX_RUNNER_ARGV;
+  if (override) {
+    try {
+      const parsed = JSON.parse(override);
+      if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) {
+        return parsed as string[];
+      }
+    } catch {
+      // fall through to inferred resolution
+    }
+  }
+  const execPath = process.execPath;
+  const scriptArg = process.argv[1];
+  if (scriptArg && /\.(t|j)sx?$/.test(scriptArg)) {
+    return [execPath, scriptArg, "codex-session-runner"];
+  }
+  return [execPath, "codex-session-runner"];
+}
+
+/** JSON payload passed to the codex subprocess runner via stdin. */
+interface CodexSubprocessInput {
+  config: ProviderSessionConfig;
+  skillsDir?: string;
+  /**
+   * W3C TRACEPARENT for the parent `worker.session.create` span. Captured in
+   * the parent (where the OTel span context is live) and forwarded so the
+   * subprocess can pass it on to Codex via env. We deliberately do NOT use
+   * `buildOtelTraceparentEnv` inside the subprocess — it would build from a
+   * fresh tracer with no active span. The runner forwards what the parent
+   * captured here back into `config.env` before constructing the SDK.
+   */
+  parentOtelEnv?: Record<string, string>;
+}
+
+/**
+ * `ProviderSession` that runs the entire codex session inside a fresh
+ * subprocess. This is the Picateclas spawn-OOM permanent fix — every codex
+ * session's heap (SDK state, transcript buffer, JSON-RPC parser, listeners)
+ * dies with the subprocess. The runner's own VSZ stays bounded across
+ * thousands of task completions.
+ *
+ * Wire protocol over stdout (line-delimited JSON):
+ *   {"kind":"event", "event": <ProviderEvent>}
+ *   {"kind":"result", "result": <ProviderResult>}
+ *
+ * stderr is forwarded verbatim into the runner's stdout (for prod logs).
+ */
+class CodexSubprocessSession implements ProviderSession {
+  private readonly proc: ReturnType<typeof Bun.spawn>;
+  private readonly listeners: Array<(event: ProviderEvent) => void> = [];
+  private readonly eventQueue: ProviderEvent[] = [];
+  private readonly completionPromise: Promise<ProviderResult>;
+  private _sessionId: string | undefined;
+
+  constructor(config: ProviderSessionConfig, skillsDir: string | undefined) {
+    const argv = resolveCodexRunnerArgv();
+    const payload: CodexSubprocessInput = {
+      config,
+      skillsDir,
+      // Capture the parent's OTel TRACEPARENT here, in the span context the
+      // runner established. The subprocess can't reconstruct it on its own
+      // since its OTel tracer doesn't share the parent's active-span state.
+      parentOtelEnv: buildOtelTraceparentEnv(config.env ?? process.env),
+    };
+
+    const apiKey = getApiKey();
+
+    this.proc = Bun.spawn(argv, {
+      // Minimal env: forward what the subprocess needs to talk to the API,
+      // load the codex CLI binary, and read OAuth tokens. config.env (which
+      // already includes the swarm-config overlay) is delivered via stdin
+      // — NOT here — so we don't repeat the same string in two places.
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        ...(process.env.NODE_EXTRA_CA_CERTS
+          ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
+          : {}),
+        ...(process.env.MCP_BASE_URL ? { MCP_BASE_URL: process.env.MCP_BASE_URL } : {}),
+        ...(apiKey ? { AGENT_SWARM_API_KEY: apiKey, API_KEY: apiKey } : {}),
+        // Embedding / summarization paths read these:
+        ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
+        ...(process.env.OPENROUTER_API_KEY
+          ? { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY }
+          : {}),
+        ...(process.env.ANTHROPIC_API_KEY
+          ? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
+          : {}),
+        ...(process.env.CODEX_PATH_OVERRIDE
+          ? { CODEX_PATH_OVERRIDE: process.env.CODEX_PATH_OVERRIDE }
+          : {}),
+        ...(process.env.CODEX_SKILLS_DIR ? { CODEX_SKILLS_DIR: process.env.CODEX_SKILLS_DIR } : {}),
+        CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
+        ...(process.env.SKIP_SESSION_SUMMARY
+          ? { SKIP_SESSION_SUMMARY: process.env.SKIP_SESSION_SUMMARY }
+          : {}),
+        ...(process.env.MEMORY_RATERS ? { MEMORY_RATERS: process.env.MEMORY_RATERS } : {}),
+      },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    // `Bun.spawn`'s `stdin` is typed as `number | FileSink`; with `stdin:
+    // "pipe"` it is always a FileSink. Narrow via assertion.
+    const stdin = this.proc.stdin as { write(s: string): void; end(): void };
+    stdin.write(JSON.stringify(payload));
+    stdin.end();
+
+    this.completionPromise = this.processStreams();
+  }
+
+  get sessionId(): string | undefined {
+    return this._sessionId;
+  }
+
+  onEvent(listener: (event: ProviderEvent) => void): void {
+    this.listeners.push(listener);
+    for (const event of this.eventQueue) {
+      listener(event);
+    }
+    this.eventQueue.length = 0;
+  }
+
+  async waitForCompletion(): Promise<ProviderResult> {
+    return this.completionPromise;
+  }
+
+  async abort(): Promise<void> {
+    this.proc.kill("SIGTERM");
+  }
+
+  private emit(event: ProviderEvent): void {
+    if (event.type === "session_init" && event.sessionId) {
+      this._sessionId = event.sessionId;
+    }
+    if (this.listeners.length > 0) {
+      for (const listener of this.listeners) {
+        try {
+          listener(event);
+        } catch {
+          // listener errors must not break the event stream
+        }
+      }
+    } else {
+      this.eventQueue.push(event);
+    }
+  }
+
+  private async processStreams(): Promise<ProviderResult> {
+    let result: ProviderResult | null = null;
+    let partial = "";
+    let stderrTail = "";
+
+    const stdoutPromise = (async () => {
+      const stdout = this.proc.stdout as ReadableStream<Uint8Array> | null;
+      if (!stdout) return;
+      for await (const chunk of stdout) {
+        partial += new TextDecoder().decode(chunk);
+        const parts = partial.split("\n");
+        partial = parts.pop() ?? "";
+        for (const line of parts) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          this.handleLine(trimmed, (r) => {
+            result = r;
+          });
+        }
+      }
+      if (partial.trim()) {
+        this.handleLine(partial.trim(), (r) => {
+          result = r;
+        });
+        partial = "";
+      }
+    })();
+
+    const stderrPromise = (async () => {
+      const stderr = this.proc.stderr as ReadableStream<Uint8Array> | null;
+      if (!stderr) return;
+      for await (const chunk of stderr) {
+        const text = new TextDecoder().decode(chunk);
+        stderrTail = (stderrTail + text).slice(-2000);
+        // Surface subprocess stderr (codex CLI warnings, auth.json
+        // restoration messages) into the parent's event stream so it lands
+        // in /workspace/logs/*.jsonl the way the in-process path did.
+        this.emit({ type: "raw_stderr", content: text });
+      }
+    })();
+
+    await Promise.all([stdoutPromise, stderrPromise]);
+    const exitCode = await this.proc.exited;
+
+    if (result) {
+      return result;
+    }
+    // Subprocess exited before sending a structured result — synthesise one
+    // so the runner doesn't hang on waitForCompletion. Include stderr tail
+    // so the actual error message reaches the task failure reason.
+    const stderrHint = stderrTail.trim() ? ` — stderr: ${stderrTail.trim().slice(-500)}` : "";
+    return {
+      exitCode: exitCode ?? 1,
+      sessionId: this._sessionId,
+      isError: true,
+      failureReason: `codex subprocess exited (code=${exitCode ?? "?"}) without a structured result${stderrHint}`,
+    };
+  }
+
+  private handleLine(line: string, setResult: (r: ProviderResult) => void): void {
+    let msg: { kind?: string; event?: ProviderEvent; result?: ProviderResult; message?: string };
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      // Not a valid JSON envelope — treat as raw stderr-equivalent.
+      this.emit({ type: "raw_stderr", content: `${line}\n` });
+      return;
+    }
+    if (msg.kind === "event" && msg.event) {
+      this.emit(msg.event);
+      return;
+    }
+    if (msg.kind === "result" && msg.result) {
+      setResult(msg.result);
+      return;
+    }
+    if (msg.kind === "error" && msg.message) {
+      this.emit({ type: "error", message: msg.message });
+      setResult({
+        exitCode: 1,
+        sessionId: this._sessionId,
+        isError: true,
+        failureReason: msg.message,
+      });
+      return;
+    }
+  }
+}
+
 export class CodexAdapter implements ProviderAdapter {
   readonly name = "codex";
   readonly traits = { hasMcp: true, hasLocalEnvironment: true };
@@ -1191,124 +1607,47 @@ export class CodexAdapter implements ProviderAdapter {
    */
   private readonly summarizeDeps: SummarizeSessionForCodexDeps;
 
-  constructor(opts: { skillsDir?: string; summarizeDeps?: SummarizeSessionForCodexDeps } = {}) {
+  /**
+   * When true, run the codex session inside the runner process (no subprocess
+   * spawn). Used by:
+   *   - Unit tests that monkey-patch `Codex.prototype.startThread` (the patch
+   *     would not survive a subprocess boundary).
+   *   - The spawned `codex-session-runner` subprocess itself, to avoid
+   *     re-spawning recursively.
+   *
+   * Production callers leave this `false`. Each codex session then runs in a
+   * fresh subprocess and its heap dies when the task completes — keeping the
+   * runner's VSZ bounded across thousands of task completions (Picateclas
+   * spawn-OOM permanent fix, 2026-05-28).
+   */
+  private readonly bypassSubprocess: boolean;
+
+  constructor(
+    opts: {
+      skillsDir?: string;
+      summarizeDeps?: SummarizeSessionForCodexDeps;
+      bypassSubprocess?: boolean;
+    } = {},
+  ) {
     this.skillsDir = opts.skillsDir;
     this.summarizeDeps = opts.summarizeDeps ?? {};
+    this.bypassSubprocess = opts.bypassSubprocess ?? false;
   }
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
-    // Codex ingests per-session instructions via AGENTS.md in the cwd. Write
-    // (or refresh) the managed block before we spin up the thread.
-    const agentsMdHandle = await writeCodexAgentsMd(config.cwd, config.systemPrompt);
-
-    try {
-      // Resolve the model once and thread it through. Claude shortnames map
-      // to Codex equivalents; everything else passes through verbatim — the
-      // SDK is the source of truth for what's valid.
-      const resolvedModel = resolveCodexModel(config.model);
-
-      // Buffer warnings emitted during config-building so they're not lost
-      // before `CodexSession.onEvent` attaches a listener. The buffer is
-      // replayed into the session's event stream right after construction
-      // via the `initialEvents` constructor parameter.
-      const preSessionEvents: ProviderEvent[] = [];
-      const bufferedEmit = (event: ProviderEvent) => {
-        preSessionEvents.push(event);
-      };
-
-      const mergedConfig = await buildCodexConfig(config, resolvedModel, bufferedEmit);
-
-      // Auth resolution. `codex_oauth` (in the swarm config store) wins over
-      // `OPENAI_API_KEY` so users can keep an OpenAI key set for embeddings
-      // without it shadowing their ChatGPT login. The entrypoint already runs
-      // this same precedence at boot — this block handles local dev (where
-      // the entrypoint didn't run) and any case where auth.json is stale.
-      const authMode = await resolveCodexAuthMode(config, bufferedEmit);
-
-      // `CodexOptions.env` does NOT inherit from `process.env`. Construct a
-      // minimal env explicitly so the spawned Codex CLI can find its binary
-      // (PATH) and HOME (for ~/.codex/auth.json). `OPENAI_API_KEY` is only
-      // forwarded when auth.json is NOT in chatgpt mode — otherwise it would
-      // override the OAuth login at the Codex CLI layer.
-      const env: Record<string, string> = {
-        PATH: process.env.PATH ?? "",
-        HOME: process.env.HOME ?? "",
-        ...(authMode !== "chatgpt" && process.env.OPENAI_API_KEY
-          ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY }
-          : {}),
-        ...(process.env.NODE_EXTRA_CA_CERTS
-          ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
-          : {}),
-        ...(config.env ?? {}),
-        // Gated cross-service OTel linking: when SWARM_ENABLE_HARNESS_OTEL (or
-        // the deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias) is on, inject
-        // TRACEPARENT from the active worker span so Codex's spans nest under
-        // our worker.session trace. Codex's Rust OTEL SDK reads W3C trace
-        // context from the env via the default tracecontext propagator.
-        // Returns {} (no-op) when off; spread last so the computed value wins.
-        ...buildOtelTraceparentEnv(config.env ?? process.env),
-      };
-
-      // The SDK's default `findCodexPath()` does `require.resolve("@openai/codex")`
-      // from the SDK's own module. When agent-swarm runs as a Bun single-file
-      // compiled executable, the bundled SDK can't resolve `@openai/codex` at
-      // runtime because it's not part of the bundle — it lives in a global
-      // install (`/usr/lib/node_modules/@openai/codex` in the Docker worker
-      // image). Honor `CODEX_PATH_OVERRIDE` so Docker can point us at the CLI
-      // wrapper (or native binary) directly. Fall back to undefined so local
-      // dev with `@openai/codex-sdk` installed as a regular node_modules
-      // dependency keeps working via the SDK's own resolver.
-      const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
-
-      const codex = new Codex({
-        ...(codexPathOverride ? { codexPathOverride } : {}),
-        env,
-        config: mergedConfig,
+    if (this.bypassSubprocess) {
+      return createInProcessCodexSession(config, {
+        skillsDir: this.skillsDir,
+        summarizeDeps: this.summarizeDeps,
       });
-
-      const threadOptions: ThreadOptions = {
-        workingDirectory: config.cwd,
-        skipGitRepoCheck: true,
-        sandboxMode: "danger-full-access",
-        approvalPolicy: "never",
-        model: resolvedModel,
-      };
-
-      const thread = config.resumeSessionId
-        ? codex.resumeThread(config.resumeSessionId, threadOptions)
-        : codex.startThread(threadOptions);
-
-      return new CodexSession(
-        thread,
-        config,
-        agentsMdHandle,
-        resolvedModel,
-        preSessionEvents,
-        this.skillsDir,
-        this.summarizeDeps,
-      );
-    } catch (err) {
-      // If we failed to construct the thread, clean up the managed AGENTS.md
-      // block so we don't leak state on the filesystem.
-      await agentsMdHandle.cleanup();
-      throw err;
     }
+    return new CodexSubprocessSession(config, this.skillsDir);
   }
 
-  async canResume(sessionId: string): Promise<boolean> {
-    if (!sessionId || typeof sessionId !== "string") {
-      return false;
-    }
-    try {
-      const codex = new Codex();
-      // `resumeThread` is synchronous in 0.118.x and returns a Thread handle.
-      // The runner only calls canResume when deciding whether to resume a
-      // task, so we accept the (cheap) handshake cost.
-      codex.resumeThread(sessionId);
-      return true;
-    } catch {
-      return false;
-    }
+  async canResume(_sessionId: string): Promise<boolean> {
+    // Native resume is deprecated; runner no longer threads resumeSessionId
+    // to adapters. Follow-up continuity flows via the context preamble.
+    return false;
   }
 
   formatCommand(commandName: string): string {

@@ -29,9 +29,13 @@ When someone @mentions the bot in a thread, the router checks whether a worker a
 
 When enabled, thread replies that do NOT @mention the bot are captured, buffered, and batched into a single follow-up task. This allows humans to give multi-message feedback in a thread without needing to @mention the bot each time.
 
+A thread counts as having swarm activity if **either**:
+- a Slack task is already linked to it via `slackChannelId` + `slackThreadTs` (someone started it by @mentioning the bot), **or**
+- the swarm itself posted the thread's **root message** — i.e. the swarm started the thread with a proactive/standalone message (a notification, status update, or an agent posting unprompted). In this case there is no task row yet, so without this the human's reply would otherwise require an @mention. The root author is resolved via a one-time `conversations.replies` lookup (cached per thread) that matches our bot specifically — by `user` for normal posts and by `bot_id` for persona-override (username/icon) posts — so threads started by *other* bots are not picked up. The lookup is skipped when a linked task already matches.
+
 ### How it works
 
-1. A human sends a non-@mention message in a thread where the swarm is already active (has existing tasks)
+1. A human sends a non-@mention message in a thread where the swarm is already active (see definition above)
 2. The message enters an in-memory buffer keyed by `channelId:threadTs`
 3. A debounce timer starts (default 10 seconds)
 4. Additional messages within the window are appended to the buffer, resetting the timer each time

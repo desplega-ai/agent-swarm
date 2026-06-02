@@ -52,6 +52,7 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(TEST_PORT),
       DATABASE_PATH: TEST_DB_PATH,
+      AGENT_SWARM_API_KEY: API_KEY,
       API_KEY,
       PAGE_SESSION_SECRET: PAGE_SECRET,
       MCP_BASE_URL: `http://127.0.0.1:${TEST_PORT}`,

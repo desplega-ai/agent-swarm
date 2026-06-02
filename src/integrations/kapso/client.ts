@@ -20,6 +20,14 @@ export interface KapsoSendResult {
   errorMessage?: string;
 }
 
+/** Result of a lightweight message action through the Meta proxy. */
+export interface KapsoMessageActionResult {
+  ok: boolean;
+  status: number;
+  raw: unknown;
+  errorMessage?: string;
+}
+
 /** Meta error codes that mean "outside the 24h customer-service window". */
 const SESSION_WINDOW_ERROR_CODES = new Set([131047, 131051, 470]);
 
@@ -96,6 +104,80 @@ export async function sendKapsoText(params: {
       ? (raw as { messages?: Array<{ id?: string }> }).messages?.[0]?.id
       : undefined;
   return { ok: true, status: res.status, messageId, raw, sessionWindowExpired: false };
+}
+
+/** Mark an inbound WhatsApp message as read, optionally showing the typing indicator. */
+export async function markKapsoMessageRead(params: {
+  apiBaseUrl: string;
+  apiKey: string;
+  phoneNumberId: string;
+  messageId: string;
+  typingIndicatorType?: "text";
+}): Promise<KapsoMessageActionResult> {
+  const url = `${params.apiBaseUrl}/meta/whatsapp/v24.0/${params.phoneNumberId}/messages`;
+  const payload: Record<string, unknown> = {
+    messaging_product: "whatsapp",
+    status: "read",
+    message_id: params.messageId,
+  };
+  if (params.typingIndicatorType) {
+    payload.typing_indicator = { type: params.typingIndicatorType };
+  }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "X-API-Key": params.apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const raw = await parseJsonSafe(res);
+
+  if (!res.ok) {
+    const { message } = extractMetaError(raw);
+    return {
+      ok: false,
+      status: res.status,
+      raw,
+      errorMessage: message ?? `Kapso mark-as-read failed with status ${res.status}`,
+    };
+  }
+
+  return { ok: true, status: res.status, raw };
+}
+
+/** React to an inbound WhatsApp message with an emoji. Pass an empty emoji to clear. */
+export async function sendKapsoReaction(params: {
+  apiBaseUrl: string;
+  apiKey: string;
+  phoneNumberId: string;
+  to: string;
+  messageId: string;
+  emoji: string;
+}): Promise<KapsoMessageActionResult> {
+  const url = `${params.apiBaseUrl}/meta/whatsapp/v24.0/${params.phoneNumberId}/messages`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "X-API-Key": params.apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: params.to,
+      type: "reaction",
+      reaction: { message_id: params.messageId, emoji: params.emoji },
+    }),
+  });
+  const raw = await parseJsonSafe(res);
+
+  if (!res.ok) {
+    const { message } = extractMetaError(raw);
+    return {
+      ok: false,
+      status: res.status,
+      raw,
+      errorMessage: message ?? `Kapso reaction failed with status ${res.status}`,
+    };
+  }
+
+  return { ok: true, status: res.status, raw };
 }
 
 /** Result of configuring a webhook on a phone number. */

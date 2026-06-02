@@ -96,7 +96,7 @@ async function runSessionWithThrowingThread(
     };
 
   try {
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     const session = await adapter.createSession(config);
     const emitted: ProviderEvent[] = [];
     session.onEvent((e) => emitted.push(e));
@@ -175,7 +175,7 @@ async function runSessionWithFakeThread(
   };
 
   try {
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     const session = await adapter.createSession(config);
 
     const emitted: ProviderEvent[] = [];
@@ -575,7 +575,7 @@ describe("CodexSession event mapping", () => {
     };
 
     try {
-      const adapter = new CodexAdapter();
+      const adapter = new CodexAdapter({ bypassSubprocess: true });
       const config = testConfig({
         logFile: join(tmpLogDir, "abort.log"),
         cwd: "",
@@ -611,41 +611,16 @@ describe("CodexSession event mapping", () => {
 });
 
 describe("CodexAdapter.canResume", () => {
-  test("returns false for empty / non-string session ids", async () => {
-    const adapter = new CodexAdapter();
+  // Native resume is deprecated. The runner no longer threads resumeSessionId
+  // to adapters; canResume returns false unconditionally so any stray caller
+  // gets a fresh-session start. Follow-up continuity flows via the context
+  // preamble (see src/commands/context-preamble.ts).
+  test("always returns false now that native resume is deprecated", async () => {
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     expect(await adapter.canResume("")).toBe(false);
+    expect(await adapter.canResume("thread-anything")).toBe(false);
     // @ts-expect-error: deliberate runtime check for non-string input
     expect(await adapter.canResume(undefined)).toBe(false);
-  });
-
-  test("returns true when resumeThread succeeds and false when it throws", async () => {
-    const sdk = await import("@openai/codex-sdk");
-    const originalResume = (
-      sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
-    ).resumeThread;
-
-    try {
-      // Success path
-      (
-        sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
-      ).resumeThread = function resumeThread(): unknown {
-        return { id: "thread-resumed" };
-      };
-      const adapter = new CodexAdapter();
-      expect(await adapter.canResume("thread-resumed")).toBe(true);
-
-      // Failure path
-      (
-        sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
-      ).resumeThread = function resumeThread(): unknown {
-        throw new Error("not found");
-      };
-      expect(await adapter.canResume("thread-missing")).toBe(false);
-    } finally {
-      (
-        sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
-      ).resumeThread = originalResume;
-    }
   });
 });
 
@@ -789,6 +764,10 @@ describe("resolveCodexModel", () => {
     expect(resolveCodexModel("gpt-5.4-mini")).toBe("gpt-5.4-mini");
   });
 
+  test("passthrough 'gpt-5.5' → gpt-5.5", () => {
+    expect(resolveCodexModel("gpt-5.5")).toBe("gpt-5.5");
+  });
+
   test("passthrough 'gpt-5.3-codex' → gpt-5.3-codex", () => {
     expect(resolveCodexModel("gpt-5.3-codex")).toBe("gpt-5.3-codex");
   });
@@ -816,6 +795,10 @@ describe("getCodexContextWindow", () => {
     expect(getCodexContextWindow("gpt-5.4-mini")).toBe(200_000);
   });
 
+  test("gpt-5.5 → 1_050_000", () => {
+    expect(getCodexContextWindow("gpt-5.5")).toBe(1_050_000);
+  });
+
   test("gpt-5.3-codex → 1_000_000 (1M context)", () => {
     expect(getCodexContextWindow("gpt-5.3-codex")).toBe(1_000_000);
   });
@@ -831,6 +814,11 @@ describe("computeCodexCostUsd", () => {
     // 1_000_000 output × $15.00/M = $15.00
     const cost = computeCodexCostUsd("gpt-5.4", 1_000_000, 0, 1_000_000);
     expect(cost).toBeCloseTo(17.5, 4);
+  });
+
+  test("gpt-5.5 with 1M uncached input + 1M output = $5 + $30 = $35", () => {
+    const cost = computeCodexCostUsd("gpt-5.5", 1_000_000, 0, 1_000_000);
+    expect(cost).toBeCloseTo(35, 4);
   });
 
   test("gpt-5.4 with cached input applies the cached discount", () => {
@@ -884,9 +872,21 @@ describe("computeCodexCostUsd", () => {
 describe("buildCodexConfig", () => {
   // Save and restore the global fetch so we don't leak mocks between tests.
   const originalFetch = globalThis.fetch;
+  // These tests assert the EXACT set of mcp_servers keys, which is only the
+  // installed-server merge logic. Disable the always-on context-mode entry so
+  // those exact-key assertions stay valid; a dedicated block below verifies
+  // the context-mode + features behavior. Save/restore the env to avoid leaks.
+  let prevContextModeDisabled: string | undefined;
+
+  beforeEach(() => {
+    prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
+    process.env.CONTEXT_MODE_DISABLED = "true";
+  });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (prevContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+    else process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
   });
 
   // Helper: build a ProviderSessionConfig pointed at a mock endpoint.
@@ -1110,6 +1110,83 @@ describe("buildCodexConfig", () => {
   });
 });
 
+// ─── Phase 3: buildCodexConfig — context-mode MCP + hook feature flags ───────
+
+describe("buildCodexConfig — context-mode + features", () => {
+  const originalFetch = globalThis.fetch;
+  // Explicitly own CONTEXT_MODE_DISABLED here. Save the ambient value up front
+  // and restore it after every test so we never leak the mutation to siblings.
+  let prevContextModeDisabled: string | undefined;
+
+  beforeEach(() => {
+    prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (prevContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+    else process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
+  });
+
+  function cfg(overrides: Partial<ProviderSessionConfig> = {}): ProviderSessionConfig {
+    return {
+      prompt: "hello",
+      systemPrompt: "",
+      model: "gpt-5.4",
+      role: "worker",
+      agentId: "agent-mcp-test",
+      taskId: "task-mcp-test",
+      apiUrl: "http://test.invalid",
+      apiKey: "test-key",
+      cwd: "",
+      logFile: `/tmp/codex-ctx-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
+      ...overrides,
+    };
+  }
+
+  function stubFetch(body: unknown, status = 200): typeof globalThis.fetch {
+    return async (): Promise<Response> => {
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+  }
+
+  test("includes the 'context-mode' mcp_servers entry by default", async () => {
+    delete process.env.CONTEXT_MODE_DISABLED;
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp).sort()).toEqual(["agent-swarm", "context-mode"]);
+    expect(mcp["context-mode"]?.command).toBe("context-mode");
+    expect(mcp["context-mode"]?.enabled).toBe(true);
+    expect(mcp["context-mode"]?.startup_timeout_sec).toBe(30);
+    expect(mcp["context-mode"]?.tool_timeout_sec).toBe(120);
+  });
+
+  test("excludes the 'context-mode' entry when CONTEXT_MODE_DISABLED=true", async () => {
+    process.env.CONTEXT_MODE_DISABLED = "true";
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
+    expect(mcp["context-mode"]).toBeUndefined();
+  });
+
+  test("sets features.hooks and features.plugin_hooks to true", async () => {
+    delete process.env.CONTEXT_MODE_DISABLED;
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+
+    const features = merged.features as Record<string, unknown>;
+    expect(features.hooks).toBe(true);
+    expect(features.plugin_hooks).toBe(true);
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 3 — session-end summarization
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1136,7 +1213,7 @@ async function runSessionWithFakeThreadAndDeps(
     };
 
   try {
-    const adapter = new CodexAdapter({ summarizeDeps });
+    const adapter = new CodexAdapter({ summarizeDeps, bypassSubprocess: true });
     const session = await adapter.createSession(config);
     const emitted: ProviderEvent[] = [];
     session.onEvent((e) => emitted.push(e));
@@ -1626,7 +1703,7 @@ describe("CodexSession — rate-limit error preservation", () => {
     };
 
     try {
-      const adapter = new CodexAdapter();
+      const adapter = new CodexAdapter({ bypassSubprocess: true });
       const config = testConfig({
         logFile: join(tmpLogDir, "abort-guard.log"),
         cwd: "",

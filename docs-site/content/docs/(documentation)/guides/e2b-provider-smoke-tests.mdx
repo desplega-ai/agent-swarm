@@ -1,0 +1,206 @@
+---
+title: E2B Provider Smoke Tests
+description: Run real provider smoke tests from Dockerless environments by launching ephemeral E2B workers against a live swarm API
+---
+
+Use E2B provider smoke tests when the swarm API is already deployed in an
+environment that cannot run Docker, such as a Kubernetes pod, but you still need
+to verify that real workers can execute tasks through each harness provider.
+
+The deployed API should not build worker images. Build and publish an E2B worker
+template in CI or during release, then have the deployed swarm launch short-lived
+worker sandboxes from that template and point them back at the live API.
+
+<Callout type="info">
+  For provider credentials and `HARNESS_PROVIDER` values, see
+  [Harness Configuration](/docs/guides/harness-configuration). For production
+  deployment basics, see [Deployment Guide](/docs/guides/deployment).
+</Callout>
+
+## What this verifies
+
+A provider smoke test should prove that the full task execution path works:
+
+- E2B can launch a worker sandbox from the expected template.
+- The worker can reach the deployed swarm API over `MCP_BASE_URL`.
+- The worker registers with a deterministic `AGENT_ID`.
+- A task assigned to that worker reaches `completed`.
+- The task records a provider session id, output, logs, and, when supported,
+  cost data.
+- The E2B sandbox is killed after the check.
+
+This is intentionally stronger than an API-only task creation check. It runs a
+real harness, against a real agent, using the same runner path as normal work.
+
+## Build once, launch many times
+
+There are two separate jobs:
+
+| Job | Where it runs | Docker required? | Purpose |
+|---|---|---:|---|
+| Build/publish template | CI or release workflow | Yes for image build, no for E2B `fromImage()` | Produce an E2B worker template for a specific image or SHA. |
+| Start smoke worker | Deployed API pod or CI smoke job | No | Launch an E2B sandbox from the prebuilt template and run a task. |
+
+The key invariant is version alignment: the deployed API and the E2B worker
+template should come from the same image tag, release version, or commit SHA.
+Testing a deployed API against a floating `latest` worker template can produce
+misleading results.
+
+## Template publishing
+
+CI should publish a worker template from the same registry image that will run in
+production:
+
+```bash
+bun run src/cli.tsx e2b build-template \
+  --role worker \
+  --source image \
+  --image ghcr.io/desplega-ai/agent-swarm-worker:${GITHUB_SHA} \
+  --worker-template agent-swarm-worker-${GITHUB_SHA}
+
+bun run src/cli.tsx e2b publish-template agent-swarm-worker-${GITHUB_SHA}
+```
+
+The image-backed template build uses the E2B SDK `fromImage()` path and does not
+require Docker on the machine that calls E2B. Docker is still needed somewhere
+upstream to build and push the registry image. Publishing calls the E2B template
+update API with `E2B_API_KEY`; it does not require a separate E2B credential.
+
+## Deployed smoke flow
+
+For each provider you want to validate:
+
+1. Choose a deterministic agent id, such as
+   `smoke-${PROVIDER}-${DEPLOYMENT_SHA}`.
+2. Start one E2B worker sandbox from the deployed template.
+3. Pass runtime env through E2B sandbox `envVars`.
+4. Wait until the worker registers at `/api/agents/{agentId}`.
+5. Create a trivial task assigned to that worker.
+6. Poll `/api/tasks/{taskId}` until it reaches `completed` or `failed`.
+7. Assert the task completed and captured the expected execution metadata.
+8. Kill the E2B sandbox.
+
+Minimum worker runtime env:
+
+```bash
+MCP_BASE_URL=https://swarm.example.com
+AGENT_SWARM_API_KEY=<same key accepted by the swarm API>
+API_KEY=<same key accepted by the swarm API>
+AGENT_ROLE=worker
+AGENT_ID=smoke-codex-${DEPLOYMENT_SHA}
+HARNESS_PROVIDER=codex
+MAX_CONCURRENT_TASKS=1
+WORKER_YOLO=true
+SLACK_DISABLE=true
+GITHUB_DISABLE=true
+```
+
+Add the provider credential required by the selected harness:
+
+| Provider | `HARNESS_PROVIDER` | Typical credential |
+|---|---|---|
+| Claude Code | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
+| Codex | `codex` | `OPENAI_API_KEY`, or configured Codex OAuth |
+| pi-mono | `pi` | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or provider-specific backend credentials |
+| opencode | `opencode` | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` |
+
+## CLI smoke check
+
+From any environment that has the repo checkout, Bun, and E2B credentials, you
+can launch a worker against a deployed API without local Docker:
+
+```bash
+bun run src/cli.tsx e2b start-worker \
+  --template agent-swarm-worker-${DEPLOYMENT_SHA} \
+  --api-url https://swarm.example.com \
+  --api-key "$SWARM_E2E_API_KEY" \
+  --agent-id "smoke-codex-${DEPLOYMENT_SHA}" \
+  --provider codex \
+  --secret OPENAI_API_KEY="$OPENAI_API_KEY" \
+  --timeout-sec 900 \
+  --json
+```
+
+Then create and poll a task:
+
+```bash
+curl -sS -X POST "https://swarm.example.com/api/tasks" \
+  -H "Authorization: Bearer $SWARM_E2E_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "Reply with exactly: pong",
+    "agentId": "smoke-codex-'"$DEPLOYMENT_SHA"'",
+    "source": "api",
+    "outputSchema": {
+      "type": "object",
+      "required": ["reply"],
+      "properties": {
+        "reply": { "const": "pong" }
+      }
+    }
+  }'
+```
+
+The output schema makes the smoke test deterministic: the task should only pass
+when the worker returns valid JSON matching the expected payload.
+
+<Callout type="warn">
+  Do not pass real secrets as literal CLI arguments in shared shell history when
+  avoidable. Prefer environment inheritance, secret files, or an internal API
+  path that supplies E2B `envVars` from the deployed secret store.
+</Callout>
+
+## Embedded smoke runner shape
+
+For an in-product deployed smoke test, keep the orchestration inside the API
+process instead of shelling out to `agent-swarm e2b`:
+
+```ts
+type ProviderSmokeRequest = {
+  providers: Array<"claude" | "codex" | "pi" | "opencode">;
+  template: string;
+  apiUrl: string;
+  apiKey: string;
+  deploymentSha: string;
+  timeoutMs: number;
+};
+```
+
+The implementation should reuse the E2B dispatch helpers directly:
+
+- `createSandbox()` with the worker template and runtime `envVars`.
+- `startDetachedProcess()` with `/docker-entrypoint.sh`.
+- `waitForAgentRegistration()` for the deterministic `AGENT_ID`.
+- Existing task APIs to create, poll, and inspect the ping task.
+- `killSandbox()` in a `finally` block.
+
+Return a structured report per provider:
+
+```ts
+type ProviderSmokeResult = {
+  provider: string;
+  ok: boolean;
+  sandboxId: string;
+  agentId: string;
+  taskId?: string;
+  taskStatus?: "completed" | "failed" | "cancelled" | "in_progress" | "pending";
+  failureReason?: string;
+};
+```
+
+Persisting this report gives operators a concrete answer to "can this deployed
+swarm currently run real work through Codex, Claude, pi, and opencode?" without
+requiring Docker inside the pod.
+
+## Cleanup and safety
+
+Always clean up sandboxes, even after task failure:
+
+```bash
+bun run src/cli.tsx e2b kill <sandbox-id>
+```
+
+Use short TTLs for smoke sandboxes, for example `--timeout-sec 900`. Prefix
+agent ids with `smoke-` so they are easy to identify in the Agents view and in
+logs. Keep `MAX_CONCURRENT_TASKS=1` so the smoke worker only handles the task
+created for that check.

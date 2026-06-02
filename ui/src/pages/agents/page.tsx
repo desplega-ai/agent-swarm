@@ -3,12 +3,13 @@ import { Search } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
+import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import type { AgentStatus, AgentWithTasks } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { AgentModelCell } from "@/components/shared/agent-model-cell";
 import { DataGrid } from "@/components/shared/data-grid";
 import { HarnessCell } from "@/components/shared/harness-cell";
-import { ProviderIcon } from "@/components/shared/provider-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
@@ -19,13 +20,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { findKnownModel } from "@/lib/agent-runtime-models";
+import { getAgentModelDisplay, getAgentModelPresentation } from "@/lib/agents-list-model-display";
 import { formatSmartTime } from "@/lib/utils";
 
 export default function AgentsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { data: agents, isLoading } = useAgents();
+  const { data: agentConfigs } = useConfigs({ scope: "agent" });
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") ?? "all");
 
@@ -38,21 +40,54 @@ export default function AgentsPage() {
     return filtered.sort((a, b) => (b.isLead ? 1 : 0) - (a.isLead ? 1 : 0));
   }, [agents, statusFilter]);
 
+  const configuredModelByAgentId = useMemo(() => {
+    const visibleIds = new Set(filteredAgents.map((agent) => agent.id));
+    const modelByAgentId = new Map<string, string>();
+    for (const config of agentConfigs ?? []) {
+      if (
+        config.scope === "agent" &&
+        config.scopeId &&
+        visibleIds.has(config.scopeId) &&
+        config.key === "MODEL_OVERRIDE" &&
+        config.value.trim()
+      ) {
+        modelByAgentId.set(config.scopeId, config.value.trim());
+      }
+    }
+    return modelByAgentId;
+  }, [agentConfigs, filteredAgents]);
+
   const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(() => {
     const modelColumn: ColDef<AgentWithTasks> = {
       headerName: "Model",
-      width: 200,
-      valueGetter: (params) => params.data?.credStatus?.latestModel?.model ?? "",
-      cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => {
-        const id = params.value;
-        if (!id) return <span className="text-muted-foreground">—</span>;
-        const known = findKnownModel(id);
-        return (
-          <span className="flex items-center gap-1.5">
-            <ProviderIcon provider={known?.providerId} className="h-3.5 w-3.5" />
-            <span className="truncate">{known?.label ?? id}</span>
-          </span>
+      width: 320,
+      minWidth: 260,
+      valueGetter: (params) => {
+        const agent = params.data;
+        if (!agent) return "";
+        const display = getAgentModelDisplay(
+          configuredModelByAgentId.get(agent.id),
+          agent.credStatus?.latestModel?.model,
         );
+        const primary = getAgentModelPresentation(display.primary);
+        return [
+          primary?.label,
+          primary?.raw,
+          primary?.provider,
+          display.configured,
+          display.lastUsed,
+        ]
+          .filter(Boolean)
+          .join(" ");
+      },
+      cellRenderer: (params: { data: AgentWithTasks | undefined }) => {
+        const agent = params.data;
+        if (!agent) return null;
+        const display = getAgentModelDisplay(
+          configuredModelByAgentId.get(agent.id),
+          agent.credStatus?.latestModel?.model,
+        );
+        return <AgentModelCell display={display} />;
       },
     };
     return [
@@ -131,7 +166,7 @@ export default function AgentsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ];
-  }, [modelColumnGate.supported]);
+  }, [configuredModelByAgentId, modelColumnGate.supported]);
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<AgentWithTasks>) => {

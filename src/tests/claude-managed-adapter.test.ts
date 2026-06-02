@@ -40,14 +40,14 @@ describe("ClaudeManagedAdapter (Phase 1 skeleton)", () => {
     }
   });
 
-  test("factory returns ClaudeManagedAdapter for 'claude-managed'", () => {
-    const adapter = createProviderAdapter("claude-managed");
+  test("factory returns ClaudeManagedAdapter for 'claude-managed'", async () => {
+    const adapter = await createProviderAdapter("claude-managed");
     expect(adapter).toBeInstanceOf(ClaudeManagedAdapter);
     expect(adapter.name).toBe("claude-managed");
   });
 
-  test("factory still rejects unknown providers and lists claude-managed", () => {
-    expect(() => createProviderAdapter("nope")).toThrow(
+  test("factory still rejects unknown providers and lists claude-managed", async () => {
+    expect(createProviderAdapter("nope")).rejects.toThrow(
       'Unknown HARNESS_PROVIDER: "nope". Supported: claude, pi, codex, devin, claude-managed',
     );
   });
@@ -517,71 +517,57 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
     }
   });
 
-  test("resume: prefetches events.list, dedupes against live stream, skips sessions.create + user.message send", async () => {
-    // Historical events the resume path will pre-fetch via events.list.
-    const historical: Array<{ id: string }> = [{ id: "hist-1" }, { id: "hist-2" }];
-    // Live stream replays one historical event + emits one new event +
-    // status_idle.
+  test("native resume deprecated: resumeSessionId is ignored — adapter creates a fresh session", async () => {
+    // Pre-Phase-2 the adapter would have skipped sessions.create when
+    // resumeSessionId was set. Native resume is now deprecated — follow-up
+    // continuity flows via the context preamble. The adapter must ignore the
+    // field, emit a warn, and create a fresh session.
     const liveEvents: Array<Record<string, unknown>> = [
       {
-        type: "session.status_running",
-        id: "hist-2", // duplicate from history — must be skipped
-        processed_at: "2026-01-01T00:00:00Z",
-      },
-      {
-        type: "agent.message",
-        id: "new-1",
-        processed_at: "2026-01-01T00:00:01Z",
-        content: [{ type: "text", text: "Resumed message" }],
-      },
-      {
         type: "session.status_idle",
-        id: "new-2",
-        processed_at: "2026-01-01T00:00:02Z",
+        id: "evt-idle",
+        processed_at: "2026-01-01T00:00:00Z",
         stop_reason: { type: "end_turn" },
       },
     ];
 
     const spy = makeFakeClient({
-      sessionId: "sesn_resume_xyz",
-      listEvents: async function* () {
-        for (const h of historical) yield h;
-      },
+      sessionId: "sesn_fresh_after_ignored_resume",
       streamEvents: async function* () {
         for (const e of liveEvents) yield e;
       },
     });
 
-    const adapter = new ClaudeManagedAdapter({ client: spy.client });
-    const session = await adapter.createSession(
-      tConfig({
-        logFile: join(tmpLogDir, "resume.log"),
-        resumeSessionId: "sesn_resume_xyz",
-      }),
-    );
-    const emitted: ProviderEvent[] = [];
-    session.onEvent((e) => emitted.push(e));
-    await session.waitForCompletion();
+    const originalWarn = console.warn;
+    const warnCalls: string[] = [];
+    console.warn = (msg: unknown) => {
+      warnCalls.push(String(msg));
+    };
+    try {
+      const adapter = new ClaudeManagedAdapter({ client: spy.client });
+      const session = await adapter.createSession(
+        tConfig({
+          logFile: join(tmpLogDir, "resume-ignored.log"),
+          resumeSessionId: "sesn_should_be_ignored",
+        }),
+      );
+      const emitted: ProviderEvent[] = [];
+      session.onEvent((e) => emitted.push(e));
+      await session.waitForCompletion();
 
-    // No sessions.create call — pure resume.
-    expect(spy.created).toHaveLength(0);
-    // No user.message send — resume reattaches to an in-flight prompt.
-    expect(spy.sent).toHaveLength(0);
-
-    // The duplicate `hist-2` event was filtered, but `new-1`'s message did
-    // make it through.
-    const messages = emitted.filter((e) => e.type === "message");
-    expect(messages).toHaveLength(1);
-    if (messages[0]?.type === "message") {
-      expect(messages[0].content).toBe("Resumed message");
-    }
-
-    // session_init still fires with the resume's sessionId.
-    const sessionInit = emitted.find((e) => e.type === "session_init");
-    if (sessionInit?.type === "session_init") {
-      expect(sessionInit.sessionId).toBe("sesn_resume_xyz");
-      expect(sessionInit.provider).toBe("claude-managed");
-      expect(sessionInit.providerMeta).toEqual({ managed: true });
+      // Adapter still calls sessions.create — resume is ignored.
+      expect(spy.created).toHaveLength(1);
+      // And still sends the user.message — fresh sessions need the prompt.
+      expect(spy.sent).toHaveLength(1);
+      // The warn fired so operators can spot the misuse in logs.
+      expect(warnCalls.some((m) => m.includes("resumeSessionId ignored"))).toBe(true);
+      // session_init carries the FRESH session id, not the requested one.
+      const sessionInit = emitted.find((e) => e.type === "session_init");
+      if (sessionInit?.type === "session_init") {
+        expect(sessionInit.sessionId).toBe("sesn_fresh_after_ignored_resume");
+      }
+    } finally {
+      console.warn = originalWarn;
     }
   });
 

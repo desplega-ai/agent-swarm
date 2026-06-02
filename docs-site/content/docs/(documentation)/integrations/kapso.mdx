@@ -21,7 +21,7 @@ The thin `send-whatsapp-message` / `reply-whatsapp-message` MCP tools cover the 
 
 ### 1. Configure environment
 
-Add to your `.env` (or set via the integrations dashboard):
+Add these as swarm config values in the integrations dashboard, or set them in your `.env` for a self-hosted deployment:
 
 ```bash
 # Required — Kapso API key (X-API-Key header)
@@ -44,6 +44,8 @@ Provisioning is a **lead-only** operation. The lead calls the `register-kapso-nu
 1. Points the number's Kapso webhook at `<MCP_BASE_URL>/api/integrations/kapso/webhook` (signed with `KAPSO_WEBHOOK_HMAC_SECRET`). This step is idempotent — an identical existing webhook is detected and not re-created.
 2. Writes the routing mapping to KV so inbound messages route to an agent (defaults to the lead) or a workflow.
 
+The tool also accepts optional `agentId`, `workflowId`, and `name` fields so you can route a number to a specific agent target, dispatch it through a workflow trigger, and label the mapping for operators.
+
 To stop routing, the lead calls `unregister-kapso-number` (also lead-only). The Kapso-side webhook is not deleted automatically — remove it in the Kapso dashboard if you want deliveries to stop.
 
 ### 3. Install the skill
@@ -64,6 +66,7 @@ Inbound events are filtered to `message.kapso.direction == "inbound"` — the sw
 ## Outbound updates
 
 - **Text (common case):** `send-whatsapp-message` / `reply-whatsapp-message` MCP tools. Free-form text is only allowed within the 24h WhatsApp session window; outside it the tool returns a structured `sessionWindowExpired` error pointing at the template path.
+- **Provisioning / teardown:** `register-kapso-number` and `unregister-kapso-number` are the lead-only MCP tools for turning native routing on or off for a specific phone-number ID.
 - **Everything else:** the `kapso-whatsapp` skill's REST recipes — templates (outside the 24h window), media (image / document / audio / video), reactions, typing indicator, mark-as-read, signature verification, contact resolution, and conversation history.
 
 ## Reference

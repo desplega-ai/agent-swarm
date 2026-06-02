@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt";
 import type { ProviderTraits } from "../providers/types";
 
@@ -8,6 +8,39 @@ const minimalArgs: BasePromptArgs = {
   agentId: "agent-abc-123",
   swarmUrl: "swarm.example.com",
 };
+
+const originalSlackDisable = process.env.SLACK_DISABLE;
+const originalSlackBotToken = process.env.SLACK_BOT_TOKEN;
+const originalSlackAppToken = process.env.SLACK_APP_TOKEN;
+
+afterEach(() => {
+  restoreEnv("SLACK_DISABLE", originalSlackDisable);
+  restoreEnv("SLACK_BOT_TOKEN", originalSlackBotToken);
+  restoreEnv("SLACK_APP_TOKEN", originalSlackAppToken);
+});
+
+function restoreEnv(
+  name: "SLACK_DISABLE" | "SLACK_BOT_TOKEN" | "SLACK_APP_TOKEN",
+  value: string | undefined,
+) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
+function enableSlackPromptTools() {
+  process.env.SLACK_DISABLE = "false";
+  process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
+  process.env.SLACK_APP_TOKEN = "xapp-test-token";
+}
+
+function disableSlackPromptTools() {
+  process.env.SLACK_DISABLE = "true";
+  delete process.env.SLACK_BOT_TOKEN;
+  delete process.env.SLACK_APP_TOKEN;
+}
 
 // ---------------------------------------------------------------------------
 // Basic fields
@@ -239,6 +272,41 @@ describe("getBasePrompt — repoContext", () => {
     expect(result).toContain("Repository Guidelines (MANDATORY)");
     expect(result).toContain("Auto-merge: Allowed");
   });
+
+  test("surfaces swarm-autostash entries when present", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        autoStashes: [
+          {
+            ref: "stash@{0}",
+            message: "On main: swarm-autostash main 2026-06-01T13:00:00.000Z",
+          },
+        ],
+      },
+    });
+
+    expect(result).toContain("Pending auto-stashed work exists in this repo");
+    expect(result).toContain("stash@{0}: On main: swarm-autostash main");
+    expect(result).toContain("git stash apply <ref>");
+    expect(result).toContain("git stash pop <ref>");
+  });
+
+  test("does not mention auto-stashed work when no swarm-autostash entries exist", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        autoStashes: [],
+      },
+    });
+
+    expect(result).not.toContain("Pending auto-stashed work exists in this repo");
+    expect(result).not.toContain("git stash apply <ref>");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -295,16 +363,17 @@ describe("getBasePrompt — truncation", () => {
   });
 
   test("total budget respected — tools truncated before claudeMd", async () => {
-    // Use soulMd to eat up most of the 150k total budget so that
-    // truncatable sections (claudeMd, toolsMd) must compete for the remainder.
+    // Use soulMd to eat up most of the 120k total budget (lowered from 150k
+    // in the Picateclas spawn-OOM fix, 2026-05-28) so that truncatable
+    // sections (claudeMd, toolsMd) must compete for the remainder.
     // soulMd is part of `prompt` which counts toward protectedLength.
     const baseResult = await getBasePrompt(minimalArgs);
     const staticLength = baseResult.length; // ~12-13k for static content
 
     // Leave exactly enough budget for claudeMd but not toolsMd.
-    // Total budget = 150k - protectedLength.
-    // We want: protectedLength ≈ 150k - 18k = 132k, so claudeMd (15k) fits but toolsMd doesn't.
-    const soulSize = 132_000 - staticLength;
+    // Total budget = 120k - protectedLength.
+    // We want: protectedLength ≈ 120k - 18k = 102k, so claudeMd (15k) fits but toolsMd doesn't.
+    const soulSize = 102_000 - staticLength;
     const result = await getBasePrompt({
       ...minimalArgs,
       soulMd: bigString(Math.max(0, soulSize)),
@@ -321,7 +390,29 @@ describe("getBasePrompt — truncation", () => {
     expect(hasToolsTruncation || !hasToolsHeader).toBe(true);
   });
 
-  test("repo context never truncated", async () => {
+  test("Picateclas spawn-OOM hardening — total prompt stays below MAX_ARG_STRLEN", async () => {
+    // Even at the worst-case where every truncatable section maxes out its
+    // budget and the repo CLAUDE.md is huge, the final prompt must stay
+    // safely below Linux's `MAX_ARG_STRLEN = 131,072` bytes (the per-argv-
+    // element kernel limit that bit Picateclas attempts 4-6, 2026-05-28).
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      soulMd: bigString(40_000),
+      claudeMd: bigString(40_000),
+      toolsMd: bigString(40_000),
+      repoContext: {
+        claudeMd: bigString(60_000),
+        clonePath: "/workspace/repos/big-repo",
+      },
+    });
+    expect(result.length).toBeLessThan(131_072);
+  });
+
+  test("repo CLAUDE.md is capped at REPO_CLAUDE_MD_MAX_CHARS (12 KB) with on-disk pointer", async () => {
+    // Picateclas spawn-OOM permanent fix (2026-05-28): repo CLAUDE.md was the
+    // single biggest volatile component of the bootstrap argv. It is now
+    // truncated to ~12 KB with a footer pointing at the on-disk file, mirroring
+    // the same shape as the agent claudeMd / toolsMd caps.
     const hugeRepoClaudeMd = bigString(30_000);
     const result = await getBasePrompt({
       ...minimalArgs,
@@ -330,8 +421,23 @@ describe("getBasePrompt — truncation", () => {
         clonePath: "/workspace/big-repo",
       },
     });
-    // The full repo content should be present (never truncated)
-    expect(result).toContain(hugeRepoClaudeMd);
+    // The full 30 KB content should NOT survive — capped at ~12 KB.
+    expect(result).not.toContain(hugeRepoClaudeMd);
+    // The truncation footer points at the on-disk path so readers can find
+    // the full content.
+    expect(result).toContain("[...truncated — see /workspace/big-repo/CLAUDE.md");
+  });
+
+  test("repo CLAUDE.md under the cap is preserved verbatim", async () => {
+    const smallRepoClaudeMd = bigString(5_000);
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: smallRepoClaudeMd,
+        clonePath: "/workspace/small-repo",
+      },
+    });
+    expect(result).toContain(smallRepoClaudeMd);
     expect(result).not.toContain("[...truncated");
   });
 });
@@ -531,5 +637,102 @@ describe("getBasePrompt — local providers unaffected", () => {
     const result = await getBasePrompt(minimalArgs);
     expect(result).toContain("store-progress");
     expect(result).toContain("/workspace");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Context-mode block — provider gating
+//
+// The context_mode block advertises the `ctx_*` MCP tools. It is included for
+// local providers that have context-mode wired into their per-session config
+// (claude, codex, opencode) and excluded for `pi`, which has no context-mode
+// wiring yet (deferred to DES-514). Remote-provider exclusion is covered by the
+// "remote provider excluded sections" suite above.
+// ---------------------------------------------------------------------------
+const localTraits: ProviderTraits = { hasMcp: true, hasLocalEnvironment: true };
+
+describe("getBasePrompt — context-mode provider gating", () => {
+  test("excludes context-mode block for pi provider", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: localTraits,
+      provider: "pi",
+    });
+    expect(result).not.toContain("Context Window Management");
+    expect(result).not.toContain("context-mode");
+  });
+
+  for (const provider of ["claude", "codex", "opencode"] as const) {
+    test(`includes context-mode block for ${provider} provider`, async () => {
+      const result = await getBasePrompt({
+        ...minimalArgs,
+        traits: localTraits,
+        provider,
+      });
+      expect(result).toContain("Context Window Management");
+      expect(result).toContain("context-mode");
+    });
+  }
+
+  test("includes context-mode block when provider is unspecified (local default)", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain("Context Window Management");
+    expect(result).toContain("context-mode");
+  });
+});
+
+describe("getBasePrompt — conditional Slack templates", () => {
+  test("omits Slack tool templates when Slack is disabled", async () => {
+    disableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      slackContext: { channelId: "C123", threadTs: "123.456" },
+    });
+
+    expect(result).not.toMatch(/\bslack-[a-z-]+\b/);
+    expect(result).toContain("Task Routing");
+  });
+
+  test("includes Slack tool template for lead when Slack is enabled", async () => {
+    enableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+    });
+
+    expect(result).toContain("#### Slack Tools");
+    expect(result).toContain("slack-reply");
+    expect(result).toContain("slack-read");
+    expect(result).toContain("slack-list-channels");
+  });
+
+  test("includes Slack tool template for worker when Slack is enabled", async () => {
+    enableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "worker",
+    });
+
+    expect(result).toContain("#### Slack Tools");
+    expect(result).toContain("slack-reply");
+    expect(result).toContain("slack-read");
+    expect(result).toContain("slack-list-channels");
+  });
+
+  test("includes worker Slack thread template when Slack is enabled", async () => {
+    enableSlackPromptTools();
+
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "worker",
+      slackContext: { channelId: "C123", threadTs: "123.456" },
+    });
+
+    expect(result).toContain("slack-reply");
+    expect(result).toContain("C123");
   });
 });

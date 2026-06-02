@@ -152,9 +152,9 @@ After adding a handler: also add the import to `scripts/generate-openapi.ts`, th
 
 <important if="you are bumping the version in package.json">
 
-`openapi.json` and `docs-site/content/docs/api-reference/**` embed `package.json`'s version. CI fails the `OpenAPI Spec Freshness Check` on any version bump without a regenerated spec.
+Two artifacts derive from `package.json`'s `version`: `openapi.json` + `docs-site/content/docs/api-reference/**` (embed it) and `charts/agent-swarm/Chart.yaml` (`version`/`appVersion` must match). CI fails the `OpenAPI Spec Freshness Check` and the chart-version sync check on a bump without regenerating them.
 
-On every version bump: run `bun run docs:openapi` and commit the regenerated files alongside the bump.
+On every version bump: run `bun run prepare-release` (runs `sync-chart-version` + `docs:openapi`) and commit ALL regenerated files alongside the bump. Releasing itself is automated — merging the bump to `main` publishes Docker/npm/E2B/GitHub release. Full flow: [runbooks/release.md](./runbooks/release.md).
 
 </important>
 
@@ -271,13 +271,13 @@ Same-PR doc-update rule + new-provider checklist: [runbooks/harness-providers.md
 
 Adapter emits CostData + context_usage → API recomputes USD against the seeded `pricing` table → row tagged `costSource` ('harness' / 'pricing-table' / 'unpriced') → UI badge. Unified context formula is `input + cache_read + cache_create + output` (see `computeContextUsedUnified`).
 
-Same-PR doc-update rule: update [docs-site/.../guides/cost-and-context-computation.mdx](./docs-site/content/docs/(documentation)/guides/cost-and-context-computation.mdx) AND [src/providers/pricing-sources.md](./src/providers/pricing-sources.md) when the contract changes. The pricing-table comes from `ui/src/lib/modelsdev-cache.json`; refresh via `bun run scripts/refresh-modelsdev-pricing.ts` and commit the snapshot.
+Same-PR doc-update rule: update [docs-site/.../guides/cost-and-context-computation.mdx](./docs-site/content/docs/(documentation)/guides/cost-and-context-computation.mdx) AND [src/providers/pricing-sources.md](./src/providers/pricing-sources.md) when the contract changes. The pricing-table comes from `src/be/modelsdev-cache.json` (symlinked into `ui/src/lib/modelsdev-cache.json` for the UI model picker); refresh via `bun run scripts/refresh-modelsdev-pricing.ts` and commit the snapshot.
 
 </important>
 
 ## Related
 
-- [runbooks/](./runbooks/) — ci, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts
+- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference

@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "sprite-cli",
+  "displayName": "Sprite CLI Sandbox",
+  "slug": "sprite-cli",
+  "title": "Sprite CLI Sandbox",
+  "description": "Use disposable Linux sandboxes for Docker, risky installs, or isolated experiments.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["SPRITES_API_KEY"],
+  "runAllSeedersCandidate": false,
+  "tags": ["sandbox", "docker", "isolation"]
+}

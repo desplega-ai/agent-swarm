@@ -10,7 +10,8 @@ export type AgentTaskStatus =
   | "paused"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "superseded";
 export type AgentTaskSource =
   | "mcp"
   | "slack"
@@ -131,6 +132,8 @@ export interface AgentTask {
   swarmVersion?: string;
   provider?: ProviderName;
   providerMeta?: DevinProviderMeta | Record<string, never>;
+  /** Sum of recorded session costs for this task. Missing when no cost rows exist. */
+  totalCostUsd?: number;
   /** Phase 1 (≥1.76.0): canonical user who requested this task. */
   requestedByUserId?: string;
   /** Phase 1 (≥1.76.0): cross-ingress context key for the conversation/thread. */
@@ -1071,6 +1074,7 @@ export interface Skill {
   userInvocable: boolean;
   version: number;
   isEnabled: boolean;
+  systemDefault: boolean;
   createdAt: string;
   lastUpdatedAt: string;
   lastFetchedAt: string | null;

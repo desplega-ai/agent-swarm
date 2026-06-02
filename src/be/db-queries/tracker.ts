@@ -110,6 +110,27 @@ export function updateTrackerSyncSwarmId(id: string, swarmId: string): void {
   getDb().query("UPDATE tracker_sync SET swarmId = ? WHERE id = ?").run(swarmId, id);
 }
 
+/**
+ * Repoint ALL `tracker_sync` rows currently keyed to `oldSwarmId` to
+ * `newSwarmId`. Returns the number of rows updated.
+ *
+ * Used when a task is superseded (PR #594): the supersede parent becomes
+ * terminal but the Linear/Jira issue is still active, and outbound
+ * completion posts + inbound webhooks lookup by swarmId. Without
+ * repointing, the resume child's completion never makes it back to the
+ * tracker and subsequent inbound events load the terminal parent and
+ * create duplicates.
+ *
+ * Safe to call when no rows match (no-op, returns 0). Repoints across
+ * all providers (Linear AND Jira) and all entity types in one call.
+ */
+export function repointTrackerSyncBySwarmId(oldSwarmId: string, newSwarmId: string): number {
+  const result = getDb()
+    .query("UPDATE tracker_sync SET swarmId = ? WHERE swarmId = ?")
+    .run(newSwarmId, oldSwarmId);
+  return Number(result.changes ?? 0);
+}
+
 export function createTrackerSync(data: {
   provider: string;
   entityType: "task";

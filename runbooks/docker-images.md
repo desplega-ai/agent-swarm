@@ -81,7 +81,7 @@ Pattern for stubbing a transitive bloater pulled in by some published dep:
 ```dockerfile
 RUN cat > /opt/global-deps/package.json <<'EOF'
 {
-  "dependencies": { "@desplega.ai/agent-fs": "0.5.3", ... },
+  "dependencies": { "@desplega.ai/agent-fs": "0.7.2", ... },
   "overrides": {
     "chromadb": "npm:empty-npm-package@1.0.0",
     "@xenova/transformers": "npm:empty-npm-package@1.0.0",

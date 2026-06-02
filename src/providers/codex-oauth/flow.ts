@@ -85,7 +85,12 @@ export function decodeJwt(token: string): Record<string, unknown> | null {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
     const payload = parts[1] ?? "";
-    const decoded = atob(payload);
+    // Normalize base64url → standard base64 before decoding.
+    // JWTs use base64url (RFC 7515): '-' replaces '+', '_' replaces '/', padding stripped.
+    // atob() only accepts standard base64; passing raw base64url throws on '-' or '_'.
+    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const decoded = atob(padded);
     return JSON.parse(decoded);
   } catch {
     return null;
@@ -170,6 +175,24 @@ export function getAccountId(accessToken: string): string | null {
   const auth = payload?.[JWT_CLAIM_PATH] as Record<string, unknown> | undefined;
   const accountId = auth?.chatgpt_account_id;
   return typeof accountId === "string" && accountId.length > 0 ? accountId : null;
+}
+
+/**
+ * Extract `chatgpt_user_id` from the JWT's OpenAI-auth claim namespace. This
+ * is per-OAuth-grant (unique per user-on-account), distinct from
+ * `chatgpt_account_id` which is shared across all users in a ChatGPT Team
+ * workspace. Used to give pooled credentials a slot-unique `keySuffix` even
+ * when multiple pool slots authenticate against the same Team account.
+ *
+ * Returns null if the JWT cannot be decoded, the namespace is absent, or the
+ * claim is missing/empty. Callers MUST handle null by falling back to a
+ * different identifier (typically `chatgpt_account_id`) — do not throw.
+ */
+export function extractChatgptUserId(accessToken: string): string | null {
+  const payload = decodeJwt(accessToken);
+  const auth = payload?.[JWT_CLAIM_PATH] as Record<string, unknown> | undefined;
+  const userId = auth?.chatgpt_user_id;
+  return typeof userId === "string" && userId.length > 0 ? userId : null;
 }
 
 export async function createAuthorizationFlow(

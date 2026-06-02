@@ -37,10 +37,10 @@ describe("ProviderAdapter.formatCommand", () => {
     expect(codex.name).toBe("codex");
   });
 
-  test("createProviderAdapter returns adapters that implement formatCommand", () => {
-    const claudeAdapter = createProviderAdapter("claude");
-    const piAdapter = createProviderAdapter("pi");
-    const codexAdapter = createProviderAdapter("codex");
+  test("createProviderAdapter returns adapters that implement formatCommand", async () => {
+    const claudeAdapter = await createProviderAdapter("claude");
+    const piAdapter = await createProviderAdapter("pi");
+    const codexAdapter = await createProviderAdapter("codex");
     expect(typeof claudeAdapter.formatCommand).toBe("function");
     expect(typeof piAdapter.formatCommand).toBe("function");
     expect(typeof codexAdapter.formatCommand).toBe("function");

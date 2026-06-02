@@ -1,76 +1,70 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createServer as createHttpServer, type Server } from "node:http";
 import {
   type ApiConfig,
   ensureTaskFinished,
   handleStructuredOutputFallback,
 } from "../commands/runner";
 
-const TEST_PORT = 13099;
-
 // Configurable mock responses per test
 let mockGetTask: Record<string, unknown> | null = null;
 let mockGetTaskStatus = 200;
 let lastFinishBody: Record<string, unknown> | null = null;
 let mockFinishResponse: Record<string, unknown> = { success: true };
+let mockFetchError: Error | null = null;
+let originalFetch: typeof fetch;
 
 function resetMocks() {
   mockGetTask = null;
   mockGetTaskStatus = 200;
   lastFinishBody = null;
   mockFinishResponse = { success: true };
+  mockFetchError = null;
 }
 
-let server: Server;
-
-function makeConfig(port = TEST_PORT): ApiConfig {
+function makeConfig(): ApiConfig {
   return {
-    apiUrl: `http://localhost:${port}`,
+    apiUrl: "http://runner-fallback.test",
     apiKey: "test-key",
     agentId: "test-agent-id",
   };
 }
 
-beforeAll(async () => {
-  server = createHttpServer(async (req, res) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = Buffer.concat(chunks).toString();
-    const url = req.url || "";
+beforeAll(() => {
+  originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input, init) => {
+    if (mockFetchError) throw mockFetchError;
 
-    // GET /api/tasks/:id
-    if (req.method === "GET" && /^\/api\/tasks\/[^/]+$/.test(url)) {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const parsedUrl = new URL(url);
+    const method = init?.method ?? "GET";
+
+    if (method === "GET" && /^\/api\/tasks\/[^/]+$/.test(parsedUrl.pathname)) {
       if (!mockGetTask) {
-        res.writeHead(mockGetTaskStatus);
-        res.end(JSON.stringify({ error: "Not found" }));
-        return;
+        return new Response(JSON.stringify({ error: "Not found" }), {
+          status: mockGetTaskStatus,
+        });
       }
-      res.writeHead(mockGetTaskStatus, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(mockGetTask));
-      return;
+      return new Response(JSON.stringify(mockGetTask), {
+        status: mockGetTaskStatus,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // POST /api/tasks/:id/finish
-    if (req.method === "POST" && /^\/api\/tasks\/[^/]+\/finish$/.test(url)) {
+    if (method === "POST" && /^\/api\/tasks\/[^/]+\/finish$/.test(parsedUrl.pathname)) {
+      const body = typeof init?.body === "string" ? init.body : "";
       lastFinishBody = body ? JSON.parse(body) : null;
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(mockFinishResponse));
-      return;
+      return new Response(JSON.stringify(mockFinishResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    res.writeHead(404);
-    res.end("Not found");
-  });
-
-  await new Promise<void>((resolve) => {
-    server.listen(TEST_PORT, () => resolve());
-  });
+    return new Response("Not found", { status: 404 });
+  }) as typeof fetch;
 });
 
 afterAll(() => {
-  server.close();
+  globalThis.fetch = originalFetch;
 });
 
 describe("handleStructuredOutputFallback", () => {
@@ -175,10 +169,9 @@ describe("handleStructuredOutputFallback", () => {
 
   test("returns fetch-error on network error", async () => {
     resetMocks();
-    // Use a port that nothing listens on
-    const badConfig = makeConfig(19999);
+    mockFetchError = new Error("network down");
 
-    const result = await handleStructuredOutputFallback(badConfig, "task-7", "claude");
+    const result = await handleStructuredOutputFallback(makeConfig(), "task-7", "claude");
     expect(result.kind).toBe("fetch-error");
     expect((result as { kind: "fetch-error"; error: string }).error).toBeTruthy();
   });
@@ -225,6 +218,92 @@ describe("ensureTaskFinished", () => {
     expect(lastFinishBody).toBeTruthy();
     expect(lastFinishBody!.status).toBe("completed");
     expect(lastFinishBody!.output).toBe("Process completed successfully (no output captured)");
+  });
+
+  test("uses provider output when no outputSchema exists", async () => {
+    resetMocks();
+    mockGetTask = {
+      id: "task-provider-output",
+      task: "Do work",
+      status: "in_progress",
+      output: null,
+      progress: null,
+      logs: [],
+    };
+
+    await ensureTaskFinished(
+      makeConfig(),
+      "worker",
+      "task-provider-output",
+      0,
+      undefined,
+      "Provider final answer",
+      "pi",
+    );
+
+    expect(lastFinishBody).toBeTruthy();
+    expect(lastFinishBody!.status).toBe("completed");
+    expect(lastFinishBody!.output).toBe("Provider final answer");
+  });
+
+  test("accepts provider output that satisfies outputSchema", async () => {
+    resetMocks();
+    mockGetTask = {
+      id: "task-provider-schema-valid",
+      task: "Do work",
+      status: "in_progress",
+      output: null,
+      outputSchema: {
+        type: "object",
+        required: ["result"],
+        properties: { result: { type: "string" } },
+      },
+      logs: [],
+    };
+
+    await ensureTaskFinished(
+      makeConfig(),
+      "worker",
+      "task-provider-schema-valid",
+      0,
+      undefined,
+      '{"result":"ok"}',
+      "pi",
+    );
+
+    expect(lastFinishBody).toBeTruthy();
+    expect(lastFinishBody!.status).toBe("completed");
+    expect(lastFinishBody!.output).toBe('{"result":"ok"}');
+  });
+
+  test("fails provider output that violates outputSchema", async () => {
+    resetMocks();
+    mockGetTask = {
+      id: "task-provider-schema-invalid",
+      task: "Do work",
+      status: "in_progress",
+      output: null,
+      outputSchema: {
+        type: "object",
+        required: ["result"],
+        properties: { result: { type: "string" } },
+      },
+      logs: [],
+    };
+
+    await ensureTaskFinished(
+      makeConfig(),
+      "worker",
+      "task-provider-schema-invalid",
+      0,
+      undefined,
+      "plain text",
+      "pi",
+    );
+
+    expect(lastFinishBody).toBeTruthy();
+    expect(lastFinishBody!.status).toBe("failed");
+    expect(lastFinishBody!.failureReason).toContain("outputSchema");
   });
 
   test("sets failed status for schema-fail fallback", async () => {

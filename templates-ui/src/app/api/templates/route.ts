@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAllTemplates } from "@/lib/templates";
+import { getAllTemplates, getAllAssets } from "@/lib/templates";
 
 // Intentional: public registry API, consumed by agent-swarm workers and external tools
 const corsHeaders = {
@@ -14,5 +14,6 @@ export async function OPTIONS() {
 
 export async function GET() {
   const templates = getAllTemplates();
-  return NextResponse.json(templates, { headers: corsHeaders });
+  const assets = getAllAssets();
+  return NextResponse.json({ templates, assets }, { headers: corsHeaders });
 }

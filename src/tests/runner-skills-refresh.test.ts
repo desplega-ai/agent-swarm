@@ -83,7 +83,7 @@ describe("refreshSkillsIfChanged", () => {
   function makeCtx(): SkillsRefreshContext {
     return {
       apiUrl: baseUrl,
-      swarmUrl: baseUrl,
+      swarmUrl: "app.agent-swarm.dev",
       apiKey: "test-key",
       agentId: "agent-1",
       role: "worker",

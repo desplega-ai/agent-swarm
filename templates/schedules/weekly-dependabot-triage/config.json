@@ -1,0 +1,13 @@
+{
+  "kind": "schedule",
+  "name": "weekly-dependabot-triage",
+  "displayName": "Weekly Dependency Triage",
+  "slug": "weekly-dependabot-triage",
+  "title": "Weekly Dependency Triage",
+  "description": "Review dependency update PRs, group safe patches, and flag risky upgrades.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": ["SLACK_CHANNEL_ID", "REPO_URL", "TIMEZONE"],
+  "runAllSeedersCandidate": false,
+  "tags": ["github", "dependencies", "maintenance"]
+}

@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Swarm · E2B Swarm Cost Estimator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./session-logs/demo-shared.css" />
+<style>
+.page{max-width:1180px;margin:0 auto;padding:30px 24px 100px}
+.hero{margin:6px 0 22px;max-width:66ch}
+.hero .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--primary);margin:0 0 9px}
+.hero h2{font-size:clamp(1.5rem,1rem + 2.2vw,2.2rem);line-height:1.1;letter-spacing:-.02em;margin:0 0 10px;font-weight:600;text-wrap:balance}
+.hero p{margin:0;color:var(--muted-foreground);font-size:15px;line-height:1.6}
+.hero p code,.note code,footer code{font-family:var(--font-mono);font-size:.85em;background:var(--code-bg);padding:.1em .38em;border-radius:5px;border:1px solid color-mix(in oklch,var(--border) 55%,transparent)}
+
+/* preset row */
+.presets{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}
+.preset{font-family:var(--font-sans);font-size:12.5px;font-weight:500;border:1px solid var(--border);background:var(--card);color:var(--foreground);border-radius:999px;padding:6px 13px;cursor:pointer;transition:background .12s,border-color .12s,transform .08s}
+.preset:hover{background:var(--accent);border-color:color-mix(in oklch,var(--primary) 35%,var(--border))}
+.preset:active{transform:translateY(1px)}
+.preset.active{background:var(--primary);border-color:transparent;color:oklch(0.985 0 0)}
+.preset small{font-family:var(--font-mono);opacity:.7;margin-left:6px;font-size:10.5px}
+
+/* layout */
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,440px);gap:22px;align-items:start}
+@media (max-width:920px){.cols{grid-template-columns:1fr}}
+
+/* control panel */
+.section{margin-bottom:18px}
+.section>.shead{display:flex;align-items:center;gap:9px;margin:0 0 12px}
+.section .num{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-family:var(--font-mono);font-weight:700;font-size:11px;background:color-mix(in oklch,var(--primary) 14%,transparent);color:var(--primary);box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--primary) 24%,transparent)}
+.section .shead h3{margin:0;font-size:14px;font-weight:600;letter-spacing:-.01em}
+.section .shead span{font-size:12px;color:var(--muted-foreground)}
+.fieldcard{border:1px solid var(--border);border-radius:13px;background:var(--card);box-shadow:var(--shadow);padding:16px 17px;display:flex;flex-direction:column;gap:15px}
+
+.field{display:flex;flex-direction:column;gap:7px}
+.field>label{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:8px}
+.field>label .hint{font-weight:400;color:var(--muted-foreground);font-size:11.5px}
+.field>label .val{margin-left:auto;font-family:var(--font-mono);font-size:12px;font-variant-numeric:tabular-nums;color:var(--primary);background:color-mix(in oklch,var(--primary) 10%,transparent);border:1px solid color-mix(in oklch,var(--primary) 22%,transparent);border-radius:6px;padding:2px 8px}
+.pair{display:flex;align-items:center;gap:11px}
+input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:5px;border-radius:99px;background:color-mix(in oklch,var(--muted-foreground) 26%,transparent);cursor:pointer;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;background:var(--primary);border:2px solid var(--card);box-shadow:0 1px 4px oklch(0 0 0/.25);cursor:pointer;transition:transform .08s}
+input[type=range]::-webkit-slider-thumb:active{transform:scale(1.12)}
+input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--primary);border:2px solid var(--card);cursor:pointer}
+input[type=range]:focus-visible{outline:2px solid var(--ring);outline-offset:3px}
+input[type=number]{font-family:var(--font-mono);font-size:12.5px;font-variant-numeric:tabular-nums;width:84px;height:32px;border:1px solid var(--border);background:var(--surface);color:var(--foreground);border-radius:8px;padding:0 9px;text-align:right}
+input[type=number].wide{width:100%}
+input[type=number]:focus-visible{outline:2px solid var(--ring);outline-offset:1px;border-color:var(--ring)}
+select.sel{font-family:var(--font-sans);font-size:13px;height:34px;border:1px solid var(--border);background:var(--surface);color:var(--foreground);border-radius:8px;padding:0 10px;cursor:pointer;width:100%}
+select.sel:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
+.row2{display:grid;grid-template-columns:1fr 1.4fr;gap:10px}
+
+/* fuzzy combobox */
+.combo{position:relative}
+.combo-input{font-family:var(--font-sans);font-size:13px;height:34px;width:100%;border:1px solid var(--border);background:var(--surface);color:var(--foreground);border-radius:8px;padding:0 30px 0 10px;cursor:text}
+.combo-input::placeholder{color:var(--muted-foreground)}
+.combo-input:focus-visible{outline:2px solid var(--ring);outline-offset:1px;border-color:var(--ring)}
+.combo.open .combo-input{border-color:var(--ring)}
+.combo-chev{position:absolute;right:9px;top:17px;transform:translateY(-50%);width:14px;height:14px;color:var(--muted-foreground);pointer-events:none;transition:transform .15s}
+.combo.open .combo-chev{transform:translateY(-50%) rotate(180deg);color:var(--primary)}
+.combo-list{position:absolute;z-index:60;top:calc(100% + 5px);left:0;right:0;margin:0;padding:5px;list-style:none;max-height:264px;overflow:auto;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 34px -14px oklch(0.141 0.005 285/.5),var(--shadow)}
+.combo-list li{display:flex;align-items:baseline;gap:9px;padding:7px 9px;border-radius:7px;font-size:13px;line-height:1.3;cursor:pointer;color:var(--foreground);scroll-margin:6px}
+.combo-list li.is-active{background:var(--accent)}
+.combo-list li.is-sel{box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--primary) 38%,transparent)}
+.combo-list li .clabel{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.combo-list li .csub{margin-left:auto;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);white-space:nowrap;flex:none}
+.combo-list li .hlm{color:var(--primary);font-weight:700}
+.combo-list li.cempty{color:var(--muted-foreground);cursor:default;justify-content:center;font-size:12px;padding:9px}
+.combo-list::-webkit-scrollbar{width:9px}
+.combo-list::-webkit-scrollbar-thumb{background:color-mix(in oklch,var(--muted-foreground) 30%,transparent);border-radius:99px;border:2px solid var(--card)}
+
+.toggle{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:12.5px;font-weight:600;user-select:none}
+.toggle input{position:absolute;opacity:0;pointer-events:none}
+.toggle .track{width:38px;height:22px;border-radius:99px;background:color-mix(in oklch,var(--muted-foreground) 30%,transparent);position:relative;transition:background .15s;flex:none}
+.toggle .track::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px oklch(0 0 0/.3);transition:transform .16s cubic-bezier(.25,1,.5,1)}
+.toggle input:checked + .track{background:var(--primary)}
+.toggle input:checked + .track::after{transform:translateX(16px)}
+.toggle input:focus-visible + .track{outline:2px solid var(--ring);outline-offset:2px}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px 13px}
+.mini{display:flex;flex-direction:column;gap:5px}
+.mini label{font-size:11px;font-weight:600;color:var(--muted-foreground);display:flex;justify-content:space-between;gap:6px}
+.mini label em{font-style:normal;font-family:var(--font-mono);font-weight:400;color:color-mix(in oklch,var(--foreground) 70%,var(--muted-foreground))}
+
+.srcline{display:flex;align-items:center;gap:8px;font-size:11.5px;font-family:var(--font-mono);color:var(--muted-foreground)}
+.srcline .pip{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted-foreground)}
+.srcline.live .pip{background:var(--success)}
+.srcline.warn{color:var(--active-strong)}.srcline.warn .pip{background:var(--active)}
+.srcline.loading .pip{background:var(--info);animation:srcpulse 1s ease-in-out infinite}
+@keyframes srcpulse{0%,100%{opacity:.4}50%{opacity:1}}
+
+details.adv{border-top:1px dashed var(--border);padding-top:13px}
+details.adv>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--muted-foreground);list-style:none;display:flex;align-items:center;gap:7px}
+details.adv>summary::-webkit-details-marker{display:none}
+details.adv>summary .chev{transition:transform .15s;width:13px;height:13px}
+details.adv[open]>summary .chev{transform:rotate(90deg)}
+details.adv .advbody{margin-top:14px;display:flex;flex-direction:column;gap:14px}
+.unit{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+
+/* results */
+.results{position:sticky;top:64px;display:flex;flex-direction:column;gap:16px}
+.bigcard{border:1px solid color-mix(in oklch,var(--primary) 38%,var(--border));border-radius:16px;background:var(--card);box-shadow:0 0 0 1px color-mix(in oklch,var(--primary) 16%,transparent),var(--shadow);overflow:hidden}
+.bigcard .top{padding:18px 20px 16px;background:color-mix(in oklch,var(--primary) 7%,var(--card))}
+.bigcard .eyebrow{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-foreground);margin:0 0 6px}
+.bigcard .total{font-size:clamp(1.9rem,1.1rem + 2.6vw,2.8rem);font-weight:600;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:9px}
+.bigcard .total .per{font-size:14px;font-weight:500;color:var(--muted-foreground);letter-spacing:0}
+.bigcard .sub{margin:9px 0 0;font-size:12.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.bigcard .sub b{color:var(--foreground);font-weight:600}
+
+/* split bar */
+.splitwrap{padding:0 20px 18px;background:color-mix(in oklch,var(--primary) 7%,var(--card))}
+.splitbar{height:12px;border-radius:99px;overflow:hidden;display:flex;background:var(--muted);box-shadow:inset 0 0 0 1px var(--border)}
+.splitbar .seg{height:100%;transition:width .35s cubic-bezier(.25,1,.5,1)}
+.splitbar .seg.infra{background:var(--info)}
+.splitbar .seg.llm{background:var(--primary)}
+.splitleg{display:flex;gap:16px;margin-top:9px;font-size:11.5px;color:var(--muted-foreground);flex-wrap:wrap}
+.splitleg span{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums}
+.splitleg .dot{width:9px;height:9px;border-radius:3px;flex:none}
+.splitleg .dot.infra{background:var(--info)}
+.splitleg .dot.llm{background:var(--primary)}
+
+.breakdown{padding:6px 8px 8px}
+.bd-group{padding:11px 12px 12px}
+.bd-group + .bd-group{border-top:1px solid var(--border)}
+.bd-head{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.bd-head .gdot{width:8px;height:8px;border-radius:3px;flex:none}
+.bd-head .gdot.infra{background:var(--info)}.bd-head .gdot.llm{background:var(--primary)}
+.bd-head h4{margin:0;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--muted-foreground)}
+.bd-head .gsum{margin-left:auto;font-family:var(--font-mono);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.line{display:flex;align-items:baseline;gap:10px;font-size:12.5px;padding:3px 0}
+.line .lbl{color:color-mix(in oklch,var(--foreground) 85%,var(--muted-foreground))}
+.line .lbl em{font-style:normal;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+.line .dots{flex:1;border-bottom:1px dotted color-mix(in oklch,var(--muted-foreground) 35%,transparent);transform:translateY(-3px)}
+.line .amt{font-family:var(--font-mono);font-size:12px;font-variant-numeric:tabular-nums;color:var(--foreground)}
+
+/* formula */
+.formula{border:1px solid var(--border);border-radius:13px;background:var(--card);box-shadow:var(--shadow);overflow:hidden}
+.formula .fhead{padding:11px 15px;border-bottom:1px solid var(--border);background:color-mix(in oklch,var(--muted) 26%,var(--card));font-family:var(--font-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-foreground)}
+.formula pre{margin:0;padding:14px 15px;font-family:var(--font-mono);font-size:11.5px;line-height:1.85;overflow-x:auto;white-space:pre}
+.formula .k{color:var(--primary);font-weight:700}
+.formula .i{color:var(--info-strong)}
+.formula .c{color:var(--muted-foreground)}
+.formula .n{color:var(--foreground);font-weight:700}
+
+.note{font-size:12px;color:var(--muted-foreground);line-height:1.55;border:1px solid var(--border);border-radius:11px;background:color-mix(in oklch,var(--muted) 22%,var(--card));padding:12px 14px}
+.note b{color:var(--foreground)}
+
+footer{margin-top:26px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:12.5px;color:var(--muted-foreground)}
+footer a{color:var(--primary);text-decoration:underline;text-underline-offset:2px}
+footer .sep{width:3px;height:3px;border-radius:50%;background:var(--border)}
+
+@media (max-width:920px){.results{position:static}}
+@media (max-width:560px){input[type=number]{width:72px} .grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="chrome">
+  <span class="badge">Mockup</span>
+  <h1>Agent Swarm <span>· E2B Cost Estimator</span></h1>
+  <div class="sp"></div>
+  <button class="btn icon-btn" id="theme" title="Toggle theme" aria-label="Toggle theme"></button>
+</div>
+
+<div class="page">
+  <div class="hero">
+    <p class="kicker">e2b start-stack · monthly pricing</p>
+    <h2>What does running a swarm cost per month?</h2>
+    <p>Two independent cost centers: <b>E2B infrastructure</b> (billed per second of sandbox wall-clock) and <b>LLM tokens</b> (the actual agent work, the <code>session_costs</code> formula). Sized by your fleet — <b>avg workers × hours per worker / month</b>. Model rates are pulled live from <b>models.dev</b>.</p>
+  </div>
+
+  <div class="presets" id="presets">
+    <button class="preset" data-preset="light">Light<small>1w · 40h</small></button>
+    <button class="preset active" data-preset="team">Team<small>3w · 60h</small></button>
+    <button class="preset" data-preset="heavy">Heavy<small>8w · 100h</small></button>
+    <button class="preset" data-preset="fleet">24/7 fleet<small>10w · 730h</small></button>
+  </div>
+
+  <div class="cols">
+    <!-- ============ CONTROLS ============ -->
+    <div class="controlsCol">
+
+      <div class="section">
+        <div class="shead"><span class="num">1</span><h3>Fleet &amp; uptime</h3><span>per month — drives E2B infra</span></div>
+        <div class="fieldcard">
+          <div class="field">
+            <label for="r-workers">Avg workers <span class="hint">running on average · 4 vCPU / 8 GB ea</span><span class="val" id="v-workers">3</span></label>
+            <div class="pair">
+              <input type="range" id="r-workers" class="in" min="0" max="50" step="0.5" value="3" data-pair="n-workers" />
+              <input type="number" id="n-workers" class="in" min="0" max="500" step="0.5" value="3" data-pair="r-workers" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="r-hpw">Hours / worker / month <span class="hint">avg active uptime · 730 = 24×7</span><span class="val" id="v-hpw">60 h</span></label>
+            <div class="pair">
+              <input type="range" id="r-hpw" class="in" min="1" max="730" step="1" value="60" data-pair="n-hpw" />
+              <input type="number" id="n-hpw" class="in" min="0" max="730" step="1" value="60" data-pair="r-hpw" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="toggle" for="t-lead">
+              <input type="checkbox" id="t-lead" class="in" checked />
+              <span class="track"></span>
+              <span>Include lead sandbox <span class="hint" style="font-weight:400">4 vCPU / 8 GB · orchestrator</span></span>
+            </label>
+          </div>
+
+          <details class="adv">
+            <summary><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg> Advanced — control-plane uptime, specs &amp; E2B rates</summary>
+            <div class="advbody">
+              <div class="grid2">
+                <div class="mini"><label>Lead hours / month <em>h</em></label><input type="number" id="lead-h" class="in wide" min="0" max="730" step="1" value="60" /></div>
+                <div class="mini"><label>API hours / month <em>h</em></label><input type="number" id="api-h" class="in wide" min="0" max="730" step="1" value="730" /></div>
+                <div class="mini"><label>API vCPU <em>count</em></label><input type="number" id="api-cpu" class="in wide" min="1" step="1" value="2" /></div>
+                <div class="mini"><label>API RAM <em>GiB</em></label><input type="number" id="api-ram" class="in wide" min="1" step="1" value="2" /></div>
+                <div class="mini"><label>Worker vCPU <em>count</em></label><input type="number" id="wk-cpu" class="in wide" min="1" step="1" value="4" /></div>
+                <div class="mini"><label>Worker RAM <em>GiB</em></label><input type="number" id="wk-ram" class="in wide" min="1" step="1" value="8" /></div>
+                <div class="mini"><label>vCPU rate <em>$/hr</em></label><input type="number" id="rate-cpu" class="in wide" min="0" step="0.0001" value="0.0504" /></div>
+                <div class="mini"><label>RAM rate <em>$/GiB·hr</em></label><input type="number" id="rate-ram" class="in wide" min="0" step="0.0001" value="0.0162" /></div>
+              </div>
+              <p class="unit">Lead reuses the worker template (4 vCPU / 8 GB). API sandbox runs no LLM agent. API defaults to 730 h (always-on control plane).</p>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="shead"><span class="num">2</span><h3>LLM work</h3><span>tokens per agent-hour</span></div>
+        <div class="fieldcard">
+          <div class="srcline loading" id="src"><span class="pip"></span><span id="src-text">loading models.dev…</span></div>
+
+          <div class="field">
+            <label>Model <span class="hint">live from models.dev</span></label>
+            <div class="row2">
+              <div class="combo" id="provider-combo">
+                <input type="text" class="combo-input" id="provider-input" placeholder="Search provider…" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="provider-list" aria-autocomplete="list" />
+                <svg class="combo-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                <ul class="combo-list" id="provider-list" role="listbox" hidden></ul>
+              </div>
+              <div class="combo" id="model-combo">
+                <input type="text" class="combo-input" id="model-input" placeholder="Search model…" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="model-list" aria-autocomplete="list" />
+                <svg class="combo-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                <ul class="combo-list" id="model-list" role="listbox" hidden></ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Per-million rates <span class="hint">USD · editable override</span></label>
+            <div class="grid2">
+              <div class="mini"><label>Input <em>uncached</em></label><input type="number" id="rt-in" class="in wide rate" min="0" step="0.01" value="5" /></div>
+              <div class="mini"><label>Output</label><input type="number" id="rt-out" class="in wide rate" min="0" step="0.01" value="25" /></div>
+              <div class="mini"><label>Cache read</label><input type="number" id="rt-cr" class="in wide rate" min="0" step="0.01" value="0.5" /></div>
+              <div class="mini"><label>Cache write</label><input type="number" id="rt-cw" class="in wide rate" min="0" step="0.01" value="6.25" /></div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="r-tph">Turns per agent-hour <span class="hint">model round-trips while active</span><span class="val" id="v-tph">12</span></label>
+            <div class="pair">
+              <input type="range" id="r-tph" class="in" min="1" max="120" step="1" value="12" data-pair="n-tph" />
+              <input type="number" id="n-tph" class="in" min="1" max="2000" step="1" value="12" data-pair="r-tph" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Tokens per turn <span class="hint">typical coding turn</span></label>
+            <div class="grid2">
+              <div class="mini"><label>Input <em>uncached</em></label><input type="number" id="tk-in" class="in wide" min="0" step="1000" value="20000" /></div>
+              <div class="mini"><label>Output</label><input type="number" id="tk-out" class="in wide" min="0" step="1000" value="18000" /></div>
+              <div class="mini"><label>Cache read</label><input type="number" id="tk-cr" class="in wide" min="0" step="1000" value="160000" /></div>
+              <div class="mini"><label>Cache write</label><input type="number" id="tk-cw" class="in wide" min="0" step="1000" value="20000" /></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note">
+        <b>Heads up:</b> E2B compute is <b>not</b> in <code>session_costs</code> — that table only records LLM tokens. The infra number here is what E2B bills you separately, driven by <b>wall-clock sandbox lifetime</b>, not utilization. Idle workers and long uptime still cost money — that's why this is sized by <b>worker-hours/month</b>, not headcount.
+      </div>
+    </div>
+
+    <!-- ============ RESULTS ============ -->
+    <div>
+      <div class="results">
+        <div class="bigcard">
+          <div class="top">
+            <p class="eyebrow">Estimated cost</p>
+            <div class="total"><span id="o-total">$0</span><span class="per">/ month</span></div>
+            <p class="sub"><b id="o-perwh">$0</b> / worker-hr · <b id="o-wh">0</b> worker-hrs/mo · <b id="o-sandboxes">0</b> sandboxes</p>
+          </div>
+          <div class="splitwrap">
+            <div class="splitbar"><div class="seg infra" id="seg-infra"></div><div class="seg llm" id="seg-llm"></div></div>
+            <div class="splitleg">
+              <span><span class="dot infra"></span>Infra <b id="o-infra-pct" style="color:var(--foreground);margin-left:3px">0%</b></span>
+              <span><span class="dot llm"></span>LLM tokens <b id="o-llm-pct" style="color:var(--foreground);margin-left:3px">0%</b></span>
+            </div>
+          </div>
+          <div class="breakdown">
+            <div class="bd-group">
+              <div class="bd-head"><span class="gdot infra"></span><h4>E2B infrastructure</h4><span class="gsum" id="o-infra">$0</span></div>
+              <div id="infra-lines"></div>
+            </div>
+            <div class="bd-group">
+              <div class="bd-head"><span class="gdot llm"></span><h4>LLM tokens</h4><span class="gsum" id="o-llm">$0</span></div>
+              <div id="llm-lines"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="formula">
+          <div class="fhead">Formula · resolved · per month</div>
+          <pre id="formula"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>E2B rates: <b style="color:var(--foreground)">$0.0504</b>/vCPU·hr · <b style="color:var(--foreground)">$0.0162</b>/GiB·hr</span>
+    <span class="sep"></span>
+    <a href="https://e2b.dev/pricing" target="_blank" rel="noopener">E2B pricing</a>
+    <span class="sep"></span>
+    <a href="https://models.dev/api.json" target="_blank" rel="noopener">models.dev API</a>
+    <span class="sep"></span>
+    <span>token formula: <code>src/http/session-data.ts</code></span>
+    <span class="sep"></span>
+    <a href="index.html">← all mockups</a>
+  </footer>
+</div>
+
+<script>
+/* ---------- theme (shared with index.html) ---------- */
+const root=document.documentElement, tb=document.getElementById('theme');
+const SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>';
+const MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
+function setTheme(t){root.classList.toggle('dark',t==='dark');tb.innerHTML=t==='dark'?SUN:MOON;try{localStorage.swarmMock=t}catch(e){}}
+setTheme((()=>{try{const u=new URLSearchParams(location.search).get('theme');if(u==='dark'||u==='light')return u;return localStorage.swarmMock||'light'}catch(e){return 'light'}})());
+tb.onclick=()=>setTheme(root.classList.contains('dark')?'light':'dark');
+
+/* ---------- helpers ---------- */
+const $=id=>document.getElementById(id);
+const num=id=>{const v=parseFloat($(id).value);return isFinite(v)?v:0;};
+const usd=(v,d=2)=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const usd0=v=>'$'+v.toLocaleString('en-US',{maximumFractionDigits:0});
+const tk=v=>v>=1e6?(v/1e6).toLocaleString('en-US',{maximumFractionDigits:2})+'M':v>=1e3?(v/1e3).toLocaleString('en-US',{maximumFractionDigits:0})+'k':String(Math.round(v));
+
+/* ---------- models.dev pricing ---------- */
+const MODELSDEV_URL='https://models.dev/api.json';
+/* offline fallback (used only if the live fetch fails) */
+const FALLBACK={
+  anthropic:{name:'Anthropic',models:{
+    'claude-opus-4-5':{name:'Claude Opus 4.5',cost:{input:5,output:25,cache_read:0.5,cache_write:6.25}},
+    'claude-sonnet-4-6':{name:'Claude Sonnet 4.6',cost:{input:3,output:15,cache_read:0.3,cache_write:3.75}},
+    'claude-haiku-4-5':{name:'Claude Haiku 4.5',cost:{input:1,output:5,cache_read:0.1,cache_write:1.25}},
+  }},
+  openai:{name:'OpenAI',models:{
+    'gpt-5.2':{name:'GPT-5.2',cost:{input:1.25,output:10,cache_read:0.125}},
+    'gpt-4o':{name:'GPT-4o',cost:{input:2.5,output:10,cache_read:1.25}},
+  }},
+  google:{name:'Google',models:{
+    'gemini-3-pro':{name:'Gemini 3 Pro',cost:{input:2,output:12,cache_read:0.2}},
+  }},
+};
+
+let PROVIDERS=[];   // [{key,name,models:[{id,name,family,in,out,cr,cw}]}]
+
+/* ---------- fuzzy combobox ---------- */
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function fuzzy(q,t){
+  if(!q) return {score:0,pos:[]};
+  q=q.toLowerCase(); const tl=String(t).toLowerCase();
+  let qi=0,score=0,pos=[],prev=-2;
+  for(let ti=0;ti<tl.length && qi<q.length;ti++){
+    if(tl[ti]===q[qi]){
+      pos.push(ti);
+      let b=1;
+      if(ti===0) b+=5; else if(/[\s\-_./]/.test(tl[ti-1])) b+=3;
+      if(ti===prev+1) b+=2;
+      score+=b; prev=ti; qi++;
+    }
+  }
+  if(qi<q.length) return null;                       // not a subsequence
+  return {score:score-(tl.length-q.length)*0.02,pos};
+}
+function hlmatch(s,pos){
+  if(!pos||!pos.length) return esc(s);
+  const set=new Set(pos); let out='';
+  for(let i=0;i<s.length;i++) out += set.has(i)?`<b class="hlm">${esc(s[i])}</b>`:esc(s[i]);
+  return out;
+}
+function makeCombo(root,opts){
+  const wrap=$(root+'-combo'), input=$(root+'-input'), list=$(root+'-list');
+  let items=[],filtered=[],active=-1,selected=null,open=false;
+  const labelOf=v=>{const it=items.find(i=>i.value===v);return it?it.label:'';};
+  function filter(q){
+    const query=(q||'').trim();
+    filtered=items.map(it=>{
+      const rl=fuzzy(query,it.label);
+      const rs=query?fuzzy(query,it.sub||''):null;
+      if(query && !rl && !rs) return null;
+      return {it,score:(rl?rl.score:0)+(rs?rs.score*0.4:0),pos:rl?rl.pos:[]};
+    }).filter(Boolean);
+    if(query) filtered.sort((a,b)=>b.score-a.score || a.it.label.localeCompare(b.it.label));
+  }
+  function draw(){
+    if(!filtered.length){list.innerHTML='<li class="cempty">no matches</li>';return;}
+    list.innerHTML=filtered.map((f,i)=>{
+      const sub=f.it.sub?`<span class="csub">${esc(f.it.sub)}</span>`:'';
+      const cls=(i===active?'is-active':'')+(f.it.value===selected?' is-sel':'');
+      return `<li role="option" data-i="${i}" class="${cls}"><span class="clabel">${hlmatch(f.it.label,f.pos)}</span>${sub}</li>`;
+    }).join('');
+  }
+  function scrollActive(){const el=list.querySelector('.is-active');if(el)el.scrollIntoView({block:'nearest'});}
+  function openList(){open=true;wrap.classList.add('open');list.hidden=false;input.setAttribute('aria-expanded','true');
+    filter(''); active=Math.max(0,filtered.findIndex(f=>f.it.value===selected)); draw(); scrollActive();}
+  function closeList(revert){open=false;wrap.classList.remove('open');list.hidden=true;input.setAttribute('aria-expanded','false');
+    if(revert && selected!=null) input.value=labelOf(selected);}
+  function move(d){if(!filtered.length)return; active=(active+d+filtered.length)%filtered.length; draw(); scrollActive();}
+  function choose(i){const f=filtered[i]; if(!f)return; selected=f.it.value; input.value=f.it.label; closeList(false); opts.onSelect&&opts.onSelect(selected);}
+  input.addEventListener('focus',()=>{input.select();openList();});
+  input.addEventListener('input',()=>{if(!open)openList(); filter(input.value); active=filtered.length?0:-1; draw();});
+  input.addEventListener('keydown',e=>{
+    if(e.key==='ArrowDown'){e.preventDefault(); if(!open)openList(); else move(1);}
+    else if(e.key==='ArrowUp'){e.preventDefault(); if(!open)openList(); else move(-1);}
+    else if(e.key==='Enter'){if(open){e.preventDefault(); choose(active);}}
+    else if(e.key==='Escape'){if(open){e.preventDefault(); closeList(true); input.blur();}}
+  });
+  input.addEventListener('blur',()=>closeList(true));
+  list.addEventListener('mousedown',e=>{const li=e.target.closest('li[data-i]'); if(!li)return; e.preventDefault(); choose(+li.dataset.i);});
+  return {
+    setItems(arr){items=arr;},
+    setValue(v,silent){selected=v; input.value=labelOf(v); if(!silent && opts.onSelect) opts.onSelect(v);},
+    getValue(){return selected;},
+  };
+}
+const provCombo=makeCombo('provider',{onSelect:key=>{
+  const p=PROVIDERS.find(x=>x.key===key); if(!p)return;
+  modelCombo.setItems(p.models.map(m=>({value:m.id,label:m.name,sub:m.id})));
+  modelCombo.setValue(p.models[0].id);             // -> model onSelect: rates + recompute
+}});
+const modelCombo=makeCombo('model',{onSelect:()=>{fillRatesFromModel(); recompute();}});
+
+function buildProviders(raw){
+  const list=[];
+  for(const key of Object.keys(raw)){
+    const p=raw[key]; const models=p&&p.models?p.models:{};
+    const priced=[];
+    for(const id of Object.keys(models)){
+      const c=models[id]&&models[id].cost;
+      if(!c||typeof c.input!=='number'||typeof c.output!=='number') continue;
+      priced.push({id,name:models[id].name||id,family:models[id].family||'',
+        in:c.input,out:c.output,cr:c.cache_read||0,cw:c.cache_write||0});
+    }
+    if(!priced.length) continue;
+    priced.sort((a,b)=>a.name.localeCompare(b.name));
+    list.push({key,name:p.name||key,models:priced});
+  }
+  /* anthropic / openai / google first, then alphabetical */
+  const head=['anthropic','openai','google'];
+  list.sort((a,b)=>{
+    const ia=head.indexOf(a.key), ib=head.indexOf(b.key);
+    if(ia!==-1||ib!==-1){ if(ia===-1)return 1; if(ib===-1)return -1; return ia-ib; }
+    return a.name.localeCompare(b.name);
+  });
+  return list;
+}
+
+function currentModel(){
+  const p=PROVIDERS.find(x=>x.key===provCombo.getValue());
+  if(!p)return null;
+  return p.models.find(m=>m.id===modelCombo.getValue())||p.models[0];
+}
+function fillRatesFromModel(){
+  const m=currentModel(); if(!m)return;
+  $('rt-in').value=m.in; $('rt-out').value=m.out; $('rt-cr').value=m.cr; $('rt-cw').value=m.cw;
+}
+function selectDefault(){
+  provCombo.setItems(PROVIDERS.map(p=>({value:p.key,label:p.name,sub:p.models.length+' models'})));
+  const aKey=PROVIDERS.some(p=>p.key==='anthropic')?'anthropic':PROVIDERS[0].key;
+  provCombo.setValue(aKey);                          // -> model items + first model + rates + recompute
+  const a=PROVIDERS.find(p=>p.key===aKey);
+  if(a && a.models.some(m=>m.id==='claude-opus-4-5')) modelCombo.setValue('claude-opus-4-5');
+}
+function setSrc(state,text){
+  const el=$('src'); el.className='srcline '+state; $('src-text').textContent=text;
+}
+document.querySelectorAll('.rate').forEach(el=>el.addEventListener('input',()=>{setSrc('warn','custom rates (edited)');}));
+
+async function loadPricing(){
+  let total=0,src='fallback';
+  try{
+    const ctrl=new AbortController();
+    const t=setTimeout(()=>ctrl.abort(),9000);
+    const res=await fetch(MODELSDEV_URL,{signal:ctrl.signal,mode:'cors'});
+    clearTimeout(t);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const raw=await res.json();
+    PROVIDERS=buildProviders(raw); src='live';
+  }catch(e){
+    PROVIDERS=buildProviders(FALLBACK); src='fallback';
+  }
+  total=PROVIDERS.reduce((n,p)=>n+p.models.length,0);
+  selectDefault();
+  if(src==='live') setSrc('live',`live · models.dev · ${total} priced models`);
+  else setSrc('warn','offline — bundled snapshot (fetch failed)');
+  recompute();
+}
+
+/* ---------- paired range <-> number ---------- */
+document.querySelectorAll('[data-pair]').forEach(el=>{
+  el.addEventListener('input',()=>{const o=$(el.dataset.pair);if(o&&o.value!==el.value)o.value=el.value;});
+});
+
+/* ---------- presets ---------- */
+const PRESETS={
+  light:{workers:1,hpw:40,lead:true,leadH:40,apiH:730,tph:10},
+  team:{workers:3,hpw:60,lead:true,leadH:60,apiH:730,tph:12},
+  heavy:{workers:8,hpw:100,lead:true,leadH:120,apiH:730,tph:16},
+  fleet:{workers:10,hpw:730,lead:true,leadH:730,apiH:730,tph:20},
+};
+function applyPreset(name){
+  const p=PRESETS[name];if(!p)return;
+  $('n-workers').value=p.workers;$('r-workers').value=p.workers;
+  $('n-hpw').value=p.hpw;$('r-hpw').value=p.hpw;
+  $('t-lead').checked=p.lead;
+  $('lead-h').value=p.leadH;$('api-h').value=p.apiH;
+  $('n-tph').value=p.tph;$('r-tph').value=p.tph;
+  document.querySelectorAll('.preset').forEach(b=>b.classList.toggle('active',b.dataset.preset===name));
+  recompute();
+}
+document.querySelectorAll('.preset').forEach(b=>b.onclick=()=>applyPreset(b.dataset.preset));
+document.querySelectorAll('.in').forEach(el=>el.addEventListener('input',()=>{
+  if(!el.closest('#presets')) document.querySelectorAll('.preset').forEach(b=>b.classList.remove('active'));
+}));
+
+/* ---------- the math (monthly) ---------- */
+function recompute(){
+  const avgWorkers=Math.max(0,num('n-workers'));
+  const hpw=Math.max(0,num('n-hpw'));               // hours / worker / month
+  const lead=$('t-lead').checked;
+  const leadH=lead?Math.max(0,num('lead-h')):0;     // lead hours / month
+  const apiH=Math.max(0,num('api-h'));              // api hours / month
+  const tph=Math.max(0,num('n-tph'));               // turns per agent-hour
+
+  const apiCpu=num('api-cpu'),apiRam=num('api-ram');
+  const wkCpu=num('wk-cpu'),wkRam=num('wk-ram');
+  const rCpu=num('rate-cpu'),rRam=num('rate-ram');
+
+  const apiRate=apiCpu*rCpu+apiRam*rRam;            // $/hr per API sandbox
+  const wkRate=wkCpu*rCpu+wkRam*rRam;               // $/hr per worker/lead sandbox
+
+  const workerHours=avgWorkers*hpw;                 // total worker sandbox-hours/month
+  const sandboxes=1+(lead?1:0)+avgWorkers;          // avg concurrent sandboxes
+
+  // infra (monthly)
+  const cApi=apiH*apiRate;
+  const cLead=leadH*wkRate;
+  const cWork=workerHours*wkRate;
+  const infra=cApi+cLead+cWork;
+
+  // tokens
+  const rin=num('rt-in'),rout=num('rt-out'),rcr=num('rt-cr'),rcw=num('rt-cw');
+  const tin=num('tk-in'),tout=num('tk-out'),tcr=num('tk-cr'),tcw=num('tk-cw');
+  const perTurn=(tin*rin + tcr*rcr + tcw*rcw + tout*rout)/1e6;
+  const agentHours=workerHours+leadH;               // API runs no agent
+  const turns=agentHours*tph;
+  const llm=turns*perTurn;
+
+  const total=infra+llm;
+  const infraPct=total>0?infra/total*100:0;
+  const llmPct=total>0?llm/total*100:0;
+
+  // headline
+  $('o-total').textContent=usd0(total);
+  $('o-perwh').textContent=workerHours>0?usd(total/workerHours):'—';
+  $('o-wh').textContent=workerHours.toLocaleString('en-US',{maximumFractionDigits:0});
+  $('o-sandboxes').textContent=sandboxes.toLocaleString('en-US',{maximumFractionDigits:1});
+  $('o-infra').textContent=usd0(infra);
+  $('o-llm').textContent=usd0(llm);
+  $('seg-infra').style.width=infraPct+'%';
+  $('seg-llm').style.width=llmPct+'%';
+  $('o-infra-pct').textContent=Math.round(infraPct)+'%';
+  $('o-llm-pct').textContent=Math.round(llmPct)+'%';
+
+  // value chips
+  $('v-workers').textContent=avgWorkers.toLocaleString('en-US',{maximumFractionDigits:1});
+  $('v-hpw').textContent=Math.round(hpw)+' h';
+  $('v-tph').textContent=Math.round(tph);
+
+  // infra lines
+  const il=[];
+  il.push(line('API',`${apiCpu}c/${apiRam}g · ${apiH} h/mo · ${usd(apiRate,4)}/hr`,cApi));
+  if(lead) il.push(line('Lead',`${wkCpu}c/${wkRam}g · ${leadH} h/mo · ${usd(wkRate,4)}/hr`,cLead));
+  il.push(line('Workers',`${fmtW(avgWorkers)}×${Math.round(hpw)}h = ${tk(workerHours)} wh · ${usd(wkRate,4)}/hr`,cWork));
+  $('infra-lines').innerHTML=il.join('');
+
+  // llm lines
+  const totTok=(tin+tout+tcr+tcw);
+  const ll=[];
+  ll.push(line('Per turn',`${tk(totTok)} tok · ${tk(tcr)} cached`,perTurn));
+  ll.push(line('Agent-hours/mo',`${tk(agentHours)} h × ${Math.round(tph)}/hr = ${tk(turns)} turns`,llm));
+  $('llm-lines').innerHTML=ll.join('');
+
+  renderFormula({apiH,apiRate,leadH,wkRate,avgWorkers,hpw,workerHours,cApi,cLead,cWork,infra,
+    lead,tin,tout,tcr,tcw,rin,rout,rcr,rcw,perTurn,agentHours,tph,turns,llm,total});
+}
+
+function fmtW(v){return v.toLocaleString('en-US',{maximumFractionDigits:1});}
+function line(label,meta,amt){
+  const m=meta?` <em>${meta}</em>`:'';
+  const a=amt<1?usd(amt,4):usd0(amt);
+  return `<div class="line"><span class="lbl">${label}${m}</span><span class="dots"></span><span class="amt">${a}</span></div>`;
+}
+function n2(v,d=2){return v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function tkc(v){return v>=1e6?(v/1e6)+'M':v>=1e3?(v/1e3)+'k':String(v);}
+
+function renderFormula(d){
+  const leadTerm=d.lead?`${d.leadH}·${n2(d.wkRate,4)}`:'0';
+  const html=
+`<span class="c"># 1 · E2B infra  ($/month · per-second wall-clock)</span>
+<span class="i">infra</span> = api_h·api_rate + lead_h·wk_rate + (avgW·hpw)·wk_rate
+      = ${d.apiH}·${n2(d.apiRate,4)} + ${leadTerm} + (${fmtW(d.avgWorkers)}·${Math.round(d.hpw)})·${n2(d.wkRate,4)}
+      = ${usd0(d.cApi)} + ${usd0(d.cLead)} + ${usd0(d.cWork)}
+      = <span class="n">${usd0(d.infra)}</span>
+
+<span class="c"># 2 · LLM tokens  (session_costs formula)</span>
+<span class="k">perTurn</span> = ( ${tkc(d.tin)}·${d.rin} + ${tkc(d.tcr)}·${d.rcr} + ${tkc(d.tcw)}·${d.rcw} + ${tkc(d.tout)}·${d.rout} ) / 1e6
+        = <span class="n">${usd(d.perTurn,4)}</span>
+agentHrs = workerHrs + leadHrs = ${tkc(d.workerHours)} + ${d.leadH} = <span class="n">${tkc(d.agentHours)} h</span>
+<span class="k">llm</span> = agentHrs · ${Math.round(d.tph)} turns/hr · perTurn = <span class="n">${usd0(d.llm)}</span>
+
+<span class="c"># total</span>
+<span class="k">TOTAL</span> = <span class="i">${usd0(d.infra)}</span> + <span class="k">${usd0(d.llm)}</span> = <span class="n">${usd0(d.total)} / month</span>`;
+  $('formula').innerHTML=html;
+}
+
+document.querySelectorAll('.in').forEach(el=>el.addEventListener('input',recompute));
+loadPricing();   // fetches models.dev, then calls recompute()
+</script>
+</body>
+</html>

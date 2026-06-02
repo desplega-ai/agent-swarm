@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { sendKapsoText } from "../integrations/kapso/client";
+import {
+  markKapsoMessageRead,
+  sendKapsoReaction,
+  sendKapsoText,
+} from "../integrations/kapso/client";
 
 const originalFetch = globalThis.fetch;
 
@@ -90,5 +94,74 @@ describe("sendKapsoText", () => {
     expect(result.ok).toBe(false);
     expect(result.sessionWindowExpired).toBe(false);
     expect(result.errorMessage).toContain("Invalid API key");
+  });
+});
+
+describe("Kapso message actions", () => {
+  test("markKapsoMessageRead can include the typing indicator", async () => {
+    let captured: { url: string; body: unknown } | null = null;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      captured = { url, body: JSON.parse(init.body as string) };
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }) as typeof fetch;
+
+    const result = await markKapsoMessageRead({
+      apiBaseUrl: "https://api.kapso.ai",
+      apiKey: "k",
+      phoneNumberId: "p",
+      messageId: "wamid.IN",
+      typingIndicatorType: "text",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured!.url).toBe("https://api.kapso.ai/meta/whatsapp/v24.0/p/messages");
+    expect(captured!.body).toEqual({
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: "wamid.IN",
+      typing_indicator: { type: "text" },
+    });
+  });
+
+  test("sendKapsoReaction posts the eyes reaction payload", async () => {
+    let body: Record<string, unknown> | null = null;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(init.body as string);
+      return new Response(JSON.stringify({ messages: [{ id: "wamid.REACT" }] }), {
+        status: 200,
+      });
+    }) as typeof fetch;
+
+    const result = await sendKapsoReaction({
+      apiBaseUrl: "https://api.kapso.ai",
+      apiKey: "k",
+      phoneNumberId: "p",
+      to: "34679077777",
+      messageId: "wamid.IN",
+      emoji: "👀",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(body).toEqual({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "34679077777",
+      type: "reaction",
+      reaction: { message_id: "wamid.IN", emoji: "👀" },
+    });
+  });
+
+  test("message action errors return structured failures", async () => {
+    mockFetch(400, { error: { message: "bad message id" } });
+
+    const result = await markKapsoMessageRead({
+      apiBaseUrl: "https://api.kapso.ai",
+      apiKey: "k",
+      phoneNumberId: "p",
+      messageId: "wamid.BAD",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toBe("bad message id");
   });
 });

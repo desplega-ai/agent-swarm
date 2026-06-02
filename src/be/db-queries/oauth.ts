@@ -180,3 +180,36 @@ export function isTokenExpiringSoon(provider: string, bufferMs = 5 * 60 * 1000):
   const expiresAt = new Date(tokens.expiresAt).getTime();
   return expiresAt - Date.now() < bufferMs;
 }
+
+// ── OAuth Refresh Locks ──
+
+export function acquireOAuthRefreshLock(provider: string, ttlMs: number): string | null {
+  const owner = crypto.randomUUID();
+  const now = Date.now();
+  const expiresAt = new Date(now + ttlMs).toISOString();
+  const nowIso = new Date(now).toISOString();
+
+  getDb()
+    .query(
+      `INSERT INTO oauth_refresh_locks (provider, owner, expiresAt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(provider) DO UPDATE SET
+         owner = excluded.owner,
+         expiresAt = excluded.expiresAt,
+         updatedAt = excluded.updatedAt
+       WHERE oauth_refresh_locks.expiresAt <= ?`,
+    )
+    .run(provider, owner, expiresAt, nowIso, nowIso, nowIso);
+
+  const row = getDb()
+    .query("SELECT owner FROM oauth_refresh_locks WHERE provider = ?")
+    .get(provider) as { owner: string } | null;
+
+  return row?.owner === owner ? owner : null;
+}
+
+export function releaseOAuthRefreshLock(provider: string, owner: string): void {
+  getDb()
+    .query("DELETE FROM oauth_refresh_locks WHERE provider = ? AND owner = ?")
+    .run(provider, owner);
+}

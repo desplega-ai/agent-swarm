@@ -246,6 +246,8 @@ export default function AgentDetailPage() {
   const taskColumns = useTasksColumns({
     storageKey: "agent-detail-tasks",
     hiddenColumns: ["agent"],
+    defaultHiddenColumns: ["cost", "deps", "tags"],
+    defaultHiddenForNewColumns: ["cost"],
   });
 
   if (isLoading) {

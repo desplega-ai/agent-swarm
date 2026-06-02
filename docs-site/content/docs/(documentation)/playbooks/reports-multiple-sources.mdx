@@ -1,0 +1,78 @@
+---
+title: Reports from Multiple Sources
+description: Integrate your data warehouse, product analytics, billing, search analytics, and observability into one swarm — then ask it the questions your team would have asked a BI tool. Charts render as auto-hosted Pages.
+---
+
+<JsonLd
+  data={{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "Join multiple data sources in an agent swarm and answer team questions",
+    description:
+      "How to wire ClickHouse, Postgres, Convex, Clerk, PostHog, Stripe, Google Search Console, GitHub, and SigNoz into a swarm and answer scheduled or on-demand questions.",
+    step: [
+      { "@type": "HowToStep", name: "Wire one skill per source", text: "Install integration skills (gsc-analytics, posthog-interaction, clerk-analytics, turso-interaction, signoz-interaction, granola-api, telemetry-report) — one per source." },
+      { "@type": "HowToStep", name: "Fetch deterministically", text: "Use swarm-script nodes to call sources over HTTP/SQL and emit a unified JSON payload. Keep the LLM out of the loop where it adds no value." },
+      { "@type": "HowToStep", name: "Synthesize", text: "Researcher takes the JSON payload + the question and produces the narrative." },
+      { "@type": "HowToStep", name: "Render", text: "Multi-chart reports render as auto-hosted HTML Pages with charts (via the report chart-generation skill); recurring digests post as Slack threads." }
+    ]
+  }}
+/>
+
+The swarm joins data across [ClickHouse](https://clickhouse.com/), [Postgres](https://www.postgresql.org/), [Convex](https://www.convex.dev/), [Clerk](https://clerk.com/), [PostHog](https://posthog.com/), [Stripe](https://stripe.com/), [Google Search Console](https://search.google.com/search-console), [GitHub](https://github.com), and [SigNoz](https://signoz.io/), and answers **scheduled questions** ("daily product-growth update?", "weekly GTM metrics?") and **on-demand questions** in Slack ("how many active orgs signed up last week?").
+
+<Mermaid chart={`flowchart LR
+  subgraph SRC["Sources"]
+    CH["ClickHouse"]
+    PG["Postgres"]
+    CK["Clerk"]
+    PH["PostHog → Convex"]
+    GH["GitHub"]
+    GSC["Search Console"]
+  end
+  SRC --> SS["swarm-script<br/>deterministic fetch → JSON"]
+  SS --> LD["Lead / Researcher<br/>synthesize"]
+  LD --> OUT["Slack thread +<br/>Page w/ charts"]
+`} />
+
+## What it does
+
+Reports render as **auto-hosted HTML [Pages](/docs/concepts) with charts** when complex, or Slack threads with chart replies for recurring digests.
+
+## Agents
+
+- **[Lead](https://templates.agent-swarm.dev/official/lead)** — orchestrates; holds the scoped secrets needed for cross-source queries.
+- **[Researcher](https://templates.agent-swarm.dev/official/researcher)** — synthesis: takes raw data + the question, produces the narrative.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **[agent-fs](https://github.com/desplega-ai/agent-fs)** (archives), **swarm KV** (question cache + report state), **Pages** (auto-hosted HTML reports with charts), **`script-run`** + **`swarm-script` nodes** (deterministic catalog scripts — JSON stdout merges into node output for downstream interpolation). Use these for "fetch + JSON" sections so the LLM stays out of the loop where it adds no value.
+
+### Custom (swarm-managed)
+
+- **Integration skills (one per source):** `gsc-analytics` ([Search Console](https://search.google.com/search-console)), `posthog-interaction` ([PostHog](https://posthog.com/) HogQL — also joins [Convex](https://www.convex.dev/) / [Clerk](https://clerk.com/) / [Stripe](https://stripe.com/) warehouses), `clerk-analytics` (user/org growth from [Clerk](https://clerk.com/)), `turso-interaction` ([Turso](https://turso.tech/) LibSQL state), `signoz-interaction` ([SigNoz](https://signoz.io/) observability), `granola-api` ([Granola](https://www.granola.ai/) meeting signal), `telemetry-report` (charts from internal telemetry).
+- **`daily-growth-snapshot` swarm-script** — calls every source over HTTP/SQL and emits a unified JSON payload, so the agent-side report is mostly framing, not data-pulling. Date-window discipline (align to complete UTC days, exclude today) is encoded in the script.
+- **Chart-generation skill** — renders the JSON payload into chart images embedded in the [Page](/docs/concepts) or Slack reply. Backed by [Chart.js](https://www.chartjs.org/) running inside a `swarm-script` node so output is deterministic and snapshot-comparable.
+
+## Workflows / Schedules
+
+- **`daily-product-growth-update`** — daily. Joins [ClickHouse](https://clickhouse.com/) (CLI installs) + [Clerk](https://clerk.com/) (signups) + [Postgres](https://www.postgresql.org/) (product activity) + [PostHog](https://posthog.com/) → [Convex](https://www.convex.dev/) (warehouse) + [GitHub](https://github.com) (stars/forks/traffic). Posts a Slack thread: header + snapshot + up to 8 chart replies + TL;DR.
+- **`gtm-weekly-review`** — weekly. [GitHub](https://github.com) stats + [Plausible](https://plausible.io/) + [Google Search Console](https://search.google.com/search-console) as a research thread.
+- **`daily-hn-briefing`** — daily. Browser-automation scrape of [Hacker News](https://news.ycombinator.com/), filter for AI/dev-tools relevance, email via [AgentMail](https://www.agentmail.to/), archive in [agent-fs](https://github.com/desplega-ai/agent-fs).
+- **`memory-rater-daily-digest`** — daily. Internal-tool health digest (relevant to swarms with a memory subsystem).
+- **`daily-blocker-digest`** — daily prelude that verifies operational-runbook items.
+
+## Patterns used
+
+- [**No-op When Nothing Changed**](/docs/playbooks/patterns/no-op-workflows) — digests skip on a quiet day instead of posting an empty report.
+
+## Tips for new swarm users
+
+- **Use deterministic `swarm-script` nodes for "fetch + JSON" sections.** Keep the LLM out of the loop where it adds no value — faster, cheaper, more reliable.
+- **Always exclude the partial current day** from time-windowed metrics. Today's numbers are incomplete and the agent will draw wrong conclusions.
+- **Render multi-chart reports as a [Page](/docs/concepts)**, not a Slack thread. People want skimmable: a linked HTML page with 8 charts beats 8 image replies.
+- **One agent owns the cross-source secrets** (scoped per agent), keeping the secret surface small and auditable.
+- **Cache slow warehouse queries in KV** with a short TTL — a 1-hour cache is invisible to users and saves a lot of cycles.
+- **Ask the swarm questions in Slack and let it pick the source** — a well-skilled lead routes "active orgs last week?" to [Clerk](https://clerk.com/), "activation funnel?" to [PostHog](https://posthog.com/), "top GSC query?" to [Google Search Console](https://search.google.com/search-console), without you naming the source.

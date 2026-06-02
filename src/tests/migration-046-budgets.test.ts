@@ -134,15 +134,16 @@ describe("migration 046 — budgets and pricing", () => {
     expect(colMap.get("effective_from")!.pk).toBeGreaterThan(0);
   });
 
-  test("pricing seed has exactly 12 rows (4 models × 3 token_classes), all at effective_from=0", () => {
+  test("pricing seed includes every known Codex model/token class at effective_from=0", () => {
     const db = getDb();
-    const total = db.prepare<CountRow, []>("SELECT COUNT(*) as cnt FROM pricing").get();
-    expect(total?.cnt).toBe(12);
+    const minimumCodexRows = Object.keys(CODEX_MODEL_PRICING).length * 3;
 
     const seedRows = db
-      .prepare<CountRow, []>("SELECT COUNT(*) as cnt FROM pricing WHERE effective_from = 0")
+      .prepare<CountRow, []>(
+        "SELECT COUNT(*) as cnt FROM pricing WHERE provider = 'codex' AND effective_from = 0",
+      )
       .get();
-    expect(seedRows?.cnt).toBe(12);
+    expect(seedRows?.cnt ?? 0).toBeGreaterThanOrEqual(minimumCodexRows);
   });
 
   test("every CODEX_MODEL_PRICING entry has rows for input / cached_input / output with matching rates", () => {

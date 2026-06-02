@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "exa-search",
+  "displayName": "Exa Search",
+  "slug": "exa-search",
+  "title": "Exa Search",
+  "description": "Use web search APIs for cited research without over-fetching irrelevant pages.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["EXA_API_KEY"],
+  "runAllSeedersCandidate": false,
+  "tags": ["research", "search", "web"]
+}

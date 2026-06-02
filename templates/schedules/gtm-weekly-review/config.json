@@ -1,0 +1,13 @@
+{
+  "kind": "schedule",
+  "name": "gtm-weekly-review",
+  "displayName": "Weekly GTM Metrics Review",
+  "slug": "gtm-weekly-review",
+  "title": "Weekly GTM Metrics Review",
+  "description": "Summarize product, marketing, or sales signals into an operator-friendly weekly review.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": ["SLACK_CHANNEL_ID", "TIMEZONE"],
+  "runAllSeedersCandidate": false,
+  "tags": ["gtm", "metrics", "reporting"]
+}

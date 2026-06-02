@@ -3,6 +3,9 @@ import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import "./globals.css";
 
+const docsOgImage =
+  "https://www.agent-swarm.dev/api/og?title=Agent+Swarm+Documentation&subtitle=Reference+guides%2C+architecture%2C+and+operating+manuals+for+multi-agent+AI+coding+teams.";
+
 export const metadata: Metadata = {
   title: {
     default: "Agent Swarm",
@@ -23,6 +26,9 @@ export const metadata: Metadata = {
     "developer tools",
   ],
   metadataBase: new URL("https://docs.agent-swarm.dev"),
+  alternates: {
+    canonical: "https://docs.agent-swarm.dev/docs",
+  },
   robots: {
     index: true,
     follow: true,
@@ -35,16 +41,16 @@ export const metadata: Metadata = {
     title: "Agent Swarm Documentation",
     description:
       "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
-    url: "https://docs.agent-swarm.dev",
+    url: "https://docs.agent-swarm.dev/docs",
     siteName: "Agent Swarm Docs",
     type: "website",
     locale: "en_US",
     images: [
       {
-        url: "https://agent-swarm.dev/og-image.png",
+        url: docsOgImage,
         width: 1200,
         height: 630,
-        alt: "Agent Swarm",
+        alt: "Agent Swarm Documentation",
       },
     ],
   },
@@ -55,7 +61,7 @@ export const metadata: Metadata = {
     title: "Agent Swarm Documentation",
     description:
       "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
-    images: ["https://agent-swarm.dev/og-image.png"],
+    images: [docsOgImage],
   },
 };
 
@@ -82,7 +88,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 {
                   "@type": "WebSite",
                   "@id": "https://docs.agent-swarm.dev/#website",
-                  url: "https://docs.agent-swarm.dev",
+                  url: "https://docs.agent-swarm.dev/docs",
                   name: "Agent Swarm Documentation",
                   publisher: {
                     "@id": "https://agent-swarm.dev/#organization",
@@ -94,6 +100,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                   description:
                     "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
                   url: "https://docs.agent-swarm.dev",
+                  image: docsOgImage,
                   mainEntity: {
                     "@type": "SoftwareApplication",
                     name: "Agent Swarm",

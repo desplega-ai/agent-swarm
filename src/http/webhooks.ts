@@ -41,7 +41,14 @@ import {
   isGitLabEnabled,
   verifyGitLabWebhook,
 } from "../gitlab";
+import {
+  type KapsoMessageActionResult,
+  markKapsoMessageRead,
+  sendKapsoReaction,
+} from "../integrations/kapso/client";
+import type { KapsoConfig } from "../integrations/kapso/config";
 import { getKapsoConfig } from "../integrations/kapso/config";
+import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
 import { routeKapsoInbound } from "../integrations/kapso/inbound";
 import { getExecutorRegistry } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
@@ -107,6 +114,72 @@ const kapsoWebhook = route({
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
+
+function logKapsoAckResult(action: string, result: KapsoMessageActionResult): void {
+  if (result.ok) return;
+  console.warn(
+    `[Kapso] Inbound acknowledgement ${action} failed: ${
+      result.errorMessage ?? `status ${result.status}`
+    }`,
+  );
+}
+
+async function acknowledgeKapsoInboundMessage(
+  payload: KapsoWebhookPayload,
+  config: KapsoConfig,
+): Promise<void> {
+  const message = payload.message;
+  const phoneNumberId = payload.phone_number_id;
+  const messageId = message?.id;
+  const to = message?.from ?? payload.conversation?.phone_number;
+
+  if (payload.test || message?.kapso?.direction !== "inbound" || !phoneNumberId || !messageId) {
+    return;
+  }
+
+  if (!config.apiKey) {
+    console.warn("[Kapso] Cannot acknowledge inbound message: KAPSO_API_KEY is not configured");
+    return;
+  }
+
+  const markRead = markKapsoMessageRead({
+    apiBaseUrl: config.apiBaseUrl,
+    apiKey: config.apiKey,
+    phoneNumberId,
+    messageId,
+    typingIndicatorType: "text",
+  });
+  const react =
+    to && to.length > 0
+      ? sendKapsoReaction({
+          apiBaseUrl: config.apiBaseUrl,
+          apiKey: config.apiKey,
+          phoneNumberId,
+          to,
+          messageId,
+          emoji: "👀",
+        })
+      : Promise.resolve<KapsoMessageActionResult>({
+          ok: false,
+          status: 0,
+          raw: null,
+          errorMessage: "missing sender phone",
+        });
+
+  const [readResult, reactionResult] = await Promise.allSettled([markRead, react]);
+  if (readResult.status === "fulfilled") {
+    logKapsoAckResult("mark-as-read/typing", readResult.value);
+  } else {
+    console.warn(
+      `[Kapso] Inbound acknowledgement mark-as-read/typing failed: ${readResult.reason}`,
+    );
+  }
+  if (reactionResult.status === "fulfilled") {
+    logKapsoAckResult("reaction", reactionResult.value);
+  } else {
+    console.warn(`[Kapso] Inbound acknowledgement reaction failed: ${reactionResult.reason}`);
+  }
+}
 
 export async function handleWebhooks(
   req: IncomingMessage,
@@ -493,6 +566,8 @@ export async function handleWebhooks(
       res.end(JSON.stringify({ error: "Invalid JSON body" }));
       return true;
     }
+
+    void acknowledgeKapsoInboundMessage(payload, config);
 
     try {
       const routing = routeKapsoInbound(payload);

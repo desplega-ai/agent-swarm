@@ -47,6 +47,8 @@ describe("pagination metrics", () => {
   });
 
   test("getTasksCount is filter-aware and independent of limit/offset", () => {
+    const totalBefore = getTasksCount();
+
     for (let i = 0; i < 7; i++) {
       createTaskExtended(`alpha task ${i}`, { tags: ["alpha"] });
     }
@@ -66,7 +68,7 @@ describe("pagination metrics", () => {
     expect(getTasksCount({ tags: ["alpha"], limit: 2, offset: 0 })).toBe(7);
 
     // The unfiltered count covers every task created above.
-    expect(getTasksCount()).toBe(10);
+    expect(getTasksCount() - totalBefore).toBe(10);
   });
 
   test("getTasksCount filter-aware on search", () => {
@@ -123,9 +125,7 @@ describe("pagination metrics", () => {
     expect(countSessions({ source: ["slack"] }) - slackBefore).toBe(2);
     expect(countSessions({ source: ["mcp", "slack"] }) - bothBefore).toBe(7);
     // q filter narrows on top of source.
-    expect(countSessions({ source: ["slack"], q: "slack session" })).toBe(
-      countSessions({ source: ["slack"] }),
-    );
+    expect(countSessions({ source: ["slack"], q: "slack session" }) - slackBefore).toBe(2);
     expect(countSessions({ q: "no-such-session-marker-zzz" })).toBe(0);
   });
 

@@ -4,6 +4,7 @@ import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
 import { getApiKey } from "../utils/api-key.ts";
+import { buildOnboardDashboardUrl } from "./onboard/dashboard-url.ts";
 import { getAgentSummary, getPresetById, PRESETS } from "./onboard/presets.ts";
 import { CoreCredentialsStep } from "./onboard/steps/core-credentials.tsx";
 import { CustomTemplatesStep } from "./onboard/steps/custom-templates.tsx";
@@ -244,7 +245,8 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
 
   if (state.step === "done") {
     const apiUrl = `http://localhost:${state.apiPort || 3013}`;
-    const dashUrl = `https://app.agent-swarm.dev?api_url=${apiUrl}&api_key=${state.apiKey}`;
+    // camelCase params — the SPA ignores snake_case (see dashboard-url.ts).
+    const dashUrl = buildOnboardDashboardUrl({ apiUrl, apiKey: state.apiKey });
     const agentCount = state.services.reduce((sum, s) => sum + s.count, 0);
 
     return (

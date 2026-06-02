@@ -1,0 +1,11 @@
+{
+  "title": "Hot patterns",
+  "pages": [
+    "index",
+    "litmus-tests",
+    "drain-loops",
+    "hitl-gates",
+    "per-customer-working-directories",
+    "no-op-workflows"
+  ]
+}

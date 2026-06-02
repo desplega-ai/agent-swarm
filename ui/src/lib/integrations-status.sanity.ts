@@ -13,7 +13,7 @@
 declare const process: { exit(code: number): void };
 
 import type { SwarmConfig } from "@/api/types";
-import { INTEGRATIONS } from "./integrations-catalog";
+import { getIntegrationFields, INTEGRATIONS } from "./integrations-catalog";
 import {
   deriveIntegrationStatus,
   findConfigForKey,
@@ -54,7 +54,9 @@ const slack = byId("slack");
 const github = byId("github");
 const businessUse = byId("business-use");
 
-const slackRequired = slack.fields.filter((f) => f.required).map((f) => f.key);
+const slackRequired = getIntegrationFields(slack)
+  .filter((f) => f.required)
+  .map((f) => f.key);
 
 const cases: Case[] = [
   {
@@ -123,7 +125,7 @@ const cases: Case[] = [
   {
     label: "github — configured (all 4 required)",
     integrationId: "github",
-    configs: github.fields
+    configs: getIntegrationFields(github)
       .filter((f) => f.required)
       .map((f) => makeConfig(f.key, `value-${f.key}`, { isSecret: !!f.isSecret })),
     expected: "configured",
@@ -143,10 +145,31 @@ const cases: Case[] = [
   {
     label: "business-use — configured",
     integrationId: "business-use",
-    configs: businessUse.fields
+    configs: getIntegrationFields(businessUse)
       .filter((f) => f.required)
       .map((f) => makeConfig(f.key, `value-${f.key}`, { isSecret: !!f.isSecret })),
     expected: "configured",
+  },
+  {
+    label: "bedrock — configured via pi / pi-mono group",
+    integrationId: "bedrock",
+    configs: [
+      makeConfig("MODEL_OVERRIDE", "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0"),
+      makeConfig("AWS_REGION", "us-east-1"),
+    ],
+    expected: "configured",
+  },
+  {
+    label: "bedrock — configured via Claude Code group",
+    integrationId: "bedrock",
+    configs: [makeConfig("CLAUDE_CODE_USE_BEDROCK", "1"), makeConfig("AWS_REGION", "us-east-1")],
+    expected: "configured",
+  },
+  {
+    label: "bedrock — partial when only one grouped required key is set",
+    integrationId: "bedrock",
+    configs: [makeConfig("CLAUDE_CODE_USE_BEDROCK", "1")],
+    expected: "partial",
   },
 ];
 

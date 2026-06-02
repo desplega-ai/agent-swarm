@@ -8,6 +8,7 @@
  */
 
 import type { ProviderTraits } from "../providers/types";
+import type { ProviderName } from "../types";
 import { resolveTemplateAsync } from "./resolver";
 
 // Side-effect import: register all system + session templates
@@ -16,12 +17,38 @@ import "./session-templates";
 /** Max characters per individual injected section before truncation */
 const BOOTSTRAP_MAX_CHARS = 20_000;
 
-/** Max total characters across all injected sections combined */
-const BOOTSTRAP_TOTAL_MAX_CHARS = 150_000;
+/**
+ * Max total characters across all injected sections combined.
+ *
+ * Sized to stay safely below Linux's `MAX_ARG_STRLEN = 131,072` bytes — the
+ * per-argv-element kernel limit that bit Picateclas attempts 4-6
+ * (2026-05-28). The base-prompt becomes one argv element when the claude
+ * adapter passes `--append-system-prompt <prompt>`, so the prompt MUST stay
+ * under MAX_ARG_STRLEN even with a few KB of growth. The claude-adapter
+ * also stages the prompt to a file (`--append-system-prompt-file`) as a
+ * belt-and-braces fix, but the budget cap is the cheap insurance for any
+ * code path that ever passes the prompt inline.
+ */
+const BOOTSTRAP_TOTAL_MAX_CHARS = 120_000;
+
+/**
+ * Per-section cap applied to the *repo* CLAUDE.md (the agent-swarm OSS
+ * one is ~18 KB and the biggest volatile component of the system prompt).
+ * 12 KB leaves room for the static prompt scaffold + identity + tools +
+ * agent CLAUDE.md without ever crossing MAX_ARG_STRLEN.
+ */
+const REPO_CLAUDE_MD_MAX_CHARS = 12_000;
 
 /** Truncation notice appended when a section is cut */
 const truncationNotice = (file: string) =>
   `\n\n[...truncated, see /workspace/${file} for full content]\n`;
+
+export function areSlackPromptToolsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const slackDisable = env.SLACK_DISABLE;
+  if (slackDisable === "true" || slackDisable === "1") return false;
+
+  return Boolean(env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN);
+}
 
 export type BasePromptArgs = {
   role: string;
@@ -29,6 +56,12 @@ export type BasePromptArgs = {
   swarmUrl: string;
   capabilities?: string[];
   traits?: ProviderTraits;
+  /**
+   * Harness provider for this session. Gates provider-specific prompt blocks
+   * (e.g. the context-mode block is excluded for `pi`, which has no
+   * context-mode MCP wiring yet — deferred to DES-514).
+   */
+  provider?: ProviderName;
   name?: string;
   description?: string;
   soulMd?: string;
@@ -39,6 +72,7 @@ export type BasePromptArgs = {
     claudeMd?: string | null;
     clonePath: string;
     warning?: string | null;
+    autoStashes?: { ref: string; message: string }[];
     guidelines?: {
       prChecks: string[];
       mergeChecks: string[];
@@ -65,15 +99,29 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   if (!hasMcp) {
     // If no MCP, role cannot be lead
     compositeEventType = "system.session.worker.remote";
+  } else if (role === "lead") {
+    compositeEventType = "system.session.lead";
+  } else if (args.provider === "pi") {
+    // Pi has no context-mode MCP wiring yet (deferred to DES-514), so it uses a
+    // worker composite that omits the context_mode block to avoid advertising
+    // phantom `ctx_*` tools. All other local providers (claude, codex, opencode)
+    // keep the block via the standard worker composite.
+    compositeEventType = "system.session.worker.pi";
   } else {
-    compositeEventType = role === "lead" ? "system.session.lead" : "system.session.worker";
+    compositeEventType = "system.session.worker";
   }
   const compositeResult = await resolveTemplateAsync(compositeEventType, vars);
   let prompt = compositeResult.text;
 
+  const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
+
+  if (hasMcp && slackPromptToolsEnabled) {
+    const slackResult = await resolveTemplateAsync("system.agent.slack", {});
+    prompt += slackResult.text;
+  }
+
   // Conditionally inject Slack instructions for workers with Slack-originated tasks
-  // Skip for providers without MCP — they can't call Slack tools (slack-reply, etc.)
-  if (role !== "lead" && args.slackContext && hasMcp) {
+  if (role !== "lead" && args.slackContext && hasMcp && slackPromptToolsEnabled) {
     const slackResult = await resolveTemplateAsync("system.agent.worker.slack", {
       slackChannelId: args.slackContext.channelId,
       slackThreadTs: args.slackContext.threadTs ?? "",
@@ -137,9 +185,25 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
         prompt += `The following CLAUDE.md is from the repository cloned at \`${args.repoContext.clonePath}\`. `;
         prompt += `**IMPORTANT: These instructions apply ONLY when working within the \`${args.repoContext.clonePath}\` directory.** `;
         prompt += `Do NOT apply these rules to files outside that directory.\n\n`;
-        prompt += `${args.repoContext.claudeMd}\n`;
+        // Cap the repo CLAUDE.md so it can't blow the bootstrap budget on its
+        // own. Pre-cap, the agent-swarm OSS CLAUDE.md was 17,856 B — the
+        // single biggest volatile component of the system prompt and the
+        // direct driver of the Picateclas argv-E2BIG saga (2026-05-28).
+        // Truncation footer points readers at the on-disk copy in the cwd.
+        prompt += `${truncateRepoClaudeMd(
+          args.repoContext.claudeMd,
+          args.repoContext.clonePath,
+          REPO_CLAUDE_MD_MAX_CHARS,
+        )}\n`;
       } else if (!args.repoContext.warning) {
         prompt += `Repository is cloned at \`${args.repoContext.clonePath}\` but has no CLAUDE.md file.\n`;
+      }
+
+      if (args.repoContext.autoStashes && args.repoContext.autoStashes.length > 0) {
+        const stashes = args.repoContext.autoStashes
+          .map((stash) => `- ${stash.ref}: ${stash.message}`)
+          .join("\n");
+        prompt += `\nPending auto-stashed work exists in this repo:\n${stashes}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
       }
     }
 
@@ -253,6 +317,24 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   return prompt;
 };
+
+/**
+ * Truncate the repo CLAUDE.md to a hard byte budget so it can't blow the
+ * bootstrap argv ceiling on its own (Picateclas spawn-OOM, 2026-05-28).
+ *
+ * The footer is structured as a `[truncated — see <path>/CLAUDE.md for full
+ * content]` notice so anyone reading the system prompt knows exactly where
+ * the dropped content lives on disk.
+ *
+ * Exported only for testing.
+ */
+export function truncateRepoClaudeMd(content: string, clonePath: string, budget: number): string {
+  if (content.length <= budget) return content;
+  const notice = `\n\n[...truncated — see ${clonePath}/CLAUDE.md for full content]\n`;
+  const contentBudget = budget - notice.length;
+  if (contentBudget <= 0) return notice.trimStart();
+  return content.slice(0, contentBudget) + notice;
+}
 
 /** Truncate a section to fit within a character budget, appending a notice if cut */
 function truncateSection(

@@ -316,6 +316,26 @@ function cleanupAgentsMdSymlink(cwd: string): void {
   }
 }
 
+function extractTextContent(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(
+      (c): c is { type?: string; text?: string } =>
+        typeof c === "object" && c !== null && (c as { type?: string }).type === "text",
+    )
+    .map((c) => c.text || "")
+    .join("")
+    .trim();
+}
+
+export function extractPiAssistantText(message: unknown): string {
+  if (!message || typeof message !== "object") return "";
+  const msg = message as { role?: string; content?: unknown };
+  if (msg.role !== "assistant") return "";
+  return extractTextContent(msg.content);
+}
+
 export class PiMonoSession implements ProviderSession {
   private listeners: Array<(event: ProviderEvent) => void> = [];
   private eventQueue: ProviderEvent[] = [];
@@ -327,6 +347,8 @@ export class PiMonoSession implements ProviderSession {
   private logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
   /** Track last emitted message text to avoid duplicates across turns */
   private lastEmittedMessage = "";
+  /** Last assistant text surfaced by pi-mono; used as runner fallback output. */
+  private lastAssistantText = "";
   /** Phase 7: wallclock start so we can populate `durationMs` on the cost row. */
   private sessionStartedAt: number = Date.now();
   /**
@@ -391,31 +413,27 @@ export class PiMonoSession implements ProviderSession {
   private handleAgentEvent(event: AgentSessionEvent): void {
     switch (event.type) {
       case "message_end": {
-        // Extract text from the final message (skip duplicates across turns)
-        const msg = event.message;
-        if (msg && "content" in msg) {
-          const text = Array.isArray(msg.content)
-            ? msg.content
-                .filter((c: unknown) => (c as { type: string }).type === "text")
-                .map((c: unknown) => (c as { text?: string }).text || "")
-                .join("")
-                .trim()
-            : String(msg.content || "").trim();
-          if (text && text !== this.lastEmittedMessage) {
-            const model = this.reportedModel();
-            this.emit({
-              type: "raw_log",
-              content: JSON.stringify({
-                type: "assistant",
-                message: {
-                  role: "assistant",
-                  content: [{ type: "text", text }],
-                  model,
-                },
-              }),
-            });
-            this.lastEmittedMessage = text;
-          }
+        // Pi emits message_end for user, assistant, and tool-result messages.
+        // Only assistant text should be printed or used as fallback output.
+        const text = extractPiAssistantText(event.message);
+        if (text) {
+          this.lastAssistantText = text;
+        }
+        if (text && text !== this.lastEmittedMessage) {
+          const model = this.reportedModel();
+          this.emit({
+            type: "raw_log",
+            content: JSON.stringify({
+              type: "assistant",
+              message: {
+                role: "assistant",
+                content: [{ type: "text", text }],
+                model,
+              },
+            }),
+          });
+          this.emit({ type: "message", role: "assistant", content: text });
+          this.lastEmittedMessage = text;
         }
         // Emit context_usage for dashboard tracking.
         // Phase 7: derive `outputTokens` from `SessionStats` delta (pi-ai's
@@ -522,6 +540,7 @@ export class PiMonoSession implements ProviderSession {
         exitCode: 0,
         sessionId: this._sessionId,
         cost,
+        output: this.lastAssistantText || undefined,
         isError: false,
       };
     } catch (err) {

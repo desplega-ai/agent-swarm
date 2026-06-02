@@ -27,6 +27,7 @@ export const CONTEXT_FORMULA = "input-cache-output" as const;
 
 const CONTEXT_WINDOW_DEFAULTS: Record<string, number> = {
   // Anthropic 4.x family
+  "claude-opus-4-8": 1_000_000,
   "claude-opus-4-7": 1_000_000,
   "claude-opus-4-6": 1_000_000,
   "claude-opus-4-5": 1_000_000,

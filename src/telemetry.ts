@@ -15,6 +15,7 @@ const TIMEOUT_MS = 5_000;
 let installationId: string | null = null;
 let source = "unknown";
 let cachedIsCloud = false;
+let cachedIsE2b = false;
 
 function isEnabled(): boolean {
   return process.env.ANONYMIZED_TELEMETRY !== "false";
@@ -39,6 +40,15 @@ function isCloudHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   if (CLOUD_HOST_EXACT.has(normalized)) return true;
   return CLOUD_HOST_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+}
+
+/**
+ * Detect whether the current process is running inside an E2B sandbox.
+ * E2B automatically exposes `E2B_SANDBOX_ID` inside every sandbox.
+ * Exported for tests; not part of the public API.
+ */
+export function _isE2bSandbox(): boolean {
+  return typeof process.env.E2B_SANDBOX_ID === "string" && process.env.E2B_SANDBOX_ID.length > 0;
 }
 
 /**
@@ -100,7 +110,8 @@ export async function initTelemetry(
 
   const resolved = _resolveCloudMode(process.env.MCP_BASE_URL);
   cachedIsCloud = resolved.isCloud;
-  console.log(`telemetry: cloud=${cachedIsCloud}`);
+  cachedIsE2b = _isE2bSandbox();
+  console.log(`telemetry: cloud=${cachedIsCloud} e2b=${cachedIsE2b}`);
 
   try {
     const existing = await getConfig("telemetry_installation_id");
@@ -153,6 +164,16 @@ function isCloudDeployment(): boolean {
   return raw === "true" || raw === "1";
 }
 
+function getTelemetryEnvironment(): string {
+  const explicit = process.env.DESPLEGA_TELEMETRY_ENV?.trim();
+  if (explicit) return explicit;
+
+  // Do not default from NODE_ENV: shipped Bun/npm installs can report
+  // "development" even when the operator did not choose a telemetry cohort.
+  if (process.env.NODE_ENV === "test") return "test";
+  return "production";
+}
+
 /** Fire-and-forget telemetry event. Never throws, never blocks. */
 export function track(options: TrackOptions): void {
   if (!isEnabled() || !installationId) return;
@@ -173,11 +194,12 @@ export function track(options: TrackOptions): void {
         // The hostname is intentionally NOT included — telemetry must stay
         // anonymous, and the boolean is sufficient to split cloud vs self-host.
         is_cloud: cachedIsCloud,
+        is_e2b: cachedIsE2b,
       },
       metadata: {
         transport: "https",
         schema_version: 1,
-        environment: process.env.NODE_ENV ?? "production",
+        environment: getTelemetryEnvironment(),
         is_cloud: isCloudDeployment(),
         ...getOrgIdentity(),
         ...options.metadata,
@@ -202,6 +224,7 @@ export function _resetTelemetryStateForTests(): void {
   installationId = null;
   source = "unknown";
   cachedIsCloud = false;
+  cachedIsE2b = false;
 }
 
 /** Test-only: read the resolved install ID. */

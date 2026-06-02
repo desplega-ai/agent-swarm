@@ -29,6 +29,7 @@ import type {
   ContextSnapshotEventType,
   ContextVersion,
   CooldownConfig,
+  FollowUpConfig,
   InboxItemState,
   InboxItemStatus,
   InboxItemType,
@@ -87,6 +88,7 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "../types";
+import { FollowUpConfigSchema, isTerminalTaskStatus } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
@@ -690,6 +692,14 @@ export function createAgent(
     );
   if (!row) throw new Error("Failed to create agent");
   try {
+    installSystemDefaultSkillsForAgent(id);
+  } catch (err) {
+    console.warn(
+      "[db] Failed to install system-default skills for new agent:",
+      (err as Error).message,
+    );
+  }
+  try {
     createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
   } catch {}
   return rowToAgent(row);
@@ -993,6 +1003,7 @@ type AgentTaskRow = {
   workflowRunId: string | null;
   workflowRunStepId: string | null;
   outputSchema: string | null;
+  followUpConfig: string | null;
   contextKey: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -1012,9 +1023,31 @@ type AgentTaskRow = {
   swarmVersion: string | null;
   provider: string | null;
   providerMeta: string | null;
+  totalCostUsd?: number | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
+  let followUpConfig: FollowUpConfig | undefined;
+  if (row.followUpConfig) {
+    try {
+      const parsed = FollowUpConfigSchema.safeParse(JSON.parse(row.followUpConfig));
+      if (parsed.success) {
+        followUpConfig = parsed.data;
+      } else {
+        console.warn(
+          `[db] Ignoring invalid agent_tasks.followUpConfig for task ${row.id}:`,
+          parsed.error.message,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[db] Ignoring malformed agent_tasks.followUpConfig for task ${row.id}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+      followUpConfig = undefined;
+    }
+  }
+
   return {
     id: row.id,
     agentId: row.agentId,
@@ -1056,6 +1089,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
     outputSchema: row.outputSchema ? JSON.parse(row.outputSchema) : undefined,
+    followUpConfig,
     contextKey: row.contextKey ?? undefined,
     compactionCount: row.compactionCount ?? undefined,
     peakContextPercent: row.peakContextPercent ?? undefined,
@@ -1075,6 +1109,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     swarmVersion: row.swarmVersion ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
     providerMeta: parseProviderMeta(row.provider as ProviderName | null, row.providerMeta),
+    totalCostUsd: row.totalCostUsd ?? undefined,
   };
 }
 
@@ -1110,6 +1145,7 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
     lastUpdatedAt: t.lastUpdatedAt,
     finishedAt: t.finishedAt,
     peakContextPercent: t.peakContextPercent,
+    totalCostUsd: t.totalCostUsd,
   };
 }
 
@@ -1170,7 +1206,7 @@ export const taskQueries = {
   setProgress: () =>
     getDb().prepare<AgentTaskRow, [string, string]>(
       `UPDATE agent_tasks SET progress = ?,
-       status = CASE WHEN status IN ('completed', 'failed', 'cancelled') THEN status ELSE 'in_progress' END,
+       status = CASE WHEN status IN ('completed', 'failed', 'cancelled', 'superseded') THEN status ELSE 'in_progress' END,
        lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
     ),
@@ -1241,14 +1277,14 @@ export function startTask(taskId: string): AgentTask | null {
   if (!oldTask) return null;
 
   // Guard: never revive tasks that are already in a terminal state
-  if (["completed", "failed", "cancelled"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
   const row = getDb()
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled') RETURNING *`,
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
     )
     .get(taskId);
   if (row && oldTask) {
@@ -1286,6 +1322,31 @@ export function getChildTasks(parentTaskId: string): AgentTask[] {
     )
     .all(parentTaskId)
     .map(rowToAgentTask);
+}
+
+/**
+ * Returns true if `parentId` has at least one non-terminal child task with
+ * `taskType = 'resume'`. Used by the heartbeat sweep as an idempotency guard:
+ * if a prior sweep tick already created a resume follow-up for this parent,
+ * don't create a duplicate.
+ *
+ * **Filters by taskType = 'resume'** specifically. A parent task can also
+ * have ordinary non-terminal delegation children (`send-task` auto-defaults
+ * `parentTaskId` to the caller's current task — see src/tools/send-task.ts).
+ * Treating those as "already resumed" would incorrectly skip the resume
+ * path for a crashed worker that had delegated subtasks (PR #594 review).
+ */
+export function hasNonTerminalResumeChild(parentId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM agent_tasks
+       WHERE parentTaskId = ?
+         AND taskType = 'resume'
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       LIMIT 1`,
+    )
+    .get(parentId);
+  return row !== undefined && row !== null;
 }
 
 export function updateTaskClaudeSessionId(
@@ -1367,14 +1428,18 @@ export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
 
 /**
  * Find a task by VCS repo and issue/PR/MR number.
- * Returns the most recent non-completed/failed task for this VCS entity.
+ * Returns the most recent non-terminal task for this VCS entity.
+ *
+ * Terminal exclusion MUST stay in lock-step with `TERMINAL_TASK_STATUSES`
+ * in `src/types.ts`. SQL strings can't import a TS const — if you add a
+ * new terminal status, grep for `NOT IN ('completed'` across this file.
  */
 export function findTaskByVcs(vcsRepo: string, vcsNumber: number): AgentTask | null {
   const row = getDb()
     .prepare<AgentTaskRow, [string, number]>(
       `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ?
-       AND status NOT IN ('completed', 'failed')
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY createdAt DESC
        LIMIT 1`,
     )
@@ -1504,7 +1569,10 @@ export function getAllTasks(
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = filters?.limit ?? 25;
   const offset = filters?.offset ?? 0;
-  const query = `SELECT * FROM agent_tasks ${whereClause} ORDER BY lastUpdatedAt DESC, priority DESC LIMIT ${limit} OFFSET ${offset}`;
+  const query = `SELECT agent_tasks.*,
+    (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = agent_tasks.id) AS totalCostUsd
+    FROM agent_tasks ${whereClause}
+    ORDER BY lastUpdatedAt DESC, priority DESC LIMIT ${limit} OFFSET ${offset}`;
 
   const rows = getDb()
     .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(query)
@@ -1869,6 +1937,50 @@ export function findCompletedTaskInThread(
   return row ? rowToAgentTask(row) : null;
 }
 
+/**
+ * Find the most recent CANCELLED task in a Slack thread. Used by the
+ * follow-up re-delegation guard so a cancellation (worker SIGTERM,
+ * runner-side abort, swarm-events tool-loop abort) doesn't permanently
+ * jam re-dispatch when an earlier sibling task in the same thread also
+ * completed.
+ *
+ * Matches both:
+ *   - `status = 'cancelled'` (the canonical terminal state from cancelTask)
+ *   - `status = 'failed'` with a failureReason that starts with "cancelled"
+ *     or "exit 130" or contains "cancelled" (the codex-adapter abort path
+ *     emits `failureReason: "cancelled"` and exits 130).
+ */
+export function findRecentCancelledTaskInThread(
+  channelId: string,
+  threadTs: string,
+  windowMinutes: number,
+): AgentTask | null {
+  const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ?
+       AND slackThreadTs = ?
+       AND lastUpdatedAt > ?
+       AND (
+         status = 'cancelled'
+         OR (
+           status = 'failed'
+           AND failureReason IS NOT NULL
+           AND (
+             failureReason LIKE 'cancelled%'
+             OR failureReason LIKE 'exit 130%'
+             OR failureReason LIKE '%cancelled%'
+           )
+         )
+       )
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 1`,
+    )
+    .get(channelId, threadTs, since);
+  return row ? rowToAgentTask(row) : null;
+}
+
 export function completeTask(id: string, output?: string): AgentTask | null {
   const oldTask = getTaskById(id);
   if (!oldTask) return null;
@@ -1876,7 +1988,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   // Idempotency guard: don't re-complete a task already in a terminal state.
   // Mirrors cancelTask. Prevents duplicate task.completed events, duplicate
   // log entries, and duplicate follow-up tasks when multiple sessions race.
-  if (["completed", "failed", "cancelled"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -1921,7 +2033,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
   // Idempotency guard: don't re-fail a task already in a terminal state.
   // Mirrors cancelTask / completeTask. Prevents duplicate task.failed events
   // and duplicate follow-up tasks when multiple sessions race.
-  if (["completed", "failed", "cancelled"].includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -1958,8 +2070,7 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
   if (!oldTask) return null;
 
   // Only cancel tasks that are not already in a terminal state
-  const terminalStatuses = ["completed", "failed", "cancelled"];
-  if (terminalStatuses.includes(oldTask.status)) {
+  if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
 
@@ -1982,6 +2093,69 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
       import("../workflows/event-bus").then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.cancelled", {
           taskId: id,
+          agentId: row.agentId,
+          workflowRunId: row.workflowRunId,
+          workflowRunStepId: row.workflowRunStepId,
+        });
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Supersede a task: mark it as `superseded` (terminal) so a fresh "resume"
+ * follow-up task can pick up where it left off. Used by the graceful-shutdown
+ * path and the `POST /api/tasks/:id/supersede` route. Returns null if the task
+ * is already terminal (mirrors `completeTask` / `cancelTask` idempotency).
+ *
+ * Writes a `task_superseded` agent_log with `{ reason, resumeTaskId }` payload
+ * and emits a `task.superseded` workflow event. The caller is responsible for
+ * creating the resume follow-up (via `createResumeFollowUp`) and passing the
+ * resulting id as `resumeTaskId`.
+ */
+export function supersedeTask(
+  id: string,
+  args: { reason: string; resumeTaskId: string | null },
+): AgentTask | null {
+  const oldTask = getTaskById(id);
+  if (!oldTask) return null;
+
+  // Idempotency guard: don't re-supersede a task already in a terminal state.
+  if (isTerminalTaskStatus(oldTask.status)) {
+    return null;
+  }
+
+  const finishedAt = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `UPDATE agent_tasks
+       SET status = 'superseded',
+           finishedAt = ?,
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       RETURNING *`,
+    )
+    .get(finishedAt, id);
+
+  if (row && oldTask) {
+    try {
+      createLogEntry({
+        eventType: "task_superseded",
+        taskId: id,
+        agentId: row.agentId ?? undefined,
+        oldValue: oldTask.status,
+        newValue: "superseded",
+        metadata: { reason: args.reason, resumeTaskId: args.resumeTaskId },
+      });
+    } catch {}
+    try {
+      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.superseded", {
+          taskId: id,
+          reason: args.reason,
+          resumeTaskId: args.resumeTaskId,
           agentId: row.agentId,
           workflowRunId: row.workflowRunId,
           workflowRunStepId: row.workflowRunStepId,
@@ -2510,6 +2684,7 @@ export interface CreateTaskOptions {
    * a schema'd task should be defensive about JSON parsing.
    */
   outputSchema?: Record<string, unknown>;
+  followUpConfig?: FollowUpConfig;
   requestedByUserId?: string;
   contextKey?: string;
 }
@@ -2528,8 +2703,9 @@ export function findRecentSimilarTasks(opts: {
   const conditions: string[] = ["createdAt > ?"];
   const params: (string | number)[] = [since];
 
-  // Exclude completed/failed/cancelled tasks — only active or recently created
-  conditions.push("status NOT IN ('completed', 'failed', 'cancelled')");
+  // Exclude all terminal statuses — only active or recently created.
+  // Keep in lock-step with `TERMINAL_TASK_STATUSES` in src/types.ts.
+  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded')");
 
   if (opts.creatorAgentId) {
     conditions.push("creatorAgentId = ?");
@@ -2564,6 +2740,16 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   if (options?.parentTaskId) {
     const parent = getTaskById(options.parentTaskId);
     if (parent) {
+      // Identity & routing — anything that says "what work is this, who asked
+      // for it, where does it run" carries forward to every child (follow-ups,
+      // reboot retries, resume tasks). Explicit options always win.
+      //
+      // When adding a new identity-shaped column to `agent_tasks`, ADD IT HERE
+      // unless you have a specific reason a child should NOT inherit it. This
+      // is the single source of truth — `createResumeFollowUp` and the other
+      // follow-up creators rely on this block instead of re-listing fields.
+
+      // Slack context
       if (parent.slackChannelId && !options.slackChannelId) {
         options.slackChannelId = parent.slackChannelId;
       }
@@ -2573,17 +2759,97 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.slackUserId && !options.slackUserId) {
         options.slackUserId = parent.slackUserId;
       }
+
+      // AgentMail context
       if (parent.agentmailInboxId && !options.agentmailInboxId) {
         options.agentmailInboxId = parent.agentmailInboxId;
+      }
+      if (parent.agentmailMessageId && !options.agentmailMessageId) {
+        options.agentmailMessageId = parent.agentmailMessageId;
       }
       if (parent.agentmailThreadId && !options.agentmailThreadId) {
         options.agentmailThreadId = parent.agentmailThreadId;
       }
+
+      // Mention context (Slack @-mentions)
+      if (parent.mentionMessageId && !options.mentionMessageId) {
+        options.mentionMessageId = parent.mentionMessageId;
+      }
+      if (parent.mentionChannelId && !options.mentionChannelId) {
+        options.mentionChannelId = parent.mentionChannelId;
+      }
+
+      // VCS identity (GitHub / GitLab issue / PR / MR + webhook routing)
+      // Webhook handlers locate active work via `findTaskByVcs(repo, number)`,
+      // so a resume / follow-up child MUST carry the full VCS identity or
+      // subsequent review/update events get dropped.
+      if (parent.vcsProvider && !options.vcsProvider) {
+        options.vcsProvider = parent.vcsProvider;
+      }
+      if (parent.vcsRepo && !options.vcsRepo) {
+        options.vcsRepo = parent.vcsRepo;
+      }
+      if (parent.vcsNumber != null && options.vcsNumber == null) {
+        options.vcsNumber = parent.vcsNumber;
+      }
+      if (parent.vcsEventType && !options.vcsEventType) {
+        options.vcsEventType = parent.vcsEventType;
+      }
+      if (parent.vcsCommentId != null && options.vcsCommentId == null) {
+        options.vcsCommentId = parent.vcsCommentId;
+      }
+      if (parent.vcsAuthor && !options.vcsAuthor) {
+        options.vcsAuthor = parent.vcsAuthor;
+      }
+      if (parent.vcsUrl && !options.vcsUrl) {
+        options.vcsUrl = parent.vcsUrl;
+      }
+      if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
+        options.vcsInstallationId = parent.vcsInstallationId;
+      }
+      if (parent.vcsNodeId && !options.vcsNodeId) {
+        options.vcsNodeId = parent.vcsNodeId;
+      }
+
+      // Execution context (per-task overrides)
+      //
+      // `model` is DELIBERATELY NOT inherited. A parent task's `model` is a
+      // concrete, provider-specific resolved string (e.g. `claude-opus-4-8`,
+      // `openrouter/moonshotai/kimi-k2.6`). Derived tasks (resume follow-ups,
+      // completion/review follow-ups, re-dispatches) routinely land on a
+      // DIFFERENT agent — and therefore a different harness/provider — than the
+      // parent. Carrying the parent's concrete model across that boundary makes
+      // the child die at session-init with a model-incompatibility error before
+      // any worker code runs (e.g. a `claude-opus-4-8` resume claimed by a Codex
+      // worker → `400 model is not supported when using Codex`, or a
+      // `kimi-k2.6` review follow-up routed to a Claude-harness Lead → session
+      // exit 1). Per Taras's directive (2026-05-29): derived tasks must never
+      // set the model — it resolves from the ASSIGNEE agent's own provider /
+      // `MODEL_OVERRIDE` config at session-init (see
+      // `src/commands/runner.ts` — `opts.model || configModel`). A null `model`
+      // here is the correct, intended state. Do NOT re-add inheritance here; if
+      // a same-provider child genuinely needs a specific model, the creator must
+      // pass it explicitly.
+      if (parent.dir && !options.dir) {
+        options.dir = parent.dir;
+      }
+
+      // Contract (schema validation) — `store-progress` validates completion
+      // output against `outputSchema`, runner injects structured-output
+      // instructions only when it's present.
+      if (parent.outputSchema && !options.outputSchema) {
+        options.outputSchema = parent.outputSchema;
+      }
+
+      // Attribution
       if (parent.requestedByUserId && !options.requestedByUserId) {
         options.requestedByUserId = parent.requestedByUserId;
       }
       if (parent.contextKey && !options.contextKey) {
         options.contextKey = parent.contextKey;
+      }
+      if (parent.followUpConfig && !options.followUpConfig) {
+        options.followUpConfig = parent.followUpConfig;
       }
     }
   }
@@ -2610,8 +2876,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, requestedByUserId, contextKey, swarmVersion, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, swarmVersion, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -2650,6 +2916,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.workflowRunId ?? null,
       options?.workflowRunStepId ?? null,
       options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
+      options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
       options?.requestedByUserId ?? null,
       options?.contextKey ?? null,
       pkg.version,
@@ -3967,6 +4234,15 @@ export const sessionLogQueries = {
       "SELECT * FROM session_logs WHERE taskId = ? ORDER BY iteration ASC, lineNumber ASC",
     ),
 
+  getRecentByTaskId: () =>
+    getDb().prepare<SessionLogRow, [string, number]>(
+      `SELECT * FROM (
+         SELECT * FROM session_logs WHERE taskId = ?
+         ORDER BY iteration DESC, lineNumber DESC
+         LIMIT ?
+       ) ORDER BY iteration ASC, lineNumber ASC`,
+    ),
+
   getBySessionId: () =>
     getDb().prepare<SessionLogRow, [string, number]>(
       "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY lineNumber ASC",
@@ -4002,7 +4278,10 @@ export function createSessionLogs(logs: {
   })();
 }
 
-export function getSessionLogsByTaskId(taskId: string): SessionLog[] {
+export function getSessionLogsByTaskId(taskId: string, limit?: number): SessionLog[] {
+  if (typeof limit === "number" && limit > 0) {
+    return sessionLogQueries.getRecentByTaskId().all(taskId, limit).map(rowToSessionLog);
+  }
   return sessionLogQueries.getByTaskId().all(taskId).map(rowToSessionLog);
 }
 
@@ -7976,6 +8255,7 @@ type SkillRow = {
   userInvocable: number;
   version: number;
   isEnabled: number;
+  systemDefault: number;
   createdAt: string;
   lastUpdatedAt: string;
   lastFetchedAt: string | null;
@@ -8005,6 +8285,7 @@ function rowToSkill(row: SkillRow): Skill {
     userInvocable: row.userInvocable === 1,
     version: row.version,
     isEnabled: row.isEnabled === 1,
+    systemDefault: row.systemDefault === 1,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     lastFetchedAt: row.lastFetchedAt,
@@ -8029,7 +8310,12 @@ function rowToAgentSkill(row: AgentSkillRow): AgentSkill {
   };
 }
 
-type SkillWithInstallRow = SkillRow & { isActive: number; installedAt: string };
+type SkillWithInstallRow = SkillRow & {
+  isActive: number;
+  installedAt: string;
+  sourceRank?: number;
+  typeRank?: number;
+};
 
 function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
   return {
@@ -8059,6 +8345,7 @@ export interface SkillInsert {
   agent?: string;
   disableModelInvocation?: boolean;
   userInvocable?: boolean;
+  systemDefault?: boolean;
 }
 
 export function createSkill(data: SkillInsert): Skill {
@@ -8071,8 +8358,8 @@ export function createSkill(data: SkillInsert): Skill {
         id, name, description, content, type, scope, ownerAgentId,
         sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex,
         allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable,
-        version, isEnabled, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
+        version, isEnabled, systemDefault, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -8095,6 +8382,7 @@ export function createSkill(data: SkillInsert): Skill {
       data.agent ?? null,
       data.disableModelInvocation ? 1 : 0,
       data.userInvocable === false ? 0 : 1,
+      data.systemDefault ? 1 : 0,
       now,
       now,
     );
@@ -8133,6 +8421,10 @@ export function updateSkill(
   if (updates.isEnabled !== undefined) {
     sets.push("isEnabled = ?");
     params.push(updates.isEnabled ? 1 : 0);
+  }
+  if (updates.systemDefault !== undefined) {
+    sets.push("systemDefault = ?");
+    params.push(updates.systemDefault ? 1 : 0);
   }
   if (updates.allowedTools !== undefined) {
     sets.push("allowedTools = ?");
@@ -8245,7 +8537,7 @@ export interface SkillFilters {
  * which is replaced with an empty string so the row still satisfies `Skill`.
  */
 const SKILL_SLIM_COLUMNS =
-  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
+  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
 
 export function listSkills(filters?: SkillFilters): Skill[] {
   const columns = filters?.includeContent === false ? SKILL_SLIM_COLUMNS : "*";
@@ -8315,6 +8607,19 @@ export function installSkill(agentId: string, skillId: string): AgentSkill {
   return rowToAgentSkill(row);
 }
 
+export function getSystemDefaultSkills(): Skill[] {
+  return getDb()
+    .prepare<SkillRow, []>(
+      "SELECT * FROM skills WHERE systemDefault = 1 AND isEnabled = 1 ORDER BY name ASC",
+    )
+    .all()
+    .map(rowToSkill);
+}
+
+export function installSystemDefaultSkillsForAgent(agentId: string): AgentSkill[] {
+  return getSystemDefaultSkills().map((skill) => installSkill(agentId, skill.id));
+}
+
 export function uninstallSkill(agentId: string, skillId: string): boolean {
   const result = getDb()
     .prepare("DELETE FROM agent_skills WHERE agentId = ? AND skillId = ?")
@@ -8324,15 +8629,23 @@ export function uninstallSkill(agentId: string, skillId: string): boolean {
 
 export function getAgentSkills(agentId: string, activeOnly = true): SkillWithInstallInfo[] {
   const query = `
-    SELECT s.*, as2.isActive, as2.installedAt
+    SELECT s.*, as2.isActive, as2.installedAt, 0 as sourceRank,
+      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
     FROM skills s
     JOIN agent_skills as2 ON s.id = as2.skillId
     WHERE as2.agentId = ?
       ${activeOnly ? "AND as2.isActive = 1" : ""}
       AND s.isEnabled = 1
+    UNION ALL
+    SELECT s.*, 1 as isActive, s.createdAt as installedAt, 1 as sourceRank,
+      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
+    FROM skills s
+    WHERE s.systemDefault = 1
+      AND s.isEnabled = 1
     ORDER BY
-      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END,
-      s.name
+      sourceRank,
+      typeRank,
+      name
   `;
 
   const rows = getDb().prepare<SkillWithInstallRow, [string]>(query).all(agentId);

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.84.0",
+    "version": "1.88.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -4014,6 +4014,9 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "persistMemory": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -7139,6 +7142,16 @@
             "required": true,
             "name": "taskId",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
           }
         ],
         "responses": {
@@ -7610,6 +7623,9 @@
                   },
                   "ownerAgentId": {
                     "type": "string"
+                  },
+                  "systemDefault": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -7693,6 +7709,9 @@
           "200": {
             "description": "Skill updated"
           },
+          "403": {
+            "description": "System-managed skills cannot be edited"
+          },
           "404": {
             "description": "Skill not found"
           }
@@ -7721,6 +7740,9 @@
         "responses": {
           "200": {
             "description": "Skill deleted"
+          },
+          "403": {
+            "description": "System-managed skills cannot be deleted"
           },
           "404": {
             "description": "Skill not found"
@@ -10114,6 +10136,67 @@
         }
       }
     },
+    "/api/tasks/{id}/supersede": {
+      "post": {
+        "summary": "Supersede an in-progress task (terminate + spawn resume follow-up)",
+        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "graceful_shutdown",
+                      "context_limits",
+                      "manual_supersede",
+                      "crash_recovery"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task superseded (or workflow-failed)"
+          },
+          "400": {
+            "description": "Task not in_progress"
+          },
+          "403": {
+            "description": "Task belongs to another agent"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
     "/api/tasks/{id}/vcs": {
       "patch": {
         "summary": "Update VCS (PR/MR) info for a task",
@@ -10839,11 +10922,13 @@
                       "email": {
                         "type": "string",
                         "format": "email"
+                      },
+                      "notes": {
+                        "type": "string"
                       }
                     },
                     "required": [
-                      "name",
-                      "email"
+                      "name"
                     ]
                   }
                 ]

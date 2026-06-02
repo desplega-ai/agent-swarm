@@ -1,0 +1,4 @@
+added 1 member(s) to swarm qa-grp:
+worker sandbox: ij6o05u88ezbn9pnesawd
+worker expires: 2026-05-30T10:40:59.570Z (in 59m)
+inspect: e2b sandbox info ij6o05u88ezbn9pnesawd --format json

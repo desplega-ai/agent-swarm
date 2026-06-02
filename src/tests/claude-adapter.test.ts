@@ -54,13 +54,13 @@ describe("ClaudeSession CLI argument construction", () => {
     expect(config.systemPrompt).toBe("You are a test agent");
   });
 
-  test("config with additionalArgs including --resume is accepted", () => {
+  test("config with arbitrary additionalArgs is accepted", () => {
+    // Native resume is deprecated — the adapter no longer special-cases
+    // --resume in additionalArgs. The config shape just round-trips opaquely.
     const config = makeConfig({
-      additionalArgs: ["--resume", "session-abc-123"],
-      resumeSessionId: "session-abc-123",
+      additionalArgs: ["--max-turns", "10"],
     });
-    expect(config.additionalArgs).toContain("--resume");
-    expect(config.additionalArgs).toContain("session-abc-123");
+    expect(config.additionalArgs).toEqual(["--max-turns", "10"]);
   });
 });
 
@@ -246,6 +246,23 @@ describe("mergeMcpConfig (issue #369)", () => {
     const merged = mergeMcpConfig({ mcpServers: {} }, {}, TASK_ID);
     expect(Object.keys(merged.mcpServers)).toHaveLength(0);
   });
+
+  test("preserves a context-mode entry through the merge", () => {
+    const base = {
+      mcpServers: {
+        "agent-swarm": {
+          type: "http",
+          url: "http://localhost:3013/mcp",
+          headers: { Authorization: "Bearer KEY", "X-Agent-ID": "a1" },
+        },
+        "plugin_context-mode_context-mode": { command: "context-mode" },
+      },
+    };
+    const merged = mergeMcpConfig(base, null, TASK_ID);
+    expect(merged.mcpServers["plugin_context-mode_context-mode"]).toEqual({
+      command: "context-mode",
+    });
+  });
 });
 
 describe("createSessionMcpConfig", () => {
@@ -323,7 +340,13 @@ describe("createSessionMcpConfig", () => {
     const written = await readWritten(path!);
     expect(written.mcpServers["agent-swarm"]).toBeDefined();
     expect(written.mcpServers.Datadog).toBeDefined();
-    expect(Object.keys(written.mcpServers).sort()).toEqual(["Datadog", "agent-swarm"]);
+    // context-mode is injected by default (see CONTEXT_MODE_DISABLED gate); the
+    // two differently-named .mcp.json servers still merge alongside it.
+    expect(Object.keys(written.mcpServers).sort()).toEqual([
+      "Datadog",
+      "agent-swarm",
+      "plugin_context-mode_context-mode",
+    ]);
   });
 
   test("ancestor wins over repo-local on agent-swarm key conflict", async () => {
@@ -402,26 +425,66 @@ describe("createSessionMcpConfig", () => {
     const written = await readWritten(path!);
     expect(written.mcpServers["from-api"]).toBeDefined();
   });
-});
 
-describe("Stale session retry logic", () => {
-  test("--resume args are stripped correctly", () => {
-    const args = ["--max-turns", "10", "--resume", "session-abc", "--verbose"];
-    const freshArgs = args.filter((arg, idx, arr) => {
-      if (arg === "--resume") return false;
-      if (idx > 0 && arr[idx - 1] === "--resume") return false;
-      return true;
-    });
-    expect(freshArgs).toEqual(["--max-turns", "10", "--verbose"]);
+  test("includes context-mode entry when CONTEXT_MODE_DISABLED is unset", async () => {
+    const prev = process.env.CONTEXT_MODE_DISABLED;
+    delete process.env.CONTEXT_MODE_DISABLED;
+    try {
+      await writeFile(
+        join(sandbox, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            "agent-swarm": {
+              type: "http",
+              url: "http://swarm/mcp",
+              headers: { Authorization: "Bearer SWARM", "X-Agent-ID": "a1" },
+            },
+          },
+        }),
+      );
+      const cwd = join(sandbox, "repos", "foo");
+      await mkdir(cwd, { recursive: true });
+
+      const path = await createSessionMcpConfig(cwd, "task-ctx-on");
+      const written = await readWritten(path!);
+      expect(written.mcpServers["plugin_context-mode_context-mode"]).toEqual({
+        command: "context-mode",
+      });
+      // Coexists with the swarm entry.
+      expect(written.mcpServers["agent-swarm"]).toBeDefined();
+    } finally {
+      if (prev === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+      else process.env.CONTEXT_MODE_DISABLED = prev;
+    }
   });
 
-  test("args without --resume remain unchanged", () => {
-    const args = ["--max-turns", "10", "--verbose"];
-    const freshArgs = args.filter((arg, idx, arr) => {
-      if (arg === "--resume") return false;
-      if (idx > 0 && arr[idx - 1] === "--resume") return false;
-      return true;
-    });
-    expect(freshArgs).toEqual(["--max-turns", "10", "--verbose"]);
+  test("excludes context-mode entry when CONTEXT_MODE_DISABLED='true'", async () => {
+    const prev = process.env.CONTEXT_MODE_DISABLED;
+    process.env.CONTEXT_MODE_DISABLED = "true";
+    try {
+      await writeFile(
+        join(sandbox, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            "agent-swarm": {
+              type: "http",
+              url: "http://swarm/mcp",
+              headers: { Authorization: "Bearer SWARM", "X-Agent-ID": "a1" },
+            },
+          },
+        }),
+      );
+      const cwd = join(sandbox, "repos", "foo");
+      await mkdir(cwd, { recursive: true });
+
+      const path = await createSessionMcpConfig(cwd, "task-ctx-off");
+      const written = await readWritten(path!);
+      expect(written.mcpServers["plugin_context-mode_context-mode"]).toBeUndefined();
+      // The swarm entry is still present.
+      expect(written.mcpServers["agent-swarm"]).toBeDefined();
+    } finally {
+      if (prev === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+      else process.env.CONTEXT_MODE_DISABLED = prev;
+    }
   });
 });

@@ -4,6 +4,7 @@ import * as z from "zod";
 import {
   createTaskExtended,
   findCompletedTaskInThread,
+  findRecentCancelledTaskInThread,
   getActiveTaskCount,
   getAgentById,
   getDb,
@@ -13,7 +14,7 @@ import {
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema } from "@/types";
+import { AgentTaskSchema, FollowUpConfigSchema } from "@/types";
 
 export const sendTaskInputSchema = z.object({
   agentId: z
@@ -82,6 +83,9 @@ export const sendTaskInputSchema = z.object({
     .describe(
       "ID of the human user who originally requested this task chain. When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically.",
     ),
+  followUpConfig: FollowUpConfigSchema.optional().describe(
+    "Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows.",
+  ),
 });
 
 export const sendTaskOutputSchema = z.object({
@@ -112,6 +116,7 @@ export async function sendTaskHandler(
     slackThreadTs,
     slackUserId,
     requestedByUserId: inputRequestedByUserId,
+    followUpConfig,
   }: SendTaskArgs,
 ): Promise<CallToolResult> {
   if (ctx.kind === "owner" && !ctx.agentId) {
@@ -192,6 +197,17 @@ export async function sendTaskHandler(
   // When the source task is a "follow-up" (worker completed/failed notification),
   // check if there are completed tasks in the same Slack thread recently.
   // This prevents the cycle: worker completes → follow-up → Lead re-delegates → repeat.
+  //
+  // Exception: if a MORE RECENT task in the same thread was cancelled (exit 130,
+  // status='cancelled', or status='failed' with failureReason containing
+  // "cancelled"), bypass the guard. A cancellation means the work was
+  // interrupted — re-dispatch is the correct response, not a deduped no-op.
+  // Without this bypass, a cancelled worker permanently jams the thread
+  // against re-delegation when an earlier completed sibling exists.
+  //
+  // NOTE: `taskType === "resume"` (created by createResumeFollowUp on
+  // supersede) is intentionally NOT in this guard — a resume IS the legitimate
+  // re-dispatch and bypassing the check is correct. Do not add "resume" here.
   if (sourceTaskId) {
     const sourceTask = getTaskById(sourceTaskId);
     if (
@@ -205,15 +221,28 @@ export async function sendTaskHandler(
         2880, // 48 hours in minutes
       );
       if (recentCompleted) {
-        const msg = `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`;
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: creatorAgentId,
-            success: false,
-            message: msg,
-          },
-        };
+        const recentCancelled = findRecentCancelledTaskInThread(
+          sourceTask.slackChannelId,
+          sourceTask.slackThreadTs,
+          2880,
+        );
+        const cancelledMoreRecent =
+          recentCancelled &&
+          new Date(recentCancelled.lastUpdatedAt).getTime() >
+            new Date(recentCompleted.lastUpdatedAt).getTime();
+        if (!cancelledMoreRecent) {
+          const msg = `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`;
+          return {
+            content: [{ type: "text", text: msg }],
+            structuredContent: {
+              yourAgentId: creatorAgentId,
+              success: false,
+              message: msg,
+            },
+          };
+        }
+        // else: fall through — the cancellation is more recent than the
+        // completion, so re-delegation is legitimate.
       }
     }
   }
@@ -238,6 +267,7 @@ export async function sendTaskHandler(
         slackChannelId,
         slackThreadTs,
         slackUserId,
+        followUpConfig,
       });
 
       return {
@@ -290,6 +320,7 @@ export async function sendTaskHandler(
         slackChannelId,
         slackThreadTs,
         slackUserId,
+        followUpConfig,
       });
 
       return {
@@ -316,6 +347,7 @@ export async function sendTaskHandler(
       slackChannelId,
       slackThreadTs,
       slackUserId,
+      followUpConfig,
     });
 
     return {
@@ -326,13 +358,17 @@ export async function sendTaskHandler(
   });
 
   const result = txn();
+  const structuredContent = {
+    yourAgentId: creatorAgentId,
+    ...result,
+  };
 
   return {
-    content: [{ type: "text", text: result.message }],
-    structuredContent: {
-      yourAgentId: creatorAgentId,
-      ...result,
-    },
+    content: [
+      { type: "text", text: result.message },
+      { type: "text", text: JSON.stringify(result) },
+    ],
+    structuredContent,
   };
 }
 

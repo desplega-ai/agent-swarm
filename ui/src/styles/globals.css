@@ -9,6 +9,9 @@
   --color-foreground: oklch(0.141 0.005 285.823);
   --color-card: oklch(1 0 0);
   --color-card-foreground: oklch(0.141 0.005 285.823);
+  /* Recessed surface — one step off `card`, used for tool-call rows in the
+     session-log viewer so nested blocks read as layered, not flat. */
+  --color-surface: oklch(0.985 0.0015 286);
   --color-popover: oklch(1 0 0);
   --color-popover-foreground: oklch(0.141 0.005 285.823);
   --color-primary: oklch(0.555 0.163 48.998);
@@ -107,6 +110,7 @@
   --color-foreground: oklch(0.985 0 0);
   --color-card: oklch(0.21 0.006 285.885);
   --color-card-foreground: oklch(0.985 0 0);
+  --color-surface: oklch(0.185 0.006 286);
   --color-popover: oklch(0.21 0.006 285.885);
   --color-popover-foreground: oklch(0.985 0 0);
   --color-primary: oklch(0.769 0.188 70.08);
@@ -249,6 +253,86 @@ body {
   }
 }
 
+/* Session-log viewer motion — entrance for newly streamed rows, a jump-to
+ * highlight flash, and the "agent is working" orb pulse. Transform/opacity and
+ * box-shadow only (no layout thrash); all disabled under reduced-motion. */
+@keyframes sl-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.sl-enter {
+  animation: sl-enter 0.42s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+@keyframes sl-flash {
+  0% {
+    background-color: color-mix(in oklch, var(--color-primary) 22%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.sl-flash {
+  animation: sl-flash 1.3s ease-out;
+}
+
+/* Streamed-in highlight — a row that arrives while the viewer is following the
+ * tail slides in and gets a brief, light primary glow that settles. Folds in
+ * the sl-enter motion so only one `animation` runs on the element. */
+@keyframes sl-stream {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+    background-color: color-mix(in oklch, var(--color-primary) 14%, transparent);
+  }
+  28% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    background-color: transparent;
+  }
+}
+
+.sl-stream {
+  animation: sl-stream 1.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+@keyframes sl-orb {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--color-status-active) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.sl-orb {
+  animation: sl-orb 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-enter,
+  .sl-flash,
+  .sl-stream,
+  .sl-orb {
+    animation: none;
+  }
+}
+
 /* Chat message markdown prose */
 .prose-chat {
   font-size: 0.85rem;
@@ -347,4 +431,38 @@ body {
 }
 .prose-session-log pre {
   max-height: 24rem;
+}
+/* Keep bullet/number lists compact — collapse the per-item <p> margins that
+ * "loose" markdown lists (blank line between items) would otherwise inject,
+ * so agent summaries render as tight lists instead of widely-spaced blocks. */
+.prose-session-log :is(ul, ol) {
+  margin: 0.35em 0;
+  padding-left: 1.4em;
+}
+.prose-session-log li {
+  margin: 0.075em 0;
+}
+.prose-session-log li > p {
+  margin: 0;
+}
+.prose-session-log li > p + p {
+  margin-top: 0.25em;
+}
+
+/* Session-log fenced code blocks (LogCodeBlock). These scoped selectors outrank
+ * the generic `.prose-* pre` rules above (extra class = higher specificity), so
+ * the inner <pre> is reset flat — no background, no radius, no double padding —
+ * and the single clean container around it owns the styling. Color is left to
+ * inherit so code reads as foreground in messages and muted in thinking blocks. */
+.prose-chat pre.sl-code-pre,
+.prose-session-log pre.sl-code-pre {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0;
+  background: transparent;
+  max-height: 26rem;
+  overflow: auto;
+  font-family: "Space Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
 }

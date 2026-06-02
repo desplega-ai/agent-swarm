@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { TemplateConfig, TemplateResponse } from "../../../templates/schema";
+import type {
+  AgentAssetConfig,
+  AgentAssetResponse,
+  AgentAssetCategory,
+  TemplateConfig,
+  TemplateResponse,
+} from "../../../templates/schema";
+import { ASSET_CATEGORIES } from "../../../templates/schema";
 
 /** Rejects path components that aren't strictly alphanumeric/hyphen/underscore. */
 function sanitizePathComponent(component: string): string {
@@ -21,11 +28,15 @@ function getTemplatesDir(): string {
   throw new Error("Templates directory not found. Expected at ../templates or src/data/templates");
 }
 
+export function isAssetCategory(category: string): category is AgentAssetCategory {
+  return (ASSET_CATEGORIES as string[]).includes(category);
+}
+
 export function getCategories(): string[] {
   const dir = getTemplatesDir();
   return fs
     .readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && d.name !== "community")
+    .filter((d) => d.isDirectory() && d.name !== "community" && !isAssetCategory(d.name))
     .map((d) => d.name);
 }
 
@@ -120,4 +131,60 @@ export function parseTemplateId(templateId: string): {
     name: pathPart.slice(slashIndex + 1),
     version,
   };
+}
+
+// ── Asset templates (skills / schedules / workflows) ──────────────────────────
+
+export function getAssetNames(category: AgentAssetCategory): string[] {
+  const dir = path.join(getTemplatesDir(), sanitizePathComponent(category));
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+}
+
+export function getAssetConfig(category: AgentAssetCategory, name: string): AgentAssetConfig {
+  const configPath = path.join(
+    getTemplatesDir(),
+    sanitizePathComponent(category),
+    sanitizePathComponent(name),
+    "config.json",
+  );
+  const raw = fs.readFileSync(configPath, "utf-8");
+  return JSON.parse(raw) as AgentAssetConfig;
+}
+
+export function getAssetContent(category: AgentAssetCategory, name: string): string {
+  const contentPath = path.join(
+    getTemplatesDir(),
+    sanitizePathComponent(category),
+    sanitizePathComponent(name),
+    "content.md",
+  );
+  return readFileOrEmpty(contentPath);
+}
+
+export function getAsset(category: AgentAssetCategory, name: string): AgentAssetResponse {
+  return {
+    config: getAssetConfig(category, name),
+    body: getAssetContent(category, name),
+  };
+}
+
+export function getAllAssets(): Array<AgentAssetConfig> {
+  const assets: Array<AgentAssetConfig> = [];
+
+  for (const category of ASSET_CATEGORIES) {
+    for (const name of getAssetNames(category)) {
+      try {
+        const config = getAssetConfig(category, name);
+        assets.push(config);
+      } catch {
+        // Skip invalid assets
+      }
+    }
+  }
+
+  return assets;
 }

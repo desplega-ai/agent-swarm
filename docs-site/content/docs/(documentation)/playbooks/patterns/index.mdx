@@ -1,0 +1,12 @@
+---
+title: Hot Patterns
+description: Five patterns that recur across every playbook — litmus tests, drain loops, HITL gates, per-customer working directories, and no-op workflows. These are the recipes that compound, regardless of which use case you're building.
+---
+
+These are the patterns that show up in nearly every playbook. Treat them as recipes — short, focused, opinionated — that you can pull into any new flow you build on top of the swarm.
+
+- [Litmus Tests](/docs/playbooks/patterns/litmus-tests) — LLM-as-judge quality gates that hard-reject sub-bar output, using a different model family from the generator.
+- [Drain Loops](/docs/playbooks/patterns/drain-loops) — turn one big ticket into a chain of stacked, individually-reviewable PRs, then a merge loop that halts on the first failure.
+- [HITL Gates](/docs/playbooks/patterns/hitl-gates) — pause a workflow mid-flight until a human approves in Slack. The agent does the work; the human owns the irreversible step.
+- [Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories) — give each top account a persistent folder in [agent-fs](https://github.com/desplega-ai/agent-fs) so context compounds across months.
+- [No-op When Nothing Changed](/docs/playbooks/patterns/no-op-workflows) — detect "did anything actually happen?" and skip silently when not. Default for any scheduled job.

@@ -85,7 +85,7 @@ describe("CodexAdapter spawn env — harness OTEL gate", () => {
   });
 
   test("gate on (SWARM_ENABLE_HARNESS_OTEL) → spawn env carries TRACEPARENT", async () => {
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     await adapter.createSession(testConfig({ env: { SWARM_ENABLE_HARNESS_OTEL: "1" } }));
 
     expect(capturedEnv).toBeDefined();
@@ -93,14 +93,14 @@ describe("CodexAdapter spawn env — harness OTEL gate", () => {
   });
 
   test("gate on via deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias → TRACEPARENT injected", async () => {
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     await adapter.createSession(testConfig({ env: { SWARM_ENABLE_CLAUDE_CODE_OTEL: "1" } }));
 
     expect(capturedEnv?.TRACEPARENT).toBe(`00-${TRACE_ID}-${SPAN_ID}-01`);
   });
 
   test("gate off → no TRACEPARENT, existing env wiring intact", async () => {
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     await adapter.createSession(testConfig({ env: {} }));
 
     expect(capturedEnv).toBeDefined();
@@ -112,7 +112,7 @@ describe("CodexAdapter spawn env — harness OTEL gate", () => {
 
   test("gate on but unsampled active span → no TRACEPARENT", async () => {
     getActiveSpanSpy.mockReturnValue(makeSpan({ sampled: false }));
-    const adapter = new CodexAdapter();
+    const adapter = new CodexAdapter({ bypassSubprocess: true });
     await adapter.createSession(testConfig({ env: { SWARM_ENABLE_HARNESS_OTEL: "1" } }));
 
     expect(capturedEnv?.TRACEPARENT).toBeUndefined();

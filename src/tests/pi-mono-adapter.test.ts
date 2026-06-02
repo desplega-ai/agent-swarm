@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createPiRuntimeAuth, PiMonoAdapter, resolveModel } from "../providers/pi-mono-adapter";
+import {
+  createPiRuntimeAuth,
+  extractPiAssistantText,
+  PiMonoAdapter,
+  resolveModel,
+} from "../providers/pi-mono-adapter";
 
 describe("PiMonoAdapter", () => {
   test("name is 'pi'", () => {
@@ -198,6 +203,37 @@ describe("createPiRuntimeAuth", () => {
 });
 
 describe("Pi-mono event normalization", () => {
+  test("extractPiAssistantText ignores user messages", () => {
+    const text = extractPiAssistantText({
+      role: "user",
+      content: "/skill:work-on-task task-123\n\nTask: hello",
+    });
+
+    expect(text).toBe("");
+  });
+
+  test("extractPiAssistantText extracts assistant text blocks", () => {
+    const text = extractPiAssistantText({
+      role: "assistant",
+      content: [
+        { type: "text", text: "Hello, " },
+        { type: "thinking", thinking: "hidden" },
+        { type: "text", text: "world!" },
+      ],
+    });
+
+    expect(text).toBe("Hello, world!");
+  });
+
+  test("extractPiAssistantText supports string assistant content", () => {
+    const text = extractPiAssistantText({
+      role: "assistant",
+      content: "Plain assistant output",
+    });
+
+    expect(text).toBe("Plain assistant output");
+  });
+
   test("message_update with text content produces raw_log-style data", () => {
     // Simulates what PiMonoSession.handleAgentEvent does
     const event = {

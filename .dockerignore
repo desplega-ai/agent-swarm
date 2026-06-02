@@ -53,6 +53,7 @@ coverage/
 # Documentation
 *.md
 !cc-plugin/**/*.md
+!templates/skills/**/*.md
 
 # Other dockerfiles and compose files
 Dockerfile

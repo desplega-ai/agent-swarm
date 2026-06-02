@@ -14,7 +14,7 @@ A *harness provider* is the runtime that actually drives an LLM: it owns the sub
   For **configuring** an existing provider, see [Harness Configuration](/docs/guides/harness-configuration). This guide is for **implementing a new one**.
 </Callout>
 
-**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping; experimental, rolling out across DES-295 → DES-299).
+**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK hosted inside a per-task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping; experimental, rolling out across DES-295 → DES-299).
 
 ---
 
@@ -63,6 +63,7 @@ interface ProviderSessionConfig {
   apiUrl: string;           // swarm API base URL for callbacks
   apiKey: string;           // swarm API key
   cwd: string;              // workspace dir
+  /** @deprecated Always undefined — native resume removed in the 2026-05-28 plan. */
   resumeSessionId?: string;
   iteration?: number;
   logFile: string;          // jsonl log path
@@ -100,7 +101,7 @@ The runner consumes these events (not the provider's native ones) to post progre
 |---|---|---|
 | [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) | `Bun.spawn` of `claude` CLI with `--output-format stream-json`, JSONL stdout parsing | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
 | [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `MODEL_OVERRIDE=amazon-bedrock/*`, anything the AWS SDK default chain accepts (see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
-| [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Wraps `@openai/codex-sdk` `Codex` / `Thread`; `thread.runStreamed()` yields `ThreadEvent` async iterator | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
+| [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`, sends session config over stdin, and receives line-delimited events/results over stdout; the child hosts `@openai/codex-sdk` `Codex` / `Thread` and streams `ThreadEvent`s back | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
 
 ### pi-mono + Amazon Bedrock auth
@@ -131,18 +132,25 @@ Full story: [Cost & context computation](./cost-and-context-computation).
 All four are wired together by the factory at [`src/providers/index.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/index.ts):
 
 ```ts
-export function createProviderAdapter(provider: string): ProviderAdapter {
+export async function createProviderAdapter(provider: string): Promise<ProviderAdapter> {
   switch (provider) {
-    case "claude":         return new ClaudeAdapter();
-    case "pi":             return new PiMonoAdapter();
-    case "codex":          return new CodexAdapter();
-    case "claude-managed": return new ClaudeManagedAdapter();
-    default: throw new Error(`Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, claude-managed`);
+    case "claude":
+      return new ClaudeAdapter();
+    case "pi": {
+      const { PiMonoAdapter } = await import("./pi-mono-adapter");
+      return new PiMonoAdapter();
+    }
+    case "codex":
+      return new CodexAdapter();
+    case "claude-managed":
+      return new ClaudeManagedAdapter();
+    default:
+      throw new Error(`Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, claude-managed`);
   }
 }
 ```
 
-The runner reads the *resolved* `HARNESS_PROVIDER` and calls the factory once at boot. The resolved value comes from `swarm_config` overlaid on `process.env`, with this precedence (highest first):
+The runner reads the *resolved* `HARNESS_PROVIDER` and awaits the factory at boot. The async factory is intentional: providers with module-level side effects (notably `pi`) are lazy-loaded only when selected, so unused adapters cannot crash unrelated workers during startup. The resolved value comes from `swarm_config` overlaid on `process.env`, with this precedence (highest first):
 
 1. `swarm_config` `HARNESS_PROVIDER` — repo > agent > global, via `/api/config/resolved`
 2. `process.env.HARNESS_PROVIDER` — container env
@@ -174,9 +182,9 @@ Tasks may carry an optional JSON Schema on `outputSchema` that the agent's final
 | `codex` | Yes | Via MCP `store-progress` |
 | `opencode` | Yes | Via MCP `store-progress` |
 | `pi` (`pi-mono`) | Yes | Via MCP `store-progress` |
-| `devin` | Conditional | Only when `HAS_MCP=true`. In default mode the schema is **not** enforced — Devin's free-form output is stored as-is. |
+| `devin` | Yes | Via MCP `store-progress` when `HAS_MCP=true`; otherwise the runner validates direct `providerOutput` before finishing the task |
 
-When supported, validation happens in the MCP `store-progress` tool: a non-conforming output fails the tool call and the agent is asked to retry. Callers consuming a schema'd task's output should still be defensive about JSON parsing — when a task runs on default-mode Devin, `task.output` may not match the schema.
+The primary enforcement point is the MCP `store-progress` tool: a non-conforming output fails the tool call and the agent is asked to retry. For providers that return direct `providerOutput` to the runner, `ensureTaskFinished()` now performs the same JSON-parse + schema-validation check before persisting `task.output`; if validation fails, the task is marked failed instead of silently storing invalid structured output.
 
 ---
 
@@ -209,12 +217,12 @@ Assembled around `runner.ts` L1582–1596 and L3093–3133:
 
 | `ProviderSessionConfig` field | Comes from |
 |---|---|
-| `prompt` | `buildPromptForTrigger(trigger, task, memories, ...)` |
+| `prompt` | `buildPromptForTrigger(trigger, task, memories, ...)`, optionally prefixed with a bounded follow-up context preamble when `task.parentTaskId` is set |
 | `systemPrompt` | `buildSystemPrompt()` + `task.additionalSystemPrompt` (see §6) |
 | `model` | `task.model` → `MODEL_OVERRIDE` env → `""` |
 | `agentId`, `taskId`, `apiUrl`, `apiKey` | Worker env + task row |
 | `cwd` | `task.dir` → `repoContext.clonePath` → `process.cwd()` (L3050–3072) |
-| `resumeSessionId` | Parent task's provider session, looked up via `fetchProviderSessionId` (L1145–1160) when `task.parentTaskId` is set |
+| `resumeSessionId` | **Deprecated** — always `undefined`. The runner stopped threading native session resume in the 2026-05-28 plan; follow-up continuity flows entirely through the context preamble prepended to `prompt`. |
 | `iteration` | Retry counter (runner state) |
 | `logFile` | `${logDir}/${timestamp}-${taskIdSlice}.jsonl` (L3102) — see §4 |
 | `env` | Merged worker env + task-provided env |
@@ -236,10 +244,11 @@ The runner (not the adapter) owns all of these. They are listed here so you know
 
 ### Resume semantics
 
-- **Parent → child** session handoff: Claude receives `--resume <parentSessionId>` via `additionalArgs` (L3002–3016).
-- **Pause → resume**: a paused task restarts with a **new** session, re-applying `task.progress` via `buildResumePrompt` (L809–829).
-- **Codex** exposes `adapter.canResume(sessionId)` and `codex.resumeThread(...)` at [`codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) L871–873, but is not yet auto-wired to pause/resume from the runner.
-- **Claude** has a stale-session recovery path at [`claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) L489–540 that strips `--resume` and opens a fresh session with a new `logFile`.
+Native session resume (the `claude --resume <UUID>` CLI flag and `codex.resumeThread(id)` SDK call) was removed in the 2026-05-28 deprecation plan ([`thoughts/taras/plans/2026-05-28-deprecate-native-resume.md`](https://github.com/desplega-ai/agent-swarm/blob/main/thoughts/taras/plans/2026-05-28-deprecate-native-resume.md)). The reasoning: native resume relied on an on-disk transcript that disappears when the worker container restarts (deploy, OOM, autoscaler reschedule), and the harness then either errored out or silently spawned a context-less session. The bounded context preamble survives any worker restart because it is rebuilt from the parent-task chain held in the API DB.
+
+- **Parent → child** continuity is now single-layered: the runner prepends a bounded preamble (cap ~2000 tokens, see `src/commands/context-preamble.ts`) for **all** providers when `task.parentTaskId` is set, and adapters always spawn a fresh harness session. `resolveResumeSession` is preserved as an observability shim that logs which session ids *would* have been used; it never returns a `resumeSessionId`.
+- **Pause → resume**: a paused task restarts with a **new** session, re-applying `task.progress` via `buildResumePrompt` (L809–829); if the task is also part of a parent chain, the context-preamble path is applied before execution resumes.
+- **Adapter behavior**: claude / claude-managed / codex each warn and ignore any stray `resumeSessionId` they receive; the runner no longer sets one. `CodexAdapter.canResume()` returns `false` unconditionally.
 
 **What your adapter owes the task:** emit `session_init` as early as possible (so the runner can persist the provider session id), emit `tool_start`/`tool_end` faithfully (so the UI shows the agent's work), and emit a `result` with populated `CostData` before your `waitForCompletion()` resolves.
 
@@ -385,6 +394,8 @@ Composed by `getBasePrompt(args)` at [`src/prompts/base-prompt.ts:55–225`](htt
 Truncation caps: `BOOTSTRAP_MAX_CHARS=20_000` per section, `BOOTSTRAP_TOTAL_MAX_CHARS=150_000` total (`base-prompt.ts` L16–19).
 
 Identity sources (`soulMd`, `identityMd`, `claudeMd`, `toolsMd`, `heartbeatMd`) are fetched from `GET /me` at `runner.ts:2427–2449`. If missing, defaults come from the template, then from the generators in [`src/prompts/defaults.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/defaults.ts), then pushed back to the server.
+
+If the runner reuses an existing repo clone that has local changes, `ensureRepoForTask()` now auto-stashes that work before refreshing from origin. The resulting `swarm-autostash` refs are threaded into `repoContext.autoStashes` and appended to the base prompt so the active session can restore them deliberately instead of silently losing or ignoring dirty work.
 
 <Callout type="info">
   Template resolution goes over HTTP (`configureHttpResolver(apiUrl, apiKey)` at `runner.ts:2206`) to obey the API/worker DB boundary. Prompt files under `src/prompts/` must remain pure — no `bun:sqlite` or `src/be/db` imports. Enforced by `scripts/check-db-boundary.sh`.

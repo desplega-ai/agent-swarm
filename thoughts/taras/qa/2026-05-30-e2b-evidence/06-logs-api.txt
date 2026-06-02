@@ -1,0 +1,200 @@
+[migrations] Applied: 042_task_context_key (0.9ms)
+[migrations] Applying: 043_jira_source
+[migrations] Applied: 043_jira_source (2.7ms)
+[migrations] Applying: 044_provider_meta
+[migrations] Applied: 044_provider_meta (1.5ms)
+[migrations] Applying: 046_budgets_and_pricing
+[migrations] Applied: 046_budgets_and_pricing (0.4ms)
+[migrations] Applying: 047_session_costs_cost_source
+[migrations] Applied: 047_session_costs_cost_source (0.9ms)
+[migrations] Applying: 048_agent_provider
+[migrations] Applied: 048_agent_provider (0.7ms)
+[migrations] Applying: 049_wait_states
+[migrations] Applied: 049_wait_states (0.3ms)
+[migrations] Applying: 050_wait_states_scope
+[migrations] Applied: 050_wait_states_scope (0.9ms)
+[migrations] Applying: 051_memory_posteriors_and_retrieval
+[migrations] Applied: 051_memory_posteriors_and_retrieval (1.8ms)
+[migrations] Applying: 052_memory_edges
+[migrations] Applied: 052_memory_edges (0.3ms)
+[migrations] Applying: 053_agent_waiting_for_credentials_status
+[migrations] Applied: 053_agent_waiting_for_credentials_status (2.5ms)
+[migrations] Applying: 054_agent_harness_provider
+[migrations] Applied: 054_agent_harness_provider (0.8ms)
+[migrations] Applying: 055_agent_cred_status
+[migrations] Applied: 055_agent_cred_status (0.8ms)
+[migrations] Applying: 056_drop_agent_tasks_source_check
+[migrations] Applied: 056_drop_agent_tasks_source_check (3.6ms)
+[migrations] Applying: 057_inbox_item_state
+[migrations] Applied: 057_inbox_item_state (0.2ms)
+[migrations] Applying: 058_task_templates
+[migrations] Applied: 058_task_templates (0.3ms)
+[migrations] Applying: 059_pages
+[migrations] Applied: 059_pages (0.2ms)
+[migrations] Applying: 060_page_versions
+[migrations] Applied: 060_page_versions (0.2ms)
+[migrations] Applying: 061_kv_store
+[migrations] Applied: 061_kv_store (0.2ms)
+[migrations] Applying: 062_pages_view_count
+[migrations] Applied: 062_pages_view_count (1.0ms)
+[migrations] Applying: 063_cost_context_schema_relax
+[migrations] Applied: 063_cost_context_schema_relax (9.8ms)
+[migrations] Applying: 064_scripts
+[migrations] Applied: 064_scripts (0.4ms)
+[migrations] Applying: 065_script_embeddings
+[migrations] Applied: 065_script_embeddings (0.1ms)
+[migrations] Applying: 066_scripts_args_json_schema
+[migrations] Applied: 066_scripts_args_json_schema (0.9ms)
+[migrations] Applying: 067_users_first_class
+[migrations] Applied: 067_users_first_class (5.9ms)
+[migrations] Applying: 068_profile_changed_event_type
+[migrations] Applied: 068_profile_changed_event_type (2.8ms)
+[migrations] Applying: 069_agent_tasks_perf_indexes
+[migrations] Applied: 069_agent_tasks_perf_indexes (0.2ms)
+[migrations] Applying: 070_seed_state
+[migrations] Applied: 070_seed_state (0.1ms)
+[migrations] Applying: 071_codex_oauth_pool
+[migrations] Applied: 071_codex_oauth_pool (0.1ms)
+[migrations] Applying: 072_task_attachments
+[migrations] Applied: 072_task_attachments (0.2ms)
+[migrations] Applying: 073_task_attachments_agent_fs_ids
+[migrations] Applied: 073_task_attachments_agent_fs_ids (1.9ms)
+[migrations] Applying: 074_user_budget_scope
+[migrations] Applied: 074_user_budget_scope (5.6ms)
+[migrations] Applying: 076_kapso_sender_user_backfill
+[migrations] Applied: 076_kapso_sender_user_backfill (0.2ms)
+[migrations] Applying: 077_oauth_refresh_locks
+[migrations] Applied: 077_oauth_refresh_locks (0.1ms)
+[pricing] seed: 2 new row(s); 2 candidate(s); modelsdev=missing
+[seed:script] created=10 updated=0 unchanged=0 preserved=0 failed=0
+[business-use] [2026-05-30T09:35:02.328Z] [INFO] Connection check successful (deferred to first batch)
+[business-use] [2026-05-30T09:35:02.329Z] [DEBUG] Batch processor started
+[business-use] [2026-05-30T09:35:02.329Z] [INFO] Business-Use SDK initialized successfully
+MCP HTTP server running on http://localhost:3013/mcp
+telemetry: cloud=false
+[Slack] Missing SLACK_BOT_TOKEN or SLACK_APP_TOKEN, Slack integration disabled
+[GitHub] Missing GITHUB_WEBHOOK_SECRET, GitHub integration disabled
+[GitLab] Integration disabled (GITLAB_WEBHOOK_SECRET not set)
+[AgentMail] Missing AGENTMAIL_WEBHOOK_SECRET, AgentMail integration disabled
+[Linear] Integration disabled or LINEAR_CLIENT_ID not set
+[Jira] Integration disabled or JIRA_CLIENT_ID not set
+[Scheduler] Starting with 10000ms polling interval
+[Heartbeat] Starting with 90000ms interval
+[Heartbeat] Checklist starting with 1800000ms interval
+[OAuth Keepalive] Starting (interval 50min, buffer 65min)
+[HTTP] ✓ GET /health → 200 (5.6ms)
+[HTTP] ⚠️ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9 → 404 (8.0ms)
+[HTTP] ⚠️ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9 → 404 (0.8ms)
+[business-use] [2026-05-30T09:35:07.398Z] [ERROR] Network error sending batch: Unable to connect. Is the computer able to access the url?
+[Heartbeat] Reboot sweep: no in-progress tasks found
+[HTTP] ⚠️ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9 → 404 (1.2ms)
+[HTTP] ✓ GET /ecosystem → 200 (1.3ms)
+[HTTP] ✓ GET /api/config/resolved?agentId=[REDACTED]&includeSecrets=[REDACTED] → 200 (9.3ms)
+[HTTP] ⚠️ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9 → 404 (0.9ms)
+[HTTP] ✓ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9/mcp-servers?resolveSecrets=[REDACTED] → 200 (6.0ms)
+[HTTP] ✓ GET /api/repos?autoClone=[REDACTED] → 200 (1.9ms)
+[HTTP] ⚠️ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9/setup-script → 404 (1.0ms)
+[HTTP] ✓ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9/skills → 200 (1.4ms)
+[HTTP] ⚠️ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9 → 404 (0.8ms)
+[HTTP] ⚠️ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9 → 404 (1.0ms)
+[HTTP] ✓ GET /api/config/resolved?agentId=[REDACTED]&includeSecrets=[REDACTED] → 200 (0.9ms)
+[HTTP] ✓ GET /api/keys/available?keyType=[REDACTED]&totalKeys=[REDACTED] → 200 (6.6ms)
+[HTTP] ✓ GET /api/keys/available?keyType=[REDACTED]&totalKeys=[REDACTED] → 200 (0.9ms)
+[HTTP] ✓ GET /api/config?scope=[REDACTED]&includeSecrets=[REDACTED] → 200 (1.6ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (4.8ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (1.0ms)
+[HTTP] ✓ POST /api/agents → 201 (3.2ms)
+[HTTP] ✓ PUT /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9/credential-status → 200 (5.3ms)
+[HTTP] ✓ POST /api/active-sessions/cleanup → 200 (1.6ms)
+[HTTP] ✓ GET /me → 200 (0.9ms)
+[HTTP] ✓ PUT /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9/profile → 200 (4.4ms)
+[HTTP] ✓ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9/mcp-servers → 200 (1.0ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (2.2ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (1.0ms)
+[HTTP] ✓ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9/skills/signature → 200 (1.1ms)
+[HTTP] ✓ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9/skills → 200 (0.9ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (1.4ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (1.0ms)
+[HTTP] ✓ GET /api/paused-tasks → 200 (0.7ms)
+[HTTP] ✓ POST /api/heartbeat/sweep → 200 (1.9ms)
+[HTTP] ✓ POST /ping → 204 (1.4ms)
+[HTTP] ✓ GET /api/config/resolved?agentId=[REDACTED]&includeSecrets=[REDACTED] → 200 (0.9ms)
+[HTTP] ✓ GET /api/keys/available?keyType=[REDACTED]&totalKeys=[REDACTED] → 200 (1.2ms)
+[HTTP] ✓ GET /api/keys/available?keyType=[REDACTED]&totalKeys=[REDACTED] → 200 (0.9ms)
+[HTTP] ✓ GET /api/poll → 200 (1.8ms)
+[OAuth Keepalive] Running scheduled token refresh for linear...
+[OAuth] linear token expiring but cannot refresh (missing config or refresh token)
+[OAuth Keepalive] linear token check completed successfully
+[OAuth Keepalive] Running scheduled token refresh for jira...
+[OAuth] jira token expiring but cannot refresh (missing config or refresh token)
+[OAuth Keepalive] jira token check completed successfully
+[HTTP] ✓ GET /api/agents/e2b-lead-iadbgy5o9kho9gesiw5s9 → 200 (1.3ms)
+[HTTP] ✓ GET /api/poll → 200 (1.3ms)
+[HTTP] ⚠️ GET /api/agents/e2b-ijre659oast22u7rcrqqh → 404 (1.1ms)
+[HTTP] ✓ GET /api/poll → 200 (1.3ms)
+[business-use] [2026-05-30T09:35:16.854Z] [ERROR] Network error sending batch: Unable to connect. Is the computer able to access the url?
+[HTTP] ⚠️ GET /api/agents/e2b-ijre659oast22u7rcrqqh → 404 (1.4ms)
+[HTTP] ✓ GET /ecosystem → 200 (0.9ms)
+[HTTP] ✓ GET /api/poll → 200 (2.0ms)
+[HTTP] ⚠️ GET /api/agents/e2b-ijre659oast22u7rcrqqh → 404 (0.8ms)
+[HTTP] ✓ GET /api/config/resolved?agentId=[REDACTED]&includeSecrets=[REDACTED] → 200 (1.0ms)
+[HTTP] ✓ GET /api/agents/e2b-ijre659oast22u7rcrqqh/mcp-servers?resolveSecrets=[REDACTED] → 200 (1.0ms)
+[HTTP] ✓ GET /api/repos?autoClone=[REDACTED] → 200 (1.1ms)
+[HTTP] ⚠️ GET /api/agents/e2b-ijre659oast22u7rcrqqh → 404 (0.6ms)
+[HTTP] ⚠️ GET /api/agents/e2b-ijre659oast22u7rcrqqh/setup-script → 404 (0.9ms)
+[HTTP] ✓ GET /api/agents/e2b-ijre659oast22u7rcrqqh/skills → 200 (1.4ms)
+[HTTP] ✓ GET /api/poll → 200 (1.2ms)
+[HTTP] ⚠️ GET /api/agents/e2b-ijre659oast22u7rcrqqh → 404 (0.8ms)
+[HTTP] ✓ GET /api/config/resolved?agentId=[REDACTED]&includeSecrets=[REDACTED] → 200 (1.1ms)
+[HTTP] ✓ GET /api/keys/available?keyType=[REDACTED]&totalKeys=[REDACTED] → 200 (0.9ms)
+[HTTP] ✓ GET /api/keys/available?keyType=[REDACTED]&totalKeys=[REDACTED] → 200 (1.4ms)
+[HTTP] ✓ GET /api/config?scope=[REDACTED]&includeSecrets=[REDACTED] → 200 (0.8ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (1.9ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (0.8ms)
+[HTTP] ✓ POST /api/agents → 201 (1.3ms)
+[HTTP] ✓ PUT /api/agents/e2b-ijre659oast22u7rcrqqh/credential-status → 200 (1.0ms)
+[HTTP] ✓ POST /api/active-sessions/cleanup → 200 (2.0ms)
+[HTTP] ✓ GET /me → 200 (0.5ms)
+[HTTP] ✓ PUT /api/agents/e2b-ijre659oast22u7rcrqqh/profile → 200 (1.9ms)
+[HTTP] ✓ GET /api/agents/e2b-ijre659oast22u7rcrqqh/mcp-servers → 200 (0.8ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (1.6ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (1.2ms)
+[HTTP] ✓ GET /api/agents/e2b-ijre659oast22u7rcrqqh/skills/signature → 200 (1.0ms)
+[HTTP] ✓ GET /api/agents/e2b-ijre659oast22u7rcrqqh/skills → 200 (1.1ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (1.2ms)
+[HTTP] ✓ POST /api/prompt-templates/render → 200 (0.8ms)
+[HTTP] ✓ GET /api/paused-tasks → 200 (0.7ms)
+[HTTP] ✓ POST /ping → 204 (1.1ms)
+[HTTP] ✓ GET /api/config/resolved?agentId=[REDACTED]&includeSecrets=[REDACTED] → 200 (0.9ms)
+[HTTP] ✓ GET /api/keys/available?keyType=[REDACTED]&totalKeys=[REDACTED] → 200 (1.0ms)
+[HTTP] ✓ GET /api/keys/available?keyType=[REDACTED]&totalKeys=[REDACTED] → 200 (0.9ms)
+[HTTP] ✓ GET /api/poll → 200 (1.8ms)
+[HTTP] ✓ GET /api/agents/e2b-ijre659oast22u7rcrqqh → 200 (1.0ms)
+[HTTP] ✓ GET /api/poll → 200 (1.5ms)
+[HTTP] ✓ GET /api/poll → 200 (1.4ms)
+[HTTP] ✓ GET /api/poll → 200 (1.2ms)
+[HTTP] ✓ GET /api/poll → 200 (1.5ms)
+[business-use] [2026-05-30T09:35:25.685Z] [ERROR] Network error sending batch: Unable to connect. Is the computer able to access the url?
+[HTTP] ✓ GET /api/poll → 200 (1.3ms)
+[HTTP] ✓ GET /api/poll → 200 (1.9ms)
+[HTTP] ✓ GET /api/poll → 200 (1.4ms)
+[HTTP] ✓ GET /api/poll → 200 (1.4ms)
+[HTTP] ✓ GET /api/poll → 200 (1.7ms)
+[HTTP] ✓ GET /api/poll → 200 (1.4ms)
+[HTTP] ✓ GET /api/poll → 200 (1.2ms)
+[HTTP] ✓ GET /api/poll → 200 (1.5ms)
+[HTTP] ✓ GET /api/poll → 200 (1.2ms)
+[HTTP] ✓ GET /api/poll → 200 (1.5ms)
+[HTTP] ✓ GET /api/poll → 200 (1.2ms)
+[HTTP] ✓ GET /api/poll → 200 (1.2ms)
+[HTTP] ✓ GET /api/poll → 200 (1.2ms)
+[HTTP] ✓ GET /api/poll → 200 (1.3ms)
+[HTTP] ✓ GET /api/poll → 200 (1.2ms)
+[HTTP] ✓ GET /api/poll → 200 (1.5ms)
+[HTTP] ✓ GET /api/poll → 200 (1.3ms)
+[HTTP] ✓ GET /api/poll → 200 (2.0ms)
+[HTTP] ✓ GET /api/poll → 200 (2.3ms)
+[HTTP] ✓ GET /api/poll → 200 (1.3ms)
+[HTTP] ✓ GET /api/poll → 200 (1.4ms)
+[HTTP] ✓ GET /api/poll → 200 (2.1ms)
+[HTTP] ✓ GET /api/poll → 200 (1.3ms)

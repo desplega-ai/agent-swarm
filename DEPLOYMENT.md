@@ -171,9 +171,21 @@ docker build -f Dockerfile.worker -t agent-swarm-worker .
 # Or using npm script
 bun run docker:build:worker
 
-# Override the pinned Claude Code version (default: 2.1.80)
+# Override the pinned Claude Code version (default: 2.1.158)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
+
+Current worker-image defaults in `Dockerfile.worker`:
+
+- `CLAUDE_CODE_VERSION=2.1.158`
+- `PI_CODING_AGENT_VERSION=0.78.0`
+- `CODEX_VERSION=0.135.0`
+- `OPENCODE_VERSION=1.15.13`
+- `OPENCODE_SDK_VERSION=1.15.13`
+
+The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
+
+Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
 ### Run
 
@@ -504,6 +516,7 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs 
 # ADDITIVE_SLACK_BUFFER_MS=10000
 
 # Optional: Require @mention for thread follow-up routing (default: false)
+# By default, replies to swarm-started thread roots also auto-route as follow-ups.
 # SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true
 ```
 

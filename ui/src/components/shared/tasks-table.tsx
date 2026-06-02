@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { findKnownModel } from "@/lib/agent-runtime-models";
+import { formatCost } from "@/lib/cost-format";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 // ─── Column model ────────────────────────────────────────────────────────────
@@ -59,6 +60,7 @@ export type TasksTableColumnId =
   | "description"
   | "status"
   | "source"
+  | "cost"
   | "model"
   | "agent"
   | "user"
@@ -77,6 +79,7 @@ export type TasksTableColumnId =
 // server is older, the table strips the column AND the menu omits the entry.
 export const TOGGLEABLE_COLUMNS: { id: TasksTableColumnId; label: string }[] = [
   { id: "source", label: "Source" },
+  { id: "cost", label: "Cost" },
   { id: "model", label: "Model" },
   { id: "agent", label: "Agent" },
   { id: "user", label: "Requested by" },
@@ -88,6 +91,10 @@ export const TOGGLEABLE_COLUMNS: { id: TasksTableColumnId; label: string }[] = [
 ];
 
 const ALWAYS_VISIBLE: TasksTableColumnId[] = ["description", "status"];
+const ALL_COLUMN_IDS: TasksTableColumnId[] = [
+  ...ALWAYS_VISIBLE,
+  ...TOGGLEABLE_COLUMNS.map((column) => column.id),
+];
 
 // Defaults applied on first mount (when no localStorage entry exists). Deps
 // and Tags are useful but visually noisy in the default density.
@@ -194,6 +201,12 @@ function ModelCell({ value }: { value: string | undefined }) {
       <span className="truncate">{known?.label ?? value}</span>
     </span>
   );
+}
+
+function CostCell({ value }: { value: number | null | undefined }) {
+  if (value == null) return DASH;
+  const precision = value > 0 && value < 1 ? 4 : "auto";
+  return <span className="font-mono text-xs tabular-nums">{formatCost(value, { precision })}</span>;
 }
 
 function AgentCell({
@@ -321,14 +334,33 @@ function TypeCell({ value }: { value: string | undefined }) {
 
 // ─── Column visibility state (lifted out so parents can place the menu) ──────
 
-function loadHidden(storageKey: string | undefined): Set<TasksTableColumnId> | null {
+function toColumnIds(value: unknown): TasksTableColumnId[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((x): x is TasksTableColumnId => typeof x === "string");
+}
+
+function loadHidden(
+  storageKey: string | undefined,
+  defaultHiddenForNewColumns: TasksTableColumnId[],
+): Set<TasksTableColumnId> | null {
   if (!storageKey || typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(`tasks-table:hidden:${storageKey}`);
     if (!raw) return null;
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return null;
-    return new Set(arr.filter((x): x is TasksTableColumnId => typeof x === "string"));
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      const hidden = new Set(toColumnIds(parsed));
+      for (const id of defaultHiddenForNewColumns) hidden.add(id);
+      return hidden;
+    }
+    if (!parsed || typeof parsed !== "object") return null;
+    const data = parsed as { hidden?: unknown; known?: unknown };
+    const hidden = new Set(toColumnIds(data.hidden));
+    const known = new Set(toColumnIds(data.known));
+    for (const id of defaultHiddenForNewColumns) {
+      if (!known.has(id)) hidden.add(id);
+    }
+    return hidden;
   } catch {
     return null;
   }
@@ -339,7 +371,7 @@ function saveHidden(storageKey: string | undefined, hidden: Set<TasksTableColumn
   try {
     window.localStorage.setItem(
       `tasks-table:hidden:${storageKey}`,
-      JSON.stringify(Array.from(hidden)),
+      JSON.stringify({ hidden: Array.from(hidden), known: ALL_COLUMN_IDS }),
     );
   } catch {
     // Quota / private-mode failures: silently keep state in memory only.
@@ -359,10 +391,12 @@ export function useTasksColumns({
   storageKey,
   hiddenColumns,
   defaultHiddenColumns = DEFAULT_HIDDEN,
+  defaultHiddenForNewColumns = [],
 }: {
   storageKey?: string;
   hiddenColumns?: TasksTableColumnId[];
   defaultHiddenColumns?: TasksTableColumnId[];
+  defaultHiddenForNewColumns?: TasksTableColumnId[];
 }): TasksColumnsState {
   // Soft-gate the "Requested by" column on the swarm exposing the People
   // surface. When the server is older (or unknown), drop the column AND its
@@ -376,7 +410,7 @@ export function useTasksColumns({
     [userColumnSupported],
   );
   const [userHidden, setUserHidden] = useState<Set<TasksTableColumnId>>(() => {
-    const saved = loadHidden(storageKey);
+    const saved = loadHidden(storageKey, defaultHiddenForNewColumns);
     return saved ?? new Set(defaultHiddenColumns);
   });
 
@@ -542,6 +576,16 @@ export function TasksTable({
         width: 110,
         ...fixed,
         cellRenderer: (p: { value: string | undefined }) => <SourcePill value={p.value} />,
+      },
+      {
+        _id: "cost",
+        field: "totalCostUsd",
+        headerName: "Cost",
+        width: 105,
+        ...fixed,
+        cellClass: "ag-right-aligned-cell",
+        headerClass: "ag-right-aligned-header",
+        cellRenderer: (p: { value: number | null | undefined }) => <CostCell value={p.value} />,
       },
       {
         _id: "model",

@@ -1,0 +1,42 @@
+---
+title: 'Pattern: HITL Gates (Human-in-the-Loop Approval)'
+description: Pause a workflow mid-flight until a human approves in Slack. The agent does the work; the human owns the irreversible decision (sending, merging, deleting, posting publicly).
+---
+
+Pause a workflow mid-flight until a human approves in Slack. The agent does the work; the human owns the irreversible decision.
+
+<Mermaid chart={`flowchart LR
+  W["Agent does the work<br/>(draft / audit / plan)"] --> G{{"request-human-input<br/>(workflow pauses)"}}
+  G -- "approve" --> GO["Proceed<br/>(send / merge / prune)"]
+  G -- "reject" --> STOP["Archive / abort"]
+`} />
+
+## What it is
+
+A workflow node (`request-human-input`) that blocks execution and posts to Slack, then resumes only when a human reacts. The agent prepares everything up to the point of no return; the human makes the call on the irreversible step.
+
+## Where we use it
+
+- **[Lead prospecting](/docs/playbooks/lead-prospecting)** — cold outreach is drafted and queued, but never sends without a human approval.
+- **[Customer support](/docs/playbooks/proactive-customer-support)** — value-showcase reports are drafted, but a human signs off before any email reaches a customer.
+- **[Destructive infra ops](/docs/playbooks/code-health-alert-management)** — the monthly disk-cleanup audits and recommends, then waits for approval before any prune. Never auto-prunes.
+- **[Social posting](/docs/playbooks/content-generation)** — every piece of content (memes, posts, blog drafts) gets human craft, tailoring, or feedback before release.
+
+## Why it works
+
+- It keeps agents fast on the 95% (research, drafting, scheduling) while keeping humans on the 5% that's hard to undo (sending, merging, deleting).
+- It's an explicit, auditable approval — not a silent autonomous action you discover later.
+
+## How to apply
+
+- Gate the **irreversible** steps only: sending email, merging to main, deleting data, posting publicly. Don't gate reversible work — that just adds latency.
+- Give the human enough context *in the gate message* to decide without digging: a summary + a link to the full artifact in [agent-fs](https://github.com/desplega-ai/agent-fs).
+- Define both branches: what happens on approve **and** on reject (archive, retry, escalate).
+- Set a timeout/fallback so a forgotten gate doesn't wedge the workflow forever.
+
+## Used in
+
+- [Lead Prospecting](/docs/playbooks/lead-prospecting)
+- [Content Generation](/docs/playbooks/content-generation)
+- [Proactive Customer Support](/docs/playbooks/proactive-customer-support)
+- [Code Health & Alert Management](/docs/playbooks/code-health-alert-management)

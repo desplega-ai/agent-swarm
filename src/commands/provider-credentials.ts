@@ -23,7 +23,6 @@ import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapt
 import { checkCodexCredentials } from "../providers/codex-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
-import { checkPiMonoCredentials } from "../providers/pi-mono-adapter";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
 import type { AgentCredStatus, AgentLatestModel, ProviderName } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -55,12 +54,16 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
 /**
  * Run the predicate for `provider`. Unknown providers throw — call sites
  * should treat that as a configuration bug, not a user-correctable state.
+ *
+ * The `pi` case uses a dynamic import so `@earendil-works/pi-coding-agent`
+ * (which has module-level side effects that crash in the Bun compiled
+ * binary) is only loaded when the pi provider is actually selected.
  */
-export function checkProviderCredentials(
+export async function checkProviderCredentials(
   provider: string,
   env: Record<string, string | undefined>,
   opts?: CredCheckOptions,
-): CredStatus {
+): Promise<CredStatus> {
   switch (provider) {
     case "claude":
       return checkClaudeCredentials(env);
@@ -72,8 +75,10 @@ export function checkProviderCredentials(
       return checkDevinCredentials(env);
     case "opencode":
       return checkOpencodeCredentials(env, opts);
-    case "pi":
+    case "pi": {
+      const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
       return checkPiMonoCredentials(env, opts);
+    }
     default:
       throw new Error(
         `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi.`,
@@ -386,7 +391,7 @@ export async function buildCredStatusReport(
   opts: CredCheckOptions = {},
   kind: AgentCredStatus["reportKind"],
 ): Promise<AgentCredStatus> {
-  const presence = checkProviderCredentials(provider, env, opts);
+  const presence = await checkProviderCredentials(provider, env, opts);
   let liveTest: AgentCredStatus["liveTest"] = null;
   if (presence.ready) {
     const live = await validateProviderCredentials(provider);

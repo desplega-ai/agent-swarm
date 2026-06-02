@@ -1,0 +1,16 @@
+{
+  "title": "Playbooks",
+  "pages": [
+    "index",
+    "feature-development",
+    "lead-prospecting",
+    "content-generation",
+    "ux-command-center",
+    "proactive-customer-support",
+    "code-health-alert-management",
+    "reports-multiple-sources",
+    "self-documenting-release-reports",
+    "---Hot patterns---",
+    "patterns"
+  ]
+}

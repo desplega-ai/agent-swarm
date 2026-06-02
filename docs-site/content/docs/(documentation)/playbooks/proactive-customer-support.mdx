@@ -1,0 +1,90 @@
+---
+title: Proactive Customer Support
+description: Standing agents per top account — persistent working directories, scheduled value-showcase reports, automatic post-meeting ingestion, and "what changed since last touchpoint?" briefings on demand.
+---
+
+<JsonLd
+  data={{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "Maintain per-customer agents that produce proactive value-showcase reports",
+    description:
+      "How to give each top account a persistent working directory in agent-fs, ingest meeting transcripts automatically, and produce customer-facing value reports on a cadence.",
+    step: [
+      { "@type": "HowToStep", name: "Per-customer directory", text: "Create a per-account directory in agent-fs holding running notes, integration history, open questions, recent activity, and meeting transcripts." },
+      { "@type": "HowToStep", name: "Trigger", text: "A trigger fires: Slack ping, calendar event, or per-customer schedule." },
+      { "@type": "HowToStep", name: "Pull data", text: "Researcher pulls product usage + behavior data into the customer's directory." },
+      { "@type": "HowToStep", name: "Stage 1 + Stage 2", text: "Generate a Stage 1 internal credit-usage breakdown, then a Stage 2 customer-facing value showcase that strips internal jargon." },
+      { "@type": "HowToStep", name: "HITL review", text: "Human reviews and edits the draft in agent-fs." },
+      { "@type": "HowToStep", name: "Send", text: "AgentMail sends the final from a verified per-account inbox; replies route back into the swarm." }
+    ]
+  }}
+/>
+
+Standing agents per top account: scheduled value-showcase reports, post-meeting follow-ups, integration history, and "what changed since last touchpoint?" briefings on demand.
+
+<Mermaid chart={`flowchart LR
+  T["Trigger: ping /<br/>schedule / meeting"] --> RE["Researcher<br/>pull usage + behavior"]
+  RE --> WD[("per-customer<br/>agent-fs dir")]
+  GR["Granola<br/>post-call transcript"] --> WD
+  WD --> DR["Draft value-<br/>showcase report"]
+  DR --> H{{"HITL review"}}
+  H -- approve --> EM["AgentMail<br/>→ customer"]
+`} />
+
+## What it does
+
+Each top account gets a [per-customer working directory](/docs/playbooks/patterns/per-customer-working-directories) in the swarm's shared filesystem ([agent-fs](https://github.com/desplega-ai/agent-fs)). An agent maintains running notes, integration history, open questions, and recent activity. On a cadence (or on demand), the agent produces a customer-facing value-showcase report: data-driven usage + outcomes framed in *their* language, not your internal feature names.
+
+## Agents
+
+- **[Lead](https://templates.agent-swarm.dev/official/lead)** — receives the ping ("report for account X"), routes the data pull, runs the redaction gate.
+- **[Researcher](https://templates.agent-swarm.dev/official/researcher)** — pulls usage data from the product DB, behavior data from analytics, cross-references meeting notes.
+- **[Forward-Deployed Engineer](https://templates.agent-swarm.dev/official/forward-deployed-engineer)** (ours is named *Jackknife*) — owns engineering-level customer questions and the technical-state side of the report.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **[agent-fs](https://github.com/desplega-ai/agent-fs)** — per-customer working directories. Persistent across sessions; each account accumulates institutional knowledge over months. See the [Per-Customer Working Directories pattern](/docs/playbooks/patterns/per-customer-working-directories).
+- **`slack-post`** — internal handoffs + human review before send.
+
+### Custom (swarm-managed)
+
+- **`agentmail-sending`** — sends the report from the swarm's verified [AgentMail](https://www.agentmail.to/) domain (signing + signature rules enforced).
+- **`customer-value-report`** — two-stage flow: *Stage 1 (internal)* data-driven usage breakdown from the product DB; *Stage 2 (customer-facing)* strips internal jargon and reframes raw usage as outcomes ("you ran 1,200 E2E checks across 3 critical flows, catching 4 regressions before deploy").
+- **`granola-api`** — fetches meeting notes/transcripts from [Granola](https://www.granola.ai/) post-call; the agent ingests and updates the per-customer directory automatically.
+- **`posthog-interaction`** (behavior via [PostHog](https://posthog.com/)), **`clerk-analytics`** (account state via [Clerk](https://clerk.com/)), **`turso-interaction`** ([Turso](https://turso.tech/)-side state).
+
+### Third-party providers
+
+- **[Granola](https://www.granola.ai/)** — meeting notes/transcripts ingested automatically post-call.
+- **[AgentMail](https://www.agentmail.to/)** — per-account inboxes; customer replies route back into the swarm.
+
+## Workflows / Schedules
+
+These tend to be **on-demand rather than scheduled** — every top account has different reporting needs and cadence (monthly QBR vs. weekly check-in vs. milestone-driven).
+
+The recurring pattern:
+
+1. Trigger (Slack ping, calendar event, or a per-customer schedule).
+2. Researcher pulls usage + behavior data into the customer's [agent-fs](https://github.com/desplega-ai/agent-fs) directory.
+3. Agent drafts the value-showcase report (Stage 2 of the skill).
+4. Human reviews + edits in agent-fs.
+5. [AgentMail](https://www.agentmail.to/) sends the final.
+6. Replies route back via the per-account [AgentMail](https://www.agentmail.to/) inbox.
+
+Post-call automation: a [Granola](https://www.granola.ai/) webhook fires after every customer meeting → agent ingests the transcript → appends to that account's directory → flags follow-ups.
+
+## Patterns used
+
+- [**Per-Customer Working Directories**](/docs/playbooks/patterns/per-customer-working-directories) — persistent per-account context that compounds over months.
+- [**HITL Gates**](/docs/playbooks/patterns/hitl-gates) — a human signs off before any direct-to-customer email.
+
+## Tips for new swarm users
+
+- **Per-customer working directories are the unlock.** A 6-month-old note like "they care about EU data residency" is what makes the next report feel personal.
+- **Frame reports as outcomes, not features.** "You caught 4 regressions" lands; "you consumed 1,200 credits" doesn't.
+- **Strip internal jargon before sending.** A Stage 1 → Stage 2 split routinely catches internal project codes leaking into draft copy.
+- **Don't auto-send.** Even with great drafting, a human signs off on any direct-to-customer email — that's your reputation insurance.
+- **Use [AgentMail](https://www.agentmail.to/) per-account inboxes** so customer replies route back into the swarm for thread-aware follow-up.

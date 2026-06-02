@@ -89,6 +89,12 @@ export interface ProviderSessionConfig {
   apiKey: string;
   cwd: string;
   vcsRepo?: string;
+  /**
+   * @deprecated Never set by the runner — native session resume was removed in
+   * the 2026-05-28 plan. Adapters log + ignore any stray value. Follow-up
+   * continuity flows through the context preamble; see
+   * `src/commands/context-preamble.ts` and `src/commands/resume-session.ts`.
+   */
   resumeSessionId?: string;
   iteration?: number;
   logFile: string;

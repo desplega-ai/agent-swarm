@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "browser-use-cloud",
+  "displayName": "Browser Use Cloud",
+  "slug": "browser-use-cloud",
+  "title": "Browser Use Cloud",
+  "description": "Run browser automation tasks with bounded polling and explicit artifacts.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["BROWSER_USE_API_KEY"],
+  "runAllSeedersCandidate": false,
+  "tags": ["browser", "automation", "qa"]
+}

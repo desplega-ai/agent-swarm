@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, createSkill, getSkillById, initDb } from "../be/db";
+import { registerSkillDeleteTool } from "../tools/skills/skill-delete";
 import { registerSkillUpdateTool } from "../tools/skills/skill-update";
 
 const TEST_DB_PATH = "./test-skill-update-scope.sqlite";
@@ -39,7 +40,30 @@ async function callSkillUpdate(
   return result as { structuredContent: StructuredContent };
 }
 
-describe("skill-update scope promotion", () => {
+async function callSkillDelete(
+  server: McpServer,
+  callerAgentId: string | undefined,
+  args: Record<string, unknown>,
+): Promise<{ structuredContent: StructuredContent }> {
+  // biome-ignore lint/complexity/noBannedTypes: accessing internal MCP SDK type for test
+  const tools = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })
+    ._registeredTools;
+  const handler = tools["skill-delete"].handler;
+
+  const extra = {
+    sessionId: "test-session",
+    requestInfo: {
+      headers: {
+        "x-agent-id": callerAgentId ?? "",
+      },
+    },
+  };
+
+  const result = await handler(args, extra);
+  return result as { structuredContent: StructuredContent };
+}
+
+describe("skill mutation tools", () => {
   let server: McpServer;
 
   beforeAll(async () => {
@@ -59,6 +83,7 @@ describe("skill-update scope promotion", () => {
 
     server = new McpServer({ name: "test-skill-update-scope", version: "1.0.0" });
     registerSkillUpdateTool(server);
+    registerSkillDeleteTool(server);
   });
 
   afterAll(async () => {
@@ -161,5 +186,67 @@ describe("skill-update scope promotion", () => {
     const stored = getSkillById(skill.id);
     expect(stored?.scope).toBe("agent");
     expect(stored?.isEnabled).toBe(false);
+  });
+
+  test("system-default skill content updates are rejected", async () => {
+    const skill = createSkill({
+      name: "system-content-locked",
+      description: "System content lock",
+      content: "---\nname: system-content-locked\ndescription: System content lock\n---\n\nBody.",
+      type: "personal",
+      scope: "swarm",
+      ownerAgentId: WORKER_ID,
+      systemDefault: true,
+    });
+
+    const result = await callSkillUpdate(server, LEAD_ID, {
+      skillId: skill.id,
+      content: "---\nname: system-content-locked\ndescription: Changed\n---\n\nChanged.",
+    });
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("system-managed");
+
+    const stored = getSkillById(skill.id);
+    expect(stored?.description).toBe("System content lock");
+    expect(stored?.version).toBe(1);
+  });
+
+  test("system-default skill enable toggle remains allowed", async () => {
+    const skill = createSkill({
+      name: "system-toggle-allowed",
+      description: "System toggle",
+      content: "---\nname: system-toggle-allowed\ndescription: System toggle\n---\n\nBody.",
+      type: "personal",
+      scope: "swarm",
+      ownerAgentId: WORKER_ID,
+      systemDefault: true,
+    });
+
+    const result = await callSkillUpdate(server, LEAD_ID, {
+      skillId: skill.id,
+      isEnabled: false,
+    });
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(getSkillById(skill.id)?.isEnabled).toBe(false);
+  });
+
+  test("system-default skill deletes are rejected", async () => {
+    const skill = createSkill({
+      name: "system-delete-locked",
+      description: "System delete lock",
+      content: "---\nname: system-delete-locked\ndescription: System delete lock\n---\n\nBody.",
+      type: "personal",
+      scope: "swarm",
+      ownerAgentId: WORKER_ID,
+      systemDefault: true,
+    });
+
+    const result = await callSkillDelete(server, LEAD_ID, { skillId: skill.id });
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("system-managed");
+    expect(getSkillById(skill.id)).not.toBeNull();
   });
 });

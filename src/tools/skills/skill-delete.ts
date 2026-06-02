@@ -3,6 +3,9 @@ import * as z from "zod";
 import { deleteSkill, getAgentById, getSkillById } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 
+const SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE =
+  "This skill is system-managed and cannot be edited from the UI; it is re-seeded on each start. Fork it under a new name to customize.";
+
 export const registerSkillDeleteTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "skill-delete",
@@ -47,6 +50,17 @@ export const registerSkillDeleteTool = (server: McpServer) => {
             yourAgentId: requestInfo.agentId,
             success: false,
             message: "Permission denied.",
+          },
+        };
+      }
+
+      if (existing.systemDefault) {
+        return {
+          content: [{ type: "text", text: SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: false,
+            message: SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE,
           },
         };
       }

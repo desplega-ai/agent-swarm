@@ -2,7 +2,12 @@ import { resolveTemplate } from "@/prompts/resolver";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import { workflowEventBus } from "@/workflows/event-bus";
 import "@/tools/templates";
+import { recordUnmappedIdentity } from "@/be/unmapped-identities";
+import { findUserByExternalId } from "@/be/users";
 import { getKapsoNumberMapping, markKapsoMessageSeen } from "./config";
+
+const KAPSO_IDENTITY_KIND = "kapso";
+const WHATSAPP_IDENTITY_KIND = "whatsapp";
 
 /** Minimal shape of the Kapso v2 inbound webhook payload (see the kapso-whatsapp skill). */
 export interface KapsoWebhookPayload {
@@ -48,6 +53,36 @@ function buildTaskDescription(payload: KapsoWebhookPayload): string {
     test_note: payload.test ? "\n- test: true (do NOT send a real WhatsApp reply)" : "",
     message_text: extractText(message),
   }).text;
+}
+
+function normalizeKapsoSender(payload: KapsoWebhookPayload): string | null {
+  const raw = payload.message?.from ?? payload.conversation?.phone_number ?? "";
+  const digits = raw.replace(/\D/g, "");
+  return digits || null;
+}
+
+function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): string | undefined {
+  const externalId = normalizeKapsoSender(payload);
+  if (!externalId) return undefined;
+
+  const mapped =
+    findUserByExternalId(KAPSO_IDENTITY_KIND, externalId) ??
+    findUserByExternalId(WHATSAPP_IDENTITY_KIND, externalId);
+  if (mapped) return mapped.id;
+
+  recordUnmappedIdentity(KAPSO_IDENTITY_KIND, externalId, {
+    sampleEventType: "kapso.message.received",
+    sampleContext: [
+      payload.conversation?.contact_name ? `contact=${payload.conversation.contact_name}` : null,
+      payload.conversation?.id ? `conversation=${payload.conversation.id}` : null,
+      payload.message?.id ? `message=${payload.message.id}` : null,
+      payload.phone_number_id ? `phone_number_id=${payload.phone_number_id}` : null,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  });
+
+  return undefined;
 }
 
 /**
@@ -104,6 +139,7 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     taskType: "kapso-inbound",
     tags: ["kapso-whatsapp", "inbound"],
     priority: 70,
+    requestedByUserId: resolveKapsoRequestedByUserId(payload),
     contextKey: `kapso:conversation:${payload.conversation?.id ?? messageId}`,
   });
 

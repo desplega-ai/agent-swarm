@@ -1,5 +1,21 @@
 import type { ProviderName } from "../types";
 
+/**
+ * # Native session resume is deprecated.
+ *
+ * Follow-up continuity is delivered via the context preamble built by
+ * `buildContextPreamble` in `src/commands/context-preamble.ts`. The preamble
+ * is bounded, deterministic, and survives worker-container restarts — the
+ * failure modes that native resume could not handle.
+ *
+ * `resolveResumeSession` is preserved as an observability shim: it accepts
+ * the same candidate shape the runner already builds and returns every
+ * non-empty candidate in `skipped` with a deprecation reason. The result's
+ * `resumeSessionId` is always `undefined` — adapters spawn fresh sessions.
+ *
+ * Refs: thoughts/taras/plans/2026-05-28-deprecate-native-resume.md
+ */
+
 export type ResumeSessionSource = "task" | "parent";
 
 export interface ResumeSessionCandidate {
@@ -18,33 +34,28 @@ export interface ResumeSessionSkip {
 }
 
 export interface ResumeSessionResolution {
+  /**
+   * @deprecated Always `undefined`. Native session resume was removed in the
+   * 2026-05-28 deprecation. See module docstring + context-preamble.ts.
+   */
   resumeSessionId?: string;
   source?: ResumeSessionSource;
   provider?: ProviderName;
   skipped: ResumeSessionSkip[];
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const RESUME_DEPRECATED_REASON = "native resume deprecated — using context preamble";
 
-const RESUMABLE_PROVIDERS = new Set<ProviderName>(["claude", "claude-managed", "codex"]);
-
-export function isClaudeCliSessionId(sessionId: string): boolean {
-  return UUID_RE.test(sessionId);
-}
-
-function normalizeStoredProvider(candidate: ResumeSessionCandidate): ProviderName | undefined {
-  if (candidate.provider === "claude" && candidate.providerMeta?.managed === true) {
-    return "claude-managed";
-  }
-  return candidate.provider;
-}
-
-function providerSupportsResume(provider: ProviderName): boolean {
-  return RESUMABLE_PROVIDERS.has(provider);
-}
-
+/**
+ * Observability shim. Records the candidates that *would* have been resume
+ * targets in the old world; never asks the adapter to resume.
+ *
+ * `_currentProvider` is kept for call-site compatibility with the runner
+ * (both call sites already pass `state.harnessProvider`); the value is
+ * intentionally unused.
+ */
 export function resolveResumeSession(
-  currentProvider: ProviderName,
+  _currentProvider: ProviderName,
   candidates: ResumeSessionCandidate[],
 ): ResumeSessionResolution {
   const skipped: ResumeSessionSkip[] = [];
@@ -52,66 +63,12 @@ export function resolveResumeSession(
   for (const candidate of candidates) {
     const sessionId = candidate.sessionId?.trim();
     if (!sessionId) continue;
-
-    const storedProvider = normalizeStoredProvider(candidate);
-
-    if (!storedProvider) {
-      if (currentProvider === "claude" && isClaudeCliSessionId(sessionId)) {
-        return {
-          resumeSessionId: sessionId,
-          source: candidate.source,
-          provider: "claude",
-          skipped,
-        };
-      }
-
-      skipped.push({
-        source: candidate.source,
-        sessionId,
-        reason:
-          currentProvider === "claude"
-            ? "legacy Claude resume requires a UUID session id"
-            : "stored session provider is unknown",
-      });
-      continue;
-    }
-
-    if (storedProvider !== currentProvider) {
-      skipped.push({
-        source: candidate.source,
-        sessionId,
-        provider: storedProvider,
-        reason: `stored session provider ${storedProvider} does not match current provider ${currentProvider}`,
-      });
-      continue;
-    }
-
-    if (!providerSupportsResume(currentProvider)) {
-      skipped.push({
-        source: candidate.source,
-        sessionId,
-        provider: storedProvider,
-        reason: `provider ${currentProvider} does not support runner resume`,
-      });
-      continue;
-    }
-
-    if (currentProvider === "claude" && !isClaudeCliSessionId(sessionId)) {
-      skipped.push({
-        source: candidate.source,
-        sessionId,
-        provider: storedProvider,
-        reason: "Claude CLI --resume requires a UUID session id",
-      });
-      continue;
-    }
-
-    return {
-      resumeSessionId: sessionId,
+    skipped.push({
       source: candidate.source,
-      provider: storedProvider,
-      skipped,
-    };
+      sessionId,
+      provider: candidate.provider,
+      reason: RESUME_DEPRECATED_REASON,
+    });
   }
 
   return { skipped };

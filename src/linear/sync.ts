@@ -11,6 +11,7 @@ import { ensureToken } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { linearContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { isTerminalTaskStatus } from "../types";
 import {
   buildSkipMessage,
   getLinearGateConfig,
@@ -503,7 +504,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     // session can be closed. Do NOT create a duplicate swarm task. If the user
     // wants to force a fresh run, they can re-assign the issue after the
     // current task finishes.
-    if (existingTask && !["completed", "failed", "cancelled"].includes(existingTask.status)) {
+    if (existingTask && !isTerminalTaskStatus(existingTask.status)) {
       console.log(
         `[Linear Sync] Issue ${issueIdentifier} already tracked as active task ${existing.swarmId} (status: ${existingTask.status}), skipping duplicate`,
       );
@@ -671,7 +672,7 @@ export async function handleIssueUpdate(
   // Map status to swarm actions
   if (swarmStatus === "cancelled") {
     const task = getTaskById(sync.swarmId);
-    if (task && !["completed", "failed", "cancelled"].includes(task.status)) {
+    if (task && !isTerminalTaskStatus(task.status)) {
       cancelTask(sync.swarmId, `Linear issue cancelled`);
       console.log(
         `[Linear Sync] Cancelled task ${sync.swarmId} (Linear issue ${data.identifier ?? issueId} cancelled)`,
@@ -709,7 +710,7 @@ export async function handleIssueDelete(event: Record<string, unknown>): Promise
   if (!sync) return;
 
   const task = getTaskById(sync.swarmId);
-  if (task && !["completed", "failed", "cancelled"].includes(task.status)) {
+  if (task && !isTerminalTaskStatus(task.status)) {
     cancelTask(sync.swarmId, "Linear issue deleted");
     console.log(`[Linear Sync] Cancelled task ${sync.swarmId} (Linear issue ${issueId} deleted)`);
   }
@@ -750,7 +751,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     const existing = getTrackerSyncByExternalId("linear", "task", issueId);
     if (existing) {
       const existingTask = getTaskById(existing.swarmId);
-      if (existingTask && !["completed", "failed", "cancelled"].includes(existingTask.status)) {
+      if (existingTask && !isTerminalTaskStatus(existingTask.status)) {
         cancelTask(existing.swarmId, "Stopped by user from Linear");
         console.log(`[Linear Sync] Cancelled task ${existing.swarmId} (stop signal from Linear)`);
       }
@@ -775,7 +776,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     const existingTask = getTaskById(existing.swarmId);
 
     // If the task is still in progress, acknowledge but don't create a new one
-    if (existingTask && !["completed", "failed", "cancelled"].includes(existingTask.status)) {
+    if (existingTask && !isTerminalTaskStatus(existingTask.status)) {
       console.log(`[Linear Sync] Prompted on in-progress task ${existing.swarmId}, acknowledging`);
       if (sessionId) {
         postAgentSessionThought(

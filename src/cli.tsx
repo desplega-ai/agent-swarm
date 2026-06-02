@@ -16,8 +16,12 @@ import { getApiKey, setApiKey } from "./utils/api-key.ts";
 // Get CLI name from bin field (assumes single key)
 const binName = Object.keys(pkg.bin)[0];
 
-// Restore cursor on exit
-const restoreCursor = () => process.stdout.write("\x1B[?25h");
+// Restore cursor on exit — only when stdout is a TTY.  Non-TTY invocations
+// (like the codex-session-runner subprocess whose stdout is a JSON pipe)
+// must not inject terminal escape sequences into the byte stream.
+const restoreCursor = () => {
+  if (process.stdout.isTTY) process.stdout.write("\x1B[?25h");
+};
 process.on("exit", restoreCursor);
 process.on("SIGINT", () => {
   restoreCursor();
@@ -288,6 +292,56 @@ const COMMAND_HELP: Record<
       `  ${binName} claude-managed-setup --api-url https://swarm.example.com`,
     ].join("\n"),
   },
+  e2b: {
+    usage: `${binName} e2b <subcommand> [options]`,
+    description:
+      "Build Agent Swarm E2B templates and start API/worker sandboxes on demand for CI or Dockerless environments.",
+    options: [
+      "  build-template --role api|worker    Build or rebuild an E2B template",
+      "  delete-template <template...>        Delete E2B templates",
+      "  publish-template <template...>       Publish E2B templates",
+      "  unpublish-template <template...>     Make E2B templates private",
+      "  start-api --template <name>          Start the API in an E2B sandbox",
+      "  start-worker --api-url <url>         Start a worker against a public API URL",
+      "  start-stack                          Start API + lead + N workers (wizard on a TTY)",
+      "  list                                 List dispatcher sandboxes",
+      "  swarms list|info|kill|add|logs       Group/inspect/teardown/grow/tail swarms by slug",
+      "  extend <sandbox-id...>               Extend a sandbox TTL (--timeout-sec <s>)",
+      "  kill <sandbox-id...> | --all         Clean up sandboxes (--all sweeps the fleet)",
+      "",
+      "  swarms options:",
+      "  swarms list                          Group sandboxes by metadata.swarm slug",
+      "  swarms info <slug>                   API URL, key source (masked), roles, TTL, health",
+      "  swarms kill <slug> | --all           Tear down a swarm (API last), or every swarm",
+      "  swarms add <slug> [--workers <n>]    Add worker(s)/--add-lead to an existing swarm",
+      "  swarms logs <slug> [--role r]        Stream a sandbox entrypoint log (--follow to tail)",
+      "  --reveal-key                         Embed the swarm key in the dashboard deep-link (raw)",
+      "",
+      "  start-stack options:",
+      "  --swarm <slug>                       Swarm name/slug (wizard + echoed one-shot command)",
+      "  --workers <n>                        Worker count (default 1)",
+      "  --no-lead                            Legacy topology: API + N workers, no lead",
+      "  --lead-agent-id <id>                 Lead agent ID (default e2b-lead-<sandbox-id>)",
+      "  --yes / --non-interactive            Skip the wizard; use flags + defaults (headless)",
+      "  --integrations <csv>                 Allowlist of integrations to keep on",
+      "  --no-slack|github|jira|linear        Disable an integration (sets API <NAME>_DISABLE)",
+      "",
+      "  --provider <name>                    Harness provider for workers (default claude)",
+      "  --timeout-sec <s>                    Sandbox TTL (default 3600)",
+      "  --env-file / --secret                Shared env/secrets applied to all roles (repeatable)",
+      "  --<api|lead|worker>-env-file <path>  Role-scoped env file, layers on the shared one (repeatable)",
+      "  --<api|lead|worker>-secret KEY=VAL   Role-scoped secret, layers on the shared one (repeatable)",
+      "  --json                               Machine-readable output",
+      "  --dry-run                            Derive planned work without touching E2B",
+      "  -h, --help                           Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} e2b build-template --role worker`,
+      `  ${binName} e2b start-worker --api-url https://swarm.example.com --api-key "$SWARM_API_KEY"`,
+      `  ${binName} e2b start-stack --yes --swarm demo --workers 2 --api-key "$SWARM_API_KEY"`,
+      `  ${binName} e2b start-stack --yes --no-lead --workers 2 --swarm demo`,
+    ].join("\n"),
+  },
 };
 
 function printHelp(command?: string) {
@@ -319,6 +373,7 @@ function printHelp(command?: string) {
     ["docs", "Open documentation (--open to launch in browser)"],
     ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
     ["claude-managed-setup", "Bootstrap Anthropic Managed Agents (agent + env + skills)"],
+    ["e2b", "Build templates and start E2B API/worker sandboxes"],
     ["version", "Show version number"],
     ["help", "Show this help message"],
   ];
@@ -570,10 +625,20 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { runCodexLogin } = await import("./commands/codex-login");
   const codexLoginArgs = process.argv.slice(process.argv.indexOf("codex-login") + 1);
   await runCodexLogin(codexLoginArgs);
+} else if (args.command === "codex-session-runner") {
+  // Internal subcommand — invoked by CodexSubprocessSession to host a single
+  // codex session in a throwaway subprocess. See src/commands/codex-session-runner.ts
+  // for the rationale (Picateclas spawn-OOM permanent fix, 2026-05-28).
+  const { runCodexSessionRunner } = await import("./commands/codex-session-runner");
+  await runCodexSessionRunner();
 } else if (args.command === "claude-managed-setup") {
   const { runClaudeManagedSetup } = await import("./commands/claude-managed-setup");
   const setupArgs = process.argv.slice(process.argv.indexOf("claude-managed-setup") + 1);
   await runClaudeManagedSetup(setupArgs);
+} else if (args.command === "e2b") {
+  const { runE2BCommand } = await import("./commands/e2b");
+  const e2bArgs = process.argv.slice(process.argv.indexOf("e2b") + 1);
+  await runE2BCommand(e2bArgs);
 } else {
   render(<App args={args} />);
 }

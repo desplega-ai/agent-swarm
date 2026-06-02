@@ -151,7 +151,11 @@ const resolveUnmapped = route({
   params: z.object({ kind: z.string(), externalId: z.string() }),
   body: z.union([
     z.object({ userId: z.string().min(1) }),
-    z.object({ name: z.string().min(1), email: z.string().email() }),
+    z.object({
+      name: z.string().min(1),
+      email: z.string().email().optional(),
+      notes: z.string().optional(),
+    }),
   ]),
   responses: {
     200: { description: "Identity linked + kv entries cleared" },
@@ -322,7 +326,7 @@ const deleteIdentityRoute = route({
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const UNMAPPED_KINDS = ["slack", "github", "gitlab", "linear"] as const;
+const UNMAPPED_KINDS = ["slack", "github", "gitlab", "linear", "kapso"] as const;
 
 /**
  * Group the two-key-per-identity kv entries (`<externalId>:meta` json +
@@ -477,7 +481,11 @@ export async function handleUsers(
         }
         targetUserId = existing.id;
       } else {
-        const created = createUser({ name: parsed.body.name, email: parsed.body.email });
+        const created = createUser({
+          name: parsed.body.name,
+          email: parsed.body.email,
+          notes: parsed.body.notes,
+        });
         targetUserId = created.id;
       }
       linkIdentity(targetUserId, kind, externalId, actor);

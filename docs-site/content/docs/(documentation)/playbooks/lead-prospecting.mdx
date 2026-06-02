@@ -1,0 +1,91 @@
+---
+title: Lead Prospecting
+description: Plug your prospecting stack into the swarm — daily discovery, drafting, and scheduling — with a human-in-the-loop gate before anything sends. Tracks "already contacted" so re-runs don't double-touch.
+---
+
+<JsonLd
+  data={{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "Run daily AI prospecting with a human approval gate",
+    description:
+      "How to wire growth-signal sources, a contact-finder, and AgentMail into an agent swarm so prospects are discovered and drafted by agents but only sent after a human approves in Slack.",
+    step: [
+      { "@type": "HowToStep", name: "Discover", text: "Find companies showing growth signals via your analytics or telemetry source." },
+      { "@type": "HowToStep", name: "Find contacts", text: "Resolve marketing, growth, or ops contacts via a contact-finder provider." },
+      { "@type": "HowToStep", name: "Skip duplicates", text: "Check the KV store for already-contacted prospects and skip them." },
+      { "@type": "HowToStep", name: "Draft outreach", text: "Generate personalized outreach drafts per prospect, persist to agent-fs." },
+      { "@type": "HowToStep", name: "Email digest", text: "Email the human reviewer a digest with subject, preview, and agent-fs links." },
+      { "@type": "HowToStep", name: "HITL gate", text: "Workflow pauses until a human approves via Slack." },
+      { "@type": "HowToStep", name: "Send", text: "On approval, send via AgentMail and record the contact in KV." }
+    ]
+  }}
+/>
+
+Plug your prospecting tools into the swarm and let agents handle discovery, drafting, and scheduling — with a human gate before anything goes out.
+
+<Mermaid chart={`flowchart LR
+  C["Cron: daily"] --> D["Discover companies<br/>w/ growth signals"]
+  D --> F["Find marketing/<br/>growth contacts"]
+  F --> X{"Already<br/>contacted?"}
+  X -- yes --> SK["Skip"]
+  X -- no --> DR["Draft outreach<br/>→ agent-fs"]
+  DR --> RV["Email digest<br/>for review"]
+  RV --> G{{"HITL gate"}}
+  G -- approve --> SE["Send via AgentMail<br/>+ log to KV"]
+  G -- reject --> AR["Archive drafts"]
+`} />
+
+## What it does
+
+Every morning the swarm discovers companies with growth signals, finds the right contact (marketing, growth, ops), drafts personalized outreach per prospect, drops everything into a review folder, emails a summary, and **waits for explicit human approval** before sending. Tracks who's been contacted so re-runs don't double-touch.
+
+## Agents
+
+- **[Lead](https://templates.agent-swarm.dev/official/lead)** — orchestrates the daily run.
+- **[Researcher](https://templates.agent-swarm.dev/official/researcher)** (or any general-purpose worker) — discovery and email drafting.
+- **Human-in-the-loop reviewer** — you. The HITL gate blocks the workflow on a Slack reaction.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **`request-human-input`** — the HITL gate. Workflow pauses until a human reacts in Slack. See the [HITL Gates pattern](/docs/playbooks/patterns/hitl-gates).
+- **`slack-post` / `slack-reply`** — surface the review and accept the gate response.
+- **[agent-fs](https://github.com/desplega-ai/agent-fs)** — drafts live here, one folder per day's batch. You can edit before approving.
+- **Swarm KV store** — namespaced per-workflow state for the "contacted prospects" set, so re-fires don't re-prospect the same person.
+
+### Custom (swarm-managed)
+
+- **`agentmail-sending`** — sends the email once approved (enforces signing + signature rules). Routes replies back into the swarm via the per-account inbox.
+
+### Third-party providers
+
+- **Growth-signal source** — pick any analytics or telemetry tool that can surface companies showing intent. We use [Plausible](https://plausible.io/), [Google Search Console](https://search.google.com/search-console), and our own website telemetry.
+- **Contact-finder** — we use [Enginy](https://www.enginy.ai/); any CRM or contact-enrichment provider with an HTTP API works.
+- **[AgentMail](https://www.agentmail.to/)** — outbound email with per-account inboxes that route replies back into the swarm.
+
+These are *integrations*, not skills — wire them in via a [script node](/docs/guides/scripts-runtime).
+
+## Workflows / Schedules
+
+- **`daily-lead-prospecting`** — runs every morning:
+  1. Discover companies with growth signals.
+  2. Find marketing/growth/ops contacts via your contact-finder.
+  3. Skip anyone already in the "contacted" KV set.
+  4. Draft a personalized outreach per prospect, store in [agent-fs](https://github.com/desplega-ai/agent-fs).
+  5. Email a digest (subject + preview + agent-fs link to each draft) for human review.
+  6. **HITL gate** — workflow blocks here.
+  7. On approval: send via [AgentMail](https://www.agentmail.to/), log into KV. On rejection: archive and continue.
+
+## Patterns used
+
+- [**HITL Gates**](/docs/playbooks/patterns/hitl-gates) — a human approves before any outbound email sends.
+
+## Tips for new swarm users
+
+- The HITL gate is non-negotiable for cold outbound. Agents are great at drafting; humans should sign off on tone, target, and timing.
+- Keep the "contacted prospects" set in swarm KV with a TTL (90–180 days) so a prospect can be re-engaged on a sensible cadence.
+- [AgentMail](https://www.agentmail.to/)'s per-account inbox is the unlock for two-way conversations — replies route back into the swarm and can trigger follow-up flows.
+- Don't over-personalize. Two facts that prove you researched the prospect beat a paragraph of synthetic empathy.
+- Be honest about the swarm's role. We surface "drafted by an agent, sent by a human" — deception breaks trust the moment they ask.

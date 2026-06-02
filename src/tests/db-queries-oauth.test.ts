@@ -2,10 +2,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "../be/db";
 import {
+  acquireOAuthRefreshLock,
   deleteOAuthTokens,
   getOAuthApp,
   getOAuthTokens,
   isTokenExpiringSoon,
+  releaseOAuthRefreshLock,
   storeOAuthTokens,
   updateOAuthTokensAfterRefresh,
   upsertOAuthApp,
@@ -236,5 +238,30 @@ describe("isTokenExpiringSoon", () => {
     expect(isTokenExpiringSoon("expiry-test", 60000)).toBe(false);
     // With 3-minute buffer, 2-minute token is expiring soon
     expect(isTokenExpiringSoon("expiry-test", 180000)).toBe(true);
+  });
+});
+
+describe("OAuth refresh locks", () => {
+  test("allows only one owner until the lock is released", () => {
+    const owner = acquireOAuthRefreshLock("lock-test", 60_000);
+    expect(typeof owner).toBe("string");
+
+    expect(acquireOAuthRefreshLock("lock-test", 60_000)).toBeNull();
+
+    releaseOAuthRefreshLock("lock-test", owner!);
+    const nextOwner = acquireOAuthRefreshLock("lock-test", 60_000);
+    expect(typeof nextOwner).toBe("string");
+    releaseOAuthRefreshLock("lock-test", nextOwner!);
+  });
+
+  test("allows a new owner after the lock expires", () => {
+    const expiredOwner = acquireOAuthRefreshLock("expired-lock-test", -1_000);
+    expect(typeof expiredOwner).toBe("string");
+
+    const nextOwner = acquireOAuthRefreshLock("expired-lock-test", 60_000);
+    expect(typeof nextOwner).toBe("string");
+    expect(nextOwner).not.toBe(expiredOwner);
+
+    releaseOAuthRefreshLock("expired-lock-test", nextOwner!);
   });
 });

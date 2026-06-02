@@ -8,6 +8,7 @@ Thanks for your interest in contributing to Agent Swarm!
 - [Running the Project](#running-the-project)
 - [Code Quality](#code-quality)
 - [Building](#building)
+- [Releasing](#releasing)
 - [Project Structure](#project-structure)
 - [Adding New Tools](#adding-new-tools)
 
@@ -203,6 +204,28 @@ bun run docker:build:worker
 # Push to registry (maintainers only)
 bun run deploy:docker
 ```
+
+---
+
+## Releasing
+
+Releases are **automated**: pushing a changed `version` in `package.json` to `main` triggers `docker-and-deploy.yml`, which builds and tags the Docker images, publishes the E2B templates, creates the git tag, publishes to npm, and cuts a GitHub Release. You never run `npm publish` / `docker push` / `gh release` by hand.
+
+Your only job is the prep — bump the version and regenerate everything that derives from it:
+
+```bash
+# On a branch (not directly on main)
+npm version --no-git-tag-version patch   # or minor / major — edits package.json only
+
+bun run prepare-release                  # regenerates Chart.yaml + openapi.json + api-reference docs
+
+# Commit the bump AND every regenerated file together, then open a PR → merge to main
+git add package.json charts/agent-swarm/Chart.yaml openapi.json docs-site/content/docs/api-reference
+```
+
+`bun run prepare-release` (`scripts/prepare-release.ts`) runs `sync-chart-version` + `docs:openapi` and prints the changed files. If you bump the version without committing these regenerated artifacts, the merge-gate freshness/sync checks block the PR.
+
+Full flow, what each CI job publishes, and how to verify: see [runbooks/release.md](./runbooks/release.md).
 
 ---
 

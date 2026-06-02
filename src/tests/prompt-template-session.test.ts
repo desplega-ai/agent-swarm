@@ -54,11 +54,12 @@ describe("Session templates — registration", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("all 13 system templates are registered", () => {
+  test("all 14 system templates are registered", () => {
     const systemTemplates = [
       "system.agent.role",
       "system.agent.register",
       "system.agent.lead",
+      "system.agent.slack",
       "system.agent.worker",
       "system.agent.worker.slack",
       "system.agent.filesystem",
@@ -89,10 +90,12 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 18 session/system templates registered", () => {
+  test("total of 20 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    expect(sessionSystem.length).toBe(18);
+    // 20 = the original 19 + `system.session.worker.pi` (a pi-specific worker
+    // composite that omits the context_mode block — see session-templates.ts).
+    expect(sessionSystem.length).toBe(20);
   });
 });
 
@@ -150,6 +153,15 @@ describe("Session templates — individual resolution", () => {
     const result = resolveTemplate("system.agent.lead", {});
     expect(result.text).toContain("CRITICAL: You are a coordinator");
     expect(result.text).toContain("coordinator");
+    expect(result.text).not.toContain("slack-reply");
+  });
+
+  test("system.agent.slack contains Slack tool guidance", () => {
+    const result = resolveTemplate("system.agent.slack", {});
+    expect(result.text).toContain("Slack Tools");
+    expect(result.text).toContain("slack-reply");
+    expect(result.text).toContain("slack-read");
+    expect(result.text).toContain("slack-list-channels");
   });
 
   test("system.agent.worker contains worker tools", () => {

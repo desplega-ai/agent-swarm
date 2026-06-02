@@ -22,14 +22,31 @@
  * purposes and doesn't validate it as a separate JWT.
  */
 
+import { extractChatgptUserId } from "./flow.js";
 import type { CodexAuthJson, CodexOAuthCredentials } from "./types.js";
 
 export function authJsonToCredentialSelection(auth: CodexAuthJson, slot = 0, total = 1) {
+  // Prefer the per-grant `chatgpt_user_id` so two slots authenticated against
+  // the same ChatGPT Team workspace get distinct suffixes. Fall back to
+  // account_id when the JWT lacks the claim — preserves boot for any
+  // unexpected token shape, at the cost of re-introducing the slot-collision
+  // bug for that specific slot only. The warn is a deliberate canary.
+  const userId = extractChatgptUserId(auth.tokens.access_token);
+  const suffixSource = userId ?? auth.tokens.account_id;
+  if (!userId) {
+    console.warn(
+      "[codex-oauth] No chatgpt_user_id in JWT — falling back to account_id for keySuffix derivation. " +
+        "If two slots share an account, their suffixes will collide.",
+    );
+  }
   return {
+    // `selected` satisfies the CredentialSelection interface but is never read
+    // for CODEX_OAUTH: creds are materialised to ~/.codex/auth.json (not env-injected),
+    // and all tracking flows through `keySuffix` + `index` (never `selected`).
     selected: auth.tokens.account_id,
     index: slot,
     total,
-    keySuffix: auth.tokens.account_id.slice(-5),
+    keySuffix: suffixSource.slice(-5),
     keyType: "CODEX_OAUTH",
   };
 }
