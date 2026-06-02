@@ -556,6 +556,18 @@ export const INTEGRATIONS: IntegrationDef[] = [
     logoSrc: "/provider-logos/attio.svg",
     docsUrl: "https://docs.attio.com/docs/overview",
     restartRequired: true,
+    recommendedSkills: [
+      {
+        name: "attio-interaction",
+        source: "template",
+        templateRepo: "desplega-ai/agent-swarm",
+        templatePath: "templates/skills/attio-interaction",
+        roles: ["lead", "worker"],
+        reason:
+          "Canonical recipes for Attio REST API v2 reads/writes, including record query, safe upsert, notes, tasks, lists, webhooks, and rate limits.",
+        installOnSetup: true,
+      },
+    ],
     fields: [
       {
         key: "ATTIO_API_KEY",
