@@ -19,6 +19,7 @@
     "agentmail-integration",
     "sentry-integration",
     "jira-integration",
+    "google-drive-integration",
     "x402-payments"
   ]
 }

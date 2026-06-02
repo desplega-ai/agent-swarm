@@ -140,3 +140,41 @@ export function useTestClaudeManagedConnection() {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Google Drive — test-connection mutation
+//
+// Hits `POST /api/integrations/google-drive/test`. Validates the SA JSON
+// structure and attempts to obtain an access token from Google's token
+// endpoint. Always returns 200 OK with `{ ok, ... }`.
+// ---------------------------------------------------------------------------
+
+export interface GoogleDriveTestResult {
+  ok: boolean;
+  clientEmail?: string;
+  projectId?: string;
+  error?: string;
+}
+
+async function postGoogleDriveTest(): Promise<GoogleDriveTestResult> {
+  const url = `${getBaseUrl()}/api/integrations/google-drive/test`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: getHeaders(),
+    body: "{}",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Test connection failed (${res.status}): ${body.slice(0, 200)}`);
+  }
+  return (await res.json()) as GoogleDriveTestResult;
+}
+
+export function useTestGoogleDriveConnection() {
+  return useMutation<GoogleDriveTestResult, Error>({
+    mutationFn: postGoogleDriveTest,
+    onError: (err) => {
+      toast.error(`Test connection failed: ${err.message}`);
+    },
+  });
+}

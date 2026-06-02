@@ -8,6 +8,7 @@ import {
   GitBranch,
   Github,
   GitMerge,
+  HardDrive,
   KeyRound,
   ListChecks,
   type LucideIcon,
@@ -48,6 +49,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "key-round": KeyRound,
   "chart-line": ChartLine,
   cloud: Cloud,
+  "hard-drive": HardDrive,
 };
 
 function resolveIcon(iconKey: string): LucideIcon {
