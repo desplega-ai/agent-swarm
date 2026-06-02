@@ -27,7 +27,14 @@ import type { CredCheckOptions, CredStatus } from "../providers/types";
 import type { AgentCredStatus, AgentLatestModel, ProviderName } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
-export type SupportedProvider = "claude" | "claude-managed" | "codex" | "devin" | "opencode" | "pi";
+export type SupportedProvider =
+  | "claude"
+  | "claude-managed"
+  | "codex"
+  | "devin"
+  | "opencode"
+  | "pi"
+  | "acp";
 
 /**
  * Static documentation of which env vars each provider considers when running
@@ -49,6 +56,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   devin: ["DEVIN_API_KEY", "DEVIN_ORG_ID"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
+  acp: [],
 };
 
 /**
@@ -79,9 +87,11 @@ export async function checkProviderCredentials(
       const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
       return checkPiMonoCredentials(env, opts);
     }
+    case "acp":
+      return { ready: true, missing: [], satisfiedBy: "sdk-delegated" };
     default:
       throw new Error(
-        `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi.`,
+        `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
       );
   }
 }
@@ -244,6 +254,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `opencode`       | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` (pi-style) | matching provider's `/v1/models` |
  * | `pi`             | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY`           | matching provider's `/v1/models` |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (validated at first inference call) |
+ * | `acp`            | target-specific                                                         | presence-only (validated by target process) |
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v1/sessions?limit=1` |
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
@@ -349,10 +360,12 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
           latency_ms: r.latency_ms,
         };
       }
+      case "acp":
+        return presenceCheckOk();
       default:
         return {
           ok: false,
-          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi.`,
+          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
           latency_ms: Date.now() - startedAt,
         };
     }
