@@ -107,6 +107,58 @@ describe("ACPAdapter", () => {
     expect(await Bun.file(join(cwd, ".gemini/GEMINI.md")).text()).toBe("system");
   });
 
+  test("resolves codex-acp with deterministic command, sanitized env, and AGENTS.md prompt", async () => {
+    const cwd = makeTempDir();
+    await Bun.write(join(cwd, "CLAUDE.md"), "# Repo instructions");
+    const config = baseConfig({
+      cwd,
+      systemPrompt: "codex acp system",
+      env: {
+        PATH: "/usr/bin",
+        HOME: "/tmp/home",
+        SECRET_THAT_MUST_NOT_LEAK: "nope",
+        ACP_TARGET: "codex-acp",
+        OPENAI_API_KEY: "sk-test",
+        CODEX_OAUTH: "{}",
+        codex_oauth_0: "pool-token",
+      },
+    });
+
+    const target = resolveAcpTarget(config);
+
+    expect(target.target).toBe("codex-acp");
+    expect(target.command(config)).toEqual(["codex-acp"]);
+    const env = target.env(config);
+    expect(env).toMatchObject({
+      PATH: "/usr/bin",
+      HOME: "/tmp/home",
+      OPENAI_API_KEY: "sk-test",
+      CODEX_OAUTH: "{}",
+      codex_oauth_0: "pool-token",
+    });
+    expect(env.SECRET_THAT_MUST_NOT_LEAK).toBeUndefined();
+
+    await target.writeSystemPromptArtifact(config);
+    const agentsMd = await Bun.file(join(cwd, "AGENTS.md")).text();
+    expect(agentsMd).toContain("<swarm_system_prompt>");
+    expect(agentsMd).toContain("codex acp system");
+    expect(agentsMd).toContain("# Repo instructions");
+  });
+
+  test("codex-acp honors explicit ACP command overrides before the installed binary", () => {
+    const config = baseConfig({
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        ACP_TARGET: "codex-acp",
+        ACP_COMMAND: "bun",
+        ACP_TARGET_ARGS: JSON.stringify(["fake-acp-agent.ts"]),
+      },
+    });
+
+    expect(resolveAcpTarget(config).command(config)).toEqual(["bun", "fake-acp-agent.ts"]);
+  });
+
   test("runs a configured ACP target through initialize, session/new, and session/prompt", async () => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
@@ -185,6 +237,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         env: {
           PATH: process.env.PATH ?? "",
           HOME: process.env.HOME ?? "",
+          ACP_TARGET: "codex-acp",
           ACP_TARGET_COMMAND: "bun",
           ACP_TARGET_ARGS: JSON.stringify([agentPath]),
         },

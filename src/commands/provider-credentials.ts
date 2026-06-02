@@ -114,6 +114,10 @@ function checkAcpCredentials(
     };
   }
 
+  if (target === "codex-acp") {
+    return checkCodexCredentials(env, opts);
+  }
+
   if (target !== "gemini-cli") {
     return { ready: true, missing: [], satisfiedBy: "sdk-delegated" };
   }
@@ -425,6 +429,9 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
           if (env.CLAUDE_CODE_OAUTH_TOKEN) return presenceCheckOk();
           if (env.ANTHROPIC_API_KEY) return checkAnthropicApiKey(env.ANTHROPIC_API_KEY);
           return presenceCheckOk();
+        }
+        if (acpTarget === "codex-acp") {
+          return validateProviderCredentials("codex");
         }
         return presenceCheckOk();
       }

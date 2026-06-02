@@ -373,6 +373,29 @@ describe("checkProviderCredentials dispatcher", () => {
     const acpStatus = await checkProviderCredentials("acp", {}, { homeDir: HOME, fs: noFiles });
     expect(acpStatus.ready).toBe(true);
     expect(acpStatus.satisfiedBy).toBe("sdk-delegated");
+
+    const acpCodexStatus = await checkProviderCredentials(
+      "acp",
+      { ACP_TARGET: "codex-acp", OPENAI_API_KEY: "x" },
+      { homeDir: HOME, fs: noFiles },
+    );
+    expect(acpCodexStatus.ready).toBe(true);
+    expect(acpCodexStatus.satisfiedBy).toBe("side-effect-pending");
+  });
+
+  test("ACP codex-acp target fails preflight clearly when Codex credentials are missing", async () => {
+    const HOME = "/home/worker";
+    const status = await checkProviderCredentials(
+      "acp",
+      { ACP_TARGET: "codex-acp" },
+      { homeDir: HOME, fs: noFiles },
+    );
+
+    expect(status.ready).toBe(false);
+    expect(status.missing).toContain("OPENAI_API_KEY");
+    expect(status.missing).toContain("CODEX_OAUTH");
+    expect(status.missing).toContain(`${HOME}/.codex/auth.json`);
+    expect(status.hint).toContain("Set OPENAI_API_KEY");
   });
 
   test("checks Gemini CLI credentials when acp target is gemini-cli", async () => {
