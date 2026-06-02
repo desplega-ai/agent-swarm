@@ -52,6 +52,7 @@ import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { interpolate } from "../workflows/template.ts";
 import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
+import { syncProfileFilesToServer } from "./profile-sync.ts";
 import {
   buildCredStatusReport,
   buildLatestModelReport,
@@ -1438,6 +1439,14 @@ interface RunnerState {
    * (per-task live re-resolution) will mutate this between tasks.
    */
   harnessProvider: ProviderName;
+  /**
+   * Whether the active adapter runs in a local worker container with a
+   * `/workspace` FS (claude, pi, codex, opencode = true; devin,
+   * claude-managed = false). Mirrors `adapter.traits.hasLocalEnvironment`,
+   * kept in sync at construction and on harness swap. Gates the session-end
+   * FS → DB profile sync (see `checkCompletedProcesses`).
+   */
+  hasLocalEnvironment: boolean;
 }
 
 /** Buffer for session logs */
@@ -3217,6 +3226,30 @@ async function checkCompletedProcesses(
       }
     }
   }
+
+  // Harness-agnostic FS → DB profile sync at session end.
+  //
+  // The Claude plugin Stop hook and the pi extension sync SOUL/IDENTITY/TOOLS/
+  // CLAUDE.md + start-up.sh on their own, but codex/opencode have no such path
+  // and pi's can silently not-fire (2026-06-01 regression). Running the sync
+  // here — at the single point where every completed harness session converges
+  // (including crashes, since the process resolved with an exit code) — makes
+  // persistence reliable for ALL local-environment harnesses without
+  // per-adapter code. Gated on `hasLocalEnvironment` so devin / claude-managed
+  // (no `/workspace`) are skipped. Idempotent: the profile route only writes a
+  // new context version when the content hash changes, so pi's double-sync and
+  // claude's redundant POST collapse to a no-op. NON-FATAL — never blocks
+  // completion; failures are logged (scrubbed) inside the helper.
+  if (apiConfig && state.hasLocalEnvironment && completedTasks.length > 0) {
+    await syncProfileFilesToServer({
+      agentId: apiConfig.agentId,
+      apiUrl: apiConfig.apiUrl,
+      apiKey: apiConfig.apiKey,
+      changeSource: "session_sync",
+    }).catch((err) => {
+      console.warn(`[${role}] ${scrubSecrets(`Profile sync failed: ${err}`)}`);
+    });
+  }
 }
 
 const TEMPLATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -3520,6 +3553,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     activeTasks: new Map(),
     maxConcurrent,
     harnessProvider: bootProvider,
+    hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
   };
 
   // Track tasks already signaled for cancellation to avoid repeated SIGTERM
@@ -3574,6 +3608,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       try {
         adapter = await createProviderAdapter(resolvedProvider);
         state.harnessProvider = resolvedProvider;
+        state.hasLocalEnvironment = adapter.traits.hasLocalEnvironment;
         basePrompt = await buildSystemPrompt();
         resolvedSystemPrompt = additionalSystemPrompt
           ? `${basePrompt}\n\n${additionalSystemPrompt}`
