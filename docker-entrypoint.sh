@@ -241,32 +241,32 @@ elif [ "$HARNESS_PROVIDER" = "acp" ]; then
     # ACP binary verification is target-dependent.
     ACP_TARGET="${ACP_TARGET:-custom}"
     case "$ACP_TARGET" in
-        gemini)
+        gemini|gemini-cli)
             if ! command -v gemini > /dev/null 2>&1; then
-                echo "FATAL: gemini CLI not found on PATH (required for ACP target 'gemini')"
+                echo "Warning: gemini CLI not found on PATH (needed for ACP target 'gemini-cli')"
                 echo "  Install: npm install -g @google/gemini-cli"
-                echo "  PATH=$PATH"
-                exit 1
+                echo "  The binary is NOT bundled in the worker image by default."
+            else
+                echo "ACP target binary: $(command -v gemini) (gemini-cli)"
             fi
-            echo "ACP target binary: $(command -v gemini) (gemini)"
             ;;
         claude-agent-acp)
             if ! command -v claude-agent-acp > /dev/null 2>&1; then
-                echo "FATAL: claude-agent-acp not found on PATH (required for ACP target 'claude-agent-acp')"
+                echo "Warning: claude-agent-acp not found on PATH (needed for ACP target 'claude-agent-acp')"
                 echo "  Install: npm install -g @zed-industries/claude-agent-acp"
-                echo "  PATH=$PATH"
-                exit 1
+                echo "  The binary is NOT bundled in the worker image by default."
+            else
+                echo "ACP target binary: $(command -v claude-agent-acp) (claude-agent-acp)"
             fi
-            echo "ACP target binary: $(command -v claude-agent-acp) (claude-agent-acp)"
             ;;
         codex-acp)
             if ! command -v codex-acp > /dev/null 2>&1; then
-                echo "FATAL: codex-acp not found on PATH (required for ACP target 'codex-acp')"
+                echo "Warning: codex-acp not found on PATH (needed for ACP target 'codex-acp')"
                 echo "  Install: cargo install codex-acp (from zed-industries/codex-acp)"
-                echo "  PATH=$PATH"
-                exit 1
+                echo "  The binary is NOT bundled in the worker image by default."
+            else
+                echo "ACP target binary: $(command -v codex-acp) (codex-acp)"
             fi
-            echo "ACP target binary: $(command -v codex-acp) (codex-acp)"
             ;;
         custom)
             ACP_CMD="${ACP_TARGET_COMMAND:-${ACP_COMMAND:-}}"

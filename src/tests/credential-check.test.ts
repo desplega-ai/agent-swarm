@@ -446,6 +446,23 @@ describe("checkProviderCredentials dispatcher", () => {
     expect(withOAuthFile.satisfiedBy).toBe("file");
   });
 
+  test("validates live acp/claude-agent-acp fails when no Claude credentials are present", async () => {
+    const { validateProviderCredentials } = await import("../commands/provider-credentials");
+    const originalEnv = { ...process.env };
+    try {
+      delete process.env.ACP_TARGET;
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.CLAUDE_API_KEY;
+      process.env.ACP_TARGET = "claude-agent-acp";
+      const result = await validateProviderCredentials("acp");
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("claude-agent-acp");
+    } finally {
+      Object.assign(process.env, originalEnv);
+    }
+  });
+
   test("throws on unknown provider", async () => {
     expect(checkProviderCredentials("nope", {})).rejects.toThrow(/unknown provider/i);
   });

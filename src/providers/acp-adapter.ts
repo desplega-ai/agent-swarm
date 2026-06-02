@@ -10,7 +10,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { extractAcpUsageMetrics, translateAcpSessionNotification } from "./acp-swarm-events";
-import { type AcpCostProvider, resolveAcpTarget } from "./acp-targets";
+import { type AcpArtifactCleanup, type AcpCostProvider, resolveAcpTarget } from "./acp-targets";
 import type {
   CostData,
   ProviderAdapter,
@@ -74,6 +74,7 @@ class ACPSession implements ProviderSession {
     private readonly diagnostics: AcpProcessDiagnostics,
     private readonly costProvider: AcpCostProvider,
     private readonly prompt: ContentBlock[],
+    private readonly artifactCleanup: AcpArtifactCleanup,
     sessionId: string,
   ) {
     this.sessionId = sessionId;
@@ -172,6 +173,7 @@ class ACPSession implements ProviderSession {
       });
     } finally {
       this.process.kill();
+      await this.artifactCleanup.cleanup();
     }
   }
 
@@ -220,13 +222,16 @@ export class ACPAdapter implements ProviderAdapter {
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const target = resolveAcpTarget(config);
-    await target.writeSystemPromptArtifact(config);
+    // Validate all config BEFORE writing any artifacts to disk (Fix #4: invalid
+    // config must not leave a secret-bearing system prompt on disk).
     const command = target.command(config);
     const prompt = target.prompt(config);
     const costProvider = target.costProvider(config);
+    const env = target.env(config);
+    const artifactCleanup = await target.writeSystemPromptArtifact(config);
     const proc = Bun.spawn(command, {
       cwd: config.cwd,
-      env: target.env(config),
+      env,
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -275,6 +280,7 @@ export class ACPAdapter implements ProviderAdapter {
         diagnostics,
         costProvider,
         prompt,
+        artifactCleanup,
         newSession.sessionId,
       );
       for (const event of startupEvents.splice(0)) {
@@ -284,6 +290,7 @@ export class ACPAdapter implements ProviderAdapter {
     } catch (err) {
       proc.kill();
       diagnostics.close();
+      await artifactCleanup.cleanup();
       throw new Error(
         `ACP target failed during ${startupStep}: ${scrubSecrets(formatError(err))}${diagnostics.errorSuffix()}`,
       );

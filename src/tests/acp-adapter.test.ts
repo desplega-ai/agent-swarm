@@ -214,6 +214,24 @@ describe("ACPAdapter", () => {
     expect(resolveAcpTarget(config).command(config)).toEqual(["bun", "fake-acp-agent.ts"]);
   });
 
+  test("invalid custom config does NOT create system prompt artifact on disk", async () => {
+    const cwd = makeTempDir();
+    const config = baseConfig({
+      cwd,
+      systemPrompt: "secret-system-prompt-that-should-not-leak",
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        ACP_COMMAND: "bun",
+        ACP_SYSTEM_PROMPT_ARTIFACT_PATH: "should-not-exist.txt",
+        ACP_COST_PROVIDER: "totally-invalid-provider",
+      },
+    });
+    const adapter = new ACPAdapter();
+    await expect(adapter.createSession(config)).rejects.toThrow("Unsupported ACP_COST_PROVIDER");
+    expect(existsSync(join(cwd, "should-not-exist.txt"))).toBe(false);
+  });
+
   test("runs a configured ACP target through initialize, session/new, and session/prompt", async () => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");

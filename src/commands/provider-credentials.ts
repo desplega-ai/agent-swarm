@@ -428,7 +428,13 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
         if (acpTarget === "claude-agent-acp") {
           if (env.CLAUDE_CODE_OAUTH_TOKEN) return presenceCheckOk();
           if (env.ANTHROPIC_API_KEY) return checkAnthropicApiKey(env.ANTHROPIC_API_KEY);
-          return presenceCheckOk();
+          if (env.CLAUDE_API_KEY) return presenceCheckOk();
+          return {
+            ok: false,
+            error:
+              "ACP target claude-agent-acp requires Claude credentials (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, or CLAUDE_API_KEY).",
+            latency_ms: Date.now() - startedAt,
+          };
         }
         if (acpTarget === "codex-acp") {
           return validateProviderCredentials("codex");

@@ -7,13 +7,19 @@ import type { CostData, ProviderSessionConfig } from "./types";
 export type AcpTarget = "custom" | "gemini-cli" | "claude-agent-acp" | "codex-acp";
 export type AcpCostProvider = NonNullable<CostData["provider"]>;
 
+export interface AcpArtifactCleanup {
+  cleanup(): Promise<void>;
+}
+
+const NOOP_CLEANUP: AcpArtifactCleanup = { cleanup: async () => {} };
+
 export interface AcpTargetProfile {
   readonly target: AcpTarget;
   command(config: ProviderSessionConfig): string[];
   env(config: ProviderSessionConfig): Record<string, string>;
   prompt(config: ProviderSessionConfig): ContentBlock[];
   costProvider(config: ProviderSessionConfig): AcpCostProvider;
-  writeSystemPromptArtifact(config: ProviderSessionConfig): Promise<void>;
+  writeSystemPromptArtifact(config: ProviderSessionConfig): Promise<AcpArtifactCleanup>;
 }
 
 export class AcpTargetResolutionError extends Error {
@@ -197,10 +203,11 @@ const customTargetProfile: AcpTargetProfile = {
   },
   async writeSystemPromptArtifact(config) {
     const relativePath = systemPromptPath(config);
-    if (!relativePath) return;
+    if (!relativePath) return NOOP_CLEANUP;
     const targetPath = relativePath.startsWith("/") ? relativePath : join(config.cwd, relativePath);
     await mkdir(dirname(targetPath), { recursive: true });
     await Bun.write(targetPath, config.systemPrompt ?? "");
+    return NOOP_CLEANUP;
   },
 };
 
@@ -248,6 +255,7 @@ const geminiCliTargetProfile: AcpTargetProfile = {
     const relativePath = readEnv(config, "ACP_GEMINI_SYSTEM_PROMPT_PATH") ?? "GEMINI.md";
     const targetPath = relativePath.startsWith("/") ? relativePath : join(config.cwd, relativePath);
     await Bun.write(targetPath, config.systemPrompt ?? "");
+    return NOOP_CLEANUP;
   },
 };
 
@@ -307,9 +315,10 @@ const claudeAgentAcpTargetProfile: AcpTargetProfile = {
     return "claude";
   },
   async writeSystemPromptArtifact(config) {
-    if (!config.systemPrompt) return;
+    if (!config.systemPrompt) return NOOP_CLEANUP;
     const targetPath = join(config.cwd, "CLAUDE.md");
     await Bun.write(targetPath, config.systemPrompt);
+    return NOOP_CLEANUP;
   },
 };
 
@@ -344,7 +353,7 @@ const codexAcpTargetProfile: AcpTargetProfile = {
     return "codex";
   },
   async writeSystemPromptArtifact(config) {
-    await writeCodexAgentsMd(config.cwd, config.systemPrompt);
+    return await writeCodexAgentsMd(config.cwd, config.systemPrompt);
   },
 };
 
