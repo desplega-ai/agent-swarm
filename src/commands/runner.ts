@@ -52,7 +52,7 @@ import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { interpolate } from "../workflows/template.ts";
 import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
-import { syncProfileFilesToServer } from "./profile-sync.ts";
+import { resolveClaudeMdPath, syncProfileFilesToServer } from "./profile-sync.ts";
 import {
   buildCredStatusReport,
   buildLatestModelReport,
@@ -1425,6 +1425,21 @@ interface RunningTask {
     keySuffix: string;
     keyIndex: number;
   };
+  /**
+   * Harness provider this session was actually spawned/resumed on, snapshotted
+   * at spawn time. The runner lets in-flight sessions finish on their original
+   * adapter after a live provider swap, so the session-end profile sync must
+   * decide based on THIS value — not the mutable global `state.harnessProvider`.
+   */
+  harnessProvider: ProviderName;
+  /**
+   * Whether this session ran in a local `/workspace` environment, snapshotted
+   * from `adapter.traits.hasLocalEnvironment` at spawn time. Gates the
+   * session-end FS → DB profile sync per finished session (a session that
+   * started local must still sync even if the worker was swapped to a remote
+   * provider before it completed, and vice versa).
+   */
+  hasLocalEnvironment: boolean;
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -1439,14 +1454,6 @@ interface RunnerState {
    * (per-task live re-resolution) will mutate this between tasks.
    */
   harnessProvider: ProviderName;
-  /**
-   * Whether the active adapter runs in a local worker container with a
-   * `/workspace` FS (claude, pi, codex, opencode = true; devin,
-   * claude-managed = false). Mirrors `adapter.traits.hasLocalEnvironment`,
-   * kept in sync at construction and on harness swap. Gates the session-end
-   * FS → DB profile sync (see `checkCompletedProcesses`).
-   */
-  hasLocalEnvironment: boolean;
 }
 
 /** Buffer for session logs */
@@ -3055,6 +3062,11 @@ async function spawnProviderProcess(
     promise,
     result: null,
     credentialInfo,
+    // Snapshot the provider + local-env trait of the adapter this session is
+    // spawned on, so the session-end sync decision survives a live provider
+    // swap that mutates the global RunnerState (review finding 2).
+    harnessProvider: opts.harnessProvider,
+    hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
   };
 
   // Non-blocking completion tracking
@@ -3082,6 +3094,8 @@ async function checkCompletedProcesses(
     cursorUpdates?: Array<{ channelId: string; ts: string }>;
     workingDir?: string;
     credentialInfo?: RunningTask["credentialInfo"];
+    harnessProvider: ProviderName;
+    hasLocalEnvironment: boolean;
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -3097,6 +3111,8 @@ async function checkCompletedProcesses(
         cursorUpdates: task.cursorUpdates,
         workingDir: task.workingDir,
         credentialInfo: task.credentialInfo,
+        harnessProvider: task.harnessProvider,
+        hasLocalEnvironment: task.hasLocalEnvironment,
       });
     }
   }
@@ -3235,17 +3251,27 @@ async function checkCompletedProcesses(
   // here — at the single point where every completed harness session converges
   // (including crashes, since the process resolved with an exit code) — makes
   // persistence reliable for ALL local-environment harnesses without
-  // per-adapter code. Gated on `hasLocalEnvironment` so devin / claude-managed
-  // (no `/workspace`) are skipped. Idempotent: the profile route only writes a
-  // new context version when the content hash changes, so pi's double-sync and
-  // claude's redundant POST collapse to a no-op. NON-FATAL — never blocks
-  // completion; failures are logged (scrubbed) inside the helper.
-  if (apiConfig && state.hasLocalEnvironment && completedTasks.length > 0) {
+  // per-adapter code. Idempotent: the profile route only writes a new context
+  // version when the content hash changes, so pi's double-sync and claude's
+  // redundant POST collapse to a no-op. NON-FATAL — never blocks completion;
+  // failures are logged (scrubbed) inside the helper.
+  //
+  // The local-env gate is per FINISHED session, snapshotted at spawn time —
+  // NOT the mutable global `state.hasLocalEnvironment`. The runner lets
+  // in-flight sessions finish on their original adapter after a live provider
+  // swap, so reading the global would (a) skip a session that started local
+  // when the worker has since flipped to a remote provider, and (b) sync stale
+  // local files after a remote session finishes once the worker flipped local.
+  // We sync when ANY finished session in this batch ran locally, and pick the
+  // CLAUDE.md source from those sessions' providers (review finding 2 + 1).
+  const localCompleted = completedTasks.filter((t) => t.hasLocalEnvironment);
+  if (apiConfig && localCompleted.length > 0) {
     await syncProfileFilesToServer({
       agentId: apiConfig.agentId,
       apiUrl: apiConfig.apiUrl,
       apiKey: apiConfig.apiKey,
       changeSource: "session_sync",
+      claudeMdPath: resolveClaudeMdPath(localCompleted.map((t) => t.harnessProvider)),
     }).catch((err) => {
       console.warn(`[${role}] ${scrubSecrets(`Profile sync failed: ${err}`)}`);
     });
@@ -3553,7 +3579,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     activeTasks: new Map(),
     maxConcurrent,
     harnessProvider: bootProvider,
-    hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
   };
 
   // Track tasks already signaled for cancellation to avoid repeated SIGTERM
@@ -3608,7 +3633,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       try {
         adapter = await createProviderAdapter(resolvedProvider);
         state.harnessProvider = resolvedProvider;
-        state.hasLocalEnvironment = adapter.traits.hasLocalEnvironment;
         basePrompt = await buildSystemPrompt();
         resolvedSystemPrompt = additionalSystemPrompt
           ? `${basePrompt}\n\n${additionalSystemPrompt}`
