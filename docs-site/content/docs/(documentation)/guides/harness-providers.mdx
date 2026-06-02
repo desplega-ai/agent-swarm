@@ -395,6 +395,8 @@ Truncation caps: `BOOTSTRAP_MAX_CHARS=20_000` per section, `BOOTSTRAP_TOTAL_MAX_
 
 Identity sources (`soulMd`, `identityMd`, `claudeMd`, `toolsMd`, `heartbeatMd`) are fetched from `GET /me` at `runner.ts:2427–2449`. If missing, defaults come from the template, then from the generators in [`src/prompts/defaults.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/defaults.ts), then pushed back to the server.
 
+If the runner reuses an existing repo clone that has local changes, `ensureRepoForTask()` now auto-stashes that work before refreshing from origin. The resulting `swarm-autostash` refs are threaded into `repoContext.autoStashes` and appended to the base prompt so the active session can restore them deliberately instead of silently losing or ignoring dirty work.
+
 <Callout type="info">
   Template resolution goes over HTTP (`configureHttpResolver(apiUrl, apiKey)` at `runner.ts:2206`) to obey the API/worker DB boundary. Prompt files under `src/prompts/` must remain pure — no `bun:sqlite` or `src/be/db` imports. Enforced by `scripts/check-db-boundary.sh`.
 </Callout>

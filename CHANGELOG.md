@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **System-default `swarm-scripts` skill + bundled templates in Docker images** (#614) — the repo now ships a built-in scripts skill/decision rubric as a system-managed default, and both `Dockerfile` and `Dockerfile.worker` copy `templates/` into the image so those defaults are present in compiled deployments.
 - **Context-mode tools on all local coding harnesses** (#599) — Claude Code, Codex, and opencode workers now advertise the `ctx_*` context-mode MCP tools by default, giving every local harness the same compressed-search / fetch-and-index workflow. `CONTEXT_MODE_DISABLED=true` remains the per-worker escape hatch.
 - **E2B dispatch CLI** (#574) — new `agent-swarm e2b` subcommands build/publish templates and start API or worker sandboxes on demand for CI and Dockerless smoke-test workflows.
 - **E2B swarm lifecycle CLI v1** (#601) — `agent-swarm e2b` now covers grouped swarm operations end-to-end: interactive/headless `start-stack` launches an API, a lead, and N workers; `e2b swarms list|info|kill|add|logs` manages those groups by slug; `e2b extend` resyncs live TTLs; and role-scoped `--api|lead|worker-{env-file,secret}` flags layer per-role runtime config on top of shared env.
@@ -36,6 +37,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`tmux` apt-installed in `Dockerfile.worker`** (#482) — ships in the worker image by default so `CLAUDE_BINARY="bunx @dexh/shannon"` works out of the box. Single apt list addition, same `RUN` block — no new layer.
 
 ### Changed
+- **Context-mode nudges fire earlier and match real tool names** (#615) — local coding harness prompts now steer agents toward `ctx_execute` / `ctx_batch_execute` after every 3 qualifying external MCP calls instead of 10, and the Claude MCP server key now matches the hook guidance so the suggested `ctx_*` tools are the same names agents can actually call.
+- **Runner refresh is now non-destructive on dirty repos** (#617) — when a task reuses an already-cloned repo with local changes, the runner auto-stashes that work before refreshing from `origin/<defaultBranch>` and surfaces the resulting `swarm-autostash` refs in the composed prompt so agents can restore them explicitly if needed.
 - **Worker harness pins refreshed** (#610) — `Dockerfile.worker` now ships Claude Code `2.1.158`, pi-mono `0.78.0`, Codex CLI / SDK `0.135.0`, and opencode / `@opencode-ai/sdk` `1.15.13`.
 - **Worker harness pins refreshed** (#583) — `Dockerfile.worker` now ships Claude Code `2.1.154`, pi-mono `0.76.0`, Codex CLI / SDK `0.135.0`, and opencode / `@opencode-ai/sdk` `1.15.12`.
 - **Helm chart version sync is scripted and CI-guarded** (#578) — new `bun run sync-chart-version` and `bun run check-chart-version` commands keep `charts/agent-swarm/Chart.yaml` aligned with `package.json` and fail CI when they drift.
@@ -52,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Docker harness bumps** (#489) — `Dockerfile.worker` ships newer codex / claude-code / pi-coding-agent / opencode versions; no compose-side changes required.
 
 ### Fixed
+- **Skill filesystem sync now targets the swarm API origin** (#616) — remote-skill sync and auto-clone flows now use the API base URL instead of a non-API origin, making worker-side skill refreshes reliable in deployed environments.
 - **Onboard dashboard auto-connect links** (#601) — the onboarding flow now builds dashboard deep-links with the SPA's required camelCase query params (`apiUrl`, `apiKey`, optional `name`), so the post-onboard "open dashboard" link connects successfully instead of silently failing on the old snake_case variant.
 - **Codex spawn-budget hardening** (#581) — the Claude adapter now stages large system prompts via `--append-system-prompt-file`, and the prompt bootstrapper caps injected repo `CLAUDE.md` content so hot workers stop tripping Linux `E2BIG` / `MAX_ARG_STRLEN` spawn failures on prompt-heavy repos.
 - **Codex subprocess diagnostics + pipe hygiene** (#584) — structured subprocess errors now propagate their real failure messages, non-TTY runs stop emitting cursor-restore escape codes into the JSON pipe, and fallback failures include stderr tail for postmortems.
