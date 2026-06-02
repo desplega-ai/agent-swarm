@@ -1877,6 +1877,7 @@ export const PricingProviderSchema = z.enum([
   "opencode",
   "devin",
   "gemini",
+  "acp",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

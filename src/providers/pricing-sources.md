@@ -53,3 +53,13 @@ yellow badge.
 To fix: either add the model to `src/be/modelsdev-cache.json` (preferred — the
 upstream snapshot probably needs refreshing) or add a manual override row via
 the existing admin route `POST /api/pricing`.
+
+## ACP custom targets
+
+`HARNESS_PROVIDER=acp` accepts any local ACP-compatible command. Because the
+wrapped target can speak for any model provider, the adapter defaults cost rows
+to `provider='acp'` and only recomputes when explicit `acp` pricing rows exist.
+For targets that wrap a known pricing namespace, set `ACP_COST_PROVIDER` to the
+underlying provider (`codex`, `gemini`, `opencode`, etc.) so the existing seeded
+rows are used. If the target self-reports USD cost through ACP, that value is
+preserved when pricing rows are missing and the row is marked `unpriced`.

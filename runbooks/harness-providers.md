@@ -12,7 +12,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
-| ACP | `acp` | `ACPAdapter` | Any ACP-compatible agent via `@agentclientprotocol/sdk`; target-keyed by `ACP_TARGET` |
+| ACP | `acp` | `ACPAdapter` | Agent Client Protocol client wrapper; built-in targets (`gemini-cli`, `claude-agent-acp`, `codex-acp`) or custom via `ACP_COMMAND` + `ACP_ENV_*` |
 
 ## `HARNESS_PROVIDER` resolution + live re-assignment
 
@@ -90,6 +90,36 @@ When `MODEL_OVERRIDE=amazon-bedrock/<model-id>` (e.g. `amazon-bedrock/anthropic.
 - The boot credential gate (`checkPiMonoCredentials`) short-circuits to `satisfiedBy: "sdk-delegated"` without inspecting any AWS env var or file. The worker does **not** park in `credential-wait` for Bedrock — even with no creds visible to agent-swarm, it claims tasks.
 - Credential errors surface at the first Bedrock inference call as an AWS SDK error in the session log (scrubbed via `scrubSecrets` at egress). Treat this the same as a codex `auth.json` failure: the adapter/SDK is the source of truth, not the boot gate.
 - This is the closest precedent to codex's "presence-only" pattern (`codexAuthFileExists` → `presenceCheckOk`). If pi-ai later exposes a `validateBedrockCredentials` helper, the live-test branch in `validateProviderCredentials` can be upgraded without touching the boot gate.
+
+## ACP custom targets
+
+`HARNESS_PROVIDER=acp` launches an Agent Client Protocol target over stdio. The
+default and currently target-neutral profile is `ACP_TARGET=custom`.
+
+Required:
+
+- `ACP_COMMAND`: executable or whitespace-split command prefix for an
+  ACP-compatible local target.
+
+Optional:
+
+- `ACP_ARGS`: JSON string array, preferred for exact argv, or a simple
+  whitespace-split string.
+- `ACP_ENV_<NAME>`: forwarded to the child as `<NAME>`; other environment
+  variables are not broadly passed through.
+- `ACP_SYSTEM_PROMPT_ARTIFACT_PATH` / `ACP_SYSTEM_PROMPT_PATH`: writes the
+  composed system prompt to this file before launching the target.
+- `ACP_SYSTEM_PROMPT_FALLBACK=user_message`: explicitly prepends the system
+  prompt as a text block in `session/prompt`. The default is to avoid doing
+  this because many ACP targets have their own system-prompt channel.
+- `ACP_COST_PROVIDER`: pricing namespace for recompute (`codex`, `gemini`,
+  `opencode`, etc.). Defaults to `acp`, which is saved but commonly `unpriced`
+  unless explicit `acp` pricing rows exist.
+
+ACP context usage is best-effort: the adapter records `usage_update.used` and
+`usage_update.size` when the target reports them and otherwise omits context
+snapshots rather than emitting fake zeros. Startup failures include the failed
+protocol step (`initialize` or `session/new`) plus a scrubbed stderr tail.
 
 ## Native session resume is deprecated (2026-05-28)
 

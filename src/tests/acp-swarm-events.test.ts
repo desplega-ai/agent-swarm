@@ -106,18 +106,53 @@ describe("translateAcpSessionNotification", () => {
       },
     });
 
-    expect(
-      translateAcpSessionNotification(
-        notification({ sessionUpdate: "usage_update", used: 20, size: 100 }),
-      )[0],
-    ).toEqual({
+    const usageEvents = translateAcpSessionNotification(
+      notification({
+        sessionUpdate: "usage_update",
+        used: 20,
+        size: 100,
+        cost: { amount: 0.02, currency: "USD" },
+        _meta: {
+          inputTokens: 12,
+          output_tokens: 8,
+        },
+      } as SessionNotification["update"]),
+    );
+    expect(usageEvents[0]).toEqual({
       type: "context_usage",
       contextUsedTokens: 20,
       contextTotalTokens: 100,
-      contextPercent: 0.2,
-      outputTokens: null,
+      contextPercent: 20,
+      outputTokens: 8,
       contextFormula: "harness-reported",
     });
+    expect(usageEvents[1]).toEqual({
+      type: "custom",
+      name: "acp_usage_update",
+      data: {
+        update: {
+          sessionUpdate: "usage_update",
+          used: 20,
+          size: 100,
+          cost: { amount: 0.02, currency: "USD" },
+          _meta: {
+            inputTokens: 12,
+            output_tokens: 8,
+          },
+        },
+        metrics: {
+          inputTokens: 12,
+          outputTokens: 8,
+          totalCostUsd: 0.02,
+        },
+      },
+    });
+
+    expect(
+      translateAcpSessionNotification(
+        notification({ sessionUpdate: "usage_update", size: 100 } as SessionNotification["update"]),
+      ).map((event) => event.type),
+    ).toEqual(["custom"]);
 
     expect(
       translateAcpSessionNotification(

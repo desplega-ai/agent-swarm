@@ -52,6 +52,7 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   "claude-managed": [],
   devin: [],
   gemini: [],
+  acp: [],
 };
 
 /**
