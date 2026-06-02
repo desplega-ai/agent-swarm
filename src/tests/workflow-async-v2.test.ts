@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   closeDb,
   completeTask,
+  createUser,
   createWorkflow,
   deleteWorkflow,
   getTaskByWorkflowRunStepId,
@@ -149,6 +150,28 @@ describe("Workflow Async v2 (Phase 4)", () => {
       expect(task!.workflowRunId).toBe(runId);
       expect(task!.workflowRunStepId).toBe(steps[0]!.id);
       expect(task!.task).toBe("Do the thing");
+    });
+
+    test("inherits requestedByUserId from workflow execution options", async () => {
+      const user = createUser({ name: "Workflow Requester" });
+      const workflow = makeWorkflow({
+        nodes: [
+          {
+            id: "task1",
+            type: "agent-task",
+            config: { template: "Do attributed workflow work" },
+          },
+        ],
+      });
+
+      const runId = await startWorkflowExecution(workflow, { test: true }, registry, {
+        requestedByUserId: user.id,
+      });
+      const steps = getWorkflowRunStepsByRunId(runId);
+      const task = getTaskByWorkflowRunStepId(steps[0]!.id);
+
+      expect(task).toBeTruthy();
+      expect(task!.requestedByUserId).toBe(user.id);
     });
 
     test("workflow pauses at waiting when hitting async executor", async () => {

@@ -110,6 +110,7 @@ import {
   registerListConfigTool,
   registerSetConfigTool,
 } from "./tools/swarm-config";
+import { registerSwarmXTool } from "./tools/swarm-x";
 // Task pool capability
 import { registerTaskActionTool } from "./tools/task-action";
 // Tracker capability
@@ -226,6 +227,9 @@ export function createServer() {
   registerScriptUpsertTool(server);
   registerScriptDeleteTool(server);
   registerScriptQueryTypesTool(server);
+
+  // External command routes - mirrors the `agent-swarm x ...` CLI surface.
+  registerSwarmXTool(server);
 
   // Slack integration tools (always registered, will no-op if Slack not configured)
   registerSlackReplyTool(server);

@@ -25,6 +25,10 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_ITERATIONS = Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
 const MAX_STEPS_PER_RUN = Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN) || 500;
 
+export interface WorkflowExecutionOptions {
+  requestedByUserId?: string;
+}
+
 /**
  * Error thrown when trigger data fails validation against a workflow's triggerSchema.
  */
@@ -50,6 +54,7 @@ export async function startWorkflowExecution(
   workflow: Workflow,
   triggerData: unknown,
   registry: ExecutorRegistry,
+  options: WorkflowExecutionOptions = {},
 ): Promise<string> {
   // Validate trigger data against triggerSchema (before any DB writes)
   if (workflow.triggerSchema) {
@@ -76,6 +81,9 @@ export async function startWorkflowExecution(
 
   // Resolve inputs and merge into initial context
   const ctx: Record<string, unknown> = { trigger: triggerData };
+  if (options.requestedByUserId) {
+    ctx.swarm = { requestedByUserId: options.requestedByUserId };
+  }
 
   // Inject workflow-level metadata for interpolation ({{workflow.dir}}, {{workflow.vcsRepo}})
   if (workflow.dir || workflow.vcsRepo) {
@@ -98,7 +106,16 @@ export async function startWorkflowExecution(
 
   const entryNodes = findEntryNodes(workflow.definition);
   const secretKeys = getSecretInputKeys(workflow.input);
-  await walkGraph(workflow.definition, runId, ctx, entryNodes, registry, workflow.id, secretKeys);
+  await walkGraph(
+    workflow.definition,
+    runId,
+    ctx,
+    entryNodes,
+    registry,
+    workflow.id,
+    secretKeys,
+    options,
+  );
   return runId;
 }
 
@@ -127,6 +144,7 @@ export async function walkGraph(
   registry: ExecutorRegistry,
   workflowId?: string,
   secretKeys: Set<string> = new Set(),
+  options: WorkflowExecutionOptions = {},
 ): Promise<void> {
   let nodeExecutionCount = 0;
   const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
@@ -234,7 +252,7 @@ export async function walkGraph(
     // Execute all pending nodes in parallel
     const results = await Promise.all(
       pendingNodes.map((node) =>
-        executeStep(def, runId, ctx, node, registry, workflowId, secretKeys).catch(
+        executeStep(def, runId, ctx, node, registry, workflowId, secretKeys, options).catch(
           (_err): StepResult => ({
             outcome: "failed",
             successors: [],
@@ -385,6 +403,7 @@ async function executeStep(
   registry: ExecutorRegistry,
   workflowId?: string,
   secretKeys: Set<string> = new Set(),
+  options: WorkflowExecutionOptions = {},
 ): Promise<StepResult> {
   // Use iteration-aware idempotency key to support loops.
   // Count existing steps for this node to determine the current iteration.
@@ -438,6 +457,7 @@ async function executeStep(
     if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
     if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
     if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
+    if (ctx.swarm !== undefined) interpolationCtx.swarm = ctx.swarm;
     // Resolve declared inputs
     for (const [localName, sourcePath] of Object.entries(node.inputs)) {
       const keys = sourcePath.split(".");
@@ -457,6 +477,7 @@ async function executeStep(
     if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
     if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
     if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
+    if (ctx.swarm !== undefined) interpolationCtx.swarm = ctx.swarm;
   }
 
   // 3c. Validate resolved inputs against inputSchema if defined
@@ -492,6 +513,7 @@ async function executeStep(
     nodeId: node.id,
     workflowId: workflowId || "",
     dryRun: false,
+    requestedByUserId: options.requestedByUserId,
   };
 
   const timeoutMs =

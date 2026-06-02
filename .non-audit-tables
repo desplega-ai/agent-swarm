@@ -1,0 +1,29 @@
+# Tables intentionally exempt from created_by / updated_by audit columns.
+# One table name per line; blank lines and # comments are ignored.
+
+_migrations
+active_sessions
+agent_log
+agent_mcp_servers
+agent_memory_edge
+agent_skills
+api_key_status
+budget_refusal_notifications
+channel_activity_cursors
+channel_read_state
+context_versions
+events
+memory_rating
+memory_retrieval
+oauth_apps
+oauth_refresh_locks
+oauth_tokens
+script_embeddings
+seed_state
+session_costs
+session_logs
+task_context_snapshots
+tracker_agent_mapping
+tracker_sync
+user_identity_events
+wait_states

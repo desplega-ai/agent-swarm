@@ -18,6 +18,7 @@ const AgentTaskConfigSchema = z.object({
   vcsRepo: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   parentTaskId: z.string().uuid().optional(),
+  requestedByUserId: z.string().optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   followUpConfig: FollowUpConfigSchema.optional(),
 });
@@ -95,6 +96,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         vcsRepo: effectiveVcsRepo,
         model: config.model,
         parentTaskId: config.parentTaskId,
+        requestedByUserId: config.requestedByUserId ?? meta.requestedByUserId,
         outputSchema: config.outputSchema,
         followUpConfig: config.followUpConfig,
         contextKey: workflowContextKey({ workflowRunId: meta.runId }),

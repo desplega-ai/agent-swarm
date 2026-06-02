@@ -21,6 +21,7 @@ import {
   WorkflowPatchSchema,
   WorkflowRunStatusSchema,
 } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { applyDefinitionPatch, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
@@ -645,10 +646,13 @@ export async function handleWorkflows(
       return true;
     }
     const body = await parseBody<Record<string, unknown>>(req);
+    const auth = getRequestAuth(req);
 
     let runId: string;
     try {
-      runId = await startWorkflowExecution(workflow, body, getExecutorRegistry());
+      runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
+        requestedByUserId: auth?.kind === "user" ? auth.userId : undefined,
+      });
     } catch (err) {
       if (err instanceof TriggerSchemaError) {
         triggerSchemaErrorResponse(res, err.message, err.validationErrors);

@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.88.0",
+  "version": "1.89.0",
   "description": "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants",
   "license": "MIT",
   "author": "desplega.sh <contact@desplega.sh>",
@@ -45,6 +45,7 @@
     "tsc:check": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
+    "check:audit-columns": "bash scripts/check-audit-columns.sh",
     "prepare-release": "bun scripts/prepare-release.ts",
     "sync-chart-version": "bun scripts/sync-chart-version.ts",
     "check-chart-version": "bun scripts/sync-chart-version.ts --check-if-package-version-changed",

@@ -13,6 +13,7 @@ import { Webhook } from "svix";
 const TEST_PORT = 19876;
 const TEST_DB_PATH = `/tmp/test-http-integration-${Date.now()}.sqlite`;
 const BASE = `http://localhost:${TEST_PORT}`;
+const TEST_API_KEY = "test-http-integration-key";
 
 let serverProc: Subprocess;
 
@@ -28,6 +29,7 @@ async function api(
 ): Promise<{ status: number; body: any; ok: boolean }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    Authorization: `Bearer ${TEST_API_KEY}`,
     ...opts.headers,
   };
   if (opts.agentId) headers["x-agent-id"] = opts.agentId;
@@ -106,7 +108,7 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(TEST_PORT),
       DATABASE_PATH: TEST_DB_PATH,
-      API_KEY: "", // no auth required
+      API_KEY: TEST_API_KEY,
       CAPABILITIES: "core,task-pool,messaging,profiles,services,scheduling,memory",
       // Disable optional integrations
       SLACK_BOT_TOKEN: "",

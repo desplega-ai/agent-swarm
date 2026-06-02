@@ -135,8 +135,15 @@ describe("handleCore auth middleware (no API_KEY configured)", () => {
     server.close();
   });
 
-  test("authed routes pass without Bearer when API_KEY is empty", async () => {
+  test("authed routes fail closed without Bearer when API_KEY is empty", async () => {
     const res = await fetch(`http://localhost:${port}/api/mcp-oauth/some-id/status`);
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toBe("Unauthorized");
+  });
+
+  test("public routes still pass when API_KEY is empty", async () => {
+    const res = await fetch(`http://localhost:${port}/api/mcp-oauth/callback`);
     expect(res.status).not.toBe(401);
   });
 });

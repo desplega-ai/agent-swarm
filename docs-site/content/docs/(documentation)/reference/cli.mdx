@@ -189,6 +189,18 @@ Key E2B options:
 
 `start-stack` now defaults to the full API + lead + workers topology. It runs interactively on a TTY, but switches to headless mode automatically under `--yes`, `--non-interactive`, `--dry-run`, or any non-TTY invocation. The `swarms logs` output is secret-scrubbed before it hits stdout, and `swarms info` can optionally embed the API key into the dashboard deep-link with `--reveal-key` when you explicitly need a copy-pasteable URL.
 
+### x
+
+Execute an external command route. The first target is Composio:
+
+```bash
+agent-swarm x composio GET /tools
+agent-swarm x composio POST /tool_router/session --body '{"user_id":"swarm-user-id"}'
+```
+
+See [The `x` command](/docs/reference/x-command) for the Composio workflow,
+`swarm_x` MCP equivalent, and safety rules.
+
 ### docs
 
 Show the documentation URL. All pages are also available in markdown format by appending `.md` to the URL.

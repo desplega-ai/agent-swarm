@@ -255,6 +255,19 @@ const COMMAND_HELP: Record<
     options: "  -h, --help             Show this help",
     examples: [`  ${binName} artifact serve`, `  ${binName} artifact help`].join("\n"),
   },
+  x: {
+    usage: `${binName} x <target> [args]`,
+    description:
+      "Execute external command routes. Prototype target: composio routes HTTP requests to the Composio REST API using COMPOSIO_API_KEY.",
+    options: [
+      "  composio <method> <path>       Route to the Composio REST API",
+      "  -h, --help                     Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} x composio GET /tools`,
+      `  ${binName} x composio POST /tools/execute/GITHUB_CREATE_AN_ISSUE --body '{"arguments":{}}'`,
+    ].join("\n"),
+  },
   scripts: {
     usage: `${binName} scripts reembed`,
     description: "Maintenance commands for reusable swarm scripts.",
@@ -369,6 +382,7 @@ function printHelp(command?: string) {
     ["claude", "Run Claude CLI"],
     ["hook", "Handle Claude Code hook events (stdin)"],
     ["artifact", "Manage agent artifacts"],
+    ["x", "Execute external command routes"],
     ["scripts", "Reusable scripts maintenance"],
     ["docs", "Open documentation (--open to launch in browser)"],
     ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
@@ -612,6 +626,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
     port: args.port,
     key: args.key,
   });
+} else if (args.command === "x") {
+  const xArgs = process.argv.slice(process.argv.indexOf("x") + 1);
+  const { runXCommand } = await import("./commands/x");
+  await runXCommand(xArgs);
 } else if (args.command === "scripts") {
   const scriptsArgs = process.argv.slice(process.argv.indexOf("scripts") + 1);
   if (args.showHelp || scriptsArgs[0] !== "reembed") {

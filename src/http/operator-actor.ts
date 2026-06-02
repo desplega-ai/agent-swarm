@@ -17,6 +17,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { fingerprintApiKey, type IdentityActor } from "../be/users";
 import { getApiKey } from "../utils/api-key";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { jsonError } from "./utils";
 
 /**
@@ -40,6 +41,14 @@ function extractBearer(req: IncomingMessage): string | null {
  * the request when this returns null.
  */
 export function getOperatorActor(req: IncomingMessage, res: ServerResponse): IdentityActor | null {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "user") {
+    return { kind: "user", id: auth.userId };
+  }
+  if (auth?.kind === "operator") {
+    return { kind: "operator", id: auth.fingerprint };
+  }
+
   const rawKey = extractBearer(req);
   const swarmKey = getApiKey();
 

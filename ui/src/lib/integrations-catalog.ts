@@ -672,6 +672,60 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
 
+  // --------------------------------------------------------------- Composio
+  {
+    id: "composio",
+    name: "Composio",
+    description:
+      "Route agents to connected user accounts in Composio through the `x composio` CLI and `swarm_x` MCP tool.",
+    category: "other",
+    iconKey: "route",
+    docsUrl: "https://docs.agent-swarm.dev/integrations/composio",
+    restartRequired: true,
+    recommendedSkills: [
+      {
+        name: "composio",
+        source: "template",
+        templateRepo: "desplega-ai/agent-swarm",
+        templatePath: "plugin/skills/composio",
+        roles: ["lead", "worker"],
+        reason:
+          "Operational recipes for creating Tool Router sessions, checking connected accounts, and executing Composio actions through `agent-swarm x composio` or `swarm_x`.",
+      },
+    ],
+    fields: [
+      {
+        key: "COMPOSIO_API_KEY",
+        label: "Project API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        helpText:
+          "Composio project API key injected into `agent-swarm x composio ...` and the `swarm_x` MCP tool. Use this for normal Tool Router requests.",
+        affectsRestart: true,
+      },
+      {
+        key: "COMPOSIO_ORG_API_KEY",
+        label: "Organization API key",
+        type: "password",
+        isSecret: true,
+        helpText:
+          "Optional organization-level key for requests that need org scope. The CLI uses it only with `--org`; `swarm_x` uses it when `useOrgKey` is true.",
+        affectsRestart: true,
+      },
+      {
+        key: "COMPOSIO_BASE_URL",
+        label: "Base URL",
+        type: "text",
+        advanced: true,
+        placeholder: "https://backend.composio.dev/api/v3",
+        helpText:
+          "Override the Composio API base URL for staging or self-hosted gateways. Leave blank for the default v3 API.",
+        affectsRestart: true,
+      },
+    ],
+  },
+
   // -------------------------------------------------------------- Anthropic
   {
     id: "anthropic",

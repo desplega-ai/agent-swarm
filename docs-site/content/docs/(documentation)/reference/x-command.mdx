@@ -1,0 +1,119 @@
+---
+title: The `x` command
+description: External command routes for Agent Swarm, starting with Composio Tool Router.
+---
+
+The `x` command is the Agent Swarm surface for external command routes:
+
+```bash
+agent-swarm x <target> ...
+```
+
+The first target is `composio`. The intent is to let humans and agents execute
+the same external routes from either the CLI or the swarm MCP server. Today:
+
+- CLI: `agent-swarm x composio <method> <path> [options]`
+- MCP: `swarm_x` with `target: "composio"`
+
+Future targets can use the same pattern without becoming top-level CLI
+commands.
+
+## Composio
+
+Composio routes are HTTP requests to the Composio Tool Router API. The CLI reads
+`COMPOSIO_API_KEY` from the environment and sends it as `x-api-key`.
+
+```bash
+agent-swarm x composio GET /tools
+agent-swarm x composio POST /tool_router/session --body '{"user_id":"swarm-user-id"}'
+```
+
+Options:
+
+| Option | Description |
+|---|---|
+| `--body`, `--data <json>` | JSON request body |
+| `-q`, `--query k=v` | Append a query parameter; repeatable |
+| `-H`, `--header k=v` | Add a non-auth header; repeatable |
+| `--base-url <url>` | Override `COMPOSIO_BASE_URL` or the default v3.1 API base |
+| `--org` | Use `COMPOSIO_ORG_API_KEY` and `x-org-api-key` |
+| `--raw` | Print response text without JSON pretty formatting |
+
+Environment:
+
+| Variable | Description |
+|---|---|
+| `COMPOSIO_API_KEY` | Project API key for Composio `x-api-key` auth |
+| `COMPOSIO_ORG_API_KEY` | Optional organization key for `--org` |
+| `COMPOSIO_BASE_URL` | Optional API base URL override |
+
+## Session flow
+
+Create a session for one app user:
+
+```bash
+agent-swarm x composio POST /tool_router/session \
+  --body '{"user_id":"swarm-user-id","toolkits":{"enable":["gmail"]},"workbench":{"enable":false}}'
+```
+
+Search for the right tool:
+
+```bash
+agent-swarm x composio POST /tool_router/session/$SESSION_ID/search \
+  --body '{"queries":[{"use_case":"Check recent emails in Gmail and return metadata only."}]}'
+```
+
+Connect the toolkit if Composio reports no active connection:
+
+```bash
+agent-swarm x composio POST /tool_router/session/$SESSION_ID/execute \
+  --body '{"tool_slug":"COMPOSIO_MANAGE_CONNECTIONS","arguments":{"toolkits":["gmail"]}}'
+```
+
+Execute after connection:
+
+```bash
+agent-swarm x composio POST /tool_router/session/$SESSION_ID/execute \
+  --body '{"tool_slug":"GMAIL_FETCH_EMAILS","arguments":{"user_id":"me","max_results":5,"include_payload":false,"verbose":false}}'
+```
+
+## MCP equivalent
+
+Use `swarm_x` when an agent should call the same route through the Agent Swarm
+MCP endpoint:
+
+```jsonc
+{
+  "target": "composio",
+  "method": "POST",
+  "path": "/tool_router/session/$SESSION_ID/execute",
+  "body": {
+    "tool_slug": "GMAIL_FETCH_EMAILS",
+    "arguments": {
+      "user_id": "me",
+      "max_results": 5,
+      "include_payload": false,
+      "verbose": false
+    }
+  }
+}
+```
+
+The MCP tool injects the Composio key server-side. It does not accept absolute
+Composio paths.
+
+## Safety rules
+
+- Use relative Composio API paths only, for example `/tool_router/session`.
+- Search before execute; use the returned tool slug and schema.
+- Use `COMPOSIO_MANAGE_CONNECTIONS` when a toolkit lacks an active connection.
+- Prefer metadata-first reads for email and document tools.
+- Store Composio `session_id` with the task or conversation when follow-up
+  turns should reuse context.
+
+## References
+
+- [Composio sessions](https://docs.composio.dev/tool-router/users-and-sessions)
+- [Tool Router session API](https://docs.composio.dev/reference/api-reference/tool-router/postToolRouterSession)
+- [Tool Router execute API](https://docs.composio.dev/reference/api-reference/tool-router/postToolRouterSessionBySessionIdExecute)
+- [Agent Swarm Composio integration](/docs/integrations/composio)

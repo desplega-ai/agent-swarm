@@ -1,0 +1,143 @@
+---
+title: Composio
+description: Tool Router sessions, connected accounts, Connect Links, and the Agent Swarm x route for third-party app tools.
+---
+
+Composio gives Agent Swarm a managed connection layer for third-party apps such
+as Gmail, GitHub, Slack, Notion, HubSpot, and similar tools. The current Agent
+Swarm integration is intentionally small: use the [`x` command](/docs/reference/x-command)
+or the `swarm_x` MCP tool to route requests to Composio's Tool Router API.
+
+<Callout type="info">
+This is a prototype/admin surface today. The long-term product shape is an
+API-mediated integration where the swarm server owns Composio auth, creates
+sessions, exposes Connect Links, and gives workers only task-scoped tool access.
+</Callout>
+
+## What it does
+
+- **Creates Tool Router sessions.** A session is Composio's runtime context for
+  one user and a set of available toolkits.
+- **Uses connected accounts.** Gmail, GitHub, and other app credentials live in
+  Composio under the provided `user_id`, not in Agent Swarm.
+- **Generates Connect Links.** If a user has not connected a toolkit yet,
+  `COMPOSIO_MANAGE_CONNECTIONS` returns a hosted link at `connect.composio.dev`.
+- **Executes app tools.** After a connection is active, the session can execute
+  app tools such as `GMAIL_FETCH_EMAILS`.
+- **Works from CLI and MCP.** Humans can run `agent-swarm x composio ...`;
+  agents can call `swarm_x` with `target: "composio"`.
+
+## Setup
+
+Add a Composio project API key to the process running the CLI or swarm API:
+
+```bash
+COMPOSIO_API_KEY=your-project-api-key
+```
+
+Optional:
+
+```bash
+COMPOSIO_BASE_URL=https://backend.composio.dev/api/v3.1
+COMPOSIO_ORG_API_KEY=your-org-api-key
+```
+
+The CLI sends `COMPOSIO_API_KEY` as `x-api-key`. With `--org`, it sends
+`COMPOSIO_ORG_API_KEY` as `x-org-api-key`.
+
+## How it works
+
+### 1. Create a user-scoped session
+
+```bash
+agent-swarm x composio POST /tool_router/session \
+  --body '{"user_id":"swarm-user-id","toolkits":{"enable":["gmail"]},"workbench":{"enable":false}}'
+```
+
+Store the returned `session_id`. Sessions persist on Composio's server and do
+not expire, but they should still be treated as task or conversation context in
+Agent Swarm.
+
+### 2. Search for tools before executing
+
+```bash
+agent-swarm x composio POST /tool_router/session/$SESSION_ID/search \
+  --body '{"queries":[{"use_case":"Check recent emails in Gmail and return metadata only."}]}'
+```
+
+Search returns the current tool slugs, schemas, recommended plan, pitfalls, and
+connection status. Do not invent tool slugs.
+
+### 3. Connect the toolkit if needed
+
+If search reports no active Gmail connection:
+
+```bash
+agent-swarm x composio POST /tool_router/session/$SESSION_ID/execute \
+  --body '{"tool_slug":"COMPOSIO_MANAGE_CONNECTIONS","arguments":{"toolkits":["gmail"]}}'
+```
+
+Composio returns a Connect Link for the user. Incomplete connection attempts
+expire quickly, so generate a fresh link if the user misses the window.
+
+### 4. Execute the app tool
+
+```bash
+agent-swarm x composio POST /tool_router/session/$SESSION_ID/execute \
+  --body '{"tool_slug":"GMAIL_FETCH_EMAILS","arguments":{"user_id":"me","max_results":5,"include_payload":false,"verbose":false}}'
+```
+
+Prefer metadata-first reads unless the task explicitly needs message bodies,
+attachments, or destructive operations.
+
+## Session and account scoping
+
+| Scope | Owner | Notes |
+|---|---|---|
+| Deployment | Agent Swarm server | Holds `COMPOSIO_API_KEY`; workers should not receive it directly in the productized path. |
+| User | Composio `user_id` | Connected accounts persist under this ID and can be reused by future sessions. |
+| Session | Composio Tool Router | Runtime context for the task: toolkits, auth config, connected account selection, MCP URL, workbench state. |
+| Task | Agent Swarm | Store the Composio `session_id` with the task or conversation so follow-ups reuse context. |
+
+If a user has multiple accounts for the same toolkit, pin the desired account
+when creating the session or pass the `account` identifier when executing a
+tool. Without an explicit account, Composio uses its default account-selection
+behavior.
+
+## MCP tool
+
+Agents can call `swarm_x` instead of shelling out:
+
+```jsonc
+{
+  "target": "composio",
+  "method": "POST",
+  "path": "/tool_router/session/$SESSION_ID/execute",
+  "body": {
+    "tool_slug": "GMAIL_FETCH_EMAILS",
+    "arguments": {
+      "user_id": "me",
+      "max_results": 5,
+      "include_payload": false,
+      "verbose": false
+    }
+  }
+}
+```
+
+`swarm_x` injects Composio auth server-side and rejects absolute Composio paths
+so the API key cannot be routed to arbitrary hosts.
+
+## Skill
+
+The `composio` skill is bundled under `plugin/skills/composio`. Use it when an
+agent needs Composio Tool Router sessions, connected accounts, Connect Links, or
+Composio app tool execution.
+
+## References
+
+- [Composio users and sessions](https://docs.composio.dev/tool-router/users-and-sessions)
+- [Create a Tool Router session](https://docs.composio.dev/reference/api-reference/tool-router/postToolRouterSession)
+- [Execute a Tool Router tool](https://docs.composio.dev/reference/api-reference/tool-router/postToolRouterSessionBySessionIdExecute)
+- [Connected accounts](https://docs.composio.dev/docs/auth-configuration/connected-accounts)
+- [Managing multiple connected accounts](https://docs.composio.dev/tool-router/managing-multiple-accounts)

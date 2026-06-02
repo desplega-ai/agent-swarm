@@ -171,6 +171,9 @@ export const DEFERRED_TOOLS = new Set([
   "script-delete",
   "script-query-types",
 
+  // External command routes (1)
+  "swarm_x",
+
   // Other (4)
   "cancel-task",
   "inject-learning",

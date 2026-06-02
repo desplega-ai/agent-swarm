@@ -5,6 +5,7 @@ import type { Subprocess } from "bun";
 const TEST_PORT = 13033;
 const TEST_DB_PATH = `/tmp/test-events-http-${Date.now()}.sqlite`;
 const BASE = `http://localhost:${TEST_PORT}`;
+const TEST_API_KEY = "test-events-http-key";
 
 let serverProc: Subprocess;
 
@@ -15,7 +16,10 @@ async function api(
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY}`,
+    },
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
   const text = await res.text();
@@ -54,7 +58,7 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(TEST_PORT),
       DATABASE_PATH: TEST_DB_PATH,
-      API_KEY: "",
+      API_KEY: TEST_API_KEY,
       CAPABILITIES: "core",
       SLACK_BOT_TOKEN: "",
       GITHUB_WEBHOOK_SECRET: "",
