@@ -217,15 +217,17 @@ All steps live in [`src/commands/runner.ts`](https://github.com/desplega-ai/agen
 When a session finishes, the runner syncs the agent's **self-editable** files back to the API so edits the agent made during the session persist into its profile (`context_versions`):
 
 - `SOUL.md` / `IDENTITY.md` / `TOOLS.md` / `HEARTBEAT.md` (bundled identity update)
-- `~/.claude/CLAUDE.md`
+- the `CLAUDE.md` source — **provider-dependent** (see below)
 - the agent-managed section of `/workspace/start-up.sh` (`setupScript`)
 
-The sync lives in [`src/commands/profile-sync.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/profile-sync.ts) (`syncProfileFilesToServer`) and is called once per completed session from `checkCompletedProcesses` in `runner.ts`, **gated on `adapter.traits.hasLocalEnvironment`**:
+The sync lives in [`src/commands/profile-sync.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/profile-sync.ts) (`syncProfileFilesToServer`) and is called from `checkCompletedProcesses` in `runner.ts`. The decision to sync is made **per finished session, using the provider / local-env trait snapshotted on `RunningTask` at spawn time** — not the mutable global `state.hasLocalEnvironment`. The runner lets an in-flight session finish on its original adapter after a live provider swap, so reading the global would skip a session that started local (worker since flipped remote) or sync stale local files after a remote session finished (worker since flipped local). The sync fires when **any** finished session in the batch ran in a local environment:
 
-| Provider | `hasLocalEnvironment` | Session-end sync |
+| Provider | local environment | Session-end sync |
 |---|---|---|
-| `claude`, `pi`, `codex`, `opencode` | `true` | **Yes** — runs every session end |
-| `devin`, `claude-managed` | `false` | No — these have no `/workspace` FS |
+| `claude`, `pi`, `codex`, `opencode` | yes | **Yes** — when the finished session ran on this provider |
+| `devin`, `claude-managed` | no | No — these have no `/workspace` FS |
+
+- **`CLAUDE.md` source is provider-routed (`resolveClaudeMdPath`).** `claude` edits its personal file at `~/.claude/CLAUDE.md` (also synced by the Claude Stop hook); every other local harness (`codex`/`pi`/`opencode`) edits `/workspace/CLAUDE.md` — the file the runner materializes from the `claudeMd` DB field at boot and that the base-prompt truncation notice points them to. An all-`claude` batch syncs the personal file (the runner is a backstop and never overwrites it with the stale workspace copy); any non-`claude` session in the batch routes to `/workspace/CLAUDE.md`. This closes the previously-open non-Claude `CLAUDE.md` FS → DB gap.
 
 Notes:
 
