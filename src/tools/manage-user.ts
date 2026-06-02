@@ -39,11 +39,6 @@ const InputSchema = z.object({
   name: z.string().optional().describe("Display name (required for create)"),
   email: z.string().optional().describe("Primary email address"),
   role: z.string().optional().describe('Role (e.g., "founder", "engineer")'),
-  preferences: z
-    .string()
-    .nullable()
-    .optional()
-    .describe("Free-text requester preferences, stored as metadata.preferences (null clears it)"),
   notes: z.string().optional().describe("Free-form notes"),
   identities: z
     .array(IdentityEntry)
@@ -69,43 +64,6 @@ const InputSchema = z.object({
     .optional()
     .describe("Free-form JSON metadata (null clears the field)"),
 });
-
-type UserWithMetadata = {
-  metadata?: Record<string, unknown>;
-};
-
-function withPreferences(
-  metadata: Record<string, unknown> | null | undefined,
-  preferences: string | null | undefined,
-): Record<string, unknown> | null | undefined {
-  if (preferences === undefined) return metadata;
-  const next = { ...(metadata ?? {}) };
-  if (preferences === null) {
-    delete next.preferences;
-  } else {
-    next.preferences = preferences;
-  }
-  return Object.keys(next).length > 0 ? next : null;
-}
-
-function getPreferences(user: UserWithMetadata): string | undefined {
-  const preferences = user.metadata?.preferences;
-  return typeof preferences === "string" ? preferences : undefined;
-}
-
-function userForOutput<T extends UserWithMetadata>(user: T): T & { preferences?: string } {
-  const preferences = getPreferences(user);
-  return preferences === undefined ? user : { ...user, preferences };
-}
-
-function buildUpdateMetadata(
-  existing: Record<string, unknown> | undefined,
-  metadata: Record<string, unknown> | null | undefined,
-  preferences: string | null | undefined,
-): Record<string, unknown> | null | undefined {
-  if (preferences === undefined) return metadata;
-  return withPreferences(metadata === undefined ? existing : metadata, preferences);
-}
 
 function diffAliases(prev: string[], next: string[]): { added: string[]; removed: string[] } {
   const prevSet = new Set(prev.map((a) => a.toLowerCase()));
@@ -146,9 +104,7 @@ export const registerManageUserTool = (server: McpServer) => {
         case "list": {
           const users = getAllUsers();
           return {
-            content: [
-              { type: "text" as const, text: JSON.stringify(users.map(userForOutput), null, 2) },
-            ],
+            content: [{ type: "text" as const, text: JSON.stringify(users, null, 2) }],
           };
         }
 
@@ -165,9 +121,7 @@ export const registerManageUserTool = (server: McpServer) => {
             };
           }
           return {
-            content: [
-              { type: "text" as const, text: JSON.stringify(userForOutput(user), null, 2) },
-            ],
+            content: [{ type: "text" as const, text: JSON.stringify(user, null, 2) }],
           };
         }
 
@@ -188,8 +142,7 @@ export const registerManageUserTool = (server: McpServer) => {
               timezone: input.timezone,
               dailyBudgetUsd: input.dailyBudgetUsd ?? undefined,
               status: input.status,
-              metadata:
-                withPreferences(input.metadata ?? undefined, input.preferences) ?? undefined,
+              metadata: input.metadata ?? undefined,
             });
             for (const ident of input.identities ?? []) {
               linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
@@ -198,7 +151,7 @@ export const registerManageUserTool = (server: McpServer) => {
               content: [
                 {
                   type: "text" as const,
-                  text: `User created: ${JSON.stringify(userForOutput(user), null, 2)}`,
+                  text: `User created: ${JSON.stringify(user, null, 2)}`,
                 },
               ],
             };
@@ -234,7 +187,7 @@ export const registerManageUserTool = (server: McpServer) => {
               timezone: input.timezone,
               dailyBudgetUsd: input.dailyBudgetUsd,
               status: input.status,
-              metadata: buildUpdateMetadata(before.metadata, input.metadata, input.preferences),
+              metadata: input.metadata,
             });
             if (!user) {
               return {
@@ -275,7 +228,7 @@ export const registerManageUserTool = (server: McpServer) => {
               content: [
                 {
                   type: "text" as const,
-                  text: `User updated: ${JSON.stringify(userForOutput(user), null, 2)}`,
+                  text: `User updated: ${JSON.stringify(user, null, 2)}`,
                 },
               ],
             };

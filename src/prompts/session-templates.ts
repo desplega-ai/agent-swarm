@@ -566,6 +566,29 @@ When working in a repository, your system prompt may include a **Repository Guid
 });
 
 // ============================================================================
+// Per-task prompt templates (category: "task_lifecycle")
+// ============================================================================
+
+registerTemplate({
+  eventType: "task.requester.profile",
+  header: "",
+  defaultBody: `
+## Requester Profile
+This task was requested by {{requester_name}}{{requester_role_suffix}}.{{requester_notes_section}}
+Honor this requester profile in tone, depth, and format where it doesn't conflict with correctness or your operating rules.
+`,
+  variables: [
+    { name: "requester_name", description: "The requesting user's display name" },
+    { name: "requester_role_suffix", description: "Formatted role suffix, including parentheses" },
+    {
+      name: "requester_notes_section",
+      description: "Formatted notes section sourced from users.notes, or empty string",
+    },
+  ],
+  category: "task_lifecycle",
+});
+
+// ============================================================================
 // Composite session templates (category: "session")
 // ============================================================================
 

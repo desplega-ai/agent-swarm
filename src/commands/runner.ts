@@ -1809,7 +1809,7 @@ interface Trigger {
     text?: string;
   }>;
   cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
-  requestedBy?: { name: string; email?: string; role?: string; preferences?: string };
+  requestedBy?: { name: string; email?: string; role?: string; notes?: string };
   // Phase 4 — budget_refused fields. The server emits this envelope from
   // /api/poll and MCP task-action accept when an admission gate refuses to
   // let the agent claim a task. Worker reads cause + reset/spend/budget for
@@ -1834,18 +1834,22 @@ interface PollOptions {
 
 type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
 
-export function buildRequesterProfilePrompt(requestedBy: RequesterProfile | undefined): string {
-  if (!requestedBy?.role && !requestedBy?.preferences) return "";
+export async function buildRequesterProfilePrompt(
+  requestedBy: RequesterProfile | undefined,
+): Promise<string> {
+  if (!requestedBy?.role && !requestedBy?.notes) return "";
 
-  const requester = `${requestedBy.name}${requestedBy.role ? ` (${requestedBy.role})` : ""}`;
-  const preferences = requestedBy.preferences?.trim();
-  const preferencesSection = preferences
-    ? `\nTheir stated preferences for how you should respond and act:\n${preferences}`
+  const notes = requestedBy.notes?.trim();
+  const notesSection = notes
+    ? `\nTheir stated notes for how you should respond and act:\n${notes}`
     : "";
+  const result = await resolveTemplateAsync("task.requester.profile", {
+    requester_name: requestedBy.name,
+    requester_role_suffix: requestedBy.role ? ` (${requestedBy.role})` : "",
+    requester_notes_section: notesSection,
+  });
 
-  return `## Requester Profile
-This task was requested by ${requester}.${preferencesSection}
-Honor this requester profile in tone, depth, and format where it doesn't conflict with correctness or your operating rules.`;
+  return result.skipped ? "" : result.text.trim();
 }
 
 /** Register agent via HTTP API */
@@ -4501,7 +4505,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Rebuild system prompt with per-task repo context
         const taskBasePrompt = await buildSystemPrompt();
-        const requesterProfilePrompt = buildRequesterProfilePrompt(trigger.requestedBy);
+        const requesterProfilePrompt = await buildRequesterProfilePrompt(trigger.requestedBy);
         const taskPromptParts = [taskBasePrompt, requesterProfilePrompt, additionalSystemPrompt]
           .filter((part): part is string => Boolean(part))
           .join("\n\n");

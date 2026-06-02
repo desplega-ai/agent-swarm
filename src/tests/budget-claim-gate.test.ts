@@ -130,13 +130,13 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
     expect((body.trigger as { taskId: string }).taskId).toBe(task.id);
   });
 
-  test("pending task trigger includes requester role and preferences", async () => {
+  test("pending task trigger includes requester role and notes", async () => {
     const worker = createAgent({ name: "w-requester", isLead: false, status: "idle", maxTasks: 1 });
     const requester = createUser({
       name: "Requester One",
       email: "requester@example.com",
       role: "engineering manager",
-      metadata: { preferences: "Include implementation detail and test coverage." },
+      notes: "Include implementation detail and test coverage.",
     });
     createTaskExtended("profile-aware task", {
       agentId: worker.id,
@@ -151,7 +151,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
       name: "Requester One",
       email: "requester@example.com",
       role: "engineering manager",
-      preferences: "Include implementation detail and test coverage.",
+      notes: "Include implementation detail and test coverage.",
     });
   });
 

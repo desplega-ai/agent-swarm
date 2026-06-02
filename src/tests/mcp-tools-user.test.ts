@@ -308,41 +308,6 @@ describe("manage-user MCP tool (identities array)", () => {
     expect(added[0]!.afterJson).toContain("b@example.com");
   });
 
-  test("preferences convenience field reads and writes metadata.preferences", async () => {
-    const created = await callTool(server, "manage-user", {
-      action: "create",
-      name: "Preference User",
-      role: "ceo",
-      preferences: "Lead with the answer; keep updates terse.",
-      metadata: { region: "us" },
-    });
-    const createdText = textOf(created);
-    expect(createdText).toContain('"preferences": "Lead with the answer; keep updates terse."');
-    expect(createdText).toContain('"region": "us"');
-    const userId = createdText.match(/"id":\s*"([^"]+)"/)![1];
-
-    const updated = await callTool(server, "manage-user", {
-      action: "update",
-      userId,
-      preferences: "Prefer technical depth and tradeoffs.",
-    });
-    const updatedParsed = JSON.parse(textOf(updated).replace(/^User updated: /, ""));
-    expect(updatedParsed.preferences).toBe("Prefer technical depth and tradeoffs.");
-    expect(updatedParsed.metadata).toMatchObject({
-      region: "us",
-      preferences: "Prefer technical depth and tradeoffs.",
-    });
-
-    const cleared = await callTool(server, "manage-user", {
-      action: "update",
-      userId,
-      preferences: null,
-    });
-    const clearedParsed = JSON.parse(textOf(cleared).replace(/^User updated: /, ""));
-    expect(clearedParsed.preferences).toBeUndefined();
-    expect(clearedParsed.metadata).toEqual({ region: "us" });
-  });
-
   test("non-lead caller is rejected", async () => {
     const result = await callTool(server, "manage-user", { action: "list" }, WORKER_ID);
     expect(textOf(result)).toContain("Only the lead agent");
