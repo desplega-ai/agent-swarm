@@ -51,13 +51,13 @@ const googleDriveTestRoute = route({
   path: "/api/integrations/google-drive/test",
   pattern: ["api", "integrations", "google-drive", "test"],
   summary:
-    "Test the Google Drive integration: validates GOOGLE_DRIVE_SA_CREDENTIALS JSON structure and attempts to obtain an access token from Google's token endpoint.",
+    "Test the Google Drive integration: validates GOOGLE_DRIVE_SA_CREDENTIALS, obtains an access token, and probes the Drive API.",
   tags: ["Integrations"],
   body: z.object({}).optional(),
   responses: {
     200: {
       description:
-        "Connection result — `{ ok: true, clientEmail, projectId }` on success or `{ ok: false, error }` on any failure.",
+        "Connection result — `{ ok: true, clientEmail, projectId }` after token exchange + Drive API probe, or `{ ok: false, error }` on any failure.",
     },
   },
 });

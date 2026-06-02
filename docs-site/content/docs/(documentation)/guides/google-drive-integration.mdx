@@ -108,9 +108,9 @@ No additional configuration is needed if ADC is already set up.
 The integration uses **service-account-based authentication** (not OAuth consent flow):
 
 1. **On boot**, the API server calls `initGoogleDrive()` which resolves credentials from `GOOGLE_DRIVE_SA_CREDENTIALS`, `GOOGLE_APPLICATION_CREDENTIALS`, or the well-known ADC path
-2. **Credentials are validated** — the JSON must contain `type: "service_account"`, `project_id`, `client_email`, `private_key`, and `token_uri`
-3. **At runtime**, agents use the `gws` CLI (installed via the `gws-drive` skill) to interact with Drive — listing files, exporting docs, uploading content, and leaving comments
-4. **Authentication is transparent** — the SA private key signs JWTs that are exchanged for short-lived access tokens at Google's token endpoint
+2. **Credentials are connected** — the service account JSON is parsed, a signed JWT is exchanged for an access token, and a lightweight Drive `files.list` probe confirms the Drive API is reachable
+3. **Credentials are persisted for agents** — the resolved service account JSON is written to `~/.config/gws/credentials.json`, and `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` points `gws` at that file
+4. **At runtime**, agents use the `gws` CLI (installed via the `gws-drive` skill) to interact with Drive — listing files, exporting docs, uploading content, and leaving comments
 
 ### What agents can do
 

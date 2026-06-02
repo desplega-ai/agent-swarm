@@ -1,9 +1,10 @@
 import { createSign } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 let initialized = false;
 let lastAuthError: string | null = null;
+let connection: GoogleDriveConnection | null = null;
 
 const WELL_KNOWN_ADC_PATHS = [
   join(
@@ -13,6 +14,17 @@ const WELL_KNOWN_ADC_PATHS = [
       : ".config/gcloud/application_default_credentials.json",
   ),
 ];
+
+function resolveHomeDir(): string {
+  return process.env.HOME || (process.platform === "win32" ? process.env.APPDATA || "" : "");
+}
+
+function resolveGwsCredentialsPath(): string {
+  return (
+    process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ||
+    join(resolveHomeDir(), ".config/gws/credentials.json")
+  );
+}
 
 function resolveCredentialsJson(): string | null {
   if (process.env.GOOGLE_DRIVE_SA_CREDENTIALS) {
@@ -41,16 +53,17 @@ function resolveCredentialsJson(): string | null {
 export function isGoogleDriveEnabled(): boolean {
   const disabled = process.env.GOOGLE_DRIVE_DISABLE;
   if (disabled === "true" || disabled === "1") return false;
-  return resolveCredentialsJson() !== null;
+  return connection !== null || resolveCredentialsJson() !== null;
 }
 
 export function resetGoogleDrive(): void {
   initialized = false;
   lastAuthError = null;
+  connection = null;
 }
 
 export async function initGoogleDrive(): Promise<boolean> {
-  if (initialized) return isGoogleDriveEnabled();
+  if (initialized) return connection !== null;
   initialized = true;
 
   const disabled = process.env.GOOGLE_DRIVE_DISABLE;
@@ -74,14 +87,28 @@ export async function initGoogleDrive(): Promise<boolean> {
   }
 
   try {
-    await verifyServiceAccountAuth(raw);
+    const verification = await verifyServiceAccountAuth(
+      raw,
+      process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID,
+    );
+    const credentialFilePath = persistGoogleDriveCredentials(raw);
+    connection = {
+      ok: true,
+      clientEmail: result.clientEmail,
+      projectId: result.projectId,
+      credentialFilePath,
+      sharedDriveId: process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID || undefined,
+      connectedAt: new Date().toISOString(),
+      tokenExpiresAt: verification.expiresAt,
+    };
     lastAuthError = null;
     console.log(
-      `[Google Drive] Integration connected (SA: ${result.clientEmail}, project: ${result.projectId})`,
+      `[Google Drive] Integration connected (SA: ${result.clientEmail}, project: ${result.projectId}, credentials: ${credentialFilePath})`,
     );
     return true;
   } catch (err) {
     lastAuthError = err instanceof Error ? err.message : String(err);
+    connection = null;
     console.error(
       `[Google Drive] SA credentials valid but auth failed: ${lastAuthError} (SA: ${result.clientEmail})`,
     );
@@ -95,6 +122,13 @@ export interface ServiceAccountInfo {
   projectId: string;
 }
 
+export interface GoogleDriveConnection extends ServiceAccountInfo {
+  credentialFilePath: string;
+  sharedDriveId?: string;
+  connectedAt: string;
+  tokenExpiresAt: string;
+}
+
 export interface ServiceAccountError {
   ok: false;
   error: string;
@@ -102,12 +136,24 @@ export interface ServiceAccountError {
 
 export type ServiceAccountResult = ServiceAccountInfo | ServiceAccountError;
 
+export interface ServiceAccountVerification {
+  accessToken: string;
+  expiresAt: string;
+}
+
+export function getGoogleDriveConnection(): GoogleDriveConnection | null {
+  return connection;
+}
+
 /**
  * Sign a JWT with the SA's private key and exchange it at Google's token
- * endpoint. Proves the credentials can actually authenticate — not just
- * that the JSON is structurally valid.
+ * endpoint, then make a lightweight Drive API request. Proves the credentials
+ * can actually reach Drive — not just that the JSON is structurally valid.
  */
-export async function verifyServiceAccountAuth(raw: string): Promise<void> {
+export async function verifyServiceAccountAuth(
+  raw: string,
+  sharedDriveId?: string,
+): Promise<ServiceAccountVerification> {
   const sa = JSON.parse(raw) as {
     client_email: string;
     private_key: string;
@@ -142,6 +188,53 @@ export async function verifyServiceAccountAuth(raw: string): Promise<void> {
     const body = await resp.text();
     throw new Error(`Token endpoint returned ${resp.status}: ${body}`);
   }
+
+  const token = (await resp.json()) as { access_token?: unknown; expires_in?: unknown };
+  if (typeof token.access_token !== "string" || token.access_token.length === 0) {
+    throw new Error("Token endpoint response did not include access_token");
+  }
+
+  await verifyDriveApiAccess(token.access_token, sharedDriveId);
+
+  const expiresIn =
+    typeof token.expires_in === "number" && Number.isFinite(token.expires_in)
+      ? token.expires_in
+      : 3600;
+  return {
+    accessToken: token.access_token,
+    expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+  };
+}
+
+async function verifyDriveApiAccess(accessToken: string, sharedDriveId?: string): Promise<void> {
+  const params = new URLSearchParams({
+    pageSize: "1",
+    fields: "files(id)",
+    supportsAllDrives: "true",
+    includeItemsFromAllDrives: "true",
+  });
+  if (sharedDriveId && sharedDriveId.length > 0) {
+    params.set("corpora", "drive");
+    params.set("driveId", sharedDriveId);
+  }
+
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Drive API files.list returned ${resp.status}: ${body}`);
+  }
+}
+
+function persistGoogleDriveCredentials(raw: string): string {
+  const credentialFilePath = resolveGwsCredentialsPath();
+  mkdirSync(dirname(credentialFilePath), { recursive: true, mode: 0o700 });
+  writeFileSync(credentialFilePath, raw, { encoding: "utf-8", mode: 0o600 });
+  process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE = credentialFilePath;
+  process.env.GOOGLE_APPLICATION_CREDENTIALS ||= credentialFilePath;
+  return credentialFilePath;
 }
 
 export function parseServiceAccountJson(raw: string): ServiceAccountResult {

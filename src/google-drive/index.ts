@@ -1,4 +1,5 @@
 export {
+  getGoogleDriveConnection,
   initGoogleDrive,
   isGoogleDriveEnabled,
   resetGoogleDrive,
