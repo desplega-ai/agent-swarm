@@ -60,8 +60,8 @@ The ACP harness (`HARNESS_PROVIDER=acp`) delegates to a concrete agent process s
 | `ACP_TARGET` | Underlying agent | Binary | Credential env vars | Bundled in worker image |
 |---|---|---|---|---|
 | `custom` (default) | Operator-provided | `ACP_COMMAND` | None (target's own) | No |
-| `gemini-cli` | Gemini CLI (native ACP) | `gemini` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | No (install: `npm i -g @google/gemini-cli`) |
-| `claude-agent-acp` | Claude Code via Zed wrapper | `claude-agent-acp` | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | No (install: `npm i -g @zed-industries/claude-agent-acp`) |
+| `gemini-cli` | Gemini CLI (native ACP) | `gemini` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Yes |
+| `claude-agent-acp` | Claude Code via Zed wrapper | `claude-agent-acp` | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | Yes |
 | `codex-acp` | Codex CLI via Zed wrapper (Rust) | `codex-acp` | `OPENAI_API_KEY` or `~/.codex/auth.json` | No (install: `cargo install codex-acp`) |
 
 ### ACP env vars

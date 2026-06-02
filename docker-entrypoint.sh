@@ -243,18 +243,18 @@ elif [ "$HARNESS_PROVIDER" = "acp" ]; then
     case "$ACP_TARGET" in
         gemini|gemini-cli)
             if ! command -v gemini > /dev/null 2>&1; then
-                echo "Warning: gemini CLI not found on PATH (needed for ACP target 'gemini-cli')"
-                echo "  Install: npm install -g @google/gemini-cli"
-                echo "  The binary is NOT bundled in the worker image by default."
+                echo "FATAL: gemini CLI not found on PATH (needed for ACP target 'gemini-cli')"
+                echo "  Expected: bundled in worker image via @google/gemini-cli"
+                exit 1
             else
                 echo "ACP target binary: $(command -v gemini) (gemini-cli)"
             fi
             ;;
         claude-agent-acp)
             if ! command -v claude-agent-acp > /dev/null 2>&1; then
-                echo "Warning: claude-agent-acp not found on PATH (needed for ACP target 'claude-agent-acp')"
-                echo "  Install: npm install -g @zed-industries/claude-agent-acp"
-                echo "  The binary is NOT bundled in the worker image by default."
+                echo "FATAL: claude-agent-acp not found on PATH (needed for ACP target 'claude-agent-acp')"
+                echo "  Expected: bundled in worker image via @zed-industries/claude-agent-acp"
+                exit 1
             else
                 echo "ACP target binary: $(command -v claude-agent-acp) (claude-agent-acp)"
             fi
