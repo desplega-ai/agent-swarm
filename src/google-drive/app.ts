@@ -1,9 +1,45 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 let initialized = false;
+
+const WELL_KNOWN_ADC_PATHS = [
+  join(
+    process.env.HOME || (process.platform === "win32" ? process.env.APPDATA || "" : ""),
+    process.platform === "win32"
+      ? "gcloud/application_default_credentials.json"
+      : ".config/gcloud/application_default_credentials.json",
+  ),
+];
+
+function resolveCredentialsJson(): string | null {
+  if (process.env.GOOGLE_DRIVE_SA_CREDENTIALS) {
+    return process.env.GOOGLE_DRIVE_SA_CREDENTIALS;
+  }
+
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
+      return readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, "utf-8");
+    } catch {
+      return null;
+    }
+  }
+
+  for (const p of WELL_KNOWN_ADC_PATHS) {
+    if (existsSync(p)) {
+      try {
+        return readFileSync(p, "utf-8");
+      } catch {}
+    }
+  }
+
+  return null;
+}
 
 export function isGoogleDriveEnabled(): boolean {
   const disabled = process.env.GOOGLE_DRIVE_DISABLE;
   if (disabled === "true" || disabled === "1") return false;
-  return !!process.env.GOOGLE_DRIVE_SA_CREDENTIALS;
+  return resolveCredentialsJson() !== null;
 }
 
 export function resetGoogleDrive(): void {
@@ -14,19 +50,29 @@ export function initGoogleDrive(): boolean {
   if (initialized) return isGoogleDriveEnabled();
   initialized = true;
 
-  if (!isGoogleDriveEnabled()) {
-    console.log("[Google Drive] Integration disabled or GOOGLE_DRIVE_SA_CREDENTIALS not set");
+  const disabled = process.env.GOOGLE_DRIVE_DISABLE;
+  if (disabled === "true" || disabled === "1") {
+    console.log("[Google Drive] Integration disabled via GOOGLE_DRIVE_DISABLE");
     return false;
   }
 
-  const raw = process.env.GOOGLE_DRIVE_SA_CREDENTIALS!;
+  const raw = resolveCredentialsJson();
+  if (!raw) {
+    console.log(
+      "[Google Drive] No credentials found (checked GOOGLE_DRIVE_SA_CREDENTIALS, GOOGLE_APPLICATION_CREDENTIALS, and well-known ADC paths)",
+    );
+    return false;
+  }
+
   const result = parseServiceAccountJson(raw);
   if (!result.ok) {
     console.error(`[Google Drive] Invalid SA credentials: ${result.error}`);
     return false;
   }
 
-  console.log(`[Google Drive] Integration initialized (SA: ${result.clientEmail})`);
+  console.log(
+    `[Google Drive] Integration initialized (SA: ${result.clientEmail}, project: ${result.projectId})`,
+  );
   return true;
 }
 

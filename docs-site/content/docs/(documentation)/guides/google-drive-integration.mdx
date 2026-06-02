@@ -1,0 +1,143 @@
+---
+title: Google Drive Integration
+description: Connect Agent Swarm to Google Drive via a GCP service account — read, write, export, and search files in Shared Drives from any agent.
+---
+
+Connect your swarm to Google Drive so agents can read, write, export, and search files in your organization's Shared Drives.
+
+## Prerequisites
+
+- A Google Cloud Platform (GCP) project
+- The **Google Drive API** enabled on that project
+- A **service account** (SA) with a JSON key
+- A Shared Drive (or folder) shared with the SA email address
+
+## GCP Setup
+
+### 1. Create a GCP project (or use an existing one)
+
+Go to the [GCP Console](https://console.cloud.google.com/) and create a new project, or select an existing one.
+
+### 2. Enable the Google Drive API
+
+1. Navigate to **APIs & Services > Library**
+2. Search for **Google Drive API**
+3. Click **Enable**
+
+### 3. Create a service account
+
+1. Go to **IAM & Admin > Service Accounts**
+2. Click **Create Service Account**
+3. Give it a name (e.g. `swarm-drive-sa`) and click **Create and Continue**
+4. Skip the optional role grants — the SA only needs Drive access, which is granted by sharing the Drive/folder directly
+5. Click **Done**
+
+### 4. Generate a JSON key
+
+1. Click on the newly created service account
+2. Go to the **Keys** tab
+3. Click **Add Key > Create new key**
+4. Select **JSON** and click **Create**
+5. Save the downloaded JSON file — this is your SA credential
+
+The JSON file looks like this:
+
+```json
+{
+  "type": "service_account",
+  "project_id": "your-project-id",
+  "private_key_id": "...",
+  "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n",
+  "client_email": "swarm-drive-sa@your-project.iam.gserviceaccount.com",
+  "client_id": "...",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "..."
+}
+```
+
+### 5. Share your Drive with the service account
+
+1. Open Google Drive and navigate to the Shared Drive (or folder) you want agents to access
+2. Click **Manage members** (or right-click > Share)
+3. Add the SA email address (e.g. `swarm-drive-sa@your-project.iam.gserviceaccount.com`)
+4. Grant **Editor** access (or **Viewer** for read-only)
+
+<Callout type="info">
+The service account can only see Drives and folders it has been explicitly shared with. If an agent reports "file not found," verify the SA email has access.
+</Callout>
+
+## Swarm Configuration
+
+### Option A: Dashboard (recommended)
+
+1. Open the Agent Swarm dashboard
+2. Go to **Settings > Integrations**
+3. Find the **Google Drive** card
+4. Paste the entire SA JSON key into the **Service Account Credentials** field
+5. Optionally set the **Shared Drive ID** for a default target
+6. Click **Save** — the integration restarts automatically
+
+Use the **Test Connection** button to verify: it signs a JWT with the SA private key and exchanges it at Google's token endpoint. On success, you'll see the SA email and GCP project ID.
+
+### Option B: Environment variables
+
+```bash
+# Paste the full SA JSON as a single-line string
+GOOGLE_DRIVE_SA_CREDENTIALS='{"type":"service_account","project_id":"...","private_key":"...","client_email":"...","token_uri":"..."}'
+
+# Optional: default Shared Drive ID
+GOOGLE_DRIVE_SHARED_DRIVE_ID=0ABcDeFgHiJkLmNoPq
+
+# Disable the integration without removing credentials
+GOOGLE_DRIVE_DISABLE=true
+```
+
+### Option C: Application Default Credentials (ADC)
+
+If you're running in a GCP environment (Cloud Run, GKE, Compute Engine) or have the `gcloud` CLI configured locally, the integration automatically checks:
+
+1. `GOOGLE_APPLICATION_CREDENTIALS` — path to a SA JSON file
+2. `~/.config/gcloud/application_default_credentials.json` — the well-known ADC location
+
+No additional configuration is needed if ADC is already set up.
+
+## How It Works
+
+The integration uses **service-account-based authentication** (not OAuth consent flow):
+
+1. **On boot**, the API server calls `initGoogleDrive()` which resolves credentials from `GOOGLE_DRIVE_SA_CREDENTIALS`, `GOOGLE_APPLICATION_CREDENTIALS`, or the well-known ADC path
+2. **Credentials are validated** — the JSON must contain `type: "service_account"`, `project_id`, `client_email`, `private_key`, and `token_uri`
+3. **At runtime**, agents use the `gws` CLI (installed via the `gws-drive` skill) to interact with Drive — listing files, exporting docs, uploading content, and leaving comments
+4. **Authentication is transparent** — the SA private key signs JWTs that are exchanged for short-lived access tokens at Google's token endpoint
+
+### What agents can do
+
+| Operation | Example |
+|-----------|---------|
+| List / search files | Find all Google Docs modified this week |
+| Read / export | Export a Google Doc as plain text or PDF |
+| Create / upload | Upload a report to a specific folder |
+| Update | Replace a file's content |
+| Comment | Leave review comments on documents |
+
+## Operator Checklist
+
+- [ ] GCP project created
+- [ ] Google Drive API enabled
+- [ ] Service account created with JSON key
+- [ ] Target Shared Drive / folder shared with the SA email
+- [ ] SA JSON pasted into the dashboard (or set via env var / ADC)
+- [ ] **Test Connection** passes in the dashboard
+- [ ] `gws-drive` skill installed on agents that need Drive access
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| "No credentials found" at boot | Verify `GOOGLE_DRIVE_SA_CREDENTIALS` is set, or `GOOGLE_APPLICATION_CREDENTIALS` points to a valid file |
+| "Invalid SA credentials" | The JSON is malformed or missing required fields — re-download the key from GCP |
+| "SA credentials valid but auth failed" | The private key or token URI is wrong, or the Drive API is not enabled on the GCP project |
+| Agent can't find files | The SA email hasn't been added as a member of the Shared Drive |
+| "supportsAllDrives" errors | Always pass `--supportsAllDrives true` when working with Shared Drives via the `gws` CLI |

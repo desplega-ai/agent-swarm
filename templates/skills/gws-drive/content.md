@@ -3,11 +3,29 @@
 You have read-write access to Google Drive via the `gws` CLI and a GCP service account.
 The SA is configured globally — credentials are available at container boot.
 
+## Installing gws
+
+`gws` (Google Workspace CLI) is a Go binary. Install it via:
+
+```bash
+# macOS / Linux (via go install)
+go install github.com/nicholasgasior/gws@latest
+
+# Or download a pre-built binary from the releases page:
+# https://github.com/nicholasgasior/gws/releases
+```
+
+If `go` is not available, download the binary for your platform from the releases page
+and place it on your `$PATH`.
+
 ## Setup
 
 The service account credentials are stored encrypted in `swarm_config` under key
 `GOOGLE_DRIVE_SA_CREDENTIALS`. At boot, the entrypoint writes them to
 `~/.config/gws/credentials.json` and sets `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE`.
+
+The integration also checks Google's standard Application Default Credentials (ADC) paths:
+`GOOGLE_APPLICATION_CREDENTIALS` env var and `~/.config/gcloud/application_default_credentials.json`.
 
 The default Shared Drive ID (if configured) is in `GOOGLE_DRIVE_SHARED_DRIVE_ID`.
 
