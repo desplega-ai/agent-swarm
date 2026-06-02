@@ -17,6 +17,13 @@ const TEST_PORT = 13083;
 const BASE = `http://localhost:${TEST_PORT}`;
 
 type MetricRunResponse = {
+  widgets: Array<{
+    widget: { id: string };
+    result: {
+      columns: string[];
+      rows: Record<string, unknown>[];
+    };
+  }>;
   result: {
     columns: string[];
     rows: Record<string, unknown>[];
@@ -67,8 +74,9 @@ describe("Metrics HTTP API", () => {
     const res = await fetch(`${BASE}/api/metrics/definitions?fields=full`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { metrics: Metric[]; total: number };
-    expect(body.total).toBeGreaterThanOrEqual(4);
-    expect(body.metrics.map((metric) => metric.slug)).toContain("tasks-created-per-day");
+    expect(body.total).toBeGreaterThanOrEqual(1);
+    const starter = body.metrics.find((metric) => metric.slug === "swarm-operations-overview");
+    expect(starter?.definition.widgets.map((widget) => widget.viz.type)).toContain("multi-line");
   });
 
   test("create, run, update snapshots prior definition", async () => {
@@ -81,10 +89,14 @@ describe("Metrics HTTP API", () => {
         description: "Counts agent rows",
         definition: {
           version: 1,
-          viz: "stat",
-          query: { sql: "SELECT COUNT(*) AS count FROM agents", maxRows: 10 },
-          columns: { value: "count" },
-          format: "integer",
+          widgets: [
+            {
+              id: "agent-count",
+              title: "Agent count",
+              query: { sql: "SELECT COUNT(*) AS count FROM agents", maxRows: 10 },
+              viz: { type: "stat", value: "count", format: "integer" },
+            },
+          ],
         },
       }),
     });
@@ -97,8 +109,8 @@ describe("Metrics HTTP API", () => {
     });
     expect(run.status).toBe(200);
     const runBody = (await run.json()) as MetricRunResponse;
-    expect(runBody.result.columns).toEqual(["count"]);
-    expect(runBody.result.rows[0]).toHaveProperty("count");
+    expect(runBody.widgets[0]?.result.columns).toEqual(["count"]);
+    expect(runBody.widgets[0]?.result.rows[0]).toHaveProperty("count");
 
     const updated = await fetch(`${BASE}/api/metrics/definitions/${id}`, {
       method: "PUT",
@@ -107,10 +119,14 @@ describe("Metrics HTTP API", () => {
         title: "Updated Count",
         definition: {
           version: 1,
-          viz: "stat",
-          query: { sql: "SELECT COUNT(*) AS count FROM agent_tasks", maxRows: 10 },
-          columns: { value: "count" },
-          format: "integer",
+          widgets: [
+            {
+              id: "task-count",
+              title: "Task count",
+              query: { sql: "SELECT COUNT(*) AS count FROM agent_tasks", maxRows: 10 },
+              viz: { type: "stat", value: "count", format: "integer" },
+            },
+          ],
         },
       }),
     });
@@ -128,10 +144,14 @@ describe("Metrics HTTP API", () => {
         title: "UI Owned Count",
         definition: {
           version: 1,
-          viz: "stat",
-          query: { sql: "SELECT COUNT(*) AS count FROM agent_tasks", maxRows: 10 },
-          columns: { value: "count" },
-          format: "integer",
+          widgets: [
+            {
+              id: "task-count",
+              title: "Task count",
+              query: { sql: "SELECT COUNT(*) AS count FROM agent_tasks", maxRows: 10 },
+              viz: { type: "stat", value: "count", format: "integer" },
+            },
+          ],
         },
       }),
     });
@@ -141,7 +161,7 @@ describe("Metrics HTTP API", () => {
     const run = await fetch(`${BASE}/api/metrics/definitions/${id}/run`, { method: "POST" });
     expect(run.status).toBe(200);
     const runBody = (await run.json()) as MetricRunResponse;
-    expect(runBody.result.rows[0]).toHaveProperty("count");
+    expect(runBody.widgets[0]?.result.rows[0]).toHaveProperty("count");
   });
 
   test("saved metric SQL rejects writes and multiple statements", async () => {
@@ -153,9 +173,14 @@ describe("Metrics HTTP API", () => {
           title: "Bad Metric",
           definition: {
             version: 1,
-            viz: "stat",
-            query: { sql },
-            columns: { value: "x" },
+            widgets: [
+              {
+                id: "bad",
+                title: "Bad",
+                query: { sql },
+                viz: { type: "stat", value: "x" },
+              },
+            ],
           },
         }),
       });

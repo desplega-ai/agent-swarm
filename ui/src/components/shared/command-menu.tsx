@@ -36,13 +36,13 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
   { label: "Agents", path: "/agents", icon: Bot },
   { label: "Tasks", path: "/tasks", icon: ClipboardList },
-  { label: "Metrics", path: "/metrics", icon: BarChart3 },
   { label: "Chat", path: "/chat", icon: MessageSquare },
   { label: "Schedules", path: "/schedules", icon: Clock },
   { label: "Usage", path: "/usage", icon: BarChart3 },
   { label: "Connections", path: "/settings/connections", icon: Settings },
   { label: "Repos", path: "/settings/repos", icon: FolderGit2 },
   { label: "Pages", path: "/pages", icon: Globe, gate: { minVersion: "1.79.0" } },
+  { label: "Dashboards", path: "/metrics", icon: BarChart3, gate: { minVersion: "1.79.0" } },
   { label: "Services", path: "/services", icon: Server },
 ];
 

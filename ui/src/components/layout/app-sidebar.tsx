@@ -47,6 +47,10 @@ interface NavItem {
   title: string;
   path: string;
   icon: typeof Home;
+  children?: Array<{
+    title: string;
+    path: string;
+  }>;
   /** When set, item is shown as disabled with this tooltip when condition fails. */
   gate?: { minVersion: string };
   /**
@@ -85,7 +89,6 @@ const navGroups: NavGroup[] = [
       { title: "Home", path: "/", icon: Home },
       { title: "Tasks", path: "/tasks", icon: ListTodo },
       { title: "Sessions", path: "/sessions", icon: MessageSquare, gate: { minVersion: "1.76.0" } },
-      { title: "Metrics", path: "/metrics", icon: BarChart3 },
       { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
     ],
   },
@@ -106,7 +109,13 @@ const navGroups: NavGroup[] = [
       { title: "Skills", path: "/skills", icon: BookOpen },
       { title: "MCP Servers", path: "/mcp-servers", icon: Cable },
       { title: "Memory", path: "/memory", icon: Brain },
-      { title: "Pages", path: "/pages", icon: Globe, gate: { minVersion: "1.79.0" } },
+      {
+        title: "Pages",
+        path: "/pages",
+        icon: Globe,
+        gate: { minVersion: "1.79.0" },
+        children: [{ title: "Dashboards", path: "/metrics" }],
+      },
       { title: "Templates", path: "/templates", icon: FileText },
     ],
   },
@@ -350,7 +359,10 @@ export function AppSidebar() {
                         const isActive =
                           item.path === "/"
                             ? location.pathname === "/"
-                            : location.pathname.startsWith(item.path);
+                            : location.pathname.startsWith(item.path) ||
+                              !!item.children?.some((child) =>
+                                location.pathname.startsWith(child.path),
+                              );
                         const gated = isGated(item);
                         if (gated) return null;
                         const badge = badges[item.path];
@@ -364,6 +376,26 @@ export function AppSidebar() {
                             </SidebarMenuButton>
                             {/* Live count — auto-hidden when icon-collapsed. */}
                             {badge != null && <SidebarMenuBadge>{badge}</SidebarMenuBadge>}
+                            {item.children && (
+                              <div className="ml-6 mt-1 flex flex-col gap-0.5 border-l border-sidebar-border pl-2">
+                                {item.children.map((child) => (
+                                  <NavLink
+                                    key={child.path}
+                                    to={child.path}
+                                    className={({ isActive: childActive }) =>
+                                      cn(
+                                        "rounded-sm px-2 py-1 text-sm transition-colors",
+                                        childActive
+                                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                                      )
+                                    }
+                                  >
+                                    {child.title}
+                                  </NavLink>
+                                ))}
+                              </div>
+                            )}
                           </SidebarMenuItem>
                         );
                       })}

@@ -18,6 +18,7 @@ import {
   MetricDefinitionSchema,
   type MetricSummary,
   MetricVersionSchema,
+  type MetricWidget,
 } from "../types";
 import { assertSelectOnlyQuery, executeReadOnlyQuery } from "./db-query";
 import { route } from "./route-def";
@@ -37,21 +38,19 @@ function slugify(input: string): string {
 
 function validateMetricDefinition(definition: unknown) {
   const parsed = MetricDefinitionSchema.parse(definition);
-  assertSelectOnlyQuery(parsed.query.sql);
+  for (const widget of parsed.widgets) {
+    assertSelectOnlyQuery(widget.query.sql);
+  }
   return parsed;
 }
 
-function runMetric(metric: Metric) {
-  assertSelectOnlyQuery(metric.definition.query.sql);
-  const requestedRows = metric.definition.query.maxRows ?? DEFAULT_METRIC_MAX_ROWS;
+function runMetricWidget(widget: MetricWidget) {
+  assertSelectOnlyQuery(widget.query.sql);
+  const requestedRows = widget.query.maxRows ?? DEFAULT_METRIC_MAX_ROWS;
   const maxRows = Math.min(requestedRows, HARD_METRIC_MAX_ROWS);
-  const result = executeReadOnlyQuery(
-    metric.definition.query.sql,
-    metric.definition.query.params ?? [],
-    maxRows,
-  );
+  const result = executeReadOnlyQuery(widget.query.sql, widget.query.params ?? [], maxRows);
   return {
-    metric,
+    widget,
     result: {
       ...result,
       rows: result.rows.map((row) =>
@@ -60,6 +59,16 @@ function runMetric(metric: Metric) {
       truncated: result.total > result.rows.length,
       maxRows,
     },
+  };
+}
+
+function runMetric(metric: Metric) {
+  const widgets = metric.definition.widgets.map(runMetricWidget);
+  return {
+    metric,
+    widgets,
+    // Kept as the first widget result for older callers during the PR cycle.
+    result: widgets[0]?.result,
   };
 }
 

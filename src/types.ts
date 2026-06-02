@@ -1399,36 +1399,59 @@ const MetricParamSchema = z.union([z.string(), z.number(), z.boolean(), z.null()
 export const MetricFormatSchema = z.enum(["number", "integer", "currency", "percent", "duration"]);
 export type MetricFormat = z.infer<typeof MetricFormatSchema>;
 
-export const MetricVisualizationSchema = z.enum(["stat", "timeseries", "bar", "table"]);
+export const MetricVisualizationSchema = z.enum([
+  "stat",
+  "table",
+  "bar",
+  "line",
+  "multi-bar",
+  "multi-line",
+]);
 export type MetricVisualization = z.infer<typeof MetricVisualizationSchema>;
+
+const MetricQuerySchema = z.object({
+  sql: z.string().min(1).max(10_000),
+  params: z.array(MetricParamSchema).optional(),
+  maxRows: z.number().int().min(1).max(500).optional(),
+});
+
+export const MetricVizConfigSchema = z.object({
+  type: MetricVisualizationSchema,
+  x: z.string().optional(),
+  y: z.string().optional(),
+  series: z.array(z.string()).optional(),
+  label: z.string().optional(),
+  value: z.string().optional(),
+  columns: z
+    .array(
+      z.object({
+        key: z.string(),
+        label: z.string().optional(),
+        format: MetricFormatSchema.optional(),
+      }),
+    )
+    .optional(),
+  format: MetricFormatSchema.optional(),
+});
+export type MetricVizConfig = z.infer<typeof MetricVizConfigSchema>;
+
+export const MetricWidgetSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  query: MetricQuerySchema,
+  viz: MetricVizConfigSchema,
+});
+export type MetricWidget = z.infer<typeof MetricWidgetSchema>;
 
 export const MetricDefinitionSchema = z.object({
   version: z.literal(1),
-  viz: MetricVisualizationSchema,
-  query: z.object({
-    sql: z.string().min(1).max(10_000),
-    params: z.array(MetricParamSchema).optional(),
-    maxRows: z.number().int().min(1).max(500).optional(),
-  }),
-  columns: z
+  widgets: z.array(MetricWidgetSchema).min(1).max(24),
+  layout: z
     .object({
-      x: z.string().optional(),
-      y: z.string().optional(),
-      label: z.string().optional(),
-      value: z.string().optional(),
-      series: z.string().optional(),
-      table: z
-        .array(
-          z.object({
-            key: z.string(),
-            label: z.string().optional(),
-            format: MetricFormatSchema.optional(),
-          }),
-        )
-        .optional(),
+      columns: z.number().int().min(1).max(4).optional(),
     })
     .optional(),
-  format: MetricFormatSchema.optional(),
   refreshSeconds: z.number().int().min(5).max(3600).optional(),
 });
 export type MetricDefinition = z.infer<typeof MetricDefinitionSchema>;

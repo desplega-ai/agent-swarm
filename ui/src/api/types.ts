@@ -1501,26 +1501,42 @@ export interface PagesListResponse {
   total: number;
 }
 
-export type MetricVisualization = "stat" | "timeseries" | "bar" | "table";
+export type MetricVisualization = "stat" | "table" | "bar" | "line" | "multi-bar" | "multi-line";
 export type MetricFormat = "number" | "integer" | "currency" | "percent" | "duration";
 
-export interface MetricDefinition {
-  version: 1;
-  viz: MetricVisualization;
+export interface MetricVizColumn {
+  key: string;
+  label?: string;
+  format?: MetricFormat;
+}
+
+export interface MetricWidget {
+  id: string;
+  title: string;
+  description?: string;
   query: {
     sql: string;
     params?: Array<string | number | boolean | null>;
     maxRows?: number;
   };
-  columns?: {
+  viz: {
+    type: MetricVisualization;
     x?: string;
     y?: string;
+    series?: string[];
     label?: string;
     value?: string;
-    series?: string;
-    table?: Array<{ key: string; label?: string; format?: MetricFormat }>;
+    columns?: MetricVizColumn[];
+    format?: MetricFormat;
   };
-  format?: MetricFormat;
+}
+
+export interface MetricDefinition {
+  version: 1;
+  widgets: MetricWidget[];
+  layout?: {
+    columns?: number;
+  };
   refreshSeconds?: number;
 }
 
@@ -1546,6 +1562,18 @@ export interface MetricsListResponse {
 
 export interface MetricRunResult {
   metric: Metric;
+  widgets: Array<{
+    widget: MetricWidget;
+    result: {
+      columns: string[];
+      rows: Record<string, unknown>[];
+      elapsed: number;
+      total: number;
+      truncated: boolean;
+      maxRows: number;
+    };
+  }>;
+  /** First widget result, kept for older callers during rollout. */
   result: {
     columns: string[];
     rows: Record<string, unknown>[];

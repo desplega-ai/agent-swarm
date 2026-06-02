@@ -32,20 +32,20 @@ export const registerCreateMetricTool = (server: McpServer) => {
     {
       title: "Create or update a metric",
       description:
-        "Stores a config-driven dashboard metric backed by a read-only SQL query. " +
+        "Stores a config-driven dashboard backed by read-only SQL widget queries. " +
         "Calls are upsert-by-(agent, slug), mirroring create_page: same slug updates " +
-        "the existing metric and snapshots the prior JSON definition.",
+        "the existing dashboard and snapshots the prior JSON definition.",
       annotations: { destructiveHint: false },
       inputSchema: z.object({
-        title: z.string().min(1).describe("Human-readable metric title."),
+        title: z.string().min(1).describe("Human-readable dashboard title."),
         slug: z
           .string()
           .min(1)
           .optional()
           .describe("URL-safe slug. Defaults to the kebab-cased title."),
-        description: z.string().optional().describe("Short description shown in the Metrics tab."),
+        description: z.string().optional().describe("Short description shown in the dashboard."),
         definition: MetricDefinitionSchema.describe(
-          "Metric JSON definition: viz type, SELECT/WITH SQL query, result columns, formatting.",
+          "Dashboard JSON definition: a list of widgets, each with SELECT/WITH SQL and viz config.",
         ),
       }),
       outputSchema: z.object({
@@ -75,7 +75,9 @@ export const registerCreateMetricTool = (server: McpServer) => {
       }
 
       try {
-        assertSelectOnlyQuery(input.definition.query.sql);
+        for (const widget of input.definition.widgets) {
+          assertSelectOnlyQuery(widget.query.sql);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
