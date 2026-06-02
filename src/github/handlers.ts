@@ -1,4 +1,4 @@
-import { failTask, findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
+import { failTask, findTaskByVcs, getAllAgents, getSwarmConfigs, incrKv, upsertKv } from "../be/db";
 import { findUserByExternalId } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { githubContextKey } from "../tasks/context-key";
@@ -45,6 +45,19 @@ function buildGithubContextKey(
     return undefined;
   }
 }
+
+/**
+ * Runtime-config guards for cancel-on-unassign and cancel-on-review-request-removed.
+ * Absent key / any value other than "false" → true (cancel, current behavior).
+ * Value "false" → false (skip cancel, leave task untouched).
+ */
+function cancelFlagEnabled(key: string): boolean {
+  const row = getSwarmConfigs({ scope: "global", key })[0];
+  return row?.value !== "false";
+}
+const cancelOnUnassignEnabled = () => cancelFlagEnabled("github.cancelOnUnassign");
+const cancelOnReviewRequestRemovedEnabled = () =>
+  cancelFlagEnabled("github.cancelOnReviewRequestRemoved");
 
 /**
  * Get review state emoji and label
@@ -278,6 +291,14 @@ export async function handlePullRequest(
       return { created: false };
     }
 
+    // Config gate: skip cancel if disabled
+    if (!cancelOnUnassignEnabled()) {
+      console.log(
+        `[GitHub] unassign cancel disabled by config — leaving task untouched (PR #${pr.number})`,
+      );
+      return { created: false };
+    }
+
     // Find the related task
     const task = findTaskByVcs(repository.full_name, pr.number);
     if (!task) {
@@ -375,6 +396,14 @@ export async function handlePullRequest(
   if (action === "review_request_removed") {
     // Check if bot's review request was removed
     if (!isBotAssignee(requested_reviewer?.login)) {
+      return { created: false };
+    }
+
+    // Config gate: skip cancel if disabled
+    if (!cancelOnReviewRequestRemovedEnabled()) {
+      console.log(
+        `[GitHub] review-request-removed cancel disabled by config — leaving task untouched (PR #${pr.number})`,
+      );
       return { created: false };
     }
 
@@ -635,6 +664,14 @@ export async function handleIssue(
   if (action === "unassigned") {
     // Check if bot was unassigned
     if (!isBotAssignee(assignee?.login)) {
+      return { created: false };
+    }
+
+    // Config gate: skip cancel if disabled
+    if (!cancelOnUnassignEnabled()) {
+      console.log(
+        `[GitHub] unassign cancel disabled by config — leaving task untouched (issue #${issue.number})`,
+      );
       return { created: false };
     }
 
