@@ -208,6 +208,16 @@ function IntegrationDetailInner({
   envPresence,
 }: InnerProps) {
   const Icon = resolveIcon(def.iconKey);
+  const logo = def.logoSrc ? (
+    <img
+      src={def.logoSrc}
+      alt=""
+      className="h-6 w-6 object-contain dark:invert"
+      aria-hidden="true"
+    />
+  ) : (
+    <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
+  );
   const status = deriveIntegrationStatus(def, configs, envPresence);
 
   const [state, setState] = useState<DirtyState>(initialState);
@@ -374,7 +384,7 @@ function IntegrationDetailInner({
           title={
             <div className="flex items-center gap-3 min-w-0">
               <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted/50 shrink-0">
-                <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
+                {logo}
               </div>
               <div className="min-w-0">
                 <h1 className="text-xl font-semibold">{def.name}</h1>
