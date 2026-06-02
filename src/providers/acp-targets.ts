@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { ProviderSessionConfig } from "./types";
 
-export type AcpTarget = "custom" | "gemini-cli";
+export type AcpTarget = "custom" | "gemini-cli" | "claude-agent-acp";
 
 export interface AcpTargetProfile {
   readonly target: AcpTarget;
@@ -140,6 +140,64 @@ const geminiCliTargetProfile: AcpTargetProfile = {
   },
 };
 
+// ─── claude-agent-acp target ────────────────────────────────────────────────
+
+const CLAUDE_ACP_BINARY = "claude-agent-acp";
+
+const CLAUDE_ACP_ENV_KEYS = [
+  "ANTHROPIC_API_KEY",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_API_KEY",
+] as const;
+
+function resolveClaudeAcpCommand(config: ProviderSessionConfig): string[] {
+  const explicit = readEnv(config, "ACP_TARGET_COMMAND") ?? readEnv(config, "ACP_COMMAND");
+  if (explicit) {
+    return parseCommand(explicit, readEnv(config, "ACP_TARGET_ARGS"));
+  }
+
+  const binDir = readEnv(config, "BUN_INSTALL");
+  const candidates = binDir
+    ? [join(binDir, "bin", CLAUDE_ACP_BINARY), CLAUDE_ACP_BINARY]
+    : [CLAUDE_ACP_BINARY];
+
+  for (const candidate of candidates) {
+    try {
+      const resolved = Bun.which(candidate, { PATH: readEnv(config, "PATH") ?? "" });
+      if (resolved) {
+        const args = readEnv(config, "ACP_TARGET_ARGS");
+        return args ? parseCommand(resolved, args) : [resolved];
+      }
+    } catch {
+      // Bun.which can throw on invalid input; try next candidate.
+    }
+  }
+
+  throw new AcpTargetResolutionError(
+    `Could not resolve "${CLAUDE_ACP_BINARY}" on PATH. Install it with: npm install -g @zed-industries/claude-agent-acp`,
+  );
+}
+
+const claudeAgentAcpTargetProfile: AcpTargetProfile = {
+  target: "claude-agent-acp",
+  command(config) {
+    return resolveClaudeAcpCommand(config);
+  },
+  env(config) {
+    const env = baseTargetEnv(config);
+    for (const key of CLAUDE_ACP_ENV_KEYS) {
+      const value = readEnv(config, key);
+      if (value) env[key] = value;
+    }
+    return env;
+  },
+  async writeSystemPromptArtifact(config) {
+    if (!config.systemPrompt) return;
+    const targetPath = join(config.cwd, "CLAUDE.md");
+    await Bun.write(targetPath, config.systemPrompt);
+  },
+};
+
 export function resolveAcpTarget(config: ProviderSessionConfig): AcpTargetProfile {
   const target = readEnv(config, "ACP_TARGET") ?? "custom";
   switch (target) {
@@ -147,9 +205,11 @@ export function resolveAcpTarget(config: ProviderSessionConfig): AcpTargetProfil
       return customTargetProfile;
     case "gemini-cli":
       return geminiCliTargetProfile;
+    case "claude-agent-acp":
+      return claudeAgentAcpTargetProfile;
     default:
       throw new AcpTargetResolutionError(
-        `Unsupported ACP target "${target}". Supported ACP targets: custom, gemini-cli.`,
+        `Unsupported ACP target "${target}". Supported targets: custom, gemini-cli, claude-agent-acp.`,
       );
   }
 }
