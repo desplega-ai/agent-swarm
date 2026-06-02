@@ -25,7 +25,6 @@ const CATEGORY_LABELS: Record<IntegrationCategory, string> = {
   llm: "LLM providers",
   observability: "Observability",
   payments: "Payments",
-  email: "Email",
   other: "Other",
 };
 

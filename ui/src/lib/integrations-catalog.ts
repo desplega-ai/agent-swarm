@@ -46,7 +46,6 @@ export type IntegrationCategory =
   | "llm"
   | "observability"
   | "payments"
-  | "email"
   | "other";
 
 export type IntegrationSpecialFlow =
@@ -576,7 +575,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     id: "agentmail",
     name: "AgentMail",
     description: "Receive email and reply from agents. Useful for customer-support-like flows.",
-    category: "email",
+    category: "comm",
     iconKey: "mail",
     docsUrl: "https://docs.agent-swarm.dev/integrations/agentmail",
     disableKey: "AGENTMAIL_DISABLE",
