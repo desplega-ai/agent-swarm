@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
+  backfillSupersedeTaskResumeTaskId,
   cancelTask,
   completeTask,
   failTask,
@@ -905,6 +906,7 @@ export async function handleTasks(
     }
 
     const resumeTaskId = followUp.task.id;
+    backfillSupersedeTaskResumeTaskId(parsed.params.id, resumeTaskId);
 
     ensure({
       id: "task.superseded",

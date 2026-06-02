@@ -2198,6 +2198,34 @@ export function supersedeTask(
   return row ? rowToAgentTask(row) : null;
 }
 
+export function backfillSupersedeTaskResumeTaskId(taskId: string, resumeTaskId: string): boolean {
+  const row = getDb()
+    .prepare<{ id: string; metadata: string | null }, [string]>(
+      `SELECT id, metadata
+       FROM agent_log
+       WHERE taskId = ? AND eventType = 'task_superseded'
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(taskId);
+  if (!row) return false;
+
+  let metadata: Record<string, unknown> = {};
+  if (row.metadata) {
+    try {
+      metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+    } catch {
+      metadata = {};
+    }
+  }
+  metadata.resumeTaskId = resumeTaskId;
+
+  const result = getDb()
+    .prepare("UPDATE agent_log SET metadata = ? WHERE id = ?")
+    .run(JSON.stringify(metadata), row.id);
+  return result.changes > 0;
+}
+
 /**
  * Pause a task that is currently in progress.
  * Used during graceful shutdown to allow tasks to resume after container restart.

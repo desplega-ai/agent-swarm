@@ -1,5 +1,6 @@
 import {
   assignUnassignedTaskPending,
+  backfillSupersedeTaskResumeTaskId,
   cleanupStaleSessions,
   createTaskExtended,
   deleteActiveSession,
@@ -103,9 +104,16 @@ export interface HeartbeatFindings {
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let checklistInterval: ReturnType<typeof setInterval> | null = null;
 let isSweeping = false;
+let beforeHeartbeatSupersedeForTests: ((task: AgentTask) => void) | null = null;
 
 /** Tasks auto-failed during the reboot sweep, consumed by boot triage */
 let rebootAffectedTasks: Array<{ original: AgentTask; retryTaskId: string | null }> = [];
+
+export function setBeforeHeartbeatSupersedeForTests(
+  hook: ((task: AgentTask) => void) | null,
+): void {
+  beforeHeartbeatSupersedeForTests = hook;
+}
 
 // ============================================================================
 // Tier 1: Preflight Gate
@@ -324,24 +332,20 @@ function remediateCrashedWorkerTask(
     return;
   }
 
+  beforeHeartbeatSupersedeForTests?.(task);
+
+  const superseded = supersedeTask(task.id, {
+    reason: opts.supersedeReason,
+    resumeTaskId: null,
+  });
+  if (!superseded) {
+    return;
+  }
+
   const resume = createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
 
   if (resume.kind === "created") {
-    const superseded = supersedeTask(task.id, {
-      reason: opts.supersedeReason,
-      resumeTaskId: resume.task.id,
-    });
-    if (!superseded) {
-      const failed = failTask(resume.task.id, "supersede_parent_not_available");
-      if (failed) {
-        findings.autoFailedTasks.push({
-          taskId: resume.task.id,
-          agentId: resume.task.agentId ?? task.agentId,
-          reason: "supersede_parent_not_available",
-        });
-      }
-      return;
-    }
+    backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
 
     findings.autoResumedTasks.push({
       taskId: task.id,
