@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
-import type { MetricSaveInput } from "../types";
+import type { MetricParam, MetricSaveInput } from "../types";
 
 export interface MetricDefinitionsFilters {
   agentId?: string;
@@ -25,10 +25,14 @@ export function useMetricDefinition(id: string | undefined) {
   });
 }
 
-export function useMetricRun(id: string | undefined, refreshSeconds?: number) {
+export function useMetricRun(
+  id: string | undefined,
+  refreshSeconds?: number,
+  variables?: Record<string, MetricParam>,
+) {
   return useQuery({
-    queryKey: ["metric-run", id],
-    queryFn: () => api.runMetric(id ?? ""),
+    queryKey: ["metric-run", id, variables],
+    queryFn: () => api.runMetric(id ?? "", variables),
     enabled: !!id,
     refetchInterval: refreshSeconds ? refreshSeconds * 1000 : false,
   });

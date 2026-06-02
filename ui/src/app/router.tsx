@@ -66,6 +66,7 @@ const REDIRECTS: Record<string, string> = {
   integrations: "/settings/integrations",
   repos: "/settings/repos",
   debug: "/settings/debug",
+  metrics: "/usage/metrics",
 };
 
 const redirectRoutes: RouteObject[] = [
@@ -109,6 +110,8 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <UsageContent /> },
           { path: "budgets", element: <BudgetsPage /> },
+          { path: "metrics", element: <MetricsPage /> },
+          { path: "metrics/:id", element: <MetricsPage /> },
         ],
       },
       {
@@ -138,7 +141,6 @@ export const router = createBrowserRouter([
       { path: "people/unmapped", element: <PeoplePage /> },
       { path: "people/:id", element: <PersonDetailPage /> },
       { path: "memory", element: <MemoryPage /> },
-      { path: "metrics", element: <MetricsPage /> },
       { path: "pages", element: <PagesListingPage /> },
       { path: "pages/:id", element: <PageDetailPage /> },
       ...redirectRoutes,

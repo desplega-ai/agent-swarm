@@ -106,6 +106,7 @@ describe("Metrics HTTP API", () => {
     const run = await fetch(`${BASE}/api/metrics/definitions/${id}/run`, {
       method: "POST",
       headers,
+      body: JSON.stringify({ variables: {} }),
     });
     expect(run.status).toBe(200);
     const runBody = (await run.json()) as MetricRunResponse;
@@ -158,9 +159,65 @@ describe("Metrics HTTP API", () => {
     expect(created.status).toBe(201);
     const { id } = (await created.json()) as { id: string; version: number };
 
-    const run = await fetch(`${BASE}/api/metrics/definitions/${id}/run`, { method: "POST" });
+    const run = await fetch(`${BASE}/api/metrics/definitions/${id}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ variables: {} }),
+    });
     expect(run.status).toBe(200);
     const runBody = (await run.json()) as MetricRunResponse;
+    expect(runBody.widgets[0]?.result.rows[0]).toHaveProperty("count");
+  });
+
+  test("run binds metric variables into query params", async () => {
+    const created = await fetch(`${BASE}/api/metrics/definitions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        slug: "variable-count",
+        title: "Variable Count",
+        definition: {
+          version: 1,
+          variables: [
+            {
+              key: "status",
+              label: "Status",
+              type: "select",
+              defaultValue: "pending",
+              options: [
+                { label: "Pending", value: "pending" },
+                { label: "Completed", value: "completed" },
+              ],
+            },
+          ],
+          widgets: [
+            {
+              id: "status-count",
+              title: "Status count",
+              query: {
+                sql: "SELECT COUNT(*) AS count FROM agent_tasks WHERE status = ?",
+                params: ["{{status}}"],
+                maxRows: 10,
+              },
+              viz: { type: "stat", value: "count", format: "integer" },
+            },
+          ],
+        },
+      }),
+    });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string; version: number };
+
+    const run = await fetch(`${BASE}/api/metrics/definitions/${id}/run`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ variables: { status: "completed" } }),
+    });
+    expect(run.status).toBe(200);
+    const runBody = (await run.json()) as MetricRunResponse & {
+      variables: Record<string, string>;
+    };
+    expect(runBody.variables.status).toBe("completed");
     expect(runBody.widgets[0]?.result.rows[0]).toHaveProperty("count");
   });
 

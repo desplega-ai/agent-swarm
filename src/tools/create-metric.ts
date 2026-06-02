@@ -171,7 +171,7 @@ export const registerCreateMetricTool = (server: McpServer) => {
       }
 
       const version = metricEditCounter(id);
-      const appUrl = `${getAppBaseUrl()}/metrics`;
+      const appUrl = `${getAppBaseUrl()}/usage/metrics`;
       return {
         content: [
           {

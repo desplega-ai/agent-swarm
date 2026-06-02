@@ -1503,6 +1503,19 @@ export interface PagesListResponse {
 
 export type MetricVisualization = "stat" | "table" | "bar" | "line" | "multi-bar" | "multi-line";
 export type MetricFormat = "number" | "integer" | "currency" | "percent" | "duration";
+export type MetricParam = string | number | boolean | null;
+export type MetricVariableType = "text" | "number" | "select";
+
+export interface MetricVariable {
+  key: string;
+  label?: string;
+  type?: MetricVariableType;
+  defaultValue?: MetricParam;
+  options?: Array<{
+    label: string;
+    value: MetricParam;
+  }>;
+}
 
 export interface MetricVizColumn {
   key: string;
@@ -1534,6 +1547,7 @@ export interface MetricWidget {
 export interface MetricDefinition {
   version: 1;
   widgets: MetricWidget[];
+  variables?: MetricVariable[];
   layout?: {
     columns?: number;
   };
@@ -1562,6 +1576,7 @@ export interface MetricsListResponse {
 
 export interface MetricRunResult {
   metric: Metric;
+  variables?: Record<string, MetricParam>;
   widgets: Array<{
     widget: MetricWidget;
     result: {

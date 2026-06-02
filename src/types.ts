@@ -1395,6 +1395,8 @@ export type PageVersion = z.infer<typeof PageVersionSchema>;
 // ---------------------------------------------------------------------------
 
 const MetricParamSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+export type MetricParam = z.infer<typeof MetricParamSchema>;
+const MetricVariableTypeSchema = z.enum(["text", "number", "select"]);
 
 export const MetricFormatSchema = z.enum(["number", "integer", "currency", "percent", "duration"]);
 export type MetricFormat = z.infer<typeof MetricFormatSchema>;
@@ -1414,6 +1416,25 @@ const MetricQuerySchema = z.object({
   params: z.array(MetricParamSchema).optional(),
   maxRows: z.number().int().min(1).max(500).optional(),
 });
+
+export const MetricVariableSchema = z.object({
+  key: z
+    .string()
+    .min(1)
+    .regex(/^[a-zA-Z][a-zA-Z0-9_]*$/),
+  label: z.string().min(1).optional(),
+  type: MetricVariableTypeSchema.default("text"),
+  defaultValue: MetricParamSchema.optional(),
+  options: z
+    .array(
+      z.object({
+        label: z.string().min(1),
+        value: MetricParamSchema,
+      }),
+    )
+    .optional(),
+});
+export type MetricVariable = z.infer<typeof MetricVariableSchema>;
 
 export const MetricVizConfigSchema = z.object({
   type: MetricVisualizationSchema,
@@ -1447,6 +1468,7 @@ export type MetricWidget = z.infer<typeof MetricWidgetSchema>;
 export const MetricDefinitionSchema = z.object({
   version: z.literal(1),
   widgets: z.array(MetricWidgetSchema).min(1).max(24),
+  variables: z.array(MetricVariableSchema).max(12).optional(),
   layout: z
     .object({
       columns: z.number().int().min(1).max(4).optional(),

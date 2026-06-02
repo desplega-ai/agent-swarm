@@ -16,7 +16,9 @@ import { snapshotMetric } from "../metrics/version";
 import {
   type Metric,
   MetricDefinitionSchema,
+  type MetricParam,
   type MetricSummary,
+  type MetricVariable,
   MetricVersionSchema,
   type MetricWidget,
 } from "../types";
@@ -26,6 +28,14 @@ import { json, jsonError } from "./utils";
 
 const DEFAULT_METRIC_MAX_ROWS = 100;
 const HARD_METRIC_MAX_ROWS = 500;
+const VARIABLE_TOKEN_RE = /^\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}$/;
+const MetricRunBodySchema = z
+  .object({
+    variables: z
+      .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+      .optional(),
+  })
+  .optional();
 
 function slugify(input: string): string {
   const slug = input
@@ -44,11 +54,63 @@ function validateMetricDefinition(definition: unknown) {
   return parsed;
 }
 
-function runMetricWidget(widget: MetricWidget) {
+function coerceVariableValue(variable: MetricVariable, raw: unknown): MetricParam {
+  if (raw == null || raw === "") {
+    return variable.defaultValue ?? null;
+  }
+  if (variable.type === "number") {
+    const numeric = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(numeric)) {
+      throw new Error(`Metric variable "${variable.key}" must be a number`);
+    }
+    return numeric;
+  }
+  if (typeof raw === "boolean" || typeof raw === "number" || typeof raw === "string") {
+    return raw;
+  }
+  return String(raw);
+}
+
+function resolveMetricVariables(metric: Metric, provided: Record<string, unknown>) {
+  const values: Record<string, MetricParam> = {};
+  for (const variable of metric.definition.variables ?? []) {
+    const value = coerceVariableValue(variable, provided[variable.key]);
+    if (variable.options?.length) {
+      const allowed = variable.options.some((option) => option.value === value);
+      if (!allowed) {
+        throw new Error(`Metric variable "${variable.key}" must match one of its options`);
+      }
+    }
+    values[variable.key] = value;
+  }
+  return values;
+}
+
+function resolveWidgetParams(
+  widget: MetricWidget,
+  variables: Record<string, MetricParam>,
+): MetricParam[] {
+  return (widget.query.params ?? []).map((param) => {
+    if (typeof param !== "string") return param;
+    const match = VARIABLE_TOKEN_RE.exec(param);
+    if (!match) return param;
+    const key = match[1]!;
+    if (!(key in variables)) {
+      throw new Error(`Metric variable "${key}" is not defined`);
+    }
+    return variables[key] ?? null;
+  });
+}
+
+function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricParam>) {
   assertSelectOnlyQuery(widget.query.sql);
   const requestedRows = widget.query.maxRows ?? DEFAULT_METRIC_MAX_ROWS;
   const maxRows = Math.min(requestedRows, HARD_METRIC_MAX_ROWS);
-  const result = executeReadOnlyQuery(widget.query.sql, widget.query.params ?? [], maxRows);
+  const result = executeReadOnlyQuery(
+    widget.query.sql,
+    resolveWidgetParams(widget, variables),
+    maxRows,
+  );
   return {
     widget,
     result: {
@@ -62,10 +124,12 @@ function runMetricWidget(widget: MetricWidget) {
   };
 }
 
-function runMetric(metric: Metric) {
-  const widgets = metric.definition.widgets.map(runMetricWidget);
+function runMetric(metric: Metric, providedVariables: Record<string, unknown> = {}) {
+  const variables = resolveMetricVariables(metric, providedVariables);
+  const widgets = metric.definition.widgets.map((widget) => runMetricWidget(widget, variables));
   return {
     metric,
+    variables,
     widgets,
     // Kept as the first widget result for older callers during the PR cycle.
     result: widgets[0]?.result,
@@ -157,6 +221,7 @@ const runMetricRoute = route({
   summary: "Run a metric definition",
   tags: ["Metrics"],
   params: z.object({ id: z.string() }),
+  body: MetricRunBodySchema,
   responses: {
     200: { description: "Metric result" },
     400: { description: "Invalid or disallowed query" },
@@ -279,7 +344,7 @@ export async function handleMetrics(
       return true;
     }
     try {
-      json(res, runMetric(metric));
+      json(res, runMetric(metric, parsed.body?.variables ?? {}));
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err));
     }

@@ -2029,9 +2029,16 @@ class ApiClient {
     return res.json();
   }
 
-  async runMetric(id: string): Promise<MetricRunResult> {
+  async runMetric(
+    id: string,
+    variables?: Record<string, import("./types").MetricParam>,
+  ): Promise<MetricRunResult> {
     const url = `${this.getBaseUrl()}/api/metrics/definitions/${encodeURIComponent(id)}/run`;
-    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ variables: variables ?? {} }),
+    });
     if (!res.ok) throw new Error(`runMetric ${id}: ${res.status}`);
     return res.json();
   }

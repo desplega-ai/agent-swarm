@@ -114,7 +114,6 @@ const navGroups: NavGroup[] = [
         path: "/pages",
         icon: Globe,
         gate: { minVersion: "1.79.0" },
-        children: [{ title: "Dashboards", path: "/metrics" }],
       },
       { title: "Templates", path: "/templates", icon: FileText },
     ],
@@ -149,6 +148,7 @@ const footerNav: FooterItem[] = [
     flyout: [
       { title: "Usage", path: "/usage", end: true },
       { title: "Budgets", path: "/usage/budgets" },
+      { title: "Metrics", path: "/usage/metrics" },
     ],
   },
 ];

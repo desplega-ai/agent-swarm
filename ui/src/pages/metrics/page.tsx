@@ -3,28 +3,22 @@ import type { ColDef } from "ag-grid-community";
 import {
   BarChart3,
   Code2,
+  Expand,
   LayoutDashboard,
   LineChart as LineChartIcon,
+  Maximize2,
+  Minimize2,
   Plus,
   RefreshCw,
   Save,
   Table2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   useCreateMetric,
+  useMetricDefinition,
   useMetricDefinitions,
   useMetricRun,
   useUpdateMetric,
@@ -33,10 +27,13 @@ import type {
   MetricDefinition,
   MetricFormat,
   MetricListItem,
+  MetricParam,
+  MetricVariable,
   MetricVisualization,
   MetricVizColumn,
   MetricWidget,
 } from "@/api/types";
+import { SharedBarChart, SharedLineChart } from "@/components/shared/charts/nivo-charts";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,20 +49,60 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, formatSmartTime } from "@/lib/utils";
 
 const NEW_METRIC_DEFINITION: MetricDefinition = {
   version: 1,
   refreshSeconds: 60,
   layout: { columns: 2 },
+  variables: [
+    {
+      key: "rangeModifier",
+      label: "Time range",
+      type: "select",
+      defaultValue: "-30 days",
+      options: [
+        { label: "Last 7 days", value: "-7 days" },
+        { label: "Last 30 days", value: "-30 days" },
+        { label: "Last 90 days", value: "-90 days" },
+      ],
+    },
+    {
+      key: "userFilter",
+      label: "Requester user ID",
+      type: "text",
+      defaultValue: "",
+    },
+    {
+      key: "agentFilter",
+      label: "Agent ID",
+      type: "text",
+      defaultValue: "",
+    },
+  ],
   widgets: [
     {
       id: "task-statuses",
       title: "Task statuses",
       description: "Tasks grouped by current status.",
       query: {
-        sql: "SELECT status, COUNT(*) AS tasks FROM agent_tasks GROUP BY status ORDER BY tasks DESC",
+        sql: "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE createdAt >= datetime('now', ?) AND (? = '' OR COALESCE(requestedByUserId, '') = ?) AND (? = '' OR COALESCE(agentId, '') = ?) GROUP BY status ORDER BY tasks DESC",
+        params: [
+          "{{rangeModifier}}",
+          "{{userFilter}}",
+          "{{userFilter}}",
+          "{{agentFilter}}",
+          "{{agentFilter}}",
+        ],
         maxRows: 100,
       },
       viz: {
@@ -82,10 +119,8 @@ const NEW_METRIC_DEFINITION: MetricDefinition = {
   ],
 };
 
-const CHART_COLORS = ["#f59e0b", "#38bdf8", "#22c55e", "#f43f5e", "#a78bfa"];
-
 function formatValue(value: unknown, format?: MetricFormat): string {
-  if (value == null) return "—";
+  if (value == null) return "-";
   const n = typeof value === "number" ? value : Number(value);
   if (format === "currency" && Number.isFinite(n)) {
     return new Intl.NumberFormat(undefined, {
@@ -94,9 +129,7 @@ function formatValue(value: unknown, format?: MetricFormat): string {
       maximumFractionDigits: 4,
     }).format(n);
   }
-  if (format === "percent" && Number.isFinite(n)) {
-    return `${(n * 100).toFixed(1)}%`;
-  }
+  if (format === "percent" && Number.isFinite(n)) return `${(n * 100).toFixed(1)}%`;
   if (format === "integer" && Number.isFinite(n)) {
     return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n);
   }
@@ -118,6 +151,32 @@ function inferColumns(rows: Record<string, unknown>[], columns?: MetricVizColumn
       format: undefined,
     }))
   );
+}
+
+function getDefaultVariableValue(variable: MetricVariable): MetricParam {
+  if (variable.defaultValue !== undefined) return variable.defaultValue;
+  return variable.options?.[0]?.value ?? "";
+}
+
+function readVariableValues(
+  variables: MetricVariable[] | undefined,
+  searchParams: URLSearchParams,
+): Record<string, MetricParam> {
+  const values: Record<string, MetricParam> = {};
+  for (const variable of variables ?? []) {
+    const raw = searchParams.get(`var_${variable.key}`);
+    const fallback = getDefaultVariableValue(variable);
+    if (raw == null) {
+      values[variable.key] = fallback;
+      continue;
+    }
+    values[variable.key] = variable.type === "number" ? Number(raw) : raw;
+  }
+  return values;
+}
+
+function variableParamValue(value: MetricParam): string {
+  return value == null ? "" : String(value);
 }
 
 function MetricTable({
@@ -162,48 +221,22 @@ function MetricChart({ rows, widget }: { rows: Record<string, unknown>[]; widget
 
   if (widget.viz.type === "line" || widget.viz.type === "multi-line") {
     return (
-      <div className="h-[280px] w-full">
-        <ResponsiveContainer>
-          <LineChart data={rows} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey={xKey} tickLine={false} axisLine={false} minTickGap={20} />
-            <YAxis tickLine={false} axisLine={false} width={44} />
-            <Tooltip />
-            {seriesKeys.map((series, index) => (
-              <Line
-                key={series}
-                type="monotone"
-                dataKey={series}
-                stroke={CHART_COLORS[index % CHART_COLORS.length]}
-                strokeWidth={2}
-                dot={widget.viz.type === "line"}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+      <SharedLineChart
+        data={rows}
+        xKey={xKey}
+        keys={seriesKeys}
+        valueFormatter={(value) => formatValue(value, widget.viz.format)}
+      />
     );
   }
 
   return (
-    <div className="h-[280px] w-full">
-      <ResponsiveContainer>
-        <BarChart data={rows} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey={xKey} tickLine={false} axisLine={false} minTickGap={10} />
-          <YAxis tickLine={false} axisLine={false} width={44} />
-          <Tooltip />
-          {seriesKeys.map((series, index) => (
-            <Bar
-              key={series}
-              dataKey={series}
-              fill={CHART_COLORS[index % CHART_COLORS.length]}
-              radius={[4, 4, 0, 0]}
-            />
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    <SharedBarChart
+      data={rows}
+      indexBy={xKey}
+      keys={seriesKeys}
+      valueFormatter={(value) => formatValue(value, widget.viz.format)}
+    />
   );
 }
 
@@ -228,16 +261,14 @@ function WidgetViz({
     const valueKey = widget.viz.value ?? Object.keys(rows[0] ?? {})[0] ?? "value";
     const labelKey = widget.viz.label;
     return (
-      <Card className="rounded-md">
-        <CardHeader className="py-4">
-          <CardDescription>
-            {labelKey ? String(rows[0]?.[labelKey] ?? widget.title) : widget.title}
-          </CardDescription>
-          <CardTitle className="font-mono text-4xl tabular-nums">
-            {formatValue(rows[0]?.[valueKey], widget.viz.format)}
-          </CardTitle>
-        </CardHeader>
-      </Card>
+      <div className="rounded-md border p-4">
+        <div className="text-sm text-muted-foreground">
+          {labelKey ? String(rows[0]?.[labelKey] ?? widget.title) : widget.title}
+        </div>
+        <div className="mt-2 font-mono text-4xl tabular-nums">
+          {formatValue(rows[0]?.[valueKey], widget.viz.format)}
+        </div>
+      </div>
     );
   }
 
@@ -271,6 +302,7 @@ function WidgetCard({
   elapsed,
   truncated,
   loading,
+  onExpand,
 }: {
   widget: MetricWidget;
   rows: Record<string, unknown>[];
@@ -278,6 +310,7 @@ function WidgetCard({
   elapsed?: number;
   truncated?: boolean;
   loading?: boolean;
+  onExpand: () => void;
 }) {
   const Icon = widgetIcon(widget.viz.type);
   return (
@@ -295,9 +328,20 @@ function WidgetCard({
               </CardDescription>
             )}
           </div>
-          <Badge variant="outline" size="tag" className="shrink-0">
-            {widget.viz.type}
-          </Badge>
+          <div className="flex shrink-0 items-center gap-2">
+            <Badge variant="outline" size="tag">
+              {widget.viz.type}
+            </Badge>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={onExpand}
+              title="Expand metric"
+            >
+              <Expand className="size-3.5" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -316,6 +360,67 @@ function WidgetCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function VariableControls({
+  variables,
+  values,
+  onChange,
+}: {
+  variables: MetricVariable[];
+  values: Record<string, MetricParam>;
+  onChange: (key: string, value: MetricParam) => void;
+}) {
+  if (variables.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      {variables.map((variable) => {
+        const value = values[variable.key] ?? getDefaultVariableValue(variable);
+        const label = variable.label ?? variable.key;
+        if (variable.type === "select" && variable.options?.length) {
+          return (
+            <div key={variable.key} className="space-y-1.5">
+              <Label className="text-xs">{label}</Label>
+              <Select
+                value={variableParamValue(value)}
+                onValueChange={(next) => onChange(variable.key, next)}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {variable.options.map((option) => (
+                    <SelectItem
+                      key={variableParamValue(option.value)}
+                      value={variableParamValue(option.value)}
+                    >
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          );
+        }
+        return (
+          <div key={variable.key} className="space-y-1.5">
+            <Label className="text-xs">{label}</Label>
+            <Input
+              className="w-[180px]"
+              type={variable.type === "number" ? "number" : "text"}
+              value={variableParamValue(value)}
+              onChange={(event) =>
+                onChange(
+                  variable.key,
+                  variable.type === "number" ? Number(event.target.value) : event.target.value,
+                )
+              }
+            />
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -338,7 +443,7 @@ function MetricEditorDialog({
 
   useEffect(() => {
     if (!open) return;
-    setTitle(metric?.title ?? "New metric");
+    setTitle(metric?.title ?? "New dashboard");
     setSlug(metric?.slug ?? "");
     setDescription(metric?.description ?? "");
     setDefinitionText(JSON.stringify(metric?.definition ?? NEW_METRIC_DEFINITION, null, 2));
@@ -361,7 +466,7 @@ function MetricEditorDialog({
           id: metric.id,
           input: { title, slug: slug || undefined, description: description || null, definition },
         });
-        toast.success("Metric updated");
+        toast.success("Dashboard updated");
       } else {
         await createMetric.mutateAsync({
           title,
@@ -369,11 +474,11 @@ function MetricEditorDialog({
           description: description || null,
           definition,
         });
-        toast.success("Metric created");
+        toast.success("Dashboard created");
       }
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save metric");
+      setError(err instanceof Error ? err.message : "Failed to save dashboard");
     }
   }
 
@@ -391,18 +496,26 @@ function MetricEditorDialog({
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="metric-title">Dashboard name</Label>
-              <Input id="metric-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <Input
+                id="metric-title"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="metric-slug">Slug</Label>
-              <Input id="metric-slug" value={slug} onChange={(e) => setSlug(e.target.value)} />
+              <Input
+                id="metric-slug"
+                value={slug}
+                onChange={(event) => setSlug(event.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="metric-description">Description</Label>
               <Input
                 id="metric-description"
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(event) => setDescription(event.target.value)}
               />
             </div>
             {error && (
@@ -443,174 +556,285 @@ function MetricEditorDialog({
   );
 }
 
-export default function MetricsPage() {
+function MetricsListPage() {
   const { data, isLoading } = useMetricDefinitions({ fields: "full", limit: 100 });
-  const metrics = useMemo(() => data?.metrics ?? [], [data]);
-  const [selectedId, setSelectedId] = useState<string | undefined>();
-  const [editorMetric, setEditorMetric] = useState<MetricListItem | undefined>();
+  const metrics = data?.metrics ?? [];
   const [editorOpen, setEditorOpen] = useState(false);
 
-  useEffect(() => {
-    if (!selectedId && metrics[0]) setSelectedId(metrics[0].id);
-  }, [metrics, selectedId]);
-
-  const selected = metrics.find((metric) => metric.id === selectedId) ?? metrics[0];
-  const refreshSeconds = selected?.definition?.refreshSeconds;
-  const run = useMetricRun(selected?.id, refreshSeconds);
-
-  function openEditor(metric?: MetricListItem) {
-    setEditorMetric(metric);
-    setEditorOpen(true);
-  }
-
-  const runMetric = run.data?.metric;
-  const widgetResults = run.data?.widgets ?? [];
-  const widgetResultById = new Map(widgetResults.map((item) => [item.widget.id, item.result]));
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
       <PageHeader
         icon={BarChart3}
-        title="Dashboards"
-        description="Editable JSON dashboards composed from SQL query widgets and viz configs."
+        title="Metrics"
+        description="Available SQL-backed dashboards. Open one to inspect dashboard widgets, raw JSON, and shareable variable state."
         action={
-          <Button onClick={() => openEditor()}>
+          <Button onClick={() => setEditorOpen(true)}>
             <Plus className="size-4" />
             Add dashboard
           </Button>
         }
       />
 
-      <div className="grid min-h-0 min-w-0 flex-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <Card className="min-h-0 min-w-0 rounded-md py-0">
-          <CardHeader className="border-b py-4">
-            <CardTitle className="text-base">Dashboards</CardTitle>
-            <CardDescription>{data?.total ?? 0} saved dashboards</CardDescription>
-          </CardHeader>
-          <CardContent className="min-h-0 overflow-y-auto p-2">
-            {isLoading ? (
-              <div className="space-y-2 p-2">
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {metrics.map((metric) => {
-                  const widgetCount = metric.definition?.widgets?.length ?? 0;
-                  return (
-                    <button
-                      key={metric.id}
-                      type="button"
-                      onClick={() => setSelectedId(metric.id)}
-                      className={cn(
-                        "w-full min-w-0 rounded-md border p-3 text-left transition-colors hover:bg-muted/60",
-                        metric.id === selected?.id
-                          ? "border-primary bg-primary/5"
-                          : "border-transparent",
-                      )}
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <LayoutDashboard className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                          {metric.title}
-                        </span>
-                        <Badge variant="outline" size="tag" className="shrink-0">
-                          {widgetCount} widgets
-                        </Badge>
-                      </div>
-                      <div className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">
+      {isLoading ? (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <Skeleton key={index} className="h-36" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {metrics.map((metric) => (
+            <Link key={metric.id} to={`/usage/metrics/${metric.id}`}>
+              <Card className="h-full rounded-md transition-colors hover:border-primary/60">
+                <CardHeader>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="truncate text-base">{metric.title}</CardTitle>
+                      <CardDescription className="line-clamp-2 break-words">
                         {metric.description ?? metric.slug}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="min-h-0 min-w-0 rounded-md">
-          <CardHeader className="border-b">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <CardTitle>{selected?.title ?? "Metrics"}</CardTitle>
-                <CardDescription className="break-words">
-                  {selected?.description ?? selected?.slug ?? "No metric selected"}
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {run.data && (
-                  <span className="text-xs text-muted-foreground">
-                    {run.data.result.total} rows in {run.data.result.elapsed}ms
-                  </span>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => run.refetch()}
-                  disabled={!selected || run.isFetching}
-                >
-                  <RefreshCw className={cn("size-4", run.isFetching && "animate-spin")} />
-                  Refresh
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => selected && openEditor(selected)}
-                  disabled={!selected}
-                >
-                  <Code2 className="size-4" />
-                  Edit JSON
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="min-h-0 overflow-y-auto">
-            {run.isLoading || !runMetric ? (
-              <div className="space-y-3">
-                <Skeleton className="h-[280px] w-full" />
-                <Skeleton className="h-28 w-full" />
-              </div>
-            ) : run.isError ? (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-                {run.error instanceof Error ? run.error.message : "Failed to run metric"}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div
-                  className={cn(
-                    "grid gap-4",
-                    (runMetric.definition.layout?.columns ?? 2) > 1 && "xl:grid-cols-2",
+                      </CardDescription>
+                    </div>
+                    <LayoutDashboard className="size-4 shrink-0 text-muted-foreground" />
+                  </div>
+                </CardHeader>
+                <CardContent className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <Badge variant="outline" size="tag">
+                    {metric.definition?.widgets?.length ?? 0} widgets
+                  </Badge>
+                  {(metric.definition?.variables?.length ?? 0) > 0 && (
+                    <Badge variant="outline" size="tag">
+                      {metric.definition?.variables?.length} variables
+                    </Badge>
                   )}
-                >
-                  {runMetric.definition.widgets.map((widget) => {
-                    const result = widgetResultById.get(widget.id);
-                    return (
-                      <WidgetCard
-                        key={widget.id}
-                        widget={widget}
-                        rows={result?.rows ?? []}
-                        total={result?.total}
-                        elapsed={result?.elapsed}
-                        truncated={result?.truncated}
-                        loading={run.isFetching}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span>
-                    Updated {selected?.updatedAt ? formatSmartTime(selected.updatedAt) : "—"}
-                  </span>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  <span>Updated {formatSmartTime(metric.updatedAt)}</span>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      )}
 
-      <MetricEditorDialog metric={editorMetric} open={editorOpen} onOpenChange={setEditorOpen} />
+      <MetricEditorDialog open={editorOpen} onOpenChange={setEditorOpen} />
     </div>
   );
+}
+
+function MetricsDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { data: selected, isLoading } = useMetricDefinition(id);
+  const tab = searchParams.get("tab") === "json" ? "json" : "dashboard";
+  const fullMode = searchParams.get("mode") === "full";
+  const expandedWidgetId = searchParams.get("widget");
+  const variables = selected?.definition?.variables ?? [];
+  const variableValues = useMemo(
+    () => readVariableValues(variables, searchParams),
+    [variables, searchParams],
+  );
+  const run = useMetricRun(selected?.id, selected?.definition?.refreshSeconds, variableValues);
+  const [editorOpen, setEditorOpen] = useState(false);
+
+  const widgetResults = run.data?.widgets ?? [];
+  const widgetResultById = new Map(widgetResults.map((item) => [item.widget.id, item.result]));
+  const expandedWidget = run.data?.metric.definition.widgets.find(
+    (widget) => widget.id === expandedWidgetId,
+  );
+  const expandedResult = expandedWidget ? widgetResultById.get(expandedWidget.id) : undefined;
+
+  function updateSearch(updates: Record<string, string | null>) {
+    const next = new URLSearchParams(searchParams);
+    for (const [key, value] of Object.entries(updates)) {
+      if (value == null || value === "") next.delete(key);
+      else next.set(key, value);
+    }
+    setSearchParams(next, { replace: false });
+  }
+
+  function setVariable(key: string, value: MetricParam) {
+    updateSearch({ [`var_${key}`]: variableParamValue(value) });
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-16" />
+        <Skeleton className="h-[420px]" />
+      </div>
+    );
+  }
+
+  if (!selected) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Metric not found" />
+        <Button variant="outline" onClick={() => navigate("/usage/metrics")}>
+          Back to metrics
+        </Button>
+      </div>
+    );
+  }
+
+  const content = (
+    <Tabs
+      value={tab}
+      onValueChange={(next) => updateSearch({ tab: next === "dashboard" ? null : next })}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+        <TabsList>
+          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+          <TabsTrigger value="json">JSON</TabsTrigger>
+        </TabsList>
+        <div className="flex flex-wrap items-center gap-2">
+          {run.data && (
+            <span className="text-xs text-muted-foreground">
+              {run.data.result?.total ?? 0} rows in {run.data.result?.elapsed ?? 0}ms
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => run.refetch()}
+            disabled={run.isFetching}
+          >
+            <RefreshCw className={cn("size-4", run.isFetching && "animate-spin")} />
+            Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setEditorOpen(true)}>
+            <Code2 className="size-4" />
+            Edit JSON
+          </Button>
+          {!fullMode && (
+            <Button variant="outline" size="sm" onClick={() => updateSearch({ mode: "full" })}>
+              <Maximize2 className="size-4" />
+              Full
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <TabsContent value="dashboard" className="mt-4 space-y-4">
+        <VariableControls variables={variables} values={variableValues} onChange={setVariable} />
+        {run.isError ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            {run.error instanceof Error ? run.error.message : "Failed to run metric"}
+          </div>
+        ) : run.isLoading || !run.data ? (
+          <div className="space-y-3">
+            <Skeleton className="h-[280px] w-full" />
+            <Skeleton className="h-28 w-full" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div
+              className={cn(
+                "grid gap-4",
+                (run.data.metric.definition.layout?.columns ?? 2) > 1 && "xl:grid-cols-2",
+              )}
+            >
+              {run.data.metric.definition.widgets.map((widget) => {
+                const result = widgetResultById.get(widget.id);
+                return (
+                  <WidgetCard
+                    key={widget.id}
+                    widget={widget}
+                    rows={result?.rows ?? []}
+                    total={result?.total}
+                    elapsed={result?.elapsed}
+                    truncated={result?.truncated}
+                    loading={run.isFetching}
+                    onExpand={() => updateSearch({ widget: widget.id })}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span>Updated {formatSmartTime(selected.updatedAt)}</span>
+              {selected.definition.refreshSeconds && (
+                <span>Auto-reloads every {selected.definition.refreshSeconds}s</span>
+              )}
+            </div>
+          </div>
+        )}
+      </TabsContent>
+
+      <TabsContent value="json" className="mt-4">
+        <div className="overflow-hidden rounded-md border">
+          <Editor
+            height="640px"
+            defaultLanguage="json"
+            value={JSON.stringify(selected.definition, null, 2)}
+            options={{ readOnly: true, minimap: { enabled: false }, wordWrap: "on", fontSize: 12 }}
+          />
+        </div>
+      </TabsContent>
+    </Tabs>
+  );
+  const expandedDialog = (
+    <Dialog
+      open={!!expandedWidget}
+      onOpenChange={(open) => !open && updateSearch({ widget: null })}
+    >
+      <DialogContent className="max-w-6xl">
+        <DialogHeader>
+          <DialogTitle>{expandedWidget?.title}</DialogTitle>
+          <DialogDescription>
+            {expandedWidget?.description ?? expandedWidget?.viz.type}
+          </DialogDescription>
+        </DialogHeader>
+        {expandedWidget && (
+          <WidgetViz
+            widget={expandedWidget}
+            rows={expandedResult?.rows ?? []}
+            loading={run.isFetching}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+
+  if (fullMode) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        <div className="flex items-center justify-between gap-3 border-b bg-card px-4 py-2">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">{selected.title}</div>
+            <div className="truncate font-mono text-[10px] text-muted-foreground">
+              {selected.slug}
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => updateSearch({ mode: null })}>
+            <Minimize2 className="size-3.5" />
+            Exit full
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-4">{content}</div>
+        {expandedDialog}
+        <MetricEditorDialog metric={selected} open={editorOpen} onOpenChange={setEditorOpen} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+      <PageHeader
+        icon={LayoutDashboard}
+        title={selected.title}
+        description={selected.description ?? selected.slug}
+        action={
+          <Button asChild variant="outline">
+            <Link to="/usage/metrics">Back to metrics</Link>
+          </Button>
+        }
+      />
+      {content}
+      {expandedDialog}
+      <MetricEditorDialog metric={selected} open={editorOpen} onOpenChange={setEditorOpen} />
+    </div>
+  );
+}
+
+export default function MetricsPage() {
+  const { id } = useParams<{ id: string }>();
+  return id ? <MetricsDetailPage /> : <MetricsListPage />;
 }
