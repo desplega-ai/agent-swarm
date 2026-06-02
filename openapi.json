@@ -364,7 +364,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   },
                   "harness_provider": {
@@ -375,7 +376,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   }
                 },
@@ -477,7 +479,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   }
                 },
@@ -956,6 +959,7 @@
                               "devin",
                               "claude-managed",
                               "opencode",
+                              "acp",
                               null
                             ],
                             "default": null
@@ -1023,6 +1027,7 @@
                           "devin",
                           "claude-managed",
                           "opencode",
+                          "acp",
                           null
                         ],
                         "default": null
@@ -5551,7 +5556,8 @@
                               "pi",
                               "opencode",
                               "devin",
-                              "gemini"
+                              "gemini",
+                              "acp"
                             ]
                           },
                           "model": {
@@ -5627,7 +5633,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -5687,7 +5694,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -5759,7 +5767,8 @@
                         "pi",
                         "opencode",
                         "devin",
-                        "gemini"
+                        "gemini",
+                        "acp"
                       ]
                     },
                     "model": {
@@ -5835,7 +5844,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -5885,7 +5895,8 @@
                         "pi",
                         "opencode",
                         "devin",
-                        "gemini"
+                        "gemini",
+                        "acp"
                       ]
                     },
                     "model": {
@@ -5958,7 +5969,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -7282,7 +7294,8 @@
                       "pi",
                       "opencode",
                       "devin",
-                      "gemini"
+                      "gemini",
+                      "acp"
                     ]
                   },
                   "createdAt": {
@@ -9386,7 +9399,8 @@
                               "pi",
                               "devin",
                               "claude-managed",
-                              "opencode"
+                              "opencode",
+                              "acp"
                             ]
                           },
                           "providers": {
@@ -9402,7 +9416,8 @@
                                     "pi",
                                     "devin",
                                     "claude-managed",
-                                    "opencode"
+                                    "opencode",
+                                    "acp"
                                   ]
                                 },
                                 "state": {
@@ -9525,7 +9540,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   }
                 },
@@ -9865,7 +9881,8 @@
                           "codex",
                           "pi",
                           "claude-managed",
-                          "opencode"
+                          "opencode",
+                          "acp"
                         ]
                       },
                       "model": {
