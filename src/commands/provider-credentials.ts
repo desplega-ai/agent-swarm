@@ -87,8 +87,20 @@ export async function checkProviderCredentials(
       const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
       return checkPiMonoCredentials(env, opts);
     }
-    case "acp":
+    case "acp": {
+      const acpTarget = env.ACP_TARGET;
+      if (acpTarget === "claude-agent-acp") {
+        if (env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY || env.CLAUDE_API_KEY) {
+          return { ready: true, missing: [], satisfiedBy: "env" };
+        }
+        return {
+          ready: false,
+          missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+          hint: "ACP target claude-agent-acp requires Claude credentials.",
+        };
+      }
       return { ready: true, missing: [], satisfiedBy: "sdk-delegated" };
+    }
     default:
       throw new Error(
         `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
@@ -360,8 +372,15 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
           latency_ms: r.latency_ms,
         };
       }
-      case "acp":
+      case "acp": {
+        const acpTarget = env.ACP_TARGET;
+        if (acpTarget === "claude-agent-acp") {
+          if (env.CLAUDE_CODE_OAUTH_TOKEN) return presenceCheckOk();
+          if (env.ANTHROPIC_API_KEY) return checkAnthropicApiKey(env.ANTHROPIC_API_KEY);
+          return presenceCheckOk();
+        }
         return presenceCheckOk();
+      }
       default:
         return {
           ok: false,

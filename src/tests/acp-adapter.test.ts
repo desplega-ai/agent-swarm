@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { checkProviderCredentials } from "../commands/provider-credentials";
 import { createProviderAdapter } from "../providers";
 import { ACPAdapter } from "../providers/acp-adapter";
 import { AcpTargetResolutionError, resolveAcpTarget } from "../providers/acp-targets";
@@ -154,5 +155,187 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     expect(events.some((event) => event.type === "tool_start")).toBe(true);
     expect(events.some((event) => event.type === "tool_end")).toBe(true);
     expect(events.some((event) => event.type === "result")).toBe(true);
+  });
+});
+
+describe("claude-agent-acp target", () => {
+  test("resolves when ACP_TARGET=claude-agent-acp", () => {
+    const profile = resolveAcpTarget(
+      baseConfig({
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: process.env.HOME ?? "",
+          ACP_TARGET: "claude-agent-acp",
+          ACP_TARGET_COMMAND: "/usr/bin/fake-claude-acp",
+        },
+      }),
+    );
+    expect(profile.target).toBe("claude-agent-acp");
+  });
+
+  test("command resolves explicit ACP_TARGET_COMMAND first", () => {
+    const config = baseConfig({
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        ACP_TARGET: "claude-agent-acp",
+        ACP_TARGET_COMMAND: "/usr/local/bin/my-claude-acp",
+      },
+    });
+    const profile = resolveAcpTarget(config);
+    expect(profile.command(config)).toEqual(["/usr/local/bin/my-claude-acp"]);
+  });
+
+  test("command with ACP_TARGET_ARGS splits correctly", () => {
+    const config = baseConfig({
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        ACP_TARGET: "claude-agent-acp",
+        ACP_TARGET_COMMAND: "/usr/bin/claude-acp",
+        ACP_TARGET_ARGS: JSON.stringify(["--verbose", "--timeout", "30"]),
+      },
+    });
+    const profile = resolveAcpTarget(config);
+    expect(profile.command(config)).toEqual([
+      "/usr/bin/claude-acp",
+      "--verbose",
+      "--timeout",
+      "30",
+    ]);
+  });
+
+  test("throws when binary not found and no explicit command", () => {
+    const config = baseConfig({
+      env: {
+        PATH: "/nonexistent/path",
+        HOME: process.env.HOME ?? "",
+        ACP_TARGET: "claude-agent-acp",
+      },
+    });
+    const profile = resolveAcpTarget(config);
+    expect(() => profile.command(config)).toThrow(AcpTargetResolutionError);
+    expect(() => profile.command(config)).toThrow("Could not resolve");
+  });
+
+  test("env passes through Claude credential env vars", () => {
+    const config = baseConfig({
+      env: {
+        PATH: "/usr/bin",
+        HOME: "/home/test",
+        ACP_TARGET: "claude-agent-acp",
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CLAUDE_CODE_OAUTH_TOKEN: "oauth-tok",
+      },
+    });
+    const profile = resolveAcpTarget(config);
+    const env = profile.env(config);
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test");
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth-tok");
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.HOME).toBe("/home/test");
+  });
+
+  test("writeSystemPromptArtifact writes CLAUDE.md in cwd", async () => {
+    const cwd = makeTempDir();
+    const config = baseConfig({
+      cwd,
+      systemPrompt: "You are a helpful assistant.",
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        ACP_TARGET: "claude-agent-acp",
+      },
+    });
+    const profile = resolveAcpTarget(config);
+    await profile.writeSystemPromptArtifact(config);
+    const claudeMdPath = join(cwd, "CLAUDE.md");
+    expect(existsSync(claudeMdPath)).toBe(true);
+    expect(readFileSync(claudeMdPath, "utf-8")).toBe("You are a helpful assistant.");
+  });
+
+  test("writeSystemPromptArtifact skips when systemPrompt is empty", async () => {
+    const cwd = makeTempDir();
+    const config = baseConfig({
+      cwd,
+      systemPrompt: "",
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        ACP_TARGET: "claude-agent-acp",
+      },
+    });
+    const profile = resolveAcpTarget(config);
+    await profile.writeSystemPromptArtifact(config);
+    expect(existsSync(join(cwd, "CLAUDE.md"))).toBe(false);
+  });
+
+  test("unsupported target throws with descriptive error", () => {
+    expect(() =>
+      resolveAcpTarget(
+        baseConfig({
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            ACP_TARGET: "nonexistent-target",
+          },
+        }),
+      ),
+    ).toThrow(AcpTargetResolutionError);
+    expect(() =>
+      resolveAcpTarget(
+        baseConfig({
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            ACP_TARGET: "nonexistent-target",
+          },
+        }),
+      ),
+    ).toThrow("Unsupported ACP target");
+  });
+});
+
+describe("ACP credential check for claude-agent-acp", () => {
+  test("ready when ANTHROPIC_API_KEY is set", async () => {
+    const status = await checkProviderCredentials("acp", {
+      ACP_TARGET: "claude-agent-acp",
+      ANTHROPIC_API_KEY: "sk-ant-test",
+    });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("env");
+  });
+
+  test("ready when CLAUDE_CODE_OAUTH_TOKEN is set", async () => {
+    const status = await checkProviderCredentials("acp", {
+      ACP_TARGET: "claude-agent-acp",
+      CLAUDE_CODE_OAUTH_TOKEN: "oauth-tok",
+    });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("env");
+  });
+
+  test("ready when CLAUDE_API_KEY is set", async () => {
+    const status = await checkProviderCredentials("acp", {
+      ACP_TARGET: "claude-agent-acp",
+      CLAUDE_API_KEY: "sk-claude",
+    });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("env");
+  });
+
+  test("not ready when no Claude creds with claude-agent-acp target", async () => {
+    const status = await checkProviderCredentials("acp", {
+      ACP_TARGET: "claude-agent-acp",
+    });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toContain("ANTHROPIC_API_KEY");
+    expect(status.hint).toBeTruthy();
+  });
+
+  test("generic ACP target remains sdk-delegated", async () => {
+    const status = await checkProviderCredentials("acp", {});
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("sdk-delegated");
   });
 });
