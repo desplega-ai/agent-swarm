@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { getResolvedConfig } from "../be/db";
+import { parseServiceAccountJson } from "../google-drive/app";
 import { route } from "./route-def";
 import { json } from "./utils";
 
@@ -41,6 +42,22 @@ const claudeManagedTestRoute = route({
     200: {
       description:
         "Connection result — `{ ok: true, agentName, model }` on success or `{ ok: false, error }` on any failure (missing config, Anthropic API error). Always 200 OK.",
+    },
+  },
+});
+
+const googleDriveTestRoute = route({
+  method: "post",
+  path: "/api/integrations/google-drive/test",
+  pattern: ["api", "integrations", "google-drive", "test"],
+  summary:
+    "Test the Google Drive integration: validates GOOGLE_DRIVE_SA_CREDENTIALS JSON structure and attempts to obtain an access token from Google's token endpoint.",
+  tags: ["Integrations"],
+  body: z.object({}).optional(),
+  responses: {
+    200: {
+      description:
+        "Connection result — `{ ok: true, clientEmail, projectId }` on success or `{ ok: false, error }` on any failure.",
     },
   },
 });
@@ -87,6 +104,49 @@ function resolveConfigValue(key: string): string | null {
   return null;
 }
 
+/**
+ * Attempt to obtain a Google OAuth2 access token using the SA credentials.
+ * This validates that the private key can sign a JWT and Google's token
+ * endpoint accepts it. Throws on any failure.
+ */
+async function testGoogleDriveAuth(raw: string): Promise<void> {
+  const sa = JSON.parse(raw) as {
+    client_email: string;
+    private_key: string;
+    token_uri: string;
+  };
+
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(
+    JSON.stringify({
+      iss: sa.client_email,
+      scope: "https://www.googleapis.com/auth/drive",
+      aud: sa.token_uri,
+      iat: now,
+      exp: now + 300,
+    }),
+  ).toString("base64url");
+
+  const { createSign } = await import("node:crypto");
+  const signer = createSign("RSA-SHA256");
+  signer.update(`${header}.${payload}`);
+  const signature = signer.sign(sa.private_key, "base64url");
+
+  const jwt = `${header}.${payload}.${signature}`;
+
+  const resp = await fetch(sa.token_uri, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Token endpoint returned ${resp.status}: ${body}`);
+  }
+}
+
 function resolveMcpBaseUrl(): string {
   const configured = resolveConfigValue("MCP_BASE_URL");
   const fallback = `http://localhost:${process.env.PORT || "3013"}`;
@@ -112,6 +172,37 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
     if (mcpUserConfigRoute.match(req.method, pathSegments)) {
       const mcpBaseUrl = resolveMcpBaseUrl();
       json(res, { mcpBaseUrl, mcpUserUrl: `${mcpBaseUrl}/mcp-user` });
+      return true;
+    }
+
+    if (googleDriveTestRoute.match(req.method, pathSegments)) {
+      const raw = resolveConfigValue("GOOGLE_DRIVE_SA_CREDENTIALS");
+      if (!raw) {
+        json(res, {
+          ok: false,
+          error:
+            "Missing GOOGLE_DRIVE_SA_CREDENTIALS. Paste the service account key JSON in the field above.",
+        });
+        return true;
+      }
+
+      const result = parseServiceAccountJson(raw);
+      if (!result.ok) {
+        json(res, { ok: false, error: result.error });
+        return true;
+      }
+
+      try {
+        await testGoogleDriveAuth(raw);
+        json(res, {
+          ok: true,
+          clientEmail: result.clientEmail,
+          projectId: result.projectId,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        json(res, { ok: false, error: `SA credentials valid but auth failed: ${message}` });
+      }
       return true;
     }
 

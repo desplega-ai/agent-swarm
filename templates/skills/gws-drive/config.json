@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "gws-drive",
+  "displayName": "Google Drive (gws CLI)",
+  "slug": "gws-drive",
+  "title": "Google Drive (gws CLI)",
+  "description": "CLI reference for Google Drive operations via gws — list, search, export, create, update, and comment on files in a Shared Drive.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": false,
+  "tags": ["google-drive", "integrations", "cli"]
+}

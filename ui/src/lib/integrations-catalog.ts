@@ -542,6 +542,52 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
 
+  // --------------------------------------------------------- Google Drive
+  {
+    id: "google-drive",
+    name: "Google Drive",
+    description:
+      "Read, create, edit, and comment on files in a Shared Drive. Uses a GCP service account — no re-auth needed.",
+    category: "other",
+    iconKey: "hard-drive",
+    docsUrl: "https://docs.agent-swarm.dev/integrations/google-drive",
+    disableKey: "GOOGLE_DRIVE_DISABLE",
+    restartRequired: true,
+    recommendedSkills: [
+      {
+        name: "gws-drive",
+        source: "template",
+        templateRepo: "desplega-ai/agent-swarm",
+        templatePath: "templates/skills/gws-drive",
+        roles: ["worker"],
+        reason:
+          "CLI reference for Google Drive operations via gws — list, search, export, create, comment. Workers need this to know the available commands.",
+        installOnSetup: true,
+      },
+    ],
+    fields: [
+      {
+        key: "GOOGLE_DRIVE_SA_CREDENTIALS",
+        label: "Service account key JSON",
+        type: "textarea",
+        required: true,
+        isSecret: true,
+        placeholder: '{"type": "service_account", "project_id": "...", ...}',
+        helpText:
+          "Paste the full JSON key file downloaded from GCP IAM → Service Accounts → Keys. Encrypted at rest.",
+        affectsRestart: true,
+      },
+      {
+        key: "GOOGLE_DRIVE_SHARED_DRIVE_ID",
+        label: "Shared Drive ID",
+        type: "text",
+        placeholder: "0ABcDeFgHiJkLmNoPq",
+        helpText:
+          "The ID of the Shared Drive agents should access. Found in the Drive URL: drive.google.com/drive/folders/<ID>. Leave blank if agents will specify per-task.",
+      },
+    ],
+  },
+
   // --------------------------------------------------------------- Sentry
   {
     id: "sentry",

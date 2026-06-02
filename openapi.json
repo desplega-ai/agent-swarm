@@ -3381,6 +3381,34 @@
         }
       }
     },
+    "/api/integrations/google-drive/test": {
+      "post": {
+        "summary": "Test the Google Drive integration: validates GOOGLE_DRIVE_SA_CREDENTIALS JSON structure and attempts to obtain an access token from Google's token endpoint.",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connection result — `{ ok: true, clientEmail, projectId }` on success or `{ ok: false, error }` on any failure."
+          }
+        }
+      }
+    },
     "/api/integrations/mcp-user/config": {
       "get": {
         "summary": "Get server-derived config for end-user MCP clients.",

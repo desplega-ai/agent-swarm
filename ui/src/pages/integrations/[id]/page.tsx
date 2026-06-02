@@ -9,6 +9,7 @@ import {
   GitBranch,
   Github,
   GitMerge,
+  HardDrive,
   Info,
   KeyRound,
   ListChecks,
@@ -40,6 +41,7 @@ import type { SwarmConfig } from "@/api/types";
 import { ClaudeManagedSection } from "@/components/integrations/claude-managed-section";
 import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
+import { GoogleDriveSection } from "@/components/integrations/google-drive-section";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
 import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
 import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
@@ -96,6 +98,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "key-round": KeyRound,
   "chart-line": ChartLine,
   cloud: Cloud,
+  "hard-drive": HardDrive,
 };
 
 function resolveIcon(iconKey: string): LucideIcon {
@@ -367,6 +370,7 @@ function IntegrationDetailInner({
   const isCodexCli = def.specialFlow === "codex-cli";
   const isClaudeManagedCli = def.specialFlow === "claude-managed-cli";
   const isGithub = def.id === "github";
+  const isGoogleDrive = def.id === "google-drive";
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
@@ -445,6 +449,11 @@ function IntegrationDetailInner({
             {/* Claude Managed Agents — CLI explainer + Test connection. */}
             {isClaudeManagedCli && (
               <ClaudeManagedSection def={def} configs={configs} envPresence={envPresence} />
+            )}
+
+            {/* Google Drive — SA credential test connection. */}
+            {isGoogleDrive && (
+              <GoogleDriveSection def={def} configs={configs} envPresence={envPresence} />
             )}
 
             {/* Body */}

@@ -11,6 +11,7 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { initGitHub, resetGitHub } from "../github";
+import { initGoogleDrive, resetGoogleDrive } from "../google-drive";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
@@ -72,6 +73,9 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
 
   resetJira();
   if (initJira()) integrations.push("jira");
+
+  resetGoogleDrive();
+  if (initGoogleDrive()) integrations.push("google-drive");
 
   await stopSlackApp();
   await startSlackApp();

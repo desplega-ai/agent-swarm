@@ -11,6 +11,7 @@ import { initAgentMail } from "../agentmail";
 import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
+import { initGoogleDrive } from "../google-drive";
 import { stopHeartbeat } from "../heartbeat";
 import { initJira } from "../jira";
 import { initLinear } from "../linear";
@@ -434,6 +435,9 @@ httpServer
 
     // Initialize Jira tracker integration (if configured)
     initJira();
+
+    // Initialize Google Drive integration (if configured)
+    initGoogleDrive();
 
     // Initialize workflow engine (trigger subscriptions + resume listener)
     initWorkflows();
