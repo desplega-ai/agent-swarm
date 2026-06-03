@@ -72,6 +72,34 @@ import "./templates.ts";
 /** Throttle interval for progress updates (3 seconds). */
 const PROGRESS_THROTTLE_MS = 3000;
 
+/** Minimum spacing for explicit runner GC sweeps. */
+const RUNNER_GC_MIN_INTERVAL_MS = 5 * 60 * 1000;
+
+let lastRunnerGcAt = 0;
+
+type GcCapableGlobal = typeof globalThis & { gc?: () => void };
+
+function scheduleRunnerGc(reason: string): boolean {
+  const gc = (globalThis as GcCapableGlobal).gc;
+  if (typeof gc !== "function") return false;
+
+  const now = Date.now();
+  if (now - lastRunnerGcAt < RUNNER_GC_MIN_INTERVAL_MS) return false;
+  lastRunnerGcAt = now;
+
+  const timer = setTimeout(() => {
+    const startedAt = Date.now();
+    try {
+      gc();
+      console.log(`[runner] Explicit GC completed after ${reason} in ${Date.now() - startedAt}ms`);
+    } catch (err) {
+      console.warn(`[runner] Explicit GC failed after ${reason}: ${err}`);
+    }
+  }, 0);
+  timer.unref?.();
+  return true;
+}
+
 /** Save PM2 process list for persistence across container restarts */
 async function savePm2State(role: string): Promise<void> {
   try {
@@ -3027,6 +3055,7 @@ async function spawnProviderProcess(
         }
         closeActiveToolSpans(result.exitCode === 0 ? "ok" : "error", result.failureReason);
         sessionSpan.end();
+        scheduleRunnerGc("session completion");
 
         return result;
       }),
@@ -3041,6 +3070,7 @@ async function spawnProviderProcess(
         });
         closeActiveToolSpans("error", error instanceof Error ? error.message : String(error));
         sessionSpan.end();
+        scheduleRunnerGc("session error");
         throw error;
       }),
     );

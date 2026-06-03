@@ -10,7 +10,7 @@ RUN bun install --frozen-lockfile
 COPY src/ ./src/
 COPY templates/ ./templates/
 COPY tsconfig.json ./
-RUN bun build ./src/cli.tsx --compile --outfile ./agent-swarm
+RUN bun build ./src/cli.tsx --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
 
 # Stage 2: Full development environment
 FROM ubuntu:24.04
