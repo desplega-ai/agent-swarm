@@ -88,7 +88,7 @@ RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/in
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.158
+ARG CLAUDE_CODE_VERSION=2.1.161
 RUN sudo npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # Verify claude binary is findable after install
 RUN which claude && claude --version
@@ -106,7 +106,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match @openai/codex-sdk in package.json — enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.135.0
+ARG CODEX_VERSION=0.136.0
 RUN sudo npm install -g @openai/codex@${CODEX_VERSION}
 RUN which codex && codex --version
 
