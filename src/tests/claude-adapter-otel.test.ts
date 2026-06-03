@@ -152,14 +152,14 @@ describe("buildClaudeCodeRuntimeEnv", () => {
     expect(env.DISABLE_BUG_COMMAND).toBe("1");
   });
 
-  test("disables Claude Code telemetry when no OTel config is present", () => {
+  test("always disables Claude Code Statsig/DNT telemetry", () => {
     const env = buildClaudeCodeRuntimeEnv({});
 
     expect(env.DISABLE_TELEMETRY).toBe("1");
     expect(env.DO_NOT_TRACK).toBe("1");
   });
 
-  test("does not disable telemetry when Claude Code OTel is configured", () => {
+  test("keeps Claude Code Statsig/DNT opt-out separate from OTel config", () => {
     for (const sourceEnv of [
       { CLAUDE_CODE_ENABLE_TELEMETRY: "1" },
       { CLAUDE_CODE_ENABLE_TELEMETRY: "true" },
@@ -169,12 +169,12 @@ describe("buildClaudeCodeRuntimeEnv", () => {
       { OTEL_LOGS_EXPORTER: "otlp" },
     ]) {
       const env = buildClaudeCodeRuntimeEnv(sourceEnv);
-      expect(env.DISABLE_TELEMETRY).toBeUndefined();
-      expect(env.DO_NOT_TRACK).toBeUndefined();
+      expect(env.DISABLE_TELEMETRY).toBe("1");
+      expect(env.DO_NOT_TRACK).toBe("1");
     }
   });
 
-  test("ignores empty OTel env values when deciding telemetry opt-out", () => {
+  test("ignores empty OTel env values for runtime defaults", () => {
     const env = buildClaudeCodeRuntimeEnv({
       OTEL_EXPORTER_OTLP_ENDPOINT: "",
       CLAUDE_CODE_ENABLE_TELEMETRY: "0",
@@ -289,7 +289,7 @@ describe("ClaudeSession spawn env — SWARM_ENABLE_CLAUDE_CODE_OTEL", () => {
     expect(env?.CLAUDE_CODE_DISABLE_THINKING).toBeUndefined();
   });
 
-  test("spawn env keeps Claude Code telemetry available when OTel is configured", async () => {
+  test("spawn env keeps Statsig/DNT opt-out even when OTel is configured", async () => {
     const adapter = new ClaudeAdapter();
     await adapter.createSession(
       makeConfig({
@@ -303,7 +303,7 @@ describe("ClaudeSession spawn env — SWARM_ENABLE_CLAUDE_CODE_OTEL", () => {
 
     expect(spawnedEnvs).toHaveLength(1);
     const env = spawnedEnvs[0];
-    expect(env?.DISABLE_TELEMETRY).toBeUndefined();
-    expect(env?.DO_NOT_TRACK).toBeUndefined();
+    expect(env?.DISABLE_TELEMETRY).toBe("1");
+    expect(env?.DO_NOT_TRACK).toBe("1");
   });
 });

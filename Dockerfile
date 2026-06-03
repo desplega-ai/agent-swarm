@@ -47,7 +47,7 @@ RUN mkdir -p script-types/node_modules && cd node_modules && \
       | tar -xf - -C /build/script-types/node_modules
 
 # Compile HTTP server to standalone binary
-RUN bun build ./src/http.ts --compile --outfile ./agent-swarm-api
+RUN bun build ./src/http.ts --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
 
 # Stage 2: Minimal runtime image
 FROM debian:bookworm-slim

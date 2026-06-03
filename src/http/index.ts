@@ -97,8 +97,46 @@ const globalState = globalThis as typeof globalThis & {
   __transportsUser?: Record<string, StreamableHTTPServerTransport>;
   __sessionUsers?: Record<string, string>;
   __sigintRegistered?: boolean;
+  __apiGcInterval?: ReturnType<typeof setInterval>;
   __runId?: string;
 };
+
+const API_GC_INTERVAL_MS = 5 * 60 * 1000;
+
+type GcCapableGlobal = typeof globalThis & { gc?: () => void };
+
+function scheduleApiGc(reason: string): boolean {
+  const gc = (globalThis as GcCapableGlobal).gc;
+  if (typeof gc !== "function") return false;
+
+  const timer = setTimeout(() => {
+    const startedAt = Date.now();
+    try {
+      gc();
+      console.log(`[HTTP] Explicit GC completed after ${reason} in ${Date.now() - startedAt}ms`);
+    } catch (err) {
+      console.warn(`[HTTP] Explicit GC failed after ${reason}: ${err}`);
+    }
+  }, 0);
+  timer.unref?.();
+  return true;
+}
+
+function startApiGcInterval() {
+  if (globalState.__apiGcInterval) return;
+
+  const gc = (globalThis as GcCapableGlobal).gc;
+  if (typeof gc !== "function") {
+    console.log("[HTTP] Explicit GC unavailable; start API with --expose-gc to enable sweeps");
+    return;
+  }
+
+  const interval = setInterval(() => {
+    scheduleApiGc("periodic API sweep");
+  }, API_GC_INTERVAL_MS);
+  interval.unref?.();
+  globalState.__apiGcInterval = interval;
+}
 
 // Clean up previous server on hot reload
 if (globalState.__httpServer) {
@@ -317,6 +355,11 @@ async function shutdown() {
   // Stop MCP OAuth pending-session garbage collector
   stopMcpOAuthPendingGc();
 
+  if (globalState.__apiGcInterval) {
+    clearInterval(globalState.__apiGcInterval);
+    delete globalState.__apiGcInterval;
+  }
+
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
     console.log(`[HTTP] Closing transport ${id}`);
@@ -350,6 +393,8 @@ if (!globalState.__sigintRegistered) {
 if (!globalState.__runId) {
   globalState.__runId = `run_${Date.now()}`;
 }
+
+startApiGcInterval();
 
 // Load global swarm configs before the server starts listening so decrypt/key
 // failures fail closed instead of leaving the runtime half-initialized.
