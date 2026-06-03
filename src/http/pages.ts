@@ -14,6 +14,7 @@ import {
 } from "../be/db";
 import { snapshotPage } from "../pages/version";
 import { type Page, PageAuthModeSchema, PageContentTypeSchema, type PageSummary } from "../types";
+import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { issuePageSessionCookie } from "../utils/page-session";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
@@ -280,25 +281,20 @@ function applyLaunchCors(req: IncomingMessage, res: ServerResponse): void {
 
 /**
  * Resolve the public API base URL used to build a page's `api_url` share
- * pointer. Falls back to `http://localhost:<PORT>` when `MCP_BASE_URL` is
- * unset (same convention as src/tools/memory-rate.ts, etc.). Trailing slashes
- * are stripped so callers can concatenate `/p/:id` directly.
+ * pointer (handed to a browser). Delegates to the shared
+ * {@link getPublicMcpBaseUrl} helper (trailing slashes already stripped) so
+ * callers can concatenate `/p/:id` directly.
  */
 function getApiBaseUrl(): string {
-  const env = process.env.MCP_BASE_URL?.trim();
-  if (env) return env.replace(/\/+$/, "");
-  return `http://localhost:${process.env.PORT || "3013"}`;
+  return getPublicMcpBaseUrl();
 }
 
 /**
  * Resolve the SPA / dashboard base URL used to build a page's `app_url` share
- * pointer (→ `/pages/:id`). `APP_URL` is the canonical env (matches the
- * request-human-input tool); falls back to the local dev port `5274`.
+ * pointer (→ `/pages/:id`). Delegates to the shared {@link getAppUrl} helper.
  */
 function getAppBaseUrl(): string {
-  const env = process.env.APP_URL?.trim();
-  if (env) return env.replace(/\/+$/, "");
-  return "http://localhost:5274";
+  return getAppUrl();
 }
 
 /** Decorate a page row with share-URL pointers. */

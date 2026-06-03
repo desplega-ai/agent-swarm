@@ -36,6 +36,7 @@ import { initTelemetry, telemetry } from "../telemetry.ts";
 import type { ProviderName, RepoGuidelines } from "../types.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
+import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import {
@@ -3299,7 +3300,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Get agent identity and swarm URL for base prompt
   const agentId = process.env.AGENT_ID || "unknown";
 
-  const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+  const apiUrl = getMcpBaseUrl();
   const swarmUrl = process.env.SWARM_URL || "localhost";
   const apiKey = getApiKey();
 

@@ -11,6 +11,7 @@ import {
 } from "../be/memory/raters/llm";
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
+import { getMcpBaseUrl } from "../utils/constants";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
@@ -150,7 +151,7 @@ async function readTaskFile(): Promise<TaskFileData | null> {
 async function fetchTaskDetails(
   taskId: string,
 ): Promise<{ id: string; task: string; progress?: string } | null> {
-  const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+  const apiUrl = getMcpBaseUrl();
   const apiKey = getApiKey();
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
@@ -1151,8 +1152,7 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
             editedPath.startsWith("/workspace/shared/memory/"))
         ) {
           try {
-            const apiUrl =
-              process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+            const apiUrl = getMcpBaseUrl();
             const apiKey = getApiKey();
             const fileContent = await Bun.file(editedPath).text();
             const isShared = editedPath.startsWith("/workspace/shared/");

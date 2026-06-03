@@ -11,9 +11,10 @@ Complete reference for all environment variables used by Agent Swarm.
 |----------|---------|-------------|
 | `PORT` | `3013` | Port for MCP HTTP server |
 | `API_KEY` | — | API key for server authentication (required) |
-| `MCP_BASE_URL` | `https://api.desplega.agent-swarm.dev` | Base URL for MCP server |
+| `MCP_BASE_URL` | `https://api.desplega.agent-swarm.dev` | Internal/worker-facing API base — the URL workers, the UI, and the setup command use to reach the API server. In split deploys this may be an internal/cluster address. |
+| `PUBLIC_MCP_BASE_URL` | Falls back to `MCP_BASE_URL` | Public, browser/externally-reachable API origin used for OAuth redirect URIs and webhook URLs. Defaults to `MCP_BASE_URL` when unset; set it in split deploys where `MCP_BASE_URL` is an internal/cluster address that external providers (Linear, Jira, GitHub) can't reach. |
 | `SWARM_URL` | `localhost` | Base domain for service discovery |
-| `APP_URL` | — | Dashboard URL for Slack message links |
+| `APP_URL` | — | Dashboard URL for Slack message links. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
 | `ENV` | — | Environment mode (`development` adds prefix to Slack agent names) |
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
 | `SQLITE_VEC_EXTENSION_PATH` | — | Path to `vec0.so` native extension for sqlite-vec vector search. Set automatically in the Docker image (`/app/extensions/vec0.so`). Only needed for non-Docker deployments. |

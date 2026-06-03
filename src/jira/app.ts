@@ -1,4 +1,5 @@
 import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { getPublicMcpBaseUrl } from "../utils/constants";
 import { initJiraOutboundSync, teardownJiraOutboundSync } from "./outbound";
 // Side-effect import: registers all Jira event templates in the in-memory
 // registry at module load time (mirrors `src/linear/templates.ts`).
@@ -41,9 +42,7 @@ export function initJira(): boolean {
   // Atlassian. Prefer MCP_BASE_URL over the localhost dev default; in prod
   // with no JIRA_REDIRECT_URI set, this is what stops Atlassian from sending
   // the user back to localhost.
-  const apiBaseUrl =
-    process.env.MCP_BASE_URL?.trim().replace(/\/+$/, "") ||
-    `http://localhost:${process.env.PORT || "3013"}`;
+  const apiBaseUrl = getPublicMcpBaseUrl();
   const redirectUri = process.env.JIRA_REDIRECT_URI ?? `${apiBaseUrl}/api/trackers/jira/callback`;
 
   upsertOAuthApp("jira", {

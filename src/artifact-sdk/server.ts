@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { getApiKey } from "../utils/api-key";
+import { getMcpBaseUrl } from "../utils/constants";
 import { BROWSER_SDK_JS } from "./browser-sdk";
 import { getAvailablePort } from "./port";
 import { createTunnel } from "./tunnel";
@@ -47,7 +48,7 @@ export function createBunHonoFetchHandler(app: Hono): (req: Request) => Promise<
 export function createArtifactServer(opts: ArtifactServerOptions): ArtifactServer {
   const agentId = process.env.AGENT_ID || "unknown";
   const apiKey = getApiKey();
-  const mcpBaseUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+  const mcpBaseUrl = getMcpBaseUrl();
 
   const app = new Hono();
 

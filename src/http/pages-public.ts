@@ -25,6 +25,7 @@ import { z } from "zod";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../artifact-sdk/browser-sdk";
 import { getPage, incrementPageViewCount } from "../be/db";
 import type { Page } from "../types";
+import { getAppUrl } from "../utils/constants";
 import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -159,14 +160,11 @@ function stripJsonSuffix(idSegment: string): string | null {
 }
 
 /**
- * Compute the SPA base URL (`APP_URL`). Mirrors `getAppBaseUrl` in pages.ts —
- * duplicated here to keep this module standalone (no cross-import inside the
- * http/ layer).
+ * Compute the SPA base URL. Delegates to the shared {@link getAppUrl} helper
+ * (the single source of truth for `APP_URL` resolution).
  */
 function getAppBaseUrl(): string {
-  const env = process.env.APP_URL?.trim();
-  if (env) return env.replace(/\/+$/, "");
-  return "http://localhost:5274";
+  return getAppUrl();
 }
 
 /**

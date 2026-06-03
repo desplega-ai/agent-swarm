@@ -23,6 +23,7 @@ import {
   registerClient,
   revokeMcpToken,
 } from "../oauth/mcp-wrapper";
+import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -36,12 +37,14 @@ function ssrfOptions() {
 }
 
 function callbackRedirectUri(): string {
-  const base = process.env.APP_URL?.replace(/\/+$/, "") ?? "http://localhost:3013";
-  return `${base}/api/mcp-oauth/callback`;
+  // The callback route lives on the API server, so it must use the PUBLIC MCP
+  // base (externally reachable), not the dashboard APP_URL.
+  return `${getPublicMcpBaseUrl()}/api/mcp-oauth/callback`;
 }
 
 function dashboardBase(): string {
-  return process.env.DASHBOARD_URL?.replace(/\/+$/, "") ?? "http://localhost:5274";
+  // getAppUrl absorbs DASHBOARD_URL as a deprecated alias.
+  return getAppUrl();
 }
 
 function defaultFinalRedirect(mcpServerId: string): string {

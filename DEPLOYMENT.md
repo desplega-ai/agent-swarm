@@ -447,7 +447,8 @@ When a worker starts, it:
 |----------|-------------|---------|
 | `PORT` | Port for MCP HTTP server | `3013` |
 | `API_KEY` | API key for server authentication | - |
-| `MCP_BASE_URL` | Base URL (for setup command) | `https://api.desplega.agent-swarm.dev` |
+| `MCP_BASE_URL` | Internal/worker-facing API base (also used by the setup command) | `https://api.desplega.agent-swarm.dev` |
+| `PUBLIC_MCP_BASE_URL` | Public, externally-reachable API origin for OAuth redirect URIs + webhook URLs. Defaults to `MCP_BASE_URL` | Falls back to `MCP_BASE_URL` |
 | `SWARM_URL` | Base domain for service discovery | `localhost` |
 | `APP_URL` | Dashboard URL for Slack message links | - |
 | `ENV` | Environment mode (`development` adds prefix to Slack agent names) | - |
@@ -455,6 +456,8 @@ When a worker starts, it:
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
 | `OPENAI_API_KEY` | OpenAI key for memory embeddings (optional) | - |
 | `CAPABILITIES` | Comma-separated feature flags | All enabled |
+
+> **Split / Helm deploys:** In topologies where `MCP_BASE_URL` points at an internal/cluster address (e.g. a Kubernetes Service DNS name reachable only inside the cluster), set `PUBLIC_MCP_BASE_URL` to the public ingress origin. OAuth redirect URIs and webhook URLs handed to external providers (Linear, Jira, GitHub) are built from `PUBLIC_MCP_BASE_URL` when it is set, falling back to `MCP_BASE_URL` otherwise.
 
 ### Codex ChatGPT OAuth
 

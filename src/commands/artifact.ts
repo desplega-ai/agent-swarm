@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createArtifactServer } from "../artifact-sdk";
 import { getApiKey } from "../utils/api-key";
+import { getMcpBaseUrl } from "../utils/constants";
 
 interface ArtifactArgs {
   additionalArgs: string[];
@@ -139,7 +140,7 @@ async function artifactServe(args: ArtifactArgs) {
 
 async function artifactList() {
   const apiKey = getApiKey();
-  const mcpBaseUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+  const mcpBaseUrl = getMcpBaseUrl();
   const agentId = process.env.AGENT_ID || "";
 
   try {
@@ -197,7 +198,7 @@ async function artifactStop(args: ArtifactArgs) {
   }
 
   const apiKey = getApiKey();
-  const mcpBaseUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+  const mcpBaseUrl = getMcpBaseUrl();
   const agentId = process.env.AGENT_ID || "";
 
   // 1. Try to stop PM2 process

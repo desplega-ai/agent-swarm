@@ -5,6 +5,7 @@ import { assertSelectOnlyQuery } from "@/http/db-query";
 import { snapshotMetric } from "@/metrics/version";
 import { createToolRegistrar } from "@/tools/utils";
 import { MetricDefinitionSchema } from "@/types";
+import { getAppUrl } from "@/utils/constants";
 
 function slugify(input: string): string {
   const slug = input
@@ -16,9 +17,7 @@ function slugify(input: string): string {
 }
 
 function getAppBaseUrl(): string {
-  const env = process.env.APP_URL?.trim();
-  if (env) return env.replace(/\/+$/, "");
-  return "http://localhost:5274";
+  return getAppUrl();
 }
 
 function metricEditCounter(metricId: string): number {

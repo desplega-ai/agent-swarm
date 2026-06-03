@@ -23,6 +23,7 @@ import { createPage, getPage, getPageBySlug, getPageVersions, updatePage } from 
 import { snapshotPage } from "@/pages/version";
 import { createToolRegistrar } from "@/tools/utils";
 import { PageAuthModeSchema, PageContentTypeSchema } from "@/types";
+import { getAppUrl, getPublicMcpBaseUrl } from "@/utils/constants";
 
 /** Same slugifier used by the HTTP createPage handler. */
 function slugify(input: string): string {
@@ -35,15 +36,11 @@ function slugify(input: string): string {
 }
 
 function getApiBaseUrl(): string {
-  const env = process.env.MCP_BASE_URL?.trim();
-  if (env) return env.replace(/\/+$/, "");
-  return `http://localhost:${process.env.PORT || "3013"}`;
+  return getPublicMcpBaseUrl();
 }
 
 function getAppBaseUrl(): string {
-  const env = process.env.APP_URL?.trim();
-  if (env) return env.replace(/\/+$/, "");
-  return "http://localhost:5274";
+  return getAppUrl();
 }
 
 /**
