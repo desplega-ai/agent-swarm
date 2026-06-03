@@ -51,6 +51,8 @@ Boundaries: `src/scripts-runtime/` is on both `check-db-boundary.sh` (no `src/be
 
 Tests: `bun test src/tests/scripts-*.test.ts`. Sandbox + timeout + abort + stdin-config + env-hygiene paths are the highest-risk surfaces — keep coverage tight.
 
+New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scripts-runtime/sdk-allowlist.ts`) to expose it to scripts, or add it to `EXCLUDED_TOOLS` in `scripts/check-sdk-tool-registration.ts` with a reason. Enforced by CI.
+
 </important>
 
 <important if="you need to run commands to build, test, lint, start the server, or generate code">
