@@ -136,6 +136,24 @@ curl -X PATCH http://localhost:3013/api/agents/<agent-id>/harness-provider \
 
 The current behavior is **forecast-only** — the worker keeps using its env-set provider until it restarts, at which point the env wins on re-register. Full dynamic harness switching (worker boots without `HARNESS_PROVIDER`, picks up provider + creds from the API on demand) is tracked in [DES-359](https://linear.app/desplega-labs/issue/DES-359).
 
+## Requester profile prompts
+
+When a task has a canonical requester (`requestedByUserId`) and that user's
+profile includes a `role` or free-text `notes`, the runner injects a
+`## Requester Profile` block into the task prompt before execution.
+
+- `users.role` becomes a concise role suffix such as `Taras (CEO)`
+- `users.notes` becomes explicit guidance on tone, depth, and format
+- The prompt tells agents to honor that guidance unless it conflicts with
+  correctness or operating rules
+
+This makes personalization operational instead of purely cosmetic: the same
+swarm can answer an exec with terse outcomes, or give an engineer more detailed
+implementation context, without forking agent identities per stakeholder.
+
+The profile prompt is additive. It does not override repository guidelines,
+safety rules, or task-specific constraints.
+
 ## Home page
 
 The home page (`/`) consumes `/status` and renders:
@@ -152,3 +170,4 @@ If `/status` returns 404 (older API server), the home page redirects to `/dashbo
 - [Harness configuration](./harness-configuration)
 - [Harness providers](./harness-providers)
 - [Deployment](./deployment)
+- [MCP tools](/docs/reference/mcp-tools)

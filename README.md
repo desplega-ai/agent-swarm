@@ -129,6 +129,8 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 - **Harness & LLM agnostic** — run with Claude Code, OpenAI Codex, pi-mono, Devin, Claude Managed Agents, raw LLMs, or opencode. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
 - **Follow-up continuity across all harnesses** — child tasks inherit a bounded prior-task context preamble built from the task chain, so continuity survives restarts and works the same across every provider. [Task lifecycle →](https://docs.agent-swarm.dev/docs/concepts/task-lifecycle)
 - **Skills & MCP servers** — reusable procedural knowledge and per-agent MCP servers with scope cascade. [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools)
+- **External tool-router access** — the `x` command and `swarm_x` MCP tool let humans and agents execute approved third-party routes such as Composio without baking bespoke MCP servers first. [CLI →](https://docs.agent-swarm.dev/docs/reference/cli) · [Composio →](https://docs.agent-swarm.dev/docs/integrations/composio)
+- **Config-driven metrics dashboards** — define read-only SQL widgets, version them, and render them in the dashboard without shipping custom frontend code. [Metrics API →](https://docs.agent-swarm.dev/docs/api-reference/stats)
 - **DB-backed pages** — agents publish HTML or JSON pages (reports, dashboards, action specs) via the `create_page` MCP tool with public / authed / password modes, version history, view counters, diff helpers, and PDF export. [MCP tools → Pages](https://docs.agent-swarm.dev/docs/reference/mcp-tools#pages-tools)
 - **KV store** — Redis-like namespaced key/value store with auto-scoped context (Slack thread / PR / Linear issue / page). [MCP tools → KV](https://docs.agent-swarm.dev/docs/reference/mcp-tools#kv-tools)
 - **Real-time dashboard** — monitor agents, tasks, and inter-agent chat. [app.agent-swarm.dev →](https://app.agent-swarm.dev)
@@ -197,6 +199,7 @@ Missing one? Ask the swarm to build it.
 | **GitLab** | Same model as GitHub — webhooks on issues/MRs, `glab` preinstalled in workers | [Guide](https://docs.agent-swarm.dev/docs/guides/gitlab-integration) |
 | **AgentMail** | Give each agent an inbox; emails become tasks or lead messages | [Guide](https://docs.agent-swarm.dev/docs/guides/agentmail-integration) |
 | **Kapso (WhatsApp)** | Native inbound WhatsApp webhook routing; agents reply over WhatsApp with MCP tools or the `kapso-whatsapp` skill | [Guide](https://docs.agent-swarm.dev/docs/integrations/kapso) |
+| **Composio** | Route approved third-party app operations through `agent-swarm x composio ...` or the `swarm_x` MCP tool | [Guide](https://docs.agent-swarm.dev/docs/integrations/composio) |
 | **Linear** | Bidirectional ticket sync via OAuth + webhooks | [Guide](https://docs.agent-swarm.dev/docs/guides/linear-integration) |
 | **Jira Cloud** | OAuth 3LO ticket sync — assignee/comment events create tasks; lifecycle posts comments back | [Guide](https://docs.agent-swarm.dev/docs/guides/jira-integration) |
 | **Sentry** | Workers can triage Sentry issues with the `/investigate-sentry-issue` command | [Guide](https://docs.agent-swarm.dev/docs/guides/sentry-integration) |
@@ -226,6 +229,7 @@ bunx @desplega.ai/agent-swarm <command>
 | `worker`  | Run a worker agent |
 | `lead`    | Run a lead agent |
 | `e2b`     | Build E2B templates and launch/manage grouped API + lead + worker swarms |
+| `x`       | Execute approved external routes such as Composio |
 | `docs`    | Open documentation (`--open` to launch in browser) |
 
 ## Deployment

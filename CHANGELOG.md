@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.90.0] - 2026-06-03
+
+### Added
+- **`x` command + `swarm_x` Composio bridge** — Agent Swarm now exposes a thin external-route surface for approved third-party operations. Humans can run `agent-swarm x composio ...`, agents can call `swarm_x`, and the docs now cover the shared workflow.
+- **Config-driven metrics dashboards** (#626) — operators can define read-only SQL dashboards, version them, and render them in the UI without shipping bespoke frontend code. Includes the `create_metric` MCP tool and the metrics definitions HTTP surface.
+- **Attio integration card + bundled interaction skill template** (#632) — the integrations catalog now exposes Attio alongside a reusable skill template for CRM record/query workflows.
+
+### Changed
+- **Requester profile guidance now propagates into task prompts** (#628) — when a canonical user has a `role` or `notes`, the runner injects a `Requester Profile` section so agents can match tone and depth without weakening task or safety constraints.
+- **GitHub task cancellation is runtime-configurable** (#634) — PR/issue unassign and review-request-removal events still cancel linked tasks by default, but each behavior can now be disabled independently through `swarm_config`.
+- **User-token attribution now survives REST task/workflow entry points** (#621) — REST-authenticated calls carry canonical-user attribution through task creation and downstream workflow execution for better auditability and requester-aware behavior.
+
+### Fixed
+- **Heartbeat can dispatch auto-assigned pool tasks correctly** (#622) — crash recovery no longer misses work that was auto-assigned from the pool before the heartbeat sweep.
+- **Heartbeat crash-recovery resume loops now stop cleanly** (#637) — the heartbeat supersede/resume path now respects the generation budget and avoids the race that could create duplicate resume attempts.
+
 ### Added
 - **System-default `swarm-scripts` skill + bundled templates in Docker images** (#614) — the repo now ships a built-in scripts skill/decision rubric as a system-managed default, and both `Dockerfile` and `Dockerfile.worker` copy `templates/` into the image so those defaults are present in compiled deployments.
 - **Context-mode tools on all local coding harnesses** (#599) — Claude Code, Codex, and opencode workers now advertise the `ctx_*` context-mode MCP tools by default, giving every local harness the same compressed-search / fetch-and-index workflow. `CONTEXT_MODE_DISABLED=true` remains the per-worker escape hatch.

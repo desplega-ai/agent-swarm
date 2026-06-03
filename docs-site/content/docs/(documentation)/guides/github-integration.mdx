@@ -50,6 +50,28 @@ GITHUB_APP_PRIVATE_KEY=base64-encoded-key
 GITHUB_DISABLE=true
 ```
 
+### Runtime cancellation flags
+
+GitHub unassign and review-request-removal events cancel the linked swarm task by
+default. You can disable either behavior independently through `swarm_config`
+without redeploying workers:
+
+- `github.cancelOnUnassign` — controls PR/issue `unassigned` events
+- `github.cancelOnReviewRequestRemoved` — controls PR `review_request_removed`
+  events
+
+Absent key, or any value other than `"false"`, keeps the current cancel-on-event
+behavior. Setting the value to `"false"` leaves the task untouched and the
+handler returns `{ created: false }`.
+
+```bash
+# Keep tasks alive when the bot is unassigned
+agent-swarm set-config global github.cancelOnUnassign false
+
+# Keep tasks alive when a review request is removed
+agent-swarm set-config global github.cancelOnReviewRequestRemoved false
+```
+
 ## Supported Events
 
 | Event | What happens |
@@ -58,6 +80,7 @@ GITHUB_DISABLE=true
 | Review requested from bot | Creates a review task |
 | `@bot-name` or `@alias` in comment/issue/PR | Creates a task with the mention context |
 | `swarm-review` label added to PR/issue | Creates a task for review (configurable via `GITHUB_EVENT_LABELS`) |
+| Bot unassigned / review request removed | Cancels the linked task by default; both behaviors are runtime-configurable via `github.cancelOnUnassign` and `github.cancelOnReviewRequestRemoved` |
 
 ### Suppressed Events (Safety Defaults)
 

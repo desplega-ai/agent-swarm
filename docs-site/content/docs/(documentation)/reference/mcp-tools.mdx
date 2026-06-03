@@ -277,6 +277,43 @@ Quote-reply a WhatsApp message via Kapso. Same text-send path as `send-whatsapp-
 | `inReplyTo` | string | Yes | The inbound WAMID to quote-reply |
 | `body` | string | Yes | Reply text |
 
+## External Route Tools
+
+### swarm_x
+
+Execute an approved external command route. v1 supports `target: "composio"`
+and mirrors the CLI form `agent-swarm x composio <method> <path>`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `target` | string | Yes | External route target. Currently `composio` |
+| `method` | string | Yes | HTTP method to send upstream |
+| `path` | string | Yes | Route path relative to the target base URL |
+| `body` | unknown | No | Optional JSON request body |
+| `headers` | object | No | Optional extra headers merged with the server-side auth header |
+
+Use this when you want a thin, auditable bridge to an external tool router
+before investing in a dedicated MCP surface.
+
+## Metrics Tools
+
+### create_metric
+
+Create or update a config-driven dashboard backed by read-only SQL widget
+queries. Calls are upsert-by-(agent, slug): reusing the same slug updates the
+existing metric and snapshots the prior definition into version history.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `title` | string | Yes | Human-readable dashboard title |
+| `slug` | string | No | URL-safe slug. Defaults to the kebab-cased title |
+| `description` | string | No | Short description shown in the dashboard |
+| `definition` | object | Yes | Metric definition JSON: widgets, SQL, variables, and viz config |
+
+Every widget query must be `SELECT`/`WITH` only. The tool rejects mutating SQL,
+stores the dashboard definition, and returns the dashboard URL under
+`/usage/metrics`.
+
 ## Task Pool Tools
 
 ### task-action
