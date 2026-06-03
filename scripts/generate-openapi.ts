@@ -28,6 +28,7 @@ import "../src/http/session-data";
 import "../src/http/sessions";
 import "../src/http/skills";
 import "../src/http/scripts";
+import "../src/http/mcp-bridge";
 import "../src/http/mcp-oauth";
 import "../src/http/mcp-servers";
 import "../src/http/stats";

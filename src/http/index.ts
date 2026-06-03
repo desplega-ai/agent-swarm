@@ -42,6 +42,7 @@ import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
 import { handleMcp } from "./mcp";
+import { handleMcpBridge } from "./mcp-bridge";
 import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
 import { handleMcpUser } from "./mcp-user";
@@ -234,6 +235,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleRepos(req, res, pathSegments, queryParams),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
         () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
+        () => handleMcpBridge(req, res, pathSegments, queryParams, myAgentId),
         () => handleMcpServers(req, res, pathSegments, queryParams),
         () => handleMcpOAuth(req, res, pathSegments, queryParams),
         () => handleMemory(req, res, pathSegments, myAgentId),

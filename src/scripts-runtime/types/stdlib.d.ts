@@ -86,6 +86,7 @@ declare module "swarm-sdk" {
       intent?: string;
       scope?: ScriptScope;
       fsMode?: ScriptFsMode;
+      idempotencyKey?: string;
     }): Promise<unknown>;
     // --- swarm / agent ---
     swarm_get(args?: { includeFull?: boolean }): Promise<unknown>;
@@ -165,6 +166,147 @@ declare module "swarm-sdk" {
     prompt_get(args: { id: string }): Promise<unknown>;
     // --- tracker ---
     tracker_status(args?: Record<string, unknown>): Promise<unknown>;
+    tracker_syncStatus(args?: Record<string, unknown>): Promise<unknown>;
+    tracker_linkTask(args: {
+      taskId: string;
+      externalId: string;
+      provider?: string;
+    }): Promise<unknown>;
+    tracker_unlink(args: { taskId: string }): Promise<unknown>;
+    tracker_mapAgent(args: {
+      agentId: string;
+      externalId: string;
+      provider?: string;
+    }): Promise<unknown>;
+
+    // --- write: memory ---
+    memory_delete(args: { id: string }): Promise<unknown>;
+    inject_learning(args: {
+      content: string;
+      name?: string;
+      scope?: "agent" | "swarm";
+      source?: string;
+      tags?: string[];
+    }): Promise<unknown>;
+
+    // --- write: tasks ---
+    task_send(args: Record<string, unknown>): Promise<unknown>;
+    task_cancel(args: { taskId: string }): Promise<unknown>;
+    task_action(args: Record<string, unknown>): Promise<unknown>;
+
+    // --- write: config ---
+    config_set(args: {
+      key: string;
+      value: unknown;
+      scope?: "global" | "agent" | "repo";
+      scopeId?: string;
+      isSecret?: boolean;
+    }): Promise<unknown>;
+    config_delete(args: { id: string }): Promise<unknown>;
+
+    // --- write: slack ---
+    slack_post(args: { channelId: string; message: string; blocks?: unknown }): Promise<unknown>;
+    slack_reply(args: {
+      channelId?: string;
+      threadTs?: string;
+      message: string;
+      taskId?: string;
+    }): Promise<unknown>;
+    slack_startThread(args: { channelId: string; message: string }): Promise<unknown>;
+    slack_uploadFile(args: Record<string, unknown>): Promise<unknown>;
+    slack_downloadFile(args: { url: string }): Promise<unknown>;
+
+    // --- write: messaging (internal) ---
+    message_post(args: { channel?: string; content: string; to?: string }): Promise<unknown>;
+
+    // --- write: profiles ---
+    profile_update(args: Record<string, unknown>): Promise<unknown>;
+
+    // --- write: services ---
+    service_register(args: Record<string, unknown>): Promise<unknown>;
+    service_unregister(args: { name: string }): Promise<unknown>;
+    service_updateStatus(args: {
+      name: string;
+      status: "starting" | "healthy" | "unhealthy" | "stopped";
+    }): Promise<unknown>;
+
+    // --- write: schedules ---
+    schedule_create(args: Record<string, unknown>): Promise<unknown>;
+    schedule_update(args: Record<string, unknown>): Promise<unknown>;
+    schedule_delete(args: { id: string }): Promise<unknown>;
+    schedule_runNow(args: { id: string }): Promise<unknown>;
+
+    // --- write: workflows ---
+    workflow_create(args: Record<string, unknown>): Promise<unknown>;
+    workflow_update(args: Record<string, unknown>): Promise<unknown>;
+    workflow_patch(args: Record<string, unknown>): Promise<unknown>;
+    workflow_patchNode(args: Record<string, unknown>): Promise<unknown>;
+    workflow_delete(args: { id: string }): Promise<unknown>;
+    workflow_trigger(args: { id: string; input?: Record<string, unknown> }): Promise<unknown>;
+    workflow_retryRun(args: { id: string }): Promise<unknown>;
+    workflow_cancelRun(args: { id: string }): Promise<unknown>;
+
+    // --- write: prompt templates ---
+    prompt_set(args: Record<string, unknown>): Promise<unknown>;
+    prompt_delete(args: { id: string }): Promise<unknown>;
+    prompt_preview(args: Record<string, unknown>): Promise<unknown>;
+
+    // --- write: scripts ---
+    script_upsert(args: {
+      name: string;
+      source: string;
+      description?: string;
+      intent?: string;
+      scope?: ScriptScope;
+      fsMode?: ScriptFsMode;
+    }): Promise<unknown>;
+    script_delete(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
+    script_queryTypes(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
+
+    // --- write: repos ---
+    repo_update(args: Record<string, unknown>): Promise<unknown>;
+
+    // --- write: agent ---
+    agent_join(args: {
+      name: string;
+      role?: string;
+      description?: string;
+      capabilities?: string[];
+      requestedId?: string;
+      lead?: boolean;
+    }): Promise<unknown>;
+    user_manage(args: Record<string, unknown>): Promise<unknown>;
+
+    // --- skills ---
+    skill_list(args?: {
+      scope?: string;
+      scopeId?: string;
+      includeBuiltin?: boolean;
+    }): Promise<unknown>;
+    skill_get(args: { id: string }): Promise<unknown>;
+    skill_search(args: { query: string; limit?: number }): Promise<unknown>;
+    skill_create(args: Record<string, unknown>): Promise<unknown>;
+    skill_update(args: Record<string, unknown>): Promise<unknown>;
+    skill_delete(args: { id: string }): Promise<unknown>;
+    skill_install(args: Record<string, unknown>): Promise<unknown>;
+    skill_uninstall(args: Record<string, unknown>): Promise<unknown>;
+    skill_publish(args: Record<string, unknown>): Promise<unknown>;
+
+    // --- mcp servers ---
+    mcpServer_list(args?: Record<string, unknown>): Promise<unknown>;
+    mcpServer_get(args: { id: string }): Promise<unknown>;
+    mcpServer_create(args: Record<string, unknown>): Promise<unknown>;
+    mcpServer_update(args: Record<string, unknown>): Promise<unknown>;
+    mcpServer_delete(args: { id: string }): Promise<unknown>;
+    mcpServer_install(args: Record<string, unknown>): Promise<unknown>;
+    mcpServer_uninstall(args: Record<string, unknown>): Promise<unknown>;
+
+    // --- pages & metrics ---
+    page_create(args: Record<string, unknown>): Promise<unknown>;
+    metric_create(args: Record<string, unknown>): Promise<unknown>;
+
+    // --- human input ---
+    request_humanInput(args: Record<string, unknown>): Promise<unknown>;
   }
 
   export interface ScriptStdlib {

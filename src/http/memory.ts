@@ -54,6 +54,8 @@ const searchMemory = route({
   body: z.object({
     query: z.string().min(1),
     limit: z.number().int().min(1).max(20).default(5),
+    scope: z.enum(["agent", "swarm", "all"]).default("all"),
+    source: z.enum(["manual", "file_index", "session_summary", "task_completion"]).optional(),
   }),
   responses: {
     200: { description: "Search results" },
@@ -325,7 +327,7 @@ export async function handleMemory(
     const parsed = await searchMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    const { query, limit } = parsed.body;
+    const { query, limit, scope, source } = parsed.body;
 
     try {
       const provider = getEmbeddingProvider();
@@ -339,8 +341,9 @@ export async function handleMemory(
 
       const candidateLimit = Math.min(limit, 20) * CANDIDATE_SET_MULTIPLIER;
       const candidates = store.search(queryEmbedding, myAgentId, {
-        scope: "all",
+        scope,
         limit: candidateLimit,
+        source,
         isLead: false,
       });
       const ranked = rerank(candidates, { limit: Math.min(limit, 20) });

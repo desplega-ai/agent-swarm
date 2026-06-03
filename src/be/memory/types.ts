@@ -70,6 +70,7 @@ export interface MemoryListOptions {
   limit?: number;
   offset?: number;
   isLead?: boolean;
+  source?: AgentMemorySource;
 }
 
 export interface MemoryStats {

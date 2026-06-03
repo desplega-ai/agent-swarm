@@ -383,7 +383,7 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   list(agentId: string, options: MemoryListOptions = {}): AgentMemory[] {
-    const { scope = "all", limit = 20, offset = 0, isLead = false } = options;
+    const { scope = "all", limit = 20, offset = 0, isLead = false, source } = options;
     const db = getDb();
 
     const conditions: string[] = [];
@@ -405,6 +405,11 @@ export class SqliteMemoryStore implements MemoryStore {
       } else if (scope === "swarm") {
         conditions.push("scope = 'swarm'");
       }
+    }
+
+    if (source) {
+      conditions.push("source = ?");
+      params.push(source);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";

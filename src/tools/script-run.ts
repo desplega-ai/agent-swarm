@@ -28,6 +28,13 @@ export const registerScriptRunTool = (server: McpServer) => {
         fsMode: scriptFsModeSchema
           .default("none")
           .describe("Filesystem mode. v1 supports none only."),
+        idempotencyKey: z
+          .string()
+          .max(200)
+          .optional()
+          .describe(
+            "When set, output is auto-persisted to kv under script:executions/{key}. Re-running with the same key overwrites. Queryable via kv-get.",
+          ),
       }),
       outputSchema: scriptToolOutputSchema,
     },

@@ -1,6 +1,6 @@
 import { scrubObject } from "../utils/secret-scrubber";
 import { Redacted } from "./redacted";
-import { isSdkToolAllowed } from "./sdk-allowlist";
+import { isSdkToolAllowed, mcpToolNameForSdkMethod } from "./sdk-allowlist";
 import type { SwarmConfig } from "./swarm-config";
 
 type BridgeRequest = {
@@ -43,9 +43,14 @@ function kvPath(args: Record<string, unknown>, keyRequired = true): string {
   return key ? `/api/kv/${encodeURIComponent(key)}` : "/api/kv";
 }
 
-function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
+/**
+ * Maps SDK method names to specific REST endpoints where they exist.
+ * Returns null for tools that should fall through to the generic MCP bridge.
+ */
+function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
   const body = argsRecord(args);
   switch (name) {
+    // ── memory ──
     case "memory_search":
       return { method: "POST", path: "/api/memory/search", body };
     case "memory_get": {
@@ -67,6 +72,13 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
       };
       return { method: "POST", path: "/api/memory/rate", body: { events: [event] } };
     }
+    case "memory_delete": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("memory_delete requires string `id`");
+      return { method: "DELETE", path: `/api/memory/${encodeURIComponent(id)}` };
+    }
+
+    // ── tasks ──
     case "task_list":
       return { method: "GET", path: appendQuery("/api/tasks", body) };
     case "task_get": {
@@ -94,6 +106,13 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
         body: { progress: body.progress ?? "" },
       };
     }
+    case "task_cancel": {
+      const taskId = typeof body.taskId === "string" ? body.taskId : undefined;
+      if (!taskId) throw new Error("task_cancel requires string `taskId`");
+      return { method: "POST", path: `/api/tasks/${encodeURIComponent(taskId)}/cancel` };
+    }
+
+    // ── kv ──
     case "kv_get":
       return { method: "GET", path: kvPath(body) };
     case "kv_set":
@@ -119,11 +138,15 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
           offset: body.offset,
         }),
       };
+
+    // ── repos ──
     case "repo_list":
       return {
         method: "GET",
         path: appendQuery("/api/repos", { autoClone: body.autoClone, name: body.name }),
       };
+
+    // ── schedules ──
     case "schedule_list":
       return {
         method: "GET",
@@ -134,10 +157,14 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
           hideCompleted: body.hideCompleted,
         }),
       };
+
+    // ── scripts ──
     case "script_search":
       return { method: "POST", path: "/api/scripts/search", body };
     case "script_run":
       return { method: "POST", path: "/api/scripts/run", body };
+
+    // ── swarm / agent ──
     case "db_query":
       return { method: "POST", path: "/api/db-query", body };
     case "swarm_get":
@@ -153,6 +180,8 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
       return { method: "GET", path: "/api/metrics" };
     case "task_poll":
       return { method: "GET", path: "/api/poll" };
+
+    // ── config ──
     case "config_get":
       return {
         method: "GET",
@@ -173,6 +202,13 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
           includeSecrets: body.includeSecrets,
         }),
       };
+    case "config_delete": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("config_delete requires string `id`");
+      return { method: "DELETE", path: `/api/config/${encodeURIComponent(id)}` };
+    }
+
+    // ── services ──
     case "service_list":
       return {
         method: "GET",
@@ -182,6 +218,8 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
           status: body.status,
         }),
       };
+
+    // ── workflows ──
     case "workflow_list":
       return {
         method: "GET",
@@ -209,6 +247,13 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
       if (!id) throw new Error("workflow_getRun requires string `id`");
       return { method: "GET", path: `/api/workflow-runs/${encodeURIComponent(id)}` };
     }
+    case "workflow_delete": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("workflow_delete requires string `id`");
+      return { method: "DELETE", path: `/api/workflows/${encodeURIComponent(id)}` };
+    }
+
+    // ── prompt templates ──
     case "prompt_list":
       return {
         method: "GET",
@@ -224,8 +269,52 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest {
       if (!id) throw new Error("prompt_get requires string `id`");
       return { method: "GET", path: `/api/prompt-templates/${encodeURIComponent(id)}` };
     }
+    case "prompt_delete": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("prompt_delete requires string `id`");
+      return { method: "DELETE", path: `/api/prompt-templates/${encodeURIComponent(id)}` };
+    }
+
+    // ── skills ──
+    case "skill_list":
+      return {
+        method: "GET",
+        path: appendQuery("/api/skills", {
+          scope: body.scope,
+          scopeId: body.scopeId,
+          includeBuiltin: body.includeBuiltin,
+        }),
+      };
+    case "skill_get": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("skill_get requires string `id`");
+      return { method: "GET", path: `/api/skills/${encodeURIComponent(id)}` };
+    }
+    case "skill_search":
+      return { method: "POST", path: "/api/skills/search", body };
+    case "skill_delete": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("skill_delete requires string `id`");
+      return { method: "DELETE", path: `/api/skills/${encodeURIComponent(id)}` };
+    }
+
+    // ── mcp servers ──
+    case "mcpServer_list":
+      return { method: "GET", path: "/api/mcp-servers" };
+    case "mcpServer_get": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("mcpServer_get requires string `id`");
+      return { method: "GET", path: `/api/mcp-servers/${encodeURIComponent(id)}` };
+    }
+    case "mcpServer_delete": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("mcpServer_delete requires string `id`");
+      return { method: "DELETE", path: `/api/mcp-servers/${encodeURIComponent(id)}` };
+    }
+
+    // ── fallthrough: proxy via generic MCP bridge ──
     default:
-      throw new Error(`Tool '${name}' is not exposed through the scripts SDK bridge`);
+      return null;
   }
 }
 
@@ -237,6 +326,26 @@ async function callBridgeApi(
 ): Promise<unknown> {
   const baseUrl = Redacted.value(config.mcpBaseUrl).replace(/\/$/, "");
   const request = bridgeRequestFor(name, args);
+
+  // Tools without a specific REST route go through the generic MCP bridge
+  if (!request) {
+    const mcpToolName = mcpToolNameForSdkMethod(name);
+    const res = await fetch(`${baseUrl}/api/mcp-bridge`, {
+      method: "POST",
+      headers: headers(config),
+      body: JSON.stringify({ tool: mcpToolName, args: args ?? {} }),
+    });
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!res.ok && options.throwOnError) {
+      const message =
+        data && typeof data === "object" && "error" in data
+          ? String((data as { error: unknown }).error)
+          : `api failed with ${res.status}`;
+      throw new Error(`swarm-sdk: ${name} failed with ${res.status}: ${message}`);
+    }
+    return scrubObject({ success: res.ok, status: res.status, data });
+  }
 
   const res = await fetch(`${baseUrl}${request.path}`, {
     method: request.method,

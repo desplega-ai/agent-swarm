@@ -22,6 +22,7 @@ import { getScript, upsertScriptByName } from "../scripts/db";
 import { extractArgsJsonSchema } from "../scripts/extract-schema";
 import { typecheckScript } from "../scripts/typecheck";
 import type { Seeder, SeedItem } from "../seed/types";
+import compoundInsightsSrc from "./catalog/compound-insights.ts" with { type: "text" };
 import dateResolveSrc from "./catalog/date-resolve.ts" with { type: "text" };
 import fetchReadableSrc from "./catalog/fetch-readable.ts" with { type: "text" };
 import ghPrSnapshotSrc from "./catalog/gh-pr-snapshot.ts" with { type: "text" };
@@ -29,9 +30,12 @@ import groupCountSrc from "./catalog/group-count.ts" with { type: "text" };
 import jsonQuerySrc from "./catalog/json-query.ts" with { type: "text" };
 import linearIssueSrc from "./catalog/linear-issue.ts" with { type: "text" };
 import memoryDedupCheckSrc from "./catalog/memory-dedup-check.ts" with { type: "text" };
+import scheduleHealthSrc from "./catalog/schedule-health.ts" with { type: "text" };
 import slackThreadFlattenSrc from "./catalog/slack-thread-flatten.ts" with { type: "text" };
+import smartRecallSrc from "./catalog/smart-recall.ts" with { type: "text" };
 import taskFailureAuditSrc from "./catalog/task-failure-audit.ts" with { type: "text" };
 import textDiffSrc from "./catalog/text-diff.ts" with { type: "text" };
+import toolUsageSrc from "./catalog/tool-usage.ts" with { type: "text" };
 
 export type SeedScript = {
   name: string;
@@ -121,6 +125,38 @@ export const SEED_SCRIPTS: SeedScript[] = [
       "Fetch a Slack thread by channel + thread timestamp and flatten it into a readable chronological transcript.",
     intent: "Turn a Slack thread into plain text for summarizing or as task context.",
     source: asText(slackThreadFlattenSrc),
+  },
+  {
+    name: "smart-recall",
+    description:
+      "Multi-query fan-out memory search with dedup and composite reranking (bestSimilarity + 0.05 * hitCount). Returns unique memories across all queries.",
+    intent:
+      "Recall relevant memories using multiple search angles — better coverage than a single query. Use for task onboarding, context gathering, or before writing new memories.",
+    source: asText(smartRecallSrc),
+  },
+  {
+    name: "schedule-health",
+    description:
+      "Per-schedule failure rate check over recent tasks — flags schedules with failure rates above a configurable threshold.",
+    intent:
+      "Find unhealthy schedules that keep failing — for daily compounding, reliability reviews, or ops triage.",
+    source: asText(scheduleHealthSrc),
+  },
+  {
+    name: "tool-usage",
+    description:
+      "Tool usage histogram from session_logs — top tools by call count over a time window, optionally filtered by agent.",
+    intent:
+      "See which MCP tools agents use most — for SDK gap analysis, optimization, or daily ops snapshots.",
+    source: asText(toolUsageSrc),
+  },
+  {
+    name: "compound-insights",
+    description:
+      "All-in-one daily ops snapshot: task completion/failure summary, failure clusters, schedule health flags, tool usage top-20, and memory health stats.",
+    intent:
+      "Single-call daily compounding Phase 0 helper — replaces ~25 raw tool roundtrips with one compressed JSON result. For daily evolution, ops reviews, or heartbeat context.",
+    source: asText(compoundInsightsSrc),
   },
 ];
 
