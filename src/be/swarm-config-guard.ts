@@ -41,6 +41,13 @@ const VALIDATED_KEYS: Record<string, (value: unknown) => string | null> = {
     if (parsed.success) return null;
     return `Invalid HARNESS_PROVIDER value (must be one of: ${ProviderNameSchema.options.join(", ")})`;
   },
+  // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
+  // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
+  CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {
+    const n = Number.parseInt(String(value), 10);
+    if (Number.isFinite(n) && n > 0) return null;
+    return "Invalid CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS (must be a positive integer of milliseconds)";
+  },
 };
 
 export function validateConfigValue(key: string, value: unknown): string | null {
