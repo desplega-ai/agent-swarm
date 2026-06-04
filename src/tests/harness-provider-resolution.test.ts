@@ -153,6 +153,14 @@ describe("validateConfigValue", () => {
       expect(err).toMatch(/CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS/);
     }
   });
+
+  test("rejects partial-numeric CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS values", () => {
+    for (const bad of ["60000ms", "1.5", "123abc", "1e5", " 60000 ms"]) {
+      const err = validateConfigValue("CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", bad);
+      expect(err).not.toBeNull();
+      expect(err).toMatch(/CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS/);
+    }
+  });
 });
 
 // ─── getResolvedConfig — scope precedence for HARNESS_PROVIDER ───────────────

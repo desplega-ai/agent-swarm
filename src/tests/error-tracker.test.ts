@@ -680,6 +680,12 @@ describe("resolveCodexCreditsExhaustedCooldownMs", () => {
       MAX_RATE_LIMIT_RESET_MS,
     );
   });
+
+  test("partial-numeric strings → default constant (not silently truncated)", () => {
+    for (const bad of ["60000ms", "1.5", "123abc", "1e5"]) {
+      expect(resolveCodexCreditsExhaustedCooldownMs(bad)).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+    }
+  });
 });
 
 describe("Codex/Claude coexistence — single tracker handles both providers", () => {
