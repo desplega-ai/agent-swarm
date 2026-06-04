@@ -11,10 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - **Harness-agnostic FS→DB profile sync at session end** (#641) — worker and lead sessions now persist identity-file changes back into the database at session end without assuming a specific coding harness.
 - **Scripts runtime exposes the full read-only MCP surface over the SDK + HTTP bridge** (#642) — catalog scripts can now call all read-only swarm MCP methods through the generated SDK, and the HTTP bridge routes those methods consistently for compiled and runtime execution paths.
+- **Script workflow run foundation** (#653) — adds the first `script_runs` / `script_run_journal` database slice, the `/api/script-runs` HTTP surface, launch-time label linting for loop steps, and generated API reference docs for the new run endpoints.
 
 ### Changed
 - **External URL env handling is unified around `PUBLIC_MCP_BASE_URL` + `APP_URL`** (#643) — OAuth callbacks, public page links, and webhook URLs now route through shared helpers, with `PUBLIC_MCP_BASE_URL` preferred for externally reachable API origins and `DASHBOARD_URL` treated as a deprecated alias of `APP_URL`.
 - **Claude runner memory guardrails are stricter in compiled and Docker deployments** (#644) — the runner and worker images now fail earlier on memory-pressure conditions and keep the packaged harness/runtime assets aligned with those guardrails.
+- **`compound-insights` seed script now reports richer nudge-eval signals** (#652) — the memory-health section includes source-pollution ratios, stale-reference counts, popular-but-useless snapshot detection, sampled embedding similarity, and a new self-scripting candidate detector based on repeated tool triplets.
+- **Models.dev pricing snapshot refreshed for June 4, 2026** (#654) — updates the vendored pricing catalog with current provider/model churn, including new provider entries and tier-shape changes across multiple gateways.
 
 ### Fixed
 - **Compiled-binary scripts now bundle `zod` reliably** (#645) — `script-upsert` and seeded scripts that import `zod` resolve correctly in compiled-binary mode instead of failing to find the module at runtime.
