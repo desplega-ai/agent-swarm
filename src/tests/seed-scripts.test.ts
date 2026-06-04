@@ -8,6 +8,7 @@ import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { typecheckScript } from "../be/scripts/typecheck";
 import { runSeeder } from "../be/seed";
 import { SEED_SCRIPTS, scriptsSeeder } from "../be/seed-scripts";
+import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { validateScriptImports } from "../scripts-runtime/import-allowlist";
 
@@ -142,6 +143,62 @@ describe("seed-scripts catalog", () => {
     // The user's edit survived — the seed did not clobber it.
     const row = getScript({ name: target.name, scope: "global" });
     expect(row?.source).toBe(userSource);
+  });
+
+  test("compound-insights decodes numeric-key SQLite blob objects for similarity checks", async () => {
+    function encodedVector(values: number[]): Record<string, number> {
+      const bytes = new Uint8Array(new Float32Array(values).buffer);
+      return Object.fromEntries(Array.from(bytes.entries()).map(([i, byte]) => [String(i), byte]));
+    }
+
+    const queries: string[] = [];
+    const ctx = {
+      swarm: {
+        async db_query({ sql }: { sql: string }) {
+          queries.push(sql);
+          if (sql.includes("SELECT scope, source, count(*) as cnt")) {
+            return {
+              columns: ["scope", "source", "cnt", "zeroAccess"],
+              rows: [["agent", "session_summary", 2, 0]],
+            };
+          }
+          if (sql.includes("SELECT id, name, source, accessCount, embedding")) {
+            return {
+              columns: ["id", "name", "source", "accessCount", "embedding"],
+              rows: [
+                ["a", "first", "session_summary", 3, encodedVector([1, 0, 0, 0])],
+                ["b", "second", "task_completion", 2, encodedVector([0.9, 0.1, 0, 0])],
+              ],
+            };
+          }
+          if (sql.includes("SELECT source, count(*) as count")) {
+            return { columns: ["source", "count"], rows: [] };
+          }
+          return { columns: [], rows: [] };
+        },
+      },
+    };
+
+    const result = await compoundInsights(
+      {
+        days: 7,
+        includeToolUsage: false,
+        includeScheduleHealth: false,
+        includeScriptCandidates: false,
+        includeByAgent: false,
+      },
+      ctx,
+    );
+
+    expect(queries.some((sql) => sql.includes("embedding IS NOT NULL"))).toBe(true);
+    expect(result.memoryHealth.pollution.similarityCheck.sampledAutoSnapshots).toBe(2);
+    expect(result.memoryHealth.pollution.similarityCheck.strongestAutoSnapshotPair).toMatchObject({
+      a: { id: "a", name: "first", source: "session_summary" },
+      b: { id: "b", name: "second", source: "task_completion" },
+    });
+    expect(
+      result.memoryHealth.pollution.similarityCheck.strongestAutoSnapshotPair.similarity,
+    ).toBeGreaterThan(0.99);
   });
 });
 

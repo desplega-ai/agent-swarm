@@ -78,6 +78,12 @@ function decodeFloat32Blob(value: any): Float32Array | null {
   if (value instanceof Uint8Array) bytes = value;
   else if (Array.isArray(value)) bytes = Uint8Array.from(value);
   else if (typeof value === "object" && Array.isArray(value.data)) bytes = Uint8Array.from(value.data);
+  else if (typeof value === "object") {
+    const keys = Object.keys(value);
+    if (keys.length > 0 && keys.every((key) => /^\d+$/.test(key))) {
+      bytes = Uint8Array.from(Object.values(value) as number[]);
+    }
+  }
   if (!bytes || bytes.byteLength < 4 || bytes.byteLength % 4 !== 0) return null;
   return new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 }
