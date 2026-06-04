@@ -77,6 +77,22 @@ describe("extractSlackMessageText", () => {
       expect(extractSlackMessageText(msg)).toBe("*Alert*: CPU spike detected");
     });
 
+    test("extracts text from section.fields when section has no top-level text", () => {
+      const msg = {
+        text: "",
+        blocks: [
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: "*Status:* resolved" },
+              { type: "mrkdwn", text: "*Priority:* P2" },
+            ],
+          },
+        ],
+      };
+      expect(extractSlackMessageText(msg)).toBe("*Status:* resolved\n*Priority:* P2");
+    });
+
     test("extracts text from rich_text block elements", () => {
       const msg = {
         text: "",
@@ -93,6 +109,34 @@ describe("extractSlackMessageText", () => {
         ],
       };
       expect(extractSlackMessageText(msg)).toBe("Rich text content");
+    });
+
+    test("extracts text from rich_text_list -> rich_text_section -> text (nested list)", () => {
+      const msg = {
+        text: "",
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_list",
+                style: "bullet",
+                elements: [
+                  {
+                    type: "rich_text_section",
+                    elements: [{ type: "text", text: "item one" }],
+                  },
+                  {
+                    type: "rich_text_section",
+                    elements: [{ type: "text", text: "item two" }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+      expect(extractSlackMessageText(msg)).toBe("item one\nitem two");
     });
 
     test("joins multiple section blocks with newline", () => {

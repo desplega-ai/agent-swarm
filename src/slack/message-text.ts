@@ -18,11 +18,9 @@ interface SlackAttachment {
 interface SlackBlockInternal {
   type?: string;
   text?: { type?: string; text?: string };
-  elements?: Array<{
-    type?: string;
-    text?: string;
-    elements?: Array<{ type?: string; text?: string }>;
-  }>;
+  /** section blocks may use fields[] instead of (or alongside) a top-level text object */
+  fields?: Array<{ type?: string; text?: string }>;
+  elements?: unknown[];
 }
 
 export interface SlackMessageLike {
@@ -33,12 +31,31 @@ export interface SlackMessageLike {
 }
 
 /**
+ * Recursively collect plain text from a Slack rich_text node tree.
+ *
+ * Handles text leaf nodes plus all container types that carry child elements:
+ * rich_text_section, rich_text_list, rich_text_quote, rich_text_preformatted.
+ */
+function collectRichTextParts(node: unknown, parts: string[]): void {
+  if (node == null || typeof node !== "object") return;
+  const n = node as { type?: string; text?: string; elements?: unknown[] };
+  if (n.type === "text" && n.text) {
+    parts.push(n.text);
+  }
+  if (Array.isArray(n.elements)) {
+    for (const child of n.elements) {
+      collectRichTextParts(child, parts);
+    }
+  }
+}
+
+/**
  * Return the best displayable text for a Slack message.
  *
  * Priority:
  * 1. `msg.text` (non-empty)
  * 2. `msg.attachments[]` — joins `fallback || text || title || pretext` for each
- * 3. `msg.blocks[]` — extracts text from section and rich_text blocks
+ * 3. `msg.blocks[]` — extracts text from section (text + fields) and rich_text blocks
  * 4. `""` if nothing found
  */
 export function extractSlackMessageText(msg: SlackMessageLike): string {
@@ -59,17 +76,18 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
     for (const rawBlock of msg.blocks) {
       if (rawBlock == null || typeof rawBlock !== "object") continue;
       const block = rawBlock as SlackBlockInternal;
-      if (block.type === "section" && block.text?.text) {
-        parts.push(block.text.text);
-      } else if (block.type === "rich_text" && Array.isArray(block.elements)) {
-        for (const el of block.elements) {
-          if (el == null || typeof el !== "object") continue;
-          if (Array.isArray(el.elements)) {
-            for (const inner of el.elements) {
-              if (inner == null || typeof inner !== "object") continue;
-              if (inner.type === "text" && inner.text) parts.push(inner.text);
+      if (block.type === "section") {
+        if (block.text?.text) parts.push(block.text.text);
+        if (Array.isArray(block.fields)) {
+          for (const field of block.fields) {
+            if (field != null && typeof field === "object" && field.text) {
+              parts.push(field.text);
             }
           }
+        }
+      } else if (block.type === "rich_text" && Array.isArray(block.elements)) {
+        for (const el of block.elements) {
+          collectRichTextParts(el, parts);
         }
       }
     }
