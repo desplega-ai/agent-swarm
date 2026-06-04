@@ -30,6 +30,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   process.env.APP_URL = "https://app.example.test";
+  process.env.SCRIPT_RUN_SUPERVISOR_DISABLE = "true";
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
 
@@ -54,6 +55,10 @@ beforeEach(() => {
   getDb().run("DELETE FROM script_run_journal");
   getDb().run("DELETE FROM script_runs");
   delete process.env.SCRIPT_RUN_CONCURRENCY_CAP;
+  delete process.env.SCRIPT_RUN_MAX_STEPS;
+  delete process.env.SCRIPT_RUN_MAX_AGENT_TASKS;
+  delete process.env.SCRIPT_RUN_MAX_WALL_MS;
+  process.env.SCRIPT_RUN_SUPERVISOR_DISABLE = "true";
 });
 
 type TestResponse = {
@@ -204,5 +209,44 @@ describe("/api/script-runs HTTP", () => {
       stepType: "raw-llm",
       result: { text: "hi" },
     });
+  });
+
+  test("aborts the run when the journal step cap is exceeded", async () => {
+    process.env.SCRIPT_RUN_MAX_STEPS = "1";
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const first = await dispatch(`/api/internal/script-runs/${id}/steps`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({
+        stepKey: "one",
+        stepType: "swarm-script",
+        status: "completed",
+        result: 1,
+      }),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await dispatch(`/api/internal/script-runs/${id}/steps`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({
+        stepKey: "two",
+        stepType: "swarm-script",
+        status: "completed",
+        result: 2,
+      }),
+    });
+    expect(second.status).toBe(429);
+
+    const detail = await dispatch(`/api/script-runs/${id}`, { agentId });
+    const body = (await detail.json()) as { run: { status: string; error?: string } };
+    expect(body.run.status).toBe("aborted_limit");
+    expect(body.run.error).toContain("SCRIPT_RUN_MAX_STEPS");
   });
 });

@@ -16,6 +16,76 @@ export const RawLlmOutputSchema = z.object({
   model: z.string(),
 });
 
+export async function executeRawLlm(
+  config: z.infer<typeof RawLlmConfigSchema>,
+): Promise<
+  | { status: "success"; output: z.infer<typeof RawLlmOutputSchema>; error?: string }
+  | { status: "failed"; error: string }
+> {
+  const modelName = config.model ?? "google/gemini-3-flash-preview";
+
+  try {
+    const { createOpenAI } = await import("@ai-sdk/openai");
+    const openrouter = createOpenAI({
+      baseURL: "https://openrouter.ai/api/v1",
+      apiKey: process.env.OPENROUTER_API_KEY,
+    });
+    const model = openrouter(modelName);
+
+    if (config.schema) {
+      const { generateObject, jsonSchema } = await import("ai");
+      const { object } = await generateObject({
+        model,
+        schema: jsonSchema(config.schema),
+        prompt: config.prompt,
+        providerOptions: {
+          openai: { strictJsonSchema: false },
+        },
+      });
+      return {
+        status: "success",
+        output: { result: object, model: modelName },
+      };
+    }
+
+    const { generateText } = await import("ai");
+    const { text } = await generateText({
+      model,
+      prompt: config.prompt,
+    });
+    return {
+      status: "success",
+      output: { result: text, model: modelName },
+    };
+  } catch (err) {
+    // Re-throw rate-limit errors so executeStep's retry policy handles them
+    // via the retry poller (scheduled backoff). Using the fallbackPort for
+    // rate limits would trigger the semantic loop-back path instead, causing
+    // runaway retries without any backoff.
+    const httpStatus =
+      (err as { status?: number; statusCode?: number })?.status ??
+      (err as { status?: number; statusCode?: number })?.statusCode;
+    const isRateLimited =
+      httpStatus === 429 ||
+      httpStatus === 529 ||
+      (err instanceof Error && /rate.?limit|too many requests|529/i.test(err.message));
+    if (isRateLimited) {
+      throw err;
+    }
+    if (config.fallbackPort) {
+      return {
+        status: "success",
+        output: { result: null, model: modelName },
+        error: `LLM call failed, using fallback port: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    return {
+      status: "failed",
+      error: `LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 // ─── Executor ───────────────────────────────────────────────
 
 export class RawLlmExecutor extends BaseExecutor<
@@ -33,68 +103,15 @@ export class RawLlmExecutor extends BaseExecutor<
     _meta: ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof RawLlmOutputSchema>>> {
     const prompt = this.deps.interpolate(config.prompt, context as Record<string, unknown>);
-    const modelName = config.model ?? "google/gemini-3-flash-preview";
-
-    try {
-      const { createOpenAI } = await import("@ai-sdk/openai");
-      const openrouter = createOpenAI({
-        baseURL: "https://openrouter.ai/api/v1",
-        apiKey: process.env.OPENROUTER_API_KEY,
-      });
-      const model = openrouter(modelName);
-
-      if (config.schema) {
-        const { generateObject, jsonSchema } = await import("ai");
-        const { object } = await generateObject({
-          model,
-          schema: jsonSchema(config.schema),
-          prompt,
-          providerOptions: {
-            openai: { strictJsonSchema: false },
-          },
-        });
-        return {
-          status: "success",
-          output: { result: object, model: modelName },
-        };
-      }
-
-      const { generateText } = await import("ai");
-      const { text } = await generateText({
-        model,
-        prompt,
-      });
+    const result = await executeRawLlm({ ...config, prompt });
+    if (result.status === "success" && result.error) {
       return {
         status: "success",
-        output: { result: text, model: modelName },
-      };
-    } catch (err) {
-      // Re-throw rate-limit errors so executeStep's retry policy handles them
-      // via the retry poller (scheduled backoff). Using the fallbackPort for
-      // rate limits would trigger the semantic loop-back path instead, causing
-      // runaway retries without any backoff.
-      const httpStatus =
-        (err as { status?: number; statusCode?: number })?.status ??
-        (err as { status?: number; statusCode?: number })?.statusCode;
-      const isRateLimited =
-        httpStatus === 429 ||
-        httpStatus === 529 ||
-        (err instanceof Error && /rate.?limit|too many requests|529/i.test(err.message));
-      if (isRateLimited) {
-        throw err;
-      }
-      if (config.fallbackPort) {
-        return {
-          status: "success",
-          output: { result: null, model: modelName },
-          nextPort: config.fallbackPort,
-          error: `LLM call failed, using fallback port: ${err instanceof Error ? err.message : String(err)}`,
-        };
-      }
-      return {
-        status: "failed",
-        error: `LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
+        output: result.output,
+        nextPort: config.fallbackPort,
+        error: result.error,
       };
     }
+    return result;
   }
 }

@@ -21,9 +21,11 @@ import {
   withRemoteContext,
   withSpanContext,
 } from "../otel";
+import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
 import { getApiKey } from "../utils/api-key";
+import { getMcpBaseUrl } from "../utils/constants";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
@@ -345,6 +347,9 @@ async function shutdown() {
   // Stop heartbeat triage
   stopHeartbeat();
 
+  // Stop durable script workflow subprocesses
+  stopScriptRunSupervisor();
+
   // Stop Slack bot
   await stopSlackApp();
 
@@ -488,6 +493,9 @@ httpServer
 
     // Initialize workflow engine (trigger subscriptions + resume listener)
     initWorkflows();
+
+    // Reconcile durable script workflow subprocesses
+    startScriptRunSupervisor(getMcpBaseUrl());
 
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {

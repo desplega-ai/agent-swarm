@@ -7553,6 +7553,156 @@
         }
       }
     },
+    "/api/internal/raw-llm": {
+      "post": {
+        "operationId": "script_runs_internal_raw_llm",
+        "summary": "Execute a raw LLM call for a script workflow",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "fallbackPort": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "prompt"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "LLM call completed"
+          },
+          "500": {
+            "description": "LLM call failed"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/agent-task": {
+      "post": {
+        "operationId": "script_runs_internal_agent_task",
+        "summary": "Create or wait for a script workflow agent task step",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stepKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "template": {
+                    "type": "string"
+                  },
+                  "task": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "offerMode": {
+                    "type": "boolean"
+                  },
+                  "dir": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "parentTaskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "requestedByUserId": {
+                    "type": "string"
+                  },
+                  "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "stepKey"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent task completed"
+          },
+          "202": {
+            "description": "Agent task created or still running"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
     "/api/session-logs": {
       "post": {
         "summary": "Store session logs",

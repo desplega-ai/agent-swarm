@@ -209,7 +209,53 @@ export interface ScriptStdlib {
 
 export interface ScriptLogger extends Console {}
 
+export interface ScriptRunContext {
+  id: string;
+  agentId: string;
+  args: unknown;
+}
+
+export interface ScriptWorkflowSteps {
+  rawLlm(
+    label: string,
+    config: { prompt: string; model?: string; schema?: Record<string, unknown> },
+  ): Promise<unknown>;
+  agentTask(
+    label: string,
+    config: {
+      template?: string;
+      task?: string;
+      agentId?: string;
+      tags?: string[];
+      priority?: number;
+      offerMode?: boolean;
+      dir?: string;
+      vcsRepo?: string;
+      model?: string;
+      parentTaskId?: string;
+      requestedByUserId?: string;
+      outputSchema?: Record<string, unknown>;
+    },
+  ): Promise<unknown>;
+  swarmScript(
+    label: string,
+    config: {
+      name?: string;
+      scriptName?: string;
+      source?: string;
+      args?: unknown;
+      scope?: ScriptScope;
+      fsMode?: ScriptFsMode;
+      intent?: string;
+      idempotencyKey?: string;
+    },
+  ): Promise<unknown>;
+  humanInTheLoop(): Promise<never>;
+}
+
 export interface ScriptContext {
+  run?: ScriptRunContext;
+  step?: ScriptWorkflowSteps;
   swarm: SwarmSdk & { config: SwarmConfig };
   stdlib: ScriptStdlib;
   logger: ScriptLogger;

@@ -1890,6 +1890,19 @@ export function getInProgressTasksByContextKey(
     .map(rowToAgentTask);
 }
 
+export function getLatestTaskByContextKey(contextKey: string): AgentTask | null {
+  if (!contextKey) return null;
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE contextKey = ?
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(contextKey);
+  return row ? rowToAgentTask(row) : null;
+}
+
 /**
  * Find the most recent agent associated with a specific Slack thread.
  * No status filter — returns the last agent that touched this thread regardless of task state.
