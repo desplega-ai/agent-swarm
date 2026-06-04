@@ -6,10 +6,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleCore } from "../http/core";
+import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerScriptDeleteTool } from "../tools/script-delete";
 import { registerScriptRunTool } from "../tools/script-run";
+import { registerScriptRunsTools } from "../tools/script-runs";
 import { registerScriptSearchTool } from "../tools/script-search";
 import { registerScriptUpsertTool } from "../tools/script-upsert";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
@@ -65,6 +67,7 @@ function buildToolServer() {
   const server = new McpServer({ name: "scripts-mcp-e2e", version: "1.0.0" });
   registerScriptSearchTool(server);
   registerScriptRunTool(server);
+  registerScriptRunsTools(server);
   registerScriptUpsertTool(server);
   registerScriptDeleteTool(server);
   const registered = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
@@ -74,6 +77,9 @@ function buildToolServer() {
     run: registered["script-run"]!,
     upsert: registered["script-upsert"]!,
     del: registered["script-delete"]!,
+    launchScriptRun: registered["launch-script-run"]!,
+    getScriptRun: registered["get-script-run"]!,
+    listScriptRuns: registered["list-script-runs"]!,
   };
 }
 
@@ -126,7 +132,10 @@ async function dispatchScriptsApi(url: string, init: RequestInit = {}): Promise<
   if (!(await handleCore(req, res, agentId, API_KEY))) {
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");
-    if (!(await handleScripts(req, res, pathSegments, queryParams, agentId))) {
+    if (
+      !(await handleScripts(req, res, pathSegments, queryParams, agentId)) &&
+      !(await handleScriptRuns(req, res, pathSegments, queryParams, agentId))
+    ) {
       res.writeHead(404);
       res.end("Not Found");
     }
@@ -148,6 +157,7 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
+  process.env.SCRIPT_RUN_SUPERVISOR_DISABLE = "true";
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(fakeEmbeddingProvider);
@@ -155,7 +165,10 @@ beforeAll(async () => {
   process.env.MCP_BASE_URL = "http://scripts-mcp-e2e.test";
   globalThis.fetch = (async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url.startsWith("http://scripts-mcp-e2e.test/api/scripts/")) {
+    if (
+      url.startsWith("http://scripts-mcp-e2e.test/api/scripts/") ||
+      url.startsWith("http://scripts-mcp-e2e.test/api/script-runs")
+    ) {
       return dispatchScriptsApi(url, init);
     }
     return savedFetch(input, init);
@@ -179,6 +192,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   getDb().run("DELETE FROM scripts");
+  getDb().run("DELETE FROM script_run_journal");
+  getDb().run("DELETE FROM script_runs");
 });
 
 describe("script_ MCP HTTP proxy tools", () => {
@@ -224,6 +239,38 @@ describe("script_ MCP HTTP proxy tools", () => {
     }>;
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.error).toContain("HTTP MCP transport");
+  });
+
+  test("launches, lists, and inspects durable script workflow runs", async () => {
+    const tools = buildToolServer();
+    const source = `export default async function main() { return { ok: true }; }`;
+
+    const launched = (await tools.launchScriptRun.handler(
+      { source, args: { input: true }, scriptName: "mcp-script-workflow" },
+      meta(workerId),
+    )) as StructuredResult<{ id: string; status: string; url: string }>;
+    expect(launched.structuredContent.success).toBe(true);
+    expect(launched.structuredContent.status).toBe(201);
+    expect(launched.structuredContent.data?.status).toBe("running");
+    const runId = launched.structuredContent.data?.id;
+    expect(runId).toBeTruthy();
+
+    const listed = (await tools.listScriptRuns.handler(
+      { status: "running", limit: 10, offset: 0 },
+      meta(workerId),
+    )) as StructuredResult<{ runs: Array<{ id: string }>; total: number }>;
+    expect(listed.structuredContent.success).toBe(true);
+    expect(listed.structuredContent.data?.total).toBe(1);
+    expect(listed.structuredContent.data?.runs[0]?.id).toBe(runId);
+
+    const detail = (await tools.getScriptRun.handler(
+      { id: runId },
+      meta(workerId),
+    )) as StructuredResult<{ run: { id: string; status: string }; journal: unknown[] }>;
+    expect(detail.structuredContent.success).toBe(true);
+    expect(detail.structuredContent.data?.run.id).toBe(runId);
+    expect(detail.structuredContent.data?.run.status).toBe("running");
+    expect(detail.structuredContent.data?.journal).toEqual([]);
   });
 
   test("typed SDK fixture passes upsert typecheck and wrong arg type fails", async () => {

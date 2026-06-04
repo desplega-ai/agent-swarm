@@ -98,7 +98,6 @@ declare module "swarm-sdk" {
       email?: string;
       userId?: string;
     }): Promise<unknown>;
-    /** Execute read-only SQL. Use `sql`; legacy `query` is accepted only as a runtime alias. */
     db_query(args: { sql: string; params?: unknown[] }): Promise<unknown>;
     // --- config ---
     config_get(args?: {
@@ -263,6 +262,20 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
     script_delete(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
     script_queryTypes(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
+    script_launchRun(args: {
+      source: string;
+      args?: unknown;
+      idempotencyKey?: string;
+      scriptName?: string;
+      requestedByUserId?: string;
+    }): Promise<unknown>;
+    script_getRun(args: { id: string }): Promise<unknown>;
+    script_listRuns(args?: {
+      status?: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit";
+      agentId?: string;
+      limit?: number;
+      offset?: number;
+    }): Promise<unknown>;
 
     // --- write: repos ---
     repo_update(args: Record<string, unknown>): Promise<unknown>;

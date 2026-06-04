@@ -55,6 +55,12 @@ describe("script MCP tools", () => {
         "Remove a swarm-shared script from the catalog. Versions table preserves history.",
       "script-query-types":
         "Fetch the signature + the auto-generated `swarm-sdk.d.ts` (derived from the live MCP tool registry) + the `stdlib.d.ts` blobs — for IDE-style introspection before authoring or running a script. The same types are used by `script-upsert`'s typecheck pass, so they are authoritative.",
+      "launch-script-run":
+        "Launch a durable one-off script workflow run. The run executes in the background and can be inspected with get-script-run for terminal status and journal entries.",
+      "get-script-run":
+        "Get a durable script workflow run by ID, including its journal entries for swarm-script, raw-llm, and agent-task steps.",
+      "list-script-runs":
+        "List durable script workflow runs, optionally filtered by status or agent ID.",
     };
 
     for (const [name, description] of Object.entries(expected)) {

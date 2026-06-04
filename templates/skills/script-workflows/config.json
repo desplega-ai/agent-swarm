@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "script-workflows",
+  "displayName": "Script Workflows",
+  "slug": "script-workflows",
+  "title": "Script Workflows",
+  "description": "Launch and inspect durable one-off script workflow runs with journaled swarm-script, raw-llm, and agent-task steps.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["scripts", "workflows", "automation"]
+}

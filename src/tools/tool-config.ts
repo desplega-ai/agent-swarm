@@ -164,12 +164,15 @@ export const DEFERRED_TOOLS = new Set([
   "kv-incr",
   "kv-list",
 
-  // Reusable scripts (5)
+  // Reusable scripts (8)
   "script-search",
   "script-run",
   "script-upsert",
   "script-delete",
   "script-query-types",
+  "launch-script-run",
+  "get-script-run",
+  "list-script-runs",
 
   // External command routes (1)
   "swarm_x",

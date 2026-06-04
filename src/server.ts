@@ -78,6 +78,7 @@ import {
 import { registerScriptDeleteTool } from "./tools/script-delete";
 import { registerScriptQueryTypesTool } from "./tools/script-query-types";
 import { registerScriptRunTool } from "./tools/script-run";
+import { registerScriptRunsTools } from "./tools/script-runs";
 import { registerScriptSearchTool } from "./tools/script-search";
 import { registerScriptUpsertTool } from "./tools/script-upsert";
 import { registerSendTaskTool } from "./tools/send-task";
@@ -227,6 +228,7 @@ export function createServer() {
   registerScriptUpsertTool(server);
   registerScriptDeleteTool(server);
   registerScriptQueryTypesTool(server);
+  registerScriptRunsTools(server);
 
   // External command routes - mirrors the `agent-swarm x ...` CLI surface.
   registerSwarmXTool(server);

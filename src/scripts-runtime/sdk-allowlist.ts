@@ -39,6 +39,9 @@ export const SDK_TOOL_NAME_MAP = {
   script_upsert: "script-upsert",
   script_delete: "script-delete", // destructive
   script_queryTypes: "script-query-types",
+  script_launchRun: "launch-script-run",
+  script_getRun: "get-script-run",
+  script_listRuns: "list-script-runs",
 
   // ── swarm / agent ──
   swarm_get: "get-swarm",
