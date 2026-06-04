@@ -60,7 +60,9 @@ export const MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS = 5 * 60 * 1000; // 5m
  * [MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS, MAX_RATE_LIMIT_RESET_MS].
  * Pure + side-effect free so it's unit-testable and cheap to call.
  */
-export function resolveCodexCreditsExhaustedCooldownMs(raw: string | number | undefined | null): number {
+export function resolveCodexCreditsExhaustedCooldownMs(
+  raw: string | number | undefined | null,
+): number {
   if (raw === undefined || raw === null || raw === "") return CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS;
   const n = typeof raw === "number" ? raw : Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n <= 0) return CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS;

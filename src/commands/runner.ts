@@ -40,11 +40,11 @@ import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import {
-  CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
   isCodexCreditsExhaustedMessage,
   isRateLimitMessage,
   MAX_RATE_LIMIT_RESET_MS,
   parseRateLimitResetTime,
+  resolveCodexCreditsExhaustedCooldownMs,
 } from "../utils/error-tracker.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
@@ -1485,6 +1485,13 @@ interface RunnerState {
    * (per-task live re-resolution) will mutate this between tasks.
    */
   harnessProvider: ProviderName;
+  /**
+   * Effective Codex credits-exhausted cooldown (ms), resolved from `swarm_config`
+   * (key `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS`) > default 2h constant, clamped to
+   * [5m, 7d]. Reconciled live by `applySwarmConfigDrift` — read at the cooldown
+   * application site so a fresh value applies to the next credits-exhausted failure.
+   */
+  codexCreditsExhaustedCooldownMs: number;
 }
 
 /** Buffer for session logs */
@@ -3212,11 +3219,10 @@ async function checkCompletedProcesses(
               `[credentials] Parsed rate limit reset time from error: ${rateLimitedUntil}`,
             );
           } else if (isCodexCreditsExhaustedMessage(failureReason)) {
-            rateLimitedUntil = new Date(
-              Date.now() + CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
-            ).toISOString();
+            const cooldownMs = state.codexCreditsExhaustedCooldownMs;
+            rateLimitedUntil = new Date(Date.now() + cooldownMs).toISOString();
             console.log(
-              `[credentials] Codex credits exhausted — applying 2h cooldown: ${rateLimitedUntil}`,
+              `[credentials] Codex credits exhausted — applying cooldown (${cooldownMs}ms): ${rateLimitedUntil}`,
             );
           } else {
             rateLimitedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
@@ -3412,8 +3418,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Failures (network, API down, malformed value) fall back to env then "claude"
   // so a swarm_config outage cannot wedge boot.
   let bootProvider: ProviderName;
+  // Codex credits-exhausted cooldown resolved at boot from the same swarm_config
+  // overlay. Falls back to process.env then the default constant on a boot fetch
+  // failure; reconciled live thereafter by `applySwarmConfigDrift`.
+  let bootCooldownMs = resolveCodexCreditsExhaustedCooldownMs(
+    process.env.CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+  );
   try {
-    bootProvider = (await fetchResolvedEnv(apiUrl, apiKey, agentId)).resolvedProvider;
+    const bootEnv = await fetchResolvedEnv(apiUrl, apiKey, agentId);
+    bootProvider = bootEnv.resolvedProvider;
+    bootCooldownMs = resolveCodexCreditsExhaustedCooldownMs(
+      bootEnv.env.CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+    );
   } catch (err) {
     console.warn(`[runner] fetchResolvedEnv failed at boot, falling back to env: ${err}`);
     bootProvider = resolveHarnessProvider({}, process.env);
@@ -3619,6 +3635,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     activeTasks: new Map(),
     maxConcurrent,
     harnessProvider: bootProvider,
+    codexCreditsExhaustedCooldownMs: bootCooldownMs,
   };
 
   // Track tasks already signaled for cancellation to avoid repeated SIGTERM
@@ -3697,6 +3714,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       console.log(`[${role}] [config] maxConcurrent: ${state.maxConcurrent} → ${nextMax}`);
       state.maxConcurrent = nextMax;
       agentVisibleChanged = true;
+    }
+
+    // (2b) Codex credits-exhausted cooldown — operator-tunable live. Not
+    // agent-visible (doesn't change provider/maxConcurrent → no re-register).
+    const nextCooldown = resolveCodexCreditsExhaustedCooldownMs(
+      freshEnv.CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+    );
+    if (nextCooldown !== state.codexCreditsExhaustedCooldownMs) {
+      console.log(
+        `[${role}] [config] codexCreditsExhaustedCooldownMs: ${state.codexCreditsExhaustedCooldownMs} → ${nextCooldown}`,
+      );
+      state.codexCreditsExhaustedCooldownMs = nextCooldown;
     }
 
     // (3) Apply the small allowlist of safe-to-mutate env keys to process.env.
