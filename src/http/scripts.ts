@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getAgentById, upsertKv } from "../be/db";
+import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
 import { deleteScript, getScript, upsertScriptByName } from "../be/scripts/db";
 import { searchScripts } from "../be/scripts/embeddings";
@@ -14,7 +14,7 @@ import {
   type ScriptScope,
   ScriptScopeSchema,
 } from "../types";
-import { scrubObject } from "../utils/secret-scrubber";
+import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -283,6 +283,7 @@ export async function handleScripts(
       return true;
     }
 
+    const startedAt = new Date().toISOString();
     const output = await runScript({
       source: source as string,
       args: parsed.body.args,
@@ -329,6 +330,39 @@ export async function handleScripts(
         changeReason: "Auto-saved successful inline run",
       });
       autoSaved = { slug, reason: "successful_inline_run" };
+    }
+
+    // Persist the inline run (no journal) so one-off executions show up alongside
+    // durable workflow runs in the Script Runs dashboard. Best-effort: recording
+    // must never fail the actual execution.
+    const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
+    const runError = ok
+      ? undefined
+      : scrubSecrets(
+          [
+            output.error,
+            output.runtimeError
+              ? `${output.runtimeError.name}: ${output.runtimeError.message}`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join(" — ") || `Script exited with code ${output.exitCode}`,
+        );
+    try {
+      recordInlineScriptRun({
+        id: crypto.randomUUID(),
+        agentId: agent.id,
+        source: source as string,
+        args: parsed.body.args ?? null,
+        scriptName: parsed.body.name,
+        status: ok ? "completed" : "failed",
+        output: output.result,
+        error: runError,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      });
+    } catch {
+      // swallow — the run already executed; persistence is observability only.
     }
 
     json(

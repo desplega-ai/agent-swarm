@@ -952,12 +952,16 @@ export type ScriptRunStatus =
   | "cancelled"
   | "aborted_limit";
 
+// `workflow` = durable background run (has a journal). `inline` = synchronous one-off run.
+export type ScriptRunKind = "workflow" | "inline";
+
 export interface ScriptRun {
   id: string;
   agentId: string;
   scriptName?: string;
   source: string;
   args?: unknown;
+  kind: ScriptRunKind;
   status: ScriptRunStatus;
   pid?: number;
   startedAt: string;

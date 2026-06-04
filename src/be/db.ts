@@ -64,6 +64,7 @@ import type {
   ScheduledTaskSummary,
   ScriptRun,
   ScriptRunJournalEntry,
+  ScriptRunKind,
   ScriptRunStatus,
   Service,
   ServiceStatus,
@@ -11231,6 +11232,7 @@ type ScriptRunRow = {
   scriptName: string | null;
   source: string;
   args: string;
+  kind: string;
   status: string;
   pid: number | null;
   startedAt: string;
@@ -11256,6 +11258,7 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
     scriptName: row.scriptName ?? undefined,
     source: row.source,
     args: JSON.parse(row.args),
+    kind: row.kind as ScriptRunKind,
     status: row.status as ScriptRunStatus,
     pid: row.pid ?? undefined,
     startedAt: row.startedAt,
@@ -11320,6 +11323,67 @@ export function createScriptRun(data: {
     );
   if (!row) throw new Error("Failed to create script run");
   return { run: rowToScriptRun(row), existing: false };
+}
+
+// Persist a synchronous inline run (POST /api/scripts/run) as an already-terminal
+// row. Unlike createScriptRun these never get a journal and never use the
+// idempotencyKey column (inline idempotency lives in the kv table).
+export function recordInlineScriptRun(data: {
+  id: string;
+  agentId: string;
+  source: string;
+  args: unknown;
+  scriptName?: string;
+  status: "completed" | "failed";
+  output?: unknown;
+  error?: string;
+  startedAt: string;
+  finishedAt: string;
+  requestedByUserId?: string;
+  createdBy?: string;
+}): ScriptRun {
+  const row = getDb()
+    .prepare<
+      ScriptRunRow,
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string,
+        string,
+        string | null,
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+      ]
+    >(
+      `INSERT INTO script_runs
+        (id, agentId, scriptName, source, args, kind, status, output, error,
+         startedAt, finishedAt, requestedByUserId, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .get(
+      data.id,
+      data.agentId,
+      data.scriptName ?? null,
+      data.source,
+      JSON.stringify(data.args ?? null),
+      data.status,
+      data.output === undefined ? null : JSON.stringify(data.output),
+      data.error ?? null,
+      data.startedAt,
+      data.finishedAt,
+      data.requestedByUserId ?? null,
+      data.createdBy ?? null,
+      data.createdBy ?? null,
+    );
+  if (!row) throw new Error("Failed to record inline script run");
+  return rowToScriptRun(row);
 }
 
 export function getScriptRun(id: string): ScriptRun | null {

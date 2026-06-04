@@ -232,6 +232,59 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(del.structuredContent.data?.deleted).toBe(true);
   });
 
+  test("persists a successful inline run with kind 'inline' and no journal", async () => {
+    const tools = buildToolServer();
+    const source = `export default async (args: { value: number }) => ({ doubled: args.value * 2 });`;
+
+    const run = (await tools.run.handler(
+      { source, args: { value: 21 }, intent: "inline persist e2e" },
+      meta(workerId),
+    )) as StructuredResult<{ result: { doubled: number } }>;
+    expect(run.structuredContent.success).toBe(true);
+    expect(run.structuredContent.data?.result).toEqual({ doubled: 42 });
+
+    const listed = (await tools.listScriptRuns.handler(
+      { limit: 10, offset: 0 },
+      meta(workerId),
+    )) as StructuredResult<{
+      runs: Array<{ id: string; kind: string; status: string }>;
+      total: number;
+    }>;
+    expect(listed.structuredContent.data?.total).toBe(1);
+    const inlineRun = listed.structuredContent.data?.runs[0];
+    expect(inlineRun?.kind).toBe("inline");
+    expect(inlineRun?.status).toBe("completed");
+
+    const detail = (await tools.getScriptRun.handler(
+      { id: inlineRun?.id },
+      meta(workerId),
+    )) as StructuredResult<{ run: { kind: string }; journal: unknown[] }>;
+    expect(detail.structuredContent.data?.run.kind).toBe("inline");
+    expect(detail.structuredContent.data?.journal).toEqual([]);
+  });
+
+  test("persists a failed inline run with kind 'inline' and an error", async () => {
+    const tools = buildToolServer();
+    const source = `export default async () => { throw new Error("boom"); };`;
+
+    const run = (await tools.run.handler(
+      { source, intent: "inline failure e2e" },
+      meta(workerId),
+    )) as StructuredResult<unknown>;
+    expect(run.structuredContent.success).toBe(true);
+
+    const listed = (await tools.listScriptRuns.handler(
+      { limit: 10, offset: 0 },
+      meta(workerId),
+    )) as StructuredResult<{
+      runs: Array<{ kind: string; status: string; error?: string }>;
+    }>;
+    const failed = listed.structuredContent.data?.runs[0];
+    expect(failed?.kind).toBe("inline");
+    expect(failed?.status).toBe("failed");
+    expect(failed?.error).toBeTruthy();
+  });
+
   test("stdio-style missing agent identity short-circuits clearly", async () => {
     const tools = buildToolServer();
     const result = (await tools.search.handler({ query: "anything" }, meta())) as StructuredResult<{

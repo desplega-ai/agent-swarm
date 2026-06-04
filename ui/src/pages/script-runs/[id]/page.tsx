@@ -12,6 +12,7 @@ import {
 import { SourceView } from "@/components/script-runs/source-view";
 import { TimelinePanel } from "@/components/script-runs/timeline-panel";
 import { AgentLink } from "@/components/shared/agent-link";
+import { ScriptRunKindBadge } from "@/components/shared/script-run-kind-badge";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -129,6 +130,7 @@ export default function ScriptRunDetailPage() {
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <h1 className="truncate text-xl font-semibold">{run.scriptName || "Script run"}</h1>
               <StatusBadge status={run.status} size="md" />
+              <ScriptRunKindBadge kind={run.kind} />
               <Badge variant="outline" size="tag" className="font-mono">
                 {formatSmartTime(run.startedAt)}
               </Badge>

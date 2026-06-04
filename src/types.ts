@@ -1555,12 +1555,18 @@ export const TERMINAL_SCRIPT_RUN_STATUSES = [
 ] as const;
 export type TerminalScriptRunStatus = (typeof TERMINAL_SCRIPT_RUN_STATUSES)[number];
 
+// `workflow` = durable background run launched via /api/script-runs (has a journal).
+// `inline` = synchronous one-off run via /api/scripts/run (no journal).
+export const ScriptRunKindSchema = z.enum(["workflow", "inline"]);
+export type ScriptRunKind = z.infer<typeof ScriptRunKindSchema>;
+
 export const ScriptRunSchema = z.object({
   id: z.string().uuid(),
   agentId: z.string(),
   scriptName: z.string().optional(),
   source: z.string(),
   args: z.unknown(),
+  kind: ScriptRunKindSchema,
   status: ScriptRunStatusSchema,
   pid: z.number().int().optional(),
   startedAt: z.string(),

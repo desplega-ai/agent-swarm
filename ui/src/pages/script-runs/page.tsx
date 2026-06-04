@@ -3,9 +3,10 @@ import { FileClock, Search } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useScriptRuns } from "@/api/hooks/use-script-runs";
-import type { ScriptRun, ScriptRunStatus } from "@/api/types";
+import type { ScriptRun, ScriptRunKind, ScriptRunStatus } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { DataGrid } from "@/components/shared/data-grid";
+import { ScriptRunKindBadge } from "@/components/shared/script-run-kind-badge";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,6 +68,13 @@ export default function ScriptRunsPage() {
               <TooltipContent className="font-mono text-xs">{params.value}</TooltipContent>
             </Tooltip>
           ) : null,
+      },
+      {
+        field: "kind",
+        headerName: "Type",
+        width: 120,
+        cellRenderer: (params: { value?: ScriptRunKind }) =>
+          params.value ? <ScriptRunKindBadge kind={params.value} /> : null,
       },
       {
         field: "status",
