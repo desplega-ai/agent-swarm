@@ -65,11 +65,7 @@ export function resolveCodexCreditsExhaustedCooldownMs(
 ): number {
   if (raw === undefined || raw === null || raw === "") return CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS;
   const n =
-    typeof raw === "number"
-      ? raw
-      : /^\d+$/.test(raw.trim())
-        ? Number(raw.trim())
-        : Number.NaN;
+    typeof raw === "number" ? raw : /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
   if (!Number.isFinite(n) || n <= 0) return CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS;
   return Math.min(Math.max(n, MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS), MAX_RATE_LIMIT_RESET_MS);
 }
