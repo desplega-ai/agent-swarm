@@ -6,10 +6,12 @@
  *   1. Binary resolution — argv[0..n] tracks `parseClaudeBinary(process.env.CLAUDE_BINARY)`,
  *      with `["claude"]` as the default. Same flags follow. Supports
  *      whitespace-separated command strings (e.g. `"bunx @dexh/shannon"`).
- *   2. Tmux fail-fast — when the resolved binary string contains "shannon"
- *      (anywhere — including inside a command string), createSession throws
- *      if `tmux` is not on PATH.
- *   3. Trust pre-seed — when the resolved binary contains "shannon", the
+ *   2. Claude Bridge routing — SWARM_USE_CLAUDE_BRIDGE=true/1 forces the
+ *      `bunx @desplega.ai/claude-bridge` argv prefix and wins over
+ *      `CLAUDE_BINARY`.
+ *   3. Tmux fail-fast — when the resolved binary string contains "shannon"
+ *      or claude-bridge is enabled, createSession throws if `tmux` is not on PATH.
+ *   4. Trust pre-seed — when the resolved binary contains "shannon", the
  *      adapter writes `projects[cwd].hasTrustDialogAccepted: true` to
  *      `$HOME/.claude.json` before spawning. Idempotent. No-op for "claude".
  *
@@ -27,8 +29,10 @@ import { join } from "node:path";
 import {
   ClaudeAdapter,
   parseClaudeBinary,
+  parseClaudeBridgeEnabled,
   preseedClaudeTrustDialog,
   resolveClaudeBinary,
+  resolveClaudeBridgeEnabled,
 } from "../providers/claude-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
 
@@ -150,6 +154,45 @@ describe("resolveClaudeBinary precedence", () => {
   });
 });
 
+describe("SWARM_USE_CLAUDE_BRIDGE boolean parsing", () => {
+  test("true/1 enable claude-bridge", () => {
+    expect(parseClaudeBridgeEnabled("true")).toBe(true);
+    expect(parseClaudeBridgeEnabled("TRUE")).toBe(true);
+    expect(parseClaudeBridgeEnabled(" 1 ")).toBe(true);
+  });
+
+  test("false/0/unset and invalid values are disabled", () => {
+    expect(parseClaudeBridgeEnabled("false")).toBe(false);
+    expect(parseClaudeBridgeEnabled("0")).toBe(false);
+    expect(parseClaudeBridgeEnabled(undefined)).toBe(false);
+    expect(parseClaudeBridgeEnabled("yes")).toBe(false);
+  });
+
+  test("resolvedEnv wins over fallbackEnv", () => {
+    expect(
+      resolveClaudeBridgeEnabled(
+        { SWARM_USE_CLAUDE_BRIDGE: "false" },
+        { SWARM_USE_CLAUDE_BRIDGE: "true" },
+      ),
+    ).toBe(false);
+    expect(
+      resolveClaudeBridgeEnabled(
+        { SWARM_USE_CLAUDE_BRIDGE: "1" },
+        { SWARM_USE_CLAUDE_BRIDGE: "0" },
+      ),
+    ).toBe(true);
+  });
+
+  test("empty resolvedEnv value falls through to fallbackEnv", () => {
+    expect(
+      resolveClaudeBridgeEnabled(
+        { SWARM_USE_CLAUDE_BRIDGE: " " },
+        { SWARM_USE_CLAUDE_BRIDGE: "true" },
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("preseedClaudeTrustDialog", () => {
   let homeDir: string;
 
@@ -241,6 +284,7 @@ describe("preseedClaudeTrustDialog", () => {
 describe("CLAUDE_BINARY env override", () => {
   // Cache the originals and restore after each test so the suite stays clean.
   let originalClaudeBinary: string | undefined;
+  let originalUseClaudeBridge: string | undefined;
   let originalOauthToken: string | undefined;
   let originalHome: string | undefined;
   let homeDir: string;
@@ -250,11 +294,13 @@ describe("CLAUDE_BINARY env override", () => {
 
   beforeEach(async () => {
     originalClaudeBinary = process.env.CLAUDE_BINARY;
+    originalUseClaudeBridge = process.env.SWARM_USE_CLAUDE_BRIDGE;
     originalOauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     originalHome = process.env.HOME;
     homeDir = await mkdtemp(join(tmpdir(), "claude-adapter-test-home-"));
     process.env.HOME = homeDir;
     delete process.env.CLAUDE_BINARY;
+    delete process.env.SWARM_USE_CLAUDE_BRIDGE;
     // Credential check runs before binary resolution; satisfy it.
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
 
@@ -284,6 +330,11 @@ describe("CLAUDE_BINARY env override", () => {
       delete process.env.CLAUDE_BINARY;
     } else {
       process.env.CLAUDE_BINARY = originalClaudeBinary;
+    }
+    if (originalUseClaudeBridge === undefined) {
+      delete process.env.SWARM_USE_CLAUDE_BRIDGE;
+    } else {
+      process.env.SWARM_USE_CLAUDE_BRIDGE = originalUseClaudeBridge;
     }
     if (originalOauthToken === undefined) {
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -422,10 +473,68 @@ describe("CLAUDE_BINARY env override", () => {
 
     expect(spawnedArgs[0][0]).toBe("shannon");
   });
+
+  test("SWARM_USE_CLAUDE_BRIDGE=true routes through bunx @desplega.ai/claude-bridge", async () => {
+    process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
+
+    const adapter = new ClaudeAdapter();
+    await adapter.createSession(makeConfig());
+
+    const argv = spawnedArgs[0];
+    expect(argv[0]).toBe("bunx");
+    expect(argv[1]).toBe("@desplega.ai/claude-bridge");
+    expect(argv).toContain("--model");
+    expect(argv).toContain("-p");
+  });
+
+  test("SWARM_USE_CLAUDE_BRIDGE=1 wins over CLAUDE_BINARY=shannon", async () => {
+    process.env.SWARM_USE_CLAUDE_BRIDGE = "1";
+    process.env.CLAUDE_BINARY = "shannon";
+
+    const adapter = new ClaudeAdapter();
+    await adapter.createSession(makeConfig());
+
+    expect(spawnedArgs[0][0]).toBe("bunx");
+    expect(spawnedArgs[0][1]).toBe("@desplega.ai/claude-bridge");
+  });
+
+  test("config.env SWARM_USE_CLAUDE_BRIDGE=true is reloadable and wins over process.env false", async () => {
+    process.env.SWARM_USE_CLAUDE_BRIDGE = "false";
+
+    const adapter = new ClaudeAdapter();
+    await adapter.createSession(
+      makeConfig({
+        env: {
+          SWARM_USE_CLAUDE_BRIDGE: "true",
+          CLAUDE_CODE_OAUTH_TOKEN: "test-token",
+        } as Record<string, string>,
+      }),
+    );
+
+    expect(spawnedArgs[0][0]).toBe("bunx");
+    expect(spawnedArgs[0][1]).toBe("@desplega.ai/claude-bridge");
+  });
+
+  test("config.env SWARM_USE_CLAUDE_BRIDGE=false disables process.env true", async () => {
+    process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
+
+    const adapter = new ClaudeAdapter();
+    await adapter.createSession(
+      makeConfig({
+        env: {
+          SWARM_USE_CLAUDE_BRIDGE: "false",
+          CLAUDE_CODE_OAUTH_TOKEN: "test-token",
+        } as Record<string, string>,
+      }),
+    );
+
+    expect(spawnedArgs[0][0]).toBe("claude");
+  });
 });
 
 describe("Shannon tmux fail-fast gate", () => {
   let originalClaudeBinary: string | undefined;
+  let originalUseClaudeBridge: string | undefined;
   let originalOauthToken: string | undefined;
   let originalHome: string | undefined;
   let homeDir: string;
@@ -434,11 +543,13 @@ describe("Shannon tmux fail-fast gate", () => {
 
   beforeEach(async () => {
     originalClaudeBinary = process.env.CLAUDE_BINARY;
+    originalUseClaudeBridge = process.env.SWARM_USE_CLAUDE_BRIDGE;
     originalOauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     originalHome = process.env.HOME;
     homeDir = await mkdtemp(join(tmpdir(), "claude-adapter-test-home-"));
     process.env.HOME = homeDir;
     delete process.env.CLAUDE_BINARY;
+    delete process.env.SWARM_USE_CLAUDE_BRIDGE;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
     spawnSpy = spyOn(Bun, "spawn").mockImplementation((() => makeFakeProc()) as typeof Bun.spawn);
     whichSpy = spyOn(Bun, "which");
@@ -457,6 +568,11 @@ describe("Shannon tmux fail-fast gate", () => {
       delete process.env.CLAUDE_BINARY;
     } else {
       process.env.CLAUDE_BINARY = originalClaudeBinary;
+    }
+    if (originalUseClaudeBridge === undefined) {
+      delete process.env.SWARM_USE_CLAUDE_BRIDGE;
+    } else {
+      process.env.SWARM_USE_CLAUDE_BRIDGE = originalUseClaudeBridge;
     }
     if (originalOauthToken === undefined) {
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -520,10 +636,22 @@ describe("Shannon tmux fail-fast gate", () => {
     const adapter = new ClaudeAdapter();
     await expect(adapter.createSession(makeConfig())).rejects.toThrow(/tmux/i);
   });
+
+  test("SWARM_USE_CLAUDE_BRIDGE=true triggers the tmux check", async () => {
+    process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
+    whichSpy.mockImplementation((name: string) => {
+      if (name === "tmux") return null;
+      return null;
+    });
+
+    const adapter = new ClaudeAdapter();
+    await expect(adapter.createSession(makeConfig())).rejects.toThrow(/SWARM_USE_CLAUDE_BRIDGE/);
+  });
 });
 
 describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
   let originalClaudeBinary: string | undefined;
+  let originalUseClaudeBridge: string | undefined;
   let originalOauthToken: string | undefined;
   let originalHome: string | undefined;
   let homeDir: string;
@@ -532,11 +660,13 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
 
   beforeEach(async () => {
     originalClaudeBinary = process.env.CLAUDE_BINARY;
+    originalUseClaudeBridge = process.env.SWARM_USE_CLAUDE_BRIDGE;
     originalOauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     originalHome = process.env.HOME;
     homeDir = await mkdtemp(join(tmpdir(), "claude-adapter-trust-test-"));
     process.env.HOME = homeDir;
     delete process.env.CLAUDE_BINARY;
+    delete process.env.SWARM_USE_CLAUDE_BRIDGE;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
     spawnSpy = spyOn(Bun, "spawn").mockImplementation((() => makeFakeProc()) as typeof Bun.spawn);
     whichSpy = spyOn(Bun, "which").mockImplementation((name: string) => {
@@ -558,6 +688,11 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
       delete process.env.CLAUDE_BINARY;
     } else {
       process.env.CLAUDE_BINARY = originalClaudeBinary;
+    }
+    if (originalUseClaudeBridge === undefined) {
+      delete process.env.SWARM_USE_CLAUDE_BRIDGE;
+    } else {
+      process.env.SWARM_USE_CLAUDE_BRIDGE = originalUseClaudeBridge;
     }
     if (originalOauthToken === undefined) {
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -622,6 +757,17 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     await adapter.createSession(makeConfig({ cwd: "/some/abs/cwd" }));
 
     // No .claude.json should have been written.
+    const exists = await Bun.file(join(homeDir, ".claude.json")).exists();
+    expect(exists).toBe(false);
+  });
+
+  test("SWARM_USE_CLAUDE_BRIDGE=true does NOT use the legacy shannon trust pre-seed", async () => {
+    process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
+    const adapter = new ClaudeAdapter();
+    await adapter.createSession(makeConfig({ cwd: "/some/abs/cwd" }));
+
+    // claude-bridge owns its own pre-clear flow; the adapter should not write
+    // the legacy shannon pre-seed file before spawning.
     const exists = await Bun.file(join(homeDir, ".claude.json")).exists();
     expect(exists).toBe(false);
   });

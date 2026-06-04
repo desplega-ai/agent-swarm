@@ -108,6 +108,45 @@ export function resolveClaudeBinary(
   return candidate || "claude";
 }
 
+const CLAUDE_BRIDGE_BINARY = "bunx @desplega.ai/claude-bridge";
+
+/**
+ * Parse a boolean env toggle. Only true/1 enable and false/0 disable; unset
+ * and invalid values are treated as disabled.
+ *
+ * Exported for unit testing.
+ */
+export function parseClaudeBridgeEnabled(raw: string | undefined): boolean {
+  const normalized = raw?.trim().toLowerCase();
+  return normalized === "true" || normalized === "1";
+}
+
+/**
+ * Resolve the reloadable claude-bridge toggle from the same resolved-env
+ * overlay used for `CLAUDE_BINARY`.
+ *
+ * Exported for unit testing.
+ */
+export function resolveClaudeBridgeEnabled(
+  resolvedEnv: Record<string, string | undefined>,
+  fallbackEnv: Record<string, string | undefined> = process.env,
+): boolean {
+  const candidate =
+    resolvedEnv.SWARM_USE_CLAUDE_BRIDGE?.trim() || fallbackEnv.SWARM_USE_CLAUDE_BRIDGE?.trim();
+  return parseClaudeBridgeEnabled(candidate);
+}
+
+function resolveClaudeBinaryArgv(
+  resolvedEnv: Record<string, string | undefined>,
+  fallbackEnv: Record<string, string | undefined> = process.env,
+): { raw: string; argv: string[]; useClaudeBridge: boolean } {
+  const useClaudeBridge = resolveClaudeBridgeEnabled(resolvedEnv, fallbackEnv);
+  const raw = useClaudeBridge
+    ? CLAUDE_BRIDGE_BINARY
+    : resolveClaudeBinary(resolvedEnv, fallbackEnv);
+  return { raw, argv: parseClaudeBinary(raw), useClaudeBridge };
+}
+
 /**
  * Pre-seed `~/.claude.json` so the per-project trust-dialog ("Quick safety
  * check: Is this a project you trust?") doesn't block on first run.
@@ -797,12 +836,9 @@ export class ClaudeAdapter implements ProviderAdapter {
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
 
     // Resolve the argv prefix. Same flags (`-p`, `--model`, ...) work across
-    // alternates; only argv[0..n] changes. `CLAUDE_BINARY` accepts a single
-    // binary (`"shannon"`, `"/usr/local/bin/shannon"`) or a whitespace-separated
-    // command string (`"bunx @dexh/shannon"`, `"npx -y @dexh/shannon"`).
-    // Setting it to anything containing `shannon` opts into the dexhorthy/shannon
-    // variant, which drives `claude` interactively in tmux to stay on the
-    // subscription credit pool after the 2026-06-15 programmatic-credit split.
+    // alternates; only argv[0..n] changes. Prefer SWARM_USE_CLAUDE_BRIDGE=true
+    // for the Desplega-owned bridge. CLAUDE_BINARY remains as the low-level
+    // override for custom binaries and the deprecated shannon path.
     //
     // `config.env` carries the swarm_config overlay (resolved repo > agent > global
     // by `fetchResolvedEnv` in src/commands/runner.ts), so operators can flip
@@ -811,19 +847,30 @@ export class ClaudeAdapter implements ProviderAdapter {
     //
     // See `docs-site/.../shannon-experimental.mdx` for the user-facing guide
     // and `runbooks/harness-providers.md` for engineering notes.
-    const claudeBinaryRaw = resolveClaudeBinary(config.env || process.env);
-    const claudeBinaryArgv = parseClaudeBinary(claudeBinaryRaw);
+    const {
+      raw: claudeBinaryRaw,
+      argv: claudeBinaryArgv,
+      useClaudeBridge,
+    } = resolveClaudeBinaryArgv(config.env || process.env);
     const isShannon = claudeBinaryRaw.toLowerCase().includes("shannon");
+    const configuredClaudeBinaryRaw = resolveClaudeBinary(config.env || process.env);
+    if (configuredClaudeBinaryRaw.toLowerCase().includes("shannon")) {
+      console.warn(
+        "\x1b[33m[claude]\x1b[0m CLAUDE_BINARY=shannon is deprecated; set SWARM_USE_CLAUDE_BRIDGE=true to use @desplega.ai/claude-bridge.",
+      );
+    }
 
     console.log(
-      `\x1b[2m[${config.role}]\x1b[0m Resolved CLAUDE_BINARY: ${claudeBinaryArgv.join(" ")} (isShannon: ${isShannon})`,
+      `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${claudeBinaryArgv.join(" ")} (useClaudeBridge: ${useClaudeBridge}, isShannon: ${isShannon})`,
     );
 
-    // Fail fast: shannon shells out to tmux. If it's missing, surface a
-    // clear error here rather than letting the spawn fail opaquely.
-    if (isShannon && !Bun.which("tmux")) {
+    // Fail fast: shannon and claude-bridge both shell out to tmux. If it's
+    // missing, surface a clear error here rather than letting startup fail
+    // opaquely.
+    if ((isShannon || useClaudeBridge) && !Bun.which("tmux")) {
+      const label = useClaudeBridge ? "SWARM_USE_CLAUDE_BRIDGE=true" : "CLAUDE_BINARY=shannon";
       throw new Error(
-        "CLAUDE_BINARY=shannon requires 'tmux' on PATH (install via apt/brew). See runbooks/harness-providers.md.",
+        `${label} requires 'tmux' on PATH (install via apt/brew). See runbooks/harness-providers.md.`,
       );
     }
 

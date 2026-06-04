@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Claude Bridge toggle for the Claude harness** — `SWARM_USE_CLAUDE_BRIDGE=true|1` now routes spawned Claude sessions through `bunx @desplega.ai/claude-bridge`, a Desplega-owned `claude -p` drop-in that drives interactive Claude Code through `tmux` for subscription-pool runs. The env is reloadable via `swarm_config`; `false|0|unset` keeps the normal `CLAUDE_BINARY` path.
+
+### Changed
+- **Shannon is deprecated** — existing `CLAUDE_BINARY=shannon` deployments keep working, including tmux fail-fast and trust pre-seed behavior, but now emit a deprecation warning pointing operators to `SWARM_USE_CLAUDE_BRIDGE=true`. Docs and runbooks now recommend claude-bridge.
+
 ## [1.90.0] - 2026-06-03
 
 ### Added

@@ -41,6 +41,14 @@ const VALIDATED_KEYS: Record<string, (value: unknown) => string | null> = {
     if (parsed.success) return null;
     return `Invalid HARNESS_PROVIDER value (must be one of: ${ProviderNameSchema.options.join(", ")})`;
   },
+  SWARM_USE_CLAUDE_BRIDGE: (value) => {
+    if (typeof value !== "string") {
+      return "Invalid SWARM_USE_CLAUDE_BRIDGE value (must be one of: true, false, 1, 0)";
+    }
+    const normalized = value.trim().toLowerCase();
+    if (["true", "false", "1", "0"].includes(normalized)) return null;
+    return "Invalid SWARM_USE_CLAUDE_BRIDGE value (must be one of: true, false, 1, 0)";
+  },
 };
 
 export function validateConfigValue(key: string, value: unknown): string | null {

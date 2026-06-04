@@ -84,10 +84,16 @@ async function defaultSpawnClaudeCli(
   signal?: AbortSignal,
   jsonSchema?: object,
 ): Promise<string> {
-  // CLAUDE_BINARY may be a single binary ("claude", "shannon") or a
-  // whitespace-separated command string ("bunx @dexh/shannon"). See
-  // parseClaudeBinary in src/providers/claude-adapter.ts.
-  const claudeBinaryArgv = (process.env.CLAUDE_BINARY ?? "claude").trim().split(/\s+/);
+  // SWARM_USE_CLAUDE_BRIDGE mirrors the main claude adapter's subscription-pool
+  // routing. Otherwise CLAUDE_BINARY may be a single binary ("claude", "shannon")
+  // or a whitespace-separated command string ("bunx @dexh/shannon").
+  const useClaudeBridge = ["true", "1"].includes(
+    (process.env.SWARM_USE_CLAUDE_BRIDGE ?? "").trim().toLowerCase(),
+  );
+  const claudeBinaryRaw = useClaudeBridge
+    ? "bunx @desplega.ai/claude-bridge"
+    : (process.env.CLAUDE_BINARY ?? "claude").trim();
+  const claudeBinaryArgv = (claudeBinaryRaw || "claude").split(/\s+/);
   const cmd = [...claudeBinaryArgv, "-p", "--model", model, "--output-format", "json"];
   if (jsonSchema) {
     cmd.push("--json-schema", JSON.stringify(jsonSchema));
