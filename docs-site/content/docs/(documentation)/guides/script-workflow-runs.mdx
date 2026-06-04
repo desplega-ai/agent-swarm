@@ -92,6 +92,192 @@ Use `list-script-runs` to find recent runs:
 
 `status`, `agentId`, `limit`, and `offset` map directly to the list API.
 
+## Copy-paste workflow patterns
+
+Taras pointed at Thariq Shihipar's dynamic workflows post, ["A harness for every task"](https://x.com/trq212/status/2061907337154367865), as the motivation: use a workflow-shaped harness when a single context window is likely to drift, stop early, or verify its own work too generously. These examples adapt the post's patterns to one-off Script Workflow runs.
+
+For each example, paste the TypeScript into `launch-script-run.source`, set the shown `args`, and give the run an `idempotencyKey` if you might launch it twice.
+
+### Classify-and-act triage
+
+Use this when an inbound item needs a cheap classifier before it spends agent time.
+
+```ts
+export default async function main(args, ctx) {
+  const classification = await ctx.step.rawLlm("classify-item", {
+    schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["bug", "docs", "question", "ops"] },
+        urgency: { type: "string", enum: ["low", "medium", "high"] },
+        nextAction: { type: "string" },
+      },
+      required: ["kind", "urgency", "nextAction"],
+      additionalProperties: false,
+    },
+    prompt: `Classify this item and choose the next action:\n${args.item}`,
+  });
+
+  const result = classification.result;
+  if (result.urgency !== "high") {
+    return { classification: result, createdTask: false };
+  }
+
+  const followUp = await ctx.step.agentTask("high-urgency-follow-up", {
+    task: `Handle this ${result.kind} item.\n\nItem:\n${args.item}\n\nRecommended action:\n${result.nextAction}`,
+    priority: 80,
+    tags: ["script-workflow", "triage"],
+  });
+
+  return { classification: result, createdTask: true, followUp };
+}
+```
+
+Launch args:
+
+```json
+{
+  "scriptName": "classify-and-act-triage",
+  "idempotencyKey": "classify-and-act-triage:support-1842",
+  "args": {
+    "item": "Customer reports that script runs disappear from the dashboard after refresh."
+  }
+}
+```
+
+### Fan-out-and-synthesize verification
+
+Use this when a post, report, or PR description has multiple claims that should be checked independently before one synthesis step.
+
+```ts
+export default async function main(args, ctx) {
+  const checks = [];
+
+  for (const [index, claim] of args.claims.entries()) {
+    checks.push(
+      await ctx.step.agentTask(`verify-claim-${index + 1}`, {
+        task: `Verify this claim against the repo or linked source. Return pass/fail and concise evidence.\n\nClaim: ${claim}`,
+        tags: ["script-workflow", "claim-check"],
+        outputSchema: {
+          type: "object",
+          properties: {
+            pass: { type: "boolean" },
+            evidence: { type: "string" },
+          },
+          required: ["pass", "evidence"],
+          additionalProperties: false,
+        },
+      }),
+    );
+  }
+
+  const synthesis = await ctx.step.rawLlm("synthesize-verification", {
+    prompt: `Summarize these independent claim checks. Call out any failed or weak claims.\n${JSON.stringify(checks, null, 2)}`,
+  });
+
+  return { checks, synthesis };
+}
+```
+
+Launch args:
+
+```json
+{
+  "scriptName": "fan-out-claim-verification",
+  "idempotencyKey": "fan-out-claim-verification:script-workflows-post-v1",
+  "args": {
+    "claims": [
+      "Script Workflow runs journal every ctx.step.* call by label.",
+      "A repeated durable label replays the first journaled result.",
+      "SCRIPT_RUN_MAX_AGENT_TASKS defaults to 50."
+    ]
+  }
+}
+```
+
+### Loop-until-done refinement
+
+Use this when the stop condition is qualitative and you want the run to keep a durable audit trail of each pass.
+
+```ts
+export default async function main(args, ctx) {
+  let draft = args.startingDraft;
+  const maxPasses = args.maxPasses ?? 3;
+
+  for (let pass = 1; pass <= maxPasses; pass++) {
+    const revision = await ctx.step.rawLlm(`revise-pass-${pass}`, {
+      prompt: `Revise this draft against the rubric.\n\nRubric:\n${args.rubric}\n\nDraft:\n${draft}`,
+    });
+    draft = revision.result;
+
+    const review = await ctx.step.rawLlm(`review-pass-${pass}`, {
+      schema: {
+        type: "object",
+        properties: {
+          done: { type: "boolean" },
+          feedback: { type: "string" },
+        },
+        required: ["done", "feedback"],
+        additionalProperties: false,
+      },
+      prompt: `Decide whether this draft satisfies the rubric.\n\nRubric:\n${args.rubric}\n\nDraft:\n${draft}`,
+    });
+
+    if (review.result.done) {
+      return { done: true, pass, draft, feedback: review.result.feedback };
+    }
+  }
+
+  return { done: false, passes: maxPasses, draft };
+}
+```
+
+Launch args:
+
+```json
+{
+  "scriptName": "loop-until-done-copy-review",
+  "idempotencyKey": "loop-until-done-copy-review:homepage-hero-v1",
+  "args": {
+    "maxPasses": 3,
+    "rubric": "Clear, specific, no invented claims, under 120 words.",
+    "startingDraft": "Agent Swarm lets teams run durable agent workflows and inspect each step."
+  }
+}
+```
+
+### SDK launch wrapper
+
+From a normal swarm script, launch the same source through the SDK and inspect the durable journal later:
+
+```ts
+export default async function main(args, ctx) {
+  const source = `export default async function main(args, ctx) {
+    const recalled = await ctx.step.swarmScript("recall", {
+      name: "smart-recall",
+      scope: "global",
+      args: { queries: args.queries },
+      intent: "sdk-launch-wrapper"
+    });
+
+    const summary = await ctx.step.rawLlm("summarize", {
+      prompt: "Summarize these recalled memories for the operator:\\n" + JSON.stringify(recalled)
+    });
+
+    return { recalled, summary };
+  }`;
+
+  const launched = await ctx.swarm.script_launchRun({
+    scriptName: "sdk-launched-memory-summary",
+    idempotencyKey: `sdk-launched-memory-summary:${args.topic}`,
+    args: { queries: [`${args.topic} gotchas`, `${args.topic} previous fixes`] },
+    source,
+  });
+
+  return launched;
+}
+```
+
 ## SDK methods
 
 Inside a swarm script, the same tools are exposed as SDK methods:
@@ -170,7 +356,28 @@ await ctx.step.swarmScript("normalize-records", {
 
 ## Lifecycle
 
-Run statuses:
+The persisted run lifecycle is a small state machine, while each `ctx.step.*` call follows the journal lookup path shown inside `running`.
+
+```mermaid
+flowchart TD
+    queued["queued\nPOST /api/script-runs accepted"] --> running["running\nsupervisor owns subprocess"]
+    running --> lookup["step label lookup\n(runId, label)"]
+    lookup -->|journal hit| replay["durable replay\nreturn stored result"]
+    lookup -->|journal miss| execute["execute step\nswarm-script / raw-llm / agent-task"]
+    execute --> write["write journal row\ncompleted or failed"]
+    replay --> next["next source line"]
+    write --> next
+    next --> running
+    running --> completed["completed\nterminal"]
+    running --> failed["failed\nterminal"]
+    running --> aborted["aborted_limit\nterminal guardrail"]
+    running --> cancelled["cancelled\nterminal"]
+    running --> paused["paused\nsupervisor stopped"]
+    paused --> reconcile["supervisor reconciliation\nrestart harness"]
+    reconcile --> lookup
+```
+
+Persisted statuses:
 
 | Status | Meaning |
 |---|---|
@@ -241,5 +448,6 @@ Use the list view to scan recent runs by status, script name, agent, start time,
 
 - [Scripts runtime](/docs/guides/scripts-runtime)
 - [Workflows](/docs/concepts/workflows)
+- [Receipts](/docs/receipts)
 - [Script Runs API reference](/docs/api-reference/script-runs)
 - [MCP tools reference](/docs/reference/mcp-tools)
