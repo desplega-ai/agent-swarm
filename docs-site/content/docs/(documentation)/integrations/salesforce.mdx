@@ -6,13 +6,13 @@ description: Connect Salesforce as an MCP server over OAuth so agents can use an
 Agent Swarm can connect to Salesforce as an MCP server over HTTP, authenticated via OAuth. Salesforce exposes several native hosted MCP endpoints — no proxy, no middleware required.
 
 <Callout type="info">
-The OAuth setup (Connected App, redirect URI, global secrets) is the same regardless of which Salesforce MCP endpoint you use. Register whichever endpoint fits your use case and choose the OAuth scopes accordingly.
+The OAuth setup (External Client App, redirect URI, global secrets) is the same regardless of which Salesforce MCP endpoint you use. Register whichever endpoint fits your use case and choose the OAuth scopes accordingly.
 </Callout>
 
 ## What it does
 
 - **Registers Salesforce as an MCP server** on the HTTP transport pointing at one of Salesforce's hosted MCP endpoints (for example, `platform/mcp/v1/platform/sobject-reads` for sObject reads — see Step 1).
-- **Authenticates with OAuth** using a Salesforce Connected App. The swarm handles the OAuth round-trip; agents call MCP tools without managing tokens directly.
+- **Authenticates with OAuth** using a Salesforce External Client App. The swarm handles the OAuth round-trip; agents call MCP tools without managing tokens directly.
 - **Gives agents access to Salesforce data.** Once connected, any agent with the Salesforce server in scope can use the MCP tools exposed by the registered endpoint.
 
 ## Setup
@@ -27,9 +27,9 @@ In the Agent Swarm dashboard (or via the CLI), register a new MCP server with HT
 
 Leave authentication unconfigured for now — you'll wire up OAuth in the next steps.
 
-### 2. Create a Salesforce Connected App
+### 2. Create a Salesforce External Client App
 
-In Salesforce Setup, go to **App Manager → New Connected App** (or **External Client App** in newer orgs) and enable OAuth settings:
+In Salesforce Setup, go to **Setup → External Client App Manager → New External Client App** and enable OAuth settings:
 
 **Callback URL** — must exactly match what the swarm sends:
 
@@ -44,17 +44,13 @@ For example: `https://your-swarm.example.com/api/mcp-oauth/callback`
 </Callout>
 
 **OAuth scopes** — add these two:
-- `Access and manage your data (api)`
+- `Access Salesforce Hosted MCP Servers (mcp_api)`
 - `Perform requests at any time (refresh_token, offline_access)`
-
-<Callout type="warn">
-Do **not** add `mcp_api` — Salesforce has no such scope. Adding it causes an `invalid_scope` error. Salesforce's supported scopes are `api`, `sfap_api`, `refresh_token`, and `einstein_gpt_api`. Add `sfap_api` only if your resource explicitly requires it.
-</Callout>
 
 After saving, copy the **Consumer Key** (client ID) and **Consumer Secret**.
 
 <Callout type="info">
-OAuth changes in Salesforce take **2–10 minutes to propagate** before the Connected App is usable. If you get `invalid_client` immediately after saving, wait a few minutes and retry.
+OAuth changes in Salesforce take **2–10 minutes to propagate** before the External Client App is usable. If you get `invalid_client` immediately after saving, wait a few minutes and retry.
 </Callout>
 
 ### 3. Paste credentials into the swarm
@@ -123,13 +119,13 @@ Common failure modes during initial setup. Read them before you start.
 
 **Symptom:** Salesforce rejects the authorization with `error=redirect_uri_mismatch`.
 
-**Root cause:** The `redirect_uri` the swarm sent does not match the Callback URL in your Connected App. This almost always happens because neither `PUBLIC_MCP_BASE_URL` nor `MCP_BASE_URL` is set to your public API origin on the **API server process** — so the chain falls through to an internal or localhost address (e.g. `http://localhost:3013` or `http://api:3013`), which Salesforce cannot match.
+**Root cause:** The `redirect_uri` the swarm sent does not match the Callback URL in your External Client App. This almost always happens because neither `PUBLIC_MCP_BASE_URL` nor `MCP_BASE_URL` is set to your public API origin on the **API server process** — so the chain falls through to an internal or localhost address (e.g. `http://localhost:3013` or `http://api:3013`), which Salesforce cannot match.
 
 **Fix:**
 - **Single-origin deploy:** Set `MCP_BASE_URL` to the public API origin in global secrets.
 - **Split deploy (internal `MCP_BASE_URL`):** Set `PUBLIC_MCP_BASE_URL` to the public ingress origin instead — don't repoint `MCP_BASE_URL` if internal callers depend on the internal address.
 
-Confirm the fix: re-click Connect, watch the Salesforce consent URL in the browser address bar, and verify the `redirect_uri` query param matches your Connected App's Callback URL exactly.
+Confirm the fix: re-click Connect, watch the Salesforce consent URL in the browser address bar, and verify the `redirect_uri` query param matches your External Client App's Callback URL exactly.
 
 ### Per-container env differs
 
@@ -137,7 +133,7 @@ In Docker or Kubernetes deployments, `MCP_BASE_URL` may be set to the public URL
 
 ### `invalid_scope`
 
-Caused by adding `mcp_api` to the Connected App scopes. That scope does not exist in Salesforce. Remove it and use `api refresh_token` only.
+Caused by using an incorrect scope string. For Hosted MCP Servers, the required scope is `mcp_api` ("Access Salesforce Hosted MCP Servers"), not the generic `api` scope. Verify your External Client App includes exactly `mcp_api` and `refresh_token, offline_access`.
 
 ### No Dynamic Client Registration
 
@@ -149,7 +145,7 @@ If `APP_URL` is unset, the post-authorization redirect lands on the default `htt
 
 ### OAuth changes take time
 
-Salesforce Connected App changes (new callback URLs, scope changes) take 2–10 minutes to propagate. If you get `invalid_client` or a redirect mismatch immediately after editing the app, wait a few minutes before retrying.
+Salesforce External Client App changes (new callback URLs, scope changes) take 2–10 minutes to propagate. If you get `invalid_client` or a redirect mismatch immediately after editing the app, wait a few minutes before retrying.
 
 ## Related docs
 
