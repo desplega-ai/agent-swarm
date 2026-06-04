@@ -8991,7 +8991,7 @@ export function getAgentSkills(agentId: string, activeOnly = true): SkillWithIns
     SELECT s.*, 1 as isActive, s.createdAt as installedAt, 1 as sourceRank,
       CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
     FROM skills s
-    WHERE s.systemDefault = 1
+    WHERE (s.systemDefault = 1 OR s.scope = 'swarm')
       AND s.isEnabled = 1
     ORDER BY
       sourceRank,
