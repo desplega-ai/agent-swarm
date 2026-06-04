@@ -13,6 +13,10 @@ export const argsSchema = z.object({
     .optional()
     .describe("Include schedule health flags (default true)"),
   includeMemoryHealth: z.boolean().optional().describe("Include memory health stats (default true)"),
+  includeScriptCandidates: z
+    .boolean()
+    .optional()
+    .describe("Include high-frequency tool-triplet candidates for future seed scripts (default true)"),
   includeByAgent: z
     .boolean()
     .optional()
@@ -40,6 +44,60 @@ function rowsToObjects(res: any): any[] {
   );
 }
 
+function asNumber(value: any): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function percent(part: number, total: number): number {
+  return total > 0 ? round1((part / total) * 100) : 0;
+}
+
+function extractToolName(content: string): string | null {
+  const match = content.match(/"type"\s*:\s*"tool_use"[\s\S]*?"name"\s*:\s*"([^"]+)"/);
+  return match?.[1] ?? null;
+}
+
+function toolSlug(tool: string): string {
+  return tool
+    .replace(/^mcp__/, "")
+    .replace(/__/g, "-")
+    .replace(/_/g, "-")
+    .replace(/[^a-zA-Z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function decodeFloat32Blob(value: any): Float32Array | null {
+  if (!value) return null;
+  let bytes: Uint8Array | null = null;
+  if (value instanceof Uint8Array) bytes = value;
+  else if (Array.isArray(value)) bytes = Uint8Array.from(value);
+  else if (typeof value === "object" && Array.isArray(value.data)) bytes = Uint8Array.from(value.data);
+  if (!bytes || bytes.byteLength < 4 || bytes.byteLength % 4 !== 0) return null;
+  return new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+}
+
+function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  const len = Math.min(a.length, b.length);
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < len; i++) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    dot += av * bv;
+    na += av * av;
+    nb += bv * bv;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
 /**
  * Daily compounding insights — compressed JSON for Phase 0 evolution.
  *
@@ -54,6 +112,7 @@ export default async function compoundInsights(args: any, ctx: any) {
   const includeToolUsage = parsed.data.includeToolUsage !== false;
   const includeScheduleHealth = parsed.data.includeScheduleHealth !== false;
   const includeMemoryHealth = parsed.data.includeMemoryHealth !== false;
+  const includeScriptCandidates = parsed.data.includeScriptCandidates !== false;
   const includeByAgent = parsed.data.includeByAgent !== false;
 
   // `days` is a validated positive int, so it is safe to interpolate into the
@@ -144,25 +203,170 @@ export default async function compoundInsights(args: any, ctx: any) {
     ).map((r: any) => ({ tool: r.tool, calls: r.calls }));
   }
 
-  // Memory health (whole store, by scope + source).
+  // Memory health (whole store, by scope + source). Pollution markers are
+  // SQL-light counts plus JS-side embedding similarity where available; prod
+  // SQLite does not expose a scalar cosine_similarity() function.
   if (includeMemoryHealth) {
     const memRows = rowsToObjects(
       await ctx.swarm.db_query({
-        sql: `SELECT scope, source, count(*) as cnt FROM agent_memory GROUP BY scope, source`,
+        sql: `SELECT scope, source, count(*) as cnt,
+                     sum(case when accessCount = 0 then 1 else 0 end) as zeroAccess,
+                     sum(case when sourceTaskId IS NOT NULL OR sourcePath IS NOT NULL then 1 else 0 end) as referenced
+              FROM agent_memory GROUP BY scope, source`,
       }),
     );
     const totalMem = memRows.reduce((s: number, r: any) => s + (r.cnt ?? 0), 0);
+    const bySource: any = {};
+    for (const r of memRows) {
+      bySource[r.source] ??= {
+        total: 0,
+        percentOfStore: 0,
+        zeroAccess: 0,
+        zeroAccessPercent: 0,
+        referenced: 0,
+      };
+      bySource[r.source].total += asNumber(r.cnt);
+      bySource[r.source].zeroAccess += asNumber(r.zeroAccess);
+      bySource[r.source].referenced += asNumber(r.referenced);
+    }
+    for (const source of Object.keys(bySource)) {
+      bySource[source].percentOfStore = percent(bySource[source].total, totalMem);
+      bySource[source].zeroAccessPercent = percent(bySource[source].zeroAccess, bySource[source].total);
+    }
+
+    const autoSnapshotSources = ["session_summary", "task_completion"];
+    const autoSnapshotTotal = autoSnapshotSources.reduce(
+      (sum, source) => sum + (bySource[source]?.total ?? 0),
+      0,
+    );
+    const popularButUseless = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: `SELECT id, name, source, accessCount, alpha, beta,
+                     round(alpha / nullif(alpha + beta, 0), 3) as usefulness,
+                     substr(content, 1, 180) as preview
+              FROM agent_memory
+              WHERE source IN ('session_summary','task_completion')
+                AND accessCount >= 5
+                AND alpha <= beta
+              ORDER BY accessCount DESC, beta DESC LIMIT 10`,
+      }),
+    ).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      source: r.source,
+      accessCount: asNumber(r.accessCount),
+      usefulness: Number(r.usefulness ?? 0),
+      preview: r.preview,
+    }));
+    const zeroAccessStaleRefRows = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: `SELECT source, count(*) as count
+              FROM agent_memory
+              WHERE accessCount = 0
+                AND (sourceTaskId IS NOT NULL OR sourcePath IS NOT NULL)
+                AND createdAt < datetime('now','-${days} days')
+              GROUP BY source ORDER BY count DESC`,
+      }),
+    );
+
+    const similarityRows = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: `SELECT id, name, source, accessCount, embedding
+              FROM agent_memory
+              WHERE source IN ('session_summary','task_completion')
+                AND embedding IS NOT NULL
+              ORDER BY accessCount DESC LIMIT 30`,
+      }),
+    );
+    let strongestAutoSnapshotPair: any = null;
+    const vectors = similarityRows
+      .map((r: any) => ({ ...r, vector: decodeFloat32Blob(r.embedding) }))
+      .filter((r: any) => r.vector);
+    for (let i = 0; i < vectors.length; i++) {
+      for (let j = i + 1; j < vectors.length; j++) {
+        const similarity = cosineSimilarity(vectors[i].vector, vectors[j].vector);
+        if (!strongestAutoSnapshotPair || similarity > strongestAutoSnapshotPair.similarity) {
+          strongestAutoSnapshotPair = {
+            similarity: round1(similarity * 100) / 100,
+            a: { id: vectors[i].id, name: vectors[i].name, source: vectors[i].source },
+            b: { id: vectors[j].id, name: vectors[j].name, source: vectors[j].source },
+          };
+        }
+      }
+    }
+
     insights.memoryHealth = {
       total: totalMem,
       byScope: memRows.reduce((m: any, r: any) => {
         m[r.scope] = (m[r.scope] ?? 0) + r.cnt;
         return m;
       }, {}),
-      bySource: memRows.reduce((m: any, r: any) => {
-        m[r.source] = (m[r.source] ?? 0) + r.cnt;
-        return m;
-      }, {}),
+      bySource,
+      pollution: {
+        autoSnapshotSources,
+        autoSnapshotTotal,
+        autoSnapshotPercent: percent(autoSnapshotTotal, totalMem),
+        popularButUselessAutoSnapshots: popularButUseless,
+        zeroAccessStaleRefs: {
+          total: zeroAccessStaleRefRows.reduce((sum: number, r: any) => sum + asNumber(r.count), 0),
+          bySource: zeroAccessStaleRefRows.reduce((m: any, r: any) => {
+            m[r.source] = asNumber(r.count);
+            return m;
+          }, {}),
+        },
+        similarityCheck: {
+          sqliteCosineSimilarityAvailable: false,
+          path: "js",
+          sampledAutoSnapshots: vectors.length,
+          strongestAutoSnapshotPair,
+        },
+      },
     };
+  }
+
+  // Evolution/self-scripting candidates: high-frequency consecutive tool
+  // triplets are good prompts for a future seed script.
+  if (includeScriptCandidates) {
+    const rows = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: `WITH raw AS (
+                 SELECT sessionId, iteration, lineNumber, content,
+                        json_extract(content, '$.tool_name') as jsonToolName
+                 FROM session_logs
+                 WHERE createdAt > ${w}
+                   AND (content LIKE '%"type":"tool_use"%' OR json_extract(content, '$.tool_name') IS NOT NULL)
+               )
+               SELECT sessionId, iteration, lineNumber, jsonToolName, content
+               FROM raw ORDER BY sessionId, iteration, lineNumber LIMIT 100`,
+      }),
+    );
+    const bySession = new Map<string, string[]>();
+    for (const row of rows) {
+      const tool = row.jsonToolName || extractToolName(String(row.content ?? ""));
+      if (!tool) continue;
+      const key = String(row.sessionId ?? "unknown");
+      const tools = bySession.get(key) ?? [];
+      tools.push(tool);
+      bySession.set(key, tools);
+    }
+    const counts = new Map<string, { tools: string[]; count: number }>();
+    for (const tools of bySession.values()) {
+      for (let i = 0; i <= tools.length - 3; i++) {
+        const triplet = tools.slice(i, i + 3);
+        const key = triplet.join(" -> ");
+        const current = counts.get(key) ?? { tools: triplet, count: 0 };
+        current.count += 1;
+        counts.set(key, current);
+      }
+    }
+    insights.scriptCandidates = [...counts.values()]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10)
+      .map((r) => ({
+        tools: r.tools,
+        count: r.count,
+        suggestedName: r.tools.map(toolSlug).filter(Boolean).slice(0, 3).join("-").slice(0, 80),
+      }));
   }
 
   // Per-agent breakdown — covers every agent that ran a task in the window.
