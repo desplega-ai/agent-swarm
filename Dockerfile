@@ -19,10 +19,13 @@ COPY tsconfig.json ./
 # The compiled API binary cannot share its /$bunfs/ virtual filesystem with
 # spawned subprocesses — bun run /$bunfs/eval-harness.ts fails in the harness
 # subprocess. Pre-building to real .js files on disk fixes this.
-RUN mkdir -p scripts-runtime && \
+RUN mkdir -p scripts-runtime script-workflows-runtime && \
     bun build ./src/scripts-runtime/eval-harness.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/eval-harness.bundle.js && \
+    bun build ./src/script-workflows/harness.ts \
+      --target bun --no-splitting \
+      --outfile ./script-workflows-runtime/harness.bundle.js && \
     bun build ./src/scripts-runtime/stdlib/index.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/stdlib.bundle.js && \
@@ -98,6 +101,9 @@ COPY --from=builder /build/node_modules/sqlite-vec-linux-*/vec0.so /app/extensio
 # bun processes, so these are pre-built real-filesystem .js files.
 COPY --from=builder /build/scripts-runtime/ /app/scripts-runtime/
 
+# Copy script workflow runtime bundle — needed by durable script-run subprocesses.
+COPY --from=builder /build/script-workflows-runtime/ /app/script-workflows-runtime/
+
 # Copy TypeScript lib .d.ts files for script typecheck in compiled binary mode.
 COPY --from=builder /build/typescript-lib/ /app/typescript-lib/
 
@@ -118,6 +124,7 @@ ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite
 ENV MIGRATIONS_DIR=/app/migrations
 ENV SQLITE_VEC_EXTENSION_PATH=/app/extensions/vec0.so
 ENV SCRIPT_RUNTIME_DIR=/app/scripts-runtime
+ENV SCRIPT_WORKFLOW_RUNTIME_DIR=/app/script-workflows-runtime
 ENV TS_LIB_DIR=/app/typescript-lib
 ENV SCRIPT_TYPES_DIR=/app/script-types
 
