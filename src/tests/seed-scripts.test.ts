@@ -9,7 +9,9 @@ import { typecheckScript } from "../be/scripts/typecheck";
 import { runSeeder } from "../be/seed";
 import { SEED_SCRIPTS, scriptsSeeder } from "../be/seed-scripts";
 import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
-import opsCatalogAudit from "../be/seed-scripts/catalog/ops-catalog-audit";
+import opsCatalogAudit, {
+  renderPage as renderOpsCatalogAuditPage,
+} from "../be/seed-scripts/catalog/ops-catalog-audit";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { validateScriptImports } from "../scripts-runtime/import-allowlist";
 
@@ -423,6 +425,68 @@ describe("seed-scripts catalog", () => {
         "prompts.system-default-skill-duplicates",
       ]),
     );
+  });
+
+  test("ops-catalog-audit renders a summary-first designed HTML report", () => {
+    const html = renderOpsCatalogAuditPage({
+      generatedAt: "2026-06-04T12:00:00.000Z",
+      summary: {
+        schedulesEnabled: 40,
+        workflowsTotal: 33,
+        workflowsEnabled: 28,
+        promptTemplates: 76,
+        findingsTotal: 2,
+      },
+      goals: {
+        schedules: {
+          goal: "Reduce schedule cost/context waste and prevent misrouted code work.",
+          findingCount: 1,
+          checks: { duplicateCronGroups: 1, routingRisks: 1 },
+          findings: [
+            {
+              id: "schedules.rule-13-15-routing",
+              severity: "critical",
+              summary: "1 enabled code-work schedule is not pinned to a code-capable worker.",
+              action: "Set targetAgentId to a code-capable worker.",
+              samples: [
+                { id: "sched-a", name: "repo-ci-audit", reason: "pool-targeted code work" },
+              ],
+            },
+          ],
+        },
+        workflows: {
+          goal: "Separate load-bearing workflows from fixtures and enforce deterministic gate outputs.",
+          findingCount: 0,
+          checks: { enabledFixtures: 0, structuredOutputGaps: 0 },
+          findings: [],
+        },
+        promptsTemplates: {
+          goal: "Keep prompt registry, runtime defaults, host guidance, and skill seed blocks aligned.",
+          findingCount: 1,
+          checks: { staleUrlPrompts: 1 },
+          findings: [
+            {
+              id: "prompts.stale-urls-hosts",
+              severity: "high",
+              summary: "1 prompt template contains stale/local/example hosts.",
+              action: "Replace hardcoded hosts with runtime env-var guidance.",
+              samples: [{ id: "prompt-a", eventType: "system.agent.role", match: "localhost" }],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(html).toContain("<main>");
+    expect(html).toContain('class="metrics"');
+    expect(html).toContain("<strong>40</strong><span>Schedules enabled</span>");
+    expect(html).toContain("schedules.rule-13-15-routing");
+    expect(html).toContain('class="finding danger"');
+    expect(html).toContain("<details>");
+    expect(html).toContain("Compressed JSON appendix");
+    expect(html).toContain('<div class="sample-table"');
+    expect(html).toContain("@media (max-width: 860px)");
+    expect(html).not.toContain("<ul>");
   });
 });
 
