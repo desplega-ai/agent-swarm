@@ -66,14 +66,13 @@ Good named scripts:
 
 For scripts that aggregate over tasks, sessions, or memory, `ctx.swarm.db_query` with direct SQL is far more efficient than fetching lists client-side.
 
-**The parameter is `sql`, not `query`:**
+**The parameter is `sql`:**
 
 ```typescript
 // CORRECT
 const res = await ctx.swarm.db_query({ sql: "SELECT status, count(*) as cnt FROM agent_tasks GROUP BY status" });
 
-// WRONG — silently returns no data
-const res = await ctx.swarm.db_query({ query: "SELECT ..." });
+// Legacy scripts may still run with `query`, but new code should not use it.
 ```
 
 **`db_query` returns positional rows, not objects.** The response shape is `{ rows: unknown[][], columns: string[] }`. Zip them into objects:

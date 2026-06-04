@@ -2332,15 +2332,18 @@
                     "minLength": 1,
                     "maxLength": 10000
                   },
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10000,
+                    "description": "Deprecated runtime alias for sql."
+                  },
                   "params": {
                     "type": "array",
                     "items": {},
                     "default": []
                   }
-                },
-                "required": [
-                  "sql"
-                ]
+                }
               }
             }
           }

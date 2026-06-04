@@ -11,6 +11,24 @@ export interface DbQueryResult {
   total: number;
 }
 
+export const DbQueryInputShape = {
+  sql: z.string().min(1).max(10_000).optional(),
+  query: z.string().min(1).max(10_000).optional().describe("Deprecated runtime alias for sql."),
+  params: z.array(z.any()).optional().default([]),
+};
+
+export const DbQueryInputSchema = z
+  .object(DbQueryInputShape)
+  .refine((body) => body.sql !== undefined || body.query !== undefined, {
+    message: "Either sql or query is required",
+  });
+
+export type DbQueryInput = z.infer<typeof DbQueryInputSchema>;
+
+export function resolveDbQuerySql(input: Pick<DbQueryInput, "sql" | "query">): string {
+  return input.sql ?? input.query ?? "";
+}
+
 function stripTrailingSemicolon(sql: string): string {
   return sql.trim().replace(/;\s*$/, "").trim();
 }
@@ -67,10 +85,7 @@ const dbQueryRoute = route({
   pattern: ["api", "db-query"],
   summary: "Execute a read-only SQL query",
   tags: ["Debug"],
-  body: z.object({
-    sql: z.string().min(1).max(10_000),
-    params: z.array(z.any()).optional().default([]),
-  }),
+  body: DbQueryInputSchema,
   responses: {
     200: {
       description: "Query results",
@@ -100,7 +115,7 @@ export async function handleDbQuery(
   if (!parsed) return true;
 
   try {
-    const result = executeReadOnlyQuery(parsed.body.sql, parsed.body.params);
+    const result = executeReadOnlyQuery(resolveDbQuerySql(parsed.body), parsed.body.params);
     json(res, result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

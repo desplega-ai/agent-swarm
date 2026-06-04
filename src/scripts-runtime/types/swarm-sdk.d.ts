@@ -80,6 +80,7 @@ declare module "swarm-sdk" {
       email?: string;
       userId?: string;
     }): Promise<unknown>;
+    /** Execute read-only SQL. Use `sql`; legacy `query` is accepted only as a runtime alias. */
     db_query(args: { sql: string; params?: unknown[] }): Promise<unknown>;
     // --- config ---
     config_get(args?: {

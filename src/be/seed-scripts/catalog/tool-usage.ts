@@ -25,7 +25,7 @@ export default async function toolUsage(args: any, ctx: any) {
   const agentId = parsed.data.agentId;
 
   const agentFilter = agentId ? `AND agent_id = '${agentId}'` : "";
-  const query = `
+  const sql = `
     SELECT tool_name, count(*) as calls
     FROM session_logs
     WHERE tool_name IS NOT NULL
@@ -36,9 +36,12 @@ export default async function toolUsage(args: any, ctx: any) {
     LIMIT ${limit}
   `;
 
-  const res: any = await ctx.swarm.db_query({ query });
+  const res: any = await ctx.swarm.db_query({ sql });
   const payload = res?.data ?? res;
-  const rows: any[] = payload?.rows ?? [];
+  const columns: string[] = payload?.columns ?? [];
+  const rows: any[] = (payload?.rows ?? []).map((row: any[]) =>
+    Object.fromEntries(columns.map((column, index) => [column, row[index]])),
+  );
 
   const totalCalls = rows.reduce((sum: number, r: any) => sum + (r.calls ?? 0), 0);
 
