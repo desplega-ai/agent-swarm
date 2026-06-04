@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { ScriptRun } from "../types";
 
 export type ScriptExecutionResult = {
@@ -27,10 +29,18 @@ export interface ScriptExecutor {
   terminatePid(pid: number, signal?: NodeJS.Signals): void;
 }
 
-function harnessPath(): string {
-  return process.env.SCRIPT_WORKFLOW_RUNTIME_DIR
-    ? `${process.env.SCRIPT_WORKFLOW_RUNTIME_DIR}/harness.bundle.js`
-    : new URL("./harness.ts", import.meta.url).pathname;
+export function getScriptWorkflowHarnessPath(): string {
+  const runtimeDir = process.env.SCRIPT_WORKFLOW_RUNTIME_DIR;
+  if (!runtimeDir) return new URL("./harness.ts", import.meta.url).pathname;
+
+  const bundledHarness = `${resolve(runtimeDir)}/harness.bundle.js`;
+  if (!existsSync(bundledHarness)) {
+    throw new Error(
+      `Script workflow harness bundle not found at ${bundledHarness}. ` +
+        "Build/copy harness.bundle.js and set SCRIPT_WORKFLOW_RUNTIME_DIR to its directory.",
+    );
+  }
+  return bundledHarness;
 }
 
 export class LocalProcessScriptExecutor implements ScriptExecutor {
@@ -43,7 +53,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     await Bun.write(sourceFile, run.source);
     await Bun.write(argsFile, JSON.stringify(run.args ?? null));
 
-    const proc = Bun.spawn(["bun", "run", harnessPath()], {
+    const proc = Bun.spawn(["bun", "run", getScriptWorkflowHarnessPath()], {
       cwd: tmpdir,
       stdin: "ignore",
       stdout: "ignore",

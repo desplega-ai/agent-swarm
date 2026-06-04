@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDb, initDb, updateScriptRun } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -248,5 +248,31 @@ describe("/api/script-runs HTTP", () => {
     const body = (await detail.json()) as { run: { status: string; error?: string } };
     expect(body.run.status).toBe("aborted_limit");
     expect(body.run.error).toContain("SCRIPT_RUN_MAX_STEPS");
+  });
+
+  test("cancel leaves terminal script runs unchanged", async () => {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id } = (await created.json()) as { id: string };
+    updateScriptRun(id, {
+      status: "failed",
+      pid: null,
+      finishedAt: new Date().toISOString(),
+      error: "original failure",
+    });
+
+    const cancelled = await dispatch(`/api/script-runs/${id}`, {
+      method: "DELETE",
+      agentId,
+    });
+    expect(cancelled.status).toBe(204);
+
+    const detail = await dispatch(`/api/script-runs/${id}`, { agentId });
+    const body = (await detail.json()) as { run: { status: string; error?: string } };
+    expect(body.run.status).toBe("failed");
+    expect(body.run.error).toBe("original failure");
   });
 });
