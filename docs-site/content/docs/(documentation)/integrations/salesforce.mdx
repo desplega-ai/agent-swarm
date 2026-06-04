@@ -1,0 +1,195 @@
+---
+title: Salesforce
+description: Connect Salesforce as an MCP server over OAuth so agents can use any of Salesforce's hosted MCP endpoints.
+---
+
+Agent Swarm can connect to Salesforce as an MCP server over HTTP, authenticated via OAuth. Salesforce exposes several native hosted MCP endpoints — no proxy, no middleware required.
+
+<Callout type="info">
+The OAuth setup (External Client App, redirect URI, global secrets) is the same regardless of which Salesforce MCP endpoint you use. Register whichever endpoint fits your use case and use the OAuth scopes below.
+</Callout>
+
+## What it does
+
+- **Registers Salesforce as an MCP server** on the HTTP transport pointing at one of Salesforce's hosted MCP endpoints (for example, `platform/mcp/v1/platform/sobject-reads` for sObject reads — see Step 2).
+- **Authenticates with OAuth** using a Salesforce External Client App. The swarm handles the OAuth round-trip; agents call MCP tools without managing tokens directly.
+- **Gives agents access to Salesforce data.** Once connected, any agent with the Salesforce server in scope can use the MCP tools exposed by the registered endpoint.
+
+## Setup
+
+### 1. Activate the Salesforce Hosted MCP server
+
+In Salesforce Setup, enable Hosted MCP Servers and activate the specific server you want agents to use before adding it to Agent Swarm.
+
+The Agent Swarm connector URL points directly at Salesforce's hosted MCP endpoint. If that hosted server is not activated in Salesforce first, the URL cannot complete the MCP/OAuth flow.
+
+### 2. Register the MCP server
+
+In the Agent Swarm dashboard (or via the CLI), register a new MCP server with HTTP transport:
+
+- **Name:** `salesforce` (or any name you choose)
+- **Transport:** HTTP
+- **URL:** the Salesforce MCP endpoint you want to expose. For example, `https://api.salesforce.com/platform/mcp/v1/platform/sobject-reads` gives agents sObject read access. Salesforce hosts additional MCP endpoints — use the path that matches your use case.
+
+Leave authentication unconfigured for now — you'll wire up OAuth in the next steps.
+
+### 3. Create a Salesforce External Client App
+
+In Salesforce Setup, go to **Setup → External Client App Manager → New External Client App** and enable OAuth settings:
+
+**Callback URL** — must exactly match what the swarm sends:
+
+```
+https://<your-swarm-api-host>/api/mcp-oauth/callback
+```
+
+For example: `https://your-swarm.example.com/api/mcp-oauth/callback`
+
+<Callout type="warn">
+**Exact match required.** No trailing slash, no port, no `www`. Salesforce's OAuth server does a literal string comparison. See [Gotchas](#gotchas) for the most common failure mode.
+</Callout>
+
+**OAuth scopes** — add these two:
+- `Access Salesforce Hosted MCP Servers (mcp_api)`
+- `Perform requests at any time (refresh_token, offline_access)`
+
+**Supported Authorization Flows** — require the **Proof Key for Code Exchange (PKCE)** extension.
+
+**Client secret** — optional. Agent Swarm can store and send a client secret, but Salesforce Hosted MCP clients do not require one unless you explicitly enable a secret requirement in the External Client App's OAuth settings. If you leave the Salesforce secret requirement disabled, copy only the **Consumer Key** (client ID).
+
+<Callout type="info">
+OAuth changes in Salesforce can take up to 30 minutes to propagate before the External Client App is usable. If you get `invalid_client` immediately after saving, wait and retry.
+</Callout>
+
+### 4. Paste the manual OAuth client into the swarm
+
+Salesforce's authorization server **does not advertise a `registration_endpoint`**, which means OAuth Dynamic Client Registration (DCR) is not available. Register the pre-created Salesforce OAuth client manually in Agent Swarm (Settings → MCP Servers → your Salesforce server → OAuth config).
+
+Agent Swarm stores these manual-client fields:
+
+| Field | Value |
+|---|---|
+| `clientId` | Salesforce **Consumer Key** |
+| `clientSecret` | Salesforce **Consumer Secret**, only if your External Client App requires one |
+| `authorizationServerIssuer` | Salesforce OAuth issuer, for example `https://login.salesforce.com` |
+| `authorizeUrl` | Salesforce authorize endpoint, for example `https://login.salesforce.com/services/oauth2/authorize` |
+| `tokenUrl` | Salesforce token endpoint, for example `https://login.salesforce.com/services/oauth2/token` |
+| `scopes` | `mcp_api` and `refresh_token` |
+
+If you use the API instead of the dashboard, the same fields are accepted by:
+
+```bash
+curl -X POST "$MCP_BASE_URL/api/mcp-oauth/<mcp-server-id>/manual-client" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clientId": "<salesforce-consumer-key>",
+    "authorizationServerIssuer": "https://login.salesforce.com",
+    "authorizeUrl": "https://login.salesforce.com/services/oauth2/authorize",
+    "tokenUrl": "https://login.salesforce.com/services/oauth2/token",
+    "scopes": ["mcp_api", "refresh_token"]
+  }'
+```
+
+Add `"clientSecret": "<salesforce-consumer-secret>"` only when your Salesforce External Client App requires it.
+
+### 5. Set global secrets
+
+Two global secrets govern how the swarm builds the OAuth redirect URI and where it sends the browser after a successful authorization. Set them in **Settings → Configuration → Global Secrets** (they hot-reload into the API server without a restart):
+
+| Secret | Value | Why |
+|---|---|---|
+| `MCP_BASE_URL` | `https://<your-swarm-api-host>` | Builds the `redirect_uri` sent to Salesforce |
+| `APP_URL` | `https://<your-dashboard-host>` | Where the browser lands after OAuth succeeds. If you are not running your own deployment, leave it as the hosted default `https://app.agent-swarm.dev` |
+
+Example:
+
+```bash
+MCP_BASE_URL=https://your-swarm-api.example.com
+APP_URL=https://your-swarm-dashboard.example.com
+```
+
+<Callout type="info">
+If your `MCP_BASE_URL` must stay an internal/cluster address (split deploy), set `PUBLIC_MCP_BASE_URL` to the public origin instead. The OAuth redirect URI is built from `PUBLIC_MCP_BASE_URL` when set, falling back to `MCP_BASE_URL`. See [Environment Variables](/docs/reference/environment-variables) for the full fallback chain.
+</Callout>
+
+### 6. Complete the OAuth flow
+
+In the swarm dashboard, go to Settings → MCP Servers → your Salesforce server and click **Connect**. You'll be redirected to Salesforce's consent screen. After approving, the browser returns to your dashboard with `?oauth=success`.
+
+### 7. Verify
+
+Trigger a tool call to confirm the connection is working. The tools available depend on the endpoint you registered. For example, if you registered the sObject reads endpoint:
+
+```sql
+SELECT Id, Name, Industry FROM Account ORDER BY CreatedDate DESC LIMIT 3
+```
+
+Any agent with the Salesforce MCP server in scope can now use it via the registered MCP tools.
+
+## How it works
+
+The OAuth redirect URI is built by `callbackRedirectUri()` in `src/http/mcp-oauth.ts`:
+
+```
+${getPublicMcpBaseUrl()}/api/mcp-oauth/callback
+```
+
+`getPublicMcpBaseUrl()` (in `src/utils/constants.ts`) resolves in this order:
+
+1. `PUBLIC_MCP_BASE_URL`
+2. `MCP_BASE_URL`
+3. `http://localhost:${PORT||3013}`
+
+It does **not** fall back to `APP_URL`. The `APP_URL` / `DASHBOARD_URL` chain is only used for the post-authorization browser redirect — the page the user lands on after consent, not the OAuth callback itself.
+
+Both the `/authorize` route and the `/callback` route run on the **API server** process. Global secrets set in the dashboard are injected into that process's environment (and hot-reloaded), which is why updating them in the UI immediately takes effect.
+
+Agent Swarm appends the [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707) `resource` parameter to the Salesforce authorization and token requests. The value is the MCP server URL you registered in Agent Swarm, for example:
+
+```
+resource=https://api.salesforce.com/platform/mcp/v1/platform/sobject-reads
+```
+
+That `resource` value is expected. It tells Salesforce which hosted MCP resource the OAuth token is being requested for.
+
+## Gotchas
+
+Common failure modes during initial setup. Read them before you start.
+
+### `redirect_uri_mismatch` (the #1 failure)
+
+**Symptom:** Salesforce rejects the authorization with `error=redirect_uri_mismatch`.
+
+**Root cause:** The `redirect_uri` the swarm sent does not match the Callback URL in your External Client App. This almost always happens because neither `PUBLIC_MCP_BASE_URL` nor `MCP_BASE_URL` is set to your public API origin on the **API server process** — so the chain falls through to an internal or localhost address (e.g. `http://localhost:3013` or `http://api:3013`), which Salesforce cannot match.
+
+**Fix:**
+- **Single-origin deploy:** Set `MCP_BASE_URL` to the public API origin in global secrets.
+- **Split deploy (internal `MCP_BASE_URL`):** Set `PUBLIC_MCP_BASE_URL` to the public ingress origin instead — don't repoint `MCP_BASE_URL` if internal callers depend on the internal address.
+
+Confirm the fix: re-click Connect, watch the Salesforce consent URL in the browser address bar, and verify the `redirect_uri` query param matches your External Client App's Callback URL exactly.
+
+### Per-container env differs
+
+In Docker or Kubernetes deployments, `MCP_BASE_URL` may be set to the public URL on worker containers but to an internal cluster address on the API server container. The OAuth flow runs on the API server, so only its environment governs the `redirect_uri`. Do not diagnose this from a worker shell.
+
+### `invalid_scope`
+
+Caused by using an incorrect scope string. For Hosted MCP Servers, the required scope is `mcp_api` ("Access Salesforce Hosted MCP Servers"), not the generic `api` scope. Verify your External Client App includes exactly `mcp_api` and `refresh_token`.
+
+### No Dynamic Client Registration
+
+Salesforce's authorization server does not advertise a `registration_endpoint`. OAuth DCR is not available — you must paste the Consumer Key, OAuth issuer, authorize URL, token URL, scopes, and optional Consumer Secret manually. Attempting DCR will fail silently or with an undocumented error.
+
+### Wrong dashboard after OAuth success
+
+If `APP_URL` is unset, the post-authorization redirect lands on the default `https://app.agent-swarm.dev` instead of your own dashboard. Set `APP_URL` in global secrets to your dashboard's public origin.
+
+### OAuth changes take time
+
+Salesforce External Client App changes (new callback URLs, scope changes) can take up to 30 minutes to propagate. If you get `invalid_client` or a redirect mismatch immediately after editing the app, wait before retrying.
+
+## Related docs
+
+- [Environment Variables](/docs/reference/environment-variables) — full `PUBLIC_MCP_BASE_URL → MCP_BASE_URL` and `APP_URL → DASHBOARD_URL` fallback chains
+- [MCP Tools](/docs/reference/mcp-tools) — tools available to agents once a server is connected
