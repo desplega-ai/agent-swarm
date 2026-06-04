@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Harness-agnostic FS→DB profile sync at session end** (#641) — worker and lead sessions now persist identity-file changes back into the database at session end without assuming a specific coding harness.
 - **Scripts runtime exposes the full read-only MCP surface over the SDK + HTTP bridge** (#642) — catalog scripts can now call all read-only swarm MCP methods through the generated SDK, and the HTTP bridge routes those methods consistently for compiled and runtime execution paths.
 - **Script workflow run foundation** (#653) — adds the first `script_runs` / `script_run_journal` database slice, the `/api/script-runs` HTTP surface, launch-time label linting for loop steps, and generated API reference docs for the new run endpoints.
+- **Script workflow core runtime** (#656) — workflow runs can now execute script nodes through the persisted script-run supervisor, including workflow context helpers, runtime limits, journal capture, and end-to-end coverage for the new execution path.
 
 ### Changed
 - **External URL env handling is unified around `PUBLIC_MCP_BASE_URL` + `APP_URL`** (#643) — OAuth callbacks, public page links, and webhook URLs now route through shared helpers, with `PUBLIC_MCP_BASE_URL` preferred for externally reachable API origins and `DASHBOARD_URL` treated as a deprecated alias of `APP_URL`.
@@ -24,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Compound-insights seed script repopulates all five sections** (#646) — the built-in report script no longer drops sections during generation.
 - **Hook registration nudges skip agents that are already joined** (#647) — workers that are already registered no longer get incorrect “join the swarm” reminders.
 - **`db-query` canonicalizes `sql` input across script and HTTP paths** (#649) — callers using script or bridge execution now resolve the canonical SQL field consistently without shape-specific workarounds.
+- **Compound-insights blob decoding handles typed-array rows** (#655) — similarity checks now decode SQLite blob values defensively so the report can compare embeddings instead of failing on non-Buffer binary values.
 
 ## [1.90.0] - 2026-06-03
 
