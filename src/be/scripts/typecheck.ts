@@ -162,6 +162,9 @@ export interface SwarmSdk {
   script_upsert(args: { name: string; source: string; description?: string; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode }): Promise<unknown>;
   script_delete(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
   script_queryTypes(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
+  script_launchRun(args: { source: string; args?: unknown; idempotencyKey?: string; scriptName?: string; requestedByUserId?: string }): Promise<unknown>;
+  script_getRun(args: { id: string }): Promise<unknown>;
+  script_listRuns(args?: { status?: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit"; agentId?: string; limit?: number; offset?: number }): Promise<unknown>;
 
   // --- write: repos ---
   repo_update(args: Record<string, unknown>): Promise<unknown>;

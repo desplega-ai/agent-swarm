@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
 import { downloadFile } from "@/slack/files";
+import { extractSlackMessageText } from "@/slack/message-text";
 import { createToolRegistrar } from "@/tools/utils";
 
 /**
@@ -203,6 +204,13 @@ export const registerSlackReadTool = (server: McpServer) => {
           text?: string;
           ts: string;
           files?: RawFile[];
+          attachments?: Array<{
+            fallback?: string;
+            text?: string;
+            title?: string;
+            pretext?: string;
+          }>;
+          blocks?: unknown[];
         };
 
         let rawMessages: RawMessage[] = [];
@@ -267,8 +275,9 @@ export const registerSlackReadTool = (server: McpServer) => {
         }> = [];
 
         for (const m of rawMessages) {
-          // Include messages with text OR files
-          if (!m.text && (!m.files || m.files.length === 0)) continue;
+          // Include messages with text, attachments, blocks, or files
+          const extractedText = extractSlackMessageText(m);
+          if (!extractedText && (!m.files || m.files.length === 0)) continue;
 
           const isBot =
             m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
@@ -330,7 +339,7 @@ export const registerSlackReadTool = (server: McpServer) => {
             user: m.user,
             username,
             isBot,
-            text: m.text || "",
+            text: extractedText,
             ts: m.ts,
             files,
           });

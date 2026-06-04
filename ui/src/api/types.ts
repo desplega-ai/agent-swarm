@@ -944,6 +944,56 @@ export interface WorkflowRunsResponse {
   runs: WorkflowRun[];
 }
 
+export type ScriptRunStatus =
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "aborted_limit";
+
+export interface ScriptRun {
+  id: string;
+  agentId: string;
+  scriptName?: string;
+  source: string;
+  args?: unknown;
+  status: ScriptRunStatus;
+  pid?: number;
+  startedAt: string;
+  finishedAt?: string;
+  output?: unknown;
+  error?: string;
+  lastHeartbeatAt?: string;
+  idempotencyKey?: string;
+  requestedByUserId?: string;
+}
+
+export type ScriptRunJournalStepType = "swarm-script" | "raw-llm" | "agent-task" | string;
+
+export interface ScriptRunJournalEntry {
+  id: string;
+  runId: string;
+  stepKey: string;
+  stepType: ScriptRunJournalStepType;
+  config: Record<string, unknown>;
+  status: "completed" | "failed";
+  result?: unknown;
+  error?: string;
+  startedAt: string;
+  completedAt?: string;
+}
+
+export interface ScriptRunsResponse {
+  runs: ScriptRun[];
+  total: number;
+}
+
+export interface ScriptRunWithJournal {
+  run: ScriptRun;
+  journal: ScriptRunJournalEntry[];
+}
+
 // Prompt Templates
 
 export interface PromptTemplate {

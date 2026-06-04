@@ -140,7 +140,7 @@ const deleteScriptRunRoute = route({
   tags: ["Script Runs"],
   params: idParamsSchema,
   responses: {
-    204: { description: "Script run cancelled" },
+    204: { description: "Script run cancelled, or already terminal" },
     404: { description: "Script run not found" },
   },
 });
@@ -394,6 +394,11 @@ export async function handleScriptRuns(
     const run = getScriptRun(parsed.params.id);
     if (!run) {
       jsonError(res, "Script run not found", 404);
+      return true;
+    }
+    if (TERMINAL_SCRIPT_RUN_STATUSES.some((status) => status === run.status)) {
+      res.writeHead(204);
+      res.end();
       return true;
     }
     terminateScriptRunProcess(run.id);

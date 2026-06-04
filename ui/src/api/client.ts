@@ -52,6 +52,9 @@ import type {
   ResolveUnmappedInput,
   ScheduledTask,
   ScheduledTasksResponse,
+  ScriptRunStatus,
+  ScriptRunsResponse,
+  ScriptRunWithJournal,
   ServicesResponse,
   SessionCostsResponse,
   SessionDetailResponse,
@@ -910,6 +913,31 @@ class ApiClient {
       headers: this.getHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to retry workflow run: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchScriptRuns(filters?: {
+    status?: ScriptRunStatus | "all";
+    agentId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ScriptRunsResponse> {
+    const params = new URLSearchParams();
+    if (filters?.status && filters.status !== "all") params.set("status", filters.status);
+    if (filters?.agentId) params.set("agentId", filters.agentId);
+    if (filters?.limit) params.set("limit", String(filters.limit));
+    if (filters?.offset) params.set("offset", String(filters.offset));
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    const url = `${this.getBaseUrl()}/api/script-runs${suffix}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch script runs: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchScriptRun(id: string): Promise<ScriptRunWithJournal> {
+    const url = `${this.getBaseUrl()}/api/script-runs/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch script run: ${res.status}`);
     return res.json();
   }
 

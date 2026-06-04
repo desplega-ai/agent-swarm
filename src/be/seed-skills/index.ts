@@ -31,6 +31,12 @@ import scheduledTaskResilienceConfig from "../../../templates/skills/scheduled-t
 import scheduledTaskResilienceContent from "../../../templates/skills/scheduled-task-resilience/content.md" with {
   type: "text",
 };
+import scriptWorkflowsConfig from "../../../templates/skills/script-workflows/config.json" with {
+  type: "text",
+};
+import scriptWorkflowsContent from "../../../templates/skills/script-workflows/content.md" with {
+  type: "text",
+};
 import swarmScriptsConfig from "../../../templates/skills/swarm-scripts/config.json" with {
   type: "text",
 };
@@ -72,6 +78,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: kvStorageConfig, body: kvStorageContent },
   { config: pagesConfig, body: pagesContent },
   { config: scheduledTaskResilienceConfig, body: scheduledTaskResilienceContent },
+  { config: scriptWorkflowsConfig, body: scriptWorkflowsContent },
   { config: swarmScriptsConfig, body: swarmScriptsContent },
   { config: workflowIterateConfig, body: workflowIterateContent },
   { config: workflowStructuredOutputConfig, body: workflowStructuredOutputContent },

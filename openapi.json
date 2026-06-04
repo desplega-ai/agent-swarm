@@ -7312,7 +7312,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Script run cancelled"
+            "description": "Script run cancelled, or already terminal"
           },
           "404": {
             "description": "Script run not found"
