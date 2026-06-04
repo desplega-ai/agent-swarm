@@ -50,6 +50,23 @@ export function isCodexCreditsExhaustedMessage(s: string): boolean {
  */
 export const CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h
 
+/** Floor for the operator-tunable Codex credits cooldown — never shorter than the tier-3 fallback. */
+export const MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS = 5 * 60 * 1000; // 5m
+
+/**
+ * Resolve the effective Codex credits-exhausted cooldown (ms) from a raw config
+ * value (string | number | undefined). Falls back to the default constant on
+ * absent / empty / non-finite / non-positive input, then clamps to
+ * [MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS, MAX_RATE_LIMIT_RESET_MS].
+ * Pure + side-effect free so it's unit-testable and cheap to call.
+ */
+export function resolveCodexCreditsExhaustedCooldownMs(raw: string | number | undefined | null): number {
+  if (raw === undefined || raw === null || raw === "") return CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS;
+  const n = typeof raw === "number" ? raw : Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS;
+  return Math.min(Math.max(n, MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS), MAX_RATE_LIMIT_RESET_MS);
+}
+
 /**
  * Clamps a candidate reset timestamp (ms) to [now+60s, now+7d].
  * Protects against past timestamps (clock skew) and absurdly far future values (malformed).

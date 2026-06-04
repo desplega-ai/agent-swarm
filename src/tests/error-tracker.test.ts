@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
   isCodexCreditsExhaustedMessage,
   isRateLimitMessage,
+  MAX_RATE_LIMIT_RESET_MS,
+  MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
   parseCodexRateLimitResetTime,
   parseRateLimitResetTime,
   parseStderrForErrors,
+  resolveCodexCreditsExhaustedCooldownMs,
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
@@ -627,6 +631,54 @@ describe("isRateLimitMessage — Codex credits-exhausted integration", () => {
     expect(isRateLimitMessage("No conversation found with session ID abc123")).toBe(false);
     expect(isRateLimitMessage("Authentication failed")).toBe(false);
     expect(isRateLimitMessage("Server error 500")).toBe(false);
+  });
+});
+
+describe("resolveCodexCreditsExhaustedCooldownMs", () => {
+  test("absent (undefined) → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs(undefined)).toBe(
+      CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+    );
+  });
+
+  test("null → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs(null)).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("empty string → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("")).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("non-numeric string → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("abc")).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("zero → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("0")).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("negative → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("-5")).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("valid in-range string (30m) → parsed value", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("1800000")).toBe(1_800_000);
+  });
+
+  test("valid in-range number (30m) → parsed value", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs(1_800_000)).toBe(1_800_000);
+  });
+
+  test("below floor → clamped to MIN", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("1000")).toBe(
+      MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+    );
+  });
+
+  test("above ceiling (8d) → clamped to MAX", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs(String(8 * 24 * 60 * 60 * 1000))).toBe(
+      MAX_RATE_LIMIT_RESET_MS,
+    );
   });
 });
 
