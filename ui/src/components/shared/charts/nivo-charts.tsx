@@ -2,7 +2,17 @@ import { ResponsiveBar } from "@nivo/bar";
 import { ResponsiveLine } from "@nivo/line";
 import { useMemo } from "react";
 
-const CHART_COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2"];
+// Categorical palette sourced from semantic design tokens (theme-aware via the
+// CSS custom properties; nivo applies these strings as SVG `fill`). Keeps the
+// `check:tokens` gate happy — no raw hex literals in src/.
+const CHART_COLORS = [
+  "var(--color-action-default)",
+  "var(--color-status-success)",
+  "var(--color-status-error)",
+  "var(--color-action-delegate-to-agent)",
+  "var(--color-status-warning)",
+  "var(--color-action-script)",
+];
 
 export interface CategoricalChartProps {
   data: Record<string, unknown>[];
