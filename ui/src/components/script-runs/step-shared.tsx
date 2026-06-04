@@ -1,4 +1,5 @@
 import { Bot, Braces, FileCode2, type LucideIcon, Workflow } from "lucide-react";
+import type { ScriptRunJournalEntry } from "@/api/types";
 
 /**
  * Visual + semantic metadata for a journal step type, shared by the source-code
@@ -92,4 +93,31 @@ export function formatDurationMs(ms: number): string {
   if (m < 60) return `${m}m ${rem}s`;
   const h = Math.floor(m / 60);
   return `${h}h ${m % 60}m`;
+}
+
+/** A journal entry laid out on the timeline: measured duration + cumulative offset. */
+export interface TimelineStep {
+  entry: ScriptRunJournalEntry;
+  index: number;
+  offsetMs: number;
+  durationMs: number;
+}
+
+/**
+ * Lay journal steps end-to-end by their measured wall-clock duration, producing a
+ * cumulative offset per step (a sequential cascade). Step `startedAt`/`completedAt`
+ * are only second-precise, so `durationMs` (sub-second, measured in-subprocess) is
+ * the trustworthy timing signal — we reconstruct the waterfall from it.
+ */
+export function buildSteps(journal: ScriptRunJournalEntry[]) {
+  let cursor = 0;
+  let max = 0;
+  const steps: TimelineStep[] = journal.map((entry, index) => {
+    const durationMs = typeof entry.durationMs === "number" ? Math.max(0, entry.durationMs) : 0;
+    const offsetMs = cursor;
+    cursor += durationMs;
+    if (durationMs > max) max = durationMs;
+    return { entry, index, offsetMs, durationMs };
+  });
+  return { steps, totalMs: cursor, maxMs: max, hasTiming: cursor > 0 };
 }
