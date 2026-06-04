@@ -124,10 +124,11 @@ export function buildWorkflowCtx(input: {
     status: "completed" | "failed",
     result?: unknown,
     error?: string,
+    durationMs?: number,
   ): Promise<void> {
     const body = (await fetchJson(`/api/internal/script-runs/${input.runId}/steps`, {
       method: "POST",
-      body: JSON.stringify({ stepKey: label, stepType, config, status, result, error }),
+      body: JSON.stringify({ stepKey: label, stepType, config, status, result, error, durationMs }),
     })) as StepWriteResponse;
     if (!("ok" in body)) throw new Error(`Failed to write journal step ${label}`);
   }
@@ -140,13 +141,16 @@ export function buildWorkflowCtx(input: {
   ): Promise<unknown> {
     const replayed = await completedStep(label);
     if (replayed.found) return replayed.result;
+    const startedAt = Date.now();
     try {
       const result = await execute();
-      await writeStep(label, stepType, config, "completed", result);
+      const durationMs = Date.now() - startedAt;
+      await writeStep(label, stepType, config, "completed", result, undefined, durationMs);
       return result;
     } catch (err) {
+      const durationMs = Date.now() - startedAt;
       const error = err instanceof Error ? err.message : String(err);
-      await writeStep(label, stepType, config, "failed", undefined, error);
+      await writeStep(label, stepType, config, "failed", undefined, error, durationMs);
       throw err;
     }
   }

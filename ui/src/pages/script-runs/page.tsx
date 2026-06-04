@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import type { ScriptRun, ScriptRunStatus } from "@/api/types";
+import { AgentLink } from "@/components/shared/agent-link";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 const STATUS_OPTIONS: Array<ScriptRunStatus | "all"> = [
@@ -43,17 +45,28 @@ export default function ScriptRunsPage() {
     () => [
       {
         field: "scriptName",
-        headerName: "Run",
-        minWidth: 220,
+        headerName: "Name",
+        minWidth: 200,
         flex: 1,
-        cellRenderer: (params: { data?: ScriptRun; value?: string }) => (
-          <div className="flex min-w-0 flex-col">
-            <span className="truncate font-medium">{params.value || "One-off script"}</span>
-            <span className="truncate font-mono text-[11px] text-muted-foreground">
-              {params.data?.id}
-            </span>
-          </div>
+        cellRenderer: (params: { value?: string }) => (
+          <span className="truncate font-medium">{params.value || "One-off script"}</span>
         ),
+      },
+      {
+        field: "id",
+        headerName: "Run ID",
+        width: 170,
+        cellRenderer: (params: { value?: string }) =>
+          params.value ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="block truncate font-mono text-xs text-muted-foreground">
+                  {params.value}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="font-mono text-xs">{params.value}</TooltipContent>
+            </Tooltip>
+          ) : null,
       },
       {
         field: "status",
@@ -66,9 +79,12 @@ export default function ScriptRunsPage() {
         field: "agentId",
         headerName: "Agent",
         width: 230,
-        cellRenderer: (params: { value?: string }) => (
-          <span className="font-mono text-xs text-muted-foreground">{params.value || "—"}</span>
-        ),
+        cellRenderer: (params: { value?: string }) =>
+          params.value ? (
+            <AgentLink agentId={params.value} onClick={(e) => e.stopPropagation()} />
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          ),
       },
       {
         field: "startedAt",
@@ -89,7 +105,12 @@ export default function ScriptRunsPage() {
         minWidth: 220,
         cellRenderer: (params: { value?: string }) =>
           params.value ? (
-            <span className="truncate text-xs text-status-error">{params.value}</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="block truncate text-xs text-status-error">{params.value}</span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-md">{params.value}</TooltipContent>
+            </Tooltip>
           ) : null,
       },
     ],
@@ -98,6 +119,11 @@ export default function ScriptRunsPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<ScriptRun>) => {
+      // Don't hijack clicks on interactive cell content (e.g. the agent link) —
+      // AG Grid's native row listener fires before React's stopPropagation, so
+      // guard on the click target instead.
+      const target = event.event?.target as HTMLElement | null;
+      if (target?.closest("a, button")) return;
       if (event.data) navigate(`/script-runs/${event.data.id}`);
     },
     [navigate],

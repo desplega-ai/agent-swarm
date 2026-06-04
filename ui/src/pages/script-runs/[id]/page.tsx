@@ -1,18 +1,17 @@
-import {
-  ArrowLeft,
-  Bot,
-  Braces,
-  CheckCircle2,
-  CircleAlert,
-  FileCode2,
-  RefreshCw,
-  Workflow,
-} from "lucide-react";
+import { ArrowLeft, Check, Copy, RefreshCw } from "lucide-react";
+import { type ReactNode, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useScriptRun } from "@/api/hooks/use-script-runs";
 import type { ScriptRunJournalEntry } from "@/api/types";
-import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { JsonViewer } from "@/components/shared/json-viewer";
+import {
+  mapStepsToBlocks,
+  parseRunAnchors,
+  parseStepBlocks,
+  type Selection,
+} from "@/components/script-runs/source-map";
+import { SourceView } from "@/components/script-runs/source-view";
+import { TimelinePanel } from "@/components/script-runs/timeline-panel";
+import { AgentLink } from "@/components/shared/agent-link";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -21,100 +20,89 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
-function stepIcon(stepType: string) {
-  if (stepType === "swarm-script") return FileCode2;
-  if (stepType === "raw-llm") return Braces;
-  if (stepType === "agent-task") return Bot;
-  return Workflow;
-}
-
-function stepTypeClass(stepType: string): string {
-  if (stepType === "swarm-script") return "border-status-active/30 text-status-active-strong";
-  if (stepType === "raw-llm") return "border-status-info/30 text-status-info-strong";
-  if (stepType === "agent-task") return "border-status-success/30 text-status-success-strong";
-  return "border-border text-muted-foreground";
-}
-
-function duration(startedAt: string, completedAt?: string): string {
-  if (!completedAt) return "—";
-  return formatElapsed(startedAt, completedAt);
-}
-
-function JournalEntry({ entry }: { entry: ScriptRunJournalEntry }) {
-  const Icon = stepIcon(entry.stepType);
-  const ok = entry.status === "completed";
-
+function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="rounded-lg border bg-card">
-      <div className="flex flex-wrap items-start gap-3 border-b px-4 py-3">
-        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-background">
-          <Icon className="h-4 w-4 text-muted-foreground" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h3 className="truncate font-mono text-sm font-semibold">{entry.stepKey}</h3>
-            <Badge
-              variant="outline"
-              className={cn("h-5 rounded-md text-[10px]", stepTypeClass(entry.stepType))}
-            >
-              {entry.stepType}
-            </Badge>
-            <Badge
-              variant="outline"
-              className={cn(
-                "h-5 rounded-md text-[10px]",
-                ok ? "text-status-success-strong" : "text-status-error-strong",
-              )}
-            >
-              {ok ? (
-                <CheckCircle2 className="mr-1 h-3 w-3" />
-              ) : (
-                <CircleAlert className="mr-1 h-3 w-3" />
-              )}
-              {entry.status}
-            </Badge>
-          </div>
-          <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
-            <span>{formatSmartTime(entry.startedAt)}</span>
-            <span>{duration(entry.startedAt, entry.completedAt)}</span>
-          </div>
-        </div>
-      </div>
-
-      {entry.error && (
-        <Alert variant="destructive" className="m-3">
-          <AlertDescription className="whitespace-pre-wrap font-mono text-xs">
-            {entry.error}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      <div className="space-y-2 p-3">
-        <CollapsibleSection title="Config" defaultOpen={false}>
-          <JsonViewer data={entry.config} />
-        </CollapsibleSection>
-        {entry.result !== undefined && (
-          <CollapsibleSection title="Result" defaultOpen={false}>
-            <JsonViewer data={entry.result} />
-          </CollapsibleSection>
-        )}
-      </div>
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-sm">{children}</span>
     </div>
   );
+}
+
+function RunId({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(id).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <Fact label="Run ID">
+      <button
+        type="button"
+        onClick={copy}
+        className="group inline-flex items-center gap-1.5 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
+        aria-label={copied ? "Copied" : "Copy run ID"}
+      >
+        <span className="break-all">{id}</span>
+        {copied ? (
+          <Check className="h-3 w-3 shrink-0 text-status-success-strong" />
+        ) : (
+          <Copy className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+        )}
+      </button>
+    </Fact>
+  );
+}
+
+function stepCounts(journal: ScriptRunJournalEntry[]) {
+  let scripts = 0;
+  let llm = 0;
+  let tasks = 0;
+  for (const e of journal) {
+    if (e.stepType === "swarm-script") scripts++;
+    else if (e.stepType === "raw-llm") llm++;
+    else if (e.stepType === "agent-task") tasks++;
+  }
+  return { scripts, llm, tasks };
 }
 
 export default function ScriptRunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data, isLoading, refetch, isFetching } = useScriptRun(id ?? "");
   const run = data?.run;
-  const journal = data?.journal ?? [];
+  const journal = useMemo(() => data?.journal ?? [], [data]);
+
+  const counts = useMemo(() => stepCounts(journal), [journal]);
+  const blocks = useMemo(() => (run?.source ? parseStepBlocks(run.source) : []), [run?.source]);
+  const anchors = useMemo(
+    () => (run?.source ? parseRunAnchors(run.source) : { input: null, output: null }),
+    [run?.source],
+  );
+  const mapping = useMemo(() => mapStepsToBlocks(journal, blocks), [journal, blocks]);
+
+  const [selection, setSelection] = useState<Selection>(null);
+
+  const selectedBlock =
+    selection?.kind === "step" ? (mapping.stepToBlock[selection.stepId] ?? null) : null;
+  const selectedAnchor =
+    selection?.kind === "input" ? "input" : selection?.kind === "output" ? "output" : null;
+
+  const handleSelectBlock = (index: number | null) => {
+    if (index === null) return setSelection(null);
+    const stepId = mapping.blockToStepIds[index]?.[0];
+    setSelection(stepId ? { kind: "step", stepId } : null);
+  };
 
   if (isLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-8 w-56" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-72 w-full" />
       </div>
     );
   }
@@ -124,13 +112,14 @@ export default function ScriptRunDetailPage() {
   }
 
   const runDuration = run.finishedAt ? formatElapsed(run.startedAt, run.finishedAt) : null;
+  const live = run.status === "running" || run.status === "paused";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex-1 min-h-0 space-y-4 overflow-y-auto">
       <div className="space-y-3">
         <Link
           to="/script-runs"
-          className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" /> Back to Script Runs
         </Link>
@@ -167,64 +156,63 @@ export default function ScriptRunDetailPage() {
         </Alert>
       )}
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-lg border bg-card p-3">
-          <div className="text-xs text-muted-foreground">Run ID</div>
-          <div className="mt-1 truncate font-mono text-xs">{run.id}</div>
-        </div>
-        <div className="rounded-lg border bg-card p-3">
-          <div className="text-xs text-muted-foreground">Agent</div>
-          <div className="mt-1 truncate font-mono text-xs">{run.agentId}</div>
-        </div>
-        <div className="rounded-lg border bg-card p-3">
-          <div className="text-xs text-muted-foreground">Heartbeat</div>
-          <div className="mt-1 text-sm">
-            {run.lastHeartbeatAt ? formatSmartTime(run.lastHeartbeatAt) : "—"}
-          </div>
-        </div>
-        <div className="rounded-lg border bg-card p-3">
-          <div className="text-xs text-muted-foreground">Journal</div>
-          <div className="mt-1 text-sm">
-            {journal.length} step{journal.length === 1 ? "" : "s"}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <CollapsibleSection title="Args" defaultOpen={false} variant="card">
-          <JsonViewer data={run.args ?? null} />
-        </CollapsibleSection>
-        {run.output !== undefined && (
-          <CollapsibleSection title="Output" defaultOpen={false} variant="card">
-            <JsonViewer data={run.output} />
-          </CollapsibleSection>
-        )}
-      </div>
-
-      <section className="flex min-h-0 flex-1 flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Journal</h2>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>
-              {journal.filter((entry) => entry.stepType === "swarm-script").length} scripts
+      <div className="flex flex-wrap items-start gap-x-8 gap-y-3 rounded-lg border bg-card px-4 py-3">
+        <Fact label="Agent">
+          <AgentLink agentId={run.agentId} />
+        </Fact>
+        <Fact label="Started">
+          <span className="font-mono text-xs">{formatSmartTime(run.startedAt)}</span>
+        </Fact>
+        <Fact label="Duration">
+          <span className="font-mono text-xs tabular-nums">{runDuration ?? "running…"}</span>
+        </Fact>
+        {live && (
+          <Fact label="Heartbeat">
+            <span className="font-mono text-xs">
+              {run.lastHeartbeatAt ? formatSmartTime(run.lastHeartbeatAt) : "—"}
             </span>
-            <span>{journal.filter((entry) => entry.stepType === "raw-llm").length} LLM</span>
-            <span>{journal.filter((entry) => entry.stepType === "agent-task").length} tasks</span>
-          </div>
-        </div>
-
-        {journal.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-            No journal entries yet.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {journal.map((entry) => (
-              <JournalEntry key={entry.id} entry={entry} />
-            ))}
-          </div>
+          </Fact>
         )}
-      </section>
+        <Fact label="Steps">
+          <span className="text-xs">
+            {journal.length}
+            {journal.length > 0 && (
+              <span className="text-muted-foreground">
+                {" · "}
+                {counts.scripts} script{counts.scripts === 1 ? "" : "s"} · {counts.llm} llm ·{" "}
+                {counts.tasks} task{counts.tasks === 1 ? "" : "s"}
+              </span>
+            )}
+          </span>
+        </Fact>
+        <div className="ml-auto">
+          <RunId id={run.id} />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <SourceView
+          source={run.source ?? ""}
+          blocks={blocks}
+          inputAnchor={anchors.input}
+          outputAnchor={anchors.output}
+          selectedBlock={selectedBlock}
+          selectedAnchor={selectedAnchor}
+          onSelectBlock={handleSelectBlock}
+          onSelectAnchor={(a) => setSelection(a ? { kind: a } : null)}
+          className="h-[72vh] lg:flex-[3]"
+        />
+        <TimelinePanel
+          journal={journal}
+          mapping={mapping}
+          runArgs={run.args ?? null}
+          runOutput={run.output}
+          hasOutput={run.output !== undefined}
+          selection={selection}
+          onSelect={setSelection}
+          className="h-[72vh] lg:flex-[2]"
+        />
+      </div>
     </div>
   );
 }

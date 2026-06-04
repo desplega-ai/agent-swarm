@@ -11459,6 +11459,7 @@ type ScriptRunJournalRow = {
   error: string | null;
   startedAt: string;
   completedAt: string | null;
+  durationMs: number | null;
   created_by: string | null;
   updated_by: string | null;
 };
@@ -11475,6 +11476,7 @@ function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalE
     error: row.error ?? undefined,
     startedAt: row.startedAt,
     completedAt: row.completedAt ?? undefined,
+    durationMs: row.durationMs ?? undefined,
   };
 }
 
@@ -11498,11 +11500,12 @@ export function upsertScriptRunJournalStep(data: {
   status: "completed" | "failed";
   result?: unknown;
   error?: string;
+  durationMs?: number;
 }): void {
   getDb().run(
     `INSERT OR IGNORE INTO script_run_journal
-      (id, runId, stepKey, stepType, config, status, result, error, completedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      (id, runId, stepKey, stepType, config, status, result, error, durationMs, completedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [
       crypto.randomUUID(),
       data.runId,
@@ -11512,6 +11515,7 @@ export function upsertScriptRunJournalStep(data: {
       data.status,
       data.result !== undefined ? JSON.stringify(data.result) : null,
       data.error ?? null,
+      data.durationMs ?? null,
     ],
   );
 }

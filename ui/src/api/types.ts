@@ -982,6 +982,12 @@ export interface ScriptRunJournalEntry {
   error?: string;
   startedAt: string;
   completedAt?: string;
+  /**
+   * Real wall-clock duration of the step in milliseconds, measured in the
+   * subprocess around the step's execution. Absent on runs recorded before
+   * per-step timing was added (the waterfall falls back to sequence mode).
+   */
+  durationMs?: number;
 }
 
 export interface ScriptRunsResponse {

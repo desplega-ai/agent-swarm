@@ -62,6 +62,7 @@ const journalStepBodySchema = z.object({
   status: z.enum(["completed", "failed"]),
   result: z.unknown().optional(),
   error: z.string().optional(),
+  durationMs: z.number().int().nonnegative().optional(),
 });
 
 const statusBodySchema = z.discriminatedUnion("status", [
@@ -440,6 +441,7 @@ export async function handleScriptRuns(
       status: parsed.body.status,
       result: parsed.body.result,
       error: parsed.body.error,
+      durationMs: parsed.body.durationMs,
     });
     const limit = assertRunWithinLimits(run.id);
     if (!limit.ok) {

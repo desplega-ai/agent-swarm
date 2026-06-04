@@ -1584,6 +1584,7 @@ export const ScriptRunJournalEntrySchema = z.object({
   error: z.string().optional(),
   startedAt: z.string(),
   completedAt: z.string().optional(),
+  durationMs: z.number().optional(),
 });
 export type ScriptRunJournalEntry = z.infer<typeof ScriptRunJournalEntrySchema>;
 
