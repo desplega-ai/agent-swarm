@@ -123,6 +123,14 @@ For ChatGPT OAuth setup, see [Provider Auth: Codex OAuth](/docs/guides/provider-
 | `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
 | `AGENT_ID` | Recommended | Auto-generated | Keep stable across restarts for task resume |
 
+### Swarm Config Keys (Codex)
+
+The following keys are stored in the swarm config store (via `PUT /api/config` or the `set-config` MCP tool) rather than as environment variables:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS` | `7200000` (2 h) | How long a Codex OAuth slot is held out of the pool after a workspace-credits-exhausted error. Must be a positive integer of milliseconds; clamped to [5 min, 7 days]. See [Workspace credits exhausted](/docs/guides/provider-auth/codex-oauth#workspace-credits-exhausted). |
+
 ### Model Selection
 
 The default model baked into the worker image is `gpt-5.4`. You can override it with `MODEL_OVERRIDE` if needed.
@@ -336,7 +344,7 @@ Codex workers support a **database-backed** multi-credential pool stored as `cod
 
 Key properties:
 
-- **Rate-limit-aware selection**: the runner queries `/api/keys/available?keyType=CODEX_OAUTH` before each task spawn and picks from non-rate-limited slots only. When a task hits a rate limit, the slot is marked unavailable for ~5 minutes (until structured `rate_limit_event` capture lands — tracked separately).
+- **Rate-limit-aware selection**: the runner queries `/api/keys/available?keyType=CODEX_OAUTH` before each task spawn and picks from non-rate-limited slots only. When a task hits a rate limit, the slot is marked unavailable: workspace-credits-exhausted errors use a **2-hour** cooldown (tunable via `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS`); other unparseable rate-limit errors fall back to ~5 minutes. See [Provider Auth: Codex OAuth — Workspace credits exhausted](/docs/guides/provider-auth/codex-oauth#workspace-credits-exhausted).
 - **Token-refresh write-back**: refreshed OAuth tokens are written back to the same `codex_oauth_<slot>` key the task started with. Other slots are never touched.
 - **Backwards compatible**: single-credential deploys work unchanged. The boot entrypoint seeds `codex_oauth_0` from the legacy `codex_oauth` key on first run.
 - **Global scope**: no per-agent or per-task affinity — any worker can pick any slot.
