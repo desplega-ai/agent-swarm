@@ -57,6 +57,7 @@ import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { describeRequestRoute } from "./route-def";
 import { handleSchedules } from "./schedules";
+import { handleScriptRuns } from "./script-runs";
 import { handleScripts } from "./scripts";
 import { handleSessionData } from "./session-data";
 import { handleSessions } from "./sessions";
@@ -272,6 +273,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
+        () => handleScriptRuns(req, res, pathSegments, queryParams, myAgentId),
         () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
         () => handleMcpBridge(req, res, pathSegments, queryParams, myAgentId),
         () => handleMcpServers(req, res, pathSegments, queryParams),

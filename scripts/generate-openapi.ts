@@ -24,6 +24,7 @@ import "../src/http/poll";
 import "../src/http/pricing";
 import "../src/http/repos";
 import "../src/http/schedules";
+import "../src/http/script-runs";
 import "../src/http/session-data";
 import "../src/http/sessions";
 import "../src/http/skills";

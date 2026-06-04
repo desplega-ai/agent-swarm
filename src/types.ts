@@ -1535,6 +1535,58 @@ export const WorkflowRunSchema = z.object({
 });
 export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
 
+// --- Script Workflow Runs ---
+
+export const ScriptRunStatusSchema = z.enum([
+  "running",
+  "paused",
+  "completed",
+  "failed",
+  "cancelled",
+  "aborted_limit",
+]);
+export type ScriptRunStatus = z.infer<typeof ScriptRunStatusSchema>;
+
+export const TERMINAL_SCRIPT_RUN_STATUSES = [
+  "completed",
+  "failed",
+  "cancelled",
+  "aborted_limit",
+] as const;
+export type TerminalScriptRunStatus = (typeof TERMINAL_SCRIPT_RUN_STATUSES)[number];
+
+export const ScriptRunSchema = z.object({
+  id: z.string().uuid(),
+  agentId: z.string(),
+  scriptName: z.string().optional(),
+  source: z.string(),
+  args: z.unknown(),
+  status: ScriptRunStatusSchema,
+  pid: z.number().int().optional(),
+  startedAt: z.string(),
+  finishedAt: z.string().optional(),
+  output: z.unknown().optional(),
+  error: z.string().optional(),
+  lastHeartbeatAt: z.string().optional(),
+  idempotencyKey: z.string().optional(),
+  requestedByUserId: z.string().optional(),
+});
+export type ScriptRun = z.infer<typeof ScriptRunSchema>;
+
+export const ScriptRunJournalEntrySchema = z.object({
+  id: z.string().uuid(),
+  runId: z.string().uuid(),
+  stepKey: z.string(),
+  stepType: z.string(),
+  config: z.record(z.string(), z.unknown()),
+  status: z.enum(["completed", "failed"]),
+  result: z.unknown().optional(),
+  error: z.string().optional(),
+  startedAt: z.string(),
+  completedAt: z.string().optional(),
+});
+export type ScriptRunJournalEntry = z.infer<typeof ScriptRunJournalEntrySchema>;
+
 // --- Workflow Run Step ---
 
 export const WorkflowRunStepStatusSchema = z.enum([

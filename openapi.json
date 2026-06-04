@@ -7126,6 +7126,433 @@
         }
       }
     },
+    "/api/script-runs": {
+      "post": {
+        "operationId": "script_runs_create",
+        "summary": "Launch a durable script workflow run",
+        "description": "Foundation endpoint for Script Workflows v1. In PR 1 it persists the run and returns its dashboard URL; spawning is added by the supervisor PR.",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {},
+                  "background": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "scriptName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "requestedByUserId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Script run created"
+          },
+          "400": {
+            "description": "Validation or label-lint failure"
+          },
+          "409": {
+            "description": "Existing idempotent run returned"
+          },
+          "429": {
+            "description": "Script run concurrency cap reached"
+          }
+        }
+      },
+      "get": {
+        "operationId": "script_runs_list",
+        "summary": "List script workflow runs",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "running",
+                "paused",
+                "completed",
+                "failed",
+                "cancelled",
+                "aborted_limit"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated script run list"
+          }
+        }
+      }
+    },
+    "/api/script-runs/{id}": {
+      "get": {
+        "operationId": "script_runs_get",
+        "summary": "Get a script workflow run with journal",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Script run detail"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "script_runs_cancel",
+        "summary": "Cancel a script workflow run",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Script run cancelled"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/steps/{stepKey}": {
+      "get": {
+        "operationId": "script_runs_internal_step_get",
+        "summary": "Get a script run journal step",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "stepKey",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Journal step found"
+          },
+          "404": {
+            "description": "Journal step not found"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/steps": {
+      "post": {
+        "operationId": "script_runs_internal_step_create",
+        "summary": "Write a script run journal step",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stepKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "stepType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "config": {},
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "failed"
+                    ]
+                  },
+                  "result": {},
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "stepKey",
+                  "stepType",
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Journal step written"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/heartbeat": {
+      "post": {
+        "operationId": "script_runs_internal_heartbeat",
+        "summary": "Record a script run heartbeat",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Heartbeat recorded"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/status": {
+      "post": {
+        "operationId": "script_runs_internal_status",
+        "summary": "Update script run status from subprocess",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "completed"
+                        ]
+                      },
+                      "output": {}
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "failed"
+                        ]
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "paused"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Status updated"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
     "/api/session-logs": {
       "post": {
         "summary": "Store session logs",

@@ -62,6 +62,9 @@ import type {
   RepoGuidelines,
   ScheduledTask,
   ScheduledTaskSummary,
+  ScriptRun,
+  ScriptRunJournalEntry,
+  ScriptRunStatus,
   Service,
   ServiceStatus,
   SessionCost,
@@ -11205,4 +11208,324 @@ export function countKv(namespace: string, opts: { prefix?: string }): number {
     )
     .get(namespace, now);
   return row?.n ?? 0;
+}
+
+// ─── Script Runs ────────────────────────────────────────────────────────────
+
+type ScriptRunRow = {
+  id: string;
+  agentId: string;
+  scriptName: string | null;
+  source: string;
+  args: string;
+  status: string;
+  pid: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+  output: string | null;
+  error: string | null;
+  last_heartbeat_at: string | null;
+  idempotencyKey: string | null;
+  requestedByUserId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+function parseJsonColumn(value: string | null): unknown | undefined {
+  if (value === null) return undefined;
+  return JSON.parse(value);
+}
+
+function rowToScriptRun(row: ScriptRunRow): ScriptRun {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    scriptName: row.scriptName ?? undefined,
+    source: row.source,
+    args: JSON.parse(row.args),
+    status: row.status as ScriptRunStatus,
+    pid: row.pid ?? undefined,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt ?? undefined,
+    output: parseJsonColumn(row.output),
+    error: row.error ?? undefined,
+    lastHeartbeatAt: row.last_heartbeat_at ?? undefined,
+    idempotencyKey: row.idempotencyKey ?? undefined,
+    requestedByUserId: row.requestedByUserId ?? undefined,
+  };
+}
+
+export function createScriptRun(data: {
+  id: string;
+  agentId: string;
+  source: string;
+  args: unknown;
+  scriptName?: string;
+  idempotencyKey?: string;
+  requestedByUserId?: string;
+  createdBy?: string;
+  updatedBy?: string;
+}): { run: ScriptRun; existing: boolean } {
+  const db = getDb();
+  if (data.idempotencyKey) {
+    const existing = db
+      .prepare<ScriptRunRow, [string]>("SELECT * FROM script_runs WHERE idempotencyKey = ?")
+      .get(data.idempotencyKey);
+    if (existing) return { run: rowToScriptRun(existing), existing: true };
+  }
+
+  const row = db
+    .prepare<
+      ScriptRunRow,
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+      ]
+    >(
+      `INSERT INTO script_runs
+        (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .get(
+      data.id,
+      data.agentId,
+      data.scriptName ?? null,
+      data.source,
+      JSON.stringify(data.args ?? null),
+      data.idempotencyKey ?? null,
+      data.requestedByUserId ?? null,
+      data.createdBy ?? null,
+      data.updatedBy ?? data.createdBy ?? null,
+    );
+  if (!row) throw new Error("Failed to create script run");
+  return { run: rowToScriptRun(row), existing: false };
+}
+
+export function getScriptRun(id: string): ScriptRun | null {
+  const row = getDb()
+    .prepare<ScriptRunRow, [string]>("SELECT * FROM script_runs WHERE id = ?")
+    .get(id);
+  return row ? rowToScriptRun(row) : null;
+}
+
+export function getScriptRunByIdempotencyKey(idempotencyKey: string): ScriptRun | null {
+  const row = getDb()
+    .prepare<ScriptRunRow, [string]>("SELECT * FROM script_runs WHERE idempotencyKey = ?")
+    .get(idempotencyKey);
+  return row ? rowToScriptRun(row) : null;
+}
+
+export function listScriptRuns(opts?: {
+  status?: ScriptRunStatus;
+  agentId?: string;
+  limit?: number;
+  offset?: number;
+}): ScriptRun[] {
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+  if (opts?.status) {
+    conditions.push("status = ?");
+    params.push(opts.status);
+  }
+  if (opts?.agentId) {
+    conditions.push("agentId = ?");
+    params.push(opts.agentId);
+  }
+
+  const limit = opts?.limit ?? 50;
+  const offset = opts?.offset ?? 0;
+  params.push(limit, offset);
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const rows = getDb()
+    .prepare<ScriptRunRow, Array<string | number>>(
+      `SELECT * FROM script_runs ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...params);
+  return rows.map(rowToScriptRun);
+}
+
+export function countScriptRuns(opts?: { status?: ScriptRunStatus; agentId?: string }): number {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (opts?.status) {
+    conditions.push("status = ?");
+    params.push(opts.status);
+  }
+  if (opts?.agentId) {
+    conditions.push("agentId = ?");
+    params.push(opts.agentId);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const row = getDb()
+    .prepare<{ count: number }, string[]>(`SELECT COUNT(*) AS count FROM script_runs ${where}`)
+    .get(...params);
+  return row?.count ?? 0;
+}
+
+export function countActiveScriptRuns(): number {
+  const row = getDb()
+    .prepare<{ count: number }, []>(
+      "SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused')",
+    )
+    .get();
+  return row?.count ?? 0;
+}
+
+export function updateScriptRun(
+  id: string,
+  patch: Partial<{
+    status: ScriptRunStatus;
+    pid: number | null;
+    finishedAt: string | null;
+    output: unknown;
+    error: string | null;
+    lastHeartbeatAt: string | null;
+    updatedBy: string | null;
+  }>,
+): void {
+  const sets: string[] = [];
+  const vals: Array<string | number | null> = [];
+  if (patch.status !== undefined) {
+    sets.push("status = ?");
+    vals.push(patch.status);
+  }
+  if (patch.pid !== undefined) {
+    sets.push("pid = ?");
+    vals.push(patch.pid);
+  }
+  if (patch.finishedAt !== undefined) {
+    sets.push("finishedAt = ?");
+    vals.push(patch.finishedAt);
+  }
+  if ("output" in patch) {
+    sets.push("output = ?");
+    vals.push(patch.output === undefined ? null : JSON.stringify(patch.output));
+  }
+  if (patch.error !== undefined) {
+    sets.push("error = ?");
+    vals.push(patch.error);
+  }
+  if (patch.lastHeartbeatAt !== undefined) {
+    sets.push("last_heartbeat_at = ?");
+    vals.push(patch.lastHeartbeatAt);
+  }
+  if (patch.updatedBy !== undefined) {
+    sets.push("updated_by = ?");
+    vals.push(patch.updatedBy);
+  }
+  if (sets.length === 0) return;
+  vals.push(id);
+  getDb().run(`UPDATE script_runs SET ${sets.join(", ")} WHERE id = ?`, vals);
+}
+
+export function getRunningScriptRuns(): ScriptRun[] {
+  const rows = getDb()
+    .prepare<ScriptRunRow, []>("SELECT * FROM script_runs WHERE status IN ('running', 'paused')")
+    .all();
+  return rows.map(rowToScriptRun);
+}
+
+// ─── Script Run Journal ─────────────────────────────────────────────────────
+
+type ScriptRunJournalRow = {
+  id: string;
+  runId: string;
+  stepKey: string;
+  stepType: string;
+  config: string;
+  status: string;
+  result: string | null;
+  error: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalEntry {
+  return {
+    id: row.id,
+    runId: row.runId,
+    stepKey: row.stepKey,
+    stepType: row.stepType,
+    config: JSON.parse(row.config),
+    status: row.status as "completed" | "failed",
+    result: parseJsonColumn(row.result),
+    error: row.error ?? undefined,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt ?? undefined,
+  };
+}
+
+export function getScriptRunJournalStep(
+  runId: string,
+  stepKey: string,
+): ScriptRunJournalEntry | null {
+  const row = getDb()
+    .prepare<ScriptRunJournalRow, [string, string]>(
+      "SELECT * FROM script_run_journal WHERE runId = ? AND stepKey = ?",
+    )
+    .get(runId, stepKey);
+  return row ? rowToScriptRunJournalEntry(row) : null;
+}
+
+export function upsertScriptRunJournalStep(data: {
+  runId: string;
+  stepKey: string;
+  stepType: string;
+  config: unknown;
+  status: "completed" | "failed";
+  result?: unknown;
+  error?: string;
+}): void {
+  getDb().run(
+    `INSERT OR IGNORE INTO script_run_journal
+      (id, runId, stepKey, stepType, config, status, result, error, completedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    [
+      crypto.randomUUID(),
+      data.runId,
+      data.stepKey,
+      data.stepType,
+      JSON.stringify(data.config ?? {}),
+      data.status,
+      data.result !== undefined ? JSON.stringify(data.result) : null,
+      data.error ?? null,
+    ],
+  );
+}
+
+export function listScriptRunJournalSteps(runId: string): ScriptRunJournalEntry[] {
+  const rows = getDb()
+    .prepare<ScriptRunJournalRow, [string]>(
+      "SELECT * FROM script_run_journal WHERE runId = ? ORDER BY startedAt ASC",
+    )
+    .all(runId);
+  return rows.map(rowToScriptRunJournalEntry);
+}
+
+export function countScriptRunJournalSteps(runId: string): number {
+  const row = getDb()
+    .prepare<{ count: number }, [string]>(
+      "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ?",
+    )
+    .get(runId);
+  return row?.count ?? 0;
+}
+
+export function countScriptRunJournalAgentTaskSteps(runId: string): number {
+  const row = getDb()
+    .prepare<{ count: number }, [string]>(
+      "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ? AND stepType = 'agent-task'",
+    )
+    .get(runId);
+  return row?.count ?? 0;
 }

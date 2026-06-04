@@ -162,9 +162,9 @@ export const SEED_SCRIPTS: SeedScript[] = [
   {
     name: "compound-insights",
     description:
-      "All-in-one swarm-wide daily ops snapshot: task completion/failure summary, real failure clusters (excludes superseded/cancelled bookkeeping), schedule health flags, tool usage top-25, memory health stats, and a per-agent breakdown. Aggregates across ALL agents via direct read-only SQL.",
+      "All-in-one swarm-wide daily ops snapshot: task completion/failure summary, real failure clusters (excludes superseded/cancelled bookkeeping), schedule health flags, tool usage top-25, memory health/pollution stats, seed-script candidate tool triplets, and a per-agent breakdown. Aggregates across ALL agents via direct read-only SQL.",
     intent:
-      "Single-call daily compounding Phase 0 helper — replaces ~25 raw tool roundtrips with one compressed JSON result covering every agent. For daily evolution, ops reviews, or heartbeat context.",
+      "Single-call daily compounding Phase 0 helper — replaces ~25 raw tool roundtrips with one compressed JSON result covering every agent. For daily evolution, self-scripting candidates, ops reviews, or heartbeat context.",
     source: asText(compoundInsightsSrc),
   },
 ];
