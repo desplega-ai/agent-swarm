@@ -4,6 +4,7 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
+import { extractSlackMessageText } from "./message-text";
 import { registerTreeMessage } from "./watcher";
 
 interface BufferedMessage {
@@ -93,15 +94,16 @@ async function getThreadContextForBuffer(channelId: string, threadTs: string): P
     if (messages.length === 0) return "";
 
     const formatted = messages
-      .filter((m) => m.text)
+      .filter((m) => extractSlackMessageText(m) !== "")
       .map((m) => {
         const msg = m as Record<string, unknown>;
         const isBotMessage = msg.bot_id !== undefined || msg.subtype === "bot_message";
+        const text = extractSlackMessageText(m);
         if (isBotMessage) {
-          const truncated = m.text && m.text.length > 500 ? `${m.text.slice(0, 500)}...` : m.text;
+          const truncated = text.length > 500 ? `${text.slice(0, 500)}...` : text;
           return `[Agent]: ${truncated}`;
         }
-        return `<@${m.user}>: ${m.text}`;
+        return `<@${m.user}>: ${text}`;
       })
       .join("\n");
 
