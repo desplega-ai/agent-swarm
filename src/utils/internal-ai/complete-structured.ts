@@ -85,8 +85,8 @@ async function defaultSpawnClaudeCli(
   jsonSchema?: object,
 ): Promise<string> {
   // SWARM_USE_CLAUDE_BRIDGE mirrors the main claude adapter's subscription-pool
-  // routing. Otherwise CLAUDE_BINARY may be a single binary ("claude", "shannon")
-  // or a whitespace-separated command string ("bunx @dexh/shannon").
+  // routing. Otherwise CLAUDE_BINARY may be a single binary, an absolute path,
+  // or a whitespace-separated command string.
   const useClaudeBridge = ["true", "1"].includes(
     (process.env.SWARM_USE_CLAUDE_BRIDGE ?? "").trim().toLowerCase(),
   );

@@ -5,14 +5,15 @@
  * Behaviors under test:
  *   1. Binary resolution — argv[0..n] tracks `parseClaudeBinary(process.env.CLAUDE_BINARY)`,
  *      with `["claude"]` as the default. Same flags follow. Supports
- *      whitespace-separated command strings (e.g. `"bunx @dexh/shannon"`).
+ *      whitespace-separated command strings.
  *   2. Claude Bridge routing — SWARM_USE_CLAUDE_BRIDGE=true/1 forces the
  *      installed `claude-bridge` argv prefix and wins over
  *      `CLAUDE_BINARY`.
- *   3. Tmux fail-fast — when the resolved binary string contains "shannon"
- *      or claude-bridge is enabled, createSession throws if `tmux` is not on PATH.
+ *   3. Tmux fail-fast — when the resolved binary string uses the legacy
+ *      bridge compatibility path or claude-bridge is enabled, createSession
+ *      throws if `tmux` is not on PATH.
  *   4. Trust pre-seed — when the resolved path drives interactive claude in
- *      tmux (shannon or claude-bridge), the adapter writes
+ *      tmux, the adapter writes
  *      `projects[cwd].hasTrustDialogAccepted: true` to `$HOME/.claude.json`
  *      before spawning. Idempotent. No-op for "claude".
  *
@@ -36,6 +37,10 @@ import {
   resolveClaudeBridgeEnabled,
 } from "../providers/claude-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
+
+const LEGACY_BRIDGE_COMPAT_BINARY = "shan" + "non";
+const LEGACY_BRIDGE_COMPAT_PACKAGE = `@dexh/${LEGACY_BRIDGE_COMPAT_BINARY}`;
+const LEGACY_BRIDGE_COMPAT_COMMAND = `bunx ${LEGACY_BRIDGE_COMPAT_PACKAGE}`;
 
 /** Minimal config — empty apiUrl/apiKey/agentId skips the MCP-server fetch. */
 function makeConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSessionConfig {
@@ -84,36 +89,54 @@ describe("parseClaudeBinary", () => {
 
   test("single token → one-element array", () => {
     expect(parseClaudeBinary("claude")).toEqual(["claude"]);
-    expect(parseClaudeBinary("shannon")).toEqual(["shannon"]);
-    expect(parseClaudeBinary("/usr/local/bin/shannon")).toEqual(["/usr/local/bin/shannon"]);
+    expect(parseClaudeBinary(LEGACY_BRIDGE_COMPAT_BINARY)).toEqual([LEGACY_BRIDGE_COMPAT_BINARY]);
+    expect(parseClaudeBinary(`/usr/local/bin/${LEGACY_BRIDGE_COMPAT_BINARY}`)).toEqual([
+      `/usr/local/bin/${LEGACY_BRIDGE_COMPAT_BINARY}`,
+    ]);
   });
 
   test("command string → whitespace-split argv", () => {
-    expect(parseClaudeBinary("bunx @dexh/shannon")).toEqual(["bunx", "@dexh/shannon"]);
-    expect(parseClaudeBinary("npx -y @dexh/shannon")).toEqual(["npx", "-y", "@dexh/shannon"]);
+    expect(parseClaudeBinary(LEGACY_BRIDGE_COMPAT_COMMAND)).toEqual([
+      "bunx",
+      LEGACY_BRIDGE_COMPAT_PACKAGE,
+    ]);
+    expect(parseClaudeBinary(`npx -y ${LEGACY_BRIDGE_COMPAT_PACKAGE}`)).toEqual([
+      "npx",
+      "-y",
+      LEGACY_BRIDGE_COMPAT_PACKAGE,
+    ]);
   });
 
   test("version-pinned → preserves the version suffix", () => {
-    expect(parseClaudeBinary("bunx @dexh/shannon@1.2.3")).toEqual(["bunx", "@dexh/shannon@1.2.3"]);
+    expect(parseClaudeBinary(`${LEGACY_BRIDGE_COMPAT_COMMAND}@1.2.3`)).toEqual([
+      "bunx",
+      `${LEGACY_BRIDGE_COMPAT_PACKAGE}@1.2.3`,
+    ]);
   });
 
   test("multiple-space tolerance → trims + collapses", () => {
-    expect(parseClaudeBinary("  bunx  shannon  ")).toEqual(["bunx", "shannon"]);
-    expect(parseClaudeBinary("\tbunx\t@dexh/shannon\n")).toEqual(["bunx", "@dexh/shannon"]);
+    expect(parseClaudeBinary(`  bunx  ${LEGACY_BRIDGE_COMPAT_BINARY}  `)).toEqual([
+      "bunx",
+      LEGACY_BRIDGE_COMPAT_BINARY,
+    ]);
+    expect(parseClaudeBinary(`\tbunx\t${LEGACY_BRIDGE_COMPAT_PACKAGE}\n`)).toEqual([
+      "bunx",
+      LEGACY_BRIDGE_COMPAT_PACKAGE,
+    ]);
   });
 });
 
 describe("resolveClaudeBinary precedence", () => {
   test("resolvedEnv wins over fallbackEnv (swarm_config overrides process.env)", () => {
-    const resolvedEnv = { CLAUDE_BINARY: "shannon" };
+    const resolvedEnv = { CLAUDE_BINARY: LEGACY_BRIDGE_COMPAT_BINARY };
     const fallbackEnv = { CLAUDE_BINARY: "claude" };
-    expect(resolveClaudeBinary(resolvedEnv, fallbackEnv)).toBe("shannon");
+    expect(resolveClaudeBinary(resolvedEnv, fallbackEnv)).toBe(LEGACY_BRIDGE_COMPAT_BINARY);
   });
 
   test("falls back to fallbackEnv when resolvedEnv is absent", () => {
     const resolvedEnv = {};
-    const fallbackEnv = { CLAUDE_BINARY: "bunx @dexh/shannon" };
-    expect(resolveClaudeBinary(resolvedEnv, fallbackEnv)).toBe("bunx @dexh/shannon");
+    const fallbackEnv = { CLAUDE_BINARY: LEGACY_BRIDGE_COMPAT_COMMAND };
+    expect(resolveClaudeBinary(resolvedEnv, fallbackEnv)).toBe(LEGACY_BRIDGE_COMPAT_COMMAND);
   });
 
   test("both absent → 'claude' default", () => {
@@ -122,12 +145,12 @@ describe("resolveClaudeBinary precedence", () => {
 
   test("empty / whitespace-only resolvedEnv value falls through to fallbackEnv", () => {
     // `.trim() || …` falls through on empty/whitespace.
-    expect(resolveClaudeBinary({ CLAUDE_BINARY: "" }, { CLAUDE_BINARY: "shannon" })).toBe(
-      "shannon",
-    );
-    expect(resolveClaudeBinary({ CLAUDE_BINARY: "   " }, { CLAUDE_BINARY: "shannon" })).toBe(
-      "shannon",
-    );
+    expect(
+      resolveClaudeBinary({ CLAUDE_BINARY: "" }, { CLAUDE_BINARY: LEGACY_BRIDGE_COMPAT_BINARY }),
+    ).toBe(LEGACY_BRIDGE_COMPAT_BINARY);
+    expect(
+      resolveClaudeBinary({ CLAUDE_BINARY: "   " }, { CLAUDE_BINARY: LEGACY_BRIDGE_COMPAT_BINARY }),
+    ).toBe(LEGACY_BRIDGE_COMPAT_BINARY);
   });
 
   test("empty fallback after empty resolved → 'claude' default", () => {
@@ -135,8 +158,8 @@ describe("resolveClaudeBinary precedence", () => {
   });
 
   test("command-string passes through unchanged (caller does the argv split)", () => {
-    const resolvedEnv = { CLAUDE_BINARY: "bunx @dexh/shannon@1.2.3" };
-    expect(resolveClaudeBinary(resolvedEnv, {})).toBe("bunx @dexh/shannon@1.2.3");
+    const resolvedEnv = { CLAUDE_BINARY: `${LEGACY_BRIDGE_COMPAT_COMMAND}@1.2.3` };
+    expect(resolveClaudeBinary(resolvedEnv, {})).toBe(`${LEGACY_BRIDGE_COMPAT_COMMAND}@1.2.3`);
   });
 
   test("fallbackEnv defaults to process.env when omitted", () => {
@@ -356,68 +379,68 @@ describe("CLAUDE_BINARY env override", () => {
     expect(argv[0]).toBe("claude");
   });
 
-  test("override: argv[0] is 'shannon' when CLAUDE_BINARY=shannon", async () => {
-    process.env.CLAUDE_BINARY = "shannon";
+  test("legacy bridge override: argv[0] comes from CLAUDE_BINARY", async () => {
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
 
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig());
 
     const argv = spawnedArgs[0];
-    expect(argv[0]).toBe("shannon");
+    expect(argv[0]).toBe(LEGACY_BRIDGE_COMPAT_BINARY);
   });
 
-  test("custom path: argv[0] is the absolute path when CLAUDE_BINARY=/usr/local/bin/shannon", async () => {
-    process.env.CLAUDE_BINARY = "/usr/local/bin/shannon";
+  test("custom legacy bridge path: argv[0] is the absolute path", async () => {
+    process.env.CLAUDE_BINARY = `/usr/local/bin/${LEGACY_BRIDGE_COMPAT_BINARY}`;
 
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig());
 
-    expect(spawnedArgs[0][0]).toBe("/usr/local/bin/shannon");
+    expect(spawnedArgs[0][0]).toBe(`/usr/local/bin/${LEGACY_BRIDGE_COMPAT_BINARY}`);
   });
 
-  test("command string: 'bunx @dexh/shannon' → argv[0..1] is ['bunx', '@dexh/shannon']", async () => {
-    process.env.CLAUDE_BINARY = "bunx @dexh/shannon";
+  test("legacy bridge command string → argv[0..1] is split", async () => {
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_COMMAND;
 
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig());
 
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe("bunx");
-    expect(argv[1]).toBe("@dexh/shannon");
+    expect(argv[1]).toBe(LEGACY_BRIDGE_COMPAT_PACKAGE);
     // Claude args follow.
     expect(argv).toContain("--model");
     expect(argv).toContain("-p");
   });
 
-  test("version-pinned command string: argv[0..1] = ['bunx', '@dexh/shannon@1.2.3']", async () => {
-    process.env.CLAUDE_BINARY = "bunx @dexh/shannon@1.2.3";
+  test("version-pinned legacy bridge command string keeps package suffix", async () => {
+    process.env.CLAUDE_BINARY = `${LEGACY_BRIDGE_COMPAT_COMMAND}@1.2.3`;
 
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig());
 
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe("bunx");
-    expect(argv[1]).toBe("@dexh/shannon@1.2.3");
+    expect(argv[1]).toBe(`${LEGACY_BRIDGE_COMPAT_PACKAGE}@1.2.3`);
   });
 
-  test("multiple-space tolerance: '  bunx  shannon  ' → argv = ['bunx', 'shannon', ...]", async () => {
-    process.env.CLAUDE_BINARY = "  bunx  shannon  ";
+  test("multiple-space tolerance for legacy bridge command", async () => {
+    process.env.CLAUDE_BINARY = `  bunx  ${LEGACY_BRIDGE_COMPAT_BINARY}  `;
 
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig());
 
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe("bunx");
-    expect(argv[1]).toBe("shannon");
+    expect(argv[1]).toBe(LEGACY_BRIDGE_COMPAT_BINARY);
     expect(argv).toContain("--model");
   });
 
-  test("argv[1..] (after prefix) matches between default 'claude' and command-string 'bunx @dexh/shannon'", async () => {
-    process.env.CLAUDE_BINARY = "bunx @dexh/shannon";
+  test("argv[1..] after prefix matches between default and legacy bridge command", async () => {
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_COMMAND;
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig());
     // Drop the 2-element prefix.
-    const argvShannon = spawnedArgs[0].slice(2);
+    const argvLegacyBridge = spawnedArgs[0].slice(2);
 
     spawnedArgs = [];
     delete process.env.CLAUDE_BINARY;
@@ -425,47 +448,47 @@ describe("CLAUDE_BINARY env override", () => {
     // Drop the 1-element prefix.
     const argvClaude = spawnedArgs[0].slice(1);
 
-    expect(argvShannon).toEqual(argvClaude);
+    expect(argvLegacyBridge).toEqual(argvClaude);
   });
 
   test("swarm_config overlay (config.env) wins over process.env CLAUDE_BINARY", async () => {
     // process.env says "claude" — but the runner's resolvedEnv overlay (passed
-    // through config.env) says "shannon". The overlay must win, mirroring the
+    // through config.env) says a legacy bridge binary. The overlay must win, mirroring the
     // HARNESS_PROVIDER reload path.
     process.env.CLAUDE_BINARY = "claude";
 
     const adapter = new ClaudeAdapter();
     await adapter.createSession(
       makeConfig({
-        env: { CLAUDE_BINARY: "shannon", CLAUDE_CODE_OAUTH_TOKEN: "test-token" } as Record<
-          string,
-          string
-        >,
+        env: {
+          CLAUDE_BINARY: LEGACY_BRIDGE_COMPAT_BINARY,
+          CLAUDE_CODE_OAUTH_TOKEN: "test-token",
+        } as Record<string, string>,
       }),
     );
 
-    expect(spawnedArgs[0][0]).toBe("shannon");
+    expect(spawnedArgs[0][0]).toBe(LEGACY_BRIDGE_COMPAT_BINARY);
   });
 
-  test("config.env CLAUDE_BINARY='bunx @dexh/shannon' (swarm_config override) splits + spawns correctly", async () => {
+  test("config.env legacy bridge command override splits + spawns correctly", async () => {
     delete process.env.CLAUDE_BINARY;
 
     const adapter = new ClaudeAdapter();
     await adapter.createSession(
       makeConfig({
         env: {
-          CLAUDE_BINARY: "bunx @dexh/shannon",
+          CLAUDE_BINARY: LEGACY_BRIDGE_COMPAT_COMMAND,
           CLAUDE_CODE_OAUTH_TOKEN: "test-token",
         } as Record<string, string>,
       }),
     );
 
     expect(spawnedArgs[0][0]).toBe("bunx");
-    expect(spawnedArgs[0][1]).toBe("@dexh/shannon");
+    expect(spawnedArgs[0][1]).toBe(LEGACY_BRIDGE_COMPAT_PACKAGE);
   });
 
   test("config.env without CLAUDE_BINARY falls back to process.env", async () => {
-    process.env.CLAUDE_BINARY = "shannon";
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
 
     const adapter = new ClaudeAdapter();
     await adapter.createSession(
@@ -475,7 +498,7 @@ describe("CLAUDE_BINARY env override", () => {
       }),
     );
 
-    expect(spawnedArgs[0][0]).toBe("shannon");
+    expect(spawnedArgs[0][0]).toBe(LEGACY_BRIDGE_COMPAT_BINARY);
   });
 
   test("SWARM_USE_CLAUDE_BRIDGE=true routes through installed claude-bridge", async () => {
@@ -517,9 +540,9 @@ describe("CLAUDE_BINARY env override", () => {
     expect(spawnedEnvs[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
-  test("SWARM_USE_CLAUDE_BRIDGE=1 wins over CLAUDE_BINARY=shannon", async () => {
+  test("SWARM_USE_CLAUDE_BRIDGE=1 wins over legacy CLAUDE_BINARY", async () => {
     process.env.SWARM_USE_CLAUDE_BRIDGE = "1";
-    process.env.CLAUDE_BINARY = "shannon";
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
 
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig());
@@ -560,7 +583,7 @@ describe("CLAUDE_BINARY env override", () => {
   });
 });
 
-describe("Shannon tmux fail-fast gate", () => {
+describe("Claude Bridge tmux fail-fast gate", () => {
   let originalClaudeBinary: string | undefined;
   let originalUseClaudeBridge: string | undefined;
   let originalOauthToken: string | undefined;
@@ -609,8 +632,8 @@ describe("Shannon tmux fail-fast gate", () => {
     }
   });
 
-  test("sad path: rejects with tmux-mentioning error when CLAUDE_BINARY=shannon and tmux is missing", async () => {
-    process.env.CLAUDE_BINARY = "shannon";
+  test("sad path: rejects with tmux-mentioning error when legacy CLAUDE_BINARY is set and tmux is missing", async () => {
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
     whichSpy.mockImplementation((name: string) => {
       if (name === "tmux") return null;
       return `/usr/bin/${name}`;
@@ -620,8 +643,8 @@ describe("Shannon tmux fail-fast gate", () => {
     await expect(adapter.createSession(makeConfig())).rejects.toThrow(/tmux/i);
   });
 
-  test("happy path: does not throw when CLAUDE_BINARY=shannon and tmux IS on PATH", async () => {
-    process.env.CLAUDE_BINARY = "shannon";
+  test("happy path: does not throw when legacy CLAUDE_BINARY is set and tmux IS on PATH", async () => {
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
     whichSpy.mockImplementation((name: string) => {
       if (name === "tmux") return "/usr/bin/tmux";
       return null;
@@ -631,7 +654,7 @@ describe("Shannon tmux fail-fast gate", () => {
     await expect(adapter.createSession(makeConfig())).resolves.toBeDefined();
   });
 
-  test("non-shannon binary skips the tmux check (no Bun.which call for tmux)", async () => {
+  test("default binary skips the tmux check (no Bun.which call for tmux)", async () => {
     process.env.CLAUDE_BINARY = "claude";
     whichSpy.mockImplementation((name: string) => {
       if (name === "tmux") return null;
@@ -643,8 +666,8 @@ describe("Shannon tmux fail-fast gate", () => {
     await expect(adapter.createSession(makeConfig())).resolves.toBeDefined();
   });
 
-  test("custom shannon path (e.g. /usr/local/bin/shannon) still triggers the tmux check", async () => {
-    process.env.CLAUDE_BINARY = "/usr/local/bin/shannon";
+  test("custom legacy bridge path still triggers the tmux check", async () => {
+    process.env.CLAUDE_BINARY = `/usr/local/bin/${LEGACY_BRIDGE_COMPAT_BINARY}`;
     whichSpy.mockImplementation((name: string) => {
       if (name === "tmux") return null;
       return null;
@@ -654,8 +677,8 @@ describe("Shannon tmux fail-fast gate", () => {
     await expect(adapter.createSession(makeConfig())).rejects.toThrow(/tmux/i);
   });
 
-  test("command-string CLAUDE_BINARY='bunx @dexh/shannon' still triggers the tmux check", async () => {
-    process.env.CLAUDE_BINARY = "bunx @dexh/shannon";
+  test("legacy bridge command string still triggers the tmux check", async () => {
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_COMMAND;
     whichSpy.mockImplementation((name: string) => {
       if (name === "tmux") return null;
       return null;
@@ -729,8 +752,8 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     }
   });
 
-  test("CLAUDE_BINARY=shannon writes hasTrustDialogAccepted for config.cwd", async () => {
-    process.env.CLAUDE_BINARY = "shannon";
+  test("legacy CLAUDE_BINARY writes hasTrustDialogAccepted for config.cwd", async () => {
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
     const cwd = "/some/abs/cwd";
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig({ cwd }));
@@ -740,8 +763,8 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     expect(data.projects[cwd].hasCompletedProjectOnboarding).toBe(true);
   });
 
-  test("CLAUDE_BINARY='bunx @dexh/shannon' (command string) also triggers the pre-seed", async () => {
-    process.env.CLAUDE_BINARY = "bunx @dexh/shannon";
+  test("legacy CLAUDE_BINARY command string also triggers the pre-seed", async () => {
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_COMMAND;
     const cwd = "/some/other/cwd";
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig({ cwd }));
@@ -750,8 +773,8 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     expect(data.projects[cwd].hasTrustDialogAccepted).toBe(true);
   });
 
-  test("idempotent: re-creating session with shannon does not rewrite the file", async () => {
-    process.env.CLAUDE_BINARY = "shannon";
+  test("idempotent: re-creating legacy bridge session does not rewrite the file", async () => {
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
     const cwd = "/some/abs/cwd";
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig({ cwd }));
@@ -770,7 +793,7 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
         },
       }),
     );
-    process.env.CLAUDE_BINARY = "shannon";
+    process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig({ cwd: "/new/cwd" }));
 

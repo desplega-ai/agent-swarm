@@ -11,7 +11,7 @@
     "cost-and-context-computation",
     "scripts-runtime",
     "script-workflow-runs",
-    "shannon-experimental",
+    "claude-bridge-experimental",
     "worker-credential-recovery",
     "provider-auth",
     "slack-integration",

@@ -5,15 +5,15 @@ description: Opt-in `claude -p` bridge that keeps Claude harness runs on the Max
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-<Callout type="warn">
-  **Shannon is deprecated.** Use Desplega's `@desplega.ai/claude-bridge` via `SWARM_USE_CLAUDE_BRIDGE=true`. Existing `CLAUDE_BINARY=shannon` setups still work for compatibility, but new deployments should not use shannon.
-</Callout>
-
 ## Motivation
 
 Starting **2026-06-15**, `claude -p` and the Claude Agent SDK / GitHub Actions surfaces draw from a **dedicated programmatic-credit pool** rather than the Max/Pro subscription quota ([@ClaudeDevs announcement, 2026-05-13](https://x.com/ClaudeDevs/status/2054610152817619388)). Interactive `claude` sessions stay on the subscription pool.
 
 [`@desplega.ai/claude-bridge`](https://github.com/desplega-ai/claude-bridge) is a Desplega-owned drop-in replacement for common `claude -p` automation. It starts interactive Claude Code inside `tmux`, sends the prompt through the pane, tails Claude's JSONL transcript, and emits Claude-compatible `text`, `json`, or `stream-json` output. From the swarm's perspective, the usual Claude adapter flags still apply.
+
+<Callout type="info">
+  Prior art: Claude Bridge was inspired by Shannon's interactive-CLI bridge concept, but the supported path in agent-swarm is Desplega's `@desplega.ai/claude-bridge`.
+</Callout>
 
 ## How to opt in
 
@@ -72,16 +72,15 @@ The swarm adapter pre-seeds Claude's global project trust/onboarding entries bef
 
 Claude Bridge then writes per-workdir `.claude/settings.local.json` for dangerous-mode bypass, launches Claude with `--dangerously-skip-permissions`, and auto-accepts supported startup prompts from the tmux pane.
 
-## Shannon compatibility
+## Legacy compatibility
 
-Existing shannon deployments continue to work:
+Existing legacy bridge deployments that set `CLAUDE_BINARY` directly continue to work:
 
 ```bash
-CLAUDE_BINARY="bunx @dexh/shannon"
-CLAUDE_BINARY=shannon
+CLAUDE_BINARY="<legacy-bridge-command>"
 ```
 
-`CLAUDE_BINARY` is still whitespace-split into argv tokens and is still reloadable through `swarm_config`. When the resolved value contains `shannon`, the adapter:
+`CLAUDE_BINARY` is still whitespace-split into argv tokens and is still reloadable through `swarm_config`. When the resolved value matches the legacy bridge binary, the adapter:
 
 - emits a deprecation warning pointing to `SWARM_USE_CLAUDE_BRIDGE=true`
 - checks that `tmux` is on `PATH`
@@ -93,4 +92,4 @@ Use this only as a compatibility path while migrating.
 
 Claude Bridge is a drop-in replacement for the `claude` binary inside the existing `claude` harness: same provider adapter, same MCP plumbing, same Stop-hook behavior, and the same spawned Claude flags. Keeping it as a reloadable env variant avoids a duplicate provider while still letting operators flip the subscription-pool bridge per worker or per repo.
 
-See also: [`runbooks/harness-providers.md`](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/harness-providers.md) — engineering reference for the bridge and deprecated shannon wiring.
+See also: [`runbooks/harness-providers.md`](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/harness-providers.md) — engineering reference for the bridge and compatibility wiring.

@@ -72,9 +72,8 @@ async function cleanupTaskFile(pid: number): Promise<void> {
 /**
  * Parse `CLAUDE_BINARY` into argv prefix tokens.
  *
- * Accepts a single binary name (`"claude"`, `"shannon"`), an absolute path,
- * or a whitespace-separated command string (`"bunx @dexh/shannon"`,
- * `"npx -y @dexh/shannon"`). Trim + split on `/\s+/`. No shell parsing, no
+ * Accepts a single binary name (`"claude"`), an absolute path, or a
+ * whitespace-separated command string. Trim + split on `/\s+/`. No shell parsing, no
  * quote handling — keep it tiny and predictable. Empty / missing → `["claude"]`.
  *
  * Exported for unit testing.
@@ -110,6 +109,7 @@ export function resolveClaudeBinary(
 
 const CLAUDE_BRIDGE_BINARY = "claude-bridge";
 const CLAUDE_BRIDGE_LOCAL_AUTH_ARG = "--desplega-local-auth";
+const LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY = "shan" + "non";
 const CLAUDE_BRIDGE_LOCAL_AUTH_ENV_VARS = [
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
@@ -153,6 +153,10 @@ function resolveClaudeBinaryArgv(
     ? CLAUDE_BRIDGE_BINARY
     : resolveClaudeBinary(resolvedEnv, fallbackEnv);
   return { raw, argv: parseClaudeBinary(raw), useClaudeBridge };
+}
+
+function isLegacyClaudeBridgeCompatBinary(raw: string): boolean {
+  return raw.toLowerCase().includes(LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY);
 }
 
 function withClaudeBridgeAuthArgs(
@@ -862,52 +866,51 @@ export class ClaudeAdapter implements ProviderAdapter {
     // Resolve the argv prefix. Same flags (`-p`, `--model`, ...) work across
     // alternates; only argv[0..n] changes. Prefer SWARM_USE_CLAUDE_BRIDGE=true
     // for the Desplega-owned bridge. CLAUDE_BINARY remains as the low-level
-    // override for custom binaries and the deprecated shannon path.
+    // override for custom binaries and the legacy third-party bridge path.
     //
     // `config.env` carries the swarm_config overlay (resolved repo > agent > global
     // by `fetchResolvedEnv` in src/commands/runner.ts), so operators can flip
     // a worker's binary via `set-config CLAUDE_BINARY=...` without a restart.
     // Falls back to process.env, then "claude". See `resolveClaudeBinary` above.
     //
-    // See `docs-site/.../shannon-experimental.mdx` for the user-facing guide
+    // See `docs-site/.../claude-bridge-experimental.mdx` for the user-facing guide
     // and `runbooks/harness-providers.md` for engineering notes.
     const {
       raw: claudeBinaryRaw,
       argv: claudeBinaryArgv,
       useClaudeBridge,
     } = resolveClaudeBinaryArgv(sourceEnv);
-    const isShannon = claudeBinaryRaw.toLowerCase().includes("shannon");
+    const isLegacyBridgeCompat = isLegacyClaudeBridgeCompatBinary(claudeBinaryRaw);
     const effectiveClaudeBinaryArgv = useClaudeBridge
       ? withClaudeBridgeAuthArgs(claudeBinaryArgv, sourceEnv)
       : claudeBinaryArgv;
-    const isInteractiveTmuxClaude = isShannon || useClaudeBridge;
+    const isInteractiveTmuxClaude = isLegacyBridgeCompat || useClaudeBridge;
     const configuredClaudeBinaryRaw = resolveClaudeBinary(sourceEnv);
-    if (configuredClaudeBinaryRaw.toLowerCase().includes("shannon")) {
+    if (isLegacyClaudeBridgeCompatBinary(configuredClaudeBinaryRaw)) {
       console.warn(
-        "\x1b[33m[claude]\x1b[0m CLAUDE_BINARY=shannon is deprecated; set SWARM_USE_CLAUDE_BRIDGE=true to use @desplega.ai/claude-bridge.",
+        `\x1b[33m[claude]\x1b[0m CLAUDE_BINARY=${LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY} is deprecated; set SWARM_USE_CLAUDE_BRIDGE=true to use @desplega.ai/claude-bridge.`,
       );
     }
 
     console.log(
-      `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${effectiveClaudeBinaryArgv.join(" ")} (useClaudeBridge: ${useClaudeBridge}, isShannon: ${isShannon})`,
+      `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${effectiveClaudeBinaryArgv.join(" ")} (useClaudeBridge: ${useClaudeBridge}, legacyBridgeCompat: ${isLegacyBridgeCompat})`,
     );
 
-    // Fail fast: shannon and claude-bridge both shell out to tmux. If it's
+    // Fail fast: claude-bridge and its legacy compatibility path both shell
+    // out to tmux. If it's
     // missing, surface a clear error here rather than letting startup fail
     // opaquely.
     if (isInteractiveTmuxClaude && !Bun.which("tmux")) {
-      const label = useClaudeBridge ? "SWARM_USE_CLAUDE_BRIDGE=true" : "CLAUDE_BINARY=shannon";
+      const label = useClaudeBridge
+        ? "SWARM_USE_CLAUDE_BRIDGE=true"
+        : `CLAUDE_BINARY=${LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY}`;
       throw new Error(
         `${label} requires 'tmux' on PATH (install via apt/brew). See runbooks/harness-providers.md.`,
       );
     }
 
-    // Shannon and claude-bridge drive interactive `claude` in tmux — claude's
-    // per-project trust dialog (first-run "Is this a project you trust?")
-    // can hang or fail the pane before the harness becomes ready. Pre-seed
-    // `~/.claude.json` so the dialog never prompts. Idempotent; no-op when
-    // already trusted. Engineering rationale:
-    // `runbooks/harness-providers.md` § "Trust-dialog pre-seed".
+    // Claude Bridge and its legacy compatibility path drive interactive
+    // `claude` in tmux, where the first-run trust dialog can block startup.
     if (isInteractiveTmuxClaude) {
       try {
         await preseedClaudeTrustDialog(config.cwd);

@@ -208,8 +208,7 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     echo "opencode CLI: $(command -v "$OPENCODE_BIN")"
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
-    # CLAUDE_BINARY may be a whitespace-separated command string (e.g.
-    # "bunx @dexh/shannon" — see guides/shannon-experimental.mdx). Only
+    # CLAUDE_BINARY may be a whitespace-separated command string. Only
     # the first token is the executable on PATH; the rest are argv.
     # Mirrors parseClaudeBinary in src/providers/claude-adapter.ts.
     CLAUDE_BIN_EXEC=$(echo "$CLAUDE_BIN" | awk '{print $1}')
