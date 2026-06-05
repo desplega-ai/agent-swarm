@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { publishCatalogReportPage } from "./catalog-report";
 
 export const argsSchema = z.object({
   days: z
@@ -21,6 +22,7 @@ export const argsSchema = z.object({
     .boolean()
     .optional()
     .describe("Include per-agent task/completion/failure breakdown (default true)"),
+  publishPage: z.boolean().optional().describe("Publish an authed HTML page (default true)"),
 });
 
 /**
@@ -120,6 +122,7 @@ export default async function compoundInsights(args: any, ctx: any) {
   const includeMemoryHealth = parsed.data.includeMemoryHealth !== false;
   const includeScriptCandidates = parsed.data.includeScriptCandidates !== false;
   const includeByAgent = parsed.data.includeByAgent !== false;
+  const publishPage = parsed.data.publishPage !== false;
 
   // `days` is a validated positive int, so it is safe to interpolate into the
   // SQLite datetime modifier. EXCLUDED_FAIL is a fixed constant list.
@@ -392,6 +395,97 @@ export default async function compoundInsights(args: any, ctx: any) {
       completed: r.completed,
       failed: r.failed,
     }));
+  }
+
+  if (publishPage) {
+    const failureFindings = (insights.failureClusters || []).map((cluster: any) => ({
+      id: `failure.${String(cluster.reason || "unknown").slice(0, 48)}`,
+      severity: cluster.count >= 5 ? "high" : cluster.count >= 2 ? "medium" : "low",
+      summary: `${cluster.count} real failure(s): ${cluster.reason}`,
+      action: "Review the repeated failure mode and decide whether to fix, retry, or add a temporary watch item.",
+      samples: [cluster],
+    }));
+    const scheduleFindings = (insights.scheduleHealth || []).map((schedule: any) => ({
+      id: `schedule.${schedule.id}`,
+      severity: schedule.failureRate >= 50 ? "high" : "medium",
+      summary: `${schedule.name} has ${schedule.failureRate}% real-failure rate.`,
+      action: "Inspect recent schedule tasks and repair, retarget, or disable the schedule.",
+      samples: [schedule],
+    }));
+    const memoryPollution = insights.memoryHealth?.pollution;
+    const memoryFindings = memoryPollution?.autoSnapshotPercent
+      ? [
+          {
+            id: "memory.auto-snapshot-share",
+            severity: memoryPollution.autoSnapshotPercent >= 40 ? "high" : "medium",
+            summary: `Automatic snapshots are ${memoryPollution.autoSnapshotPercent}% of memory.`,
+            action: "Review memory gates and prune low-use automatic snapshots before adding more.",
+            samples: [memoryPollution],
+          },
+        ]
+      : [];
+    const scriptFindings = (insights.scriptCandidates || []).map((candidate: any) => ({
+      id: `script-candidate.${candidate.suggestedName || "unnamed"}`,
+      severity: candidate.count >= 3 ? "medium" : "low",
+      summary: `${candidate.count} repeated tool triplet(s): ${candidate.tools.join(" -> ")}`,
+      action: "Consider turning this repeated workflow into a reusable seeded script.",
+      samples: [candidate],
+    }));
+
+    insights.page = await publishCatalogReportPage(
+      {
+        title: "Compound Insights Audit",
+        slug: "compound-insights",
+        description: "Swarm-wide daily ops snapshot for compounding and reliability review.",
+        generatedAt: insights.generatedAt,
+        lede: `Swarm-wide ${days}-day snapshot: ${insights.taskSummary.total} task(s), ${insights.taskSummary.completionRate}% completion rate, ${insights.taskSummary.failureRate}% failure rate.`,
+        metrics: [
+          ["Tasks", insights.taskSummary.total],
+          ["Completed", insights.taskSummary.completed],
+          ["Failed", insights.taskSummary.failed],
+          ["Failure clusters", insights.failureClusters?.length || 0],
+        ],
+        sections: [
+          {
+            key: "failures",
+            goal: "Expose repeated real failure modes without counting bookkeeping noise.",
+            findingCount: failureFindings.length,
+            checks: insights.taskSummary,
+            findings: failureFindings,
+          },
+          {
+            key: "schedules",
+            goal: "Keep schedule failures visible before daily work compounds stale assumptions.",
+            findingCount: scheduleFindings.length,
+            checks: { unhealthySchedules: scheduleFindings.length },
+            findings: scheduleFindings,
+          },
+          {
+            key: "memory",
+            goal: "Detect memory bloat and low-use automatic snapshots.",
+            findingCount: memoryFindings.length,
+            checks: insights.memoryHealth
+              ? {
+                  total: insights.memoryHealth.total,
+                  autoSnapshotPercent: memoryPollution?.autoSnapshotPercent ?? 0,
+                  sampledAutoSnapshots:
+                    memoryPollution?.similarityCheck?.sampledAutoSnapshots ?? 0,
+                }
+              : {},
+            findings: memoryFindings,
+          },
+          {
+            key: "script-candidates",
+            goal: "Find repeated tool chains worth compressing into reusable scripts.",
+            findingCount: scriptFindings.length,
+            checks: { candidates: scriptFindings.length },
+            findings: scriptFindings,
+          },
+        ],
+        appendix: insights,
+      },
+      ctx,
+    );
   }
 
   return insights;

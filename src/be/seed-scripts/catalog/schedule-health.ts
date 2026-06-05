@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { publishCatalogReportPage } from "./catalog-report";
 
 export const argsSchema = z.object({
   days: z
@@ -11,6 +12,7 @@ export const argsSchema = z.object({
     .number()
     .optional()
     .describe("Flag schedules with failure rate above this (0-1, default 0.2)"),
+  publishPage: z.boolean().optional().describe("Publish an authed HTML page (default true)"),
 });
 
 /** Per-schedule health check: failure rates and flagging unhealthy schedules. */
@@ -19,6 +21,7 @@ export default async function scheduleHealth(args: any, ctx: any) {
   if (!parsed.success) return { error: "invalid args: " + parsed.error.message };
   const days = parsed.data.days || 7;
   const threshold = parsed.data.failureThreshold ?? 0.2;
+  const publishPage = parsed.data.publishPage !== false;
   const since = new Date(Date.now() - days * 86400000).toISOString();
 
   // Get schedules
@@ -26,7 +29,38 @@ export default async function scheduleHealth(args: any, ctx: any) {
   const schedPayload = schedRes?.data ?? schedRes;
   const schedules: any[] = schedPayload?.schedules ?? [];
 
-  if (!schedules.length) return { days, schedules: [], flagged: [] };
+  if (!schedules.length) {
+    const result: any = { days, threshold, totalSchedules: 0, flaggedCount: 0, schedules: [], flagged: [] };
+    if (publishPage) {
+      result.page = await publishCatalogReportPage(
+        {
+          title: "Schedule Health Audit",
+          slug: "schedule-health",
+          description: "Per-schedule failure rate audit.",
+          generatedAt: new Date().toISOString(),
+          lede: "No schedules were returned for the selected window.",
+          metrics: [
+            ["Schedules", 0],
+            ["Flagged", 0],
+            ["Days", days],
+            ["Threshold", threshold],
+          ],
+          sections: [
+            {
+              key: "schedule-health",
+              goal: "Keep recurring schedules healthy and visible.",
+              findingCount: 0,
+              checks: { schedules: 0, flagged: 0 },
+              findings: [],
+            },
+          ],
+          appendix: result,
+        },
+        ctx,
+      );
+    }
+    return result;
+  }
 
   // Get recent tasks to correlate with schedules
   const taskRes: any = await ctx.swarm.task_list({ createdAfter: since, limit: 2000 });
@@ -62,7 +96,7 @@ export default async function scheduleHealth(args: any, ctx: any) {
 
   const flagged = results.filter((r: any) => r.flagged);
 
-  return {
+  const result: any = {
     days,
     threshold,
     totalSchedules: schedules.length,
@@ -70,4 +104,46 @@ export default async function scheduleHealth(args: any, ctx: any) {
     schedules: results.sort((a: any, b: any) => b.failureRate - a.failureRate),
     flagged,
   };
+
+  if (publishPage) {
+    result.page = await publishCatalogReportPage(
+      {
+        title: "Schedule Health Audit",
+        slug: "schedule-health",
+        description: "Per-schedule failure rate audit.",
+        generatedAt: new Date().toISOString(),
+        lede: `Checked ${schedules.length} schedule(s) over ${days} day(s); ${flagged.length} exceeded the configured failure threshold.`,
+        metrics: [
+          ["Schedules", schedules.length],
+          ["Flagged", flagged.length],
+          ["Days", days],
+          ["Threshold", threshold],
+        ],
+        sections: [
+          {
+            key: "schedule-health",
+            goal: "Keep recurring schedules healthy and visible.",
+            findingCount: flagged.length,
+            checks: {
+              totalSchedules: schedules.length,
+              flaggedSchedules: flagged.length,
+              threshold,
+              scannedTasks: tasks.length,
+            },
+            findings: flagged.map((schedule: any) => ({
+              id: `schedule.${schedule.id}`,
+              severity: schedule.failureRate >= 0.5 ? "high" : "medium",
+              summary: `${schedule.name} failed ${schedule.failed}/${schedule.runs} recent run(s).`,
+              action: "Review the latest failed tasks and disable, repair, or retarget this schedule.",
+              samples: [schedule],
+            })),
+          },
+        ],
+        appendix: result,
+      },
+      ctx,
+    );
+  }
+
+  return result;
 }

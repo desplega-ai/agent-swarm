@@ -8,6 +8,7 @@ import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { typecheckScript } from "../be/scripts/typecheck";
 import { runSeeder } from "../be/seed";
 import { SEED_SCRIPTS, scriptsSeeder } from "../be/seed-scripts";
+import bootTriage from "../be/seed-scripts/catalog/boot-triage";
 import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
 import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
@@ -52,8 +53,8 @@ afterAll(async () => {
 });
 
 describe("seed-scripts catalog", () => {
-  test("manifest holds 16 unique, well-described scripts", () => {
-    expect(SEED_SCRIPTS.length).toBe(16);
+  test("manifest holds 17 unique, well-described scripts", () => {
+    expect(SEED_SCRIPTS.length).toBe(17);
     const names = SEED_SCRIPTS.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
     for (const s of SEED_SCRIPTS) {
@@ -189,6 +190,7 @@ describe("seed-scripts catalog", () => {
         includeScheduleHealth: false,
         includeScriptCandidates: false,
         includeByAgent: false,
+        publishPage: false,
       },
       ctx,
     );
@@ -487,6 +489,122 @@ describe("seed-scripts catalog", () => {
     expect(html).toContain('<div class="sample-table"');
     expect(html).toContain("@media (max-width: 860px)");
     expect(html).not.toContain("<ul>");
+  });
+
+  test("boot-triage returns one read-only post-restart snapshot", async () => {
+    const queries: Array<{ sql: string; params?: unknown[] }> = [];
+    const result: any = await bootTriage(
+      { nowIso: "2026-06-05T10:15:00.000Z" },
+      {
+        stdlib: {
+          fetch: async () =>
+            new Response(
+              JSON.stringify([
+                {
+                  number: 669,
+                  title: "release: v1.92.0",
+                  html_url: "https://github.com/desplega-ai/agent-swarm/pull/669",
+                  merged_at: "2026-06-05T10:08:00.000Z",
+                },
+              ]),
+              { status: 200 },
+            ),
+        },
+        swarm: {
+          db_query: async (args: { sql: string; params?: unknown[] }) => {
+            queries.push(args);
+            if (args.sql.includes("t.status = 'failed'")) {
+              return {
+                columns: [
+                  "id",
+                  "task",
+                  "status",
+                  "taskType",
+                  "agentId",
+                  "agentName",
+                  "scheduleId",
+                  "parentTaskId",
+                  "failureReason",
+                  "createdAt",
+                  "lastUpdatedAt",
+                ],
+                rows: [
+                  [
+                    "failed-real",
+                    "Investigate deploy",
+                    "failed",
+                    "feature",
+                    "agent-1",
+                    "Worker",
+                    null,
+                    null,
+                    "Typecheck failed",
+                    "2026-06-05T10:00:00.000Z",
+                    "2026-06-05T10:02:00.000Z",
+                  ],
+                  [
+                    "failed-benign",
+                    "Superseded task",
+                    "failed",
+                    "task",
+                    "agent-1",
+                    "Worker",
+                    null,
+                    null,
+                    "cancelled",
+                    "2026-06-05T10:00:00.000Z",
+                    "2026-06-05T10:02:00.000Z",
+                  ],
+                ],
+              };
+            }
+            if (args.sql.includes("t.status = 'in_progress'")) {
+              return {
+                columns: [
+                  "id",
+                  "task",
+                  "status",
+                  "taskType",
+                  "agentId",
+                  "agentName",
+                  "scheduleId",
+                  "parentTaskId",
+                  "failureReason",
+                  "createdAt",
+                  "lastUpdatedAt",
+                ],
+                rows: [
+                  [
+                    "stuck-1",
+                    "Stuck work",
+                    "in_progress",
+                    "feature",
+                    "agent-offline",
+                    "Offline",
+                    null,
+                    null,
+                    null,
+                    "2026-06-05T10:00:00.000Z",
+                    "2026-06-05T10:01:00.000Z",
+                  ],
+                ],
+              };
+            }
+            return { columns: [], rows: [] };
+          },
+        },
+      },
+    );
+
+    expect(queries.length).toBe(4);
+    expect(result.deployRestartDetection.mergedPrsWithinWindow).toHaveLength(1);
+    expect(result.recentlyFailedTasks.map((task: any) => task.id)).toEqual(["failed-real"]);
+    expect(result.stuckInProgressOnOfflineAgents.map((task: any) => task.id)).toEqual(["stuck-1"]);
+    expect(result.summary).toMatchObject({
+      mergedPrsWithinWindow: 1,
+      recentlyFailedTasks: 1,
+      stuckInProgressOnOfflineAgents: 1,
+    });
   });
 });
 

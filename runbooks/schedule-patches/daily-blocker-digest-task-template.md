@@ -1,22 +1,3 @@
-# Daily Blocker Digest
-
-Ask the lead to summarize stuck work, failing checks, and owner decisions every weekday.
-
-## Schedule
-
-```json
-{
-  "cron": "5 2 * * *",
-  "timezone": "UTC",
-  "agentRole": "lead",
-  "enabled": true
-}
-```
-
-## Scheduled Task
-
-This is the full task prompt the schedule runs on each fire — including the accumulated operational learnings baked into it. Adapt the swarm-specific references (channel IDs, agent names, repo paths) to your environment before enabling.
-
 Task Type: Daily Blocker Digest — "Compound Prelude" (unified with PR review)
 
 You are Lead. This runs 5 minutes before the compound evolution. Purpose: surface every item claimed to be "awaiting human" so the compound can detect stale-state items (blockers actually resolved but never removed), AND provide the single daily summary of open PRs. Rule from Taras (2026-04-22): verify, don't assume.

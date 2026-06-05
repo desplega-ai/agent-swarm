@@ -28,6 +28,9 @@ import {
   startHeartbeat,
   stopHeartbeat,
 } from "../heartbeat/heartbeat";
+import { getTemplateDefinition } from "../prompts/registry";
+
+import "../heartbeat/templates";
 
 const TEST_DB_PATH = "./test-heartbeat.sqlite";
 
@@ -58,6 +61,25 @@ describe("Heartbeat Triage", () => {
     getDb().run("DELETE FROM agent_tasks");
     getDb().run("DELETE FROM agents");
     getDb().run("DELETE FROM active_sessions");
+  });
+
+  describe("registered heartbeat templates", () => {
+    test("pin tracked-item caps and seeded script calls", () => {
+      const checklist = getTemplateDefinition("heartbeat.checklist")?.defaultBody ?? "";
+      const bootTriage = getTemplateDefinition("heartbeat.boot-triage")?.defaultBody ?? "";
+
+      for (const body of [checklist, bootTriage]) {
+        expect(body).toContain("Active Blockers + Watch Items + Open Discussion");
+        expect(body).toContain("≤10 items");
+        expect(body).toContain("20 is the absolute max");
+        expect(body).toContain("explicit lift trigger + date");
+      }
+
+      expect(checklist).toContain("Heartbeat Audit");
+      expect(checklist).toContain("Rule #11");
+      expect(bootTriage).toContain("global script `boot-triage`");
+      expect(bootTriage).toContain("one read-only call");
+    });
   });
 
   // ==========================================================================
