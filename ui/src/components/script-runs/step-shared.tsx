@@ -1,5 +1,6 @@
 import { Bot, Braces, FileCode2, type LucideIcon, Workflow } from "lucide-react";
 import type { ScriptRunJournalEntry } from "@/api/types";
+import { formatDurationMs as formatMs } from "@/lib/format-duration-ms";
 
 /**
  * Visual + semantic metadata for a journal step type, shared by the source-code
@@ -79,21 +80,11 @@ export function stepTypeMeta(stepType: string): StepTypeMeta {
 }
 
 /**
- * Sub-second-aware duration formatter. `formatElapsed`/`formatDuration` floor to
- * whole seconds (120ms → "0s"); the timeline needs millisecond fidelity.
+ * Sub-second-aware duration label for the timeline. Delegates to the canonical
+ * `@/lib/format-duration-ms` in `precise` mode — `formatElapsed`/`formatDuration`
+ * floor to whole seconds (120ms → "0s"), but the timeline needs ms fidelity.
  */
-export function formatDurationMs(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "—";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  const s = ms / 1000;
-  if (s < 10) return `${s.toFixed(2).replace(/0$/, "")}s`;
-  if (s < 60) return `${Math.round(s)}s`;
-  const m = Math.floor(s / 60);
-  const rem = Math.round(s % 60);
-  if (m < 60) return `${m}m ${rem}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
+export const formatDurationMs = (ms: number): string => formatMs(ms, { precise: true });
 
 /** A journal entry laid out on the timeline: measured duration + cumulative offset. */
 export interface TimelineStep {

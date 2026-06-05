@@ -353,10 +353,13 @@ export async function handleScripts(
         id: crypto.randomUUID(),
         agentId: agent.id,
         source: source as string,
-        args: parsed.body.args ?? null,
+        // Scrub args + result before persisting: the stored row is later served
+        // raw by GET /api/script-runs/{id} to the dashboard, so it needs the same
+        // redaction guarantees as the scrubbed run response below.
+        args: scrubObject(parsed.body.args ?? null),
         scriptName: parsed.body.name,
         status: ok ? "completed" : "failed",
-        output: output.result,
+        output: scrubObject(output.result),
         error: runError,
         startedAt,
         finishedAt: new Date().toISOString(),

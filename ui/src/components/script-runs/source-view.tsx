@@ -1,6 +1,7 @@
 import { Check, Copy, WrapText } from "lucide-react";
 import { Highlight, themes } from "prism-react-renderer";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 import type { SourceAnchor, StepBlock } from "./source-map";
@@ -57,7 +58,7 @@ export function SourceView({
   className,
 }: SourceViewProps) {
   const { theme } = useTheme();
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const [wrap, setWrap] = useState(false);
 
   const lineInfo = useMemo(() => {
@@ -98,13 +99,6 @@ export function SourceView({
     const target = container.scrollTop + offset - container.clientHeight * 0.3;
     container.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
   }, [selectedBlock, selectedAnchor]);
-
-  const copy = () => {
-    navigator.clipboard.writeText(source).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
-  };
 
   const isSelected = (region: Region): boolean => {
     if (region.kind === "step") return region.blockIndex === selectedBlock;
@@ -148,7 +142,7 @@ export function SourceView({
           </button>
           <button
             type="button"
-            onClick={copy}
+            onClick={() => copy(source)}
             aria-label={copied ? "Copied" : "Copy source"}
             className={cn(
               "inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted-foreground/15 hover:text-foreground",

@@ -49,6 +49,28 @@ function buildMatcher(labelRaw: string): (stepKey: string) => boolean {
   return () => false;
 }
 
+/**
+ * Build a `lineOf(charIndex) → 0-based line` lookup for `source`. Scans newlines
+ * once into a sorted `lineStarts` array, then answers each query with a binary
+ * search. Shared by both source parsers so the indexing logic lives in one place.
+ */
+function lineIndexer(source: string): (idx: number) => number {
+  const lineStarts = [0];
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === "\n") lineStarts.push(i + 1);
+  }
+  return (idx: number): number => {
+    let lo = 0;
+    let hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (lineStarts[mid] <= idx) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+}
+
 /** Is the char at `i` escaped? Counts consecutive preceding backslashes (odd = escaped). */
 function isEscaped(src: string, i: number): boolean {
   let n = 0;
@@ -64,21 +86,7 @@ function isEscaped(src: string, i: number): boolean {
 export function parseStepBlocks(source: string): StepBlock[] {
   const blocks: StepBlock[] = [];
   const re = /ctx\s*\.\s*step\s*\.\s*(swarmScript|agentTask|rawLlm|humanInTheLoop)\s*\(/g;
-
-  const lineStarts = [0];
-  for (let i = 0; i < source.length; i++) {
-    if (source[i] === "\n") lineStarts.push(i + 1);
-  }
-  const lineOf = (idx: number): number => {
-    let lo = 0;
-    let hi = lineStarts.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (lineStarts[mid] <= idx) lo = mid;
-      else hi = mid - 1;
-    }
-    return lo;
-  };
+  const lineOf = lineIndexer(source);
 
   let m: RegExpExecArray | null = re.exec(source);
   while (m !== null) {
@@ -150,20 +158,7 @@ export interface RunAnchors {
 
 /** Locate the source lines that correspond to the run's input (args) and output (return). */
 export function parseRunAnchors(source: string): RunAnchors {
-  const lineStarts = [0];
-  for (let i = 0; i < source.length; i++) {
-    if (source[i] === "\n") lineStarts.push(i + 1);
-  }
-  const lineOf = (idx: number): number => {
-    let lo = 0;
-    let hi = lineStarts.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (lineStarts[mid] <= idx) lo = mid;
-      else hi = mid - 1;
-    }
-    return lo;
-  };
+  const lineOf = lineIndexer(source);
 
   const sig =
     /^[^\n]*\bmain\b[^\n]*\(/m.exec(source) ?? /^[^\n]*\bfunction\b[^\n]*\(/m.exec(source);

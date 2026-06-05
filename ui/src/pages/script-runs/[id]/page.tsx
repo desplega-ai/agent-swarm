@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -36,18 +37,12 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function RunId({ id }: { id: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard.writeText(id).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
-  };
+  const { copied, copy } = useCopyToClipboard();
   return (
     <Fact label="Run ID">
       <button
         type="button"
-        onClick={copy}
+        onClick={() => copy(id)}
         className="group inline-flex items-center gap-1.5 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
         aria-label={copied ? "Copied" : "Copy run ID"}
       >
