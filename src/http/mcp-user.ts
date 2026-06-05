@@ -5,6 +5,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { resolveUserByToken } from "@/be/users";
 import { createUserServer } from "@/server-user";
 import type { User } from "@/types";
+import { closeIdleMcpTransports, type McpTransportActivity, markMcpTransportActivity } from "./mcp";
 
 function unauthorized(res: ServerResponse): true {
   res.writeHead(401, { "Content-Type": "application/json" });
@@ -32,6 +33,7 @@ export async function handleMcpUser(
   res: ServerResponse,
   transports: Record<string, StreamableHTTPServerTransport>,
   sessionUsers: Record<string, string>,
+  sessionActivity: McpTransportActivity = {},
 ): Promise<boolean> {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
@@ -57,16 +59,19 @@ export async function handleMcpUser(
 
     if (sessionId && transports[sessionId]) {
       transport = transports[sessionId];
+      markMcpTransportActivity(sessionActivity, sessionId);
     } else if (!sessionId && isInitializeRequest(body)) {
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
           transports[id] = transport;
           sessionUsers[id] = user.id;
+          markMcpTransportActivity(sessionActivity, id);
         },
         onsessionclosed: (id) => {
           delete transports[id];
           delete sessionUsers[id];
+          delete sessionActivity[id];
         },
       });
 
@@ -74,6 +79,7 @@ export async function handleMcpUser(
         if (transport.sessionId) {
           delete transports[transport.sessionId];
           delete sessionUsers[transport.sessionId];
+          delete sessionActivity[transport.sessionId];
         }
       };
 
@@ -92,11 +98,13 @@ export async function handleMcpUser(
     }
 
     await transport.handleRequest(req, res, body);
+    markMcpTransportActivity(sessionActivity, transport.sessionId);
     return true;
   }
 
   if (req.method === "GET" || req.method === "DELETE") {
     if (sessionId && transports[sessionId]) {
+      markMcpTransportActivity(sessionActivity, sessionId);
       await transports[sessionId].handleRequest(req, res);
       return true;
     }
@@ -108,4 +116,19 @@ export async function handleMcpUser(
   res.writeHead(405);
   res.end("Method not allowed");
   return true;
+}
+
+export function closeIdleMcpUserTransports(
+  transports: Record<string, StreamableHTTPServerTransport>,
+  sessionUsers: Record<string, string>,
+  sessionActivity: McpTransportActivity,
+  options: { now?: number; idleTimeoutMs?: number } = {},
+): number {
+  return closeIdleMcpTransports(transports, sessionActivity, {
+    ...options,
+    label: "user MCP",
+    onClose: (id) => {
+      delete sessionUsers[id];
+    },
+  });
 }

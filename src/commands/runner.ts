@@ -3127,6 +3127,7 @@ async function checkCompletedProcesses(
   state: RunnerState,
   role: string,
   apiConfig?: ApiConfig,
+  cancelledSignaled?: Set<string>,
 ): Promise<void> {
   const completedTasks: Array<{
     taskId: string;
@@ -3161,6 +3162,9 @@ async function checkCompletedProcesses(
   // Remove completed tasks from the map and ensure they're marked as finished
   for (const { taskId, result, cursorUpdates, workingDir, credentialInfo } of completedTasks) {
     state.activeTasks.delete(taskId);
+    vcsDetectedTasks.delete(taskId);
+    vcsCheckTimestamps.delete(taskId);
+    cancelledSignaled?.delete(taskId);
 
     if (apiConfig) {
       removeActiveSession(apiConfig, taskId);
@@ -4122,7 +4126,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Wait if at capacity (though unlikely on fresh startup)
         while (state.activeTasks.size >= state.maxConcurrent) {
-          await checkCompletedProcesses(state, role, apiConfig);
+          await checkCompletedProcesses(state, role, apiConfig, cancelledSignaled);
           await Bun.sleep(1000);
         }
 
@@ -4341,7 +4345,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     await pingServer(apiConfig, role);
 
     // Check for completed processes first and ensure tasks are marked as finished
-    await checkCompletedProcesses(state, role, apiConfig);
+    await checkCompletedProcesses(state, role, apiConfig, cancelledSignaled);
 
     // Live HARNESS_PROVIDER reconciliation. Re-fetches `swarm_config` (overlaid
     // on env) and swaps the adapter if the resolved provider changed —
