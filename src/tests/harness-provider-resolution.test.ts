@@ -139,6 +139,29 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("HARNESS_PROVIDER", null)).not.toBeNull();
   });
 
+  test("accepts a valid CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", () => {
+    expect(validateConfigValue("CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", "7200000")).toBeNull();
+    expect(validateConfigValue("CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", "1800000")).toBeNull();
+    // case-insensitive key lookup
+    expect(validateConfigValue("codex_credits_exhausted_cooldown_ms", "60000")).toBeNull();
+  });
+
+  test("rejects non-positive / non-numeric CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", () => {
+    for (const bad of ["abc", "0", "-5", ""]) {
+      const err = validateConfigValue("CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", bad);
+      expect(err).not.toBeNull();
+      expect(err).toMatch(/CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS/);
+    }
+  });
+
+  test("rejects partial-numeric CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS values", () => {
+    for (const bad of ["60000ms", "1.5", "123abc", "1e5", " 60000 ms"]) {
+      const err = validateConfigValue("CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", bad);
+      expect(err).not.toBeNull();
+      expect(err).toMatch(/CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS/);
+    }
+  });
+
   test("accepts only boolean-like SWARM_USE_CLAUDE_BRIDGE values", () => {
     for (const value of ["true", "false", "1", "0", " TRUE "]) {
       expect(validateConfigValue("SWARM_USE_CLAUDE_BRIDGE", value)).toBeNull();

@@ -219,9 +219,42 @@ The adapter's `formatTerminalError` method matches incoming Codex error messages
 When the runner sees either prefix in a task's `failureReason`, it calls `POST /api/keys/report-rate-limit` to mark the used slot as unavailable. The `rateLimitedUntil` timestamp is:
 
 - Parsed from the error message if it contains an ISO 8601 or Unix-epoch reset time.
-- Otherwise set to **now + 5 minutes** as a conservative fallback until structured `rate_limit_event` capture lands (tracked as a separate follow-up PR).
+- Set to **now + `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS`** (default 2 hours) when the error is a workspace-credits-exhausted message ("Your workspace is out of credits…"). See [Workspace credits exhausted](#workspace-credits-exhausted) below.
+- Otherwise set to **now + 5 minutes** as a conservative fallback for other unparseable rate-limit errors.
 
 The slot is excluded from future `availableIndices` responses until `rateLimitedUntil` passes.
+
+### Workspace credits exhausted
+
+Codex returns a distinct error when a workspace's credit balance is depleted:
+
+> "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+
+This error does not match standard rate-limit patterns, so the runner applies a dedicated cooldown rather than the 5-minute fallback. The default cooldown is **2 hours** — workspace credits typically refill on a weekly cadence, so a short fallback would keep re-handing the dead slot every 5 minutes and burn retries until the next refill.
+
+You can tune this cooldown via the swarm config store:
+
+| Config key | Type | Default | Valid range | Description |
+|---|---|---|---|---|
+| `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS` | positive integer (ms) | `7200000` (2 h) | 5 min – 7 days | How long a credits-exhausted Codex OAuth slot is held out of the pool before being retried. |
+
+Set it via the API:
+
+```bash
+curl -X PUT http://localhost:3013/api/config \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"global","key":"CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS","value":"14400000"}'
+# Sets cooldown to 4 hours
+```
+
+Or via the `set-config` MCP tool:
+
+```
+set-config key=CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS value=14400000 scope=global
+```
+
+The value must be a **positive integer of milliseconds** (e.g. `"7200000"` — no units suffix, no decimal point). The runner clamps the configured value to the `[5m, 7d]` range; values outside that range are silently brought to the nearest bound at runtime, but the write-time validator at `PUT /api/config` rejects clearly invalid inputs immediately.
 
 ### Backwards compatibility
 
