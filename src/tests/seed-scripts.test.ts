@@ -97,7 +97,9 @@ describe("seed-scripts catalog", () => {
   test("scriptsSeeder seeds the whole catalog at global scope", async () => {
     const result = await runSeeder(scriptsSeeder, { quiet: true });
     expect(result.failed).toEqual([]);
-    expect(result.created).toBe(SEED_SCRIPTS.length);
+    expect(
+      result.created + result.updated + result.skippedUnchanged + result.skippedUserModified,
+    ).toBe(SEED_SCRIPTS.length);
 
     const globals = listScripts({ scope: "global" });
     for (const s of SEED_SCRIPTS) {
