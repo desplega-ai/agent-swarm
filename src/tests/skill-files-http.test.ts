@@ -137,4 +137,35 @@ describe("/api/skills/:id/files", () => {
     const missingSkill = await dispatch(`/api/skills/no-such-skill/files/references/a.md`);
     expect(missingSkill.status).toBe(404);
   });
+
+  test("rejects file mutations for system-managed skills", async () => {
+    const systemSkill = createSkill({
+      name: `system-file-skill-${crypto.randomUUID()}`,
+      description: "System file skill",
+      content: "---\nname: system-file-skill\ndescription: System file skill\n---\n\nBody.",
+      type: "remote",
+      scope: "global",
+      isComplex: true,
+      systemDefault: true,
+    });
+
+    const post = await dispatch(`/api/skills/${systemSkill.id}/files`, {
+      method: "POST",
+      body: JSON.stringify({
+        files: [{ path: "references/guide.md", content: "# Guide" }],
+      }),
+    });
+    expect(post.status).toBe(403);
+
+    const put = await dispatch(`/api/skills/${systemSkill.id}/files/references/guide.md`, {
+      method: "PUT",
+      body: JSON.stringify({ content: "# Guide" }),
+    });
+    expect(put.status).toBe(403);
+
+    const del = await dispatch(`/api/skills/${systemSkill.id}/files/references/guide.md`, {
+      method: "DELETE",
+    });
+    expect(del.status).toBe(403);
+  });
 });

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { closeDb, createAgent, createSkill, initDb, installSkill, upsertSkillFile } from "../be/db";
 import { syncSkillsToFilesystem } from "../be/skill-sync";
 
@@ -167,6 +167,30 @@ describe("syncSkillsToFilesystem", () => {
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(bundledFile, "utf-8")).toContain("Bundled reference.");
     expect(existsSync(binaryFile)).toBe(false);
+  });
+
+  test("removes stale bundled files from swarm-managed skill directories", () => {
+    rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
+
+    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    expect(result.errors).toHaveLength(0);
+
+    const skillDir = join(FAKE_HOME, ".claude", "skills", "complex-db-skill");
+    const staleFile = join(skillDir, "references", "old-guide.md");
+    const currentFile = join(skillDir, "references", "guide.md");
+    const staleBinary = join(skillDir, "assets", "logo.png");
+    mkdirSync(dirname(staleFile), { recursive: true });
+    mkdirSync(dirname(staleBinary), { recursive: true });
+    writeFileSync(staleFile, "stale");
+    writeFileSync(staleBinary, "previous binary payload");
+
+    const nextResult = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+
+    expect(nextResult.errors).toHaveLength(0);
+    expect(nextResult.removed).toBeGreaterThanOrEqual(2);
+    expect(existsSync(staleFile)).toBe(false);
+    expect(existsSync(staleBinary)).toBe(false);
+    expect(readFileSync(currentFile, "utf-8")).toContain("Bundled reference.");
   });
 
   test("skips legacy complex skills without stored files", () => {

@@ -8,6 +8,7 @@
  * This runs on the API side — workers call it via POST /api/skills/sync-filesystem.
  */
 
+import type { Dirent } from "node:fs";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -29,6 +30,62 @@ export interface SkillSyncResult {
  */
 const SWARM_MARKER_FILE = ".swarm-managed";
 
+function reconcileManagedSkillFiles(skillDir: string, currentRelativeFiles: Set<string>): number {
+  if (!existsSync(join(skillDir, SWARM_MARKER_FILE))) return 0;
+
+  let removed = 0;
+
+  const walk = (dir: string, relativeDir = ""): boolean => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+
+    let hasEntries = false;
+    for (const entry of entries) {
+      const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      const fullPath = join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        const childHasEntries = walk(fullPath, relativePath);
+        if (!childHasEntries) {
+          try {
+            rmSync(fullPath, { recursive: true, force: true });
+          } catch {
+            hasEntries = true;
+          }
+        } else {
+          hasEntries = true;
+        }
+        continue;
+      }
+
+      if (
+        relativePath === "SKILL.md" ||
+        relativePath === SWARM_MARKER_FILE ||
+        currentRelativeFiles.has(relativePath)
+      ) {
+        hasEntries = true;
+        continue;
+      }
+
+      try {
+        rmSync(fullPath, { force: true });
+        removed++;
+      } catch {
+        hasEntries = true;
+      }
+    }
+
+    return hasEntries;
+  };
+
+  walk(skillDir);
+  return removed;
+}
+
 /**
  * Sync agent's installed skills to the filesystem.
  *
@@ -45,6 +102,7 @@ export function syncSkillsToFilesystem(
   const home = homeOverride ?? homedir();
   const errors: string[] = [];
   let synced = 0;
+  let removed = 0;
 
   // Directories to write to
   const skillDirs: string[] = [];
@@ -77,6 +135,9 @@ export function syncSkillsToFilesystem(
     if (!safeName) continue;
 
     writtenNames.add(safeName);
+    const currentBundledFilePaths = new Set(
+      bundledFiles.filter((file) => !file.isBinary).map((file) => file.path),
+    );
 
     for (const baseDir of skillDirs) {
       const skillDir = join(baseDir, safeName);
@@ -85,6 +146,7 @@ export function syncSkillsToFilesystem(
 
       try {
         mkdirSync(skillDir, { recursive: true });
+        removed += reconcileManagedSkillFiles(skillDir, currentBundledFilePaths);
         writeFileSync(skillFile, skill.content, "utf-8");
         writeFileSync(markerFile, "", "utf-8");
         synced++;
@@ -121,7 +183,6 @@ export function syncSkillsToFilesystem(
   // present). Leaves user-installed personal skills alone — important on
   // local dev where ~/.codex/skills holds skills the user installed
   // outside the swarm.
-  let removed = 0;
   for (const baseDir of skillDirs) {
     if (!existsSync(baseDir)) continue;
 

@@ -552,6 +552,10 @@ export async function handleSkills(
       jsonError(res, "Skill not found", 404);
       return true;
     }
+    if (skill.systemDefault) {
+      jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
+      return true;
+    }
 
     try {
       const files = upsertSkillFiles(parsed.params.id, parsed.body.files);
@@ -597,6 +601,10 @@ export async function handleSkills(
       jsonError(res, "Skill not found", 404);
       return true;
     }
+    if (skill.systemDefault) {
+      jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
+      return true;
+    }
 
     try {
       const file = upsertSkillFile(parsed.params.id, {
@@ -619,6 +627,10 @@ export async function handleSkills(
     const skill = getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    if (skill.systemDefault) {
+      jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
       return true;
     }
 
