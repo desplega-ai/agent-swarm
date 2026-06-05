@@ -43,11 +43,16 @@ import { handleHeartbeat } from "./heartbeat";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
-import { handleMcp } from "./mcp";
+import {
+  closeIdleMcpTransports,
+  DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS,
+  handleMcp,
+  type McpTransportActivity,
+} from "./mcp";
 import { handleMcpBridge } from "./mcp-bridge";
 import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
-import { handleMcpUser } from "./mcp-user";
+import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
 import { handleMemory } from "./memory";
 import { handleMetrics } from "./metrics";
 import { handlePageProxy } from "./page-proxy";
@@ -99,12 +104,15 @@ const globalState = globalThis as typeof globalThis & {
   __transports?: Record<string, StreamableHTTPServerTransport>;
   __transportsUser?: Record<string, StreamableHTTPServerTransport>;
   __sessionUsers?: Record<string, string>;
+  __transportActivity?: McpTransportActivity;
+  __transportActivityUser?: McpTransportActivity;
   __sigintRegistered?: boolean;
   __apiGcInterval?: ReturnType<typeof setInterval>;
   __runId?: string;
 };
 
 const API_GC_INTERVAL_MS = 5 * 60 * 1000;
+const MCP_TRANSPORT_IDLE_TIMEOUT_MS = DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS;
 
 type GcCapableGlobal = typeof globalThis & { gc?: () => void };
 
@@ -130,11 +138,25 @@ function startApiGcInterval() {
 
   const gc = (globalThis as GcCapableGlobal).gc;
   if (typeof gc !== "function") {
-    console.log("[HTTP] Explicit GC unavailable; start API with --expose-gc to enable sweeps");
-    return;
+    console.log("[HTTP] Explicit GC unavailable; idle MCP transport sweeps remain enabled");
   }
 
   const interval = setInterval(() => {
+    const closedOwnerTransports = closeIdleMcpTransports(transports, transportActivity, {
+      idleTimeoutMs: MCP_TRANSPORT_IDLE_TIMEOUT_MS,
+      label: "MCP",
+    });
+    const closedUserTransports = closeIdleMcpUserTransports(
+      transportsUser,
+      sessionUsers,
+      transportActivityUser,
+      { idleTimeoutMs: MCP_TRANSPORT_IDLE_TIMEOUT_MS },
+    );
+    if (closedOwnerTransports > 0 || closedUserTransports > 0) {
+      console.log(
+        `[HTTP] Closed ${closedOwnerTransports} owner MCP and ${closedUserTransports} user MCP idle transport(s)`,
+      );
+    }
     scheduleApiGc("periodic API sweep");
   }, API_GC_INTERVAL_MS);
   interval.unref?.();
@@ -151,6 +173,8 @@ const transports: Record<string, StreamableHTTPServerTransport> = globalState.__
 const transportsUser: Record<string, StreamableHTTPServerTransport> =
   globalState.__transportsUser ?? {};
 const sessionUsers: Record<string, string> = globalState.__sessionUsers ?? {};
+const transportActivity: McpTransportActivity = globalState.__transportActivity ?? {};
+const transportActivityUser: McpTransportActivity = globalState.__transportActivityUser ?? {};
 
 const httpServer = createHttpServer(async (req, res) => {
   const startTime = performance.now();
@@ -291,8 +315,8 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleSessions(req, res, pathSegments, queryParams),
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
-        () => handleMcp(req, res, transports),
-        () => handleMcpUser(req, res, transportsUser, sessionUsers),
+        () => handleMcp(req, res, transports, transportActivity),
+        () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
       ];
 
       try {
@@ -334,6 +358,8 @@ globalState.__httpServer = httpServer;
 globalState.__transports = transports;
 globalState.__transportsUser = transportsUser;
 globalState.__sessionUsers = sessionUsers;
+globalState.__transportActivity = transportActivity;
+globalState.__transportActivityUser = transportActivityUser;
 
 async function shutdown() {
   console.log("Shutting down HTTP server...");
@@ -372,6 +398,7 @@ async function shutdown() {
     console.log(`[HTTP] Closing transport ${id}`);
     transport.close();
     delete transports[id];
+    delete transportActivity[id];
   }
 
   for (const [id, transport] of Object.entries(transportsUser)) {
@@ -379,6 +406,7 @@ async function shutdown() {
     transport.close();
     delete transportsUser[id];
     delete sessionUsers[id];
+    delete transportActivityUser[id];
   }
 
   // Close all active connections forcefully
