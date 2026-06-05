@@ -10,7 +10,9 @@ import {
   type Selection,
 } from "@/components/script-runs/source-map";
 import { SourceView } from "@/components/script-runs/source-view";
+import { buildSteps, formatDurationMs } from "@/components/script-runs/step-shared";
 import { TimelinePanel } from "@/components/script-runs/timeline-panel";
+import { WaterfallView } from "@/components/script-runs/waterfall-view";
 import { AgentLink } from "@/components/shared/agent-link";
 import { ScriptRunKindBadge } from "@/components/shared/script-run-kind-badge";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -19,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -86,6 +89,8 @@ export default function ScriptRunDetailPage() {
   const mapping = useMemo(() => mapStepsToBlocks(journal, blocks), [journal, blocks]);
 
   const [selection, setSelection] = useState<Selection>(null);
+  const [view, setView] = useState<"detail" | "waterfall">("detail");
+  const { steps, totalMs, hasTiming } = useMemo(() => buildSteps(journal), [journal]);
 
   const selectedBlock =
     selection?.kind === "step" ? (mapping.stepToBlock[selection.stepId] ?? null) : null;
@@ -192,29 +197,72 @@ export default function ScriptRunDetailPage() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 lg:flex-row">
-        <SourceView
-          source={run.source ?? ""}
-          blocks={blocks}
-          inputAnchor={anchors.input}
-          outputAnchor={anchors.output}
-          selectedBlock={selectedBlock}
-          selectedAnchor={selectedAnchor}
-          onSelectBlock={handleSelectBlock}
-          onSelectAnchor={(a) => setSelection(a ? { kind: a } : null)}
-          className="h-[72vh] lg:flex-[3]"
-        />
-        <TimelinePanel
-          journal={journal}
-          mapping={mapping}
-          runArgs={run.args ?? null}
-          runOutput={run.output}
-          hasOutput={run.output !== undefined}
-          selection={selection}
-          onSelect={setSelection}
-          className="h-[72vh] lg:flex-[2]"
-        />
-      </div>
+      <Tabs
+        value={view}
+        onValueChange={(v) => setView(v as "detail" | "waterfall")}
+        className="gap-3"
+      >
+        <TabsList variant="line">
+          <TabsTrigger value="detail">Detail</TabsTrigger>
+          <TabsTrigger value="waterfall">Waterfall</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="detail" className="flex flex-col gap-4 lg:flex-row">
+          <SourceView
+            source={run.source ?? ""}
+            blocks={blocks}
+            inputAnchor={anchors.input}
+            outputAnchor={anchors.output}
+            selectedBlock={selectedBlock}
+            selectedAnchor={selectedAnchor}
+            onSelectBlock={handleSelectBlock}
+            onSelectAnchor={(a) => setSelection(a ? { kind: a } : null)}
+            className="h-[72vh] lg:flex-[3]"
+          />
+          <TimelinePanel
+            journal={journal}
+            mapping={mapping}
+            runArgs={run.args ?? null}
+            runOutput={run.output}
+            hasOutput={run.output !== undefined}
+            selection={selection}
+            onSelect={setSelection}
+            className="h-[72vh] lg:flex-[2]"
+          />
+        </TabsContent>
+
+        <TabsContent value="waterfall">
+          <div className="flex h-[72vh] min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2">
+              <h2 className="text-sm font-semibold">Waterfall</h2>
+              {hasTiming && (
+                <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                  {formatDurationMs(totalMs)} total
+                </span>
+              )}
+              {selection && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelection(null)}
+                  className="ml-auto h-7 text-xs"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            <WaterfallView
+              steps={steps}
+              totalMs={totalMs}
+              hasTiming={hasTiming}
+              mapping={mapping}
+              selection={selection}
+              onSelect={setSelection}
+              hasOutput={run.output !== undefined}
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

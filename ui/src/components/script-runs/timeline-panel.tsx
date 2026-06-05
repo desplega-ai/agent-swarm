@@ -5,12 +5,10 @@ import type { ScriptRunJournalEntry } from "@/api/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { JsonView } from "./json-view";
 import type { Selection, StepBlockMapping } from "./source-map";
 import { buildSteps, formatDurationMs, stepTypeMeta, type TimelineStep } from "./step-shared";
-import { WaterfallView } from "./waterfall-view";
 
 function MetaItem({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -258,7 +256,6 @@ export function TimelinePanel({
 }: TimelinePanelProps) {
   const { steps, totalMs, maxMs, hasTiming } = useMemo(() => buildSteps(journal), [journal]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [tab, setTab] = useState<"steps" | "waterfall">("steps");
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -318,109 +315,82 @@ export function TimelinePanel({
     <div
       className={cn("flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card", className)}
     >
-      <Tabs
-        value={tab}
-        onValueChange={(v) => setTab(v as "steps" | "waterfall")}
-        className="flex min-h-0 flex-1 flex-col gap-0"
-      >
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2">
-          <h2 className="text-sm font-semibold">Timeline</h2>
-          {hasTiming && (
-            <span className="font-mono text-xs tabular-nums text-muted-foreground">
-              {formatDurationMs(totalMs)} total
-            </span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2">
+        <h2 className="text-sm font-semibold">Timeline</h2>
+        {hasTiming && (
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+            {formatDurationMs(totalMs)} total
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-1">
+          {selection && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onSelect(null)}
+              className="h-7 text-xs"
+            >
+              Clear
+            </Button>
           )}
-          <div className="ml-auto flex items-center gap-2">
-            <TabsList variant="line">
-              <TabsTrigger value="steps">Steps</TabsTrigger>
-              <TabsTrigger value="waterfall">Waterfall</TabsTrigger>
-            </TabsList>
-            {selection && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onSelect(null)}
-                className="h-7 text-xs"
-              >
-                Clear
-              </Button>
-            )}
-            {tab === "steps" && (
-              <Button variant="ghost" size="sm" onClick={toggleAll} className="h-7 text-xs">
-                {allExpanded ? "Collapse all" : "Expand all"}
-              </Button>
-            )}
-          </div>
+          <Button variant="ghost" size="sm" onClick={toggleAll} className="h-7 text-xs">
+            {allExpanded ? "Collapse all" : "Expand all"}
+          </Button>
         </div>
+      </div>
 
-        <TabsContent value="steps" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
-            <IoRow
-              kind="input"
-              data={runArgs}
-              expanded={expanded.has("input")}
-              selected={selection?.kind === "input"}
-              onActivate={() => activateIo("input")}
-              rowRef={(el) => {
-                if (el) rowRefs.current.set("input", el);
-                else rowRefs.current.delete("input");
-              }}
-            />
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+        <IoRow
+          kind="input"
+          data={runArgs}
+          expanded={expanded.has("input")}
+          selected={selection?.kind === "input"}
+          onActivate={() => activateIo("input")}
+          rowRef={(el) => {
+            if (el) rowRefs.current.set("input", el);
+            else rowRefs.current.delete("input");
+          }}
+        />
 
-            {steps.map((step) => (
-              <TimelineRow
-                key={step.entry.id}
-                step={step}
-                hasTiming={hasTiming}
-                maxMs={maxMs}
-                expanded={expanded.has(step.entry.id)}
-                selected={selection?.kind === "step" && selection.stepId === step.entry.id}
-                blockActive={
-                  selectedBlock !== undefined &&
-                  mapping.stepToBlock[step.entry.id] === selectedBlock
-                }
-                onActivate={() => activateStep(step.entry.id)}
-                rowRef={(el) => {
-                  if (el) rowRefs.current.set(step.entry.id, el);
-                  else rowRefs.current.delete(step.entry.id);
-                }}
-              />
-            ))}
-
-            {hasOutput && (
-              <IoRow
-                kind="output"
-                data={runOutput}
-                expanded={expanded.has("output")}
-                selected={selection?.kind === "output"}
-                onActivate={() => activateIo("output")}
-                rowRef={(el) => {
-                  if (el) rowRefs.current.set("output", el);
-                  else rowRefs.current.delete("output");
-                }}
-              />
-            )}
-          </div>
-
-          {!hasTiming && journal.length > 0 && (
-            <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-              Per-step timing wasn&rsquo;t recorded for this run.
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="waterfall" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <WaterfallView
-            steps={steps}
-            totalMs={totalMs}
+        {steps.map((step) => (
+          <TimelineRow
+            key={step.entry.id}
+            step={step}
             hasTiming={hasTiming}
-            mapping={mapping}
-            selection={selection}
-            onSelect={onSelect}
-            hasOutput={hasOutput}
+            maxMs={maxMs}
+            expanded={expanded.has(step.entry.id)}
+            selected={selection?.kind === "step" && selection.stepId === step.entry.id}
+            blockActive={
+              selectedBlock !== undefined && mapping.stepToBlock[step.entry.id] === selectedBlock
+            }
+            onActivate={() => activateStep(step.entry.id)}
+            rowRef={(el) => {
+              if (el) rowRefs.current.set(step.entry.id, el);
+              else rowRefs.current.delete(step.entry.id);
+            }}
           />
-        </TabsContent>
-      </Tabs>
+        ))}
+
+        {hasOutput && (
+          <IoRow
+            kind="output"
+            data={runOutput}
+            expanded={expanded.has("output")}
+            selected={selection?.kind === "output"}
+            onActivate={() => activateIo("output")}
+            rowRef={(el) => {
+              if (el) rowRefs.current.set("output", el);
+              else rowRefs.current.delete("output");
+            }}
+          />
+        )}
+      </div>
+
+      {!hasTiming && journal.length > 0 && (
+        <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">
+          Per-step timing wasn&rsquo;t recorded for this run.
+        </div>
+      )}
     </div>
   );
 }

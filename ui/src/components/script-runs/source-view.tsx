@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, WrapText } from "lucide-react";
 import { Highlight, themes } from "prism-react-renderer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@/hooks/use-theme";
@@ -58,6 +58,7 @@ export function SourceView({
 }: SourceViewProps) {
   const { theme } = useTheme();
   const [copied, setCopied] = useState(false);
+  const [wrap, setWrap] = useState(false);
 
   const lineInfo = useMemo(() => {
     const map = new Map<
@@ -131,17 +132,32 @@ export function SourceView({
             </span>
           )}
         </div>
-        <button
-          type="button"
-          onClick={copy}
-          aria-label={copied ? "Copied" : "Copy source"}
-          className={cn(
-            "inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted-foreground/15 hover:text-foreground",
-            copied && "text-status-success-strong",
-          )}
-        >
-          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setWrap((w) => !w)}
+            aria-label={wrap ? "Disable line wrap" : "Enable line wrap"}
+            aria-pressed={wrap}
+            title={wrap ? "Disable line wrap" : "Wrap long lines"}
+            className={cn(
+              "inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted-foreground/15 hover:text-foreground",
+              wrap && "bg-muted-foreground/15 text-foreground",
+            )}
+          >
+            <WrapText className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={copy}
+            aria-label={copied ? "Copied" : "Copy source"}
+            className={cn(
+              "inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted-foreground/15 hover:text-foreground",
+              copied && "text-status-success-strong",
+            )}
+          >
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          </button>
+        </div>
       </div>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
@@ -151,7 +167,15 @@ export function SourceView({
           theme={theme === "dark" ? themes.vsDark : themes.github}
         >
           {({ tokens, getLineProps, getTokenProps }) => (
-            <pre className="m-0 py-2 font-mono text-xs leading-relaxed">
+            <pre
+              className={cn(
+                "m-0 py-2 font-mono text-xs leading-relaxed",
+                // No-wrap: grow to the longest line (w-max) so row highlights/edges
+                // span the full scroll width when scrolled right. min-w-full keeps
+                // them filling the viewport when every line is short.
+                wrap ? "min-w-full" : "w-max min-w-full",
+              )}
+            >
               {tokens.map((line, i) => {
                 const info = lineInfo.get(i);
                 const region = info?.region;
@@ -172,6 +196,7 @@ export function SourceView({
                     onClick={region ? () => onRegionClick(region, selected) : undefined}
                     className={cn(
                       "flex border-l-2 border-l-transparent pr-3 transition-colors",
+                      wrap && "items-start",
                       region && "cursor-pointer",
                       meta?.codeBg,
                       meta?.rail,
@@ -186,7 +211,13 @@ export function SourceView({
                     <span className="w-10 shrink-0 select-none pr-3 text-right text-muted-foreground/40">
                       {i + 1}
                     </span>
-                    <span {...getLineProps({ line })} className="flex-1">
+                    <span
+                      {...getLineProps({ line })}
+                      className={cn(
+                        "flex-1",
+                        wrap ? "min-w-0 whitespace-pre-wrap break-words" : "whitespace-pre",
+                      )}
+                    >
                       {line.map((token, k) => (
                         <span key={k} {...getTokenProps({ token })} />
                       ))}
