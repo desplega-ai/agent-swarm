@@ -186,7 +186,7 @@ export const SEED_SCRIPTS: SeedScript[] = [
       "3-axis memory quality evaluation: carry-forward context (do follow-up tasks retrieve useful memories from prior tasks?), follow preferences (are CLAUDE.md/IDENTITY.md/SOUL.md/TOOLS.md memories retrieved and useful?), and stay current (what fraction of retrieved memories are fresh vs stale?). Outputs a baseline report to agent-fs + a swarm Page.",
     intent:
       "Measure memory system health across OpenAI Dreaming-inspired axes — before/after baseline for architecture changes, blog-post numbers, daily quality monitoring.",
-    source: bundleCatalogReport(asText(memoryEvalSrc)),
+    source: asText(memoryEvalSrc),
   },
   {
     name: "ops-catalog-audit",
