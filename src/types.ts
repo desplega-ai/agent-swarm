@@ -1801,6 +1801,19 @@ export const SkillWithInstallInfoSchema = SkillSchema.extend({
 });
 export type SkillWithInstallInfo = z.infer<typeof SkillWithInstallInfoSchema>;
 
+export const SkillFileSchema = z.object({
+  id: z.string(),
+  skillId: z.string(),
+  path: z.string(),
+  content: z.string(),
+  mimeType: z.string(),
+  isBinary: z.boolean(),
+  size: z.number().nullable(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type SkillFile = z.infer<typeof SkillFileSchema>;
+
 // ── MCP Servers ──────────────────────────────────────────────────────────
 
 export const McpServerTransportSchema = z.enum(["stdio", "http", "sse"]);

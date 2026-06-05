@@ -115,6 +115,7 @@ export const SDK_TOOL_NAME_MAP = {
   // ── skills ──
   skill_list: "skill-list",
   skill_get: "skill-get",
+  skill_getFile: "skill-get-file",
   skill_search: "skill-search",
   skill_create: "skill-create",
   skill_update: "skill-update",

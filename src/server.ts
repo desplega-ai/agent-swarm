@@ -86,6 +86,7 @@ import { registerSendTaskTool } from "./tools/send-task";
 import {
   registerSkillCreateTool,
   registerSkillDeleteTool,
+  registerSkillGetFileTool,
   registerSkillGetTool,
   registerSkillInstallRemoteTool,
   registerSkillInstallTool,
@@ -329,6 +330,7 @@ export function createServer() {
   registerSkillUpdateTool(server);
   registerSkillDeleteTool(server);
   registerSkillGetTool(server);
+  registerSkillGetFileTool(server);
   registerSkillListTool(server);
   registerSkillSearchTool(server);
   registerSkillInstallTool(server);

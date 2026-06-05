@@ -10,8 +10,8 @@
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { getAgentSkills } from "./db";
+import { dirname, join } from "node:path";
+import { getAgentSkills, getSkillFiles } from "./db";
 
 export interface SkillSyncResult {
   synced: number;
@@ -33,7 +33,8 @@ const SWARM_MARKER_FILE = ".swarm-managed";
  * Sync agent's installed skills to the filesystem.
  *
  * For simple skills (content in DB): writes SKILL.md to ~/.claude/skills/<name>/
- * For complex skills (isComplex=true): skipped here (handled by npx in entrypoint)
+ * For DB-backed complex skills: writes SKILL.md plus bundled skill_files rows.
+ * Legacy complex skills without skill_files remain handled by npx in entrypoint.
  */
 export function syncSkillsToFilesystem(
   agentId: string,
@@ -67,7 +68,8 @@ export function syncSkillsToFilesystem(
 
   for (const skill of skills) {
     if (!skill.isActive || !skill.isEnabled) continue;
-    if (skill.isComplex) continue; // Complex skills handled by npx
+    const bundledFiles = skill.isComplex ? getSkillFiles(skill.id) : [];
+    if (skill.isComplex && bundledFiles.length === 0) continue; // Legacy complex skills handled by npx
     if (!skill.content) continue;
 
     // Sanitize skill name to prevent path traversal (strip /, .., and non-safe chars)
@@ -87,9 +89,30 @@ export function syncSkillsToFilesystem(
         writeFileSync(markerFile, "", "utf-8");
         synced++;
       } catch (err) {
-        errors.push(
-          `${skill.name} -> ${skillDir}: ${err instanceof Error ? err.message : "Unknown error"}`,
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        errors.push(`${skill.name} -> ${skillDir}: ${msg}`);
+        console.error(
+          `[skill-sync] Failed to write SKILL.md for ${skill.name} to ${skillDir}: ${msg}`,
         );
+      }
+
+      for (const file of bundledFiles) {
+        if (file.isBinary) {
+          console.log(`[skill-sync] Skipping binary skill file ${skill.name}/${file.path}`);
+          continue;
+        }
+
+        const targetPath = join(skillDir, file.path);
+        try {
+          mkdirSync(dirname(targetPath), { recursive: true });
+          writeFileSync(targetPath, file.content, "utf-8");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          errors.push(`${skill.name}/${file.path} -> ${targetPath}: ${msg}`);
+          console.error(
+            `[skill-sync] Failed to write bundled file ${skill.name}/${file.path} to ${targetPath}: ${msg}`,
+          );
+        }
       }
     }
   }

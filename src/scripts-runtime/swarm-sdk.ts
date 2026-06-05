@@ -290,6 +290,19 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       if (!id) throw new Error("skill_get requires string `id`");
       return { method: "GET", path: `/api/skills/${encodeURIComponent(id)}` };
     }
+    case "skill_getFile": {
+      const skillId = typeof body.skillId === "string" ? body.skillId : undefined;
+      const path = typeof body.path === "string" ? body.path : undefined;
+      if (!skillId) throw new Error("skill_getFile requires string `skillId`");
+      if (!path) throw new Error("skill_getFile requires string `path`");
+      return {
+        method: "GET",
+        path: `/api/skills/${encodeURIComponent(skillId)}/files/${path
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}`,
+      };
+    }
     case "skill_search":
       return { method: "POST", path: "/api/skills/search", body };
     case "skill_delete": {

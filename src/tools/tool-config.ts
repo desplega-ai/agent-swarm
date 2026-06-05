@@ -128,11 +128,12 @@ export const DEFERRED_TOOLS = new Set([
   // Approval Requests (1)
   "request-human-input",
 
-  // Skills (11)
+  // Skills (12)
   "skill-create",
   "skill-update",
   "skill-delete",
   "skill-get",
+  "skill-get-file",
   "skill-list",
   "skill-search",
   "skill-install",

@@ -72,6 +72,7 @@ import type {
   SessionCostSource,
   SessionLog,
   Skill,
+  SkillFile,
   SkillScope,
   SkillType,
   SkillWithInstallInfo,
@@ -8700,6 +8701,119 @@ function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
   };
 }
 
+type SkillFileRow = {
+  id: string;
+  skillId: string;
+  path: string;
+  content: string;
+  mimeType: string;
+  isBinary: number;
+  size: number | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToSkillFile(row: SkillFileRow): SkillFile {
+  return {
+    id: row.id,
+    skillId: row.skillId,
+    path: row.path,
+    content: row.content,
+    mimeType: row.mimeType,
+    isBinary: row.isBinary === 1,
+    size: row.size,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+export type SkillFileInput = {
+  path: string;
+  content: string;
+  mimeType?: string;
+  isBinary?: boolean;
+  size?: number | null;
+};
+
+export type SkillFileManifestEntry = Omit<SkillFile, "content">;
+type NormalizedSkillFileInput = {
+  path: string;
+  content: string;
+  mimeType: string;
+  isBinary: boolean;
+  size: number;
+};
+
+export const SKILL_FILE_LIMITS = {
+  maxCount: Number(process.env.SKILL_FILES_MAX_COUNT ?? 100),
+  maxTotalBytes: Number(process.env.SKILL_FILES_MAX_TOTAL_BYTES ?? 10 * 1024 * 1024),
+  maxFileBytes: Number(process.env.SKILL_FILES_MAX_FILE_BYTES ?? 500 * 1024),
+};
+
+const BINARY_SKILL_FILE_PLACEHOLDER = "[binary file - not synced]";
+
+export function normalizeSkillFilePath(path: string): string {
+  const raw = path.trim().replace(/\\/g, "/");
+  if (!raw) throw new Error("File path is required");
+  if (raw.startsWith("/")) throw new Error("File path must be relative");
+
+  const parts = raw.split("/").filter(Boolean);
+  if (parts.length === 0) throw new Error("File path is required");
+  if (parts.some((part) => part === "." || part === "..")) {
+    throw new Error("File path cannot contain traversal segments");
+  }
+
+  const normalized = parts.join("/");
+  if (normalized === "SKILL.md") {
+    throw new Error("SKILL.md is stored on the skill record, not in skill_files");
+  }
+  return normalized;
+}
+
+function byteSize(content: string): number {
+  return Buffer.byteLength(content, "utf8");
+}
+
+function normalizeSkillFileInput(input: SkillFileInput): NormalizedSkillFileInput {
+  const path = normalizeSkillFilePath(input.path);
+  const isBinary = input.isBinary === true;
+  const content = isBinary ? input.content || BINARY_SKILL_FILE_PLACEHOLDER : input.content;
+  const size = input.size ?? byteSize(content);
+  if (!Number.isFinite(size) || size < 0) {
+    throw new Error("File size must be a non-negative number");
+  }
+  if (size > SKILL_FILE_LIMITS.maxFileBytes) {
+    throw new Error(`File ${path} exceeds max size ${SKILL_FILE_LIMITS.maxFileBytes}`);
+  }
+
+  return {
+    path,
+    content,
+    mimeType: input.mimeType ?? "text/plain",
+    isBinary,
+    size,
+  };
+}
+
+function assertSkillFileLimits(skillId: string, incoming: SkillFileInput[], replaceAll: boolean) {
+  const existing = replaceAll ? [] : listSkillFileManifest(skillId);
+  const byPath = new Map(existing.map((file) => [file.path, file.size ?? 0]));
+
+  for (const input of incoming) {
+    const normalized = normalizeSkillFileInput(input);
+    byPath.set(normalized.path, normalized.size);
+  }
+
+  if (byPath.size > SKILL_FILE_LIMITS.maxCount) {
+    throw new Error(`Skill file count exceeds max ${SKILL_FILE_LIMITS.maxCount}`);
+  }
+
+  const total = [...byPath.values()].reduce((sum, size) => sum + size, 0);
+  if (total > SKILL_FILE_LIMITS.maxTotalBytes) {
+    throw new Error(`Skill files exceed max total size ${SKILL_FILE_LIMITS.maxTotalBytes}`);
+  }
+}
+
 export interface SkillInsert {
   name: string;
   description: string;
@@ -8871,6 +8985,124 @@ export function updateSkill(
     .get(...params);
 
   return row ? rowToSkill(row) : null;
+}
+
+function bumpSkillVersion(skillId: string, now = new Date().toISOString()) {
+  getDb()
+    .prepare("UPDATE skills SET version = version + 1, lastUpdatedAt = ? WHERE id = ?")
+    .run(now, skillId);
+}
+
+export function listSkillFileManifest(skillId: string): SkillFileManifestEntry[] {
+  return getDb()
+    .prepare<SkillFileRow, [string]>(
+      `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+       FROM skill_files
+       WHERE skillId = ?
+       ORDER BY path ASC`,
+    )
+    .all(skillId)
+    .map((row) => {
+      const { content: _content, ...manifest } = rowToSkillFile(row);
+      return manifest;
+    });
+}
+
+export function getSkillFiles(skillId: string): SkillFile[] {
+  return getDb()
+    .prepare<SkillFileRow, [string]>(
+      `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+       FROM skill_files
+       WHERE skillId = ?
+       ORDER BY path ASC`,
+    )
+    .all(skillId)
+    .map(rowToSkillFile);
+}
+
+export function getSkillFile(skillId: string, path: string): SkillFile | null {
+  const normalizedPath = normalizeSkillFilePath(path);
+  const row = getDb()
+    .prepare<SkillFileRow, [string, string]>(
+      `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+       FROM skill_files
+       WHERE skillId = ? AND path = ?`,
+    )
+    .get(skillId, normalizedPath);
+  return row ? rowToSkillFile(row) : null;
+}
+
+export function upsertSkillFile(skillId: string, input: SkillFileInput): SkillFile {
+  const payload = normalizeSkillFileInput(input);
+  assertSkillFileLimits(skillId, [payload], false);
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  return upsertSkillFileUnchecked(skillId, payload, id, now, true);
+}
+
+function upsertSkillFileUnchecked(
+  skillId: string,
+  payload: NormalizedSkillFileInput,
+  id: string,
+  now: string,
+  bumpVersion: boolean,
+): SkillFile {
+  const row = getDb()
+    .prepare<SkillFileRow, (string | number | null)[]>(
+      `INSERT INTO skill_files (
+        id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(skillId, path) DO UPDATE SET
+        content = excluded.content,
+        mimeType = excluded.mimeType,
+        isBinary = excluded.isBinary,
+        size = excluded.size,
+        lastUpdatedAt = excluded.lastUpdatedAt
+      RETURNING *`,
+    )
+    .get(
+      id,
+      skillId,
+      payload.path,
+      payload.content,
+      payload.mimeType,
+      payload.isBinary ? 1 : 0,
+      payload.size,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to upsert skill file");
+  if (bumpVersion) bumpSkillVersion(skillId, now);
+  return rowToSkillFile(row);
+}
+
+export function upsertSkillFiles(skillId: string, files: SkillFileInput[]): SkillFile[] {
+  if (files.length === 0) return [];
+  const normalized = files.map(normalizeSkillFileInput);
+  assertSkillFileLimits(skillId, normalized, false);
+
+  const now = new Date().toISOString();
+  return getDb().transaction(() => {
+    const rows = normalized.map((file) =>
+      upsertSkillFileUnchecked(skillId, file, crypto.randomUUID(), now, false),
+    );
+    bumpSkillVersion(skillId, now);
+    return rows;
+  })();
+}
+
+export function deleteSkillFile(skillId: string, path: string): boolean {
+  const normalizedPath = normalizeSkillFilePath(path);
+  const result = getDb()
+    .prepare("DELETE FROM skill_files WHERE skillId = ? AND path = ?")
+    .run(skillId, normalizedPath);
+  if (result.changes > 0) {
+    bumpSkillVersion(skillId);
+    return true;
+  }
+  return false;
 }
 
 export function deleteSkill(id: string): boolean {
