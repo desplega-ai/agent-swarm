@@ -1,7 +1,7 @@
 import { getDb, isSqliteVecAvailable } from "@/be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
-import { TTL_DEFAULTS } from "../constants";
+import { EMBEDDING_DIMENSIONS, TTL_DEFAULTS } from "../constants";
 import type {
   MemoryCandidate,
   MemoryHealth,
@@ -13,8 +13,7 @@ import type {
   MemoryVecPopulateStats,
 } from "../types";
 
-const VECTOR_DIMENSIONS = 512;
-const VECTOR_BYTES = VECTOR_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
+const VECTOR_BYTES = EMBEDDING_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
 
 type AgentMemoryRow = {
   id: string;
@@ -98,7 +97,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const db = getDb();
     try {
       console.log(
-        `[memory-vec] sqlite-vec extension_loaded=true vector_dimensions=${VECTOR_DIMENSIONS}`,
+        `[memory-vec] sqlite-vec extension_loaded=true vector_dimensions=${EMBEDDING_DIMENSIONS}`,
       );
 
       const existingSchema = this.getVecTableSchema();
@@ -112,7 +111,7 @@ export class SqliteMemoryStore implements MemoryStore {
       db.run(`
         CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
           memory_id TEXT PRIMARY KEY,
-          embedding float[512] distance_metric=cosine
+          embedding float[${EMBEDDING_DIMENSIONS}] distance_metric=cosine
         )
       `);
 
@@ -222,7 +221,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
   private toVecBuffer(embedding: Buffer | Float32Array): Buffer | null {
     if (embedding instanceof Float32Array) {
-      if (embedding.length !== VECTOR_DIMENSIONS) return null;
+      if (embedding.length !== EMBEDDING_DIMENSIONS) return null;
       return serializeEmbedding(embedding);
     }
     if (embedding.length !== VECTOR_BYTES) return null;
@@ -327,7 +326,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const { scope = "all", limit = 10, source, isLead = false, includeExpired = false } = options;
 
     const health = this.getHealth();
-    if (health.retrievalMode === "vec" && embedding.length === VECTOR_DIMENSIONS) {
+    if (health.retrievalMode === "vec" && embedding.length === EMBEDDING_DIMENSIONS) {
       console.log(
         `[memory-search] retrieval_path=vec scope=${scope} limit=${limit} vec_rows=${health.counts.memoryVec} searchable=${health.counts.searchable}`,
       );
@@ -341,7 +340,7 @@ export class SqliteMemoryStore implements MemoryStore {
     }
 
     console.log(
-      `[memory-search] retrieval_path=fallback scope=${scope} limit=${limit} reason=${embedding.length !== VECTOR_DIMENSIONS ? "query_dimension_mismatch" : health.reasons.join("|") || "vec_unavailable"}`,
+      `[memory-search] retrieval_path=fallback scope=${scope} limit=${limit} reason=${embedding.length !== EMBEDDING_DIMENSIONS ? "query_dimension_mismatch" : health.reasons.join("|") || "vec_unavailable"}`,
     );
     return this.searchBruteForce(embedding, agentId, {
       scope,
@@ -584,7 +583,7 @@ export class SqliteMemoryStore implements MemoryStore {
       const vecBuffer = this.toVecBuffer(embedding);
       if (!vecBuffer) {
         console.warn(
-          `[memory-vec] update skipped memory_id=${id} reason=invalid_dimensions dimensions=${embedding.length} expected=${VECTOR_DIMENSIONS}`,
+          `[memory-vec] update skipped memory_id=${id} reason=invalid_dimensions dimensions=${embedding.length} expected=${EMBEDDING_DIMENSIONS}`,
         );
         return;
       }
@@ -709,7 +708,7 @@ export class SqliteMemoryStore implements MemoryStore {
         extensionLoaded: isSqliteVecAvailable(),
         tableExists: schema !== null,
         initialized: this.vecInitialized,
-        vectorDimensions: VECTOR_DIMENSIONS,
+        vectorDimensions: EMBEDDING_DIMENSIONS,
         distanceMetric: "cosine",
         schema,
         lastPopulate: this.lastPopulate,

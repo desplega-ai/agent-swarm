@@ -255,7 +255,7 @@ describe("SqliteMemoryStore", () => {
   });
 
   describe("memory_vec population", () => {
-    test("populates existing 512d embeddings on startup and reports health counts", () => {
+    test("populates existing embeddings on startup and reports health counts", () => {
       const raw = store.store({
         agentId: agentA,
         scope: "agent",

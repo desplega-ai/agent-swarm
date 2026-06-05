@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { closeDb, initDb } from "../be/db";
+import { EMBEDDING_DIMENSIONS } from "../be/memory/constants";
 import { handleMemory } from "../http/memory";
 import { getPathSegments } from "../http/utils";
 
@@ -61,7 +62,7 @@ describe("GET /api/memory/health", () => {
         extensionLoaded: expect.any(Boolean),
         tableExists: expect.any(Boolean),
         initialized: expect.any(Boolean),
-        vectorDimensions: 512,
+        vectorDimensions: EMBEDDING_DIMENSIONS,
         distanceMetric: "cosine",
       },
       counts: {

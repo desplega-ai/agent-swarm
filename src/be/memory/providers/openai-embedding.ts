@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MODEL } from "../constants";
+import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../constants";
 import type { EmbeddingProvider } from "../types";
 
 interface OpenAIEmbeddingConfig {
@@ -21,10 +21,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
     this.model = config?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small";
 
-    this.dimensions =
-      config?.dimensions ??
-      Number(process.env.EMBEDDING_DIMENSIONS) ??
-      DEFAULT_EMBEDDING_DIMENSIONS;
+    this.dimensions = config?.dimensions ?? EMBEDDING_DIMENSIONS;
 
     this.name = config?.model
       ? `openai/${config.model}`
