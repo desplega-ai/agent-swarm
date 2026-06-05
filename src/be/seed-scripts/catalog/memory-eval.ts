@@ -192,6 +192,7 @@ function reportToDailyPoint(date: string, report: any): DailyPoint {
   };
 }
 
+/** 3-axis memory quality evaluation with over-time trend tracking and KV-backed historical backfill. */
 export default async function memoryEval(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args || {});
   if (!parsed.success) return { error: "invalid args: " + parsed.error.message };
