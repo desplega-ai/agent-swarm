@@ -33,6 +33,7 @@ import groupCountSrc from "./catalog/group-count.ts" with { type: "text" };
 import jsonQuerySrc from "./catalog/json-query.ts" with { type: "text" };
 import linearIssueSrc from "./catalog/linear-issue.ts" with { type: "text" };
 import memoryDedupCheckSrc from "./catalog/memory-dedup-check.ts" with { type: "text" };
+import memoryEvalSrc from "./catalog/memory-eval.ts" with { type: "text" };
 import opsCatalogAuditSrc from "./catalog/ops-catalog-audit.ts" with { type: "text" };
 import scheduleHealthSrc from "./catalog/schedule-health.ts" with { type: "text" };
 import slackThreadFlattenSrc from "./catalog/slack-thread-flatten.ts" with { type: "text" };
@@ -178,6 +179,14 @@ export const SEED_SCRIPTS: SeedScript[] = [
     intent:
       "Single-call daily compounding Phase 0 helper — replaces ~25 raw tool roundtrips with one compressed JSON result covering every agent. For daily evolution, self-scripting candidates, ops reviews, or heartbeat context.",
     source: bundleCatalogReport(asText(compoundInsightsSrc)),
+  },
+  {
+    name: "memory-eval",
+    description:
+      "3-axis memory quality evaluation: carry-forward context (do follow-up tasks retrieve useful memories from prior tasks?), follow preferences (are CLAUDE.md/IDENTITY.md/SOUL.md/TOOLS.md memories retrieved and useful?), and stay current (what fraction of retrieved memories are fresh vs stale?). Outputs a baseline report to agent-fs + a swarm Page.",
+    intent:
+      "Measure memory system health across OpenAI Dreaming-inspired axes — before/after baseline for architecture changes, blog-post numbers, daily quality monitoring.",
+    source: bundleCatalogReport(asText(memoryEvalSrc)),
   },
   {
     name: "ops-catalog-audit",
