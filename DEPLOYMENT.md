@@ -15,6 +15,17 @@ This guide covers all deployment options for Agent Swarm.
 - [System Prompts](#system-prompts)
 - [Service Registry (PM2)](#service-registry-pm2)
 - [Publishing (Maintainers)](#publishing-maintainers)
+- [Self-Hosted SSO](#self-hosted-sso)
+
+---
+
+## Self-Hosted SSO
+
+Protect your deployment with Single Sign-On. Three compatible deployment modes are documented in [`docs-site/content/docs/(documentation)/guides/self-hosted-sso.mdx`](./docs-site/content/docs/(documentation)/guides/self-hosted-sso.mdx) and the [Self-Hosted SSO guide](https://agent-swarm.dev/docs/guides/self-hosted-sso) on the docs site:
+
+1. **oauth2-proxy quickstart** — zero-code reverse-proxy gate. Example configs in [`examples/sso/`](./examples/sso/).
+2. **Native OIDC middleware** — proposed per-user `aswt_` token issuance (not yet implemented).
+3. **Trusted-header mode** (recommended) — oauth2-proxy handles the IdP dance; the app trusts forwarded identity headers for per-user attribution.
 
 ---
 
