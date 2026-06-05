@@ -98,6 +98,7 @@
   - [kv-delete](#kv-delete)
   - [kv-incr](#kv-incr)
   - [kv-list](#kv-list)
+- [Other Tools](#other-tools)
 
 ---
 
@@ -227,8 +228,12 @@ Execute a read-only SQL query against the swarm database. Available to all authe
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `sql` | `string` | Yes | - | SQL query (read-only only — writes are rejected) |
-| `params` | `array` | No | [] | Query parameters |
+| `success` | `boolean` | Yes | - | - |
+| `columns` | `array` | Yes | - | - |
+| `rows` | `array` | Yes | - | - |
+| `elapsed` | `number` | Yes | - | - |
+| `total` | `number` | Yes | - | - |
+| `truncated` | `boolean` | Yes | - | - |
 
 ### get-oauth-access-token
 
@@ -391,6 +396,7 @@ Dry-run render a prompt template with provided variables. Optionally supply a cu
 | `source` | `string` | No | - | Inline TypeScript source to run. |
 | `args` | `unknown` | No | - | JSON-serializable script arguments. |
 | `intent` | `string` | No | "" | Why this script is being run. |
+| `idempotencyKey` | `string` | No | - | When set, output is auto-persisted to kv under script:executions/{key}. Re-running with the same key overwrites. Queryable via kv-get. |
 
 ### script-upsert
 
@@ -550,7 +556,13 @@ Provision a Kapso WhatsApp phone number for native inbound routing. Lead-only. P
 
 ### unregister-kapso-number
 
-*Documentation not available*
+**Unregister Kapso WhatsApp Number**
+
+Remove a Kapso phone number's native routing mapping from the KV store. Lead-only. Inbound messages for the number stop routing through the native handler. The Kapso-side webhook is not deleted automatically — remove it in the Kapso dashboard if you want deliveries to stop.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | Kapso/Meta phone-number ID whose mapping should be removed. |
 
 ### send-whatsapp-message
 
@@ -567,7 +579,16 @@ Send a free-form WhatsApp text via Kapso (within the 24h session window). Thin w
 
 ### reply-whatsapp-message
 
-*Documentation not available*
+**Reply to WhatsApp Message**
+
+Quote-reply a WhatsApp message via Kapso — same as send-whatsapp-message but threads to a specific inbound WAMID via context.message_id. Recipient is inferred from the conversation; pass the original sender's phone as `to`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | The swarm's Kapso/Meta phone-number ID to send from (KAPSO_PHONE_NUMBER_ID). |
+| `to` | `string` | Yes | - | Recipient phone in E.164 WITHOUT '+'. |
+| `inReplyTo` | `string` | Yes | - | The inbound WAMID to quote-reply (set as context.message_id). |
+| `body` | `string` | Yes | - | Reply text. |
 
 ## Task Pool Tools
 
@@ -1124,6 +1145,35 @@ Posts a message to a channel for cross-agent communication.
 | `content` | `string` | Yes | - | Message content. |
 | `replyTo` | `uuid` | No | - | Message ID to reply to (for threading). |
 | `mentions` | `array` | No | - | Agent IDs to @mention (they'll see it in unread). |
+
+### launch-script-run
+
+**Launch Script Run**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `source` | `string` | Yes | - | TypeScript script workflow source. |
+| `args` | `unknown` | No | - | JSON-serializable workflow arguments. |
+| `idempotencyKey` | `string` | No | - | Optional key that returns the existing run instead of launching a duplicate. |
+| `requestedByUserId` | `string` | No | - | Optional canonical user ID to attribute the run to. |
+
+### get-script-run
+
+**Get Script Run**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Script run ID. |
+
+### list-script-runs
+
+**List Script Runs**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `agentId` | `string` | No | - | Optional agent ID filter. |
+| `limit` | `number` | No | 50 | Maximum runs to return. |
+| `offset` | `number` | No | 0 | Pagination offset. |
 
 ### read-messages
 

@@ -205,46 +205,39 @@ function resolveStringConstant(constName: string, content: string): string {
 /**
  * Parse a tool file to extract metadata
  */
-async function parseToolFile(toolFileName: string): Promise<ToolInfo | null> {
+async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
   const filePath = path.join(TOOLS_DIR, `${toolFileName}.ts`);
   const content = await Bun.file(filePath).text();
+  const registrations = [...content.matchAll(/(?:createToolRegistrar\(server\)|register)\(\s*["']([^"']+)["']/g)];
+  if (registrations.length === 0) return [];
 
-  // Extract tool name from createToolRegistrar call
-  const nameMatch = content.match(/createToolRegistrar\(server\)\(\s*["']([^"']+)["']/);
-  if (!nameMatch) return null;
+  const infos: ToolInfo[] = [];
+  for (let idx = 0; idx < registrations.length; idx++) {
+    const match = registrations[idx]!;
+    const name = match[1]!;
+    const start = match.index ?? 0;
+    const end = idx + 1 < registrations.length ? (registrations[idx + 1]!.index ?? content.length) : content.length;
+    const snippet = content.slice(start, end);
 
-  const name = nameMatch[1];
+    const titleMatch = snippet.match(/title:\s*["']([^"']+)["']/);
+    const title = titleMatch ? titleMatch[1] : formatTitle(name);
 
-  // Extract title
-  const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
-  const title = titleMatch ? titleMatch[1] : formatTitle(name);
+    let description = "";
+    const descKeyRegex = /description\s*:\s*(?=["'`])/g;
+    let descKeyMatch: RegExpExecArray | null;
+    while ((descKeyMatch = descKeyRegex.exec(snippet)) !== null) {
+      const startIdx = descKeyMatch.index + descKeyMatch[0].length;
+      const parsed = parseStringLiteralChain(snippet, startIdx);
+      if (!parsed) continue;
+      description = parsed.value.replace(/\s+/g, " ").trim();
+      break;
+    }
 
-  // Extract description — find `description:` immediately followed by a
-  // string-literal opener and walk the chain. The lookahead `(?=["'\`])`
-  // skips over `description: z.string()...` lines that some tools have on
-  // nested zod field schemas (e.g. request-human-input's `QuestionSchema`),
-  // so we land on the tool-level config description, not a nested-field one.
-  //
-  // The walker is quote-delimiter-aware: a `"`-delimited literal is closed
-  // only by another `"`, so descriptions like
-  //   `"Model to use ('haiku', 'sonnet', or 'opus')..."`
-  // are captured in full. (Pre-fix regex used `["'\`]...["'\`]` which let
-  // ANY quote close the literal, truncating at the first inner `'`.)
-  let description = "";
-  const descKeyRegex = /description\s*:\s*(?=["'`])/g;
-  let descKeyMatch: RegExpExecArray | null;
-  while ((descKeyMatch = descKeyRegex.exec(content)) !== null) {
-    const startIdx = descKeyMatch.index + descKeyMatch[0].length;
-    const parsed = parseStringLiteralChain(content, startIdx);
-    if (!parsed) continue;
-    description = parsed.value.replace(/\s+/g, " ").trim();
-    break;
+    const fields = parseSchemaFields(snippet, content);
+    infos.push({ name, title, description, fields });
   }
 
-  // Parse schema fields
-  const fields = parseSchemaFields(content);
-
-  return { name, title, description, fields };
+  return infos;
 }
 
 /**
@@ -252,7 +245,7 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo | null> {
  * threaded through so `parseField` can resolve `.describe(CONST_NAME)`
  * references back to their string-literal definitions.
  */
-function parseSchemaFields(content: string): FieldInfo[] {
+function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
   const fields: FieldInfo[] = [];
 
   // Find inputSchema block
@@ -303,7 +296,7 @@ function parseSchemaFields(content: string): FieldInfo[] {
     const isEndOfField = (char === "," && depth === 0) || j === objectContent.length - 1;
 
     if (isEndOfField && currentField.trim()) {
-      const field = parseField(currentField, content);
+      const field = parseField(currentField, fullContent);
       if (field) fields.push(field);
       currentField = "";
     }
@@ -476,8 +469,8 @@ async function generateDocs() {
   // Parse all tool files
   const toolInfoMap = new Map<string, ToolInfo>();
   for (const fileName of allToolFiles) {
-    const info = await parseToolFile(fileName);
-    if (info) {
+    const infos = await parseToolFile(fileName);
+    for (const info of infos) {
       toolInfoMap.set(info.name, info);
     }
   }
@@ -544,6 +537,10 @@ async function generateDocs() {
   const uncategorized = [...toolInfoMap.keys()].filter((name) => !categorizedTools.has(name));
 
   if (uncategorized.length > 0) {
+    markdown = markdown.replace(
+      "\n---\n\n",
+      `- [Other Tools](#other-tools)\n\n---\n\n`,
+    );
     markdown += `## Other Tools\n\n`;
     markdown += `*Tools not assigned to a capability group*\n\n`;
     for (const toolName of uncategorized) {

@@ -788,7 +788,7 @@ Delete an MCP server definition. Only the owning agent or lead can delete.
 
 Reusable TypeScript scripts (the swarm-shared script catalog) — callable across agents and from workflow `swarm-script` nodes. The runtime evaluates user-supplied TS in a sandboxed `Bun.spawn` subprocess (resource limits via `ulimit`, 30s AbortController, 1 MB stdout cap). Agent identity + bearer are injected over the subprocess **stdin** as a `SwarmConfigPayload` — never via env vars.
 
-Use `script-run` for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`.
+Use `script-run` for direct reusable-script execution. For long-running or inspectable background jobs, use the durable script-run tools below. For local-only throwaway TS, use code-mode `run`.
 
 ### script-search
 
@@ -831,6 +831,37 @@ Delete a named script from the catalog.
 ### script-query-types
 
 Return the generated `.d.ts` SDK surface (derived from the MCP tool registry via `scripts/bundle-script-types.ts`). Useful for type-checking scripts locally before `script-upsert`.
+
+### launch-script-run
+
+Launch a durable one-off script workflow run. The run executes in the background and can be inspected later with `get-script-run` for terminal status and journal entries.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `source` | string | Yes | TypeScript script workflow source |
+| `args` | unknown | No | JSON-serializable workflow arguments |
+| `idempotencyKey` | string | No | Optional key that returns the existing run instead of launching a duplicate |
+| `scriptName` | string | No | Optional human-readable script/workflow name for the run |
+| `requestedByUserId` | string | No | Optional canonical user ID to attribute the run to |
+
+### get-script-run
+
+Get a durable script workflow run by ID, including its journal entries for `swarm-script`, `raw-llm`, and `agent-task` steps.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | Script run ID |
+
+### list-script-runs
+
+List durable script workflow runs, optionally filtered by status or agent ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | string | No | Optional script run status filter |
+| `agentId` | string | No | Optional agent ID filter |
+| `limit` | number | No | Maximum runs to return (default: 50) |
+| `offset` | number | No | Pagination offset |
 
 ## Debug Tools
 

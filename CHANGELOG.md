@@ -6,11 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.92.0] - 2026-06-05
+
 ### Added
-- **Claude Bridge toggle for the Claude harness** — `SWARM_USE_CLAUDE_BRIDGE=true|1` now routes spawned Claude sessions through the installed `claude-bridge` binary from pinned package `@desplega.ai/claude-bridge@0.1.5`, a Desplega-owned `claude -p` drop-in that drives interactive Claude Code through `tmux` for subscription-pool runs. The env is reloadable via `swarm_config`; `false|0|unset` keeps the normal `CLAUDE_BINARY` path.
+- **Durable script workflow runs** (#653, #656, #657, #659, #663) — script workflows can now run in the background with persisted runs, journaled step state, dashboard visibility, and three new MCP tools: `launch-script-run`, `get-script-run`, and `list-script-runs`.
+- **Salesforce Hosted MCP Server setup guide** (#660) — the docs now include an end-to-end Salesforce OAuth guide covering External Client App setup, required `mcp_api` scopes, manual client registration, and common redirect / scope pitfalls.
 
 ### Changed
-- **Shannon is deprecated** — existing `CLAUDE_BINARY=shannon` deployments keep working, including tmux fail-fast and trust pre-seed behavior, but now emit a deprecation warning pointing operators to `SWARM_USE_CLAUDE_BRIDGE=true`. Docs and runbooks now recommend claude-bridge.
+- **Claude Bridge toggle for the Claude harness** (#664) — `SWARM_USE_CLAUDE_BRIDGE=true|1` now routes spawned Claude sessions through the installed `claude-bridge` binary from pinned package `@desplega.ai/claude-bridge@0.1.5`, a Desplega-owned `claude -p` drop-in that drives interactive Claude Code through `tmux` for subscription-pool runs. The env is reloadable via `swarm_config`; `false|0|unset` keeps the normal `CLAUDE_BINARY` path.
+- **Shannon is now a deprecated compatibility path** (#664) — existing `CLAUDE_BINARY=shannon` deployments keep working, including tmux fail-fast and trust pre-seed behavior, but now emit a deprecation warning pointing operators to `SWARM_USE_CLAUDE_BRIDGE=true`. Docs and runbooks now recommend claude-bridge.
+- **Codex credits-exhausted cooldown is operator-tunable** (#668) — the dedicated cooldown for workspace-credits-exhausted Codex OAuth slots now resolves from `swarm_config`, validates strictly, and updates live without restarting workers.
+
+### Fixed
+- **Slack thread reads now include attachment-only and Block Kit-only roots** (#658) — `slack-read` and worker thread-context extraction now recover text from alert-style Slack payloads, so Datadog / PagerDuty / GitHub threads no longer appear empty to the swarm.
 
 ## [1.90.0] - 2026-06-03
 
