@@ -11,9 +11,10 @@
  *      `CLAUDE_BINARY`.
  *   3. Tmux fail-fast — when the resolved binary string contains "shannon"
  *      or claude-bridge is enabled, createSession throws if `tmux` is not on PATH.
- *   4. Trust pre-seed — when the resolved binary contains "shannon", the
- *      adapter writes `projects[cwd].hasTrustDialogAccepted: true` to
- *      `$HOME/.claude.json` before spawning. Idempotent. No-op for "claude".
+ *   4. Trust pre-seed — when the resolved path drives interactive claude in
+ *      tmux (shannon or claude-bridge), the adapter writes
+ *      `projects[cwd].hasTrustDialogAccepted: true` to `$HOME/.claude.json`
+ *      before spawning. Idempotent. No-op for "claude".
  *
  * `Bun.spawn` is stubbed so the tests don't actually exec anything; we read
  * the argv off the call args. `Bun.which` is stubbed for the tmux gate so
@@ -291,6 +292,7 @@ describe("CLAUDE_BINARY env override", () => {
   let spawnSpy: ReturnType<typeof spyOn>;
   let whichSpy: ReturnType<typeof spyOn>;
   let spawnedArgs: Array<readonly string[]>;
+  let spawnedEnvs: Array<Record<string, string> | undefined>;
 
   beforeEach(async () => {
     originalClaudeBinary = process.env.CLAUDE_BINARY;
@@ -305,8 +307,10 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
 
     spawnedArgs = [];
-    spawnSpy = spyOn(Bun, "spawn").mockImplementation(((cmd: readonly string[]) => {
+    spawnedEnvs = [];
+    spawnSpy = spyOn(Bun, "spawn").mockImplementation(((cmd: readonly string[], opts?: unknown) => {
       spawnedArgs.push(cmd);
+      spawnedEnvs.push((opts as { env?: Record<string, string> } | undefined)?.env);
       return makeFakeProc();
     }) as typeof Bun.spawn);
 
@@ -484,6 +488,33 @@ describe("CLAUDE_BINARY env override", () => {
     expect(argv[0]).toBe("claude-bridge");
     expect(argv).toContain("--model");
     expect(argv).toContain("-p");
+  });
+
+  test("SWARM_USE_CLAUDE_BRIDGE=true passes OAuth token to the bridge process", async () => {
+    process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
+
+    const adapter = new ClaudeAdapter();
+    await adapter.createSession(makeConfig());
+
+    expect(spawnedArgs[0][0]).toBe("claude-bridge");
+    expect(spawnedEnvs[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBe("test-token");
+  });
+
+  test("SWARM_USE_CLAUDE_BRIDGE=true forwards Anthropic local auth through bridge flag", async () => {
+    const adapter = new ClaudeAdapter();
+    await adapter.createSession(
+      makeConfig({
+        env: {
+          SWARM_USE_CLAUDE_BRIDGE: "true",
+          ANTHROPIC_API_KEY: "sk-ant-test",
+        } as Record<string, string>,
+      }),
+    );
+
+    expect(spawnedArgs[0][0]).toBe("claude-bridge");
+    expect(spawnedArgs[0]).toContain("--desplega-local-auth");
+    expect(spawnedEnvs[0]?.ANTHROPIC_API_KEY).toBe("sk-ant-test");
+    expect(spawnedEnvs[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
   test("SWARM_USE_CLAUDE_BRIDGE=1 wins over CLAUDE_BINARY=shannon", async () => {
@@ -758,14 +789,14 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     expect(exists).toBe(false);
   });
 
-  test("SWARM_USE_CLAUDE_BRIDGE=true does NOT use the legacy shannon trust pre-seed", async () => {
+  test("SWARM_USE_CLAUDE_BRIDGE=true writes hasTrustDialogAccepted for config.cwd", async () => {
     process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
+    const cwd = "/some/bridge/cwd";
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ cwd: "/some/abs/cwd" }));
+    await adapter.createSession(makeConfig({ cwd }));
 
-    // claude-bridge owns its own pre-clear flow; the adapter should not write
-    // the legacy shannon pre-seed file before spawning.
-    const exists = await Bun.file(join(homeDir, ".claude.json")).exists();
-    expect(exists).toBe(false);
+    const data = JSON.parse(await readFile(join(homeDir, ".claude.json"), "utf-8"));
+    expect(data.projects[cwd].hasTrustDialogAccepted).toBe(true);
+    expect(data.projects[cwd].hasCompletedProjectOnboarding).toBe(true);
   });
 });

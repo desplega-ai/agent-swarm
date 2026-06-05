@@ -109,6 +109,14 @@ export function resolveClaudeBinary(
 }
 
 const CLAUDE_BRIDGE_BINARY = "claude-bridge";
+const CLAUDE_BRIDGE_LOCAL_AUTH_ARG = "--desplega-local-auth";
+const CLAUDE_BRIDGE_LOCAL_AUTH_ENV_VARS = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_CUSTOM_HEADERS",
+  "ANTHROPIC_MODEL",
+] as const;
 
 /**
  * Parse a boolean env toggle. Only true/1 enable and false/0 disable; unset
@@ -147,14 +155,29 @@ function resolveClaudeBinaryArgv(
   return { raw, argv: parseClaudeBinary(raw), useClaudeBridge };
 }
 
+function withClaudeBridgeAuthArgs(
+  argv: readonly string[],
+  sourceEnv: Record<string, string | undefined>,
+): string[] {
+  if (sourceEnv.CLAUDE_CODE_OAUTH_TOKEN) {
+    return [...argv];
+  }
+
+  if (CLAUDE_BRIDGE_LOCAL_AUTH_ENV_VARS.some((name) => sourceEnv[name])) {
+    return [...argv, CLAUDE_BRIDGE_LOCAL_AUTH_ARG];
+  }
+
+  return [...argv];
+}
+
 /**
  * Pre-seed `~/.claude.json` so the per-project trust-dialog ("Quick safety
  * check: Is this a project you trust?") doesn't block on first run.
  *
  * Mirrors the onboarding-skip hack in `Dockerfile.worker` (which writes
  * `hasCompletedOnboarding` and `bypassPermissionsModeAccepted`). When the
- * resolved binary contains "shannon", claude runs inside tmux and shannon
- * does NOT auto-accept the dialog, so the pane hangs forever. Writing
+ * resolved binary runs interactive claude inside tmux, claude does NOT
+ * reliably auto-accept the dialog, so the pane can hang forever. Writing
  * `projects[cwd].hasTrustDialogAccepted = true` (and `hasCompletedProjectOnboarding`)
  * tells claude-code the cwd is pre-trusted.
  *
@@ -832,7 +855,8 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     const model = config.model || "opus";
 
-    const credType = validateClaudeCredentials(config.env || process.env);
+    const sourceEnv = config.env || process.env;
+    const credType = validateClaudeCredentials(sourceEnv);
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
 
     // Resolve the argv prefix. Same flags (`-p`, `--model`, ...) work across
@@ -851,9 +875,13 @@ export class ClaudeAdapter implements ProviderAdapter {
       raw: claudeBinaryRaw,
       argv: claudeBinaryArgv,
       useClaudeBridge,
-    } = resolveClaudeBinaryArgv(config.env || process.env);
+    } = resolveClaudeBinaryArgv(sourceEnv);
     const isShannon = claudeBinaryRaw.toLowerCase().includes("shannon");
-    const configuredClaudeBinaryRaw = resolveClaudeBinary(config.env || process.env);
+    const effectiveClaudeBinaryArgv = useClaudeBridge
+      ? withClaudeBridgeAuthArgs(claudeBinaryArgv, sourceEnv)
+      : claudeBinaryArgv;
+    const isInteractiveTmuxClaude = isShannon || useClaudeBridge;
+    const configuredClaudeBinaryRaw = resolveClaudeBinary(sourceEnv);
     if (configuredClaudeBinaryRaw.toLowerCase().includes("shannon")) {
       console.warn(
         "\x1b[33m[claude]\x1b[0m CLAUDE_BINARY=shannon is deprecated; set SWARM_USE_CLAUDE_BRIDGE=true to use @desplega.ai/claude-bridge.",
@@ -861,25 +889,26 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
 
     console.log(
-      `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${claudeBinaryArgv.join(" ")} (useClaudeBridge: ${useClaudeBridge}, isShannon: ${isShannon})`,
+      `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${effectiveClaudeBinaryArgv.join(" ")} (useClaudeBridge: ${useClaudeBridge}, isShannon: ${isShannon})`,
     );
 
     // Fail fast: shannon and claude-bridge both shell out to tmux. If it's
     // missing, surface a clear error here rather than letting startup fail
     // opaquely.
-    if ((isShannon || useClaudeBridge) && !Bun.which("tmux")) {
+    if (isInteractiveTmuxClaude && !Bun.which("tmux")) {
       const label = useClaudeBridge ? "SWARM_USE_CLAUDE_BRIDGE=true" : "CLAUDE_BINARY=shannon";
       throw new Error(
         `${label} requires 'tmux' on PATH (install via apt/brew). See runbooks/harness-providers.md.`,
       );
     }
 
-    // Shannon drives `claude` in tmux — claude's per-project trust dialog
-    // (first-run "Is this a project you trust?") hangs the pane because shannon
-    // doesn't auto-accept it. Pre-seed `~/.claude.json` so the dialog never
-    // prompts. Idempotent; no-op when already trusted. Engineering rationale:
+    // Shannon and claude-bridge drive interactive `claude` in tmux — claude's
+    // per-project trust dialog (first-run "Is this a project you trust?")
+    // can hang or fail the pane before the harness becomes ready. Pre-seed
+    // `~/.claude.json` so the dialog never prompts. Idempotent; no-op when
+    // already trusted. Engineering rationale:
     // `runbooks/harness-providers.md` § "Trust-dialog pre-seed".
-    if (isShannon) {
+    if (isInteractiveTmuxClaude) {
       try {
         await preseedClaudeTrustDialog(config.cwd);
       } catch (err) {
@@ -944,7 +973,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       taskFilePath,
       taskFilePid,
       sessionMcpConfig,
-      claudeBinaryArgv,
+      effectiveClaudeBinaryArgv,
       systemPromptFile,
     );
   }

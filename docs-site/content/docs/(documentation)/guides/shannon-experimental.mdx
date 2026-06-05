@@ -68,9 +68,9 @@ In-flight task sessions stay on the binary they spawned with; new spawns pick up
 
 ## Prompt pre-clear
 
-Claude Bridge owns the prompt pre-clear flow. It updates Claude's global project trust/onboarding entries, writes per-workdir `.claude/settings.local.json` for dangerous-mode bypass, launches Claude with `--dangerously-skip-permissions`, and auto-accepts supported startup prompts from the tmux pane.
+The swarm adapter pre-seeds Claude's global project trust/onboarding entries before it spawns Claude Bridge. Bridge mode launches interactive Claude Code inside `tmux`, so this prevents the first-run trust prompt from blocking or exiting before the bridge becomes ready.
 
-Because that behavior lives in claude-bridge, the swarm does **not** run the legacy shannon trust pre-seed when `SWARM_USE_CLAUDE_BRIDGE=true`.
+Claude Bridge then writes per-workdir `.claude/settings.local.json` for dangerous-mode bypass, launches Claude with `--dangerously-skip-permissions`, and auto-accepts supported startup prompts from the tmux pane.
 
 ## Shannon compatibility
 
@@ -85,7 +85,7 @@ CLAUDE_BINARY=shannon
 
 - emits a deprecation warning pointing to `SWARM_USE_CLAUDE_BRIDGE=true`
 - checks that `tmux` is on `PATH`
-- runs the legacy `$HOME/.claude.json` trust pre-seed before spawning
+- runs the same `$HOME/.claude.json` trust pre-seed before spawning
 
 Use this only as a compatibility path while migrating.
 

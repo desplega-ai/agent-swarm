@@ -135,14 +135,18 @@ The published npm package is `@desplega.ai/claude-bridge`; version `0.1.5` is pi
 
 ### Prompt pre-clear
 
-claude-bridge handles first-run blocking prompts itself:
+The adapter runs the same `$HOME/.claude.json` project trust pre-seed for
+bridge mode that it uses for shannon before spawning the binary. This is
+required because bridge mode launches interactive Claude Code inside `tmux`;
+if Claude hits the first-run "is this a project you trust?" prompt before the
+bridge is ready, the pane can exit or hang with no useful stderr.
+
+claude-bridge also handles first-run blocking prompts itself after startup:
 
 - edits Claude's global config so `projects[workdir].hasTrustDialogAccepted` and `hasCompletedProjectOnboarding` are set
 - writes `.claude/settings.local.json` with dangerous-mode bypass settings
 - launches `claude` with `--dangerously-skip-permissions`
 - watches `tmux capture-pane` for supported startup prompts and sends `Enter`
-
-Because that behavior lives in claude-bridge, the swarm does **not** run the legacy shannon trust pre-seed when bridge mode is enabled.
 
 ### Deprecated shannon compatibility
 
@@ -164,11 +168,11 @@ The resolved raw string is parsed by `parseClaudeBinary`: trim + whitespace-spli
 | `bunx @dexh/shannon` | `["bunx", "@dexh/shannon"]` — deprecated no-install form |
 | `npx -y @dexh/shannon` | `["npx", "-y", "@dexh/shannon"]` — deprecated npm form |
 
-The shannon gates remain unchanged for compatibility: tmux fail-fast plus the legacy `preseedClaudeTrustDialog(cwd, homeDir?)` helper, which writes `$HOME/.claude.json` to set `projects[cwd].hasTrustDialogAccepted = true` and `hasCompletedProjectOnboarding = true`. The helper is idempotent and read-merge-write. Bun's `os.homedir()` caches the real passwd entry and ignores `process.env.HOME` mutations, so the helper defaults to `process.env.HOME ?? homedir()` for testability.
+The shannon gates remain unchanged for compatibility: tmux fail-fast plus the shared `preseedClaudeTrustDialog(cwd, homeDir?)` helper, which writes `$HOME/.claude.json` to set `projects[cwd].hasTrustDialogAccepted = true` and `hasCompletedProjectOnboarding = true`. The helper is idempotent and read-merge-write. Bun's `os.homedir()` caches the real passwd entry and ignores `process.env.HOME` mutations, so the helper defaults to `process.env.HOME ?? homedir()` for testability.
 
 ### Auth
 
-Same env vars as the default claude flow: `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or `ANTHROPIC_API_KEY`. The credential check is unchanged.
+Same env vars as the default claude flow: `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or `ANTHROPIC_API_KEY`. The credential check is unchanged. The adapter passes OAuth directly into the bridge process; when bridge mode is enabled with Anthropic local auth instead of OAuth, the adapter adds `--desplega-local-auth` so claude-bridge forwards the local auth env into the tmux-launched Claude process.
 
 ### Not a new `HARNESS_PROVIDER`
 
