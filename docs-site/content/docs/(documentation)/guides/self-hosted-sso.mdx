@@ -1,29 +1,24 @@
 ---
 title: Self-Hosted SSO
-description: Protect your self-hosted Agent Swarm deployment with Single Sign-On — three compatible deployment modes from a zero-code docker-compose add-on to full native OIDC middleware.
+description: Protect your self-hosted Agent Swarm deployment with Single Sign-On — oauth2-proxy quickstart and trusted-header forwarding mode.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
-Agent Swarm ships without a built-in login page by design — early self-hosters authenticate with a pre-shared `API_KEY`. As deployments grow to multiple teams, you need verified identity and access control. This guide covers three SSO modes that compose cleanly together.
-
-<Callout type="info">
-**Are oauth2-proxy and native OIDC compatible?** Yes. They're designed for different deployment phases and can be layered in the recommended "trusted-header" configuration (Mode 3). Short answer: oauth2-proxy owns the IdP dance; the app trusts its forwarded-identity headers; you get per-user attribution without waiting for native OIDC to be implemented.
-</Callout>
+Agent Swarm ships without a built-in login page by design — early self-hosters authenticate with a pre-shared `API_KEY`. As deployments grow to multiple teams, you need verified identity and access control. This guide covers two SSO deployment modes that compose cleanly together.
 
 ---
 
 ## Decision table
 
-| Mode | Implementation | Per-user API attribution | IdP group → role | Complexity | When to use |
-|---|---|---|---|---|---|
-| **1. oauth2-proxy** | docker-compose add-on | No — shared operator key | No | Low | Lock the dashboard fast. |
-| **2. Native OIDC** | App middleware (proposed) | Yes — per-user `aswt_` tokens | Yes (with RBAC) | High | Production, full governance. |
-| **3. Trusted-header** | oauth2-proxy + forwarded headers | Yes — proxy-attested identity | Yes (with RBAC) | Medium | Recommended for most self-hosters. |
+| Mode | Implementation | What it provides | Complexity | When to use |
+|---|---|---|---|---|
+| **1. oauth2-proxy** | docker-compose add-on | IdP authentication gate; all authenticated users share the operator key | Low | Lock the dashboard fast. |
+| **2. Trusted-header** | oauth2-proxy + forwarded headers | Same gate, plus identity headers forwarded to the upstream | Medium | Recommended for most self-hosters. |
 
-<Callout type="warning">
-**RBAC first, then SSO.** If your goal is access control governance (per-role visibility, VP-ops separation, budget quotas per team), ship RBAC ([DES-445](https://linear.app/desplega/issue/DES-445)) before investing in native OIDC. SSO gives verified identity; RBAC controls what each identity can see and do. See [RBAC Sequencing](#rbac-and-sso-sequencing) below.
+<Callout type="info">
+Role-based access control (RBAC) is on the roadmap — track and upvote it at [feedback.agent-swarm.dev/p/user-rbac](https://feedback.agent-swarm.dev/p/user-rbac).
 </Callout>
 
 ---
@@ -32,7 +27,7 @@ Agent Swarm ships without a built-in login page by design — early self-hosters
 
 **What it does:** A reverse proxy / forward-auth gate sits in front of the Agent Swarm dashboard. Users log in through your IdP (Okta, Google, Azure, Keycloak, …). On success, oauth2-proxy forwards the request to the swarm. The swarm still sees one shared `API_KEY` — no per-user attribution at the API layer.
 
-**Best for:** Teams that need to lock the dashboard right now, without waiting for native OIDC development.
+**Best for:** Teams that need to lock the dashboard right now.
 
 **Limitation:** Every authenticated user has full operator-key access. There is no per-user identity at the API or MCP layer.
 
@@ -105,75 +100,11 @@ A ready-to-use version of this file lives at [`examples/sso/oauth2-proxy.cfg`](h
 
 ---
 
-## Mode 2 — Native OIDC middleware (proposed)
+## Mode 2 — Trusted-header mode (recommended)
 
-<Callout type="info">
-**This mode is not yet implemented.** The design is documented here so self-hosters know what to expect, and so contributors know how it will land. The env vars and flow below are the proposed interface — they do not currently exist in `src/http/auth.ts`. If you need SSO today, use Mode 1 or Mode 3.
-</Callout>
+**What it does:** oauth2-proxy handles the IdP interaction (Mode 1). After authentication, it forwards identity headers (`X-Forwarded-User`, `X-Forwarded-Email`, `X-Forwarded-Groups`) to the swarm API. This gives you a clear identity signal at the proxy layer, ready to be consumed when the app adds header-based attribution.
 
-**What it does:** OIDC handling is built into the swarm API itself. A user visits `/api/auth/oidc/login`, gets redirected to the IdP, and on callback the swarm provisions a per-user `aswt_` token. Every subsequent API call carries that token — full attribution at the HTTP and MCP layer. When combined with RBAC, IdP groups map directly to swarm roles.
-
-**Best for:** Deployments that need per-user audit trails and IdP group → role automation.
-
-### How it will work
-
-```
-Browser  →  GET /api/auth/oidc/login
-         ←  redirect to IdP authorization endpoint
-
-IdP      →  redirect back with ?code=...
-
-Browser  →  GET /api/auth/oidc/callback
-            1. Validate ID token against JWKS
-            2. findOrCreateUserByEmail(email)          ← reuses src/be/users.ts
-            3. linkIdentity(userId, "oidc", sub)        ← writes user_external_ids
-            4. map IdP groups → users.role              ← if OIDC_GROUP_ROLE_MAP set
-            5. mintAswToken(userId)
-         ←  return aswt_ token → browser stores in localStorage
-```
-
-### Proposed environment variables
-
-```ini title=".env (proposed — not yet implemented)"
-## Native OIDC middleware — proposed interface
-## These vars will be read by src/http/oidc.ts once implemented.
-
-OIDC_ISSUER_URL=https://YOUR_IDP.example.com
-OIDC_CLIENT_ID=YOUR_CLIENT_ID
-OIDC_CLIENT_SECRET=YOUR_CLIENT_SECRET
-OIDC_REDIRECT_URI=https://YOUR_SWARM_HOST/api/auth/oidc/callback
-OIDC_SCOPES=openid email profile groups
-
-# Group claim name — varies by provider:
-#   Okta:      groups   (must be explicitly added to the app token in Okta UI)
-#   Azure AD:  roles    (v2 tokens; configure group claims in App Registration)
-#   Keycloak:  groups   (default)
-#   Google:    n/a      (groups require Admin SDK, not standard OIDC)
-OIDC_GROUP_CLAIM=groups
-
-# Map IdP group names to swarm role names (JSON).
-# Requires RBAC (DES-445) to be enabled — roles must exist before mapping.
-OIDC_GROUP_ROLE_MAP='{"engineering":"member","admins":"admin","read-only":"viewer"}'
-```
-
-A reference `.env` block is also at [`examples/sso/native-oidc.env.example`](https://github.com/desplega-ai/agent-swarm/blob/main/examples/sso/native-oidc.env.example).
-
-### OIDC provider notes
-
-| Provider | Notes |
-|---|---|
-| **Okta** | Enable "Groups" claim in Okta app settings. Discovery URL: `https://your-org.okta.com`. |
-| **Azure AD / Entra ID** | Add group claims in the App Registration "Token configuration" tab. Groups appear as `roles` in v2 tokens. Discovery URL: `https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0`. |
-| **Google Workspace** | Standard OIDC; no group claim without Admin SDK. Role mapping not supported without extra integration. Discovery URL: `https://accounts.google.com`. |
-| **Keycloak** | Standard OIDC. `groups` claim included by default when you add the "groups" mapper to the client. |
-
----
-
-## Mode 3 — Trusted-header mode (recommended)
-
-**What it does:** oauth2-proxy handles the IdP interaction (Mode 1). After authentication, it forwards identity headers to the swarm API. The app reads those headers and maps them to an existing swarm user, giving per-user attribution without implementing native OIDC on the server side.
-
-**Best for:** Self-hosters who want per-user attribution today without waiting for native OIDC. The proxy does the OIDC heavy lifting; the app just trusts what the proxy attests.
+**Best for:** Self-hosters who want to establish the full trusted-header pipeline today and benefit from per-user attribution as the app layer evolves.
 
 **Security note:** The swarm API must only accept forwarded-header requests from the proxy, not from the public internet. Enforce this by keeping the API port (`3013`) off the public network, and routing all external traffic through the proxy.
 
@@ -190,20 +121,10 @@ When using `--pass-user-headers` (or equivalent config), oauth2-proxy adds:
 
 ### docker-compose.yml additions for trusted-header mode
 
-Add these to the `oauth2-proxy` service in Mode 1, and also add the `SSO_TRUSTED_HEADER` env var to your `api` service:
+Add the following to the `oauth2-proxy` service from Mode 1:
 
 ```yaml title="docker-compose.yml additions"
 services:
-  api:
-    # ... existing config ...
-    environment:
-      # ... existing env vars ...
-
-      ## Trusted-header SSO (Mode 3) — proposed interface
-      ## When set, the API accepts X-Forwarded-Email as an authenticated identity
-      ## only for requests arriving from the proxy (enforce via network policy).
-      # SSO_TRUSTED_HEADER=X-Forwarded-Email
-
   oauth2-proxy:
     # ... base config from Mode 1 ...
     command:
@@ -223,61 +144,24 @@ pass_access_token    = false    # keep IdP access token off the wire
 set_xauthrequest     = true     # enable X-Auth-Request-* headers
 ```
 
-A complete docker-compose snippet for Mode 3 is at [`examples/sso/docker-compose.sso.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/examples/sso/docker-compose.sso.yml).
-
-<Callout type="warning">
-**The `SSO_TRUSTED_HEADER` config is proposed (not yet implemented).** The env var and header-reading middleware in `src/http/auth.ts` are not yet in the codebase. Track progress on native auth support alongside RBAC work in [DES-445](https://linear.app/desplega/issue/DES-445).
-</Callout>
+A complete docker-compose snippet for Mode 2 is at [`examples/sso/docker-compose.sso.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/examples/sso/docker-compose.sso.yml).
 
 ---
 
 ## Mode compatibility summary
 
-The three modes compose — you don't have to choose one forever:
+The two modes build on each other — you can start with Mode 1 and add Mode 2 without disruption:
 
 ```
-Phase 2 (now): oauth2-proxy gate                   → Mode 1
-Phase 2 + 3:   oauth2-proxy + trusted headers      → Mode 3
-Phase 3 (later): native OIDC replaces proxy dance  → Mode 2
+Step 1: oauth2-proxy gate                → Mode 1
+Step 2: add --pass-user-headers          → Mode 2 (trusted-header)
 ```
 
-In the "both together" configuration (Mode 3), the proxy handles:
+In Mode 2, the proxy handles:
 - OIDC authorization code flow
 - Token validation and refresh
 - Session cookie management
-
-The app handles:
-- Trusted-header → user lookup
-- `aswt_` token issuance for the API surface
-- Role mapping (once RBAC exists)
-
-You can migrate from Mode 3 to Mode 2 without user disruption — it's a server-side swap of who handles the OIDC dance. Existing `aswt_` tokens and user records remain valid.
-
----
-
-## RBAC and SSO sequencing
-
-<Callout type="info">
-**Recommendation: ship RBAC before native OIDC.**
-</Callout>
-
-If your goal is governance — per-role visibility, team access controls, budget quotas — RBAC ([DES-445](https://linear.app/desplega/issue/DES-445)) delivers most of that value independently of SSO. Here is why the order matters:
-
-| Why RBAC first | Detail |
-|---|---|
-| SSO ≠ access control | SSO authenticates who you are; RBAC controls what you can do. SSO alone gives all authenticated users identical access. |
-| RBAC ships on existing primitives | `aswt_` human tokens already create per-user identity. DES-445 adds an enforcement layer with an `RBAC_ENABLED` opt-in flag — no breaking changes for existing deployments. |
-| SSO group mapping needs roles | The key SSO feature for team deployments is IdP-group → role auto-mapping (e.g., everyone in Okta group "engineering" gets `member` role). That mapping only has meaning once roles exist. |
-| oauth2-proxy bridges the gap | Mode 1 covers the login-gate requirement today, so RBAC isn't blocked on native OIDC. |
-
-**Recommended phases:**
-
-| Phase | Work | Can start now? |
-|---|---|---|
-| **1 — RBAC** | DES-445: role model, per-route ACL, `RBAC_ENABLED` flag | Yes |
-| **2 — SSO stopgap** | oauth2-proxy docker-compose (Mode 1) | Yes — parallel with Phase 1 |
-| **3 — Native OIDC** | `src/http/oidc.ts` middleware, `aswt_` auto-provisioning | After Phase 1 |
-| **4 — Group mapping** | `OIDC_GROUP_ROLE_MAP` IdP groups → swarm roles | After Phases 1 + 3 |
+- Identity header forwarding
 
 ---
 
@@ -294,5 +178,5 @@ If your goal is governance — per-role visibility, team access controls, budget
 
 - [Deployment Guide](/docs/guides/deployment) — base Docker Compose setup this guide extends
 - [Secrets Encryption](/docs/guides/secrets-encryption) — encrypting OIDC client secrets at rest
-- RBAC / DES-445 — access control model (in development)
+- [RBAC / user roles](https://feedback.agent-swarm.dev/p/user-rbac) — track and upvote role-based access control on the roadmap
 - [Design doc: SSO Integration for Agent Swarm](https://live.agent-fs.dev/file/~/648a5f3c-35c8-4f11-8673-b89de52cd6bd/2faf73ba-4eee-4472-8b3b-359c4ed6bfbb/thoughts/16990304-76e4-4017-b991-f3e37b34cf73/research/2026-06-05-sso-integration-design.md) — internal design doc with full architecture rationale
