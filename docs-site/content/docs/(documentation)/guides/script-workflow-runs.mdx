@@ -59,8 +59,8 @@ Call `launch-script-run` with:
 ```json
 {
   "scriptName": "task-context-summary",
-  "idempotencyKey": "task-context-summary:20f2842c",
-  "args": { "taskId": "20f2842c-dca8-4c60-be2b-b97344be940d" },
+  "idempotencyKey": "task-context-summary:<task-short-id>",
+  "args": { "taskId": "<task-id>" },
   "source": "export default async function main(args, ctx) { /* ... */ }"
 }
 ```
@@ -72,7 +72,7 @@ The tool calls `POST /api/script-runs` with `background: true`, preserves the in
 Use `get-script-run` for a single run:
 
 ```json
-{ "id": "e557714e-1e36-4a5b-b19f-8fabfc062ca8" }
+{ "id": "<script-run-id>" }
 ```
 
 The response includes the `run` object and `journal` entries. Each journal entry has:
@@ -87,7 +87,7 @@ The response includes the `run` object and `journal` entries. Each journal entry
 Use `list-script-runs` to find recent runs:
 
 ```json
-{ "status": "completed", "agentId": "38d36438-58a0-45b5-8602-a5d52b07c2f1", "limit": 25 }
+{ "status": "completed", "agentId": "<agent-id>", "limit": 25 }
 ```
 
 `status`, `agentId`, `limit`, and `offset` map directly to the list API.

@@ -24,7 +24,7 @@ Instructions:
 
 1. Use qa-use browser commands (e.g., `/qa-use:explore`) to scrape the following HN pages **ONE AT A TIME, STRICTLY SEQUENTIAL**.
 
-   **CRITICAL — DO NOT PARALLELIZE.** Do NOT fan out parallel browser sessions, do NOT launch multiple Browser Use SDK flows concurrently, do NOT batch the URLs into a single multi-target call. This template has auto-failed on 2026-05-10 and 2026-05-11 because the worker scraped all 5 URLs in parallel and crossed the heartbeat-stale watchdog threshold before the flows completed. Strict serial execution is required.
+   **CRITICAL — DO NOT PARALLELIZE.** Do NOT fan out parallel browser sessions, do NOT launch multiple Browser Use SDK flows concurrently, do NOT batch the URLs into a single multi-target call. Browser-heavy runs can cross the heartbeat-stale watchdog threshold when several pages are scraped in parallel. Strict serial execution is required.
 
    **Workflow:** Scrape URL #1 → call `store-progress` with a one-line update (e.g., "Scraped HN page 1 — N stories found") → scrape URL #2 → `store-progress` → … → URL #5 → `store-progress`. After every individual URL scrape, you MUST call `store-progress` BEFORE starting the next URL. This keeps the session heartbeat fresh and prevents the watchdog from killing the task.
 

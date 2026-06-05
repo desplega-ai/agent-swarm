@@ -8,12 +8,12 @@ The swarm has Jira OAuth connected but **no inbound sync** (unlike Linear). Ever
 2. Hit `https://api.atlassian.com/ex/jira/<CLOUD_ID>/rest/api/3/...` — not your site hostname directly. 3LO bearer tokens only work via the `api.atlassian.com` proxy.
 3. Bodies for descriptions/comments must be in **ADF** (Atlassian Document Format), not plain text or markdown.
 
-## Known constants (Desplega tenant)
+## Deployment constants
 
 - Site: `<your-site>.atlassian.net`
-- Cloud ID: `0054e739-8d39-4f01-8d6a-431619cae8fc`
-- Default project: `KAN` ("Swarm")
-- Scopes on the stored token: `manage:jira-webhook offline_access read:jira-work read:me write:jira-work`
+- Cloud ID: `<cloud-id>`
+- Default project: `<PROJECT>`
+- Scopes on the stored token: confirm from `oauth_tokens.scope` before write operations
 
 If the cloudId ever changes, rediscover it:
 ```bash
@@ -65,7 +65,7 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
 
 ```bash
 curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/project/KAN" \
+  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/project/$PROJECT_KEY" \
   | jq '{key, name, lead: .lead.displayName, issueTypes: [.issueTypes[] | {id, name, subtask}]}'
 ```
 
@@ -76,7 +76,7 @@ Use the **`/search/jql`** endpoint (the older `/search` is deprecated for cloud)
 ```bash
 curl -s -G \
   -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  --data-urlencode 'jql=project = KAN AND statusCategory != Done' \
+  --data-urlencode 'jql=project = <PROJECT> AND statusCategory != Done' \
   --data-urlencode 'fields=summary,status,assignee,priority' \
   "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/search/jql" \
   | jq '[.issues[] | {key, summary: .fields.summary, status: .fields.status.name, assignee: .fields.assignee.displayName}]'
@@ -92,7 +92,7 @@ curl -s -X POST \
   "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue" \
   -d '{
     "fields": {
-      "project": { "key": "KAN" },
+      "project": { "key": "<PROJECT>" },
       "summary": "Short title",
       "issuetype": { "name": "Task" },
       "description": {
@@ -106,9 +106,9 @@ curl -s -X POST \
   }'
 ```
 
-Returns `{ id, key, self }` on success (HTTP 201). The `key` (e.g. `KAN-7`) is what humans use; URL is `https://<your-site>.atlassian.net/browse/<KEY>`.
+Returns `{ id, key, self }` on success (HTTP 201). The `key` (e.g. `<PROJECT>-7`) is what humans use; URL is `https://<your-site>.atlassian.net/browse/<KEY>`.
 
-Available issue types in `KAN` (verify per-project): `Epic, Subtask, Task, Story, Feature, Request, Bug`.
+Available issue types are project-specific; list the project before creating issues.
 
 ### 5. Transition issue status (e.g. → Done)
 
@@ -120,23 +120,15 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
   | jq '.transitions[] | {id, name, to: .to.name}'
 ```
 
-For project `KAN` (verified 2026-04-27), the workflow exposes ALL transitions from any state — you do not need to walk through intermediate states:
-
-| Transition ID | Target state |
-|---|---|
-| `11` | To Do |
-| `21` | In Progress |
-| `31` | In Review |
-| `41` | Backlog |
-| `51` | **Done** |
+Transition IDs are project-specific. Do not copy IDs between Jira projects; discover them for the issue you are about to update.
 
 Transition (returns HTTP 204 on success, no body):
 
 ```bash
 curl -s -X POST \
   -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/KAN-3/transitions" \
-  -d '{"transition":{"id":"51"}}'
+  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/<KEY>/transitions" \
+  -d '{"transition":{"id":"<TRANSITION_ID>"}}'
 ```
 
 ### 6. Comment on an issue
@@ -146,7 +138,7 @@ ADF body again:
 ```bash
 curl -s -X POST \
   -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/KAN-3/comment" \
+  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/<KEY>/comment" \
   -d '{
     "body": {
       "type": "doc", "version": 1,
@@ -161,7 +153,7 @@ Atlassian Cloud uses **accountId**, not username. Find one via:
 
 ```bash
 curl -s -G -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  --data-urlencode 'query=taras' \
+  --data-urlencode 'query=<name-or-email>' \
   "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/user/search" \
   | jq '.[] | {accountId, displayName, emailAddress}'
 ```
@@ -170,7 +162,7 @@ Assign:
 ```bash
 curl -s -X PUT \
   -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/KAN-3/assignee" \
+  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/<KEY>/assignee" \
   -d '{"accountId":"<ACCOUNT_ID>"}'
 ```
 
@@ -181,7 +173,7 @@ To unassign: `{"accountId": null}`.
 ```bash
 curl -s -X PUT \
   -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/KAN-3" \
+  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/<KEY>" \
   -d '{ "fields": { "summary": "New summary", "labels": ["swarm","auto"] } }'
 ```
 
@@ -226,21 +218,22 @@ If you need rich content, build it in a script — don't try to write deep ADF i
 
 ```bash
 TOKEN=$(db-query "SELECT accessToken FROM oauth_tokens WHERE provider='jira'")
-CLOUD_ID="0054e739-8d39-4f01-8d6a-431619cae8fc"
+CLOUD_ID="<cloud-id>"
+PROJECT_KEY="<PROJECT>"
 
 # 1. List open issues in KAN
 curl -s -G -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  --data-urlencode 'jql=project = KAN AND statusCategory != Done' \
+  --data-urlencode "jql=project = $PROJECT_KEY AND statusCategory != Done" \
   --data-urlencode 'fields=summary,status' \
   "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/search/jql" \
   | jq -r '.issues[].key' > /tmp/keys.txt
 
-# 2. Transition each to Done (id 51 in KAN)
+# 2. Transition each to Done using the transition ID discovered for this workflow
 for KEY in $(cat /tmp/keys.txt); do
   curl -s -X POST \
     -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
     "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/$KEY/transitions" \
-    -d '{"transition":{"id":"51"}}'
+    -d '{"transition":{"id":"<DONE_TRANSITION_ID>"}}'
   sleep 0.3
 done
 ```

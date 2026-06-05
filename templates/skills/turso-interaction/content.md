@@ -13,9 +13,9 @@ Using the **platform JWT against `/v2/pipeline` returns `HTTP 401 "invalid JWT t
 
 The platform JWT *can*, however, **mint** a DB token for any DB (see "Mint a DB token via API" below) — that's how you bootstrap access to a DB whose token isn't stored in config.
 
-## Swarm config inventory (current)
+## Swarm config inventory
 
-Always fetch with `get-config includeSecrets=true`. As of 2026-05-12:
+Always fetch with `get-config includeSecrets=true` and adapt the key list to your deployment:
 
 | Key | Plane | Scope | Notes |
 |---|---|---|---|

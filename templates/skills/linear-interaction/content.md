@@ -54,9 +54,9 @@ curl -s -X POST https://api.linear.app/graphql \
   -d '{"query": "<GRAPHQL_QUERY>"}'
 ```
 
-## Agent Interaction API — `action` vs `thought` (added 2026-05-19)
+## Agent Interaction API — `action` vs `thought`
 
-Linear's **Agent Interaction API** (different from issue mutations above) supports two activity payload kinds. The swarm's agent-activity sync was broken for ~weeks because they were confused; PRs #495 / #497 fixed it. Use this section whenever emitting `agentActivityCreate` mutations.
+Linear's **Agent Interaction API** (different from issue mutations above) supports two activity payload kinds. Use this section whenever emitting `agentActivityCreate` mutations.
 
 | Activity kind | When to use | `parameter` field |
 |---|---|---|
@@ -76,7 +76,7 @@ Linear's **Agent Interaction API** (different from issue mutations above) suppor
 | Branch create / merge / delete | `action` | branch name |
 | PR open / review / merge | `action` | PR URL |
 
-**Why this trips people:** "action" reads naturally as "every tool call IS an action…". But Linear uses `action` to mean *parameterized operation Linear can index/route on*, not *task-progress-narration*. Narration is `thought`. See shared memory `linear-agent-activity-action-vs-thought-2026-05-18`.
+**Why this trips people:** "action" reads naturally as "every tool call IS an action…". But Linear uses `action` to mean *parameterized operation Linear can index/route on*, not *task-progress-narration*. Narration is `thought`.
 
 ## Common Operations
 

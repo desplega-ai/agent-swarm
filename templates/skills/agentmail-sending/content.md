@@ -4,7 +4,7 @@ These rules are MANDATORY for all agents sending email via AgentMail. Violating 
 
 ## Rule 1: TEXT ONLY — Never Pass `html` Parameter
 
-**AgentMail has a critical bug (as of 2026-03-25):** When both `text` and `html` parameters are passed to `send_message` or `reply_to_message`, the HTML body content is silently dropped. The resulting email has an empty `<div dir="ltr"></div>`. Email clients (Gmail, etc.) prefer the HTML version over plain text, so recipients see a completely blank email.
+**AgentMail can drop visible email content when both `text` and `html` parameters are passed:** Some clients prefer the HTML version, so a blank or malformed HTML body can make recipients see an empty email even when plain text was provided.
 
 **What to do:**
 - ONLY pass the `text` parameter

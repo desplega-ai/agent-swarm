@@ -45,9 +45,9 @@ Token format is `<org>/<account_id>/<token_id>/<secret>`. The first segment is y
 
 Flags: every command takes `-s <sprite>` (or sets a default via `sprite use`). `-o <org>` overrides the org if you have multiple.
 
-## Sandbox baseline (as of 2026-05-07)
+## Sandbox baseline
 
-- Ubuntu 25.10 (Questing Quokka), kernel 6.12.x-fly (firecracker microVM)
+- Ubuntu-based microVM image (exact version may change over time)
 - Non-root `sprite` user (uid 1001), passwordless `sudo`
 - No docker, no `/var/run/docker.sock`, no container runtime preinstalled
 - No systemd / init — `service` and `systemctl` won't work; start daemons manually with `sudo <daemon> &` or `nohup`

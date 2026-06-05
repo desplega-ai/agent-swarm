@@ -4,7 +4,7 @@ Kapso (https://kapso.ai) is a WhatsApp platform vendor for the Meta Cloud API. A
 
 ## When to use MCP tools vs this skill's REST recipes
 
-PR #560 ships **thin MCP-tool wrappers for the common case only**:
+Some deployments expose **thin MCP-tool wrappers for the common case only**:
 
 | Tool | Use for |
 |---|---|
@@ -54,7 +54,7 @@ Shape (top-level keys):
 {
   "message": {
     "id": "wamid.HBgL...",            // Meta message id (WAMID)
-    "from": "34679077777",            // E.164 without +
+    "from": "15550100000",            // dummy E.164 without +
     "from_user_id": "ES.26772...",    // Meta-internal user id
     "timestamp": "1779281573",        // unix seconds (string)
     "type": "text",                   // text | image | audio | video | document | sticker | location | contacts | reaction | ...
@@ -71,7 +71,7 @@ Shape (top-level keys):
   },
   "conversation": {
     "id": "bd7e888e-...",
-    "phone_number": "34679077777",
+    "phone_number": "15550100000",
     "phone_number_id": "<phone-number-id>",
     "contact_name": "Example Contact",
     "status": "active",
@@ -183,7 +183,7 @@ Per WhatsApp policy, free-form text is only allowed within 24h of the last inbou
 **Common case shortcut:** call the `send-whatsapp-message` MCP tool — it wraps exactly this REST call. The recipe below is the canonical reference and the fallback when you need fields the tool doesn't expose.
 
 ```bash
-TO="34679077777"
+TO="15550100000"
 TEXT="Hi there"
 
 curl -s -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
@@ -218,7 +218,7 @@ Prefer quote-replies when answering a specific question — it keeps long conver
 
 ## Sending media (image, document, audio, video)
 
-Two-step pipeline through Kapso's Meta proxy: **upload, then send by id**. Sending by `id` is more reliable than `link` (no public-host requirement) — validated 2026-05-20.
+Two-step pipeline through Kapso's Meta proxy: **upload, then send by id**. Sending by `id` is more reliable than `link` because it does not require the media to be hosted at a public URL.
 
 ### 1. Upload
 
@@ -242,7 +242,7 @@ curl -s -X POST -H "X-API-Key: $API_KEY" \
 
 Quote-reply works on media too — add `"context": { "message_id": "<wamid>" }` at the top level.
 
-### Wide images: pad to ~square, send as image (validated 2026-05-20)
+### Wide images: pad to ~square, send as image
 
 WhatsApp scales `type:image` to bubble width + recompresses, so a wide 1200×630 social card renders as a tiny shrunken strip. **The fix is NOT `type:document`** — a `.png` sent as a document shows a plain file card with NO inline preview (must tap+download). Bad UX both ways.
 
@@ -310,7 +310,7 @@ If `send-whatsapp-message` returns `sessionWindowExpired: true`, fall through to
 curl -s -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
   -d '{
     "messaging_product": "whatsapp",
-    "to": "34679077777",
+    "to": "15550100000",
     "type": "template",
     "template": {
       "name": "<template_name>",
@@ -324,7 +324,7 @@ List approved templates first: `GET $API_BASE/platform/v1/whatsapp/templates?pho
 
 ## Webhook signature verification
 
-Every Kapso webhook delivery includes `X-Webhook-Signature: <hex>` (HMAC-SHA256 of the raw body using `KAPSO_WEBHOOK_HMAC_SECRET`). The native handler (`/api/integrations/kapso/webhook`, PR #560) and the workflow webhook trigger both verify automatically — the trigger's `hmacHeader` is `X-Webhook-Signature` and `hmacSecret` resolves from swarm config.
+Every Kapso webhook delivery includes `X-Webhook-Signature: <hex>` (HMAC-SHA256 of the raw body using `KAPSO_WEBHOOK_HMAC_SECRET`). Native handlers and workflow webhook triggers should verify the signature automatically; if you configure a custom trigger, set its HMAC header to `X-Webhook-Signature` and resolve the secret from swarm config.
 
 To verify manually:
 
@@ -344,10 +344,10 @@ echo -n "$RAW_BODY" | openssl dgst -sha256 -hmac "$HMAC_SECRET" -hex | awk '{pri
 
 ## Where this fits in the swarm
 
-Two inbound paths exist (PR #560 adds the first, the original demo workflow remains):
+Two common inbound paths exist:
 
-- **Native handler** (`/api/integrations/kapso/webhook`, PR #560) — fires for any phone number registered via `register-kapso-number`. Verifies HMAC, dedupes by message id (KV `integrations:kapso:dedupe`, 24h TTL), reads the routing mapping from KV (`integrations:kapso:numbers`), and either dispatches a `kapso-inbound` task or delegates to a workflow trigger (advanced override). Also emits a `kapso.message.received` event on the workflow event bus.
-- **Workflow `kapso-whatsapp-inbound-demo`** (`a5700897-8f6b-4e1e-9e6b-dcc10e479cb5`) — fires for unregistered numbers (or numbers whose mapping points at this workflow). Pipeline: `react-eyes` (mark read + typing + 👀) → `debounce` (collapse rapid-fire bursts) → `gate-proceed` → `notify-taras` (agent-task triage) → `finalize` (✅/❌ reaction).
+- **Native handler** (`/api/integrations/kapso/webhook`) — fires for any phone number registered via `register-kapso-number`. Verifies HMAC, dedupes by message id, reads the routing mapping, and either dispatches an inbound-message task or delegates to a workflow trigger.
+- **Workflow trigger** (`<workflow-id>`) — useful when you want custom routing, batching, triage, or approval steps before a reply is sent. A typical pipeline marks the message read, debounces rapid-fire bursts, routes to an agent task, and optionally sends a final reaction or status update.
 
 **Debounce / batching:** the demo workflow's `debounce` node waits ~8s after each message and only the LAST message of a burst proceeds to the agent task — so a user firing 3 quick messages produces ONE task, not three. The agent is told the `batchSize` and should read trailing history and answer the whole burst in one reply. When >1 messages are collapsed, the user sees a "🧵 Got your N messages" note.
 
@@ -357,7 +357,7 @@ HMAC verification is enforced (signed mode) on both paths.
 
 ## Common gotchas
 
-- Phone numbers from Kapso are E.164 **without `+`** (e.g. `34679077777`). Add `+` when displaying to humans, drop it when calling the API.
+- Phone numbers from Kapso are E.164 **without `+`** (e.g. `15550100000`). Add `+` when displaying to humans, drop it when calling the API.
 - `message.text.body` is only present for `type:"text"`. For other types read `message.<type>` (see the table above) or `message.kapso.content` for a text representation.
 - Outbound status events (`delivered`, `read`) are NOT a customer interaction — skip them. Filter by `message.kapso.direction == "inbound"`.
 - Real inbound messages commonly arrive with `status: "delivered"` (delivered to us). Do NOT skip on status — only `direction` signals inbound vs outbound.

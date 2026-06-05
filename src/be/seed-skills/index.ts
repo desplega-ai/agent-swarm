@@ -25,12 +25,6 @@ import kvStorageContent from "../../../templates/skills/kv-storage/content.md" w
 };
 import pagesConfig from "../../../templates/skills/pages/config.json" with { type: "text" };
 import pagesContent from "../../../templates/skills/pages/content.md" with { type: "text" };
-import scheduledTaskResilienceConfig from "../../../templates/skills/scheduled-task-resilience/config.json" with {
-  type: "text",
-};
-import scheduledTaskResilienceContent from "../../../templates/skills/scheduled-task-resilience/content.md" with {
-  type: "text",
-};
 import scriptWorkflowsConfig from "../../../templates/skills/script-workflows/config.json" with {
   type: "text",
 };
@@ -77,7 +71,6 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: artifactsConfig, body: artifactsContent },
   { config: kvStorageConfig, body: kvStorageContent },
   { config: pagesConfig, body: pagesContent },
-  { config: scheduledTaskResilienceConfig, body: scheduledTaskResilienceContent },
   { config: scriptWorkflowsConfig, body: scriptWorkflowsContent },
   { config: swarmScriptsConfig, body: swarmScriptsContent },
   { config: workflowIterateConfig, body: workflowIterateContent },
