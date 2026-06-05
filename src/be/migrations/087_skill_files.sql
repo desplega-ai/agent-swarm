@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS skill_files (
   size INTEGER,
   createdAt TEXT NOT NULL,
   lastUpdatedAt TEXT NOT NULL,
+  created_by TEXT REFERENCES users(id),
+  updated_by TEXT REFERENCES users(id),
   UNIQUE(skillId, path)
 );
 

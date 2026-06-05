@@ -80,6 +80,8 @@ describe("skill_files storage", () => {
       "size",
       "createdAt",
       "lastUpdatedAt",
+      "created_by",
+      "updated_by",
     ]);
   });
 
