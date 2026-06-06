@@ -424,4 +424,126 @@ describe("SqliteMemoryStore", () => {
       expect(filtered.length).toBeGreaterThan(0);
     });
   });
+
+  describe("purgeExpired()", () => {
+    const purgeAgent = "cccc0000-0000-4000-8000-000000000003";
+
+    beforeAll(() => {
+      try {
+        createAgent({ id: purgeAgent, name: "Purge Agent", isLead: false, status: "idle" });
+      } catch {
+        // agent may already exist from a prior run
+      }
+    });
+
+    test("deletes rows past their expiresAt and returns count", () => {
+      const db = getDb();
+
+      // Store a session_summary (3-day TTL) then backdateits expiresAt to the past
+      const mem = store.store({
+        agentId: purgeAgent,
+        scope: "agent",
+        name: "expired session",
+        content: "old session data",
+        source: "session_summary",
+      });
+      db.prepare("UPDATE agent_memory SET expiresAt = datetime('now', '-1 day') WHERE id = ?").run(
+        mem.id,
+      );
+
+      // Store a manual memory (never expires) — should survive
+      const keeper = store.store({
+        agentId: purgeAgent,
+        scope: "agent",
+        name: "keeper",
+        content: "manual content",
+        source: "manual",
+      });
+
+      const purged = store.purgeExpired();
+      expect(purged).toBeGreaterThanOrEqual(1);
+
+      expect(store.get(mem.id)).toBeNull();
+      expect(store.get(keeper.id)).not.toBeNull();
+    });
+
+    test("returns 0 when nothing is expired", () => {
+      const purged = store.purgeExpired();
+      expect(purged).toBe(0);
+    });
+
+    test("also removes corresponding vec rows", () => {
+      const db = getDb();
+      const emb = vector({ 0: 0.9, 100: 0.1 });
+
+      const mem = store.store({
+        agentId: purgeAgent,
+        scope: "agent",
+        name: "vec-purge-test",
+        content: "will be purged",
+        source: "task_completion",
+      });
+      store.updateEmbedding(mem.id, emb, "test-model");
+
+      const vecBefore = db
+        .prepare<{ count: number }, [string]>(
+          "SELECT COUNT(*) as count FROM memory_vec WHERE memory_id = ?",
+        )
+        .get(mem.id);
+
+      // Only check vec cleanup if the row was actually inserted
+      if (vecBefore && vecBefore.count > 0) {
+        db.prepare(
+          "UPDATE agent_memory SET expiresAt = datetime('now', '-1 day') WHERE id = ?",
+        ).run(mem.id);
+
+        store.purgeExpired();
+
+        const vecAfter = db
+          .prepare<{ count: number }, [string]>(
+            "SELECT COUNT(*) as count FROM memory_vec WHERE memory_id = ?",
+          )
+          .get(mem.id);
+        expect(vecAfter?.count ?? 0).toBe(0);
+      }
+    });
+  });
+
+  describe("knn-k cap", () => {
+    test("search does not throw when vec table exceeds 4096 rows", () => {
+      const db = getDb();
+      const emb = vector({ 0: 1.0 });
+      const embBuffer = serializeEmbedding(emb);
+
+      // Check if vec is available — if not, skip (test is meaningful only with vec)
+      const health = store.getHealth();
+      if (health.retrievalMode !== "vec") return;
+
+      // Insert enough rows to exceed 4096 in the vec table
+      const currentCount =
+        db.prepare<{ c: number }, []>("SELECT COUNT(*) as c FROM memory_vec").get()?.c ?? 0;
+      const needed = Math.max(0, 4097 - currentCount);
+
+      for (let i = 0; i < needed; i++) {
+        const id = `knn-test-${i}-${Date.now()}`;
+        db.prepare(
+          "INSERT INTO agent_memory (id, agentId, scope, name, content, source, embedding, chunkIndex, totalChunks, tags, alpha, beta, createdAt, accessedAt) VALUES (?, ?, 'agent', ?, 'knn test', 'manual', ?, 0, 1, '[]', 1, 1, datetime('now'), datetime('now'))",
+        ).run(id, agentA, `knn-${i}`, embBuffer);
+        const vecBuf = new Float32Array(emb);
+        db.prepare("INSERT INTO memory_vec (memory_id, embedding) VALUES (?, ?)").run(
+          id,
+          Buffer.from(vecBuf.buffer),
+        );
+      }
+
+      const vecCount =
+        db.prepare<{ c: number }, []>("SELECT COUNT(*) as c FROM memory_vec").get()?.c ?? 0;
+      expect(vecCount).toBeGreaterThanOrEqual(4097);
+
+      // This should NOT throw — it should clamp k to 4096
+      const results = store.search(emb, agentA, { scope: "agent", limit: 10 });
+      expect(results).toBeDefined();
+      expect(Array.isArray(results)).toBe(true);
+    });
+  });
 });

@@ -25,6 +25,7 @@ export interface MemoryStore {
   listForReembedding(options?: { agentId?: string }): { id: string; content: string }[];
   delete(id: string): boolean;
   deleteBySourcePath(sourcePath: string, agentId: string): number;
+  purgeExpired(): number;
   updateEmbedding(id: string, embedding: Float32Array, model: string): void;
   getStats(agentId: string): MemoryStats;
   getHealth(): MemoryHealth;

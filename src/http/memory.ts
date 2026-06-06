@@ -683,3 +683,41 @@ export async function handleMemory(
 
   return false;
 }
+
+// ─── Expired Memory GC ──────────────────────────────────────────────────────
+
+const MEMORY_GC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+let memoryGcTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startMemoryGc(intervalMs = MEMORY_GC_INTERVAL_MS): void {
+  if (memoryGcTimer) return;
+
+  // Run immediately on startup to clear any backlog
+  try {
+    const purged = getMemoryStore().purgeExpired();
+    if (purged > 0) {
+      console.log(`[memory-gc] Initial purge removed ${purged} expired memory row(s)`);
+    }
+  } catch (err) {
+    console.error("[memory-gc] Initial purge failed:", err);
+  }
+
+  memoryGcTimer = setInterval(() => {
+    try {
+      const purged = getMemoryStore().purgeExpired();
+      if (purged > 0) {
+        console.log(`[memory-gc] Periodic purge removed ${purged} expired memory row(s)`);
+      }
+    } catch (err) {
+      console.error("[memory-gc] Periodic purge failed:", err);
+    }
+  }, intervalMs);
+  if (typeof memoryGcTimer?.unref === "function") memoryGcTimer.unref();
+}
+
+export function stopMemoryGc(): void {
+  if (memoryGcTimer) {
+    clearInterval(memoryGcTimer);
+    memoryGcTimer = null;
+  }
+}

@@ -366,7 +366,8 @@ export class SqliteMemoryStore implements MemoryStore {
     const { scope, limit, source, isLead, includeExpired } = options;
 
     const embeddingBuffer = serializeEmbedding(queryEmbedding);
-    const knnLimit = Math.max(limit, this.getVecCount());
+    // sqlite-vec hard ceiling is 4096 for knn queries
+    const knnLimit = Math.min(Math.max(limit, this.getVecCount()), 4096);
 
     const conditions: string[] = ["v.embedding MATCH ?"];
     const params: (Buffer | string | number | null)[] = [embeddingBuffer];
@@ -567,6 +568,40 @@ export class SqliteMemoryStore implements MemoryStore {
     const result = db
       .prepare("DELETE FROM agent_memory WHERE sourcePath = ? AND agentId = ?")
       .run(sourcePath, agentId);
+    return result.changes;
+  }
+
+  purgeExpired(): number {
+    const db = getDb();
+
+    const expiredIds = db
+      .prepare<{ id: string }, []>(
+        "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
+      )
+      .all();
+
+    if (expiredIds.length === 0) return 0;
+
+    if (this.vecInitialized && this.getVecTableSchema()) {
+      const batchSize = 500;
+      for (let i = 0; i < expiredIds.length; i += batchSize) {
+        const batch = expiredIds.slice(i, i + batchSize);
+        const placeholders = batch.map(() => "?").join(",");
+        db.prepare(`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`).run(
+          ...batch.map((r) => r.id),
+        );
+      }
+    }
+
+    const result = db
+      .prepare(
+        "DELETE FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
+      )
+      .run();
+
+    console.log(
+      `[memory] Purged ${result.changes} expired memory row(s) (vec cleanup: ${expiredIds.length} id(s))`,
+    );
     return result.changes;
   }
 

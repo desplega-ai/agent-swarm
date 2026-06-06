@@ -53,7 +53,7 @@ import { handleMcpBridge } from "./mcp-bridge";
 import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
 import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
-import { handleMemory } from "./memory";
+import { handleMemory, startMemoryGc, stopMemoryGc } from "./memory";
 import { handleMetrics } from "./metrics";
 import { handlePageProxy } from "./page-proxy";
 import { handlePages } from "./pages";
@@ -388,6 +388,9 @@ async function shutdown() {
   // Stop MCP OAuth pending-session garbage collector
   stopMcpOAuthPendingGc();
 
+  // Stop memory expired-row garbage collector
+  stopMemoryGc();
+
   if (globalState.__apiGcInterval) {
     clearInterval(globalState.__apiGcInterval);
     delete globalState.__apiGcInterval;
@@ -550,6 +553,9 @@ httpServer
 
     // Start MCP OAuth pending-session garbage collector (5-min tick)
     startMcpOAuthPendingGc();
+
+    // Start expired-memory garbage collector (1-hour tick, immediate first run)
+    startMemoryGc();
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);
