@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.92.1] - 2026-06-07
+
+### Added
+- **Complex skill file foundation** (#680) — skills can now store bundled reference files in the database, sync those files into local provider skill directories, expose file CRUD over `/api/skills/{id}/files*`, and let agents fetch bundled references on demand via the new `skill-get-file` MCP tool.
+
+### Changed
+- **Bundled model pricing metadata refreshed** (#682) — the daily models.dev sync updated the built-in pricing data that powers model-cost lookups and related guidance.
+
+### Fixed
+- **Memory KNN queries now cap `k` and purge expired rows first** (#684) — oversized nearest-neighbor requests no longer overrun the memory index path, and expired rows are cleaned before search to keep recall stable.
+
 ## [1.92.0] - 2026-06-05
 
 ### Added
