@@ -1323,6 +1323,17 @@ Get full skill content by ID or name. Name resolution checks agent scope first, 
 | `skillId` | `string` | No | - | Skill ID |
 | `name` | `string` | No | - | Skill name (resolved with precedence) |
 
+### skill-get-file
+
+**Get Skill File**
+
+Fetch a bundled reference file from a complex skill by skillId and relative path. Use this when the file is not available on disk.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | Skill ID |
+| `path` | `string` | Yes | - | Relative path, e.g. references/animations.md |
+
 ### skill-search
 
 **Search Skills**
