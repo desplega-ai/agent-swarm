@@ -230,7 +230,7 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
     "@desplega.ai/wts": "0.2.3",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/qa-use": "2.19.0",
-    "@desplega.ai/claude-bridge": "0.1.5",
+    "@desplega.ai/claude-bridge": "0.1.7",
     "@desplega.ai/agent-fs": "0.7.2"
   },
   "overrides": {

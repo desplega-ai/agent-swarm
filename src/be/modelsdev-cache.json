@@ -599,6 +599,7 @@
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
+        "temperature": true,
         "release_date": "2026-03-11",
         "last_updated": "2026-03-12",
         "modalities": {
@@ -861,6 +862,7 @@
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
+        "temperature": true,
         "release_date": "2025-12-15",
         "last_updated": "2026-01-19",
         "modalities": {
@@ -19449,6 +19451,7 @@
         "reasoning": false,
         "tool_call": false,
         "structured_output": false,
+        "temperature": true,
         "release_date": "2025-08-08",
         "last_updated": "2025-08-08",
         "modalities": {
@@ -19473,10 +19476,12 @@
       "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": {
         "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
         "name": "Nvidia Nemotron 3 Nano Omni",
+        "family": "nemotron",
         "attachment": true,
         "reasoning": true,
         "tool_call": true,
         "structured_output": false,
+        "temperature": true,
         "release_date": "2026-04-28",
         "last_updated": "2026-04-28",
         "modalities": {
@@ -19507,6 +19512,7 @@
         "reasoning": false,
         "tool_call": false,
         "structured_output": false,
+        "temperature": true,
         "release_date": "2025-12-15",
         "last_updated": "2025-12-15",
         "modalities": {
@@ -19536,6 +19542,7 @@
         "reasoning": false,
         "tool_call": false,
         "structured_output": false,
+        "temperature": true,
         "release_date": "2025-08-08",
         "last_updated": "2025-08-08",
         "modalities": {
@@ -19565,6 +19572,7 @@
         "reasoning": false,
         "tool_call": false,
         "structured_output": false,
+        "temperature": true,
         "release_date": "2025-08-18",
         "last_updated": "2025-08-18",
         "modalities": {
@@ -19594,6 +19602,7 @@
         "reasoning": false,
         "tool_call": false,
         "structured_output": false,
+        "temperature": true,
         "release_date": "2025-04-15",
         "last_updated": "2025-04-15",
         "modalities": {
@@ -19618,10 +19627,12 @@
       "nvidia/nemotron-3-super-120b-a12b": {
         "id": "nvidia/nemotron-3-super-120b-a12b",
         "name": "Nvidia Nemotron 3 Super 120B",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
         "structured_output": false,
+        "temperature": true,
         "release_date": "2026-03-01",
         "last_updated": "2026-03-01",
         "modalities": {
@@ -19646,10 +19657,12 @@
       "nvidia/nemotron-3-super-120b-a12b:thinking": {
         "id": "nvidia/nemotron-3-super-120b-a12b:thinking",
         "name": "Nvidia Nemotron 3 Super 120B Thinking",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
         "structured_output": false,
+        "temperature": true,
         "release_date": "2026-03-01",
         "last_updated": "2026-03-01",
         "modalities": {
@@ -38657,6 +38670,7 @@
       "nvidia/nemotron-3-nano-30b-a3b": {
         "id": "nvidia/nemotron-3-nano-30b-a3b",
         "name": "NVIDIA: Nemotron 3 Nano 30B A3B",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
@@ -38684,6 +38698,7 @@
       "nvidia/nemotron-nano-9b-v2": {
         "id": "nvidia/nemotron-nano-9b-v2",
         "name": "NVIDIA: Nemotron Nano 9B V2",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
@@ -38711,6 +38726,7 @@
       "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
         "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
         "name": "NVIDIA: Nemotron 3 Nano Omni (free)",
+        "family": "nemotron",
         "attachment": true,
         "reasoning": true,
         "tool_call": true,
@@ -38741,6 +38757,7 @@
       "nvidia/nemotron-3-super-120b-a12b:free": {
         "id": "nvidia/nemotron-3-super-120b-a12b:free",
         "name": "NVIDIA: Nemotron 3 Super (free)",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
@@ -38768,6 +38785,7 @@
       "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
         "id": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
         "name": "NVIDIA: Llama 3.3 Nemotron Super 49B V1.5",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
@@ -38795,6 +38813,7 @@
       "nvidia/nemotron-3-super-120b-a12b": {
         "id": "nvidia/nemotron-3-super-120b-a12b",
         "name": "NVIDIA: Nemotron 3 Super",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
@@ -44833,7 +44852,7 @@
         "cost": {
           "input": 0.14,
           "output": 0.28,
-          "cache_read": 0.028
+          "cache_read": 0.0028
         }
       },
       "deepseek-chat": {
@@ -44863,7 +44882,7 @@
         "cost": {
           "input": 0.14,
           "output": 0.28,
-          "cache_read": 0.028
+          "cache_read": 0.0028
         }
       },
       "deepseek-v4-flash": {
@@ -67143,16 +67162,16 @@
       },
       "deepseek/deepseek-r1": {
         "id": "deepseek/deepseek-r1",
-        "name": "R1",
+        "name": "DeepSeek-R1",
         "family": "deepseek-thinking",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2024-07-31",
+        "knowledge": "2024-07",
         "release_date": "2025-01-20",
-        "last_updated": "2025-01-20",
+        "last_updated": "2025-05-29",
         "modalities": {
           "input": [
             "text"
@@ -68603,9 +68622,9 @@
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2025-09-30",
-        "release_date": "2025-09-11",
-        "last_updated": "2025-09-11",
+        "knowledge": "2025-04",
+        "release_date": "2025-09",
+        "last_updated": "2025-09",
         "modalities": {
           "input": [
             "text"
@@ -68626,15 +68645,15 @@
       },
       "qwen/qwen3.5-122b-a10b": {
         "id": "qwen/qwen3.5-122b-a10b",
-        "name": "Qwen3.5-122B-A10B",
-        "family": "qwen3.5",
+        "name": "Qwen3.5 122B-A10B",
+        "family": "qwen",
         "attachment": true,
         "reasoning": true,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2026-02-25",
-        "last_updated": "2026-02-25",
+        "release_date": "2026-02-23",
+        "last_updated": "2026-02-23",
         "modalities": {
           "input": [
             "text",
@@ -68657,16 +68676,16 @@
       },
       "qwen/qwen3-next-80b-a3b-instruct": {
         "id": "qwen/qwen3-next-80b-a3b-instruct",
-        "name": "Qwen3 Next 80B A3B Instruct",
+        "name": "Qwen3-Next 80B-A3B Instruct",
         "family": "qwen",
         "attachment": false,
         "reasoning": false,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2025-09-30",
-        "release_date": "2025-09-11",
-        "last_updated": "2025-09-11",
+        "knowledge": "2025-04",
+        "release_date": "2025-09",
+        "last_updated": "2025-09",
         "modalities": {
           "input": [
             "text"
@@ -68786,9 +68805,9 @@
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2025-03-31",
-        "release_date": "2025-04-28",
-        "last_updated": "2025-04-28",
+        "knowledge": "2025-04",
+        "release_date": "2025-04",
+        "last_updated": "2025-04",
         "modalities": {
           "input": [
             "text"
@@ -68809,16 +68828,16 @@
       },
       "qwen/qwen3-coder-30b-a3b-instruct": {
         "id": "qwen/qwen3-coder-30b-a3b-instruct",
-        "name": "Qwen3 Coder 30B A3B Instruct",
+        "name": "Qwen3-Coder 30B-A3B Instruct",
         "family": "qwen",
         "attachment": false,
         "reasoning": false,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2025-06-30",
-        "release_date": "2025-07-31",
-        "last_updated": "2025-07-31",
+        "knowledge": "2025-04",
+        "release_date": "2025-04",
+        "last_updated": "2025-04",
         "modalities": {
           "input": [
             "text"
@@ -68933,14 +68952,14 @@
       "qwen/qwen3.6-27b": {
         "id": "qwen/qwen3.6-27b",
         "name": "Qwen3.6 27B",
-        "family": "qwen3.6",
+        "family": "qwen",
         "attachment": true,
         "reasoning": true,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2026-04-27",
-        "last_updated": "2026-04-27",
+        "release_date": "2026-04-22",
+        "last_updated": "2026-04-22",
         "modalities": {
           "input": [
             "text",
@@ -68953,26 +68972,26 @@
         },
         "open_weights": true,
         "limit": {
-          "context": 262140,
-          "output": 262140
+          "context": 131072,
+          "output": 131072
         },
         "cost": {
-          "input": 0.29,
-          "output": 3.2
+          "input": 0.289,
+          "output": 2.4
         }
       },
       "qwen/qwen3-235b-a22b": {
         "id": "qwen/qwen3-235b-a22b",
-        "name": "Qwen3 235B A22B",
+        "name": "Qwen3 235B-A22B",
         "family": "qwen",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "knowledge": "2025-03-31",
-        "release_date": "2025-04-28",
-        "last_updated": "2025-04-28",
+        "knowledge": "2025-04",
+        "release_date": "2025-04",
+        "last_updated": "2025-04",
         "modalities": {
           "input": [
             "text"
@@ -69032,7 +69051,7 @@
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "knowledge": "2025-06-30",
+        "knowledge": "2025-04",
         "release_date": "2025-09-23",
         "last_updated": "2025-09-23",
         "modalities": {
@@ -69064,9 +69083,9 @@
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2025-06-30",
-        "release_date": "2025-09-23",
-        "last_updated": "2025-09-23",
+        "knowledge": "2025-04",
+        "release_date": "2025-07-23",
+        "last_updated": "2025-07-23",
         "modalities": {
           "input": [
             "text"
@@ -69427,16 +69446,16 @@
       },
       "qwen/qwen3-next-80b-a3b-thinking": {
         "id": "qwen/qwen3-next-80b-a3b-thinking",
-        "name": "Qwen3 Next 80B A3B Thinking",
+        "name": "Qwen3-Next 80B-A3B (Thinking)",
         "family": "qwen",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2025-09-30",
-        "release_date": "2025-09-11",
-        "last_updated": "2025-09-11",
+        "knowledge": "2025-04",
+        "release_date": "2025-09",
+        "last_updated": "2025-09",
         "modalities": {
           "input": [
             "text"
@@ -69464,9 +69483,9 @@
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "knowledge": "2025-06-30",
-        "release_date": "2025-09-17",
-        "last_updated": "2025-09-17",
+        "knowledge": "2025-04",
+        "release_date": "2025-07-28",
+        "last_updated": "2025-07-28",
         "modalities": {
           "input": [
             "text"
@@ -69489,15 +69508,15 @@
       },
       "qwen/qwen3.5-35b-a3b": {
         "id": "qwen/qwen3.5-35b-a3b",
-        "name": "Qwen3.5-35B-A3B",
-        "family": "qwen3.5",
+        "name": "Qwen3.5 35B-A3B",
+        "family": "qwen",
         "attachment": true,
         "reasoning": true,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2026-02-25",
-        "last_updated": "2026-02-25",
+        "release_date": "2026-02-23",
+        "last_updated": "2026-02-23",
         "modalities": {
           "input": [
             "text",
@@ -69553,15 +69572,15 @@
       },
       "qwen/qwen3.6-35b-a3b": {
         "id": "qwen/qwen3.6-35b-a3b",
-        "name": "Qwen3.6 35B A3B",
-        "family": "qwen3.6",
+        "name": "Qwen3.6 35B-A3B",
+        "family": "qwen",
         "attachment": true,
         "reasoning": true,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2026-04-27",
-        "last_updated": "2026-04-27",
+        "release_date": "2026-04-17",
+        "last_updated": "2026-04-17",
         "modalities": {
           "input": [
             "text",
@@ -69677,14 +69696,15 @@
       "qwen/qwen3.6-max-preview": {
         "id": "qwen/qwen3.6-max-preview",
         "name": "Qwen3.6 Max Preview",
-        "family": "qwen3.6",
+        "family": "qwen",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2026-04-27",
-        "last_updated": "2026-04-27",
+        "knowledge": "2025-04",
+        "release_date": "2026-04-20",
+        "last_updated": "2026-04-20",
         "modalities": {
           "input": [
             "text"
@@ -69706,16 +69726,15 @@
       },
       "qwen/qwen3.5-397b-a17b": {
         "id": "qwen/qwen3.5-397b-a17b",
-        "name": "Qwen3.5 397B A17B",
+        "name": "Qwen3.5 397B-A17B",
         "family": "qwen",
         "attachment": true,
         "reasoning": true,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2025-04",
-        "release_date": "2026-02-16",
-        "last_updated": "2026-02-16",
+        "release_date": "2026-02-15",
+        "last_updated": "2026-02-15",
         "modalities": {
           "input": [
             "text",
@@ -69745,8 +69764,9 @@
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2026-06-03",
-        "last_updated": "2026-06-03",
+        "knowledge": "2025-04",
+        "release_date": "2026-06-02",
+        "last_updated": "2026-06-02",
         "modalities": {
           "input": [
             "text",
@@ -69829,15 +69849,15 @@
       },
       "qwen/qwen3.5-27b": {
         "id": "qwen/qwen3.5-27b",
-        "name": "Qwen3.5-27B",
-        "family": "qwen3.5",
+        "name": "Qwen3.5 27B",
+        "family": "qwen",
         "attachment": true,
         "reasoning": true,
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2026-02-25",
-        "last_updated": "2026-02-25",
+        "release_date": "2026-02-23",
+        "last_updated": "2026-02-23",
         "modalities": {
           "input": [
             "text",
@@ -69981,16 +70001,16 @@
       },
       "qwen/qwen-plus": {
         "id": "qwen/qwen-plus",
-        "name": "Qwen-Plus",
+        "name": "Qwen Plus",
         "family": "qwen",
         "attachment": false,
         "reasoning": false,
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "knowledge": "2025-03-31",
-        "release_date": "2025-02-01",
-        "last_updated": "2025-02-01",
+        "knowledge": "2024-04",
+        "release_date": "2024-01-25",
+        "last_updated": "2025-09-11",
         "modalities": {
           "input": [
             "text"
@@ -71042,8 +71062,8 @@
           "output": 8192
         },
         "cost": {
-          "input": 0.04,
-          "output": 0.04
+          "input": 0.14,
+          "output": 0.14
         }
       },
       "meta-llama/llama-3.1-8b-instruct": {
@@ -71376,37 +71396,6 @@
           "output": 1.25
         }
       },
-      "baidu/ernie-4.5-vl-28b-a3b": {
-        "id": "baidu/ernie-4.5-vl-28b-a3b",
-        "name": "ERNIE 4.5 VL 28B A3B",
-        "family": "ernie",
-        "attachment": true,
-        "reasoning": true,
-        "tool_call": true,
-        "structured_output": false,
-        "temperature": true,
-        "knowledge": "2025-03-31",
-        "release_date": "2025-08-12",
-        "last_updated": "2025-08-12",
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "open_weights": true,
-        "limit": {
-          "context": 30000,
-          "output": 8000
-        },
-        "cost": {
-          "input": 0.14,
-          "output": 0.56
-        }
-      },
       "x-ai/grok-4.20-multi-agent": {
         "id": "x-ai/grok-4.20-multi-agent",
         "name": "Grok 4.20 Multi-Agent",
@@ -71626,8 +71615,8 @@
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "release_date": "2025-12-14",
-        "last_updated": "2025-12-14",
+        "release_date": "2025-12-15",
+        "last_updated": "2025-12-15",
         "modalities": {
           "input": [
             "text"
@@ -71677,16 +71666,15 @@
       },
       "nvidia/nemotron-nano-9b-v2": {
         "id": "nvidia/nemotron-nano-9b-v2",
-        "name": "Nemotron Nano 9B V2",
+        "name": "Nemotron Nano 9B v2",
         "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "knowledge": "2025-03-31",
-        "release_date": "2025-09-05",
-        "last_updated": "2025-09-05",
+        "release_date": "2025-08-18",
+        "last_updated": "2025-08-18",
         "modalities": {
           "input": [
             "text"
@@ -71714,9 +71702,8 @@
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "knowledge": "2025-11",
-        "release_date": "2025-12-14",
-        "last_updated": "2025-12-14",
+        "release_date": "2025-12-15",
+        "last_updated": "2025-12-15",
         "modalities": {
           "input": [
             "text"
@@ -71779,15 +71766,15 @@
         "modalities": {
           "input": [
             "text",
-            "audio",
             "image",
-            "video"
+            "video",
+            "audio"
           ],
           "output": [
             "text"
           ]
         },
-        "open_weights": false,
+        "open_weights": true,
         "limit": {
           "context": 256000,
           "output": 65536
@@ -71799,7 +71786,7 @@
       },
       "nvidia/nemotron-3-ultra-550b-a55b": {
         "id": "nvidia/nemotron-3-ultra-550b-a55b",
-        "name": "Nemotron 3 Ultra",
+        "name": "Nemotron 3 Ultra 550B A55B",
         "family": "nemotron",
         "attachment": false,
         "reasoning": true,
@@ -71836,7 +71823,6 @@
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2024-04",
         "release_date": "2026-03-11",
         "last_updated": "2026-03-11",
         "modalities": {
@@ -71866,13 +71852,12 @@
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "knowledge": "2025-11",
         "release_date": "2025-10-28",
         "last_updated": "2025-10-28",
         "modalities": {
           "input": [
-            "image",
             "text",
+            "image",
             "video"
           ],
           "output": [
@@ -71898,9 +71883,8 @@
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "knowledge": "2025-03-31",
-        "release_date": "2025-09-05",
-        "last_updated": "2025-09-05",
+        "release_date": "2025-08-18",
+        "last_updated": "2025-08-18",
         "modalities": {
           "input": [
             "text"
@@ -71921,16 +71905,15 @@
       },
       "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
         "id": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        "name": "Llama 3.3 Nemotron Super 49B V1.5",
+        "name": "Llama 3.3 Nemotron Super 49B v1.5",
         "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "knowledge": "2024-03-31",
-        "release_date": "2025-10-10",
-        "last_updated": "2025-10-10",
+        "release_date": "2025-07-25",
+        "last_updated": "2025-07-25",
         "modalities": {
           "input": [
             "text"
@@ -71951,14 +71934,13 @@
       },
       "nvidia/nemotron-3-super-120b-a12b": {
         "id": "nvidia/nemotron-3-super-120b-a12b",
-        "name": "Nemotron 3 Super",
+        "name": "Nemotron 3 Super 120B A12B",
         "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "knowledge": "2024-04",
         "release_date": "2026-03-11",
         "last_updated": "2026-03-11",
         "modalities": {
@@ -72064,36 +72046,6 @@
           "input": 0.22,
           "output": 0.85,
           "cache_read": 0.06
-        }
-      },
-      "arcee-ai/spotlight": {
-        "id": "arcee-ai/spotlight",
-        "name": "Spotlight",
-        "attachment": true,
-        "reasoning": false,
-        "tool_call": false,
-        "structured_output": false,
-        "temperature": true,
-        "knowledge": "2025-03-31",
-        "release_date": "2025-05-05",
-        "last_updated": "2025-05-05",
-        "modalities": {
-          "input": [
-            "image",
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "open_weights": false,
-        "limit": {
-          "context": 131072,
-          "output": 65537
-        },
-        "cost": {
-          "input": 0.18,
-          "output": 0.18
         }
       },
       "arcee-ai/maestro-reasoning": {
@@ -72522,8 +72474,8 @@
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "release_date": "2026-04-22",
-        "last_updated": "2026-04-22",
+        "release_date": "2026-04-20",
+        "last_updated": "2026-04-20",
         "modalities": {
           "input": [
             "text"
@@ -72667,7 +72619,6 @@
       "stepfun/step-3.5-flash": {
         "id": "stepfun/step-3.5-flash",
         "name": "Step 3.5 Flash",
-        "family": "step",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
@@ -72675,7 +72626,7 @@
         "temperature": true,
         "knowledge": "2025-01",
         "release_date": "2026-01-29",
-        "last_updated": "2026-01-29",
+        "last_updated": "2026-02-13",
         "modalities": {
           "input": [
             "text"
@@ -73334,12 +73285,13 @@
         },
         "open_weights": true,
         "limit": {
-          "context": 262144,
-          "output": 16384
+          "context": 256000,
+          "output": 8192
         },
         "cost": {
           "input": 0.12,
-          "output": 0.37
+          "output": 0.36,
+          "cache_read": 0.09
         }
       },
       "google/gemini-3-flash-preview": {
@@ -75178,36 +75130,6 @@
           "cache_read": 0.5
         }
       },
-      "openai/gpt-4-1106-preview": {
-        "id": "openai/gpt-4-1106-preview",
-        "name": "GPT-4 Turbo (older v1106)",
-        "family": "gpt",
-        "attachment": false,
-        "reasoning": false,
-        "tool_call": true,
-        "structured_output": true,
-        "temperature": true,
-        "knowledge": "2023-04-30",
-        "release_date": "2023-11-06",
-        "last_updated": "2023-11-06",
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "open_weights": false,
-        "limit": {
-          "context": 128000,
-          "output": 4096
-        },
-        "cost": {
-          "input": 10,
-          "output": 30
-        }
-      },
       "openai/gpt-oss-20b": {
         "id": "openai/gpt-oss-20b",
         "name": "gpt-oss-20b",
@@ -76440,7 +76362,7 @@
         "open_weights": true,
         "limit": {
           "context": 196608,
-          "output": 131072
+          "output": 196608
         },
         "cost": {
           "input": 0.279,
@@ -97939,6 +97861,7 @@
       "mistralai/mistral-nemotron": {
         "id": "mistralai/mistral-nemotron",
         "name": "mistral-nemotron",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": false,
         "tool_call": true,
@@ -98968,6 +98891,7 @@
       "nvidia/llama-nemotron-rerank-vl-1b-v2": {
         "id": "nvidia/llama-nemotron-rerank-vl-1b-v2",
         "name": "llama-nemotron-rerank-vl-1b-v2",
+        "family": "nemotron",
         "attachment": true,
         "reasoning": false,
         "tool_call": false,
@@ -99052,6 +98976,7 @@
       "nvidia/nemotron-3-content-safety": {
         "id": "nvidia/nemotron-3-content-safety",
         "name": "nemotron-3-content-safety",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": false,
         "tool_call": false,
@@ -99133,6 +99058,7 @@
       "nvidia/llama-nemotron-embed-vl-1b-v2": {
         "id": "nvidia/llama-nemotron-embed-vl-1b-v2",
         "name": "llama-nemotron-embed-vl-1b-v2",
+        "family": "nemotron",
         "attachment": true,
         "reasoning": false,
         "tool_call": false,
@@ -99188,6 +99114,7 @@
       "nvidia/llama-3_1-nemotron-safety-guard-8b-v3": {
         "id": "nvidia/llama-3_1-nemotron-safety-guard-8b-v3",
         "name": "llama-3.1-nemotron-safety-guard-8b-v3",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": false,
         "tool_call": false,
@@ -99383,6 +99310,7 @@
       "nvidia/nemotron-mini-4b-instruct": {
         "id": "nvidia/nemotron-mini-4b-instruct",
         "name": "nemotron-mini-4b-instruct",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": false,
         "tool_call": true,
@@ -99410,6 +99338,7 @@
       "nvidia/nemotron-voicechat": {
         "id": "nvidia/nemotron-voicechat",
         "name": "nemotron-voicechat",
+        "family": "nemotron",
         "attachment": true,
         "reasoning": false,
         "tool_call": true,
@@ -99494,6 +99423,7 @@
       "nvidia/nemotron-content-safety-reasoning-4b": {
         "id": "nvidia/nemotron-content-safety-reasoning-4b",
         "name": "nemotron-content-safety-reasoning-4b",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": false,
@@ -109079,6 +109009,7 @@
       "nemotron-3-super-120b-a12b": {
         "id": "nemotron-3-super-120b-a12b",
         "name": "Nemotron 3 Super 120B A12B",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
@@ -159526,7 +159457,7 @@
       "@cf/moonshotai/kimi-k2.6": {
         "id": "@cf/moonshotai/kimi-k2.6",
         "name": "Kimi K2.6",
-        "family": "kimi",
+        "family": "kimi-k2.6",
         "attachment": true,
         "reasoning": true,
         "tool_call": true,
@@ -159536,8 +159467,8 @@
         "structured_output": true,
         "temperature": true,
         "knowledge": "2025-01",
-        "release_date": "2026-04-20",
-        "last_updated": "2026-04-20",
+        "release_date": "2026-04-21",
+        "last_updated": "2026-04-21",
         "modalities": {
           "input": [
             "text",
@@ -159561,14 +159492,15 @@
       "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": {
         "id": "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
         "name": "Deepseek R1 Distill Qwen 32B",
-        "family": "deepseek",
+        "family": "deepseek-thinking",
         "attachment": false,
         "reasoning": true,
         "tool_call": false,
         "structured_output": false,
         "temperature": true,
-        "release_date": "2025-01-22",
-        "last_updated": "2025-01-22",
+        "knowledge": "2024-07",
+        "release_date": "2025-01-20",
+        "last_updated": "2025-05-29",
         "modalities": {
           "input": [
             "text"
@@ -159657,6 +159589,7 @@
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
+        "knowledge": "2023-12",
         "release_date": "2024-12-06",
         "last_updated": "2024-12-06",
         "modalities": {
@@ -159686,8 +159619,9 @@
         "tool_call": true,
         "structured_output": false,
         "temperature": true,
-        "release_date": "2025-04-16",
-        "last_updated": "2025-04-16",
+        "knowledge": "2024-08",
+        "release_date": "2025-04-05",
+        "last_updated": "2025-04-05",
         "modalities": {
           "input": [
             "text",
@@ -159891,8 +159825,8 @@
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2025-12-15",
-        "last_updated": "2025-12-15",
+        "release_date": "2026-04-02",
+        "last_updated": "2026-04-02",
         "modalities": {
           "input": [
             "text",
@@ -160397,6 +160331,7 @@
       "nvidia/Llama-3_1-Nemotron-Ultra-253B-v1": {
         "id": "nvidia/Llama-3_1-Nemotron-Ultra-253B-v1",
         "name": "Llama-3.1-Nemotron-Ultra-253B-v1",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": false,
         "tool_call": true,
@@ -160429,6 +160364,7 @@
       "nvidia/Nemotron-3-Nano-Omni": {
         "id": "nvidia/Nemotron-3-Nano-Omni",
         "name": "Nemotron-3-Nano-Omni",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
@@ -160461,6 +160397,7 @@
       "nvidia/nemotron-3-super-120b-a12b": {
         "id": "nvidia/nemotron-3-super-120b-a12b",
         "name": "Nemotron-3-Super-120B-A12B",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
@@ -160491,6 +160428,7 @@
       "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B": {
         "id": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
         "name": "Nemotron-3-Nano-30B-A3B",
+        "family": "nemotron",
         "attachment": false,
         "reasoning": false,
         "tool_call": true,
