@@ -25,6 +25,10 @@ These are operating recommendations, not hard minimums. If a worker runs large l
 
 For Kubernetes, set requests to the steady-state budget the scheduler should reserve and limits to the burst ceiling each pod can use during an active session. Heavy workers need the widest gap between request and limit because build tools, language servers, test runners, and provider subprocesses can spike together.
 
+<Callout type="warn">
+Kubernetes is stricter about memory bursts than a generated Docker Compose or single-host deployment. Exceeding `limits.memory` triggers an immediate OOMKill, and pods running above `requests.memory` are the first eviction candidates under node memory pressure. Compose sets no hard memory ceiling by default, so size Kubernetes requests near the real working set and give limits real headroom. A practical heavy-worker limit is `MAX_CONCURRENT_TASKS * per-session peak (~2 GB) + page-cache headroom`; at the default `MAX_CONCURRENT_TASKS=1`, one heavy coding session peaks around 2 GB, and raising the setting multiplies that peak. For critical lead pods, setting memory request equal to memory limit gives Guaranteed QoS, so the pod is not evicted under node memory pressure; the lead's observed peak is modest enough that a small equal request/limit is usually sufficient.
+</Callout>
+
 | Pod type | Suggested replicas | CPU request | CPU limit | Memory request | Memory limit | Notes |
 |---|---:|---:|---:|---:|---:|---|
 | API server | 1-2 | 500m | 1 CPU | 512 MiB | 1 GiB | Run 2 replicas when the database and storage layer support the deployment topology. |
@@ -33,10 +37,10 @@ For Kubernetes, set requests to the steady-state budget the scheduler should res
 | Light worker | 1 per pod | 250m | 750m | 512 MiB | 1 GiB | Suitable for review, content, triage, and low-build inspection tasks. |
 | Browser / E2E worker | 1 per pod | 1 CPU | 2-3 CPU | 2 GiB | 4 GiB | Browser automation and test fixtures need memory headroom beyond normal worker sizing. |
 
-| Worker class | Recommended pod shape | Concurrency per pod | Scaling rule |
+| Worker class | Recommended pod shape | Concurrency per pod (`MAX_CONCURRENT_TASKS`) | Scaling rule |
 |---|---|---:|---|
-| Heavy coding | 1 agent per pod | 1 active task | Scale by adding pods, not by packing multiple coding sessions into one container. |
-| Light specialist | 1 agent per pod | 1 active task | Scale horizontally when queue latency matters. |
+| Heavy coding | 1 agent per pod | 1 active task (default) | Scale by adding pods, not by packing multiple coding sessions into one container. |
+| Light specialist | 1 agent per pod | 1 active task (default) | Scale horizontally when queue latency matters. |
 | Thin relay / managed-provider worker | 1 agent per pod | 1-2 active tasks | Increase only if the provider runtime executes outside the worker and local tool use is light. |
 
 <Callout type="info">
@@ -66,9 +70,9 @@ Illustrative Hetzner-style VPS tiers:
 
 ## Agent Concurrency Settings
 
-Agent Swarm scales most predictably when each local-runtime worker runs one active task at a time. Increasing per-worker concurrency can be useful for thin relay workers or low-tool tasks, but it multiplies memory peaks and makes local builds contend inside the same container.
+Agent Swarm scales most predictably when each local-runtime worker runs one active task at a time. The per-worker concurrency knob is `MAX_CONCURRENT_TASKS`; the generated Docker Compose default is `MAX_CONCURRENT_TASKS=1`, meaning one active task per worker. Increasing it can be useful for thin relay workers or low-tool tasks, but it multiplies memory peaks and makes local builds contend inside the same container.
 
-| Concurrency profile | Worker count | Parallel tasks per worker | Total active tasks | Recommended host or cluster budget | When to use |
+| Concurrency profile | Worker count | `MAX_CONCURRENT_TASKS` per worker | Total active tasks | Recommended host or cluster budget | When to use |
 |---|---:|---:|---:|---|---|
 | Evaluation | 1 lead + 1 heavy worker | 1 | 1 | 2-4 vCPU, 4-8 GiB RAM | Trial deployments and occasional coding tasks. |
 | Small team | 1 lead + 2-3 heavy workers + 2 light workers | 1 | 4-5 | 8 vCPU, 16 GiB RAM | Several independent tasks per day with room for reviews and content work. |
@@ -79,7 +83,7 @@ Agent Swarm scales most predictably when each local-runtime worker runs one acti
 | Knob | Resource effect | Recommendation |
 |---|---|---|
 | Number of worker containers | Adds near-linear CPU/RAM capacity and isolation | Preferred scaling lever for local-runtime agents. |
-| Parallel tasks per worker | Multiplies per-container peak memory and tool contention | Keep at `1` for coding, builds, browser automation, and repo-wide tests. |
+| `MAX_CONCURRENT_TASKS` (parallel tasks per worker) | Multiplies per-container peak memory and tool contention | Keep the default `1` for coding, builds, browser automation, and repo-wide tests. |
 | Heavy-worker ratio | Determines how many implementation tasks can run at once | Size from expected active coding sessions, not total agent count. |
 | Light-worker ratio | Adds review, triage, content, and QA capacity cheaply | Use remaining host capacity after API, lead, and heavy workers are reserved. |
 | Provider credential pools | Avoids provider-side rate or session contention | Match credential slots to the maximum number of concurrent workers for that provider. |
