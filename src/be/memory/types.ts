@@ -22,6 +22,10 @@ export interface MemoryStore {
   peek(id: string): AgentMemory | null;
   search(embedding: Float32Array, agentId: string, options: MemorySearchOptions): MemoryCandidate[];
   list(agentId: string, options: MemoryListOptions): AgentMemory[];
+  isSourceProtected(source: AgentMemorySource): boolean;
+  listForCuration(
+    agentId?: string,
+  ): { id: string; source: string; name: string; createdAt: string }[];
   listForReembedding(options?: { agentId?: string }): { id: string; content: string }[];
   delete(id: string): boolean;
   deleteBySourcePath(sourcePath: string, agentId: string): number;
@@ -51,6 +55,10 @@ export interface MemoryInput {
 
 export interface MemoryCandidate extends AgentMemory {
   similarity: number;
+  /** Raw cosine similarity before reranking (preserved for diagnostics). */
+  rawSimilarity?: number;
+  /** Final composite score after reranking (recency × source × usefulness × access). */
+  compositeScore?: number;
   accessCount: number;
   expiresAt: string | null;
   embeddingModel: string | null;

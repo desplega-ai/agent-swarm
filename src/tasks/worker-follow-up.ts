@@ -2,6 +2,7 @@ import {
   createTaskExtended,
   getActiveTaskCount,
   getAgentById,
+  getDependentTasks,
   getLeadAgent,
   getTaskAttachments,
   getTaskById,
@@ -115,6 +116,17 @@ export function createWorkerTaskFollowUp(args: {
       task_id: task.id,
     });
     followUpDescription = failedResult.text;
+
+    // Enrich with cascade info: list dependents that were cascade-failed.
+    const cascadedDeps = getDependentTasks(task.id, { includeTerminal: true }).filter(
+      (t) => t.status === "failed" && t.failureReason?.includes("Blocked dependency"),
+    );
+    if (cascadedDeps.length > 0) {
+      const depLines = cascadedDeps.map(
+        (d) => `- ${d.id.slice(0, 8)} — "${d.task.slice(0, 100)}" (${d.failureReason})`,
+      );
+      followUpDescription += `\n\n⚠️ Cascade impact: ${cascadedDeps.length} dependent task(s) were also failed because they depend on this task:\n${depLines.join("\n")}`;
+    }
   }
 
   return createTaskExtended(followUpDescription, {

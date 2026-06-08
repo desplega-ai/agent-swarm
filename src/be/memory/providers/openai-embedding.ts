@@ -55,6 +55,13 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       const values = response.data[0]?.embedding;
       if (!values) return null;
 
+      if (values.length !== this.dimensions) {
+        console.error(
+          `[memory] Embedding dimension mismatch: expected=${this.dimensions} got=${values.length}. Provider may not support the 'dimensions' parameter.`,
+        );
+        return null;
+      }
+
       return new Float32Array(values);
     } catch (err) {
       console.error("[memory] Embedding failed:", (err as Error).message);
@@ -90,6 +97,12 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       for (const item of response.data) {
         const originalIndex = nonEmptyIndices[item.index];
         if (originalIndex !== undefined && item.embedding) {
+          if (item.embedding.length !== this.dimensions) {
+            console.error(
+              `[memory] Batch embedding dimension mismatch: expected=${this.dimensions} got=${item.embedding.length}. Provider may not support the 'dimensions' parameter.`,
+            );
+            continue;
+          }
           results[originalIndex] = new Float32Array(item.embedding);
         }
       }

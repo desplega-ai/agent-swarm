@@ -123,13 +123,13 @@ describe("Memory E2E Lifecycle", () => {
 
   describe("reranking affects result order", () => {
     test("newer memory with same embedding ranks higher", () => {
-      // Create old memory
+      // Use task_completion source so recency decay applies (manual has no decay)
       const old = store.store({
         agentId: agentA,
         scope: "agent",
         name: "old knowledge",
         content: "Old deployment docs",
-        source: "manual",
+        source: "task_completion",
       });
       store.updateEmbedding(old.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
@@ -144,7 +144,7 @@ describe("Memory E2E Lifecycle", () => {
         scope: "agent",
         name: "fresh knowledge",
         content: "New deployment docs",
-        source: "manual",
+        source: "task_completion",
       });
       store.updateEmbedding(fresh.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
@@ -302,7 +302,7 @@ describe("Memory E2E Lifecycle", () => {
         content: "Agent A only",
         source: "manual",
       });
-      store.updateEmbedding(m1.id, new Float32Array([1, 0, 0]), "test-model");
+      store.updateEmbedding(m1.id, new Float32Array([1, 0.3, 0.3]), "test-model");
       agentMemId = m1.id;
 
       const m2 = store.store({
@@ -312,7 +312,7 @@ describe("Memory E2E Lifecycle", () => {
         content: "Visible to all",
         source: "manual",
       });
-      store.updateEmbedding(m2.id, new Float32Array([0, 1, 0]), "test-model");
+      store.updateEmbedding(m2.id, new Float32Array([0.3, 1, 0.3]), "test-model");
       swarmMemId = m2.id;
 
       const m3 = store.store({
@@ -322,7 +322,7 @@ describe("Memory E2E Lifecycle", () => {
         content: "Agent B only",
         source: "manual",
       });
-      store.updateEmbedding(m3.id, new Float32Array([0, 0, 1]), "test-model");
+      store.updateEmbedding(m3.id, new Float32Array([0.3, 0.3, 1]), "test-model");
       otherAgentMemId = m3.id;
     });
 

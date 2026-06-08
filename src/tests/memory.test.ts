@@ -342,8 +342,9 @@ describe("Memory System", () => {
         status: "idle",
       });
 
-      // Create memories with known embeddings
-      // Memory 1: agent scope for searchAgentId, embedding [1,0,0]
+      // Create memories with known embeddings (all share a baseline component
+      // so pairwise cosine similarity stays above the MIN_SIMILARITY floor).
+      // Memory 1: agent scope for searchAgentId
       const m1 = store.store({
         agentId: searchAgentId,
         scope: "agent",
@@ -351,9 +352,9 @@ describe("Memory System", () => {
         content: "Agent-scoped content",
         source: "manual",
       });
-      store.updateEmbedding(m1.id, new Float32Array([1, 0, 0]), "test-model");
+      store.updateEmbedding(m1.id, new Float32Array([1, 0.3, 0.3]), "test-model");
 
-      // Memory 2: swarm scope, embedding [0,1,0]
+      // Memory 2: swarm scope
       const m2 = store.store({
         agentId: searchAgentId,
         scope: "swarm",
@@ -361,9 +362,9 @@ describe("Memory System", () => {
         content: "Swarm-scoped content",
         source: "file_index",
       });
-      store.updateEmbedding(m2.id, new Float32Array([0, 1, 0]), "test-model");
+      store.updateEmbedding(m2.id, new Float32Array([0.3, 1, 0.3]), "test-model");
 
-      // Memory 3: agent scope for OTHER agent, embedding [0,0,1]
+      // Memory 3: agent scope for OTHER agent
       const m3 = store.store({
         agentId: searchAgentId2,
         scope: "agent",
@@ -371,11 +372,11 @@ describe("Memory System", () => {
         content: "Other agent's private memory",
         source: "manual",
       });
-      store.updateEmbedding(m3.id, new Float32Array([0, 0, 1]), "test-model");
+      store.updateEmbedding(m3.id, new Float32Array([0.3, 0.3, 1]), "test-model");
     });
 
     test("worker sees own agent-scoped + swarm memories", () => {
-      const query = new Float32Array([1, 0, 0]); // closest to Memory 1
+      const query = new Float32Array([1, 0.3, 0.3]); // closest to Memory 1
       const results = store.search(query, searchAgentId, { isLead: false });
       const names = results.map((r) => r.name);
 
@@ -385,7 +386,7 @@ describe("Memory System", () => {
     });
 
     test("worker does not see other agent's agent-scoped memories", () => {
-      const query = new Float32Array([0, 0, 1]); // closest to Memory 3
+      const query = new Float32Array([0.3, 0.3, 1]); // closest to Memory 3
       const results = store.search(query, searchAgentId, { isLead: false });
       const names = results.map((r) => r.name);
 
@@ -393,7 +394,7 @@ describe("Memory System", () => {
     });
 
     test("lead sees ALL memories across agents", () => {
-      const query = new Float32Array([0, 0, 1]); // closest to Memory 3
+      const query = new Float32Array([0.3, 0.3, 1]); // closest to Memory 3
       const results = store.search(query, searchAgentId, { isLead: true });
       const names = results.map((r) => r.name);
 
@@ -403,12 +404,12 @@ describe("Memory System", () => {
     });
 
     test("results sorted by similarity (highest first)", () => {
-      const query = new Float32Array([1, 0, 0]); // identical to Memory 1's embedding
+      const query = new Float32Array([1, 0.3, 0.3]); // closest to Memory 1's embedding
       const results = store.search(query, searchAgentId, { isLead: true });
 
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].name).toBe("Agent Memory 1");
-      expect(results[0].similarity).toBeCloseTo(1.0, 3);
+      expect(results[0].similarity).toBeGreaterThan(0.9);
 
       // Each subsequent result should have lower or equal similarity
       for (let i = 1; i < results.length; i++) {

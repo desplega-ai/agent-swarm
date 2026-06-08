@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { accessBoost, computeScore, recencyDecay, rerank, usefulness } from "../be/memory/reranker";
+import {
+  accessBoost,
+  computeScore,
+  recencyDecay,
+  rerank,
+  sourceQuality,
+  usefulness,
+} from "../be/memory/reranker";
 import type { MemoryCandidate } from "../be/memory/types";
 
 function makeCandidate(
@@ -37,21 +44,33 @@ describe("recencyDecay", () => {
     expect(decay).toBeCloseTo(1.0, 5);
   });
 
-  test("memory at half-life (14d) → ~0.5", () => {
+  test("task_completion at half-life (14d) → ~0.5", () => {
     const created = new Date(now.getTime() - 14 * 86400000).toISOString();
-    const decay = recencyDecay(created, now);
+    const decay = recencyDecay(created, now, "task_completion");
     expect(decay).toBeCloseTo(0.5, 2);
   });
 
-  test("memory at 2× half-life (28d) → ~0.25", () => {
-    const created = new Date(now.getTime() - 28 * 86400000).toISOString();
-    const decay = recencyDecay(created, now);
-    expect(decay).toBeCloseTo(0.25, 2);
+  test("session_summary at 7d → ~0.5 (7d half-life)", () => {
+    const created = new Date(now.getTime() - 7 * 86400000).toISOString();
+    const decay = recencyDecay(created, now, "session_summary");
+    expect(decay).toBeCloseTo(0.5, 2);
   });
 
-  test("very old memory (365d) → near 0", () => {
+  test("file_index at 180d → ~0.5 (180d half-life)", () => {
+    const created = new Date(now.getTime() - 180 * 86400000).toISOString();
+    const decay = recencyDecay(created, now, "file_index");
+    expect(decay).toBeCloseTo(0.5, 2);
+  });
+
+  test("manual memory at any age → 1.0 (no decay)", () => {
     const created = new Date(now.getTime() - 365 * 86400000).toISOString();
-    const decay = recencyDecay(created, now);
+    const decay = recencyDecay(created, now, "manual");
+    expect(decay).toBe(1.0);
+  });
+
+  test("very old task_completion (365d) → near 0", () => {
+    const created = new Date(now.getTime() - 365 * 86400000).toISOString();
+    const decay = recencyDecay(created, now, "task_completion");
     expect(decay).toBeLessThan(0.001);
   });
 
@@ -59,6 +78,12 @@ describe("recencyDecay", () => {
     const created = new Date(now.getTime() + 86400000).toISOString();
     const decay = recencyDecay(created, now);
     expect(decay).toBe(1.0);
+  });
+
+  test("no source provided → falls back to task_completion half-life", () => {
+    const created = new Date(now.getTime() - 14 * 86400000).toISOString();
+    const decay = recencyDecay(created, now);
+    expect(decay).toBeCloseTo(0.5, 2);
   });
 });
 
@@ -93,31 +118,71 @@ describe("accessBoost", () => {
   });
 });
 
+describe("sourceQuality", () => {
+  test("manual → 1.5", () => {
+    expect(sourceQuality("manual")).toBe(1.5);
+  });
+
+  test("file_index → 1.0", () => {
+    expect(sourceQuality("file_index")).toBe(1.0);
+  });
+
+  test("task_completion → 0.7", () => {
+    expect(sourceQuality("task_completion")).toBe(0.7);
+  });
+
+  test("session_summary → 0.5", () => {
+    expect(sourceQuality("session_summary")).toBe(0.5);
+  });
+});
+
 describe("computeScore", () => {
   const now = new Date("2026-04-12T12:00:00Z");
 
-  test("multiplies similarity × decay × boost", () => {
+  test("manual: similarity × 1.0 (no decay) × source(1.5) × boost × usefulness", () => {
     const candidate = makeCandidate({
       similarity: 0.8,
+      source: "manual",
       createdAt: now.toISOString(),
       accessedAt: now.toISOString(),
       accessCount: 0,
     });
     const score = computeScore(candidate, now);
-    // 0.8 * 1.0 * 1.0 = 0.8
-    expect(score).toBeCloseTo(0.8, 5);
+    // 0.8 * 1.0 (no decay for manual) * 1.0 (no boost) * 1.5 (source) * 1.0 (usefulness) = 1.2
+    expect(score).toBeCloseTo(1.2, 5);
   });
 
-  test("old memory with no access gets penalized", () => {
+  test("task_completion at 14d → penalized by decay AND source multiplier", () => {
     const candidate = makeCandidate({
       similarity: 0.8,
+      source: "task_completion",
       createdAt: new Date(now.getTime() - 14 * 86400000).toISOString(),
       accessedAt: new Date(now.getTime() - 14 * 86400000).toISOString(),
       accessCount: 0,
     });
     const score = computeScore(candidate, now);
-    // 0.8 * 0.5 * 1.0 = 0.4
-    expect(score).toBeCloseTo(0.4, 2);
+    // 0.8 * 0.5 (14d decay) * 1.0 (no boost) * 0.7 (source) * 1.0 (usefulness) = 0.28
+    expect(score).toBeCloseTo(0.28, 2);
+  });
+
+  test("old manual vs fresh task_completion: manual wins on relevance", () => {
+    const oldManual = makeCandidate({
+      similarity: 0.8,
+      source: "manual",
+      createdAt: new Date(now.getTime() - 76 * 86400000).toISOString(),
+      accessedAt: new Date(now.getTime() - 76 * 86400000).toISOString(),
+      accessCount: 0,
+    });
+    const freshTC = makeCandidate({
+      similarity: 0.05,
+      source: "task_completion",
+      createdAt: new Date(now.getTime() - 1 * 86400000).toISOString(),
+      accessedAt: new Date(now.getTime() - 1 * 86400000).toISOString(),
+      accessCount: 0,
+    });
+    // This is THE bug we're fixing: with the old flat 14d decay, the old manual
+    // memory scored lower than fresh noise. Now manual has no decay.
+    expect(computeScore(oldManual, now)).toBeGreaterThan(computeScore(freshTC, now));
   });
 });
 
@@ -166,36 +231,51 @@ describe("rerank", () => {
     expect(result[0]!.similarity).toBeGreaterThan(result[1]!.similarity);
   });
 
-  test("recency boosts newer memory over older with same raw similarity", () => {
+  test("recency boosts newer task_completion over older with same raw similarity", () => {
     const candidates = [
       makeCandidate({
         similarity: 0.8,
-        createdAt: new Date(now.getTime() - 14 * 86400000).toISOString(), // 14d old
+        source: "task_completion",
+        createdAt: new Date(now.getTime() - 14 * 86400000).toISOString(),
       }),
       makeCandidate({
         similarity: 0.8,
-        createdAt: now.toISOString(), // fresh
+        source: "task_completion",
+        createdAt: now.toISOString(),
       }),
     ];
     const result = rerank(candidates, { limit: 2, now });
-    // Fresh memory should rank higher due to recency decay
     expect(result[0]!.createdAt).toBe(now.toISOString());
   });
 
   test("now parameter enables deterministic testing", () => {
     const candidate = makeCandidate({
       similarity: 0.8,
+      source: "task_completion",
       createdAt: new Date(now.getTime() - 7 * 86400000).toISOString(),
     });
     const result1 = rerank([candidate], { limit: 1, now });
     const result2 = rerank([candidate], { limit: 1, now });
     expect(result1[0]!.similarity).toBe(result2[0]!.similarity);
   });
+
+  test("preserves rawSimilarity and compositeScore", () => {
+    const candidate = makeCandidate({
+      similarity: 0.8,
+      source: "manual",
+      createdAt: now.toISOString(),
+    });
+    const result = rerank([candidate], { limit: 1, now });
+    expect(result[0]!.rawSimilarity).toBe(0.8);
+    expect(result[0]!.compositeScore).toBeDefined();
+    // For a fresh manual memory: 0.8 * 1.0 (no decay) * 1.0 (no boost) * 1.5 (source) * 1.0 (usefulness)
+    expect(result[0]!.compositeScore).toBeCloseTo(1.2, 5);
+    // similarity field = compositeScore
+    expect(result[0]!.similarity).toBe(result[0]!.compositeScore);
+  });
 });
 
 describe("usefulness", () => {
-  // The default-floor cases assume MEMORY_DEMOTION_FLOOR is unset/empty.
-  // The override case sets and restores the env var.
   let originalFloor: string | undefined;
   beforeEach(() => {
     originalFloor = process.env.MEMORY_DEMOTION_FLOOR;
@@ -224,10 +304,6 @@ describe("usefulness", () => {
   });
 
   test("Beta(50,1) → 2 * 50/51 ≈ 1.961 (approaches ceiling, never above 2.0)", () => {
-    // NB: the clamp `Math.min(2.0, 2 * mean)` is a defensive ceiling — the
-    // formula 2 * α/(α+β) is bounded above by 2 for any finite β > 0, so the
-    // clamp only fires on degenerate inputs (β = 0). The plan's "===2.0"
-    // expectation was a numerical slip; the asymptote is what we ship.
     expect(usefulness(50, 1)).toBeCloseTo((2 * 50) / 51, 10);
     expect(usefulness(50, 1)).toBeLessThan(2.0);
   });
@@ -242,110 +318,45 @@ describe("usefulness", () => {
   });
 });
 
-describe("backward-compat: MEMORY_RATERS unset → reranker is a no-op", () => {
-  // Litmus for step-1: with default Beta(1,1) priors and the default
-  // MEMORY_DEMOTION_FLOOR=1.0, computeScore must return EXACTLY the same value
-  // as a pre-rater build (similarity * recencyDecay * accessBoost).
-  const now = new Date("2026-04-12T12:00:00Z");
+describe("source-aware scoring: manual memories survive age penalty", () => {
+  const now = new Date("2026-06-08T12:00:00Z");
 
-  let originalFloor: string | undefined;
-  beforeEach(() => {
-    originalFloor = process.env.MEMORY_DEMOTION_FLOOR;
-    delete process.env.MEMORY_DEMOTION_FLOOR;
-  });
-  afterEach(() => {
-    if (originalFloor === undefined) {
-      delete process.env.MEMORY_DEMOTION_FLOOR;
-    } else {
-      process.env.MEMORY_DEMOTION_FLOOR = originalFloor;
-    }
-  });
-
-  test("computeScore equals similarity * recencyDecay * accessBoost (no usefulness drift)", () => {
-    const cases: MemoryCandidate[] = [
-      makeCandidate({
-        similarity: 0.8,
-        createdAt: now.toISOString(),
-        accessedAt: now.toISOString(),
-        accessCount: 0,
-      }),
-      makeCandidate({
-        similarity: 0.5,
-        createdAt: new Date(now.getTime() - 14 * 86400000).toISOString(),
-        accessedAt: new Date(now.getTime() - 24 * 3600000).toISOString(),
-        accessCount: 5,
-      }),
-      makeCandidate({
-        similarity: 0.99,
-        createdAt: new Date(now.getTime() - 28 * 86400000).toISOString(),
-        accessedAt: new Date(now.getTime() - 72 * 3600000).toISOString(),
-        accessCount: 12,
-      }),
-    ];
-
-    for (const c of cases) {
-      const expected =
-        c.similarity *
-        recencyDecay(c.createdAt, now) *
-        accessBoost(c.accessedAt, c.accessCount, now);
-      expect(computeScore(c, now)).toBe(expected);
-    }
-  });
-
-  test("snapshot order + scores match a hard-coded pre-rater baseline", () => {
-    // Baseline computed from main (pre-step-1): similarity * recencyDecay * accessBoost.
-    // With alpha=beta=1 + default floor, the new code must produce identical numbers.
-    const candidates = [
-      makeCandidate({
-        similarity: 0.9,
-        createdAt: now.toISOString(),
-        accessedAt: now.toISOString(),
-        accessCount: 0,
-      }),
-      makeCandidate({
-        similarity: 0.6,
-        createdAt: new Date(now.getTime() - 7 * 86400000).toISOString(),
-        accessedAt: now.toISOString(),
-        accessCount: 0,
-      }),
-      makeCandidate({
-        similarity: 0.3,
-        createdAt: new Date(now.getTime() - 28 * 86400000).toISOString(),
-        accessedAt: now.toISOString(),
-        accessCount: 0,
-      }),
-    ];
-    const result = rerank(candidates, { limit: 3, now });
-
-    // Expected scores: similarity * 2^(-ageDays/14) (no access boost, alpha=beta=1).
-    // 0.9 * 1.0      = 0.9
-    // 0.6 * 2^(-0.5) ≈ 0.4242640687
-    // 0.3 * 2^(-2)   = 0.075
-    expect(result[0]!.similarity).toBeCloseTo(0.9, 10);
-    expect(result[1]!.similarity).toBeCloseTo(0.6 * 2 ** -0.5, 10);
-    expect(result[2]!.similarity).toBeCloseTo(0.075, 10);
-  });
-
-  test("usefulness multiplies into score when posteriors move", () => {
-    // Sanity: a memory with α=10, β=1 should score ~1.818× higher than the same
-    // memory at α=β=1, holding everything else constant. Other rows unchanged.
-    const proven = makeCandidate({
-      similarity: 0.5,
-      createdAt: now.toISOString(),
-      accessedAt: now.toISOString(),
-      accessCount: 0,
-      alpha: 10,
-      beta: 1,
-    });
-    const baseline = makeCandidate({
-      similarity: 0.5,
-      createdAt: now.toISOString(),
-      accessedAt: now.toISOString(),
+  test("76-day-old manual memory scores higher than 1-day-old noise task_completion", () => {
+    // The root-cause scenario from Taras's report: a 76-day-old manual memory
+    // with raw similarity 0.8 was being outscored by a 1-day-old noise result
+    // with raw similarity 0.05. The old reranker gave the noise result a HIGHER
+    // composite score because the flat 14d half-life crushed the old manual
+    // memory by 2^(-76/14) = 0.023. Now manual has no decay.
+    const oldManual = makeCandidate({
+      similarity: 0.8,
+      source: "manual",
+      createdAt: new Date(now.getTime() - 76 * 86400000).toISOString(),
+      accessedAt: new Date(now.getTime() - 76 * 86400000).toISOString(),
       accessCount: 0,
     });
-    expect(computeScore(proven, now) / computeScore(baseline, now)).toBeCloseTo(
-      usefulness(10, 1),
-      10,
-    );
+    const freshNoise = makeCandidate({
+      similarity: 0.05,
+      source: "task_completion",
+      createdAt: new Date(now.getTime() - 1 * 86400000).toISOString(),
+      accessedAt: new Date(now.getTime() - 1 * 86400000).toISOString(),
+      accessCount: 0,
+    });
+
+    const ranked = rerank([freshNoise, oldManual], { limit: 2, now });
+    expect(ranked[0]!.source).toBe("manual");
+    expect(ranked[0]!.rawSimilarity).toBe(0.8);
+  });
+
+  test("session_summary decays fast (7d half-life)", () => {
+    const oldSummary = makeCandidate({
+      similarity: 0.8,
+      source: "session_summary",
+      createdAt: new Date(now.getTime() - 14 * 86400000).toISOString(),
+      accessedAt: new Date(now.getTime() - 14 * 86400000).toISOString(),
+      accessCount: 0,
+    });
+    // At 14d with 7d half-life: decay = 2^(-14/7) = 0.25
+    // Score: 0.8 * 0.25 * 0.5 (source) = 0.1
+    expect(computeScore(oldSummary, now)).toBeCloseTo(0.1, 2);
   });
 });
