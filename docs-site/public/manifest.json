@@ -1,0 +1,33 @@
+{
+  "name": "Agent Swarm — Coordination intelligence for AI agents",
+  "short_name": "Agent Swarm",
+  "description": "A lead delegates, workers ship in Docker, memory compounds across sessions. Run Devin, Claude Code, or any agent as a coordinated team.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#b45309",
+  "orientation": "portrait-primary",
+  "categories": ["productivity", "developer", "business"],
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
