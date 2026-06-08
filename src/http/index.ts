@@ -556,6 +556,15 @@ httpServer
 
     // Start expired-memory garbage collector (1-hour tick, immediate first run)
     startMemoryGc();
+
+    // Background backfill: re-embed any agent_memory rows with wrong-dimension
+    // embeddings (e.g. 1536d instead of 512d). Non-blocking, idempotent, no-op
+    // when the DB is clean. See src/be/memory/boot-reembed.ts.
+    import("../be/memory/boot-reembed")
+      .then(({ runBootReembed }) => runBootReembed())
+      .catch((err) => {
+        console.error("[boot-reembed] startup backfill failed (non-fatal):", err);
+      });
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);

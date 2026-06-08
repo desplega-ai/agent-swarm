@@ -1,7 +1,12 @@
 import { getDb, isSqliteVecAvailable } from "@/be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
-import { EMBEDDING_DIMENSIONS, TTL_DEFAULTS } from "../constants";
+import {
+  EMBEDDING_DIMENSIONS,
+  MIN_SIMILARITY,
+  PROTECTED_SOURCES,
+  TTL_DEFAULTS,
+} from "../constants";
 import type {
   MemoryCandidate,
   MemoryHealth,
@@ -400,6 +405,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const candidates: MemoryCandidate[] = [];
     for (const row of rows) {
       const similarity = 1 - row.distance;
+      if (similarity < MIN_SIMILARITY) continue;
       candidates.push(rowToCandidate(row, similarity));
     }
 
@@ -446,6 +452,7 @@ export class SqliteMemoryStore implements MemoryStore {
       const emb = deserializeEmbedding(row.embedding);
       if (emb.length !== queryEmbedding.length) continue;
       const similarity = cosineSimilarity(queryEmbedding, emb);
+      if (similarity < MIN_SIMILARITY) continue;
       candidates.push(rowToCandidate(row, similarity));
     }
 
@@ -521,6 +528,31 @@ export class SqliteMemoryStore implements MemoryStore {
       .all(...params);
 
     return rows.map(rowToAgentMemory);
+  }
+
+  isSourceProtected(source: AgentMemorySource): boolean {
+    return PROTECTED_SOURCES.has(source);
+  }
+
+  listForCuration(
+    agentId?: string,
+  ): { id: string; source: string; name: string; createdAt: string }[] {
+    const db = getDb();
+    const protectedList = [...PROTECTED_SOURCES].map((s) => `'${s}'`).join(",");
+    if (agentId) {
+      return db
+        .prepare<{ id: string; source: string; name: string; createdAt: string }, [string]>(
+          `SELECT id, source, name, createdAt FROM agent_memory
+           WHERE agentId = ? AND source NOT IN (${protectedList})`,
+        )
+        .all(agentId);
+    }
+    return db
+      .prepare<{ id: string; source: string; name: string; createdAt: string }, []>(
+        `SELECT id, source, name, createdAt FROM agent_memory
+         WHERE source NOT IN (${protectedList})`,
+      )
+      .all();
   }
 
   listForReembedding(options?: { agentId?: string }): { id: string; content: string }[] {

@@ -558,13 +558,12 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
     );
 
     // The usefulness factor at Beta(1,1) is exactly 1.0; a memory with no
-    // ratings should score within numerical noise of similarity * recency *
-    // access (the original pre-v1.5 formula).
+    // ratings should score = similarity * recency * access * sourceQuality * usefulness.
+    // For source=manual: sourceQuality=1.5, recency=1.0 (no decay for manual),
+    // access=1.0, usefulness=1.0. So score = 0.5 * 1.5 = 0.75.
     const fresh = buildCandidate(0.5);
     const score = rerank([fresh], { limit: 1 })[0]!.similarity;
-    // recency at age = 0 is exactly 1; access_boost at count=0 is exactly 1;
-    // usefulness at (1,1) is exactly 1. So score === 0.5 to machine precision.
-    expect(score).toBeCloseTo(0.5, 10);
+    expect(score).toBeCloseTo(0.75, 10);
   });
 });
 
