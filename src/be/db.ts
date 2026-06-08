@@ -62,12 +62,17 @@ import type {
   RepoGuidelines,
   ScheduledTask,
   ScheduledTaskSummary,
+  ScriptRun,
+  ScriptRunJournalEntry,
+  ScriptRunKind,
+  ScriptRunStatus,
   Service,
   ServiceStatus,
   SessionCost,
   SessionCostSource,
   SessionLog,
   Skill,
+  SkillFile,
   SkillScope,
   SkillType,
   SkillWithInstallInfo,
@@ -110,6 +115,26 @@ export function isSqliteVecAvailable(): boolean {
   return sqliteVecAvailable;
 }
 
+function loadSqliteVec(database: Database): void {
+  sqliteVecAvailable = false;
+  try {
+    const extensionPath = process.env.SQLITE_VEC_EXTENSION_PATH;
+    if (extensionPath) {
+      database.loadExtension(extensionPath);
+    } else {
+      const sqliteVec = require("sqlite-vec");
+      sqliteVec.load(database);
+    }
+    sqliteVecAvailable = true;
+    console.log(`[db] sqlite-vec loaded${extensionPath ? ` from ${extensionPath}` : ""}`);
+  } catch (err) {
+    console.warn(
+      "[db] sqlite-vec not available, falling back to in-memory cosine:",
+      (err as Error).message,
+    );
+  }
+}
+
 export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   if (db) {
     return db;
@@ -126,6 +151,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     db = Database.deserialize(templateBytes);
     db.run("PRAGMA busy_timeout = 5000;");
     db.run("PRAGMA foreign_keys = ON;");
+    loadSqliteVec(db);
     configureDbResolver(resolvePromptTemplate);
     // Ensure the encryption key is resolved even when restoring from the test
     // template. The cache may have been cleared via __resetEncryptionKeyForTests
@@ -151,22 +177,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // `require.resolve("sqlite-vec-<platform>/vec0.so")` can't find the native
   // asset — so we prefer an explicit filesystem path when set, and only fall
   // back to the npm resolver for normal dev runs.
-  try {
-    const extensionPath = process.env.SQLITE_VEC_EXTENSION_PATH;
-    if (extensionPath) {
-      database.loadExtension(extensionPath);
-    } else {
-      const sqliteVec = require("sqlite-vec");
-      sqliteVec.load(database);
-    }
-    sqliteVecAvailable = true;
-    console.log(`[db] sqlite-vec loaded${extensionPath ? ` from ${extensionPath}` : ""}`);
-  } catch (err) {
-    console.warn(
-      "[db] sqlite-vec not available, falling back to in-memory cosine:",
-      (err as Error).message,
-    );
-  }
+  loadSqliteVec(database);
 
   // Run database migrations (schema creation + incremental changes)
   runMigrations(database);
@@ -344,6 +355,7 @@ export function closeDb(): void {
     db.close();
     db = null;
   }
+  sqliteVecAvailable = false;
 }
 
 // ============================================================================
@@ -1887,6 +1899,19 @@ export function getInProgressTasksByContextKey(
     .map(rowToAgentTask);
 }
 
+export function getLatestTaskByContextKey(contextKey: string): AgentTask | null {
+  if (!contextKey) return null;
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE contextKey = ?
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(contextKey);
+  return row ? rowToAgentTask(row) : null;
+}
+
 /**
  * Find the most recent agent associated with a specific Slack thread.
  * No status filter — returns the last agent that touched this thread regardless of task state.
@@ -2092,6 +2117,14 @@ export function failTask(id: string, reason: string): AgentTask | null {
         });
       });
     } catch {}
+
+    // Cascade-fail any non-terminal tasks that depend on this one.
+    // The cascade is recursive (transitive closure) and cycle-safe.
+    try {
+      cascadeFailDependents(id, "failed");
+    } catch (err) {
+      console.error("[failTask] cascade-fail dependents error:", err);
+    }
   }
   return row ? rowToAgentTask(row) : null;
 }
@@ -2130,6 +2163,12 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
         });
       });
     } catch {}
+
+    try {
+      cascadeFailDependents(id, "cancelled");
+    } catch (err) {
+      console.error("[cancelTask] cascade-fail dependents error:", err);
+    }
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -2193,9 +2232,43 @@ export function supersedeTask(
         });
       });
     } catch {}
+
+    try {
+      cascadeFailDependents(id, "superseded");
+    } catch (err) {
+      console.error("[supersedeTask] cascade-fail dependents error:", err);
+    }
   }
 
   return row ? rowToAgentTask(row) : null;
+}
+
+export function backfillSupersedeTaskResumeTaskId(taskId: string, resumeTaskId: string): boolean {
+  const row = getDb()
+    .prepare<{ id: string; metadata: string | null }, [string]>(
+      `SELECT id, metadata
+       FROM agent_log
+       WHERE taskId = ? AND eventType = 'task_superseded'
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(taskId);
+  if (!row) return false;
+
+  let metadata: Record<string, unknown> = {};
+  if (row.metadata) {
+    try {
+      metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+    } catch {
+      metadata = {};
+    }
+  }
+  metadata.resumeTaskId = resumeTaskId;
+
+  const result = getDb()
+    .prepare("UPDATE agent_log SET metadata = ? WHERE id = ?")
+    .run(JSON.stringify(metadata), row.id);
+  return result.changes > 0;
 }
 
 /**
@@ -3335,6 +3408,75 @@ export function checkDependencies(taskId: string): {
   }
 
   return { ready: blockedBy.length === 0, blockedBy };
+}
+
+/**
+ * Reverse-lookup: find all tasks whose `dependsOn` JSON array contains `parentId`.
+ * Uses SQLite `json_each` to scan the dependsOn column efficiently.
+ * Returns only non-terminal tasks by default (the callers want to cascade-fail
+ * live dependents, not re-process already-finished ones).
+ */
+export function getDependentTasks(
+  parentId: string,
+  opts?: { includeTerminal?: boolean },
+): AgentTask[] {
+  const database = getDb();
+  const rows = database
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT t.*
+       FROM agent_tasks t, json_each(t.dependsOn) AS dep
+       WHERE dep.value = ?`,
+    )
+    .all(parentId);
+
+  const tasks = rows.map(rowToAgentTask);
+  if (opts?.includeTerminal) return tasks;
+  return tasks.filter((t) => !isTerminalTaskStatus(t.status));
+}
+
+export interface CascadeFailResult {
+  taskId: string;
+  taskSubject: string;
+}
+
+/**
+ * Recursively cascade-fail all transitive dependents of a parent task.
+ * Walks the full dependency graph: if A fails, and B depends on A, and C
+ * depends on B, then both B and C are failed.
+ *
+ * Guards against cycles with a visited set. Skips already-terminal tasks.
+ * Returns the list of tasks that were actually cascade-failed (for follow-up
+ * enrichment).
+ */
+export function cascadeFailDependents(
+  parentId: string,
+  parentStatus: string,
+  visited?: Set<string>,
+): CascadeFailResult[] {
+  const seen = visited ?? new Set<string>();
+  if (seen.has(parentId)) return [];
+  seen.add(parentId);
+
+  const dependents = getDependentTasks(parentId);
+  const results: CascadeFailResult[] = [];
+
+  for (const dep of dependents) {
+    if (seen.has(dep.id)) continue;
+
+    const reason = `Blocked dependency ${parentId.slice(0, 8)} was ${parentStatus}`;
+    const failed = failTask(dep.id, reason);
+    if (failed) {
+      results.push({
+        taskId: failed.id,
+        taskSubject: failed.task.slice(0, 120),
+      });
+      // Recurse: this dependent may itself have dependents
+      const transitive = cascadeFailDependents(dep.id, "failed (cascade)", seen);
+      results.push(...transitive);
+    }
+  }
+
+  return results;
 }
 
 // ============================================================================
@@ -7047,7 +7189,7 @@ export function createPage(data: {
   title: string;
   description?: string;
   contentType: PageContentType;
-  authMode: PageAuthMode;
+  authMode?: PageAuthMode;
   passwordHash?: string;
   body: string;
   needsCredentials?: string[];
@@ -7066,7 +7208,7 @@ export function createPage(data: {
       data.title,
       data.description ?? null,
       data.contentType,
-      data.authMode,
+      data.authMode ?? "authed",
       data.passwordHash ?? null,
       data.body,
       data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
@@ -8648,6 +8790,119 @@ function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
   };
 }
 
+type SkillFileRow = {
+  id: string;
+  skillId: string;
+  path: string;
+  content: string;
+  mimeType: string;
+  isBinary: number;
+  size: number | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToSkillFile(row: SkillFileRow): SkillFile {
+  return {
+    id: row.id,
+    skillId: row.skillId,
+    path: row.path,
+    content: row.content,
+    mimeType: row.mimeType,
+    isBinary: row.isBinary === 1,
+    size: row.size,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+export type SkillFileInput = {
+  path: string;
+  content: string;
+  mimeType?: string;
+  isBinary?: boolean;
+  size?: number | null;
+};
+
+export type SkillFileManifestEntry = Omit<SkillFile, "content">;
+type NormalizedSkillFileInput = {
+  path: string;
+  content: string;
+  mimeType: string;
+  isBinary: boolean;
+  size: number;
+};
+
+export const SKILL_FILE_LIMITS = {
+  maxCount: Number(process.env.SKILL_FILES_MAX_COUNT ?? 100),
+  maxTotalBytes: Number(process.env.SKILL_FILES_MAX_TOTAL_BYTES ?? 10 * 1024 * 1024),
+  maxFileBytes: Number(process.env.SKILL_FILES_MAX_FILE_BYTES ?? 500 * 1024),
+};
+
+const BINARY_SKILL_FILE_PLACEHOLDER = "[binary file - not synced]";
+
+export function normalizeSkillFilePath(path: string): string {
+  const raw = path.trim().replace(/\\/g, "/");
+  if (!raw) throw new Error("File path is required");
+  if (raw.startsWith("/")) throw new Error("File path must be relative");
+
+  const parts = raw.split("/").filter(Boolean);
+  if (parts.length === 0) throw new Error("File path is required");
+  if (parts.some((part) => part === "." || part === "..")) {
+    throw new Error("File path cannot contain traversal segments");
+  }
+
+  const normalized = parts.join("/");
+  if (normalized === "SKILL.md") {
+    throw new Error("SKILL.md is stored on the skill record, not in skill_files");
+  }
+  return normalized;
+}
+
+function byteSize(content: string): number {
+  return Buffer.byteLength(content, "utf8");
+}
+
+function normalizeSkillFileInput(input: SkillFileInput): NormalizedSkillFileInput {
+  const path = normalizeSkillFilePath(input.path);
+  const isBinary = input.isBinary === true;
+  const content = isBinary ? input.content || BINARY_SKILL_FILE_PLACEHOLDER : input.content;
+  const size = input.size ?? byteSize(content);
+  if (!Number.isFinite(size) || size < 0) {
+    throw new Error("File size must be a non-negative number");
+  }
+  if (size > SKILL_FILE_LIMITS.maxFileBytes) {
+    throw new Error(`File ${path} exceeds max size ${SKILL_FILE_LIMITS.maxFileBytes}`);
+  }
+
+  return {
+    path,
+    content,
+    mimeType: input.mimeType ?? "text/plain",
+    isBinary,
+    size,
+  };
+}
+
+function assertSkillFileLimits(skillId: string, incoming: SkillFileInput[], replaceAll: boolean) {
+  const existing = replaceAll ? [] : listSkillFileManifest(skillId);
+  const byPath = new Map(existing.map((file) => [file.path, file.size ?? 0]));
+
+  for (const input of incoming) {
+    const normalized = normalizeSkillFileInput(input);
+    byPath.set(normalized.path, normalized.size);
+  }
+
+  if (byPath.size > SKILL_FILE_LIMITS.maxCount) {
+    throw new Error(`Skill file count exceeds max ${SKILL_FILE_LIMITS.maxCount}`);
+  }
+
+  const total = [...byPath.values()].reduce((sum, size) => sum + size, 0);
+  if (total > SKILL_FILE_LIMITS.maxTotalBytes) {
+    throw new Error(`Skill files exceed max total size ${SKILL_FILE_LIMITS.maxTotalBytes}`);
+  }
+}
+
 export interface SkillInsert {
   name: string;
   description: string;
@@ -8821,6 +9076,124 @@ export function updateSkill(
   return row ? rowToSkill(row) : null;
 }
 
+function bumpSkillVersion(skillId: string, now = new Date().toISOString()) {
+  getDb()
+    .prepare("UPDATE skills SET version = version + 1, lastUpdatedAt = ? WHERE id = ?")
+    .run(now, skillId);
+}
+
+export function listSkillFileManifest(skillId: string): SkillFileManifestEntry[] {
+  return getDb()
+    .prepare<SkillFileRow, [string]>(
+      `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+       FROM skill_files
+       WHERE skillId = ?
+       ORDER BY path ASC`,
+    )
+    .all(skillId)
+    .map((row) => {
+      const { content: _content, ...manifest } = rowToSkillFile(row);
+      return manifest;
+    });
+}
+
+export function getSkillFiles(skillId: string): SkillFile[] {
+  return getDb()
+    .prepare<SkillFileRow, [string]>(
+      `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+       FROM skill_files
+       WHERE skillId = ?
+       ORDER BY path ASC`,
+    )
+    .all(skillId)
+    .map(rowToSkillFile);
+}
+
+export function getSkillFile(skillId: string, path: string): SkillFile | null {
+  const normalizedPath = normalizeSkillFilePath(path);
+  const row = getDb()
+    .prepare<SkillFileRow, [string, string]>(
+      `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+       FROM skill_files
+       WHERE skillId = ? AND path = ?`,
+    )
+    .get(skillId, normalizedPath);
+  return row ? rowToSkillFile(row) : null;
+}
+
+export function upsertSkillFile(skillId: string, input: SkillFileInput): SkillFile {
+  const payload = normalizeSkillFileInput(input);
+  assertSkillFileLimits(skillId, [payload], false);
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  return upsertSkillFileUnchecked(skillId, payload, id, now, true);
+}
+
+function upsertSkillFileUnchecked(
+  skillId: string,
+  payload: NormalizedSkillFileInput,
+  id: string,
+  now: string,
+  bumpVersion: boolean,
+): SkillFile {
+  const row = getDb()
+    .prepare<SkillFileRow, (string | number | null)[]>(
+      `INSERT INTO skill_files (
+        id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(skillId, path) DO UPDATE SET
+        content = excluded.content,
+        mimeType = excluded.mimeType,
+        isBinary = excluded.isBinary,
+        size = excluded.size,
+        lastUpdatedAt = excluded.lastUpdatedAt
+      RETURNING *`,
+    )
+    .get(
+      id,
+      skillId,
+      payload.path,
+      payload.content,
+      payload.mimeType,
+      payload.isBinary ? 1 : 0,
+      payload.size,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to upsert skill file");
+  if (bumpVersion) bumpSkillVersion(skillId, now);
+  return rowToSkillFile(row);
+}
+
+export function upsertSkillFiles(skillId: string, files: SkillFileInput[]): SkillFile[] {
+  if (files.length === 0) return [];
+  const normalized = files.map(normalizeSkillFileInput);
+  assertSkillFileLimits(skillId, normalized, false);
+
+  const now = new Date().toISOString();
+  return getDb().transaction(() => {
+    const rows = normalized.map((file) =>
+      upsertSkillFileUnchecked(skillId, file, crypto.randomUUID(), now, false),
+    );
+    bumpSkillVersion(skillId, now);
+    return rows;
+  })();
+}
+
+export function deleteSkillFile(skillId: string, path: string): boolean {
+  const normalizedPath = normalizeSkillFilePath(path);
+  const result = getDb()
+    .prepare("DELETE FROM skill_files WHERE skillId = ? AND path = ?")
+    .run(skillId, normalizedPath);
+  if (result.changes > 0) {
+    bumpSkillVersion(skillId);
+    return true;
+  }
+  return false;
+}
+
 export function deleteSkill(id: string): boolean {
   const result = getDb().prepare("DELETE FROM skills WHERE id = ?").run(id);
   return result.changes > 0;
@@ -8963,7 +9336,7 @@ export function getAgentSkills(agentId: string, activeOnly = true): SkillWithIns
     SELECT s.*, 1 as isActive, s.createdAt as installedAt, 1 as sourceRank,
       CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
     FROM skills s
-    WHERE s.systemDefault = 1
+    WHERE (s.systemDefault = 1 OR s.scope = 'swarm')
       AND s.isEnabled = 1
     ORDER BY
       sourceRank,
@@ -11177,4 +11550,391 @@ export function countKv(namespace: string, opts: { prefix?: string }): number {
     )
     .get(namespace, now);
   return row?.n ?? 0;
+}
+
+// ─── Script Runs ────────────────────────────────────────────────────────────
+
+type ScriptRunRow = {
+  id: string;
+  agentId: string;
+  scriptName: string | null;
+  source: string;
+  args: string;
+  kind: string;
+  status: string;
+  pid: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+  output: string | null;
+  error: string | null;
+  last_heartbeat_at: string | null;
+  idempotencyKey: string | null;
+  requestedByUserId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+function parseJsonColumn(value: string | null): unknown | undefined {
+  if (value === null) return undefined;
+  return JSON.parse(value);
+}
+
+function rowToScriptRun(row: ScriptRunRow): ScriptRun {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    scriptName: row.scriptName ?? undefined,
+    source: row.source,
+    args: JSON.parse(row.args),
+    kind: row.kind as ScriptRunKind,
+    status: row.status as ScriptRunStatus,
+    pid: row.pid ?? undefined,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt ?? undefined,
+    output: parseJsonColumn(row.output),
+    error: row.error ?? undefined,
+    lastHeartbeatAt: row.last_heartbeat_at ?? undefined,
+    idempotencyKey: row.idempotencyKey ?? undefined,
+    requestedByUserId: row.requestedByUserId ?? undefined,
+  };
+}
+
+export function createScriptRun(data: {
+  id: string;
+  agentId: string;
+  source: string;
+  args: unknown;
+  scriptName?: string;
+  idempotencyKey?: string;
+  requestedByUserId?: string;
+  createdBy?: string;
+  updatedBy?: string;
+}): { run: ScriptRun; existing: boolean } {
+  const db = getDb();
+  if (data.idempotencyKey) {
+    const existing = db
+      .prepare<ScriptRunRow, [string]>("SELECT * FROM script_runs WHERE idempotencyKey = ?")
+      .get(data.idempotencyKey);
+    if (existing) return { run: rowToScriptRun(existing), existing: true };
+  }
+
+  const row = db
+    .prepare<
+      ScriptRunRow,
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+      ]
+    >(
+      `INSERT INTO script_runs
+        (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .get(
+      data.id,
+      data.agentId,
+      data.scriptName ?? null,
+      data.source,
+      JSON.stringify(data.args ?? null),
+      data.idempotencyKey ?? null,
+      data.requestedByUserId ?? null,
+      data.createdBy ?? null,
+      data.updatedBy ?? data.createdBy ?? null,
+    );
+  if (!row) throw new Error("Failed to create script run");
+  return { run: rowToScriptRun(row), existing: false };
+}
+
+// Persist a synchronous inline run (POST /api/scripts/run) as an already-terminal
+// row. Unlike createScriptRun these never get a journal and never use the
+// idempotencyKey column (inline idempotency lives in the kv table).
+export function recordInlineScriptRun(data: {
+  id: string;
+  agentId: string;
+  source: string;
+  args: unknown;
+  scriptName?: string;
+  status: "completed" | "failed";
+  output?: unknown;
+  error?: string;
+  startedAt: string;
+  finishedAt: string;
+  requestedByUserId?: string;
+  createdBy?: string;
+}): ScriptRun {
+  const row = getDb()
+    .prepare<
+      ScriptRunRow,
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string,
+        string,
+        string | null,
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+      ]
+    >(
+      `INSERT INTO script_runs
+        (id, agentId, scriptName, source, args, kind, status, output, error,
+         startedAt, finishedAt, requestedByUserId, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .get(
+      data.id,
+      data.agentId,
+      data.scriptName ?? null,
+      data.source,
+      JSON.stringify(data.args ?? null),
+      data.status,
+      data.output === undefined ? null : JSON.stringify(data.output),
+      data.error ?? null,
+      data.startedAt,
+      data.finishedAt,
+      data.requestedByUserId ?? null,
+      data.createdBy ?? null,
+      data.createdBy ?? null,
+    );
+  if (!row) throw new Error("Failed to record inline script run");
+  return rowToScriptRun(row);
+}
+
+export function getScriptRun(id: string): ScriptRun | null {
+  const row = getDb()
+    .prepare<ScriptRunRow, [string]>("SELECT * FROM script_runs WHERE id = ?")
+    .get(id);
+  return row ? rowToScriptRun(row) : null;
+}
+
+export function getScriptRunByIdempotencyKey(idempotencyKey: string): ScriptRun | null {
+  const row = getDb()
+    .prepare<ScriptRunRow, [string]>("SELECT * FROM script_runs WHERE idempotencyKey = ?")
+    .get(idempotencyKey);
+  return row ? rowToScriptRun(row) : null;
+}
+
+export function listScriptRuns(opts?: {
+  status?: ScriptRunStatus;
+  agentId?: string;
+  limit?: number;
+  offset?: number;
+}): ScriptRun[] {
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+  if (opts?.status) {
+    conditions.push("status = ?");
+    params.push(opts.status);
+  }
+  if (opts?.agentId) {
+    conditions.push("agentId = ?");
+    params.push(opts.agentId);
+  }
+
+  const limit = opts?.limit ?? 50;
+  const offset = opts?.offset ?? 0;
+  params.push(limit, offset);
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const rows = getDb()
+    .prepare<ScriptRunRow, Array<string | number>>(
+      `SELECT * FROM script_runs ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...params);
+  return rows.map(rowToScriptRun);
+}
+
+export function countScriptRuns(opts?: { status?: ScriptRunStatus; agentId?: string }): number {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (opts?.status) {
+    conditions.push("status = ?");
+    params.push(opts.status);
+  }
+  if (opts?.agentId) {
+    conditions.push("agentId = ?");
+    params.push(opts.agentId);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const row = getDb()
+    .prepare<{ count: number }, string[]>(`SELECT COUNT(*) AS count FROM script_runs ${where}`)
+    .get(...params);
+  return row?.count ?? 0;
+}
+
+export function countActiveScriptRuns(): number {
+  const row = getDb()
+    .prepare<{ count: number }, []>(
+      "SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused')",
+    )
+    .get();
+  return row?.count ?? 0;
+}
+
+export function updateScriptRun(
+  id: string,
+  patch: Partial<{
+    status: ScriptRunStatus;
+    pid: number | null;
+    finishedAt: string | null;
+    output: unknown;
+    error: string | null;
+    lastHeartbeatAt: string | null;
+    updatedBy: string | null;
+  }>,
+): void {
+  const sets: string[] = [];
+  const vals: Array<string | number | null> = [];
+  if (patch.status !== undefined) {
+    sets.push("status = ?");
+    vals.push(patch.status);
+  }
+  if (patch.pid !== undefined) {
+    sets.push("pid = ?");
+    vals.push(patch.pid);
+  }
+  if (patch.finishedAt !== undefined) {
+    sets.push("finishedAt = ?");
+    vals.push(patch.finishedAt);
+  }
+  if ("output" in patch) {
+    sets.push("output = ?");
+    vals.push(patch.output === undefined ? null : JSON.stringify(patch.output));
+  }
+  if (patch.error !== undefined) {
+    sets.push("error = ?");
+    vals.push(patch.error);
+  }
+  if (patch.lastHeartbeatAt !== undefined) {
+    sets.push("last_heartbeat_at = ?");
+    vals.push(patch.lastHeartbeatAt);
+  }
+  if (patch.updatedBy !== undefined) {
+    sets.push("updated_by = ?");
+    vals.push(patch.updatedBy);
+  }
+  if (sets.length === 0) return;
+  vals.push(id);
+  getDb().run(`UPDATE script_runs SET ${sets.join(", ")} WHERE id = ?`, vals);
+}
+
+export function getRunningScriptRuns(): ScriptRun[] {
+  const rows = getDb()
+    .prepare<ScriptRunRow, []>("SELECT * FROM script_runs WHERE status IN ('running', 'paused')")
+    .all();
+  return rows.map(rowToScriptRun);
+}
+
+// ─── Script Run Journal ─────────────────────────────────────────────────────
+
+type ScriptRunJournalRow = {
+  id: string;
+  runId: string;
+  stepKey: string;
+  stepType: string;
+  config: string;
+  status: string;
+  result: string | null;
+  error: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalEntry {
+  return {
+    id: row.id,
+    runId: row.runId,
+    stepKey: row.stepKey,
+    stepType: row.stepType,
+    config: JSON.parse(row.config),
+    status: row.status as "completed" | "failed",
+    result: parseJsonColumn(row.result),
+    error: row.error ?? undefined,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt ?? undefined,
+    durationMs: row.durationMs ?? undefined,
+  };
+}
+
+export function getScriptRunJournalStep(
+  runId: string,
+  stepKey: string,
+): ScriptRunJournalEntry | null {
+  const row = getDb()
+    .prepare<ScriptRunJournalRow, [string, string]>(
+      "SELECT * FROM script_run_journal WHERE runId = ? AND stepKey = ?",
+    )
+    .get(runId, stepKey);
+  return row ? rowToScriptRunJournalEntry(row) : null;
+}
+
+export function upsertScriptRunJournalStep(data: {
+  runId: string;
+  stepKey: string;
+  stepType: string;
+  config: unknown;
+  status: "completed" | "failed";
+  result?: unknown;
+  error?: string;
+  durationMs?: number;
+}): void {
+  getDb().run(
+    `INSERT OR IGNORE INTO script_run_journal
+      (id, runId, stepKey, stepType, config, status, result, error, durationMs, completedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    [
+      crypto.randomUUID(),
+      data.runId,
+      data.stepKey,
+      data.stepType,
+      JSON.stringify(data.config ?? {}),
+      data.status,
+      data.result !== undefined ? JSON.stringify(data.result) : null,
+      data.error ?? null,
+      data.durationMs ?? null,
+    ],
+  );
+}
+
+export function listScriptRunJournalSteps(runId: string): ScriptRunJournalEntry[] {
+  const rows = getDb()
+    .prepare<ScriptRunJournalRow, [string]>(
+      "SELECT * FROM script_run_journal WHERE runId = ? ORDER BY startedAt ASC",
+    )
+    .all(runId);
+  return rows.map(rowToScriptRunJournalEntry);
+}
+
+export function countScriptRunJournalSteps(runId: string): number {
+  const row = getDb()
+    .prepare<{ count: number }, [string]>(
+      "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ?",
+    )
+    .get(runId);
+  return row?.count ?? 0;
+}
+
+export function countScriptRunJournalAgentTaskSteps(runId: string): number {
+  const row = getDb()
+    .prepare<{ count: number }, [string]>(
+      "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ? AND stepType = 'agent-task'",
+    )
+    .get(runId);
+  return row?.count ?? 0;
 }

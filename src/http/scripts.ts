@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getAgentById } from "../be/db";
+import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
 import { deleteScript, getScript, upsertScriptByName } from "../be/scripts/db";
 import { searchScripts } from "../be/scripts/embeddings";
@@ -14,7 +14,7 @@ import {
   type ScriptScope,
   ScriptScopeSchema,
 } from "../types";
-import { scrubObject } from "../utils/secret-scrubber";
+import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -37,6 +37,7 @@ const runBodySchema = z
     intent: z.string().default(""),
     scope: ScriptScopeSchema.optional(),
     fsMode: ScriptFsModeSchema.default("none"),
+    idempotencyKey: z.string().max(200).optional(),
   })
   .refine((body) => Boolean(body.name) !== Boolean(body.source), {
     message: "Provide exactly one of name or source",
@@ -282,12 +283,34 @@ export async function handleScripts(
       return true;
     }
 
+    const startedAt = new Date().toISOString();
     const output = await runScript({
       source: source as string,
       args: parsed.body.args,
       fsMode,
       agentId: agent.id,
     });
+
+    // Persist output to KV when idempotencyKey is provided and run succeeded
+    let kvSaved: { namespace: string; key: string } | undefined;
+    if (parsed.body.idempotencyKey && !output.error && output.exitCode === 0) {
+      const kvNamespace = `script:executions`;
+      const kvKey = parsed.body.idempotencyKey;
+      const kvValue = {
+        result: output.result,
+        durationMs: output.durationMs,
+        scriptName: parsed.body.name ?? null,
+        executedAt: new Date().toISOString(),
+      };
+      upsertKv({
+        namespace: kvNamespace,
+        key: kvKey,
+        value: kvValue,
+        valueType: "json",
+        expiresAt: null,
+      });
+      kvSaved = { namespace: kvNamespace, key: kvKey };
+    }
 
     let autoSaved: { slug: string; reason: string } | undefined;
     if (parsed.body.source && !output.error && output.exitCode === 0) {
@@ -309,11 +332,48 @@ export async function handleScripts(
       autoSaved = { slug, reason: "successful_inline_run" };
     }
 
+    // Persist the inline run (no journal) so one-off executions show up alongside
+    // durable workflow runs in the Script Runs dashboard. Best-effort: recording
+    // must never fail the actual execution.
+    const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
+    const runError = ok
+      ? undefined
+      : scrubSecrets(
+          [
+            output.error,
+            output.runtimeError
+              ? `${output.runtimeError.name}: ${output.runtimeError.message}`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join(" — ") || `Script exited with code ${output.exitCode}`,
+        );
+    try {
+      recordInlineScriptRun({
+        id: crypto.randomUUID(),
+        agentId: agent.id,
+        source: source as string,
+        // Scrub args + result before persisting: the stored row is later served
+        // raw by GET /api/script-runs/{id} to the dashboard, so it needs the same
+        // redaction guarantees as the scrubbed run response below.
+        args: scrubObject(parsed.body.args ?? null),
+        scriptName: parsed.body.name,
+        status: ok ? "completed" : "failed",
+        output: scrubObject(output.result),
+        error: runError,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      });
+    } catch {
+      // swallow — the run already executed; persistence is observability only.
+    }
+
     json(
       res,
       scrubObject({
         result: output.result,
         autoSaved,
+        kvSaved,
         truncated: output.truncated,
         durationMs: output.durationMs,
         stdout: output.stdout,

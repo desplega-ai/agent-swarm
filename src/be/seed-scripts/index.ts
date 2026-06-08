@@ -22,6 +22,10 @@ import { getScript, upsertScriptByName } from "../scripts/db";
 import { extractArgsJsonSchema } from "../scripts/extract-schema";
 import { typecheckScript } from "../scripts/typecheck";
 import type { Seeder, SeedItem } from "../seed/types";
+import bootTriageSrc from "./catalog/boot-triage.ts" with { type: "text" };
+// @ts-expect-error Bun text imports return the raw source string for bundling standalone scripts.
+import catalogReportSrc from "./catalog/catalog-report.ts" with { type: "text" };
+import compoundInsightsSrc from "./catalog/compound-insights.ts" with { type: "text" };
 import dateResolveSrc from "./catalog/date-resolve.ts" with { type: "text" };
 import fetchReadableSrc from "./catalog/fetch-readable.ts" with { type: "text" };
 import ghPrSnapshotSrc from "./catalog/gh-pr-snapshot.ts" with { type: "text" };
@@ -29,9 +33,15 @@ import groupCountSrc from "./catalog/group-count.ts" with { type: "text" };
 import jsonQuerySrc from "./catalog/json-query.ts" with { type: "text" };
 import linearIssueSrc from "./catalog/linear-issue.ts" with { type: "text" };
 import memoryDedupCheckSrc from "./catalog/memory-dedup-check.ts" with { type: "text" };
+import memoryEvalSrc from "./catalog/memory-eval.ts" with { type: "text" };
+import opsCatalogAuditSrc from "./catalog/ops-catalog-audit.ts" with { type: "text" };
+import scheduleHealthSrc from "./catalog/schedule-health.ts" with { type: "text" };
 import slackThreadFlattenSrc from "./catalog/slack-thread-flatten.ts" with { type: "text" };
+import smartRecallSrc from "./catalog/smart-recall.ts" with { type: "text" };
+import taskContextGatheringSrc from "./catalog/task-context-gathering.ts" with { type: "text" };
 import taskFailureAuditSrc from "./catalog/task-failure-audit.ts" with { type: "text" };
 import textDiffSrc from "./catalog/text-diff.ts" with { type: "text" };
+import toolUsageSrc from "./catalog/tool-usage.ts" with { type: "text" };
 
 export type SeedScript = {
   name: string;
@@ -43,6 +53,14 @@ export type SeedScript = {
 // Text imports resolve to a string at runtime; TypeScript types them as the
 // module's default export, so the cast restores the real shape.
 const asText = (s: unknown): string => s as string;
+
+const CATALOG_REPORT_IMPORT_RE = /^import\s+\{[^}]*\}\s+from "\.\/catalog-report";\n\n?/m;
+
+function bundleCatalogReport(source: string): string {
+  const helper = asText(catalogReportSrc);
+  if (!CATALOG_REPORT_IMPORT_RE.test(source)) return source;
+  return `${helper}\n\n${source.replace(CATALOG_REPORT_IMPORT_RE, "")}`;
+}
 
 export const SEED_SCRIPTS: SeedScript[] = [
   {
@@ -97,7 +115,7 @@ export const SEED_SCRIPTS: SeedScript[] = [
       "Scan recently failed swarm tasks and cluster them by failure reason, agent or schedule to surface recurring problems.",
     intent:
       "Find patterns in swarm task failures — which agent, schedule or error keeps breaking — for a reliability review.",
-    source: asText(taskFailureAuditSrc),
+    source: bundleCatalogReport(asText(taskFailureAuditSrc)),
   },
   {
     name: "memory-dedup-check",
@@ -121,6 +139,70 @@ export const SEED_SCRIPTS: SeedScript[] = [
       "Fetch a Slack thread by channel + thread timestamp and flatten it into a readable chronological transcript.",
     intent: "Turn a Slack thread into plain text for summarizing or as task context.",
     source: asText(slackThreadFlattenSrc),
+  },
+  {
+    name: "smart-recall",
+    description:
+      "Multi-query fan-out memory search with dedup and composite reranking (bestSimilarity + 0.05 * hitCount). Returns unique memories across all queries.",
+    intent:
+      "Recall relevant memories using multiple search angles — better coverage than a single query. Use for task onboarding, context gathering, or before writing new memories.",
+    source: asText(smartRecallSrc),
+  },
+  {
+    name: "task-context-gathering",
+    description:
+      "Get task details and recall relevant memories in one call — returns a slimmed task projection plus deduped and reranked memories from multi-query fan-out.",
+    intent:
+      "Task onboarding: one call instead of task_get plus multiple memory_search calls. Pass the task description split into 2-4 natural-language queries.",
+    source: asText(taskContextGatheringSrc),
+  },
+  {
+    name: "schedule-health",
+    description:
+      "Per-schedule failure rate check over recent tasks — flags schedules with failure rates above a configurable threshold.",
+    intent:
+      "Find unhealthy schedules that keep failing — for daily compounding, reliability reviews, or ops triage.",
+    source: bundleCatalogReport(asText(scheduleHealthSrc)),
+  },
+  {
+    name: "tool-usage",
+    description:
+      "Tool usage histogram from session_logs — top tools by call count over a time window, optionally filtered by agent.",
+    intent:
+      "See which MCP tools agents use most — for SDK gap analysis, optimization, or daily ops snapshots.",
+    source: asText(toolUsageSrc),
+  },
+  {
+    name: "compound-insights",
+    description:
+      "All-in-one swarm-wide daily ops snapshot: task completion/failure summary, real failure clusters (excludes superseded/cancelled bookkeeping), schedule health flags, tool usage top-25, memory health/pollution stats, seed-script candidate tool triplets, and a per-agent breakdown. Aggregates across ALL agents via direct read-only SQL.",
+    intent:
+      "Single-call daily compounding Phase 0 helper — replaces ~25 raw tool roundtrips with one compressed JSON result covering every agent. For daily evolution, self-scripting candidates, ops reviews, or heartbeat context.",
+    source: bundleCatalogReport(asText(compoundInsightsSrc)),
+  },
+  {
+    name: "memory-eval",
+    description:
+      "3-axis memory quality evaluation: carry-forward context (do follow-up tasks retrieve useful memories from prior tasks?), follow preferences (are CLAUDE.md/IDENTITY.md/SOUL.md/TOOLS.md memories retrieved and useful?), and stay current (what fraction of retrieved memories are fresh vs stale?). Outputs a baseline report to agent-fs + a swarm Page.",
+    intent:
+      "Measure memory system health across OpenAI Dreaming-inspired axes — before/after baseline for architecture changes, blog-post numbers, daily quality monitoring.",
+    source: asText(memoryEvalSrc),
+  },
+  {
+    name: "ops-catalog-audit",
+    description:
+      "Audit-as-code catalog check for schedules, workflows, and prompt/template drift. Clusters actionable findings by goal and can publish an authed HTML report page.",
+    intent:
+      "Re-run the ops inventory audit in one call: duplicate/dead schedules, code-work routing risks, enabled workflow fixtures, structured-output gate gaps, prompt registry drift, stale hosts, and systemDefault skill duplicates.",
+    source: bundleCatalogReport(asText(opsCatalogAuditSrc)),
+  },
+  {
+    name: "boot-triage",
+    description:
+      "Post-restart heartbeat triage snapshot: deploy restart PR context, recent real failures, stuck offline-agent work, orphaned tasks, and superseded tasks missing resume children.",
+    intent:
+      "Run immediately after a swarm restart to gather deterministic boot triage data in one read-only call before the Lead decides what to retry, cancel, or escalate.",
+    source: asText(bootTriageSrc),
   },
 ];
 

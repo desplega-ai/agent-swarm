@@ -125,6 +125,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         scope: scope as "agent" | "swarm" | "all",
         limit,
         isLead,
+        source,
       });
 
       const mapped = recent.map((r) => ({

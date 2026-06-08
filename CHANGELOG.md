@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.92.1] - 2026-06-07
+
+### Added
+- **Complex skill file foundation** (#680) — skills can now store bundled reference files in the database, sync those files into local provider skill directories, expose file CRUD over `/api/skills/{id}/files*`, and let agents fetch bundled references on demand via the new `skill-get-file` MCP tool.
+
+### Changed
+- **Bundled model pricing metadata refreshed** (#682) — the daily models.dev sync updated the built-in pricing data that powers model-cost lookups and related guidance.
+
+### Fixed
+- **Memory KNN queries now cap `k` and purge expired rows first** (#684) — oversized nearest-neighbor requests no longer overrun the memory index path, and expired rows are cleaned before search to keep recall stable.
+
+## [1.92.0] - 2026-06-05
+
+### Added
+- **Durable script workflow runs** (#653, #656, #657, #659, #663) — script workflows can now run in the background with persisted runs, journaled step state, dashboard visibility, and three new MCP tools: `launch-script-run`, `get-script-run`, and `list-script-runs`.
+- **Salesforce Hosted MCP Server setup guide** (#660) — the docs now include an end-to-end Salesforce OAuth guide covering External Client App setup, required `mcp_api` scopes, manual client registration, and common redirect / scope pitfalls.
+
+### Changed
+- **Claude Bridge toggle for the Claude harness** (#664) — `SWARM_USE_CLAUDE_BRIDGE=true|1` now routes spawned Claude sessions through the installed `claude-bridge` binary from pinned package `@desplega.ai/claude-bridge@0.1.8`, a Desplega-owned `claude -p` drop-in that drives interactive Claude Code through `tmux` for subscription-pool runs. The env is reloadable via `swarm_config`; `false|0|unset` keeps the normal `CLAUDE_BINARY` path.
+- **Legacy Claude bridge binaries are now a deprecated compatibility path** (#664) — existing direct `CLAUDE_BINARY` bridge deployments keep working, including tmux fail-fast and trust pre-seed behavior, but now emit a deprecation warning pointing operators to `SWARM_USE_CLAUDE_BRIDGE=true`. Docs and runbooks now recommend claude-bridge.
+- **Codex credits-exhausted cooldown is operator-tunable** (#668) — the dedicated cooldown for workspace-credits-exhausted Codex OAuth slots now resolves from `swarm_config`, validates strictly, and updates live without restarting workers.
+
+### Fixed
+- **Slack thread reads now include attachment-only and Block Kit-only roots** (#658) — `slack-read` and worker thread-context extraction now recover text from alert-style Slack payloads, so Datadog / PagerDuty / GitHub threads no longer appear empty to the swarm.
+
+## [1.90.0] - 2026-06-03
+
+### Added
+- **`x` command + `swarm_x` Composio bridge** — Agent Swarm now exposes a thin external-route surface for approved third-party operations. Humans can run `agent-swarm x composio ...`, agents can call `swarm_x`, and the docs now cover the shared workflow.
+- **Config-driven metrics dashboards** (#626) — operators can define read-only SQL dashboards, version them, and render them in the UI without shipping bespoke frontend code. Includes the `create_metric` MCP tool and the metrics definitions HTTP surface.
+- **Attio integration card + bundled interaction skill template** (#632) — the integrations catalog now exposes Attio alongside a reusable skill template for CRM record/query workflows.
+
+### Changed
+- **Requester profile guidance now propagates into task prompts** (#628) — when a canonical user has a `role` or `notes`, the runner injects a `Requester Profile` section so agents can match tone and depth without weakening task or safety constraints.
+- **GitHub task cancellation is runtime-configurable** (#634) — PR/issue unassign and review-request-removal events still cancel linked tasks by default, but each behavior can now be disabled independently through `swarm_config`.
+- **User-token attribution now survives REST task/workflow entry points** (#621) — REST-authenticated calls carry canonical-user attribution through task creation and downstream workflow execution for better auditability and requester-aware behavior.
+
+### Fixed
+- **Heartbeat can dispatch auto-assigned pool tasks correctly** (#622) — crash recovery no longer misses work that was auto-assigned from the pool before the heartbeat sweep.
+- **Heartbeat crash-recovery resume loops now stop cleanly** (#637) — the heartbeat supersede/resume path now respects the generation budget and avoids the race that could create duplicate resume attempts.
+
 ### Added
 - **System-default `swarm-scripts` skill + bundled templates in Docker images** (#614) — the repo now ships a built-in scripts skill/decision rubric as a system-managed default, and both `Dockerfile` and `Dockerfile.worker` copy `templates/` into the image so those defaults are present in compiled deployments.
 - **Context-mode tools on all local coding harnesses** (#599) — Claude Code, Codex, and opencode workers now advertise the `ctx_*` context-mode MCP tools by default, giving every local harness the same compressed-search / fetch-and-index workflow. `CONTEXT_MODE_DISABLED=true` remains the per-worker escape hatch.
@@ -33,8 +74,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`GET /api/memory/{id}` and `GET /api/schedules` REST endpoints** — fetch a single memory by ID, and list schedules with `enabled` / `name` / `scheduleType` / `hideCompleted` query filters.
 - **OpenTelemetry tracing** (#488) — API, worker, MCP, and tool execution spans exported via OTLP. Disabled unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Works with SigNoz Cloud, self-hosted SigNoz, Jaeger (via OTLP collector), Honeycomb, Grafana Tempo, and any other OTLP-compatible backend. New env vars: `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` (secret-scrubbed), `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_TRACE_POLL`. Full guide at [`/docs/guides/observability-opentelemetry`](/docs/guides/observability-opentelemetry).
 - **`OTEL_TRACE_POLL` flag to gate poll-loop spans** (#492) — `worker.poll` and `/api/poll` spans are now off by default; set `OTEL_TRACE_POLL=1` to re-enable. Reduces span volume by ~90% on idle workers. Same PR also fixes the SigNoz Cloud endpoint docs — use the regional base URL (e.g. `https://ingest.eu2.signoz.cloud`); the SDK appends `/v1/traces`.
-- **Shannon-variant `CLAUDE_BINARY` is now first-class** (#482) — the existing-but-undocumented `CLAUDE_BINARY` env var is formalized as the opt-in for [`@dexh/shannon`](https://github.com/dexhorthy/shannon), which drives `claude` interactively in `tmux` to keep swarm runs on the Max/Pro subscription credit pool after Anthropic's 2026-06-15 programmatic-credit split. Accepts a single binary (`shannon`), an absolute path, or a whitespace-separated command string (`bunx @dexh/shannon`, `npx -y @dexh/shannon`); whitespace-split into argv tokens before the swarm appends the usual claude flags. New `parseClaudeBinary` and `resolveClaudeBinary` helpers in `src/providers/claude-adapter.ts`. Reloadable via `swarm_config` overlay (precedence: repo > agent > global > env > `claude`) so operators can flip a worker via `set-config CLAUDE_BINARY=...` without a container restart. Fail-fast `Bun.which("tmux")` check when the resolved binary contains `shannon`. Pre-seeds `~/.claude.json` (`projects[cwd].hasTrustDialogAccepted = true`) at session-create so the first-run trust dialog doesn't hang the tmux pane. New user-facing guide at [`/docs/guides/shannon-experimental`](/docs/guides/shannon-experimental); engineering notes in `runbooks/harness-providers.md`.
-- **`tmux` apt-installed in `Dockerfile.worker`** (#482) — ships in the worker image by default so `CLAUDE_BINARY="bunx @dexh/shannon"` works out of the box. Single apt list addition, same `RUN` block — no new layer.
+- **Legacy bridge `CLAUDE_BINARY` support is now first-class** (#482) — the existing-but-undocumented `CLAUDE_BINARY` env var is formalized for alternate Claude CLI argv prefixes that drive `claude` interactively in `tmux` to keep swarm runs on the Max/Pro subscription credit pool after Anthropic's 2026-06-15 programmatic-credit split. Accepts a single binary, an absolute path, or a whitespace-separated command string; whitespace-split into argv tokens before the swarm appends the usual claude flags. New `parseClaudeBinary` and `resolveClaudeBinary` helpers in `src/providers/claude-adapter.ts`. Reloadable via `swarm_config` overlay (precedence: repo > agent > global > env > `claude`) so operators can flip a worker via `set-config CLAUDE_BINARY=...` without a container restart. Fail-fast `Bun.which("tmux")` check for legacy bridge binaries. Pre-seeds `~/.claude.json` (`projects[cwd].hasTrustDialogAccepted = true`) at session-create so the first-run trust dialog doesn't hang the tmux pane. User-facing guide moved to [`/docs/guides/claude-bridge-experimental`](/docs/guides/claude-bridge-experimental); engineering notes in `runbooks/harness-providers.md`.
+- **`tmux` apt-installed in `Dockerfile.worker`** (#482) — ships in the worker image by default so tmux-backed Claude bridge commands work out of the box. Single apt list addition, same `RUN` block — no new layer.
 
 ### Changed
 - **Context-mode nudges fire earlier and match real tool names** (#615) — local coding harness prompts now steer agents toward `ctx_execute` / `ctx_batch_execute` after every 3 qualifying external MCP calls instead of 10, and the Claude MCP server key now matches the hook guidance so the suggested `ctx_*` tools are the same names agents can actually call.

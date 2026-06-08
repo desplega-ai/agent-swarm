@@ -49,8 +49,8 @@ curl -s "https://api.x.com/2/tweets/{TWEET_ID}?tweet.fields=reply_settings" \
 
 Response includes `reply_settings`:
 - `everyone` — Anyone can reply
-- `mentionedUsers` — Only mentioned users can reply (unless @desplegalabs is mentioned)
-- `following` — Only followers can reply (unless the author follows @desplegalabs)
+- `mentionedUsers` — Only mentioned users can reply unless your account is mentioned
+- `following` — Only followers can reply unless the author follows your account
 
 **If reply_settings is NOT "everyone", do NOT attempt the reply.** Report back that the tweet has conversation restrictions. Quote tweets may also be restricted on such tweets.
 
@@ -85,7 +85,7 @@ curl -X POST "https://api.x.com/2/tweets" \
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| **402 CreditsDepleted** | Monthly API credits exhausted | **STOP immediately.** Do NOT retry. Save generated content to agent-fs for later manual posting. Report to Slack. Mark task as failed. Taras must top up credits at developer.x.com. |
+| **402 CreditsDepleted** | Monthly API credits exhausted | **STOP immediately.** Do NOT retry. Save generated content to agent-fs for later manual posting. Report to the requester. Mark task as failed. An account owner must top up credits at developer.x.com. |
 | 403 Forbidden on reply | Conversation restrictions | Pre-check reply_settings |
 | 403 Forbidden on quote | Quote restrictions | Report back, don't retry |
 | 401 Unauthorized | Bad OAuth signature | Verify credentials, check timestamp |
@@ -95,8 +95,7 @@ curl -X POST "https://api.x.com/2/tweets" \
 
 ## Account Info
 
-- **Account:** @desplegalabs
-- **User ID:** 2027510506601488384
+Store your account handle and user ID in local config or notes for your deployment. Do not assume this template's operator account.
 
 ## Workflow
 
@@ -106,4 +105,3 @@ curl -X POST "https://api.x.com/2/tweets" \
 4. POST the tweet/reply/quote
 5. If 402, STOP — save content to agent-fs and report (credits depleted)
 6. If 403, report the restriction — do NOT retry blindly
-

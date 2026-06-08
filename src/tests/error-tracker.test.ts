@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+  isCodexCreditsExhaustedMessage,
+  isRateLimitMessage,
+  MAX_RATE_LIMIT_RESET_MS,
+  MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
   parseCodexRateLimitResetTime,
   parseRateLimitResetTime,
   parseStderrForErrors,
+  resolveCodexCreditsExhaustedCooldownMs,
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
@@ -564,6 +570,121 @@ describe("parseRateLimitResetTime", () => {
     expect(parseRateLimitResetTime("retry after 100000 seconds")).toBeUndefined();
     // More than 24 hours in minutes
     expect(parseRateLimitResetTime("wait 2000 minutes")).toBeUndefined();
+  });
+});
+
+describe("isCodexCreditsExhaustedMessage", () => {
+  const CANONICAL =
+    "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.";
+
+  test("returns true for the canonical credits-exhausted message", () => {
+    expect(isCodexCreditsExhaustedMessage(CANONICAL)).toBe(true);
+  });
+
+  test("matches 'out of credits' fragment", () => {
+    expect(isCodexCreditsExhaustedMessage("Your workspace is out of credits.")).toBe(true);
+  });
+
+  test("matches 'refill in order to continue' fragment", () => {
+    expect(isCodexCreditsExhaustedMessage("Please refill in order to continue.")).toBe(true);
+  });
+
+  test("matches 'workspace owner to refill' fragment", () => {
+    expect(isCodexCreditsExhaustedMessage("Ask your workspace owner to refill credits.")).toBe(
+      true,
+    );
+  });
+
+  test("is case-insensitive", () => {
+    expect(isCodexCreditsExhaustedMessage("OUT OF CREDITS")).toBe(true);
+  });
+
+  test("returns false for unrelated errors", () => {
+    expect(isCodexCreditsExhaustedMessage("No conversation found with session ID abc123")).toBe(
+      false,
+    );
+    expect(isCodexCreditsExhaustedMessage("Authentication failed")).toBe(false);
+    expect(isCodexCreditsExhaustedMessage("Rate limit exceeded")).toBe(false);
+    expect(isCodexCreditsExhaustedMessage("Connection timeout")).toBe(false);
+  });
+
+  test("returns false for bare 'refill' without qualifying context", () => {
+    expect(isCodexCreditsExhaustedMessage("Please refill your coffee")).toBe(false);
+  });
+});
+
+describe("isRateLimitMessage — Codex credits-exhausted integration", () => {
+  const CANONICAL =
+    "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.";
+
+  test("returns true for canonical Codex credits-exhausted message", () => {
+    expect(isRateLimitMessage(CANONICAL)).toBe(true);
+  });
+
+  test("still returns true for standard rate-limit messages", () => {
+    expect(isRateLimitMessage("Rate limit exceeded")).toBe(true);
+    expect(isRateLimitMessage("429 Too Many Requests")).toBe(true);
+    expect(isRateLimitMessage("You've hit your weekly limit")).toBe(true);
+  });
+
+  test("still returns false for unrelated errors", () => {
+    expect(isRateLimitMessage("No conversation found with session ID abc123")).toBe(false);
+    expect(isRateLimitMessage("Authentication failed")).toBe(false);
+    expect(isRateLimitMessage("Server error 500")).toBe(false);
+  });
+});
+
+describe("resolveCodexCreditsExhaustedCooldownMs", () => {
+  test("absent (undefined) → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs(undefined)).toBe(
+      CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+    );
+  });
+
+  test("null → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs(null)).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("empty string → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("")).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("non-numeric string → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("abc")).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("zero → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("0")).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("negative → default constant", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("-5")).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+  });
+
+  test("valid in-range string (30m) → parsed value", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("1800000")).toBe(1_800_000);
+  });
+
+  test("valid in-range number (30m) → parsed value", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs(1_800_000)).toBe(1_800_000);
+  });
+
+  test("below floor → clamped to MIN", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs("1000")).toBe(
+      MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+    );
+  });
+
+  test("above ceiling (8d) → clamped to MAX", () => {
+    expect(resolveCodexCreditsExhaustedCooldownMs(String(8 * 24 * 60 * 60 * 1000))).toBe(
+      MAX_RATE_LIMIT_RESET_MS,
+    );
+  });
+
+  test("partial-numeric strings → default constant (not silently truncated)", () => {
+    for (const bad of ["60000ms", "1.5", "123abc", "1e5"]) {
+      expect(resolveCodexCreditsExhaustedCooldownMs(bad)).toBe(CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS);
+    }
   });
 });
 

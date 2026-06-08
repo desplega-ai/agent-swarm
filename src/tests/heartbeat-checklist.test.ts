@@ -271,6 +271,26 @@ describe("Heartbeat Checklist", () => {
       expect(tasks[0]!.task).toContain("Review blocked tasks");
     });
 
+    test("created task enforces HEARTBEAT tracked-item cap and seeded audit call", async () => {
+      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      updateAgentProfile(lead.id, {
+        heartbeatMd: "- Watch PR #123 until 2026-06-07\n",
+      });
+
+      await checkHeartbeatChecklist();
+
+      const tasks = getDb()
+        .query("SELECT task FROM agent_tasks WHERE taskType = 'heartbeat-checklist'")
+        .all() as Array<{ task: string }>;
+      expect(tasks.length).toBe(1);
+      expect(tasks[0]!.task).toContain("Active Blockers + Watch Items + Open Discussion");
+      expect(tasks[0]!.task).toContain("≤10 items");
+      expect(tasks[0]!.task).toContain("20 is the absolute max");
+      expect(tasks[0]!.task).toContain("script-run");
+      expect(tasks[0]!.task).toContain("Heartbeat Audit");
+      expect(tasks[0]!.task).toContain("Rule #11");
+    });
+
     test("created task has correct tags", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
       updateAgentProfile(lead.id, {
@@ -367,6 +387,22 @@ describe("Heartbeat Checklist", () => {
         .query("SELECT task FROM agent_tasks WHERE taskType = 'boot-triage'")
         .all() as Array<{ task: string }>;
       expect(tasks[0]!.task).toContain("Check Slack for unaddressed requests");
+    });
+
+    test("boot-triage task enforces HEARTBEAT cap and seeded boot-triage call", async () => {
+      createAgent({ name: "lead", isLead: true, status: "idle" });
+
+      await createBootTriageTask();
+
+      const tasks = getDb()
+        .query("SELECT task FROM agent_tasks WHERE taskType = 'boot-triage'")
+        .all() as Array<{ task: string }>;
+      expect(tasks[0]!.task).toContain("Active Blockers + Watch Items + Open Discussion");
+      expect(tasks[0]!.task).toContain("≤10 items");
+      expect(tasks[0]!.task).toContain("20 is the absolute max");
+      expect(tasks[0]!.task).toContain("script-run");
+      expect(tasks[0]!.task).toContain("boot-triage");
+      expect(tasks[0]!.task).toContain("one read-only call");
     });
 
     test("dedup: skips when active boot-triage task exists", async () => {

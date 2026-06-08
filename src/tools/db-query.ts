@@ -1,9 +1,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { executeReadOnlyQuery } from "@/http/db-query";
+import { DbQueryInputShape, executeReadOnlyQuery, resolveDbQuerySql } from "@/http/db-query";
 import { createToolRegistrar } from "@/tools/utils";
 
 const MCP_MAX_ROWS = 100;
+
+const DbQueryToolInputSchema = z
+  .object({
+    ...DbQueryInputShape,
+    sql: z.string().optional().describe("SQL query (read-only only — writes are rejected)"),
+    query: z.string().optional().describe("Deprecated runtime alias for sql."),
+    params: z.array(z.any()).optional().default([]).describe("Query parameters"),
+  })
+  .refine((body) => body.sql !== undefined || body.query !== undefined, {
+    message: "Either sql or query is required",
+  });
 
 export const registerDbQueryTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -13,10 +24,7 @@ export const registerDbQueryTool = (server: McpServer) => {
       description:
         "Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (oauth_tokens, configs). Results capped at 100 rows.",
       annotations: { readOnlyHint: true },
-      inputSchema: z.object({
-        sql: z.string().describe("SQL query (read-only only — writes are rejected)"),
-        params: z.array(z.any()).optional().default([]).describe("Query parameters"),
-      }),
+      inputSchema: DbQueryToolInputSchema,
       outputSchema: z.object({
         success: z.boolean(),
         columns: z.array(z.string()),
@@ -26,8 +34,10 @@ export const registerDbQueryTool = (server: McpServer) => {
         truncated: z.boolean(),
       }),
     },
-    async ({ sql, params }, _requestInfo, _meta) => {
+    async (input, _requestInfo, _meta) => {
       try {
+        const sql = resolveDbQuerySql(input);
+        const params = input.params ?? [];
         const result = executeReadOnlyQuery(sql, params, MCP_MAX_ROWS);
         const truncated = result.total > MCP_MAX_ROWS;
 

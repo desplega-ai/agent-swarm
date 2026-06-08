@@ -29,7 +29,7 @@ The org token is stored in swarm config as `SPRITES_API_KEY` (global, secret). S
 sprite auth setup --token "$SPRITES_API_KEY"
 ```
 
-Token format is `<org>/<account_id>/<token_id>/<secret>`. The first segment is the org (`desplega`).
+Token format is `<org>/<account_id>/<token_id>/<secret>`. The first segment is your organization slug.
 
 ## Core commands
 
@@ -45,9 +45,9 @@ Token format is `<org>/<account_id>/<token_id>/<secret>`. The first segment is t
 
 Flags: every command takes `-s <sprite>` (or sets a default via `sprite use`). `-o <org>` overrides the org if you have multiple.
 
-## Sandbox baseline (as of 2026-05-07)
+## Sandbox baseline
 
-- Ubuntu 25.10 (Questing Quokka), kernel 6.12.x-fly (firecracker microVM)
+- Ubuntu-based microVM image (exact version may change over time)
 - Non-root `sprite` user (uid 1001), passwordless `sudo`
 - No docker, no `/var/run/docker.sock`, no container runtime preinstalled
 - No systemd / init — `service` and `systemctl` won't work; start daemons manually with `sudo <daemon> &` or `nohup`
@@ -105,7 +105,7 @@ trap "sprite destroy test-$$ --force" EXIT INT TERM
 # … work …
 ```
 
-If a script crashes, `sprite list` shows what's still up. Sweep with `sprite list -o desplega` and destroy anything you don't recognize.
+If a script crashes, `sprite list` shows what's still up. Sweep with `sprite list -o <org>` and destroy anything you don't recognize.
 
 ## Setup script snippet
 
@@ -130,4 +130,3 @@ grep -q '/.local/bin' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.l
 - **Daemon survival:** `sprite exec` runs in a fresh subshell. A daemon backgrounded with `&` survives the exec call (sprites use a shared init), but if you want to be safe use `nohup`. To stop it, `sprite exec -s … -- sudo pkill <daemon>`.
 - **Port forwarding:** ports inside the sprite are not exposed to your swarm container. Curl from *inside* the sprite (`sprite exec -s … -- curl localhost:5432`) — not from your container.
 - **Don't leak secrets:** treat the sprite as an untrusted host. Don't put production tokens in there.
-

@@ -1,6 +1,6 @@
 # desloppify — Code-health scan workflow (swarm edition)
 
-`desloppify` is a multi-language codebase health scanner (peteromallet/desloppify). This skill is the swarm-adapted SKILL.md: it codifies the **install recipe with the tree-sitter pin**, the surface-only **scan → status → next → triage** workflow we run for repos like `agent-swarm`, and the **publish-to-agent-fs** step so humans (Eze) can see the findings.
+`desloppify` is a multi-language codebase health scanner (peteromallet/desloppify). This skill is the swarm-adapted SKILL.md: it codifies the **install recipe with the tree-sitter pin**, the surface-only **scan → status → next → triage** workflow for code-health scans, and the **publish-to-agent-fs** step so humans can see the findings.
 
 > **Default mode for swarm workers: surface-only.** Run Phase 1 + early Phase 2, publish a memo to agent-fs, stop. Do **not** run Phase 3 (queue-grinding refactors) unless the task explicitly asks.
 
@@ -8,7 +8,7 @@
 
 - A task asks you to run desloppify, do a code-health scan, get a health score, or surface debt themes on a repo.
 - A task references `peteromallet/desloppify` or the upstream `docs/SKILL.md`.
-- You need to triage tech debt on a TS / Python / multi-lang repo (agent-swarm, landing, agent-swarm-landing, desplega-ai, etc.).
+- You need to triage tech debt on a TS / Python / multi-lang repo.
 
 If the task is "fix this one bug" or "rename X" → not this skill. Desloppify is for batch debt-surfacing, not point fixes.
 
@@ -28,7 +28,7 @@ pipx runpip desloppify show tree-sitter-language-pack | grep Version
 
 ## Step 2 — Install (first run only)
 
-Use `pipx`. This is the working recipe verified in PR #463 (Dockerfile.worker) and across multiple sprite smokes:
+Use `pipx`. This keeps the scanner isolated from the project environment:
 
 ```bash
 pipx install 'desloppify[full]==0.9.15'
@@ -39,7 +39,7 @@ pipx runpip desloppify show tree-sitter-language-pack | grep Version
 # → must show 1.6.2 (or another <1.8)
 ```
 
-**Why the pin:** `tree-sitter-language-pack` 1.8.0 has an ABI mismatch with `tree-sitter` that crashes desloppify in `cohesion.py:52` → `extractors.py:90` with a `TypeError`. Upstream fix is [peteromallet/desloppify#605](https://github.com/peteromallet/desloppify/pull/605) — open, unmerged. Until that ships, we cap locally. (See task `616b4bba-43de-40b5-af3b-4e219b622218` for the full repro.)
+**Why the pin:** some `tree-sitter-language-pack` 1.8.x builds have ABI mismatches with `tree-sitter` that crash scans during language extraction. Until the installed scanner version is known to work with newer language-pack releases, cap it below 1.8.
 
 If `pipx` isn't installed: `python3 -m pip install --user pipx && python3 -m pipx ensurepath` and start a new shell. If `pipx install` fails with build errors, jump to **Sprite escape hatch** below.
 
@@ -94,11 +94,11 @@ What to capture for the memo:
 
 ## Step 6 — Publish findings to agent-fs
 
-Save the scan memo so Eze and the swarm can see it. Use the shared org (`648a5f3c-35c8-4f11-8673-b89de52cd6bd`) and namespace the path under your own agent ID:
+Save the scan memo somewhere durable so operators can review it. If your deployment uses agent-fs, write it under your own agent namespace:
 
 ```bash
 DATE=$(date +%Y-%m-%d)
-agent-fs --org 648a5f3c-35c8-4f11-8673-b89de52cd6bd write \
+agent-fs --org <org-id> write \
   thoughts/$AGENT_ID/research/$DATE-desloppify-<repo>-scan.md \
   --content "$(cat <<'EOF'
 # desloppify scan — <repo> @ <SHA>
@@ -160,7 +160,7 @@ sprite exec -s desloppify-scan -- bash -c '
   pipx install "desloppify[full]==0.9.15"
   pipx inject --force desloppify "tree-sitter-language-pack<1.8"
   pipx runpip desloppify show tree-sitter-language-pack | grep Version
-  git clone --depth=1 https://github.com/desplega-ai/<repo>.git /tmp/repo
+  git clone --depth=1 https://github.com/<owner>/<repo>.git /tmp/repo
   cd /tmp/repo
   desloppify scan --path .
   desloppify status
@@ -191,11 +191,10 @@ desloppify status
 desloppify next --count 15
 
 # Publish + report
-agent-fs --org 648a5f3c-35c8-4f11-8673-b89de52cd6bd write thoughts/$AGENT_ID/research/$(date +%F)-desloppify-<repo>-scan.md --content "..." -m "scan memo"
+agent-fs --org <org-id> write thoughts/$AGENT_ID/research/$(date +%F)-desloppify-<repo>-scan.md --content "..." -m "scan memo"
 # slack-reply on the originating thread
 ```
 
 ## Upstream reference
 
 Full Phase 3 / review workflow / plan commands are in the upstream SKILL.md: <https://github.com/peteromallet/desloppify/blob/main/docs/SKILL.md>. Reach for it when you're explicitly asked to grind the queue (rare). Default swarm mode stops after the memo + Slack reply.
-

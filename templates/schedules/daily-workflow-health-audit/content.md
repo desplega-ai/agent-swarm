@@ -15,11 +15,11 @@ Check scheduled jobs and workflows for repeated failures, stale runs, and silent
 
 ## Scheduled Task
 
-This is the full task prompt the schedule runs on each fire — including the accumulated operational learnings baked into it. Adapt the swarm-specific references (channel IDs, agent names, repo paths) to your environment before enabling.
+This is the full task prompt the schedule runs on each fire. Adapt the channel IDs, mentions, app URLs, and escalation rules to your environment before enabling. As you learn from real incidents, expand this prompt with your own local failure modes and recovery notes.
 
 Task Type: Daily Workflow + Schedule Health Audit
 
-You are Lead. Run this audit and post a single Slack digest. **Source ask:** Eze in `C0A4J7GB0UD` thread ts `1779264760.065579` (2026-05-20). Cadence: daily at 08:00 UTC. Purpose: surface any workflow run or scheduled-task fire from the last 24h that hard-failed or silently failed (completed but produced nothing useful) so we catch broken cron/workflow plumbing before it ages out.
+You are Lead. Run this audit and post a single Slack digest. Cadence: daily at 08:00 UTC. Purpose: surface any workflow run or scheduled-task fire from the last 24h that hard-failed or silently failed (completed but produced nothing useful) so the team catches broken cron/workflow plumbing before it ages out.
 
 ---
 
@@ -137,7 +137,7 @@ If TOTAL issues across 1A–1F is zero:
 ```
 :white_check_mark: *Daily Workflow + Schedule Health Audit* — <YYYY-MM-DD>
 
-<@U08NY4B5R2M> All clear — <workflowRuns24h> workflow runs + <scheduledFires24h> scheduled fires in the last 24h, all produced expected output.
+<OWNER_OR_TEAM_MENTION> All clear — <workflowRuns24h> workflow runs + <scheduledFires24h> scheduled fires in the last 24h, all produced expected output.
 ```
 
 Otherwise:
@@ -145,7 +145,7 @@ Otherwise:
 ```
 :stethoscope: *Daily Workflow + Schedule Health Audit* — <YYYY-MM-DD>
 
-<@U08NY4B5R2M> Audit window: last 24h. Totals: <workflowRuns24h> workflow runs · <scheduledFires24h> scheduled fires · *<TOTAL_ISSUES> issues*
+<OWNER_OR_TEAM_MENTION> Audit window: last 24h. Totals: <workflowRuns24h> workflow runs · <scheduledFires24h> scheduled fires · *<TOTAL_ISSUES> issues*
 
 *Hard failures — workflow runs* (<N1A>)
 • <url|workflow:name> — failed <relative-time>
@@ -174,7 +174,7 @@ Omit any section whose count is 0. Cap message at 4000 chars (Slack limit) — i
 
 ## Phase 3 — Post to Slack and complete
 
-1. Call `slack-post` with `channelId="C0A4J7GB0UD"` and `message=<rendered digest>`. **Do NOT** thread under the design thread `1779264760.065579` — daily fires are top-level so they're easy to scan.
+1. Call `slack-post` with your configured channel ID and `message=<rendered digest>`. Prefer a top-level daily fire unless your team's convention is to thread recurring audit messages.
 2. Call `store-progress` with `status: "completed"` and a one-paragraph `output` summary:
    - `Issues found: hard-fail-wf=<N1A>, hard-fail-task=<N1B>, halted-24h=<N1C>, silent-empty=<N1D>, cron-stuck=<N1E>, consec-err=<N1F>.`
    - `Totals: workflowRuns24h=<X>, scheduledFires24h=<Y>.`
@@ -185,5 +185,5 @@ Omit any section whose count is 0. Cap message at 4000 chars (Slack limit) — i
 - ❌ Posting a separate Slack message per failure mode — ONE digest.
 - ❌ Raw IDs without clickable URLs.
 - ❌ Dumping full `error` / `output` content — truncate to 220 chars per item.
-- ❌ Threading the daily digest under the original 1779264760.065579 design thread.
+- ❌ Threading the daily digest somewhere your team will not scan.
 - ❌ Skipping the "all clear" message when zero issues — the heartbeat itself is the signal that the audit ran.

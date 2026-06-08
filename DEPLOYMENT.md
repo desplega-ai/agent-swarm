@@ -15,6 +15,17 @@ This guide covers all deployment options for Agent Swarm.
 - [System Prompts](#system-prompts)
 - [Service Registry (PM2)](#service-registry-pm2)
 - [Publishing (Maintainers)](#publishing-maintainers)
+- [Self-Hosted SSO](#self-hosted-sso)
+
+---
+
+## Self-Hosted SSO
+
+Protect your deployment with Single Sign-On. Three compatible deployment modes are documented in [`docs-site/content/docs/(documentation)/guides/self-hosted-sso.mdx`](./docs-site/content/docs/(documentation)/guides/self-hosted-sso.mdx) and the [Self-Hosted SSO guide](https://agent-swarm.dev/docs/guides/self-hosted-sso) on the docs site:
+
+1. **oauth2-proxy quickstart** — zero-code reverse-proxy gate. Example configs in [`examples/sso/`](./examples/sso/).
+2. **Native OIDC middleware** — proposed per-user `aswt_` token issuance (not yet implemented).
+3. **Trusted-header mode** (recommended) — oauth2-proxy handles the IdP dance; the app trusts forwarded identity headers for per-user attribution.
 
 ---
 
@@ -447,7 +458,8 @@ When a worker starts, it:
 |----------|-------------|---------|
 | `PORT` | Port for MCP HTTP server | `3013` |
 | `API_KEY` | API key for server authentication | - |
-| `MCP_BASE_URL` | Base URL (for setup command) | `https://api.desplega.agent-swarm.dev` |
+| `MCP_BASE_URL` | Internal/worker-facing API base (also used by the setup command) | `https://api.desplega.agent-swarm.dev` |
+| `PUBLIC_MCP_BASE_URL` | Public, externally-reachable API origin for OAuth redirect URIs + webhook URLs. Defaults to `MCP_BASE_URL` | Falls back to `MCP_BASE_URL` |
 | `SWARM_URL` | Base domain for service discovery | `localhost` |
 | `APP_URL` | Dashboard URL for Slack message links | - |
 | `ENV` | Environment mode (`development` adds prefix to Slack agent names) | - |
@@ -455,6 +467,8 @@ When a worker starts, it:
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
 | `OPENAI_API_KEY` | OpenAI key for memory embeddings (optional) | - |
 | `CAPABILITIES` | Comma-separated feature flags | All enabled |
+
+> **Split / Helm deploys:** In topologies where `MCP_BASE_URL` points at an internal/cluster address (e.g. a Kubernetes Service DNS name reachable only inside the cluster), set `PUBLIC_MCP_BASE_URL` to the public ingress origin. OAuth redirect URIs and webhook URLs handed to external providers (Linear, Jira, GitHub) are built from `PUBLIC_MCP_BASE_URL` when it is set, falling back to `MCP_BASE_URL` otherwise.
 
 ### Codex ChatGPT OAuth
 

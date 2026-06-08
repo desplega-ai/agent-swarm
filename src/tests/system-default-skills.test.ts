@@ -37,8 +37,10 @@ describe("system-default skills", () => {
     const names = skills.map((skill) => skill.name);
 
     expect(names).toContain("attio-interaction");
+    expect(names).toContain("script-workflows");
     expect(names).toContain("swarm-scripts");
     expect(skills.find((skill) => skill.name === "attio-interaction")?.systemDefault).toBe(true);
+    expect(skills.find((skill) => skill.name === "script-workflows")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "swarm-scripts")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "kv-storage")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "pages")?.systemDefault).toBe(true);
@@ -48,6 +50,7 @@ describe("system-default skills", () => {
 
     const defaults = getSystemDefaultSkills().map((skill) => skill.name);
     expect(defaults).toContain("attio-interaction");
+    expect(defaults).toContain("script-workflows");
     expect(defaults).toContain("swarm-scripts");
     expect(defaults).toContain("kv-storage");
     expect(defaults).toContain("pages");
@@ -76,6 +79,43 @@ describe("system-default skills", () => {
     const skills = getAgentSkills(existingAgent.id);
     expect(skills.map((skill) => skill.name)).toContain("manual-system-default");
     expect(skills.find((skill) => skill.id === manualDefault.id)?.isActive).toBe(true);
+  });
+
+  test("existing agents see swarm-scope skills without explicit install rows", () => {
+    const existingAgent = createAgent({
+      name: "Existing Swarm Skill Worker",
+      description: "Created before a swarm-scope skill",
+      role: "worker",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      capabilities: [],
+    });
+
+    const swarmSkill = createSkill({
+      name: "manual-swarm-scope-skill",
+      description: "Manual swarm scope skill",
+      content:
+        "---\nname: manual-swarm-scope-skill\ndescription: Manual swarm scope skill\n---\nBody.",
+      type: "personal",
+      scope: "swarm",
+      systemDefault: false,
+    });
+
+    const installRow = getDb()
+      .prepare<{ count: number }, [string, string]>(
+        `SELECT COUNT(*) AS count
+         FROM agent_skills
+         WHERE agentId = ?
+           AND skillId = ?`,
+      )
+      .get(existingAgent.id, swarmSkill.id);
+
+    expect(installRow?.count ?? 0).toBe(0);
+
+    const skills = getAgentSkills(existingAgent.id);
+    expect(skills.map((skill) => skill.name)).toContain("manual-swarm-scope-skill");
+    expect(skills.find((skill) => skill.id === swarmSkill.id)?.isActive).toBe(true);
   });
 
   test("new agents get concrete agent_skills rows for system defaults", () => {

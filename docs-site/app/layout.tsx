@@ -25,6 +25,11 @@ export const metadata: Metadata = {
     "task lifecycle",
     "developer tools",
   ],
+  manifest: "/manifest.json",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
   metadataBase: new URL("https://docs.agent-swarm.dev"),
   alternates: {
     canonical: "https://docs.agent-swarm.dev/docs",

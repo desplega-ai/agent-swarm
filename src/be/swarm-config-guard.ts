@@ -41,6 +41,23 @@ const VALIDATED_KEYS: Record<string, (value: unknown) => string | null> = {
     if (parsed.success) return null;
     return `Invalid HARNESS_PROVIDER value (must be one of: ${ProviderNameSchema.options.join(", ")})`;
   },
+  // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
+  // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
+  CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {
+    const str = String(value).trim();
+    if (!/^\d+$/.test(str) || Number(str) <= 0) {
+      return "Invalid CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS (must be a positive integer of milliseconds)";
+    }
+    return null;
+  },
+  SWARM_USE_CLAUDE_BRIDGE: (value) => {
+    if (typeof value !== "string") {
+      return "Invalid SWARM_USE_CLAUDE_BRIDGE value (must be one of: true, false, 1, 0)";
+    }
+    const normalized = value.trim().toLowerCase();
+    if (["true", "false", "1", "0"].includes(normalized)) return null;
+    return "Invalid SWARM_USE_CLAUDE_BRIDGE value (must be one of: true, false, 1, 0)";
+  },
 };
 
 export function validateConfigValue(key: string, value: unknown): string | null {

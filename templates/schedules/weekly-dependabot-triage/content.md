@@ -15,31 +15,35 @@ Review dependency update PRs, group safe patches, and flag risky upgrades.
 
 ## Scheduled Task
 
-This is the full task prompt the schedule runs on each fire — including the accumulated operational learnings baked into it. Adapt the swarm-specific references (channel IDs, agent names, repo paths) to your environment before enabling.
+This is a reusable starting prompt. Before enabling it, replace the repository, paths, branch names, reviewers, and notification target with values for your project.
 
-Triage dependabot PRs from https://github.com/desplega-ai/desplega.ai/pulls
+Task Type: Weekly Dependency Triage
+
+Repository: `owner/repo`
+Important paths: `path-one`, `path-two`
 
 ## Instructions
 
-1. **List all open dependabot PRs** in desplega-ai/desplega.ai using `gh pr list`
-2. **Only paths we care about**: `/be` and `/new-fe`. Close all other dependabot PRs (ones that don't touch these paths).
-3. **DO NOT touch non-dependabot PRs** — leave them as-is.
-4. **Create two unified PRs** that merge all dependabot bumps into one PR each:
-   - One for `/be` changes — branch name format: `YYYY-MM-DD-dependabot-be` (use today's date)
-   - One for `/new-fe` changes — branch name format: `YYYY-MM-DD-dependabot-fe` (use today's date)
-   - Each unified PR should be based on latest `main` and include all the dependency bumps from the individual dependabot PRs for that path.
-   - After creating the unified PRs, close the individual dependabot PRs that were merged into them.
-5. **Return the URLs** of the two final unified PRs.
-6. If there are no open dependabot PRs, just report that and complete.
+1. List all open dependency-update PRs in the configured repository using `gh pr list`.
+2. Separate PRs by the paths they touch. Close or ignore PRs outside the configured path list only if that is your team's policy.
+3. Do not touch non-dependency PRs.
+4. For each configured path, create one unified PR that combines compatible dependency bumps:
+   - Branch name format: `YYYY-MM-DD-dependencies-<path-name>`
+   - Base the branch on latest `main`
+   - Include the dependency bumps for that path
+   - Leave incompatible or conflicting upgrades as separate PRs with notes
+5. After creating a unified PR, close only the individual dependency PRs that were incorporated.
+6. Return the final PR URLs and call out any skipped PRs with a reason.
+7. If there are no open dependency PRs, report that and complete.
 
 ## Approach
 
-- Clone the repo, checkout main, pull latest
-- For each path (be, new-fe): create a branch, cherry-pick or merge the dependabot changes, push, create PR
-- Close individual dependabot PRs after unifying
-- Be careful: some dependabot PRs may have conflicts — handle gracefully
+- Clone or update the repo, checkout `main`, and pull latest
+- Create a branch per path group
+- Cherry-pick, merge, or manually apply each dependency update as appropriate
+- Run the repo's required dependency checks before pushing
+- Push, open PRs, request the configured reviewers, and notify the configured channel or thread
 
-## Important
-- The PR title should be descriptive, e.g. "chore(be): consolidate dependabot bumps YYYY-MM-DD"
-- Add @tarasyarema as reviewer on both PRs
-- Post the final PR URLs back to Slack
+## Completion
+
+Call `store-progress` with status `completed` and an output summary listing unified PR URLs, closed source PRs, skipped PRs, and failed checks if any.

@@ -25,6 +25,7 @@ import { z } from "zod";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../artifact-sdk/browser-sdk";
 import { getPage, incrementPageViewCount } from "../be/db";
 import type { Page } from "../types";
+import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
 import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -159,14 +160,15 @@ function stripJsonSuffix(idSegment: string): string | null {
 }
 
 /**
- * Compute the SPA base URL (`APP_URL`). Mirrors `getAppBaseUrl` in pages.ts —
- * duplicated here to keep this module standalone (no cross-import inside the
- * http/ layer).
+ * Compute the SPA base URL. Public JSON pages historically redirect to the
+ * local dashboard when no app URL is configured; keep that route-local
+ * fallback while still delegating `APP_URL`/`DASHBOARD_URL` resolution to the
+ * shared helper.
  */
+const LOCAL_PAGE_APP_URL = "http://localhost:5274";
+
 function getAppBaseUrl(): string {
-  const env = process.env.APP_URL?.trim();
-  if (env) return env.replace(/\/+$/, "");
-  return "http://localhost:5274";
+  return getAppUrl(LOCAL_PAGE_APP_URL);
 }
 
 /**
@@ -177,15 +179,12 @@ function getAppBaseUrl(): string {
  */
 function buildCsp(): string {
   // `frame-ancestors` lists every origin allowed to iframe `/p/:id`. We must
-  // include the SPA origin(s). `APP_URL` may carry a comma-separated list so
+  // include the SPA origin(s). Configured app URLs may be comma-separated so
   // portless dev (`https://ui.swarm.localhost`), a Vite port (`http://localhost:5274`),
   // and a tunnel/staging origin can all coexist. Additionally, in non-production
   // we always allow `http://localhost:*` and `https://*.localhost` so swapping
   // between Vite ports / portless dev doesn't require restarting the API.
-  const configured = (process.env.APP_URL ?? "")
-    .split(",")
-    .map((s) => s.trim().replace(/\/+$/, ""))
-    .filter(Boolean);
+  const configured = getConfiguredAppUrls();
   const devFallbacks =
     process.env.NODE_ENV === "production"
       ? []

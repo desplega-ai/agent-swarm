@@ -88,7 +88,12 @@ function resolveConfigValue(key: string): string | null {
 }
 
 function resolveMcpBaseUrl(): string {
-  const configured = resolveConfigValue("MCP_BASE_URL");
+  // Browser-facing connect URLs: prefer the public ingress origin
+  // (PUBLIC_MCP_BASE_URL) over the internal MCP_BASE_URL so split deployments
+  // (Helm) surface a host the user's browser can actually reach. Both honor the
+  // swarm_config → env resolution order. Falls back to the localhost dev base.
+  const configured =
+    resolveConfigValue("PUBLIC_MCP_BASE_URL") ?? resolveConfigValue("MCP_BASE_URL");
   const fallback = `http://localhost:${process.env.PORT || "3013"}`;
   return (configured || fallback).replace(/\/+$/, "");
 }

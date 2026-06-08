@@ -54,7 +54,7 @@ describe("Session templates — registration", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("all 14 system templates are registered", () => {
+  test("all 15 system templates are registered", () => {
     const systemTemplates = [
       "system.agent.role",
       "system.agent.register",
@@ -66,6 +66,7 @@ describe("Session templates — registration", () => {
       "system.agent.agent_fs",
       "system.agent.self_awareness",
       "system.agent.context_mode",
+      "system.agent.seed_scripts",
 
       "system.agent.system",
       "system.agent.services",
@@ -90,12 +91,12 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 20 session/system templates registered", () => {
+  test("total of 21 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 20 = the original 19 + `system.session.worker.pi` (a pi-specific worker
-    // composite that omits the context_mode block — see session-templates.ts).
-    expect(sessionSystem.length).toBe(20);
+    // 21 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`.
+    // The pi composite omits script nudges because pi workers do not have MCP.
+    expect(sessionSystem.length).toBe(21);
   });
 });
 
@@ -187,6 +188,15 @@ describe("Session templates — individual resolution", () => {
     expect(result.text).toContain("batch_execute");
   });
 
+  test("system.agent.seed_scripts points agents at task-start scripts", () => {
+    const result = resolveTemplate("system.agent.seed_scripts", {});
+    expect(result.text).toContain("Pre-built Seed Scripts");
+    expect(result.text).toContain("task-context-gathering");
+    expect(result.text).toContain("smart-recall");
+    expect(result.text).toContain("script-search");
+    expect(result.text).not.toContain("compound-insights");
+  });
+
   // system.agent.guidelines was removed — its content was redundant with worker/lead templates
 
   test("system.agent.system contains package info", () => {
@@ -240,6 +250,7 @@ describe("Session templates — composite resolution", () => {
 
     // Contains context_mode
     expect(result.text).toContain("Context Window Management");
+    expect(result.text).toContain("Pre-built Seed Scripts");
 
     // Guidelines template was removed (redundant with lead/worker templates)
 
@@ -275,6 +286,7 @@ describe("Session templates — composite resolution", () => {
 
     // Contains context_mode
     expect(result.text).toContain("Context Window Management");
+    expect(result.text).toContain("Pre-built Seed Scripts");
 
     // Guidelines template was removed (redundant with lead/worker templates)
 
@@ -309,6 +321,8 @@ describe("Session templates — composite resolution", () => {
     expect(workerResult.text).toContain("join-swarm");
     expect(leadResult.text).toContain("How You Are Built");
     expect(workerResult.text).toContain("How You Are Built");
+    expect(leadResult.text).toContain("Pre-built Seed Scripts");
+    expect(workerResult.text).toContain("Pre-built Seed Scripts");
 
     // Lead has lead content, not worker
     expect(leadResult.text).toContain("CRITICAL: You are a coordinator");
@@ -343,6 +357,7 @@ describe("Session templates — getBasePrompt integration", () => {
     expect(result).toContain("join-swarm");
     expect(result).toContain("store-progress");
     expect(result).toContain("How You Are Built");
+    expect(result).toContain("Pre-built Seed Scripts");
     expect(result).toContain("System packages available");
 
     // Conditional sections (services included by default)
@@ -365,8 +380,22 @@ describe("Session templates — getBasePrompt integration", () => {
     expect(result).toContain("your role is: lead");
     expect(result).toContain("integration-test-lead");
     expect(result).toContain("CRITICAL: You are a coordinator");
+    expect(result).toContain("Pre-built Seed Scripts");
 
     // Should NOT have worker content
     expect(result).not.toContain("task-action");
+  });
+
+  test("getBasePrompt excludes seed_scripts for pi worker", async () => {
+    const { getBasePrompt } = await import("../prompts/base-prompt");
+    const result = await getBasePrompt({
+      role: "worker",
+      agentId: "integration-test-pi",
+      swarmUrl: "swarm.test.com",
+      provider: "pi",
+    });
+
+    expect(result).not.toContain("Pre-built Seed Scripts");
+    expect(result).not.toContain("task-context-gathering");
   });
 });

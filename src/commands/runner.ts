@@ -36,12 +36,15 @@ import { initTelemetry, telemetry } from "../telemetry.ts";
 import type { ProviderName, RepoGuidelines } from "../types.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
+import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import {
+  isCodexCreditsExhaustedMessage,
   isRateLimitMessage,
   MAX_RATE_LIMIT_RESET_MS,
   parseRateLimitResetTime,
+  resolveCodexCreditsExhaustedCooldownMs,
 } from "../utils/error-tracker.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
@@ -52,6 +55,7 @@ import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { interpolate } from "../workflows/template.ts";
 import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
+import { resolveClaudeMdPath, syncProfileFilesToServer } from "./profile-sync.ts";
 import {
   buildCredStatusReport,
   buildLatestModelReport,
@@ -69,6 +73,34 @@ import "./templates.ts";
 
 /** Throttle interval for progress updates (3 seconds). */
 const PROGRESS_THROTTLE_MS = 3000;
+
+/** Minimum spacing for explicit runner GC sweeps. */
+const RUNNER_GC_MIN_INTERVAL_MS = 5 * 60 * 1000;
+
+let lastRunnerGcAt = 0;
+
+type GcCapableGlobal = typeof globalThis & { gc?: () => void };
+
+function scheduleRunnerGc(reason: string): boolean {
+  const gc = (globalThis as GcCapableGlobal).gc;
+  if (typeof gc !== "function") return false;
+
+  const now = Date.now();
+  if (now - lastRunnerGcAt < RUNNER_GC_MIN_INTERVAL_MS) return false;
+  lastRunnerGcAt = now;
+
+  const timer = setTimeout(() => {
+    const startedAt = Date.now();
+    try {
+      gc();
+      console.log(`[runner] Explicit GC completed after ${reason} in ${Date.now() - startedAt}ms`);
+    } catch (err) {
+      console.warn(`[runner] Explicit GC failed after ${reason}: ${err}`);
+    }
+  }, 0);
+  timer.unref?.();
+  return true;
+}
 
 /** Save PM2 process list for persistence across container restarts */
 async function savePm2State(role: string): Promise<void> {
@@ -394,6 +426,7 @@ async function fetchResolvedEnv(
 const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "MODEL_OVERRIDE",
   "AGENT_FS_SHARED_ORG_ID",
+  "SWARM_USE_CLAUDE_BRIDGE",
 ]);
 
 /**
@@ -1424,6 +1457,21 @@ interface RunningTask {
     keySuffix: string;
     keyIndex: number;
   };
+  /**
+   * Harness provider this session was actually spawned/resumed on, snapshotted
+   * at spawn time. The runner lets in-flight sessions finish on their original
+   * adapter after a live provider swap, so the session-end profile sync must
+   * decide based on THIS value — not the mutable global `state.harnessProvider`.
+   */
+  harnessProvider: ProviderName;
+  /**
+   * Whether this session ran in a local `/workspace` environment, snapshotted
+   * from `adapter.traits.hasLocalEnvironment` at spawn time. Gates the
+   * session-end FS → DB profile sync per finished session (a session that
+   * started local must still sync even if the worker was swapped to a remote
+   * provider before it completed, and vice versa).
+   */
+  hasLocalEnvironment: boolean;
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -1438,6 +1486,13 @@ interface RunnerState {
    * (per-task live re-resolution) will mutate this between tasks.
    */
   harnessProvider: ProviderName;
+  /**
+   * Effective Codex credits-exhausted cooldown (ms), resolved from `swarm_config`
+   * (key `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS`) > default 2h constant, clamped to
+   * [5m, 7d]. Reconciled live by `applySwarmConfigDrift` — read at the cooldown
+   * application site so a fresh value applies to the next credits-exhausted failure.
+   */
+  codexCreditsExhaustedCooldownMs: number;
 }
 
 /** Buffer for session logs */
@@ -3010,6 +3065,7 @@ async function spawnProviderProcess(
         }
         closeActiveToolSpans(result.exitCode === 0 ? "ok" : "error", result.failureReason);
         sessionSpan.end();
+        scheduleRunnerGc("session completion");
 
         return result;
       }),
@@ -3024,6 +3080,7 @@ async function spawnProviderProcess(
         });
         closeActiveToolSpans("error", error instanceof Error ? error.message : String(error));
         sessionSpan.end();
+        scheduleRunnerGc("session error");
         throw error;
       }),
     );
@@ -3046,6 +3103,11 @@ async function spawnProviderProcess(
     promise,
     result: null,
     credentialInfo,
+    // Snapshot the provider + local-env trait of the adapter this session is
+    // spawned on, so the session-end sync decision survives a live provider
+    // swap that mutates the global RunnerState (review finding 2).
+    harnessProvider: opts.harnessProvider,
+    hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
   };
 
   // Non-blocking completion tracking
@@ -3065,6 +3127,7 @@ async function checkCompletedProcesses(
   state: RunnerState,
   role: string,
   apiConfig?: ApiConfig,
+  cancelledSignaled?: Set<string>,
 ): Promise<void> {
   const completedTasks: Array<{
     taskId: string;
@@ -3073,6 +3136,8 @@ async function checkCompletedProcesses(
     cursorUpdates?: Array<{ channelId: string; ts: string }>;
     workingDir?: string;
     credentialInfo?: RunningTask["credentialInfo"];
+    harnessProvider: ProviderName;
+    hasLocalEnvironment: boolean;
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -3088,6 +3153,8 @@ async function checkCompletedProcesses(
         cursorUpdates: task.cursorUpdates,
         workingDir: task.workingDir,
         credentialInfo: task.credentialInfo,
+        harnessProvider: task.harnessProvider,
+        hasLocalEnvironment: task.hasLocalEnvironment,
       });
     }
   }
@@ -3095,6 +3162,9 @@ async function checkCompletedProcesses(
   // Remove completed tasks from the map and ensure they're marked as finished
   for (const { taskId, result, cursorUpdates, workingDir, credentialInfo } of completedTasks) {
     state.activeTasks.delete(taskId);
+    vcsDetectedTasks.delete(taskId);
+    vcsCheckTimestamps.delete(taskId);
+    cancelledSignaled?.delete(taskId);
 
     if (apiConfig) {
       removeActiveSession(apiConfig, taskId);
@@ -3152,6 +3222,12 @@ async function checkCompletedProcesses(
             rateLimitedUntil = clampResetTime(parsedResetTime);
             console.log(
               `[credentials] Parsed rate limit reset time from error: ${rateLimitedUntil}`,
+            );
+          } else if (isCodexCreditsExhaustedMessage(failureReason)) {
+            const cooldownMs = state.codexCreditsExhaustedCooldownMs;
+            rateLimitedUntil = new Date(Date.now() + cooldownMs).toISOString();
+            console.log(
+              `[credentials] Codex credits exhausted — applying cooldown (${cooldownMs}ms): ${rateLimitedUntil}`,
             );
           } else {
             rateLimitedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
@@ -3216,6 +3292,40 @@ async function checkCompletedProcesses(
         }
       }
     }
+  }
+
+  // Harness-agnostic FS → DB profile sync at session end.
+  //
+  // The Claude plugin Stop hook and the pi extension sync SOUL/IDENTITY/TOOLS/
+  // CLAUDE.md + start-up.sh on their own, but codex/opencode have no such path
+  // and pi's can silently not-fire (2026-06-01 regression). Running the sync
+  // here — at the single point where every completed harness session converges
+  // (including crashes, since the process resolved with an exit code) — makes
+  // persistence reliable for ALL local-environment harnesses without
+  // per-adapter code. Idempotent: the profile route only writes a new context
+  // version when the content hash changes, so pi's double-sync and claude's
+  // redundant POST collapse to a no-op. NON-FATAL — never blocks completion;
+  // failures are logged (scrubbed) inside the helper.
+  //
+  // The local-env gate is per FINISHED session, snapshotted at spawn time —
+  // NOT the mutable global `state.hasLocalEnvironment`. The runner lets
+  // in-flight sessions finish on their original adapter after a live provider
+  // swap, so reading the global would (a) skip a session that started local
+  // when the worker has since flipped to a remote provider, and (b) sync stale
+  // local files after a remote session finishes once the worker flipped local.
+  // We sync when ANY finished session in this batch ran locally, and pick the
+  // CLAUDE.md source from those sessions' providers (review finding 2 + 1).
+  const localCompleted = completedTasks.filter((t) => t.hasLocalEnvironment);
+  if (apiConfig && localCompleted.length > 0) {
+    await syncProfileFilesToServer({
+      agentId: apiConfig.agentId,
+      apiUrl: apiConfig.apiUrl,
+      apiKey: apiConfig.apiKey,
+      changeSource: "session_sync",
+      claudeMdPath: resolveClaudeMdPath(localCompleted.map((t) => t.harnessProvider)),
+    }).catch((err) => {
+      console.warn(`[${role}] ${scrubSecrets(`Profile sync failed: ${err}`)}`);
+    });
   }
 }
 
@@ -3299,7 +3409,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Get agent identity and swarm URL for base prompt
   const agentId = process.env.AGENT_ID || "unknown";
 
-  const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+  const apiUrl = getMcpBaseUrl();
   const swarmUrl = process.env.SWARM_URL || "localhost";
   const apiKey = getApiKey();
 
@@ -3313,10 +3423,22 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Failures (network, API down, malformed value) fall back to env then "claude"
   // so a swarm_config outage cannot wedge boot.
   let bootProvider: ProviderName;
+  // Codex credits-exhausted cooldown is sourced solely from the global swarm_config
+  // (key `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS`). Initialize to the default constant
+  // for the case where it is unset, then apply the swarm_config value below; on a
+  // boot-fetch failure it stays at the default. Reconciled live thereafter by
+  // `applySwarmConfigDrift`.
+  let bootCooldownMs = resolveCodexCreditsExhaustedCooldownMs(undefined);
   try {
-    bootProvider = (await fetchResolvedEnv(apiUrl, apiKey, agentId)).resolvedProvider;
+    const bootEnv = await fetchResolvedEnv(apiUrl, apiKey, agentId);
+    bootProvider = bootEnv.resolvedProvider;
+    bootCooldownMs = resolveCodexCreditsExhaustedCooldownMs(
+      bootEnv.env.CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+    );
   } catch (err) {
-    console.warn(`[runner] fetchResolvedEnv failed at boot, falling back to env: ${err}`);
+    console.warn(
+      `[runner] fetchResolvedEnv failed at boot, falling back to env for provider and the default cooldown: ${err}`,
+    );
     bootProvider = resolveHarnessProvider({}, process.env);
   }
   console.log(`[runner] Resolved HARNESS_PROVIDER: ${bootProvider}`);
@@ -3520,6 +3642,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     activeTasks: new Map(),
     maxConcurrent,
     harnessProvider: bootProvider,
+    codexCreditsExhaustedCooldownMs: bootCooldownMs,
   };
 
   // Track tasks already signaled for cancellation to avoid repeated SIGTERM
@@ -3598,6 +3721,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       console.log(`[${role}] [config] maxConcurrent: ${state.maxConcurrent} → ${nextMax}`);
       state.maxConcurrent = nextMax;
       agentVisibleChanged = true;
+    }
+
+    // (2b) Codex credits-exhausted cooldown — operator-tunable live. Not
+    // agent-visible (doesn't change provider/maxConcurrent → no re-register).
+    const nextCooldown = resolveCodexCreditsExhaustedCooldownMs(
+      freshEnv.CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+    );
+    if (nextCooldown !== state.codexCreditsExhaustedCooldownMs) {
+      console.log(
+        `[${role}] [config] codexCreditsExhaustedCooldownMs: ${state.codexCreditsExhaustedCooldownMs} → ${nextCooldown}`,
+      );
+      state.codexCreditsExhaustedCooldownMs = nextCooldown;
     }
 
     // (3) Apply the small allowlist of safe-to-mutate env keys to process.env.
@@ -3991,7 +4126,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Wait if at capacity (though unlikely on fresh startup)
         while (state.activeTasks.size >= state.maxConcurrent) {
-          await checkCompletedProcesses(state, role, apiConfig);
+          await checkCompletedProcesses(state, role, apiConfig, cancelledSignaled);
           await Bun.sleep(1000);
         }
 
@@ -4210,7 +4345,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     await pingServer(apiConfig, role);
 
     // Check for completed processes first and ensure tasks are marked as finished
-    await checkCompletedProcesses(state, role, apiConfig);
+    await checkCompletedProcesses(state, role, apiConfig, cancelledSignaled);
 
     // Live HARNESS_PROVIDER reconciliation. Re-fetches `swarm_config` (overlaid
     // on env) and swaps the adapter if the resolved provider changed —

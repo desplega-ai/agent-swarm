@@ -1,6 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import { getApiKey } from "@/utils/api-key";
+import { getMcpBaseUrl } from "@/utils/constants";
 import type { RequestInfo } from "./utils";
 
 export const SCRIPT_TRANSPORT_ERROR =
@@ -20,10 +21,7 @@ export const scriptToolOutputSchema = z.object({
 export type ScriptToolStructuredContent = z.infer<typeof scriptToolOutputSchema>;
 
 function apiBaseUrl(): string {
-  return (process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`).replace(
-    /\/+$/,
-    "",
-  );
+  return getMcpBaseUrl();
 }
 
 function toolError(message: string, status = 400): CallToolResult {

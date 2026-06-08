@@ -4,6 +4,7 @@ import {
   OpenApiGeneratorV31,
 } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
+import { getPublicMcpBaseUrl } from "../utils/constants";
 import { routeRegistry } from "./route-def";
 
 extendZodWithOpenApi(z);
@@ -74,8 +75,7 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
     });
   }
 
-  const serverUrl =
-    opts.serverUrl || process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+  const serverUrl = opts.serverUrl || getPublicMcpBaseUrl();
 
   const generator = new OpenApiGeneratorV31(registry.definitions);
   const doc = generator.generateDocument({

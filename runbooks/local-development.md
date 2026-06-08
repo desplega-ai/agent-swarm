@@ -17,7 +17,8 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 | Var | Default | Notes |
 |---|---|---|
 | `AGENT_SWARM_API_KEY` (preferred) / `API_KEY` (legacy) | `123123` | Auth header `Authorization: Bearer …`. `AGENT_SWARM_API_KEY` wins when both are set — prefer it when exporting in your shell profile so the CLI works from any cwd without colliding with other tools' `API_KEY`. |
-| `MCP_BASE_URL` | `http://localhost:3013` | Public URL the workers/UI hit |
+| `MCP_BASE_URL` | `http://localhost:3013` | Internal/worker-facing API base the workers/UI hit |
+| `PUBLIC_MCP_BASE_URL` | falls back to `MCP_BASE_URL` | Public origin for OAuth redirect URIs + webhook URLs. No action needed locally — leave unset and it defaults to `MCP_BASE_URL`. Only relevant in split deploys where `MCP_BASE_URL` is an internal/cluster address. |
 | `APP_URL` | `http://localhost:5274` | Dashboard URL |
 | `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE` | unset | Set `=true` to disable each integration |
 | `CONTEXT_MODE_DISABLED` | unset (enabled) | Set `=true` to opt a worker out of context-mode. Default-enabled — the worker image bakes in context-mode, and the Claude/Codex/OpenCode adapters wire it in unless this is `true`. |

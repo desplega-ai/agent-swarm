@@ -128,11 +128,12 @@ export const DEFERRED_TOOLS = new Set([
   // Approval Requests (1)
   "request-human-input",
 
-  // Skills (11)
+  // Skills (12)
   "skill-create",
   "skill-update",
   "skill-delete",
   "skill-get",
+  "skill-get-file",
   "skill-list",
   "skill-search",
   "skill-install",
@@ -164,12 +165,15 @@ export const DEFERRED_TOOLS = new Set([
   "kv-incr",
   "kv-list",
 
-  // Reusable scripts (5)
+  // Reusable scripts (8)
   "script-search",
   "script-run",
   "script-upsert",
   "script-delete",
   "script-query-types",
+  "launch-script-run",
+  "get-script-run",
+  "list-script-runs",
 
   // External command routes (1)
   "swarm_x",

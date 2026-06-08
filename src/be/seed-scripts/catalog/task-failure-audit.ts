@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { publishCatalogReportPage } from "./catalog-report";
 
 export const argsSchema = z.object({
   days: z
@@ -17,6 +18,7 @@ export const argsSchema = z.object({
     .positive()
     .optional()
     .describe("Max failed tasks to scan (default 500)"),
+  publishPage: z.boolean().optional().describe("Publish an authed HTML page (default true)"),
 });
 
 const REASON_PATTERNS: any[] = [
@@ -46,6 +48,7 @@ export default async function taskFailureAudit(args: any, ctx: any) {
   const days = parsed.data.days || 7;
   const groupBy = parsed.data.groupBy || "reason";
   const limit = parsed.data.limit || 500;
+  const publishPage = parsed.data.publishPage !== false;
 
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const res: any = await ctx.swarm.task_list({
@@ -77,11 +80,55 @@ export default async function taskFailureAudit(args: any, ctx: any) {
     .map((k: string) => groups[k])
     .sort((a: any, b: any) => b.count - a.count);
 
-  return {
+  const result: any = {
     days,
     groupBy,
     totalFailed: tasks.length,
     clusterCount: rows.length,
     groups: rows,
   };
+
+  if (publishPage) {
+    result.page = await publishCatalogReportPage(
+      {
+        title: "Task Failure Audit",
+        slug: "task-failure-audit",
+        description: "Clustered audit of recently failed swarm tasks.",
+        generatedAt: new Date().toISOString(),
+        lede: `Clustered ${tasks.length} failed task(s) over ${days} day(s) by ${groupBy}.`,
+        metrics: [
+          ["Failed tasks", tasks.length],
+          ["Clusters", rows.length],
+          ["Days", days],
+          ["Limit", limit],
+        ],
+        sections: [
+          {
+            key: "failure-clusters",
+            goal: "Surface repeated failure modes before they become operational drift.",
+            findingCount: rows.length,
+            checks: { totalFailed: tasks.length, clusterCount: rows.length, groupBy },
+            findings: rows.map((group: any) => ({
+              id: `failure.${group.key}`,
+              severity: group.count >= 5 ? "high" : group.count >= 2 ? "medium" : "low",
+              summary: `${group.count} failed task(s) in ${group.key}.`,
+              action: "Inspect the sample task IDs and decide whether this needs a fix, retry, or HEARTBEAT watch item.",
+              samples: [
+                {
+                  key: group.key,
+                  count: group.count,
+                  taskIds: group.taskIds,
+                  sampleReason: group.sampleReason,
+                },
+              ],
+            })),
+          },
+        ],
+        appendix: result,
+      },
+      ctx,
+    );
+  }
+
+  return result;
 }

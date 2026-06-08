@@ -1,0 +1,56 @@
+# Agent Swarm — SSO add-on (oauth2-proxy)
+#
+# Extends docker-compose.example.yml with an oauth2-proxy service.
+#
+# Mode 1 (oauth2-proxy gate):
+#   Use as-is. All external traffic goes through port 4180; the swarm API
+#   stays on the internal docker network.
+#
+# Mode 3 (trusted-header — per-user attribution):
+#   1. Uncomment the pass_user_headers command flags below.
+#   2. Set SSO_TRUSTED_HEADER=X-Forwarded-Email on the `api` service.
+#   3. Ensure port 3013 is NOT exposed to the internet.
+#
+# Usage:
+#   docker compose -f docker-compose.example.yml -f examples/sso/docker-compose.sso.yml \
+#     --env-file .env up -d
+#
+# Prerequisites:
+#   - Copy examples/sso/oauth2-proxy.cfg → ./oauth2-proxy.cfg and fill in your IdP values.
+#   - Register the redirect URI in your IdP: http://YOUR_SWARM_HOST:4180/oauth2/callback
+#
+# See docs: https://agent-swarm.dev/docs/guides/self-hosted-sso
+
+services:
+
+  # ── Mode 3: Trusted-header additions to the API service ──────────────────────
+  # Uncomment to enable per-user attribution from proxy-forwarded headers.
+  # api:
+  #   environment:
+  #     ## Proposed — not yet implemented. Track: https://linear.app/desplega/issue/DES-445
+  #     - SSO_TRUSTED_HEADER=X-Forwarded-Email
+
+  # ── oauth2-proxy service ──────────────────────────────────────────────────────
+  oauth2-proxy:
+    image: "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
+    restart: unless-stopped
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    ports:
+      # External SSO-protected entry point. All browser traffic should go here.
+      # After successful login, requests are proxied to the swarm API/UI.
+      - "4180:4180"
+
+    volumes:
+      # Mount your filled-in oauth2-proxy.cfg from the project root.
+      - ./oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro
+
+    command:
+      - "--config=/etc/oauth2-proxy/oauth2-proxy.cfg"
+      # ── Mode 3: Uncomment to forward identity headers to the swarm API ────────
+      # - "--pass-user-headers=true"
+      # - "--set-xauthrequest=true"
+      # - "--pass-access-token=false"

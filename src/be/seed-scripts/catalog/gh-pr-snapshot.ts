@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const argsSchema = z.object({
-  repo: z.string().describe("Repository in 'owner/name' form, e.g. 'desplega-ai/agent-swarm'"),
+  repo: z.string().describe("Repository in 'owner/name' form, e.g. 'owner/name'"),
   number: z.number().int().positive().describe("Pull request number"),
   token: z
     .string()

@@ -1,0 +1,182 @@
+---
+title: Self-Hosted SSO
+description: Protect your self-hosted Agent Swarm deployment with Single Sign-On — oauth2-proxy quickstart and trusted-header forwarding mode.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+Agent Swarm ships without a built-in login page by design — early self-hosters authenticate with a pre-shared `API_KEY`. As deployments grow to multiple teams, you need verified identity and access control. This guide covers two SSO deployment modes that compose cleanly together.
+
+---
+
+## Decision table
+
+| Mode | Implementation | What it provides | Complexity | When to use |
+|---|---|---|---|---|
+| **1. oauth2-proxy** | docker-compose add-on | IdP authentication gate; all authenticated users share the operator key | Low | Lock the dashboard fast. |
+| **2. Trusted-header** | oauth2-proxy + forwarded headers | Same gate, plus identity headers forwarded to the upstream | Medium | Recommended for most self-hosters. |
+
+<Callout type="info">
+Role-based access control (RBAC) is on the roadmap — track and upvote it at [feedback.agent-swarm.dev/p/user-rbac](https://feedback.agent-swarm.dev/p/user-rbac).
+</Callout>
+
+---
+
+## Mode 1 — oauth2-proxy quickstart
+
+**What it does:** A reverse proxy / forward-auth gate sits in front of the Agent Swarm dashboard. Users log in through your IdP (Okta, Google, Azure, Keycloak, …). On success, oauth2-proxy forwards the request to the swarm. The swarm still sees one shared `API_KEY` — no per-user attribution at the API layer.
+
+**Best for:** Teams that need to lock the dashboard right now.
+
+**Limitation:** Every authenticated user has full operator-key access. There is no per-user identity at the API or MCP layer.
+
+### Add oauth2-proxy to your docker-compose.yml
+
+Add the following service to your existing `docker-compose.yml` (the one based on `docker-compose.example.yml`):
+
+```yaml title="docker-compose.yml (add to existing file)"
+services:
+  # ... your existing api / lead / worker services ...
+
+  oauth2-proxy:
+    image: "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "4180:4180"
+    environment:
+      - OAUTH2_PROXY_CONFIG=/etc/oauth2-proxy/oauth2-proxy.cfg
+    volumes:
+      - ./oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro
+    command: ["--config=/etc/oauth2-proxy/oauth2-proxy.cfg"]
+```
+
+Then create `oauth2-proxy.cfg` alongside your `docker-compose.yml` — see the [example config](#example-oauth2-proxycfg) below.
+
+With this setup, `http://your-host:4180` is the SSO-protected entry point to the dashboard. Browsers hitting port `4180` are challenged by oauth2-proxy; authenticated sessions are proxied to the Agent Swarm API/UI on port `3013`.
+
+### Example oauth2-proxy.cfg
+
+```ini title="oauth2-proxy.cfg"
+## oauth2-proxy configuration for Agent Swarm
+## Full reference: https://oauth2-proxy.github.io/oauth2-proxy/configuration/overview/
+
+# ── Provider ───────────────────────────────────────────────────────────────────
+# Replace with your IdP's OIDC discovery endpoint.
+provider = "oidc"
+oidc_issuer_url = "https://YOUR_IDP.example.com"          # Okta: https://your-org.okta.com
+                                                           # Azure: https://login.microsoftonline.com/TENANT_ID/v2.0
+                                                           # Google: https://accounts.google.com
+                                                           # Keycloak: http://keycloak:8080/realms/YOUR_REALM
+client_id     = "YOUR_OIDC_CLIENT_ID"
+client_secret = "YOUR_OIDC_CLIENT_SECRET"
+
+# ── Callback ───────────────────────────────────────────────────────────────────
+redirect_url = "http://YOUR_SWARM_HOST:4180/oauth2/callback"
+
+# ── Upstream (the swarm API/UI) ────────────────────────────────────────────────
+upstreams = ["http://api:3013"]    # docker-compose service name + port
+
+# ── Cookie ────────────────────────────────────────────────────────────────────
+cookie_secret = "YOUR_32_BYTE_BASE64_SECRET"  # openssl rand -base64 32
+cookie_secure = false    # set to true if serving over HTTPS
+cookie_name   = "_oauth2_proxy"
+
+# ── Network ───────────────────────────────────────────────────────────────────
+http_address = "0.0.0.0:4180"
+
+# ── Email allow-list (optional) ───────────────────────────────────────────────
+# Restrict access to specific email domains:
+# email_domains = ["yourcompany.com"]
+
+# ── Access logging ────────────────────────────────────────────────────────────
+request_logging = true
+```
+
+A ready-to-use version of this file lives at [`examples/sso/oauth2-proxy.cfg`](https://github.com/desplega-ai/agent-swarm/blob/main/examples/sso/oauth2-proxy.cfg) in the repository.
+
+---
+
+## Mode 2 — Trusted-header mode (recommended)
+
+**What it does:** oauth2-proxy handles the IdP interaction (Mode 1). After authentication, it forwards identity headers (`X-Forwarded-User`, `X-Forwarded-Email`, `X-Forwarded-Groups`) to the swarm API. This gives you a clear identity signal at the proxy layer, ready to be consumed when the app adds header-based attribution.
+
+**Best for:** Self-hosters who want to establish the full trusted-header pipeline today and benefit from per-user attribution as the app layer evolves.
+
+**Security note:** The swarm API must only accept forwarded-header requests from the proxy, not from the public internet. Enforce this by keeping the API port (`3013`) off the public network, and routing all external traffic through the proxy.
+
+### Headers forwarded by oauth2-proxy
+
+When using `--pass-user-headers` (or equivalent config), oauth2-proxy adds:
+
+| Header | Value |
+|---|---|
+| `X-Forwarded-User` | Username / email from IdP |
+| `X-Forwarded-Email` | Email address |
+| `X-Forwarded-Groups` | Comma-separated IdP groups |
+| `X-Auth-Request-User` | Alternative header — same value |
+
+### docker-compose.yml additions for trusted-header mode
+
+Add the following to the `oauth2-proxy` service from Mode 1:
+
+```yaml title="docker-compose.yml additions"
+services:
+  oauth2-proxy:
+    # ... base config from Mode 1 ...
+    command:
+      - "--config=/etc/oauth2-proxy/oauth2-proxy.cfg"
+      - "--pass-user-headers=true"        # forward X-Forwarded-User / X-Forwarded-Email
+      - "--pass-host-header=true"
+```
+
+### Updated oauth2-proxy.cfg for trusted-header mode
+
+Add the following to your `oauth2-proxy.cfg`:
+
+```ini title="oauth2-proxy.cfg additions for trusted-header mode"
+# Pass identity headers to the upstream swarm API
+pass_user_headers    = true
+pass_access_token    = false    # keep IdP access token off the wire
+set_xauthrequest     = true     # enable X-Auth-Request-* headers
+```
+
+A complete docker-compose snippet for Mode 2 is at [`examples/sso/docker-compose.sso.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/examples/sso/docker-compose.sso.yml).
+
+---
+
+## Mode compatibility summary
+
+The two modes build on each other — you can start with Mode 1 and add Mode 2 without disruption:
+
+```
+Step 1: oauth2-proxy gate                → Mode 1
+Step 2: add --pass-user-headers          → Mode 2 (trusted-header)
+```
+
+In Mode 2, the proxy handles:
+- OIDC authorization code flow
+- Token validation and refresh
+- Session cookie management
+- Identity header forwarding
+
+---
+
+## Security notes
+
+- **Never expose the swarm API port (`3013`) directly to the internet when using trusted-header mode.** The API cannot distinguish a legitimate proxy header from a forged one without additional origin checks. Route all external traffic through the proxy.
+- **Rotate `cookie_secret` if compromised.** All existing oauth2-proxy sessions are invalidated — users will need to re-authenticate.
+- **Back up your `SECRETS_ENCRYPTION_KEY`.** SSO config (client secrets, cookie secrets) is stored encrypted in the swarm config store. Losing the key means losing access to those secrets. See [Secrets Encryption](/docs/guides/secrets-encryption).
+- **OIDC client secrets should be stored as swarm config secrets**, not plain env vars, for production deployments. The swarm config store encrypts at rest with AES-256-GCM.
+
+---
+
+## Related
+
+- [Deployment Guide](/docs/guides/deployment) — base Docker Compose setup this guide extends
+- [Secrets Encryption](/docs/guides/secrets-encryption) — encrypting OIDC client secrets at rest
+- [RBAC / user roles](https://feedback.agent-swarm.dev/p/user-rbac) — track and upvote role-based access control on the roadmap
+- [Design doc: SSO Integration for Agent Swarm](https://live.agent-fs.dev/file/~/648a5f3c-35c8-4f11-8673-b89de52cd6bd/2faf73ba-4eee-4472-8b3b-359c4ed6bfbb/thoughts/16990304-76e4-4017-b991-f3e37b34cf73/research/2026-06-05-sso-integration-design.md) — internal design doc with full architecture rationale

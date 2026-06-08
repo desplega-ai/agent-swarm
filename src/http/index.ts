@@ -21,9 +21,11 @@ import {
   withRemoteContext,
   withSpanContext,
 } from "../otel";
+import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
 import { getApiKey } from "../utils/api-key";
+import { getMcpBaseUrl } from "../utils/constants";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
@@ -41,11 +43,17 @@ import { handleHeartbeat } from "./heartbeat";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
-import { handleMcp } from "./mcp";
+import {
+  closeIdleMcpTransports,
+  DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS,
+  handleMcp,
+  type McpTransportActivity,
+} from "./mcp";
+import { handleMcpBridge } from "./mcp-bridge";
 import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
-import { handleMcpUser } from "./mcp-user";
-import { handleMemory } from "./memory";
+import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
+import { handleMemory, startMemoryGc, stopMemoryGc } from "./memory";
 import { handleMetrics } from "./metrics";
 import { handlePageProxy } from "./page-proxy";
 import { handlePages } from "./pages";
@@ -56,6 +64,7 @@ import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { describeRequestRoute } from "./route-def";
 import { handleSchedules } from "./schedules";
+import { handleScriptRuns } from "./script-runs";
 import { handleScripts } from "./scripts";
 import { handleSessionData } from "./session-data";
 import { handleSessions } from "./sessions";
@@ -95,9 +104,64 @@ const globalState = globalThis as typeof globalThis & {
   __transports?: Record<string, StreamableHTTPServerTransport>;
   __transportsUser?: Record<string, StreamableHTTPServerTransport>;
   __sessionUsers?: Record<string, string>;
+  __transportActivity?: McpTransportActivity;
+  __transportActivityUser?: McpTransportActivity;
   __sigintRegistered?: boolean;
+  __apiGcInterval?: ReturnType<typeof setInterval>;
   __runId?: string;
 };
+
+const API_GC_INTERVAL_MS = 5 * 60 * 1000;
+const MCP_TRANSPORT_IDLE_TIMEOUT_MS = DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS;
+
+type GcCapableGlobal = typeof globalThis & { gc?: () => void };
+
+function scheduleApiGc(reason: string): boolean {
+  const gc = (globalThis as GcCapableGlobal).gc;
+  if (typeof gc !== "function") return false;
+
+  const timer = setTimeout(() => {
+    const startedAt = Date.now();
+    try {
+      gc();
+      console.log(`[HTTP] Explicit GC completed after ${reason} in ${Date.now() - startedAt}ms`);
+    } catch (err) {
+      console.warn(`[HTTP] Explicit GC failed after ${reason}: ${err}`);
+    }
+  }, 0);
+  timer.unref?.();
+  return true;
+}
+
+function startApiGcInterval() {
+  if (globalState.__apiGcInterval) return;
+
+  const gc = (globalThis as GcCapableGlobal).gc;
+  if (typeof gc !== "function") {
+    console.log("[HTTP] Explicit GC unavailable; idle MCP transport sweeps remain enabled");
+  }
+
+  const interval = setInterval(() => {
+    const closedOwnerTransports = closeIdleMcpTransports(transports, transportActivity, {
+      idleTimeoutMs: MCP_TRANSPORT_IDLE_TIMEOUT_MS,
+      label: "MCP",
+    });
+    const closedUserTransports = closeIdleMcpUserTransports(
+      transportsUser,
+      sessionUsers,
+      transportActivityUser,
+      { idleTimeoutMs: MCP_TRANSPORT_IDLE_TIMEOUT_MS },
+    );
+    if (closedOwnerTransports > 0 || closedUserTransports > 0) {
+      console.log(
+        `[HTTP] Closed ${closedOwnerTransports} owner MCP and ${closedUserTransports} user MCP idle transport(s)`,
+      );
+    }
+    scheduleApiGc("periodic API sweep");
+  }, API_GC_INTERVAL_MS);
+  interval.unref?.();
+  globalState.__apiGcInterval = interval;
+}
 
 // Clean up previous server on hot reload
 if (globalState.__httpServer) {
@@ -109,6 +173,8 @@ const transports: Record<string, StreamableHTTPServerTransport> = globalState.__
 const transportsUser: Record<string, StreamableHTTPServerTransport> =
   globalState.__transportsUser ?? {};
 const sessionUsers: Record<string, string> = globalState.__sessionUsers ?? {};
+const transportActivity: McpTransportActivity = globalState.__transportActivity ?? {};
+const transportActivityUser: McpTransportActivity = globalState.__transportActivityUser ?? {};
 
 const httpServer = createHttpServer(async (req, res) => {
   const startTime = performance.now();
@@ -233,7 +299,9 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
+        () => handleScriptRuns(req, res, pathSegments, queryParams, myAgentId),
         () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
+        () => handleMcpBridge(req, res, pathSegments, queryParams, myAgentId),
         () => handleMcpServers(req, res, pathSegments, queryParams),
         () => handleMcpOAuth(req, res, pathSegments, queryParams),
         () => handleMemory(req, res, pathSegments, myAgentId),
@@ -247,8 +315,8 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleSessions(req, res, pathSegments, queryParams),
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
-        () => handleMcp(req, res, transports),
-        () => handleMcpUser(req, res, transportsUser, sessionUsers),
+        () => handleMcp(req, res, transports, transportActivity),
+        () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
       ];
 
       try {
@@ -290,6 +358,8 @@ globalState.__httpServer = httpServer;
 globalState.__transports = transports;
 globalState.__transportsUser = transportsUser;
 globalState.__sessionUsers = sessionUsers;
+globalState.__transportActivity = transportActivity;
+globalState.__transportActivityUser = transportActivityUser;
 
 async function shutdown() {
   console.log("Shutting down HTTP server...");
@@ -303,6 +373,9 @@ async function shutdown() {
   // Stop heartbeat triage
   stopHeartbeat();
 
+  // Stop durable script workflow subprocesses
+  stopScriptRunSupervisor();
+
   // Stop Slack bot
   await stopSlackApp();
 
@@ -315,11 +388,20 @@ async function shutdown() {
   // Stop MCP OAuth pending-session garbage collector
   stopMcpOAuthPendingGc();
 
+  // Stop memory expired-row garbage collector
+  stopMemoryGc();
+
+  if (globalState.__apiGcInterval) {
+    clearInterval(globalState.__apiGcInterval);
+    delete globalState.__apiGcInterval;
+  }
+
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
     console.log(`[HTTP] Closing transport ${id}`);
     transport.close();
     delete transports[id];
+    delete transportActivity[id];
   }
 
   for (const [id, transport] of Object.entries(transportsUser)) {
@@ -327,6 +409,7 @@ async function shutdown() {
     transport.close();
     delete transportsUser[id];
     delete sessionUsers[id];
+    delete transportActivityUser[id];
   }
 
   // Close all active connections forcefully
@@ -348,6 +431,8 @@ if (!globalState.__sigintRegistered) {
 if (!globalState.__runId) {
   globalState.__runId = `run_${Date.now()}`;
 }
+
+startApiGcInterval();
 
 // Load global swarm configs before the server starts listening so decrypt/key
 // failures fail closed instead of leaving the runtime half-initialized.
@@ -440,6 +525,9 @@ httpServer
     // Initialize workflow engine (trigger subscriptions + resume listener)
     initWorkflows();
 
+    // Reconcile durable script workflow subprocesses
+    startScriptRunSupervisor(getMcpBaseUrl());
+
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {
       const { startScheduler } = await import("../scheduler");
@@ -465,6 +553,18 @@ httpServer
 
     // Start MCP OAuth pending-session garbage collector (5-min tick)
     startMcpOAuthPendingGc();
+
+    // Start expired-memory garbage collector (1-hour tick, immediate first run)
+    startMemoryGc();
+
+    // Background backfill: re-embed any agent_memory rows with wrong-dimension
+    // embeddings (e.g. 1536d instead of 512d). Non-blocking, idempotent, no-op
+    // when the DB is clean. See src/be/memory/boot-reembed.ts.
+    import("../be/memory/boot-reembed")
+      .then(({ runBootReembed }) => runBootReembed())
+      .catch((err) => {
+        console.error("[boot-reembed] startup backfill failed (non-fatal):", err);
+      });
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);

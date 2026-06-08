@@ -99,6 +99,11 @@ config:
   # -- Public dashboard URL referenced in Slack message links. Leave blank
   # to omit dashboard links from Slack notifications.
   appUrl: ""
+  # -- Public, browser/externally-reachable API origin for OAuth redirect URIs + registered webhooks.
+  # Leave blank to derive from ingress.host when ingress is enabled, otherwise
+  # the app falls back to the internal mcpBaseUrl. In split deploys set to the
+  # public ingress URL explicitly when the chart cannot infer it.
+  publicMcpBaseUrl: ""
   # -- Free-form additional env vars layered on top of the chart defaults.
   # Useful for less-common knobs (TEMPLATE_REGISTRY_URL, SCHEDULER_INTERVAL_MS, etc.).
   extraEnv: {}

@@ -1,4 +1,5 @@
 import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { getPublicMcpBaseUrl } from "../utils/constants";
 import { initLinearOutboundSync, teardownLinearOutboundSync } from "./outbound";
 
 let initialized = false;
@@ -31,9 +32,7 @@ export function initLinear(): boolean {
   // verbatim by the OAuth flow. Prefer MCP_BASE_URL over the localhost default
   // so prod doesn't send users back to localhost when LINEAR_REDIRECT_URI is
   // unset.
-  const apiBaseUrl =
-    process.env.MCP_BASE_URL?.trim().replace(/\/+$/, "") ||
-    `http://localhost:${process.env.PORT || "3013"}`;
+  const apiBaseUrl = getPublicMcpBaseUrl();
   const redirectUri =
     process.env.LINEAR_REDIRECT_URI ?? `${apiBaseUrl}/api/trackers/linear/callback`;
 

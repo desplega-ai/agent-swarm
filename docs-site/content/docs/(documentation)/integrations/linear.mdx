@@ -27,6 +27,11 @@ Agent Swarm integrates with [Linear](https://linear.app) as an inbound issue-tra
    - **Callback URL**: `<MCP_BASE_URL>/api/trackers/linear/callback`
    - **Webhook URL**: `<MCP_BASE_URL>/api/trackers/linear/webhook`
 2. Enable **Agent session events** in the webhook settings.
+
+<Callout type="info">
+These URLs are built from `PUBLIC_MCP_BASE_URL` when it is set, falling back to `MCP_BASE_URL` otherwise. In split deploys where `MCP_BASE_URL` is an internal/cluster address, set `PUBLIC_MCP_BASE_URL` to the public ingress origin so Linear can reach the callback and webhook.
+</Callout>
+
 3. Copy the Client ID, Client Secret, and Webhook Signing Secret.
 
 ### 2. Configure environment

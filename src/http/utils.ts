@@ -157,14 +157,21 @@ export function triggerSchemaErrorResponse(
  * redirect URIs). Returns a URL with no trailing slash.
  *
  * Resolution order:
- *   1. `MCP_BASE_URL` env (canonical)
- *   2. Inbound request host — `X-Forwarded-Proto`/`X-Forwarded-Host` if behind
+ *   1. `PUBLIC_MCP_BASE_URL` env — explicit public origin. Wins so split
+ *      deployments (Helm) can keep `MCP_BASE_URL` pointed at an internal
+ *      cluster address while outbound URLs use the public ingress.
+ *   2. `MCP_BASE_URL` env — canonical when public and internal hosts coincide
+ *      (e.g. an ngrok tunnel set as `MCP_BASE_URL` in local dev).
+ *   3. Inbound request host — `X-Forwarded-Proto`/`X-Forwarded-Host` if behind
  *      a proxy/tunnel (ngrok), else `Host` header. Lets the URL stay correct
- *      when MCP_BASE_URL is unset and the API is reached via an arbitrary
+ *      when neither env var is set and the API is reached via an arbitrary
  *      external hostname.
- *   3. `http://localhost:<PORT>` fallback
+ *   4. `http://localhost:<PORT>` fallback
  */
 export function deriveApiBaseUrl(req: IncomingMessage): string {
+  const publicBase = process.env.PUBLIC_MCP_BASE_URL?.trim();
+  if (publicBase) return publicBase.replace(/\/+$/, "");
+
   const envBase = process.env.MCP_BASE_URL?.trim();
   if (envBase) return envBase.replace(/\/+$/, "");
 

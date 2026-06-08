@@ -13,9 +13,9 @@ description: Take feature requests from Slack or a Linear ticket and turn them i
     totalTime: "PT2H",
     step: [
       { "@type": "HowToStep", name: "Triage", text: "Lead agent picks up the Slack ping or Linear ticket and decides whether research, plan, or direct implementation is needed." },
-      { "@type": "HowToStep", name: "Research", text: "Researcher agent runs /desplega:research and persists findings in agent-fs." },
-      { "@type": "HowToStep", name: "Plan", text: "Plan node turns findings into an implementation plan via /desplega:create-plan." },
-      { "@type": "HowToStep", name: "Implement", text: "Coder agent runs /desplega:implement-plan, opens a PR with conventional commits, and triggers CI." },
+      { "@type": "HowToStep", name: "Research", text: "Researcher agent persists findings in agent-fs." },
+      { "@type": "HowToStep", name: "Plan", text: "Plan node turns findings into an implementation plan." },
+      { "@type": "HowToStep", name: "Implement", text: "Coder agent opens a PR with conventional commits and triggers CI." },
       { "@type": "HowToStep", name: "Review", text: "Reviewer agent reviews the PR with gh or glab CLI; merges (squash) when approved and CI is green; transitions the Linear sub-issue to Done." }
     ]
   }}
@@ -25,8 +25,8 @@ Take a feature request from [Slack](https://slack.com) or a [Linear](https://lin
 
 <Mermaid chart={`flowchart LR
   S["Slack request / Linear ticket"] --> L["Lead<br/>triage + route"]
-  L --> R["Researcher<br/>/desplega:research"]
-  R --> P["Plan<br/>/desplega:create-plan"]
+  L --> R["Researcher<br/>research"]
+  R --> P["Plan<br/>implementation plan"]
   P --> I["Coder<br/>implement + open PR"]
   I --> V{"Reviewer<br/>review PR"}
   V -- "approved + CI green" --> M["Merge (squash)<br/>Linear → Done"]
@@ -41,7 +41,7 @@ A request arrives in Slack or as a [Linear](https://linear.app) ticket. The [lea
 
 - **[Lead](https://templates.agent-swarm.dev/official/lead)** — orchestrator. Picks up the ping, decides whether a research/plan step is needed (complex feature) or direct implementation suffices (bug fix / small change), and routes the work.
 - **[Researcher](https://templates.agent-swarm.dev/official/researcher)** — deep codebase research and analysis. Outputs structured findings into [agent-fs](https://github.com/desplega-ai/agent-fs) so downstream agents can pull them.
-- **[Coder](https://templates.agent-swarm.dev/official/coder)** (ours is named *Picateclas*) — turns the plan into a working PR using git worktrees, conventional commits, and the repo's existing test discipline.
+- **[Coder](https://templates.agent-swarm.dev/official/coder)** — turns the plan into a working PR using git worktrees, conventional commits, and the repo's existing test discipline.
 - **[Reviewer](https://templates.agent-swarm.dev/official/reviewer)** — critical PR reviewer that doesn't rubber-stamp. Uses [`gh`](https://cli.github.com/) / [`glab`](https://gitlab.com/gitlab-org/cli) CLI for inline comments and review submissions.
 
 ## Tools & Skills
@@ -55,11 +55,11 @@ A request arrives in Slack or as a [Linear](https://linear.app) ticket. The [lea
 
 ### From ai-toolbox
 
-- **[`/desplega:research` → `/desplega:create-plan` → `/desplega:implement-plan`](https://github.com/desplega-ai/ai-toolbox/tree/main/cc-plugin/base/commands)** — our open-source [Claude Code](https://www.anthropic.com/claude-code) plugin. Enforces "research before plan before code" and persists artifacts in [agent-fs](https://github.com/desplega-ai/agent-fs). Thin command wrappers in [`cc-plugin/base/commands`](https://github.com/desplega-ai/ai-toolbox/tree/main/cc-plugin/base/commands) over [`cc-plugin/base/skills`](https://github.com/desplega-ai/ai-toolbox/tree/main/cc-plugin/base/skills) (`researching`, `implementing`, …).
+- **Research → plan → implement command chains** — optional [Claude Code](https://www.anthropic.com/claude-code) command wrappers can enforce "research before plan before code" and persist artifacts in [agent-fs](https://github.com/desplega-ai/agent-fs).
 
 ### Custom (swarm-managed)
 
-- **`linear-interaction`, `linear-expert`** — outbound [Linear](https://linear.app) updates ([Linear sync is inbound-only](/docs/integrations/linear) by default — these handle the outbound side: transitioning state, posting comments, creating issues). Publishing model under [discussion](https://linear.app/desplega-labs/issue/DES-510).
+- **`linear-interaction`, `linear-expert`** — outbound [Linear](https://linear.app) updates ([Linear sync is inbound-only](/docs/integrations/linear) by default — these handle the outbound side: transitioning state, posting comments, creating issues).
 
 ## Workflows / Schedules
 

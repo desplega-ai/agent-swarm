@@ -237,10 +237,35 @@ All steps live in [`src/commands/runner.ts`](https://github.com/desplega-ai/agen
 | `session.onEvent(...)` | Each `ProviderEvent` → API call (progress, logs, cost, context) |
 | `session.waitForCompletion` | Blocks until the adapter resolves |
 | `ensureTaskFinished` | `POST /api/tasks/{id}/finish` |
+| `syncProfileFilesToServer` | Session-end FS → DB sync of the agent's self-editable files (see below). Runs for every `hasLocalEnvironment` harness. |
 
 <Callout type="info">
   **One task → one session.** The runner tracks concurrent tasks in `state.activeTasks: Map<taskId, RunningTask>` up to `MAX_CONCURRENT_TASKS`. An adapter never needs to multiplex tasks internally — if the worker should handle two at once, the runner spawns two sessions.
 </Callout>
+
+### Session-end identity / config sync (FS → DB)
+
+When a session finishes, the runner syncs the agent's **self-editable** files back to the API so edits the agent made during the session persist into its profile (`context_versions`):
+
+- `SOUL.md` / `IDENTITY.md` / `TOOLS.md` / `HEARTBEAT.md` (bundled identity update)
+- the `CLAUDE.md` source — **provider-dependent** (see below)
+- the agent-managed section of `/workspace/start-up.sh` (`setupScript`)
+
+The sync lives in [`src/commands/profile-sync.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/profile-sync.ts) (`syncProfileFilesToServer`) and is called from `checkCompletedProcesses` in `runner.ts`. The decision to sync is made **per finished session, using the provider / local-env trait snapshotted on `RunningTask` at spawn time** — not the mutable global `state.hasLocalEnvironment`. The runner lets an in-flight session finish on its original adapter after a live provider swap, so reading the global would skip a session that started local (worker since flipped remote) or sync stale local files after a remote session finished (worker since flipped local). The sync fires when **any** finished session in the batch ran in a local environment:
+
+| Provider | local environment | Session-end sync |
+|---|---|---|
+| `claude`, `pi`, `codex`, `opencode` | yes | **Yes** — when the finished session ran on this provider |
+| `devin`, `claude-managed` | no | No — these have no `/workspace` FS |
+
+- **`CLAUDE.md` source is provider-routed (`resolveClaudeMdPath`).** `claude` edits its personal file at `~/.claude/CLAUDE.md` (also synced by the Claude Stop hook); every other local harness (`codex`/`pi`/`opencode`) edits `/workspace/CLAUDE.md` — the file the runner materializes from the `claudeMd` DB field at boot and that the base-prompt truncation notice points them to. An all-`claude` batch syncs the personal file (the runner is a backstop and never overwrites it with the stale workspace copy); any non-`claude` session in the batch routes to `/workspace/CLAUDE.md`. This closes the previously-open non-Claude `CLAUDE.md` FS → DB gap.
+
+Notes:
+
+- **Harness-agnostic, runner-driven.** Because the sync runs in the runner — at the single point where every completed session converges, including crashes — it does **not** depend on the harness emitting a shutdown event. This is what makes it reliable for `codex`/`opencode` (which previously had no sync path) and for `pi` (whose in-extension `session_shutdown` sync could silently not-fire). The Claude plugin Stop hook ([`src/hooks/hook.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/hooks/hook.ts)) and the pi extension ([`src/providers/pi-mono-extension.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-extension.ts)) still run their own sync; the runner-level call is the authoritative backstop.
+- **Idempotent.** The profile route only writes a new `context_versions` row when the content hash changes (`updateAgentProfile` in `src/be/db.ts`), so a redundant sync — pi's extension + runner double-POST, or an unchanged file — collapses to a no-op.
+- **Non-fatal but visible.** A failed sync never fails the task, but unlike the original copies it checks `resp.ok` and logs a scrubbed warning instead of silently swallowing the error.
+- **Consequence (the "Rule 19" reversion).** Because the FS is now the authoritative source at session end for all local-environment harnesses, a Lead `update-profile` edit to *another* agent's `SOUL.md`/`IDENTITY.md`/`setupScript` (which writes only the DB row, not the remote container's FS) is reverted on that agent's next session end. Previously only `claude` exhibited this; now `pi` (reliably), `codex`, and `opencode` do too. Pushing Lead edits all the way to a remote agent's FS is a separate, unsolved problem.
 
 ### What fields on the task become `ProviderSessionConfig`
 
@@ -489,13 +514,15 @@ Skills are the swarm's portable procedural knowledge — reusable markdown files
 
 ### Where skill files come from
 
-The swarm syncs skills into each provider's skill dir at container boot in [`docker-entrypoint.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-entrypoint.sh) L764–803. The same `SKILL.md` content is copied into:
+The swarm still seeds skills into each provider's skill dir at container boot in [`docker-entrypoint.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-entrypoint.sh) L764–803, but bundled complex-skill files are now also synced from the database during normal skill refreshes. At minimum, every skill installs its `SKILL.md` into:
 
 - `~/.claude/skills/<name>/SKILL.md`
 - `~/.pi/agent/skills/<name>/SKILL.md`
 - `~/.codex/skills/<name>/SKILL.md`
 
-When adding a new provider, extend this block with `~/.<foo>/skills/<name>/SKILL.md` (or whatever path your runtime expects).
+For DB-backed complex skills, sibling bundled files are mirrored alongside `SKILL.md` under the same skill directory. Legacy remote/sourceRepo-only complex skills still rely on the entrypoint fallback when the bundle is not present in the database yet.
+
+When adding a new provider, extend both sync paths with `~/.<foo>/skills/<name>/...` (or whatever directory layout your runtime expects).
 
 ---
 

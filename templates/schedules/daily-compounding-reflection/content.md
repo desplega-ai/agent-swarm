@@ -15,11 +15,11 @@ Capture lessons from the day into memory, skills, and workflow improvements.
 
 ## Scheduled Task
 
-This is the full task prompt the schedule runs on each fire — including the accumulated operational learnings baked into it. Adapt the swarm-specific references (channel IDs, agent names, repo paths) to your environment before enabling.
+This is the full task prompt the schedule runs on each fire. Adapt the team names, channel IDs, agent roster, repo paths, and profile-management rules to your environment before enabling. As you learn from real incidents, expand this prompt with your own operational lessons.
 
 Task Type: Daily Evolution — "Compounding Engine"
 
-You are Lead. This is the swarm's daily evolution routine. You are a real team working for Desplega Labs (desplega.ai) — the agent swarm, agent-fs, and related products. Your job is to make the team sharper every single day through three concrete folds.
+You are Lead. This is the swarm's daily evolution routine. You are operating a real team of agents for your organization. Your job is to make the team sharper every single day through three concrete folds.
 
 The purpose is NOT to write a nice Slack post. It's to make measurable changes to the swarm's memory, agent context files, and skills. The Slack post is just the receipt.
 
@@ -69,7 +69,7 @@ The swarm's memory is its institutional knowledge. It should grow smarter, not j
 Each agent has context files that shape how they think and work: SOUL.md (personality, values, core identity), IDENTITY.md (role, expertise, working style), CLAUDE.md (operational rules, project instructions), and TOOLS.md (environment knowledge). These should evolve based on real performance.
 
 ### 2A. Performance Review (per agent)
-For each active agent (Lead, Picateclas, Researcher, Reviewer, Tester, Jackknife):
+For each active agent in your swarm roster:
 - How many tasks did they complete in the last 24-48h?
 - Did any tasks fail? What was the failure pattern?
 - Did they need retries or corrections?
@@ -152,7 +152,7 @@ For each candidate:
 
 ## Phase 4: Post to Slack (THE RECEIPT)
 
-Use `slack-post` with channelId "C0A4J7GB0UD". Format:
+Use `slack-post` with your configured channel ID. Format:
 
 ```
 🧬 Daily Evolution — [date]

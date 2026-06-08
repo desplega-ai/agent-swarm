@@ -11,6 +11,7 @@ import {
 } from "../be/memory/raters/llm";
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
+import { getMcpBaseUrl } from "../utils/constants";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
@@ -83,6 +84,27 @@ interface CancelledTasksResponse {
 }
 
 /**
+ * Decide whether to show the "not registered — use join-swarm" nudge.
+ *
+ * Rules:
+ *  1. Only nudge on SessionStart — other events should not prompt re-registration.
+ *  2. If X-Agent-ID header is present the agent is pre-assigned; a null lookup
+ *     is transient, not a real "unregistered" state → suppress the nudge.
+ *  3. Only genuinely-unregistered agents (no X-Agent-ID, null lookup, SessionStart)
+ *     see the nudge.
+ */
+export function shouldShowRegistrationNudge(opts: {
+  agentInfoPresent: boolean;
+  eventType: string;
+  hasAgentIdHeader: boolean;
+}): boolean {
+  if (opts.agentInfoPresent) return false;
+  if (opts.eventType !== "SessionStart") return false;
+  if (opts.hasAgentIdHeader) return false;
+  return true;
+}
+
+/**
  * Check if a path is under the agent's own subdirectory on the shared disk.
  * Shared disk categories: thoughts, memory, downloads, misc.
  * Each agent can only write to /workspace/shared/{category}/{agentId}/
@@ -150,7 +172,7 @@ async function readTaskFile(): Promise<TaskFileData | null> {
 async function fetchTaskDetails(
   taskId: string,
 ): Promise<{ id: string; task: string; progress?: string } | null> {
-  const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+  const apiUrl = getMcpBaseUrl();
   const apiKey = getApiKey();
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
@@ -889,13 +911,15 @@ export async function handleHook(): Promise<void> {
         console.log(tray);
       }
     }
-  } else {
+  } else if (
+    shouldShowRegistrationNudge({
+      agentInfoPresent: false,
+      eventType: msg.hook_event_name,
+      hasAgentIdHeader: hasAgentIdHeader(),
+    })
+  ) {
     console.log(
-      `You are not registered in the agent swarm yet. Use the join-swarm tool to register yourself, then check your status with my-agent-info.
-
-If the ${SERVER_NAME} server is not running or disabled, disregard this message.
-
-${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?.headers["X-Agent-ID"]}, it will be used automatically on join-swarm.` : "You do not have a pre-defined agent ID, you will receive one when you join the swarm, or optionally you can request one when calling join-swarm."}`,
+      `You are not registered in the agent swarm yet. Use the join-swarm tool to register yourself, then check your status with my-agent-info.\n\nIf the ${SERVER_NAME} server is not running or disabled, disregard this message.\n\nYou do not have a pre-defined agent ID, you will receive one when you join the swarm, or optionally you can request one when calling join-swarm.`,
     );
   }
 
@@ -1151,8 +1175,7 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
             editedPath.startsWith("/workspace/shared/memory/"))
         ) {
           try {
-            const apiUrl =
-              process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+            const apiUrl = getMcpBaseUrl();
             const apiKey = getApiKey();
             const fileContent = await Bun.file(editedPath).text();
             const isShared = editedPath.startsWith("/workspace/shared/");

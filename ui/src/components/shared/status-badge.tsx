@@ -3,6 +3,7 @@ import type {
   AgentStatus,
   AgentTaskStatus,
   ApprovalRequestStatus,
+  ScriptRunStatus,
   ServiceStatus,
   WorkflowRunStatus,
   WorkflowRunStepStatus,
@@ -15,6 +16,7 @@ type Status =
   | AgentTaskStatus
   | ApprovalRequestStatus
   | ServiceStatus
+  | ScriptRunStatus
   | WorkflowRunStatus
   | WorkflowRunStepStatus;
 
@@ -67,6 +69,11 @@ const statusConfig: Record<string, StatusConfig> = {
   failed: { label: "FAILED", dot: "bg-status-error", text: "text-status-error-strong" },
   cancelled: { label: "CANCELLED", dot: "bg-status-neutral", text: "text-status-neutral" },
   superseded: { label: "SUPERSEDED", dot: "bg-status-neutral", text: "text-status-neutral" },
+  aborted_limit: {
+    label: "ABORTED LIMIT",
+    dot: "bg-status-warning",
+    text: "text-status-warning-strong",
+  },
 
   // Service statuses
   starting: {

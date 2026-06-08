@@ -7,7 +7,7 @@ db-query: SELECT accessToken, expiresAt FROM oauth_tokens WHERE provider = 'line
 ```
 If `expiresAt` is in the past, do NOT attempt the API calls — just report the needed update in your task output.
 
-To authorize the user should use: https://api.desplega.agent-swarm.dev/api/trackers/linear/authorize (potentially needing to remove the app and re-auth). Only mention this if you can confirm it's expired or not present.
+To re-authorize, use your swarm API base URL with `/api/trackers/linear/authorize` (potentially needing to remove the app and re-auth). Only mention this if you can confirm the token is expired or not present.
 
 ---
 
@@ -22,7 +22,7 @@ The available MCP tracker tools (`tracker-link-task`, `tracker-link-epic`, `trac
 
 ## When to Transition (Timing)
 
-- **Sprint cadence with direct-to-main commits (e.g. chat-py port):** Transition the Linear ticket to **Done** the moment the worker reports ship (commits on `main`). Do NOT wait for review, test-run, or merge — there's no PR to wait for. Waiting causes HEARTBEAT/blocker-digest to flag RESOLVED-STALE tickets.
+- **Direct-to-main work:** Transition the Linear ticket to **Done** the moment the worker reports ship (commits on `main`). Do NOT wait for review, test-run, or merge when there is no PR to wait for. Waiting causes blocker digests to flag RESOLVED-STALE tickets.
 - **Standard PR workflow:** Transition to **In Review** on PR open, **Done** after merge. If the ticket is still "In Progress" 30 min after the PR merges, you're late.
 - **Blocked:** If a ticket is stuck on a dependency, add a comment linking the blocker — don't leave it silent.
 
@@ -54,9 +54,9 @@ curl -s -X POST https://api.linear.app/graphql \
   -d '{"query": "<GRAPHQL_QUERY>"}'
 ```
 
-## Agent Interaction API — `action` vs `thought` (added 2026-05-19)
+## Agent Interaction API — `action` vs `thought`
 
-Linear's **Agent Interaction API** (different from issue mutations above) supports two activity payload kinds. The swarm's agent-activity sync was broken for ~weeks because they were confused; PRs #495 / #497 fixed it. Use this section whenever emitting `agentActivityCreate` mutations.
+Linear's **Agent Interaction API** (different from issue mutations above) supports two activity payload kinds. Use this section whenever emitting `agentActivityCreate` mutations.
 
 | Activity kind | When to use | `parameter` field |
 |---|---|---|
@@ -76,7 +76,7 @@ Linear's **Agent Interaction API** (different from issue mutations above) suppor
 | Branch create / merge / delete | `action` | branch name |
 | PR open / review / merge | `action` | PR URL |
 
-**Why this trips people:** "action" reads naturally as "every tool call IS an action…". But Linear uses `action` to mean *parameterized operation Linear can index/route on*, not *task-progress-narration*. Narration is `thought`. See shared memory `linear-agent-activity-action-vs-thought-2026-05-18`.
+**Why this trips people:** "action" reads naturally as "every tool call IS an action…". But Linear uses `action` to mean *parameterized operation Linear can index/route on*, not *task-progress-narration*. Narration is `thought`.
 
 ## Common Operations
 
@@ -120,8 +120,8 @@ mutation {
 }
 ```
 
-**Known state IDs for Desplega Labs team:**
-- Done: `83d3fcc6-dfeb-44fa-b719-64108ddc850d`
+**Known state IDs:**
+- Store your team's common state UUIDs in local notes or swarm config; do not hardcode another team's IDs into this template.
 
 ### 2. Add a Comment to an Issue
 
@@ -213,7 +213,7 @@ curl -s -X POST https://api.linear.app/graphql \
 ## Important Notes
 
 - **Always update Linear when completing Linear-sourced tasks.** The user expects the ticket to reflect the swarm's work. Marking only the swarm task as complete is insufficient. Do not complete only the swarm task — failing to update Linear breaks the sync and wastes resources.
-- **Transition timing:** see the "When to Transition" section above. Sprint-cadence ports = transition on ship, not on merge.
+- **Transition timing:** see the "When to Transition" section above. Direct-to-main work transitions on ship, not on merge.
 - **Token expiry:** Check `expiresAt` before making calls. If expired, notify the user — they need to re-authorize.
 - **Rate limits:** Linear has rate limits. For bulk operations, add small delays between calls.
 - **Issue identifiers vs UUIDs:** The human-readable identifier (e.g., "DES-12") works for queries but the `issueUpdate` mutation requires the actual UUID. Always fetch the UUID first via a query.
@@ -227,4 +227,3 @@ Common errors:
 - `Entity not found` → Wrong issue ID/identifier
 - `"parameter must not be empty"` (or similar on Agent Interaction API) → You sent an `action` activity without a `parameter` — convert to `thought` or fill in a real noun. See "Agent Interaction API — action vs thought" above.
 - Rate limited → Back off and retry after delay
-

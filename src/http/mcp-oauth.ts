@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getMcpServerById } from "../be/db";
+import type { McpOAuthToken } from "../be/db-queries/mcp-oauth";
 import {
   applyMcpOAuthRefresh,
   consumeMcpOAuthPending,
@@ -23,6 +24,7 @@ import {
   registerClient,
   revokeMcpToken,
 } from "../oauth/mcp-wrapper";
+import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -36,12 +38,14 @@ function ssrfOptions() {
 }
 
 function callbackRedirectUri(): string {
-  const base = process.env.APP_URL?.replace(/\/+$/, "") ?? "http://localhost:3013";
-  return `${base}/api/mcp-oauth/callback`;
+  // The callback route lives on the API server, so it must use the PUBLIC MCP
+  // base (externally reachable), not the dashboard APP_URL.
+  return `${getPublicMcpBaseUrl()}/api/mcp-oauth/callback`;
 }
 
 function dashboardBase(): string {
-  return process.env.DASHBOARD_URL?.replace(/\/+$/, "") ?? "http://localhost:5274";
+  // getAppUrl absorbs DASHBOARD_URL as a deprecated alias.
+  return getAppUrl();
 }
 
 function defaultFinalRedirect(mcpServerId: string): string {
@@ -59,6 +63,43 @@ interface DiscoveryResult {
   requiresOAuth: boolean;
   dcrSupported: boolean;
   bearerMethodsSupported: string[] | null;
+}
+
+interface OAuthClientForAuthorize {
+  clientId: string;
+  clientSecret: string | null;
+  resourceUrl: string;
+  authorizationServerIssuer: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  revocationUrl: string | null;
+  scopes: string[];
+}
+
+function splitScopes(scopes: string | null | undefined): string[] {
+  return scopes?.split(/\s+/).filter(Boolean) ?? [];
+}
+
+function manualClientFromToken(token: McpOAuthToken | null): OAuthClientForAuthorize | null {
+  if (!token || token.clientSource !== "manual" || !token.dcrClientId) return null;
+
+  // The manual-client route validates these on write. Re-check before using the
+  // stored endpoints because /authorize redirects the browser to authorizeUrl.
+  assertUrlSafe(token.resourceUrl, ssrfOptions());
+  assertUrlSafe(token.authorizeUrl, ssrfOptions());
+  assertUrlSafe(token.tokenUrl, ssrfOptions());
+  if (token.revocationUrl) assertUrlSafe(token.revocationUrl, ssrfOptions());
+
+  return {
+    clientId: token.dcrClientId,
+    clientSecret: token.dcrClientSecret,
+    resourceUrl: token.resourceUrl,
+    authorizationServerIssuer: token.authorizationServerIssuer,
+    authorizeUrl: token.authorizeUrl,
+    tokenUrl: token.tokenUrl,
+    revocationUrl: token.revocationUrl,
+    scopes: splitScopes(token.scope),
+  };
 }
 
 async function discoverForMcp(resourceUrl: string): Promise<DiscoveryResult | null> {
@@ -266,10 +307,10 @@ interface AuthorizeFlowQuery {
 }
 
 /**
- * Discover metadata, DCR-register (or fail), build the authorize URL, and
- * persist the pending session. Returns the provider `providerUrl` the caller
- * should redirect to / respond with. On failure, writes a JSON error response
- * and returns null.
+ * Use a stored manual client or discover metadata + DCR-register, build the
+ * authorize URL, and persist the pending session. Returns the provider
+ * `providerUrl` the caller should redirect to / respond with. On failure,
+ * writes a JSON error response and returns null.
  */
 async function prepareAuthorizeFlow(
   res: ServerResponse,
@@ -277,15 +318,26 @@ async function prepareAuthorizeFlow(
   server: NonNullable<ReturnType<typeof getMcpServerById>>,
   q: AuthorizeFlowQuery,
 ): Promise<string | null> {
-  const discovery = await discoverForMcp(server.url!);
-  if (!discovery) {
-    jsonError(res, "MCP server does not require OAuth", 400);
-    return null;
-  }
+  const userId = q.userId ?? null;
+  let client = manualClientFromToken(getMcpOAuthToken(mcpServerId, userId));
 
-  let clientId: string | null = null;
-  let clientSecret: string | null = null;
-  if (discovery.dcrSupported && discovery.registrationEndpoint) {
+  if (!client) {
+    const discovery = await discoverForMcp(server.url!);
+    if (!discovery) {
+      jsonError(res, "MCP server does not require OAuth", 400);
+      return null;
+    }
+
+    if (!discovery.dcrSupported || !discovery.registrationEndpoint) {
+      jsonError(
+        res,
+        "DCR not supported — paste client_id/client_secret via POST /api/mcp-oauth/:id/manual-client first.",
+        400,
+      );
+      return null;
+    }
+
+    const scopes = q.scopes ? splitScopes(q.scopes) : discovery.scopes;
     const dcr = await registerClient(discovery.registrationEndpoint, {
       client_name: `agent-swarm (${server.name})`,
       redirect_uris: [callbackRedirectUri()],
@@ -293,43 +345,45 @@ async function prepareAuthorizeFlow(
       response_types: ["code"],
       token_endpoint_auth_method: "client_secret_basic",
       application_type: "web",
-      scope: (q.scopes ?? discovery.scopes.join(" ")) || undefined,
+      scope: scopes.join(" ") || undefined,
     });
-    clientId = dcr.client_id;
-    clientSecret = dcr.client_secret ?? null;
-  } else {
-    jsonError(
-      res,
-      "DCR not supported — paste client_id/client_secret via POST /api/mcp-oauth/:id/manual-client first.",
-      400,
-    );
-    return null;
+
+    client = {
+      clientId: dcr.client_id,
+      clientSecret: dcr.client_secret ?? null,
+      resourceUrl: discovery.resourceUrl,
+      authorizationServerIssuer: discovery.authorizationServerIssuer,
+      authorizeUrl: discovery.authorizeUrl,
+      tokenUrl: discovery.tokenUrl,
+      revocationUrl: discovery.revocationUrl,
+      scopes,
+    };
   }
 
-  const scopes = q.scopes ? q.scopes.split(" ").filter(Boolean) : discovery.scopes;
+  const scopes = q.scopes ? splitScopes(q.scopes) : client.scopes;
 
   const built = await buildAuthorizeUrl({
-    authorizeUrl: discovery.authorizeUrl,
-    tokenUrl: discovery.tokenUrl,
-    clientId: clientId!,
+    authorizeUrl: client.authorizeUrl,
+    tokenUrl: client.tokenUrl,
+    clientId: client.clientId,
     redirectUri: callbackRedirectUri(),
     scopes,
-    resource: discovery.resourceUrl,
+    resource: client.resourceUrl,
   });
 
   insertMcpOAuthPending({
     state: built.state,
     mcpServerId,
-    userId: q.userId ?? null,
+    userId,
     codeVerifier: built.codeVerifier,
-    resourceUrl: discovery.resourceUrl,
-    authorizationServerIssuer: discovery.authorizationServerIssuer,
-    authorizeUrl: discovery.authorizeUrl,
-    tokenUrl: discovery.tokenUrl,
-    revocationUrl: discovery.revocationUrl,
+    resourceUrl: client.resourceUrl,
+    authorizationServerIssuer: client.authorizationServerIssuer,
+    authorizeUrl: client.authorizeUrl,
+    tokenUrl: client.tokenUrl,
+    revocationUrl: client.revocationUrl,
     scopes: scopes.join(" "),
-    dcrClientId: clientId!,
-    dcrClientSecret: clientSecret,
+    dcrClientId: client.clientId,
+    dcrClientSecret: client.clientSecret,
     redirectUri: callbackRedirectUri(),
     finalRedirect: q.redirect ?? null,
   });
@@ -390,6 +444,10 @@ export async function handleMcpOAuth(
         codeVerifier: pending.codeVerifier,
         resource: pending.resourceUrl,
       });
+      const existing = getMcpOAuthToken(pending.mcpServerId, pending.userId);
+      const clientSource =
+        existing?.clientSource ??
+        (pending.dcrClientId ? ("dcr" as const) : ("preregistered" as const));
 
       upsertMcpOAuthToken({
         mcpServerId: pending.mcpServerId,
@@ -406,7 +464,7 @@ export async function handleMcpOAuth(
         revocationUrl: pending.revocationUrl,
         dcrClientId: pending.dcrClientId,
         dcrClientSecret: pending.dcrClientSecret,
-        clientSource: pending.dcrClientId ? "dcr" : "preregistered",
+        clientSource,
         lastRefreshedAt: new Date().toISOString(),
       });
 

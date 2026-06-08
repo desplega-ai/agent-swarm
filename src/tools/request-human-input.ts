@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createApprovalRequest, getAgentCurrentTask } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
+import { getAppUrl } from "@/utils/constants";
 
 const QuestionSchema = z.object({
   id: z.string().describe("Unique ID for the question (used as key in responses)"),
@@ -94,7 +95,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
         timeoutSeconds,
       });
 
-      const appUrl = process.env.APP_URL || "http://localhost:5274";
+      const appUrl = getAppUrl();
       const url = `${appUrl}/approval-requests/${request.id}`;
 
       return {

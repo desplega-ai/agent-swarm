@@ -3,13 +3,18 @@ import { z } from "zod";
 import {
   createSkill,
   deleteSkill,
+  deleteSkillFile,
   getAgentSkills,
   getSkillById,
+  getSkillFile,
   installSkill,
+  listSkillFileManifest,
   listSkills,
   searchSkills,
   uninstallSkill,
   updateSkill,
+  upsertSkillFile,
+  upsertSkillFiles,
 } from "../be/db";
 import { parseSkillContent } from "../be/skill-parser";
 import { computeAgentSkillsSignature, syncSkillsToFilesystem } from "../be/skill-sync";
@@ -18,6 +23,24 @@ import { json, jsonError } from "./utils";
 
 const SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE =
   "This skill is system-managed and cannot be edited from the UI; it is re-seeded on each start. Fork it under a new name to customize.";
+
+const skillFileBodySchema = z.object({
+  content: z.string(),
+  mimeType: z.string().optional(),
+  isBinary: z.boolean().optional(),
+  size: z.number().int().nonnegative().optional(),
+});
+
+const skillFileWithPathSchema = skillFileBodySchema.extend({
+  path: z.string().min(1),
+});
+
+function decodeSkillFilePath(pathSegments: string[]): string {
+  return pathSegments
+    .slice(4)
+    .map((segment) => decodeURIComponent(segment))
+    .join("/");
+}
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -55,6 +78,86 @@ const getSkillRoute = route({
   responses: {
     200: { description: "Skill details" },
     404: { description: "Skill not found" },
+  },
+});
+
+const listSkillFilesRoute = route({
+  method: "get",
+  path: "/api/skills/{id}/files",
+  pattern: ["api", "skills", null, "files"],
+  summary: "List bundled files for a skill",
+  description: "Returns a manifest of bundled skill files without file content.",
+  tags: ["Skills"],
+  auth: { apiKey: true },
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Skill file manifest" },
+    404: { description: "Skill not found" },
+  },
+});
+
+const bulkUpsertSkillFilesRoute = route({
+  method: "post",
+  path: "/api/skills/{id}/files",
+  pattern: ["api", "skills", null, "files"],
+  summary: "Bulk upsert bundled files for a skill",
+  tags: ["Skills"],
+  auth: { apiKey: true },
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    files: z.array(skillFileWithPathSchema).max(100),
+  }),
+  responses: {
+    200: { description: "Skill files upserted" },
+    400: { description: "Validation error" },
+    404: { description: "Skill not found" },
+  },
+});
+
+const getSkillFileRoute = route({
+  method: "get",
+  path: "/api/skills/{id}/files/{path}",
+  pattern: ["api", "skills", null, "files", null],
+  exact: false,
+  summary: "Get a bundled skill file",
+  tags: ["Skills"],
+  auth: { apiKey: true },
+  params: z.object({ id: z.string(), path: z.string() }),
+  responses: {
+    200: { description: "Skill file" },
+    404: { description: "Skill or file not found" },
+  },
+});
+
+const upsertSkillFileRoute = route({
+  method: "put",
+  path: "/api/skills/{id}/files/{path}",
+  pattern: ["api", "skills", null, "files", null],
+  exact: false,
+  summary: "Upsert a bundled skill file",
+  tags: ["Skills"],
+  auth: { apiKey: true },
+  params: z.object({ id: z.string(), path: z.string() }),
+  body: skillFileBodySchema,
+  responses: {
+    200: { description: "Skill file upserted" },
+    400: { description: "Validation error" },
+    404: { description: "Skill not found" },
+  },
+});
+
+const deleteSkillFileRoute = route({
+  method: "delete",
+  path: "/api/skills/{id}/files/{path}",
+  pattern: ["api", "skills", null, "files", null],
+  exact: false,
+  summary: "Delete a bundled skill file",
+  tags: ["Skills"],
+  auth: { apiKey: true },
+  params: z.object({ id: z.string(), path: z.string() }),
+  responses: {
+    200: { description: "Skill file deleted" },
+    404: { description: "Skill or file not found" },
   },
 });
 
@@ -420,6 +523,128 @@ export async function handleSkills(
         });
 
     json(res, { skills, total: skills.length });
+    return true;
+  }
+
+  // GET /api/skills/:id/files
+  if (listSkillFilesRoute.match(req.method, pathSegments)) {
+    const parsed = await listSkillFilesRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const skill = getSkillById(parsed.params.id);
+    if (!skill) {
+      jsonError(res, "Skill not found", 404);
+      return true;
+    }
+
+    const files = listSkillFileManifest(parsed.params.id);
+    json(res, { files, total: files.length });
+    return true;
+  }
+
+  // POST /api/skills/:id/files
+  if (bulkUpsertSkillFilesRoute.match(req.method, pathSegments)) {
+    const parsed = await bulkUpsertSkillFilesRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const skill = getSkillById(parsed.params.id);
+    if (!skill) {
+      jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    if (skill.systemDefault) {
+      jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
+      return true;
+    }
+
+    try {
+      const files = upsertSkillFiles(parsed.params.id, parsed.body.files);
+      const updatedSkill = getSkillById(parsed.params.id);
+      json(res, { files, total: files.length, skill: updatedSkill });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to upsert files", 400);
+    }
+    return true;
+  }
+
+  // GET /api/skills/:id/files/:path
+  if (getSkillFileRoute.match(req.method, pathSegments)) {
+    const parsed = await getSkillFileRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const skill = getSkillById(parsed.params.id);
+    if (!skill) {
+      jsonError(res, "Skill not found", 404);
+      return true;
+    }
+
+    try {
+      const file = getSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
+      if (!file) {
+        jsonError(res, "Skill file not found", 404);
+        return true;
+      }
+      json(res, { file });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Invalid file path", 400);
+    }
+    return true;
+  }
+
+  // PUT /api/skills/:id/files/:path
+  if (upsertSkillFileRoute.match(req.method, pathSegments)) {
+    const parsed = await upsertSkillFileRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const skill = getSkillById(parsed.params.id);
+    if (!skill) {
+      jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    if (skill.systemDefault) {
+      jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
+      return true;
+    }
+
+    try {
+      const file = upsertSkillFile(parsed.params.id, {
+        path: decodeSkillFilePath(pathSegments),
+        ...parsed.body,
+      });
+      const updatedSkill = getSkillById(parsed.params.id);
+      json(res, { file, skill: updatedSkill });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to upsert file", 400);
+    }
+    return true;
+  }
+
+  // DELETE /api/skills/:id/files/:path
+  if (deleteSkillFileRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteSkillFileRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const skill = getSkillById(parsed.params.id);
+    if (!skill) {
+      jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    if (skill.systemDefault) {
+      jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
+      return true;
+    }
+
+    try {
+      const deleted = deleteSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
+      if (!deleted) {
+        jsonError(res, "Skill file not found", 404);
+        return true;
+      }
+      const updatedSkill = getSkillById(parsed.params.id);
+      json(res, { success: true, skill: updatedSkill });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Invalid file path", 400);
+    }
     return true;
   }
 

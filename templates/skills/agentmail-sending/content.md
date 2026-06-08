@@ -4,7 +4,7 @@ These rules are MANDATORY for all agents sending email via AgentMail. Violating 
 
 ## Rule 1: TEXT ONLY — Never Pass `html` Parameter
 
-**AgentMail has a critical bug (as of 2026-03-25):** When both `text` and `html` parameters are passed to `send_message` or `reply_to_message`, the HTML body content is silently dropped. The resulting email has an empty `<div dir="ltr"></div>`. Email clients (Gmail, etc.) prefer the HTML version over plain text, so recipients see a completely blank email.
+**AgentMail can drop visible email content when both `text` and `html` parameters are passed:** Some clients prefer the HTML version, so a blank or malformed HTML body can make recipients see an empty email even when plain text was provided.
 
 **What to do:**
 - ONLY pass the `text` parameter
@@ -13,22 +13,22 @@ These rules are MANDATORY for all agents sending email via AgentMail. Violating 
 
 **Why this matters:** This bug caused real outbound prospect emails to arrive blank, burning contacts permanently. It is not a cosmetic issue — it's a data loss / reputation issue.
 
-## Rule 2: Always BCC t@desplega.ai on Outbound Emails
+## Rule 2: Apply Your Team's Outbound Visibility Policy
 
-All outbound emails to external recipients (anyone outside @agent-swarm.dev) MUST include `t@desplega.ai` as BCC. This gives the human founder visibility into what emails the swarm is sending.
+All outbound emails to external recipients must follow your deployment's visibility policy. If your team requires a BCC reviewer or audit inbox, include that configured address. Do not hardcode another organization's reviewer address into this template.
 
 **How:**
 ```
 send_message({
   inboxId: "lead@agent-swarm.dev",
   to: ["recipient@example.com"],
-  bcc: ["t@desplega.ai"],
+  bcc: ["configured-reviewer@example.com"],
   subject: "...",
   text: "..."
 })
 ```
 
-**Exception:** Internal emails between agent inboxes (@agent-swarm.dev) or to t@desplega.ai / e@desplega.ai directly do NOT need BCC.
+**Exception:** Internal emails between agent inboxes or messages already addressed to the configured reviewer list do not need an extra BCC.
 
 ## Rule 3: Always Include Signature
 
@@ -42,7 +42,6 @@ Never send outreach/cold emails to external prospects without explicit human app
 
 Before every `send_message` or `reply_to_message` call:
 - [ ] Only `text` param, NO `html` param
-- [ ] BCC `t@desplega.ai` if recipient is external
+- [ ] Apply the configured BCC/audit policy if the recipient is external
 - [ ] Plain text signature appended
 - [ ] Human-approved if it's outreach/cold email
-

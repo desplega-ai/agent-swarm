@@ -10,16 +10,29 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
+  completeTask,
   createAgent,
   createTaskExtended,
   getChildTasks,
   getDb,
+  getLogsByTaskId,
   getTaskById,
   initDb,
   insertActiveSession,
   startTask,
 } from "../be/db";
-import { codeLevelTriage } from "../heartbeat/heartbeat";
+import {
+  createTrackerSync,
+  getTrackerSync,
+  getTrackerSyncByExternalId,
+} from "../be/db-queries/tracker";
+import {
+  codeLevelTriage,
+  MAX_RESUME_GENERATIONS,
+  RESUME_BUDGET_EXHAUSTED_REASON,
+  setBeforeHeartbeatSupersedeForTests,
+} from "../heartbeat/heartbeat";
+import { RESUME_GENERATION_TAG_PREFIX } from "../tasks/worker-follow-up";
 
 const TEST_DB_PATH = "./test-heartbeat-supersede-resume.sqlite";
 
@@ -46,6 +59,8 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
   });
 
   beforeEach(() => {
+    setBeforeHeartbeatSupersedeForTests(null);
+    getDb().run("DELETE FROM tracker_sync");
     getDb().run("DELETE FROM agent_tasks");
     getDb().run("DELETE FROM agents");
     getDb().run("DELETE FROM active_sessions");
@@ -81,7 +96,82 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(resume.taskType).toBe("resume");
     expect(resume.tags).toContain("auto-resume");
     expect(resume.tags).toContain("reason:crash_recovery");
+    expect(resume.tags).toContain(`${RESUME_GENERATION_TAG_PREFIX}1`);
     expect(resume.id).toBe(findings.autoResumedTasks[0]!.resumeTaskId);
+
+    const supersedeLog = getLogsByTaskId(parent.id).find(
+      (log) => log.eventType === "task_superseded",
+    );
+    expect(supersedeLog).toBeTruthy();
+    const metadata = JSON.parse(supersedeLog!.metadata ?? "{}") as { resumeTaskId?: string };
+    expect(metadata.resumeTaskId).toBe(resume.id);
+  });
+
+  test("Case A: crash-recovery resume chain stops at the generation cap", async () => {
+    const agent = createAgent({ name: "dead-resume-worker", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Resume at generation cap", {
+      agentId: agent.id,
+      taskType: "resume",
+      tags: [
+        "auto-resume",
+        "reason:crash_recovery",
+        `${RESUME_GENERATION_TAG_PREFIX}${MAX_RESUME_GENERATIONS}`,
+      ],
+    });
+    startTask(parent.id);
+
+    const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.autoResumedTasks.length).toBe(0);
+    expect(findings.autoFailedTasks.length).toBe(1);
+    expect(findings.autoFailedTasks[0]!.taskId).toBe(parent.id);
+    expect(findings.autoFailedTasks[0]!.reason).toBe(RESUME_BUDGET_EXHAUSTED_REASON);
+
+    const updatedParent = getTaskById(parent.id);
+    expect(updatedParent?.status).toBe("failed");
+    expect(updatedParent?.failureReason).toBe(RESUME_BUDGET_EXHAUSTED_REASON);
+    expect(getChildTasks(parent.id).length).toBe(0);
+  });
+
+  test("Case A: supersede race does not create a resume child or repoint tracker_sync", async () => {
+    const agent = createAgent({ name: "dead-worker-race", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Tracked parent that finishes during heartbeat", {
+      agentId: agent.id,
+    });
+    startTask(parent.id);
+
+    createTrackerSync({
+      provider: "linear",
+      entityType: "task",
+      swarmId: parent.id,
+      externalId: "linear-race-issue",
+      externalIdentifier: "ENG-637",
+      externalUrl: "https://linear.app/test/issue/ENG-637",
+    });
+
+    const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+
+    setBeforeHeartbeatSupersedeForTests((task) => {
+      expect(task.id).toBe(parent.id);
+      completeTask(parent.id, "finished by racing worker");
+    });
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.autoResumedTasks.length).toBe(0);
+    expect(findings.autoFailedTasks.length).toBe(0);
+
+    const updatedParent = getTaskById(parent.id);
+    expect(updatedParent?.status).toBe("completed");
+    expect(getChildTasks(parent.id).length).toBe(0);
+
+    expect(getTrackerSync("linear", "task", parent.id)).not.toBeNull();
+    const byExternal = getTrackerSyncByExternalId("linear", "task", "linear-race-issue");
+    expect(byExternal?.swarmId).toBe(parent.id);
   });
 
   // --------------------------------------------------------------------------

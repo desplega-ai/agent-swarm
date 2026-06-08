@@ -31,6 +31,8 @@ const RepoDetailPage = lazy(() => import("@/pages/repos/[id]/page"));
 const WorkflowsPage = lazy(() => import("@/pages/workflows/page"));
 const WorkflowDetailPage = lazy(() => import("@/pages/workflows/[id]/page"));
 const WorkflowRunDetailPage = lazy(() => import("@/pages/workflow-runs/[id]/page"));
+const ScriptRunsPage = lazy(() => import("@/pages/script-runs/page"));
+const ScriptRunDetailPage = lazy(() => import("@/pages/script-runs/[id]/page"));
 const TemplatesPage = lazy(() => import("@/pages/templates/page"));
 const TemplateDetailPage = lazy(() => import("@/pages/templates/[id]/page"));
 const TemplateVersionDetailPage = lazy(
@@ -102,6 +104,8 @@ export const router = createBrowserRouter([
       { path: "workflows", element: <WorkflowsPage /> },
       { path: "workflows/:id", element: <WorkflowDetailPage /> },
       { path: "workflow-runs/:id", element: <WorkflowRunDetailPage /> },
+      { path: "script-runs", element: <ScriptRunsPage /> },
+      { path: "script-runs/:id", element: <ScriptRunDetailPage /> },
       { path: "approval-requests", element: <ApprovalRequestsPage /> },
       { path: "approval-requests/:id", element: <ApprovalRequestDetailPage /> },
       {

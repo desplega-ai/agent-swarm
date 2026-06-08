@@ -25,14 +25,14 @@ artifacts.
 
 ## Quick Start
 
-### Public HTML report
+### Authed HTML report
 ```jsonc
 // Tool call: create_page
 {
   "title": "Q2 Status Report",
   "description": "Roll-up of in-flight tasks across the swarm",
   "contentType": "text/html",
-  "authMode": "public",
+  "authMode": "authed",
   "body": "<!doctype html><html><body><h1>Q2 Status</h1>...</body></html>"
 }
 // → { id, version: 1, app_url, api_url }
@@ -40,6 +40,9 @@ artifacts.
 
 Share `app_url` (the SPA route) for the general case; share `api_url` for a
 no-SPA-required direct link.
+
+Use `authMode: "public"` only when the page is intentionally safe for anyone
+with the URL to view.
 
 ### Authed JSON dashboard
 ```jsonc

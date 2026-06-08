@@ -1,3 +1,4 @@
+import { getPublicMcpBaseUrl } from "../utils/constants";
 import { jiraFetch } from "./client";
 import { getJiraMetadata, updateJiraMetadata } from "./metadata";
 
@@ -23,7 +24,7 @@ let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 // ─── URL helpers ─────────────────────────────────────────────────────────────
 
 function getWebhookBaseUrl(): string {
-  return process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+  return getPublicMcpBaseUrl();
 }
 
 function getRegisteredWebhookUrl(): string {

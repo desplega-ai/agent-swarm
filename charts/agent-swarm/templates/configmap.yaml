@@ -10,6 +10,12 @@ data:
   {{- if .Values.config.appUrl }}
   APP_URL: {{ .Values.config.appUrl | quote }}
   {{- end }}
+  {{- if .Values.config.publicMcpBaseUrl }}
+  PUBLIC_MCP_BASE_URL: {{ .Values.config.publicMcpBaseUrl | quote }}
+  {{- else if and .Values.ingress.enabled .Values.ingress.host }}
+  {{- $publicMcpScheme := ternary "https" "http" (gt (len .Values.ingress.tls) 0) }}
+  PUBLIC_MCP_BASE_URL: {{ printf "%s://%s" $publicMcpScheme .Values.ingress.host | quote }}
+  {{- end }}
   {{- if .Values.config.slackAllowedEmailDomains }}
   SLACK_ALLOWED_EMAIL_DOMAINS: {{ .Values.config.slackAllowedEmailDomains | quote }}
   {{- end }}

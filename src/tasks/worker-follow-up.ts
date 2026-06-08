@@ -2,6 +2,7 @@ import {
   createTaskExtended,
   getActiveTaskCount,
   getAgentById,
+  getDependentTasks,
   getLeadAgent,
   getTaskAttachments,
   getTaskById,
@@ -21,6 +22,20 @@ import "../tools/templates";
 export const WORKER_LIVENESS_WINDOW_SECONDS = Number(
   process.env.WORKER_LIVENESS_WINDOW_SECONDS || "30",
 );
+
+export const RESUME_GENERATION_TAG_PREFIX = "resume-generation:";
+
+export function getResumeGeneration(task: Pick<AgentTask, "tags">): number {
+  const tag = task.tags.find((value) => value.startsWith(RESUME_GENERATION_TAG_PREFIX));
+  if (!tag) return 0;
+
+  const parsed = Number(tag.slice(RESUME_GENERATION_TAG_PREFIX.length));
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+export function getNextResumeGeneration(parent: Pick<AgentTask, "tags">): number {
+  return getResumeGeneration(parent) + 1;
+}
 
 function attachmentPointer(a: TaskAttachment): string {
   switch (a.kind) {
@@ -101,6 +116,17 @@ export function createWorkerTaskFollowUp(args: {
       task_id: task.id,
     });
     followUpDescription = failedResult.text;
+
+    // Enrich with cascade info: list dependents that were cascade-failed.
+    const cascadedDeps = getDependentTasks(task.id, { includeTerminal: true }).filter(
+      (t) => t.status === "failed" && t.failureReason?.includes("Blocked dependency"),
+    );
+    if (cascadedDeps.length > 0) {
+      const depLines = cascadedDeps.map(
+        (d) => `- ${d.id.slice(0, 8)} — "${d.task.slice(0, 100)}" (${d.failureReason})`,
+      );
+      followUpDescription += `\n\n⚠️ Cascade impact: ${cascadedDeps.length} dependent task(s) were also failed because they depend on this task:\n${depLines.join("\n")}`;
+    }
   }
 
   return createTaskExtended(followUpDescription, {
@@ -205,7 +231,11 @@ export function createResumeFollowUp(args: {
   ].join("\n");
 
   const priority = Math.min(100, (parent.priority ?? 50) + 10);
-  const tags = ["auto-resume", `reason:${args.reason}`];
+  const tags = [
+    "auto-resume",
+    `reason:${args.reason}`,
+    `${RESUME_GENERATION_TAG_PREFIX}${getNextResumeGeneration(parent)}`,
+  ];
 
   // Identity-shaped fields (dir, VCS provider/repo/number/url/etc.,
   // outputSchema, slack channel/thread/user, agentmail, mention, contextKey,

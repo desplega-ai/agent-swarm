@@ -41,7 +41,7 @@ Three independent flows:
 ## Agents
 
 - **[Lead](https://templates.agent-swarm.dev/official/lead)** — triages incoming alerts. First question is always "is this signal?" — every alerting tool has expected noise (we route browser/block-runner errors *away* from [Sentry](https://sentry.io/) because they're customer-test failures, not bugs).
-- **[Coder](https://templates.agent-swarm.dev/official/coder)** (ours is *Picateclas*) — implements fixes once triaged.
+- **[Coder](https://templates.agent-swarm.dev/official/coder)** — implements fixes once triaged.
 - **[Reviewer](https://templates.agent-swarm.dev/official/reviewer)** — code review on every alert-driven PR (no auto-merge for incident fixes).
 - **[Researcher](https://templates.agent-swarm.dev/official/researcher)** — root-cause investigation when triage isn't obvious.
 
@@ -55,7 +55,7 @@ Three independent flows:
 ### Custom (swarm-managed)
 
 - **`signoz-interaction`** — traces/metrics/logs/alerts from [SigNoz](https://signoz.io/).
-- **`desplega-infra`** — host-level triage (CPU/mem/disk, container counts, collector uptime).
+- **Host-infrastructure triage skill** — host-level triage (CPU/mem/disk, container counts, collector uptime).
 - **Webhook bridge** — small custom integration that turns incoming [Datadog](https://www.datadoghq.com/) / [New Relic](https://newrelic.com/) / [Sentry](https://sentry.io/) / [SigNoz](https://signoz.io/) alerts into swarm tasks with the right tags.
 - **Alert filter rules** — codified in the lead's playbook + per-product config: which alert tags are real vs. expected noise.
 

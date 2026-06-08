@@ -54,6 +54,8 @@ const searchMemory = route({
   body: z.object({
     query: z.string().min(1),
     limit: z.number().int().min(1).max(20).default(5),
+    scope: z.enum(["agent", "swarm", "all"]).default("all"),
+    source: z.enum(["manual", "file_index", "session_summary", "task_completion"]).optional(),
   }),
   responses: {
     200: { description: "Search results" },
@@ -110,6 +112,18 @@ const listMemory = route({
   responses: {
     200: { description: "Memory list / search results" },
     400: { description: "Validation error" },
+  },
+});
+
+const memoryHealth = route({
+  method: "get",
+  path: "/api/memory/health",
+  pattern: ["api", "memory", "health"],
+  summary: "Report memory vector index health and retrieval mode",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  responses: {
+    200: { description: "Memory vector index health" },
   },
 });
 
@@ -325,7 +339,7 @@ export async function handleMemory(
     const parsed = await searchMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    const { query, limit } = parsed.body;
+    const { query, limit, scope, source } = parsed.body;
 
     try {
       const provider = getEmbeddingProvider();
@@ -339,8 +353,9 @@ export async function handleMemory(
 
       const candidateLimit = Math.min(limit, 20) * CANDIDATE_SET_MULTIPLIER;
       const candidates = store.search(queryEmbedding, myAgentId, {
-        scope: "all",
+        scope,
         limit: candidateLimit,
+        source,
         isLead: false,
       });
       const ranked = rerank(candidates, { limit: Math.min(limit, 20) });
@@ -372,6 +387,8 @@ export async function handleMemory(
           name: r.name,
           content: r.content,
           similarity: r.similarity,
+          rawSimilarity: r.rawSimilarity,
+          compositeScore: r.compositeScore,
           source: r.source,
           scope: r.scope,
         })),
@@ -427,6 +444,8 @@ export async function handleMemory(
             scope: r.scope,
             source: r.source,
             similarity: r.similarity,
+            rawSimilarity: r.rawSimilarity,
+            compositeScore: r.compositeScore,
             createdAt: r.createdAt,
             accessedAt: r.accessedAt,
             accessCount: r.accessCount ?? 0,
@@ -492,6 +511,14 @@ export async function handleMemory(
       console.error("[memory-list] Error:", (err as Error).message);
       jsonError(res, "Memory list failed", 500);
     }
+    return true;
+  }
+
+  if (memoryHealth.match(req.method, pathSegments)) {
+    const parsed = await memoryHealth.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
+
+    json(res, getMemoryStore().getHealth());
     return true;
   }
 
@@ -659,4 +686,42 @@ export async function handleMemory(
   }
 
   return false;
+}
+
+// ─── Expired Memory GC ──────────────────────────────────────────────────────
+
+const MEMORY_GC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+let memoryGcTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startMemoryGc(intervalMs = MEMORY_GC_INTERVAL_MS): void {
+  if (memoryGcTimer) return;
+
+  // Run immediately on startup to clear any backlog
+  try {
+    const purged = getMemoryStore().purgeExpired();
+    if (purged > 0) {
+      console.log(`[memory-gc] Initial purge removed ${purged} expired memory row(s)`);
+    }
+  } catch (err) {
+    console.error("[memory-gc] Initial purge failed:", err);
+  }
+
+  memoryGcTimer = setInterval(() => {
+    try {
+      const purged = getMemoryStore().purgeExpired();
+      if (purged > 0) {
+        console.log(`[memory-gc] Periodic purge removed ${purged} expired memory row(s)`);
+      }
+    } catch (err) {
+      console.error("[memory-gc] Periodic purge failed:", err);
+    }
+  }, intervalMs);
+  if (typeof memoryGcTimer?.unref === "function") memoryGcTimer.unref();
+}
+
+export function stopMemoryGc(): void {
+  if (memoryGcTimer) {
+    clearInterval(memoryGcTimer);
+    memoryGcTimer = null;
+  }
 }

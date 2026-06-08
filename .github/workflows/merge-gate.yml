@@ -126,6 +126,9 @@ jobs:
       - name: Check DB audit columns
         run: bash scripts/check-audit-columns.sh
 
+      - name: Check SDK tool registration
+        run: bun scripts/check-sdk-tool-registration.ts
+
   test:
     name: Run Tests
     needs: detect-changes

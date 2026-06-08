@@ -295,8 +295,7 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     echo "opencode CLI: $(command -v "$OPENCODE_BIN")"
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
-    # CLAUDE_BINARY may be a whitespace-separated command string (e.g.
-    # "bunx @dexh/shannon" — see guides/shannon-experimental.mdx). Only
+    # CLAUDE_BINARY may be a whitespace-separated command string. Only
     # the first token is the executable on PATH; the rest are argv.
     # Mirrors parseClaudeBinary in src/providers/claude-adapter.ts.
     CLAUDE_BIN_EXEC=$(echo "$CLAUDE_BIN" | awk '{print $1}')
@@ -1045,10 +1044,14 @@ elif [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
             fi
         done
 
-        # Install complex remote skills via npx
-        echo "$SKILLS_RESPONSE" | jq -r '.skills[] | select(.isComplex == true) | .sourceRepo // empty' 2>/dev/null | while read -r repo; do
+        # Install legacy complex remote skills via npx. DB-backed complex skills
+        # are synced through /api/skills/sync-filesystem; this remains a safe
+        # fallback for sourceRepo-only skills.
+        echo "$SKILLS_RESPONSE" | jq -r '.skills[] | select(.isComplex == true) | [.id, (.sourceRepo // "")] | @tsv' 2>/dev/null | while IFS=$'\t' read -r skill_id repo; do
             if [ -n "$repo" ]; then
-                npx skills add "$repo" -a claude-code -a pi -g -y 2>&1 || echo "[entrypoint] Warning: failed to install complex skill from $repo"
+                npx skills add "$repo" -a claude-code -a pi -a codex -g -y 2>&1 || echo "[entrypoint] Warning: failed to install complex skill from $repo" >&2
+            else
+                echo "[entrypoint] Warning: complex skill ${skill_id:-unknown} has no sourceRepo; skipping npx install" >&2
             fi
         done
 

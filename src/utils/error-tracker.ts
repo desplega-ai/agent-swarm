@@ -28,7 +28,46 @@ export const MAX_RATE_LIMIT_RESET_MS = 7 * 24 * 60 * 60 * 1000;
  * "429 Too Many Requests"; does not match "No conversation found with session ID".
  */
 export function isRateLimitMessage(s: string): boolean {
-  return /rate.?limit|hit your[\w\s-]*limit|usage[ _-]?limit|too many requests|\b429\b/i.test(s);
+  return (
+    /rate.?limit|hit your[\w\s-]*limit|usage[ _-]?limit|too many requests|\b429\b/i.test(s) ||
+    isCodexCreditsExhaustedMessage(s)
+  );
+}
+
+/**
+ * Detects Codex's workspace-credit-exhausted error, which surfaces as:
+ * "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+ * This wording does not match the standard rate-limit patterns, so it needs its own predicate.
+ * Kept specific to avoid false positives — "refill" alone is intentionally excluded.
+ */
+export function isCodexCreditsExhaustedMessage(s: string): boolean {
+  return /out of credits|refill in order to continue|workspace owner to refill/i.test(s);
+}
+
+/** Default cooldown applied when a Codex OAuth slot returns a credits-exhausted error.
+ *  The workspace credit cap is weekly, so a 2-hour cooldown is conservative but avoids
+ *  the sawtooth of the 5-minute tier-3 fallback re-handing the dead slot every 5 minutes.
+ */
+export const CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h
+
+/** Floor for the operator-tunable Codex credits cooldown — never shorter than the tier-3 fallback. */
+export const MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS = 5 * 60 * 1000; // 5m
+
+/**
+ * Resolve the effective Codex credits-exhausted cooldown (ms) from a raw config
+ * value (string | number | undefined). Falls back to the default constant on
+ * absent / empty / non-finite / non-positive input, then clamps to
+ * [MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS, MAX_RATE_LIMIT_RESET_MS].
+ * Pure + side-effect free so it's unit-testable and cheap to call.
+ */
+export function resolveCodexCreditsExhaustedCooldownMs(
+  raw: string | number | undefined | null,
+): number {
+  if (raw === undefined || raw === null || raw === "") return CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS;
+  const n =
+    typeof raw === "number" ? raw : /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
+  if (!Number.isFinite(n) || n <= 0) return CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS;
+  return Math.min(Math.max(n, MIN_CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS), MAX_RATE_LIMIT_RESET_MS);
 }
 
 /**

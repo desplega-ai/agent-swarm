@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { closeDb, createAgent, createSkill, initDb, installSkill } from "../be/db";
+import { dirname, join } from "node:path";
+import { closeDb, createAgent, createSkill, initDb, installSkill, upsertSkillFile } from "../be/db";
 import { syncSkillsToFilesystem } from "../be/skill-sync";
 
 const SWARM_MARKER = ".swarm-managed";
@@ -38,7 +38,7 @@ describe("syncSkillsToFilesystem", () => {
     });
     installSkill(agentId, skill.id);
 
-    // Create a complex skill (should be skipped)
+    // Create a legacy complex skill with no stored files (should be skipped)
     const complexSkill = createSkill({
       name: "complex-skill",
       description: "A complex skill",
@@ -48,6 +48,28 @@ describe("syncSkillsToFilesystem", () => {
       isComplex: true,
     });
     installSkill(agentId, complexSkill.id);
+
+    const dbBackedComplexSkill = createSkill({
+      name: "complex-db-skill",
+      description: "A DB-backed complex skill",
+      content: "---\nname: complex-db-skill\ndescription: A DB-backed complex skill\n---\n\nBody.",
+      type: "remote",
+      scope: "global",
+      isComplex: true,
+    });
+    installSkill(agentId, dbBackedComplexSkill.id);
+    upsertSkillFile(dbBackedComplexSkill.id, {
+      path: "references/guide.md",
+      content: "# Guide\n\nBundled reference.",
+      mimeType: "text/markdown",
+    });
+    upsertSkillFile(dbBackedComplexSkill.id, {
+      path: "assets/logo.png",
+      content: "[binary file - not synced]",
+      mimeType: "image/png",
+      isBinary: true,
+      size: 2048,
+    });
 
     mkdirSync(FAKE_HOME, { recursive: true });
   });
@@ -108,7 +130,7 @@ describe("syncSkillsToFilesystem", () => {
     const result = syncSkillsToFilesystem(agentId, "all", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
-    expect(result.synced).toBe(3); // 1 skill × 3 dirs
+    expect(result.synced).toBe(6); // 2 DB-backed skills × 3 dirs
 
     const claudeFile = join(FAKE_HOME, ".claude", "skills", "test-skill", "SKILL.md");
     const piFile = join(FAKE_HOME, ".pi", "agent", "skills", "test-skill", "SKILL.md");
@@ -118,11 +140,108 @@ describe("syncSkillsToFilesystem", () => {
     expect(existsSync(codexFile)).toBe(true);
   });
 
-  test("skips complex skills", () => {
+  test("syncs DB-backed complex skill files and skips binary placeholders", () => {
+    rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
+
+    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+
+    expect(result.errors).toHaveLength(0);
+
+    const skillFile = join(FAKE_HOME, ".claude", "skills", "complex-db-skill", "SKILL.md");
+    const bundledFile = join(
+      FAKE_HOME,
+      ".claude",
+      "skills",
+      "complex-db-skill",
+      "references",
+      "guide.md",
+    );
+    const binaryFile = join(
+      FAKE_HOME,
+      ".claude",
+      "skills",
+      "complex-db-skill",
+      "assets",
+      "logo.png",
+    );
+    expect(existsSync(skillFile)).toBe(true);
+    expect(readFileSync(bundledFile, "utf-8")).toContain("Bundled reference.");
+    expect(existsSync(binaryFile)).toBe(false);
+  });
+
+  test("removes stale bundled files from swarm-managed skill directories", () => {
+    rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
+
+    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    expect(result.errors).toHaveLength(0);
+
+    const skillDir = join(FAKE_HOME, ".claude", "skills", "complex-db-skill");
+    const staleFile = join(skillDir, "references", "old-guide.md");
+    const currentFile = join(skillDir, "references", "guide.md");
+    const staleBinary = join(skillDir, "assets", "logo.png");
+    mkdirSync(dirname(staleFile), { recursive: true });
+    mkdirSync(dirname(staleBinary), { recursive: true });
+    writeFileSync(staleFile, "stale");
+    writeFileSync(staleBinary, "previous binary payload");
+
+    const nextResult = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+
+    expect(nextResult.errors).toHaveLength(0);
+    expect(nextResult.removed).toBeGreaterThanOrEqual(2);
+    expect(existsSync(staleFile)).toBe(false);
+    expect(existsSync(staleBinary)).toBe(false);
+    expect(readFileSync(currentFile, "utf-8")).toContain("Bundled reference.");
+  });
+
+  test("skips legacy complex skills without stored files", () => {
     const _result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     const complexDir = join(FAKE_HOME, ".claude", "skills", "complex-skill");
     expect(existsSync(complexDir)).toBe(false);
+  });
+
+  test("continues syncing bundled files after one file write fails", () => {
+    const failSkill = createSkill({
+      name: "complex-fail-safe",
+      description: "Complex skill with one blocked file",
+      content:
+        "---\nname: complex-fail-safe\ndescription: Complex skill with one blocked file\n---\n\nBody.",
+      type: "remote",
+      scope: "global",
+      isComplex: true,
+    });
+    installSkill(agentId, failSkill.id);
+    upsertSkillFile(failSkill.id, {
+      path: "references/blocked.md",
+      content: "blocked",
+    });
+    upsertSkillFile(failSkill.id, {
+      path: "references/ok.md",
+      content: "ok",
+    });
+
+    rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
+    const blockedTarget = join(
+      FAKE_HOME,
+      ".claude",
+      "skills",
+      "complex-fail-safe",
+      "references",
+      "blocked.md",
+    );
+    mkdirSync(blockedTarget, { recursive: true });
+
+    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+
+    expect(result.errors.some((error) => error.includes("references/blocked.md"))).toBe(true);
+    expect(
+      readFileSync(
+        join(FAKE_HOME, ".claude", "skills", "complex-fail-safe", "references", "ok.md"),
+        "utf-8",
+      ),
+    ).toBe("ok");
+
+    rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
   });
 
   test("removes stale swarm-managed skill directories", () => {
@@ -185,7 +304,7 @@ describe("syncSkillsToFilesystem", () => {
     const result = syncSkillsToFilesystem(agentId, "all", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
-    expect(result.synced).toBe(3);
+    expect(result.synced).toBeGreaterThanOrEqual(6);
 
     const claudeFile = join(FAKE_HOME, ".claude", "skills", "test-skill", "SKILL.md");
     const piFile = join(FAKE_HOME, ".pi", "agent", "skills", "test-skill", "SKILL.md");

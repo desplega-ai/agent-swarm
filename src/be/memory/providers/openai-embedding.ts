@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MODEL } from "../constants";
+import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../constants";
 import type { EmbeddingProvider } from "../types";
 
 interface OpenAIEmbeddingConfig {
@@ -21,10 +21,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
     this.model = config?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small";
 
-    this.dimensions =
-      config?.dimensions ??
-      Number(process.env.EMBEDDING_DIMENSIONS) ??
-      DEFAULT_EMBEDDING_DIMENSIONS;
+    this.dimensions = config?.dimensions ?? EMBEDDING_DIMENSIONS;
 
     this.name = config?.model
       ? `openai/${config.model}`
@@ -57,6 +54,13 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
       const values = response.data[0]?.embedding;
       if (!values) return null;
+
+      if (values.length !== this.dimensions) {
+        console.error(
+          `[memory] Embedding dimension mismatch: expected=${this.dimensions} got=${values.length}. Provider may not support the 'dimensions' parameter.`,
+        );
+        return null;
+      }
 
       return new Float32Array(values);
     } catch (err) {
@@ -93,6 +97,12 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       for (const item of response.data) {
         const originalIndex = nonEmptyIndices[item.index];
         if (originalIndex !== undefined && item.embedding) {
+          if (item.embedding.length !== this.dimensions) {
+            console.error(
+              `[memory] Batch embedding dimension mismatch: expected=${this.dimensions} got=${item.embedding.length}. Provider may not support the 'dimensions' parameter.`,
+            );
+            continue;
+          }
           results[originalIndex] = new Float32Array(item.embedding);
         }
       }

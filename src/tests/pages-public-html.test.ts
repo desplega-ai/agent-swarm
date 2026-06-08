@@ -41,6 +41,8 @@ describe("GET /p/:id — HTML public path", () => {
   let server: Server;
   const agentId = crypto.randomUUID();
   const headers = { "Content-Type": "application/json", "X-Agent-ID": agentId };
+  const ORIG_APP = process.env.APP_URL;
+  const ORIG_DASHBOARD = process.env.DASHBOARD_URL;
 
   beforeAll(async () => {
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -56,6 +58,10 @@ describe("GET /p/:id — HTML public path", () => {
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDb();
+    if (ORIG_APP === undefined) delete process.env.APP_URL;
+    else process.env.APP_URL = ORIG_APP;
+    if (ORIG_DASHBOARD === undefined) delete process.env.DASHBOARD_URL;
+    else process.env.DASHBOARD_URL = ORIG_DASHBOARD;
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -96,6 +102,41 @@ describe("GET /p/:id — HTML public path", () => {
     const text = await res.text();
     expect(text).toContain("<h1>Hello</h1>");
     expect(text).toContain("class SwarmSDK"); // BROWSER_SDK_JS sentinel
+  });
+
+  test("CSP frame ancestors include deprecated DASHBOARD_URL alias", async () => {
+    const prevApp = process.env.APP_URL;
+    const prevDashboard = process.env.DASHBOARD_URL;
+    delete process.env.APP_URL;
+    process.env.DASHBOARD_URL = "https://dashboard.example.test/";
+    try {
+      const html = "<!doctype html><html><head><title>CSP</title></head><body></body></html>";
+      const post = await fetch(`${BASE}/api/pages`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          slug: "dashboard-url-csp",
+          title: "Dashboard URL CSP",
+          contentType: "text/html",
+          authMode: "public",
+          body: html,
+        }),
+      });
+      expect(post.status).toBe(201);
+      const { id } = (await post.json()) as { id: string };
+
+      const res = await fetch(`${BASE}/p/${id}`);
+      expect(res.status).toBe(200);
+      const csp = res.headers.get("content-security-policy");
+      const frameAncestors =
+        csp?.split(";").find((d) => d.trim().startsWith("frame-ancestors ")) ?? "";
+      expect(frameAncestors).toContain("https://dashboard.example.test");
+    } finally {
+      if (prevApp === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = prevApp;
+      if (prevDashboard === undefined) delete process.env.DASHBOARD_URL;
+      else process.env.DASHBOARD_URL = prevDashboard;
+    }
   });
 
   test("public JSON page 302-redirects to SPA artifact route", async () => {

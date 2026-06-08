@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.89.0",
+    "version": "1.92.1",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2337,15 +2337,18 @@
                     "minLength": 1,
                     "maxLength": 10000
                   },
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10000,
+                    "description": "Deprecated runtime alias for sql."
+                  },
                   "params": {
                     "type": "array",
                     "items": {},
                     "default": []
                   }
-                },
-                "required": [
-                  "sql"
-                ]
+                }
               }
             }
           }
@@ -4110,6 +4113,24 @@
                     "minimum": 1,
                     "maximum": 20,
                     "default": 5
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "agent",
+                      "swarm",
+                      "all"
+                    ],
+                    "default": "all"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "manual",
+                      "file_index",
+                      "session_summary",
+                      "task_completion"
+                    ]
                   }
                 },
                 "required": [
@@ -4240,6 +4261,24 @@
           },
           "400": {
             "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/memory/health": {
+      "get": {
+        "summary": "Report memory vector index health and retrieval mode",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory vector index health"
           }
         }
       }
@@ -4583,7 +4622,8 @@
                       "public",
                       "authed",
                       "password"
-                    ]
+                    ],
+                    "default": "authed"
                   },
                   "password": {
                     "type": "string",
@@ -4602,7 +4642,6 @@
                 "required": [
                   "title",
                   "contentType",
-                  "authMode",
                   "body"
                 ]
               }
@@ -7117,6 +7156,587 @@
         }
       }
     },
+    "/api/script-runs": {
+      "post": {
+        "operationId": "script_runs_create",
+        "summary": "Launch a durable script workflow run",
+        "description": "Foundation endpoint for Script Workflows v1. In PR 1 it persists the run and returns its dashboard URL; spawning is added by the supervisor PR.",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {},
+                  "background": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "scriptName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "requestedByUserId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Script run created"
+          },
+          "400": {
+            "description": "Validation or label-lint failure"
+          },
+          "409": {
+            "description": "Existing idempotent run returned"
+          },
+          "429": {
+            "description": "Script run concurrency cap reached"
+          }
+        }
+      },
+      "get": {
+        "operationId": "script_runs_list",
+        "summary": "List script workflow runs",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "running",
+                "paused",
+                "completed",
+                "failed",
+                "cancelled",
+                "aborted_limit"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated script run list"
+          }
+        }
+      }
+    },
+    "/api/script-runs/{id}": {
+      "get": {
+        "operationId": "script_runs_get",
+        "summary": "Get a script workflow run with journal",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Script run detail"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "script_runs_cancel",
+        "summary": "Cancel a script workflow run",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Script run cancelled, or already terminal"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/steps/{stepKey}": {
+      "get": {
+        "operationId": "script_runs_internal_step_get",
+        "summary": "Get a script run journal step",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "stepKey",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Journal step found"
+          },
+          "404": {
+            "description": "Journal step not found"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/steps": {
+      "post": {
+        "operationId": "script_runs_internal_step_create",
+        "summary": "Write a script run journal step",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stepKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "stepType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "config": {},
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "failed"
+                    ]
+                  },
+                  "result": {},
+                  "error": {
+                    "type": "string"
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "stepKey",
+                  "stepType",
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Journal step written"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/heartbeat": {
+      "post": {
+        "operationId": "script_runs_internal_heartbeat",
+        "summary": "Record a script run heartbeat",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Heartbeat recorded"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/status": {
+      "post": {
+        "operationId": "script_runs_internal_status",
+        "summary": "Update script run status from subprocess",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "completed"
+                        ]
+                      },
+                      "output": {}
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "failed"
+                        ]
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "paused"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Status updated"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
+    "/api/internal/raw-llm": {
+      "post": {
+        "operationId": "script_runs_internal_raw_llm",
+        "summary": "Execute a raw LLM call for a script workflow",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "fallbackPort": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "prompt"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "LLM call completed"
+          },
+          "500": {
+            "description": "LLM call failed"
+          }
+        }
+      }
+    },
+    "/api/internal/script-runs/{runId}/agent-task": {
+      "post": {
+        "operationId": "script_runs_internal_agent_task",
+        "summary": "Create or wait for a script workflow agent task step",
+        "tags": [
+          "Script Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stepKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "template": {
+                    "type": "string"
+                  },
+                  "task": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "offerMode": {
+                    "type": "boolean"
+                  },
+                  "dir": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "parentTaskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "requestedByUserId": {
+                    "type": "string"
+                  },
+                  "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "stepKey"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent task completed"
+          },
+          "202": {
+            "description": "Agent task created or still running"
+          },
+          "404": {
+            "description": "Script run not found"
+          }
+        }
+      }
+    },
     "/api/session-logs": {
       "post": {
         "summary": "Store session logs",
@@ -7803,6 +8423,257 @@
         }
       }
     },
+    "/api/skills/{id}/files": {
+      "get": {
+        "summary": "List bundled files for a skill",
+        "description": "Returns a manifest of bundled skill files without file content.",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill file manifest"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      },
+      "post": {
+        "summary": "Bulk upsert bundled files for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "content": {
+                          "type": "string"
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        },
+                        "isBinary": {
+                          "type": "boolean"
+                        },
+                        "size": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "content",
+                        "path"
+                      ]
+                    },
+                    "maxItems": 100
+                  }
+                },
+                "required": [
+                  "files"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skill files upserted"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      }
+    },
+    "/api/skills/{id}/files/{path}": {
+      "get": {
+        "summary": "Get a bundled skill file",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "path",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill file"
+          },
+          "404": {
+            "description": "Skill or file not found"
+          }
+        }
+      },
+      "put": {
+        "summary": "Upsert a bundled skill file",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "path",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  },
+                  "isBinary": {
+                    "type": "boolean"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "content"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skill file upserted"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a bundled skill file",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "path",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill file deleted"
+          },
+          "404": {
+            "description": "Skill or file not found"
+          }
+        }
+      }
+    },
     "/api/skills/{id}/install": {
       "post": {
         "summary": "Install skill for an agent",
@@ -8165,6 +9036,10 @@
                       "workspace-rw"
                     ],
                     "default": "none"
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "maxLength": 200
                   }
                 }
               }
@@ -8330,6 +9205,57 @@
           },
           "404": {
             "description": "Script not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-bridge": {
+      "post": {
+        "summary": "Generic MCP tool proxy for the scripts SDK bridge",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tool": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "args": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "tool"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tool result"
+          },
+          "400": {
+            "description": "Invalid tool name or args"
+          },
+          "403": {
+            "description": "Tool not in SDK allowlist"
+          },
+          "404": {
+            "description": "Tool not found"
           }
         }
       }

@@ -288,6 +288,39 @@ describe("runScript", () => {
     }
   });
 
+  test("zod import works in compiled binary mode (SCRIPT_RUNTIME_DIR)", async () => {
+    const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
+    await Bun.$`mkdir -p ${tmpdir}`;
+    try {
+      const runtimeSrc = new URL("../scripts-runtime", import.meta.url).pathname;
+      await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
+      await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
+      await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();
+      const zodEntry = Bun.resolveSync("zod", import.meta.dir);
+      await Bun.$`bun build ${zodEntry} --target bun --no-splitting --outfile ${tmpdir}/zod.bundle.js`.quiet();
+
+      process.env.SCRIPT_RUNTIME_DIR = tmpdir;
+
+      const output = await runScript({
+        agentId: "agent-1",
+        args: { name: "test" },
+        resources,
+        source: `
+          import { z } from "zod";
+          export const argsSchema = z.object({ name: z.string() });
+          export default async (args: z.infer<typeof argsSchema>) => ({ greeting: "hello " + args.name });
+        `,
+      });
+
+      expect(output.error).toBeUndefined();
+      expect(output.result).toEqual({ greeting: "hello test" });
+      expect(output.exitCode).toBe(0);
+    } finally {
+      delete process.env.SCRIPT_RUNTIME_DIR;
+      await Bun.$`rm -rf ${tmpdir}`;
+    }
+  });
+
   test("argsSchema rejects invalid args with a formatted Zod error", async () => {
     const output = await runScript({
       agentId: "agent-1",

@@ -63,14 +63,13 @@ describe("create_page MCP tool", () => {
     }
   });
 
-  test("first call creates a row + returns shareable URLs", async () => {
+  test("first call creates an authed row by default + returns shareable URLs", async () => {
     const tool = buildServer();
     const result = (await tool.handler(
       {
         title: "Hello Page",
         body: "<h1>hello</h1>",
         contentType: "text/html",
-        authMode: "public",
       },
       fakeMeta,
     )) as {
@@ -97,6 +96,24 @@ describe("create_page MCP tool", () => {
     const row = getPageBySlug(agentId, "hello-page");
     expect(row).not.toBeNull();
     expect(row!.body).toBe("<h1>hello</h1>");
+    expect(row!.authMode).toBe("authed");
+  });
+
+  test("explicit public auth mode is preserved", async () => {
+    const tool = buildServer();
+    await tool.handler(
+      {
+        title: "Public Page",
+        body: "<h1>public</h1>",
+        contentType: "text/html",
+        authMode: "public",
+      },
+      fakeMeta,
+    );
+
+    const row = getPageBySlug(agentId, "public-page");
+    expect(row).not.toBeNull();
+    expect(row!.authMode).toBe("public");
   });
 
   test("re-running with the same slug upserts + bumps edit-counter", async () => {

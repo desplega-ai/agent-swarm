@@ -22,11 +22,17 @@ export interface MemoryStore {
   peek(id: string): AgentMemory | null;
   search(embedding: Float32Array, agentId: string, options: MemorySearchOptions): MemoryCandidate[];
   list(agentId: string, options: MemoryListOptions): AgentMemory[];
+  isSourceProtected(source: AgentMemorySource): boolean;
+  listForCuration(
+    agentId?: string,
+  ): { id: string; source: string; name: string; createdAt: string }[];
   listForReembedding(options?: { agentId?: string }): { id: string; content: string }[];
   delete(id: string): boolean;
   deleteBySourcePath(sourcePath: string, agentId: string): number;
+  purgeExpired(): number;
   updateEmbedding(id: string, embedding: Float32Array, model: string): void;
   getStats(agentId: string): MemoryStats;
+  getHealth(): MemoryHealth;
 }
 
 // ============================================================================
@@ -49,6 +55,10 @@ export interface MemoryInput {
 
 export interface MemoryCandidate extends AgentMemory {
   similarity: number;
+  /** Raw cosine similarity before reranking (preserved for diagnostics). */
+  rawSimilarity?: number;
+  /** Final composite score after reranking (recency × source × usefulness × access). */
+  compositeScore?: number;
   accessCount: number;
   expiresAt: string | null;
   embeddingModel: string | null;
@@ -70,6 +80,7 @@ export interface MemoryListOptions {
   limit?: number;
   offset?: number;
   isLead?: boolean;
+  source?: AgentMemorySource;
 }
 
 export interface MemoryStats {
@@ -78,6 +89,39 @@ export interface MemoryStats {
   byScope: Record<string, number>;
   withEmbeddings: number;
   expired: number;
+}
+
+export interface MemoryHealth {
+  sqliteVec: {
+    extensionLoaded: boolean;
+    tableExists: boolean;
+    initialized: boolean;
+    vectorDimensions: number;
+    distanceMetric: "cosine";
+    schema: string | null;
+    lastPopulate: MemoryVecPopulateStats | null;
+  };
+  counts: {
+    total: number;
+    withEmbedding: number;
+    validEmbedding: number;
+    invalidEmbedding: number;
+    searchable: number;
+    memoryVec: number;
+    missingFromVec: number;
+    extraInVec: number;
+  };
+  retrievalMode: "vec" | "fallback";
+  reasons: string[];
+}
+
+export interface MemoryVecPopulateStats {
+  attempted: number;
+  inserted: number;
+  skippedInvalidDimensions: number;
+  failed: number;
+  beforeCount: number;
+  afterCount: number;
 }
 
 export interface RerankOptions {

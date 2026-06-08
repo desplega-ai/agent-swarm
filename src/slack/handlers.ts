@@ -18,6 +18,7 @@ import type { SlackFile } from "./files";
 import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
+import { extractSlackMessageText } from "./message-text";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 import { registerTreeMessage } from "./watcher";
 
@@ -173,6 +174,8 @@ interface ThreadMessage {
   subtype?: string;
   text?: string;
   ts: string;
+  attachments?: Array<{ fallback?: string; text?: string; title?: string; pretext?: string }>;
+  blocks?: unknown[];
 }
 
 // Cache for bot's own user ID (avoids redundant auth.test calls)
@@ -286,8 +289,11 @@ async function getThreadContext(
     });
 
     const messages = (result.messages || []) as ThreadMessage[];
-    // Filter out the current message only (keep bot messages for context)
-    const previousMessages = messages.filter((m) => m.ts !== currentTs && m.text);
+    // Filter out the current message; include any message with extractable text
+    const previousMessages = messages.filter((m) => {
+      if (m.ts === currentTs) return false;
+      return extractSlackMessageText(m) !== "";
+    });
 
     if (previousMessages.length === 0) return "";
 
@@ -298,13 +304,14 @@ async function getThreadContext(
       const isBotMessage =
         m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
 
+      const text = extractSlackMessageText(m);
       if (isBotMessage) {
         // Bot/agent message - truncate if too long
-        const truncatedText = m.text && m.text.length > 500 ? `${m.text.slice(0, 500)}...` : m.text;
+        const truncatedText = text.length > 500 ? `${text.slice(0, 500)}...` : text;
         formattedMessages.push(`[Agent]: ${truncatedText}`);
       } else {
         const userName = m.user ? await getUserDisplayName(client, m.user) : "Unknown";
-        formattedMessages.push(`${userName}: ${m.text}`);
+        formattedMessages.push(`${userName}: ${text}`);
       }
     }
 

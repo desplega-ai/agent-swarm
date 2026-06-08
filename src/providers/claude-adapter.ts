@@ -72,9 +72,8 @@ async function cleanupTaskFile(pid: number): Promise<void> {
 /**
  * Parse `CLAUDE_BINARY` into argv prefix tokens.
  *
- * Accepts a single binary name (`"claude"`, `"shannon"`), an absolute path,
- * or a whitespace-separated command string (`"bunx @dexh/shannon"`,
- * `"npx -y @dexh/shannon"`). Trim + split on `/\s+/`. No shell parsing, no
+ * Accepts a single binary name (`"claude"`), an absolute path, or a
+ * whitespace-separated command string. Trim + split on `/\s+/`. No shell parsing, no
  * quote handling — keep it tiny and predictable. Empty / missing → `["claude"]`.
  *
  * Exported for unit testing.
@@ -108,14 +107,81 @@ export function resolveClaudeBinary(
   return candidate || "claude";
 }
 
+const CLAUDE_BRIDGE_BINARY = "claude-bridge";
+const CLAUDE_BRIDGE_LOCAL_AUTH_ARG = "--desplega-local-auth";
+const LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY = "shan" + "non";
+const CLAUDE_BRIDGE_LOCAL_AUTH_ENV_VARS = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_CUSTOM_HEADERS",
+  "ANTHROPIC_MODEL",
+] as const;
+
+/**
+ * Parse a boolean env toggle. Only true/1 enable and false/0 disable; unset
+ * and invalid values are treated as disabled.
+ *
+ * Exported for unit testing.
+ */
+export function parseClaudeBridgeEnabled(raw: string | undefined): boolean {
+  const normalized = raw?.trim().toLowerCase();
+  return normalized === "true" || normalized === "1";
+}
+
+/**
+ * Resolve the reloadable claude-bridge toggle from the same resolved-env
+ * overlay used for `CLAUDE_BINARY`.
+ *
+ * Exported for unit testing.
+ */
+export function resolveClaudeBridgeEnabled(
+  resolvedEnv: Record<string, string | undefined>,
+  fallbackEnv: Record<string, string | undefined> = process.env,
+): boolean {
+  const candidate =
+    resolvedEnv.SWARM_USE_CLAUDE_BRIDGE?.trim() || fallbackEnv.SWARM_USE_CLAUDE_BRIDGE?.trim();
+  return parseClaudeBridgeEnabled(candidate);
+}
+
+function resolveClaudeBinaryArgv(
+  resolvedEnv: Record<string, string | undefined>,
+  fallbackEnv: Record<string, string | undefined> = process.env,
+): { raw: string; argv: string[]; useClaudeBridge: boolean } {
+  const useClaudeBridge = resolveClaudeBridgeEnabled(resolvedEnv, fallbackEnv);
+  const raw = useClaudeBridge
+    ? CLAUDE_BRIDGE_BINARY
+    : resolveClaudeBinary(resolvedEnv, fallbackEnv);
+  return { raw, argv: parseClaudeBinary(raw), useClaudeBridge };
+}
+
+function isLegacyClaudeBridgeCompatBinary(raw: string): boolean {
+  return raw.toLowerCase().includes(LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY);
+}
+
+function withClaudeBridgeAuthArgs(
+  argv: readonly string[],
+  sourceEnv: Record<string, string | undefined>,
+): string[] {
+  if (sourceEnv.CLAUDE_CODE_OAUTH_TOKEN) {
+    return [...argv];
+  }
+
+  if (CLAUDE_BRIDGE_LOCAL_AUTH_ENV_VARS.some((name) => sourceEnv[name])) {
+    return [...argv, CLAUDE_BRIDGE_LOCAL_AUTH_ARG];
+  }
+
+  return [...argv];
+}
+
 /**
  * Pre-seed `~/.claude.json` so the per-project trust-dialog ("Quick safety
  * check: Is this a project you trust?") doesn't block on first run.
  *
  * Mirrors the onboarding-skip hack in `Dockerfile.worker` (which writes
  * `hasCompletedOnboarding` and `bypassPermissionsModeAccepted`). When the
- * resolved binary contains "shannon", claude runs inside tmux and shannon
- * does NOT auto-accept the dialog, so the pane hangs forever. Writing
+ * resolved binary runs interactive claude inside tmux, claude does NOT
+ * reliably auto-accept the dialog, so the pane can hang forever. Writing
  * `projects[cwd].hasTrustDialogAccepted = true` (and `hasCompletedProjectOnboarding`)
  * tells claude-code the cwd is pre-trusted.
  *
@@ -337,6 +403,30 @@ export function buildClaudeCodeOtelEnv(
 }
 
 /**
+ * Claude Code runtime defaults for ephemeral swarm harness sessions.
+ *
+ * These are plain subprocess env vars, not prompt content. They are injected
+ * after the resolved swarm config so the worker enforces the memory/privacy
+ * guardrails consistently per spawn. Statsig/DNT opt-out is intentionally
+ * separate from our Claude Code OTel export path, which is controlled by
+ * buildClaudeCodeOtelEnv.
+ */
+export function buildClaudeCodeRuntimeEnv(
+  _sourceEnv: Record<string, string | undefined>,
+): Record<string, string> {
+  return {
+    ENABLE_TOOL_SEARCH: "true",
+    CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING: "1",
+    CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
+    CLAUDE_CODE_DISABLE_ATTACHMENTS: "1",
+    DISABLE_TELEMETRY: "1",
+    DO_NOT_TRACK: "1",
+    DISABLE_FEEDBACK_COMMAND: "1",
+    DISABLE_BUG_COMMAND: "1",
+  };
+}
+
+/**
  * Resolve the path at which the per-task system prompt is staged on disk.
  *
  * Pushing the prompt as `--append-system-prompt <value>` makes the entire
@@ -398,11 +488,13 @@ class ClaudeSession implements ProviderSession {
     // so the freshly-computed TRACEPARENT wins over any stale value the
     // container env might carry.
     const otelEnv = buildClaudeCodeOtelEnv(sourceEnv);
+    const runtimeEnv = buildClaudeCodeRuntimeEnv(sourceEnv);
     this.proc = Bun.spawn(cmd, {
       cwd: this.config.cwd,
       env: {
         ENABLE_PROMPT_CACHING_1H: "1",
         ...sourceEnv,
+        ...runtimeEnv,
         ...otelEnv,
         TASK_FILE: taskFilePath,
         // Belt-and-braces: TASK_FILE on disk can disappear mid-session (race
@@ -767,46 +859,59 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     const model = config.model || "opus";
 
-    const credType = validateClaudeCredentials(config.env || process.env);
+    const sourceEnv = config.env || process.env;
+    const credType = validateClaudeCredentials(sourceEnv);
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
 
     // Resolve the argv prefix. Same flags (`-p`, `--model`, ...) work across
-    // alternates; only argv[0..n] changes. `CLAUDE_BINARY` accepts a single
-    // binary (`"shannon"`, `"/usr/local/bin/shannon"`) or a whitespace-separated
-    // command string (`"bunx @dexh/shannon"`, `"npx -y @dexh/shannon"`).
-    // Setting it to anything containing `shannon` opts into the dexhorthy/shannon
-    // variant, which drives `claude` interactively in tmux to stay on the
-    // subscription credit pool after the 2026-06-15 programmatic-credit split.
+    // alternates; only argv[0..n] changes. Prefer SWARM_USE_CLAUDE_BRIDGE=true
+    // for the Desplega-owned bridge. CLAUDE_BINARY remains as the low-level
+    // override for custom binaries and the legacy third-party bridge path.
     //
     // `config.env` carries the swarm_config overlay (resolved repo > agent > global
     // by `fetchResolvedEnv` in src/commands/runner.ts), so operators can flip
     // a worker's binary via `set-config CLAUDE_BINARY=...` without a restart.
     // Falls back to process.env, then "claude". See `resolveClaudeBinary` above.
     //
-    // See `docs-site/.../shannon-experimental.mdx` for the user-facing guide
+    // See `docs-site/.../claude-bridge-experimental.mdx` for the user-facing guide
     // and `runbooks/harness-providers.md` for engineering notes.
-    const claudeBinaryRaw = resolveClaudeBinary(config.env || process.env);
-    const claudeBinaryArgv = parseClaudeBinary(claudeBinaryRaw);
-    const isShannon = claudeBinaryRaw.toLowerCase().includes("shannon");
-
-    console.log(
-      `\x1b[2m[${config.role}]\x1b[0m Resolved CLAUDE_BINARY: ${claudeBinaryArgv.join(" ")} (isShannon: ${isShannon})`,
-    );
-
-    // Fail fast: shannon shells out to tmux. If it's missing, surface a
-    // clear error here rather than letting the spawn fail opaquely.
-    if (isShannon && !Bun.which("tmux")) {
-      throw new Error(
-        "CLAUDE_BINARY=shannon requires 'tmux' on PATH (install via apt/brew). See runbooks/harness-providers.md.",
+    const {
+      raw: claudeBinaryRaw,
+      argv: claudeBinaryArgv,
+      useClaudeBridge,
+    } = resolveClaudeBinaryArgv(sourceEnv);
+    const isLegacyBridgeCompat = isLegacyClaudeBridgeCompatBinary(claudeBinaryRaw);
+    const effectiveClaudeBinaryArgv = useClaudeBridge
+      ? withClaudeBridgeAuthArgs(claudeBinaryArgv, sourceEnv)
+      : claudeBinaryArgv;
+    const isInteractiveTmuxClaude = isLegacyBridgeCompat || useClaudeBridge;
+    const configuredClaudeBinaryRaw = resolveClaudeBinary(sourceEnv);
+    if (isLegacyClaudeBridgeCompatBinary(configuredClaudeBinaryRaw)) {
+      console.warn(
+        `\x1b[33m[claude]\x1b[0m CLAUDE_BINARY=${LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY} is deprecated; set SWARM_USE_CLAUDE_BRIDGE=true to use @desplega.ai/claude-bridge.`,
       );
     }
 
-    // Shannon drives `claude` in tmux — claude's per-project trust dialog
-    // (first-run "Is this a project you trust?") hangs the pane because shannon
-    // doesn't auto-accept it. Pre-seed `~/.claude.json` so the dialog never
-    // prompts. Idempotent; no-op when already trusted. Engineering rationale:
-    // `runbooks/harness-providers.md` § "Trust-dialog pre-seed".
-    if (isShannon) {
+    console.log(
+      `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${effectiveClaudeBinaryArgv.join(" ")} (useClaudeBridge: ${useClaudeBridge}, legacyBridgeCompat: ${isLegacyBridgeCompat})`,
+    );
+
+    // Fail fast: claude-bridge and its legacy compatibility path both shell
+    // out to tmux. If it's
+    // missing, surface a clear error here rather than letting startup fail
+    // opaquely.
+    if (isInteractiveTmuxClaude && !Bun.which("tmux")) {
+      const label = useClaudeBridge
+        ? "SWARM_USE_CLAUDE_BRIDGE=true"
+        : `CLAUDE_BINARY=${LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY}`;
+      throw new Error(
+        `${label} requires 'tmux' on PATH (install via apt/brew). See runbooks/harness-providers.md.`,
+      );
+    }
+
+    // Claude Bridge and its legacy compatibility path drive interactive
+    // `claude` in tmux, where the first-run trust dialog can block startup.
+    if (isInteractiveTmuxClaude) {
       try {
         await preseedClaudeTrustDialog(config.cwd);
       } catch (err) {
@@ -871,7 +976,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       taskFilePath,
       taskFilePid,
       sessionMcpConfig,
-      claudeBinaryArgv,
+      effectiveClaudeBinaryArgv,
       systemPromptFile,
     );
   }

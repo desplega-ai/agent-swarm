@@ -1,6 +1,7 @@
 export { registerSkillCreateTool } from "./skill-create";
 export { registerSkillDeleteTool } from "./skill-delete";
 export { registerSkillGetTool } from "./skill-get";
+export { registerSkillGetFileTool } from "./skill-get-file";
 export { registerSkillInstallTool } from "./skill-install";
 export { registerSkillInstallRemoteTool } from "./skill-install-remote";
 export { registerSkillListTool } from "./skill-list";

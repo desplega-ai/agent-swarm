@@ -61,14 +61,13 @@ describe("Pages HTTP API", () => {
     }
   });
 
-  test("POST /api/pages creates a page and returns {id, version}", async () => {
+  test("POST /api/pages creates an authed page by default and returns {id, version}", async () => {
     const res = await fetch(`${baseUrl}/api/pages`, {
       method: "POST",
       headers,
       body: JSON.stringify({
         title: "Hello",
         contentType: "text/html",
-        authMode: "public",
         body: "<h1>hi</h1>",
       }),
     });
@@ -87,6 +86,25 @@ describe("Pages HTTP API", () => {
     expect(page.agentId).toBe(agentId);
     expect(page.slug).toBe("hello"); // auto-slug from title
     expect(page.contentType).toBe("text/html");
+    expect(page.authMode).toBe("authed");
+  });
+
+  test("POST /api/pages can explicitly opt in to public auth", async () => {
+    const res = await fetch(`${baseUrl}/api/pages`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        title: "Public",
+        contentType: "text/html",
+        authMode: "public",
+        body: "<h1>public</h1>",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { id: string };
+    const got = await fetch(`${baseUrl}/api/pages/${json.id}`, { headers });
+    const page = (await got.json()) as Page;
     expect(page.authMode).toBe("public");
   });
 

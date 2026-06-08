@@ -90,6 +90,7 @@ async function writeBareImportShims(tmpdir: string): Promise<void> {
     const shims: [string, string][] = [
       ["stdlib", `${runtimeDir}/stdlib.bundle.js`],
       ["swarm-sdk", `${runtimeDir}/swarm-sdk.bundle.js`],
+      ["zod", `${runtimeDir}/zod.bundle.js`],
     ];
     for (const [name, bundlePath] of shims) {
       const dir = `${tmpdir}/node_modules/${name}`;

@@ -10,13 +10,11 @@ import {
   putKapsoNumberMapping,
 } from "@/integrations/kapso/config";
 import { createToolRegistrar } from "@/tools/utils";
+import { getPublicMcpBaseUrl } from "@/utils/constants";
 
 /** Build the native inbound webhook URL the swarm exposes for Kapso deliveries. */
 function nativeWebhookUrl(): string {
-  const base = (
-    process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`
-  ).replace(/\/+$/, "");
-  return `${base}/api/integrations/kapso/webhook`;
+  return `${getPublicMcpBaseUrl()}/api/integrations/kapso/webhook`;
 }
 
 export const registerRegisterKapsoNumberTool = (server: McpServer) => {

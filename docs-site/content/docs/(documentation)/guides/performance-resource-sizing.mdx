@@ -1,0 +1,160 @@
+---
+title: Performance & Resource Sizing
+description: Size Agent Swarm containers by role, understand harness reliability profiles, and avoid common CPU and memory metric traps.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This guide documents practical container sizing numbers for Agent Swarm workers, leads, and light specialist agents. The recommendations come from production-style container metrics observed over a 4-hour SigNoz window, plus the operational lessons from investigating two recurring false alarms: a CPU graph that climbed in a perfect straight line and memory that looked stuck high after a heavy coding session.
+
+## Recommended Container Sizes
+
+Use role-specific sizing instead of giving every container the same budget. A heavy coding worker has a different resource profile than a lead agent or an idle content/review worker.
+
+| Container role | Observed usage | Recommendation | Notes |
+|---|---|---|---|
+| Heavy worker | Peaks around 1.4 CPU cores and 2.0 GB RAM during an active coding session | >=2 vCPU burst, 2-3 GB RAM | Use this for implementation workers running Codex or Claude on real repo work. The extra CPU headroom matters during tool-heavy sessions, TypeScript checks, tests, and provider subprocess startup. |
+| Lead / orchestrator | Peaks around 0.8 CPU cores and 830 MB RAM | About 1 vCPU, 1 GB RAM | Leads coordinate task intake, Slack updates, delegation, and review loops. They need less memory than implementation workers but should not be starved. |
+| Light / idle workers | Idle baseline around 3% CPU and 200-290 MB RAM | About 0.5 vCPU, 512 MB-1 GB RAM | Reviewer, tester, content, UX, and similar specialist workers can run smaller when they are not expected to perform heavy local builds. |
+
+<Callout type="info">
+These are operating recommendations, not hard minimums. If a worker runs large local builds, browser automation, Docker-in-Docker, or repository-wide test suites, size it like a heavy worker even if its role name sounds light.
+</Callout>
+
+## Kubernetes Sizing
+
+For Kubernetes, set requests to the steady-state budget the scheduler should reserve and limits to the burst ceiling each pod can use during an active session. Heavy workers need the widest gap between request and limit because build tools, language servers, test runners, and provider subprocesses can spike together.
+
+<Callout type="warn">
+Kubernetes is stricter about memory bursts than a generated Docker Compose or single-host deployment. Exceeding `limits.memory` triggers an immediate OOMKill, and pods running above `requests.memory` are the first eviction candidates under node memory pressure. Compose sets no hard memory ceiling by default, so size Kubernetes requests near the real working set and give limits real headroom. A practical heavy-worker limit is `MAX_CONCURRENT_TASKS * per-session peak (~2 GB) + page-cache headroom`; at the default `MAX_CONCURRENT_TASKS=1`, one heavy coding session peaks around 2 GB, and raising the setting multiplies that peak. For critical lead pods, setting memory request equal to memory limit gives Guaranteed QoS, so the pod is not evicted under node memory pressure; the lead's observed peak is modest enough that a small equal request/limit is usually sufficient.
+</Callout>
+
+| Pod type | Suggested replicas | CPU request | CPU limit | Memory request | Memory limit | Notes |
+|---|---:|---:|---:|---:|---:|---|
+| API server | 1-2 | 500m | 1 CPU | 512 MiB | 1 GiB | Run 2 replicas when the database and storage layer support the deployment topology. |
+| Lead agent | 1 | 750m | 1.5 CPU | 768 MiB | 1.5 GiB | Coordination-heavy pods benefit from low latency more than high memory. |
+| Heavy worker | 1 per pod | 1 CPU | 2 CPU | 2 GiB | 3 GiB | Best default for coding agents, repo-wide checks, and tool-heavy implementation. |
+| Light worker | 1 per pod | 250m | 750m | 512 MiB | 1 GiB | Suitable for review, content, triage, and low-build inspection tasks. |
+| Browser / E2E worker | 1 per pod | 1 CPU | 2-3 CPU | 2 GiB | 4 GiB | Browser automation and test fixtures need memory headroom beyond normal worker sizing. |
+
+| Worker class | Recommended pod shape | Concurrency per pod (`MAX_CONCURRENT_TASKS`) | Scaling rule |
+|---|---|---:|---|
+| Heavy coding | 1 agent per pod | 1 active task (default) | Scale by adding pods, not by packing multiple coding sessions into one container. |
+| Light specialist | 1 agent per pod | 1 active task (default) | Scale horizontally when queue latency matters. |
+| Thin relay / managed-provider worker | 1 agent per pod | 1-2 active tasks | Increase only if the provider runtime executes outside the worker and local tool use is light. |
+
+<Callout type="info">
+For Kubernetes autoscaling, use queue depth, task age, and active-session count as the primary signals. CPU alone can under-scale idle-but-backlogged swarms and over-scale during short local build bursts.
+</Callout>
+
+## Docker Compose on a Single Host
+
+On a single VPS or bare-metal host, leave reserve capacity for the database, Docker, the kernel page cache, logs, and deploy-time overlap. A practical rule is to allocate only 70-80% of host memory to steady-state containers and keep at least 1-2 vCPU uncommitted on busy boxes.
+
+| Service | CPU budget | RAM budget | Replicas | Notes |
+|---|---:|---:|---:|---|
+| API server | 1 vCPU | 1 GiB | 1 | Keep close to the database. Increase CPU if API latency rises during task churn. |
+| Lead agent | 1 vCPU | 1 GiB | 1 | Usually one lead is enough for a small to medium swarm. |
+| Heavy worker | 2 vCPU burst | 2-3 GiB | By host capacity | Count each active coding worker as the main unit of capacity. |
+| Light worker | 0.5-1 vCPU | 512 MiB-1 GiB | By host capacity | Good filler capacity after heavy workers are reserved. |
+| Observability / proxy / support services | 0.5-1 vCPU | 512 MiB-2 GiB | 1 each | Include these before calculating worker slots. |
+
+Illustrative Hetzner-style VPS tiers:
+
+| Example host class | Approx. host resources | Recommended swarm shape | Notes |
+|---|---:|---|---|
+| Small VPS | 4 vCPU / 8 GiB RAM | API + lead + 1 heavy worker + 1-2 light workers | Good for evaluation, demos, and low-concurrency self-hosting. |
+| Medium VPS | 8 vCPU / 16 GiB RAM | API + lead + 3 heavy workers + 2-4 light workers | Practical baseline for a small production team. |
+| Large VPS / small dedicated host | 16 vCPU / 32 GiB RAM | API + lead + 6-8 heavy workers + 4-8 light workers | Keep 6-8 GiB free for OS cache, logs, deploy overlap, and occasional spikes. |
+| Dedicated build host | 32 vCPU / 64 GiB RAM | API + lead + 12-16 heavy workers + light workers as needed | Useful when many workers run tests or builds locally. Split database/storage if API latency or disk I/O becomes noisy. |
+
+## Agent Concurrency Settings
+
+Agent Swarm scales most predictably when each local-runtime worker runs one active task at a time. The per-worker concurrency knob is `MAX_CONCURRENT_TASKS`; the generated Docker Compose default is `MAX_CONCURRENT_TASKS=1`, meaning one active task per worker. Increasing it can be useful for thin relay workers or low-tool tasks, but it multiplies memory peaks and makes local builds contend inside the same container.
+
+| Concurrency profile | Worker count | `MAX_CONCURRENT_TASKS` per worker | Total active tasks | Recommended host or cluster budget | When to use |
+|---|---:|---:|---:|---|---|
+| Evaluation | 1 lead + 1 heavy worker | 1 | 1 | 2-4 vCPU, 4-8 GiB RAM | Trial deployments and occasional coding tasks. |
+| Small team | 1 lead + 2-3 heavy workers + 2 light workers | 1 | 4-5 | 8 vCPU, 16 GiB RAM | Several independent tasks per day with room for reviews and content work. |
+| Busy team | 1 lead + 6-8 heavy workers + 4 light workers | 1 | 10-12 | 16 vCPU, 32 GiB RAM | Regular parallel implementation, review, and QA loops. |
+| High throughput | 1-2 leads + 12-16 heavy workers + 8+ light workers | 1 | 20+ | 32+ vCPU, 64+ GiB RAM or Kubernetes node pool | Sustained task queues where horizontal scale matters more than single-host simplicity. |
+| Thin relay workers | Depends on provider | 2 | Varies | Add 512 MiB-1 GiB RAM per extra active task | Only for providers where execution happens outside the worker and local tooling is minimal. |
+
+| Knob | Resource effect | Recommendation |
+|---|---|---|
+| Number of worker containers | Adds near-linear CPU/RAM capacity and isolation | Preferred scaling lever for local-runtime agents. |
+| `MAX_CONCURRENT_TASKS` (parallel tasks per worker) | Multiplies per-container peak memory and tool contention | Keep the default `1` for coding, builds, browser automation, and repo-wide tests. |
+| Heavy-worker ratio | Determines how many implementation tasks can run at once | Size from expected active coding sessions, not total agent count. |
+| Light-worker ratio | Adds review, triage, content, and QA capacity cheaply | Use remaining host capacity after API, lead, and heavy workers are reserved. |
+| Provider credential pools | Avoids provider-side rate or session contention | Match credential slots to the maximum number of concurrent workers for that provider. |
+
+## Harness Provider Profiles
+
+Agent Swarm can run several harness providers. Their runtime behavior matters when you assign work to specific worker containers.
+
+| Harness provider | Typical roles | Operational profile |
+|---|---|---|
+| `claude` | Lead, research, broad reasoning | Stable and reliable for broad reasoning, coordination, and work where continuity matters. |
+| `codex` | Implementation, review, structured validation | Stable with deterministic output behavior. Good fit for structured-output tasks, litmus work, code review, and implementation sessions that benefit from precise tool use. |
+| `pi` | Content, QA, UX inspection | Fine for content and QA-style work. Size by the actual task profile: content and inspection can be light, but browser or build-heavy QA can require more headroom. |
+| `opencode` | Lightweight review and discovery | Less suitable for determinism-critical work when deployments observe intermittent `opencode session error` crashes near task start. Retarget canonical workflow nodes to `claude` or `codex` when output determinism matters. |
+
+## Reading CPU Correctly
+
+The most common CPU false alarm is reading a cumulative counter as if it were an instantaneous utilization gauge.
+
+`container.cpu.utilization` can look like a perfectly linear post-deploy CPU climb when a dashboard plots it with average time aggregation. That line is not necessarily real load. It is a cumulative-since-boot counter being averaged over time, so the average mechanically rises until the container restarts. The tell is that it resets on each deploy.
+
+For instantaneous CPU, plot a rate query such as:
+
+```text
+rate(container.cpu.usage.total)
+```
+
+<Callout type="warn">
+Never make CPU sizing decisions from an avg-aggregated cumulative counter. If the graph climbs in a clean straight line and resets on deploy, first check whether the panel should use `rate` instead of `avg`.
+</Callout>
+
+A real-world SigNoz dashboard investigation hit this exact issue. The fix was to change the Container CPU Percent panel from average time aggregation to rate aggregation. After that, the real instantaneous CPU line was flat instead of climbing.
+
+## Reading Memory Correctly
+
+`container.memory.usage.total` can look stuck high after a heavy worker session. That does not automatically mean the worker is leaking memory.
+
+Two effects stack together:
+
+1. **cgroup page cache.** Coding sessions read and write many files. File-backed pages stay in the container's memory accounting as page cache. That cache is reclaimable, and the kernel usually keeps it until there is pressure because free RAM is wasted RAM.
+2. **Long-lived Bun/Node high-water mark.** When the runner, provider adapter, or child process allocates memory during a session, the JavaScript runtime may free heap internally without returning that RSS to the operating system. The process can sit near its session peak until it restarts.
+
+The practical tell is redeploy behavior. In the investigation that produced this guide, a coding worker plateaued around 1,145 MB at idle, peaked at 1,979 MB during a heavy session, and reset to about 470 MB after the next redeploy. That pattern is consistent with page cache plus runtime high-water mark, not a continuously growing leak.
+
+For a better "real memory" panel, plot working set instead of total usage:
+
+```text
+container.memory.usage.total - container.memory.inactive_file
+```
+
+The exact metric names vary by collector, but the idea is the same: subtract inactive file-backed cache from total container memory so reclaimable page cache does not look like unreclaimable application heap.
+
+<Callout type="info">
+Use `usage.total` for capacity planning and OOM risk. Use working set for leak triage. They answer different questions.
+</Callout>
+
+## Recent Improvements
+
+Two fixes came out of the same operational thread:
+
+- PR #675 bounded two real accumulators: runner task-keyed VCS/cancel bookkeeping after completed tasks leave `state.activeTasks`, and API-side MCP owner/user session transports that survived unclean disconnects. The PR also added focused unit coverage for MCP idle transport cleanup.
+- The SigNoz Container CPU Percent dashboard panel was corrected from average aggregation on a cumulative counter to a rate-based view, removing the fake post-deploy CPU climb.
+
+## Practical Sizing Checklist
+
+Before changing container limits, answer these in order:
+
+1. Is the worker doing heavy local code work, or mostly coordination/content/review?
+2. Is the CPU panel using a rate over cumulative CPU usage, not an average of a monotonic counter?
+3. Is the memory panel showing total usage, working set, or heap/RSS from inside the process?
+4. Does apparent memory growth reset on redeploy?
+5. Is the harness provider appropriate for the task's reliability and determinism requirements?
+
+If the metrics pass those checks, size heavy coding workers with real headroom, keep leads around 1 vCPU / 1 GB, and run light specialists smaller until their actual workload says otherwise.

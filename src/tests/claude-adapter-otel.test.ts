@@ -15,7 +15,11 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { type Span, trace } from "@opentelemetry/api";
-import { buildClaudeCodeOtelEnv, ClaudeAdapter } from "../providers/claude-adapter";
+import {
+  buildClaudeCodeOtelEnv,
+  buildClaudeCodeRuntimeEnv,
+  ClaudeAdapter,
+} from "../providers/claude-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
 
 // Example IDs from the task — trace af2c8371…, span adff4f24… (the orphaned
@@ -136,6 +140,51 @@ describe("buildClaudeCodeOtelEnv — gate on", () => {
   });
 });
 
+describe("buildClaudeCodeRuntimeEnv", () => {
+  test("sets memory/privacy defaults for ephemeral Claude Code sessions", () => {
+    const env = buildClaudeCodeRuntimeEnv({});
+
+    expect(env.ENABLE_TOOL_SEARCH).toBe("true");
+    expect(env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING).toBe("1");
+    expect(env.CLAUDE_CODE_SKIP_PROMPT_HISTORY).toBe("1");
+    expect(env.CLAUDE_CODE_DISABLE_ATTACHMENTS).toBe("1");
+    expect(env.DISABLE_FEEDBACK_COMMAND).toBe("1");
+    expect(env.DISABLE_BUG_COMMAND).toBe("1");
+  });
+
+  test("always disables Claude Code Statsig/DNT telemetry", () => {
+    const env = buildClaudeCodeRuntimeEnv({});
+
+    expect(env.DISABLE_TELEMETRY).toBe("1");
+    expect(env.DO_NOT_TRACK).toBe("1");
+  });
+
+  test("keeps Claude Code Statsig/DNT opt-out separate from OTel config", () => {
+    for (const sourceEnv of [
+      { CLAUDE_CODE_ENABLE_TELEMETRY: "1" },
+      { CLAUDE_CODE_ENABLE_TELEMETRY: "true" },
+      { OTEL_EXPORTER_OTLP_ENDPOINT: "https://otel.example.test" },
+      { OTEL_TRACES_EXPORTER: "otlp" },
+      { OTEL_METRICS_EXPORTER: "otlp" },
+      { OTEL_LOGS_EXPORTER: "otlp" },
+    ]) {
+      const env = buildClaudeCodeRuntimeEnv(sourceEnv);
+      expect(env.DISABLE_TELEMETRY).toBe("1");
+      expect(env.DO_NOT_TRACK).toBe("1");
+    }
+  });
+
+  test("ignores empty OTel env values for runtime defaults", () => {
+    const env = buildClaudeCodeRuntimeEnv({
+      OTEL_EXPORTER_OTLP_ENDPOINT: "",
+      CLAUDE_CODE_ENABLE_TELEMETRY: "0",
+    });
+
+    expect(env.DISABLE_TELEMETRY).toBe("1");
+    expect(env.DO_NOT_TRACK).toBe("1");
+  });
+});
+
 // ─── Spawn integration through ClaudeAdapter.createSession ────────────────────
 
 /** Fake Bun.Subprocess — exits cleanly with no output. */
@@ -221,5 +270,40 @@ describe("ClaudeSession spawn env — SWARM_ENABLE_CLAUDE_CODE_OTEL", () => {
     // Existing env wiring is untouched.
     expect(env?.ENABLE_PROMPT_CACHING_1H).toBe("1");
     expect(env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("test-token");
+  });
+
+  test("spawn env carries Claude Code runtime guardrails", async () => {
+    const adapter = new ClaudeAdapter();
+    await adapter.createSession(makeConfig({ env: { CLAUDE_CODE_OAUTH_TOKEN: "test-token" } }));
+
+    expect(spawnedEnvs).toHaveLength(1);
+    const env = spawnedEnvs[0];
+    expect(env?.ENABLE_TOOL_SEARCH).toBe("true");
+    expect(env?.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING).toBe("1");
+    expect(env?.CLAUDE_CODE_SKIP_PROMPT_HISTORY).toBe("1");
+    expect(env?.CLAUDE_CODE_DISABLE_ATTACHMENTS).toBe("1");
+    expect(env?.DISABLE_FEEDBACK_COMMAND).toBe("1");
+    expect(env?.DISABLE_BUG_COMMAND).toBe("1");
+    expect(env?.DISABLE_TELEMETRY).toBe("1");
+    expect(env?.DO_NOT_TRACK).toBe("1");
+    expect(env?.CLAUDE_CODE_DISABLE_THINKING).toBeUndefined();
+  });
+
+  test("spawn env keeps Statsig/DNT opt-out even when OTel is configured", async () => {
+    const adapter = new ClaudeAdapter();
+    await adapter.createSession(
+      makeConfig({
+        env: {
+          CLAUDE_CODE_OAUTH_TOKEN: "test-token",
+          CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+          OTEL_EXPORTER_OTLP_ENDPOINT: "https://otel.example.test",
+        },
+      }),
+    );
+
+    expect(spawnedEnvs).toHaveLength(1);
+    const env = spawnedEnvs[0];
+    expect(env?.DISABLE_TELEMETRY).toBe("1");
+    expect(env?.DO_NOT_TRACK).toBe("1");
   });
 });

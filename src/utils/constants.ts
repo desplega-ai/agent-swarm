@@ -3,19 +3,69 @@
  */
 
 /**
- * Default dashboard URL used when `APP_URL` is unset. Points at the public
- * production dashboard so links (Slack messages, approval URLs, etc.) are
- * always renderable. Self-hosted operators should set `APP_URL` to override.
+ * Default dashboard URL used when neither `APP_URL` nor the deprecated
+ * `DASHBOARD_URL` is set. Points at the public production dashboard so links
+ * (Slack messages, approval URLs, page share links, post-OAuth redirects)
+ * stay renderable even when an operator forgets to configure it. Local dev
+ * should set `APP_URL` (e.g. in `.env`) to point at the local dashboard.
  */
 export const DEFAULT_APP_URL = "https://app.agent-swarm.dev";
 
 /**
- * Resolve the effective app/dashboard URL from `APP_URL` (with trailing
- * slashes stripped), falling back to {@link DEFAULT_APP_URL}.
+ * Resolve every explicitly configured app/dashboard URL. Each env var may be
+ * a comma-separated origin list; entries are returned in precedence order with
+ * trailing slashes stripped.
+ *
+ * Precedence: `APP_URL` entries → `DASHBOARD_URL` entries (deprecated alias,
+ * kept for back-compat).
  */
-export function getAppUrl(): string {
-  const raw = process.env.APP_URL?.trim();
-  return (raw || DEFAULT_APP_URL).replace(/\/+$/, "");
+export function getConfiguredAppUrls(): string[] {
+  return [process.env.APP_URL, process.env.DASHBOARD_URL]
+    .flatMap((value) => (value ?? "").split(","))
+    .map((value) => value.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
+/**
+ * Resolve the effective app/dashboard URL — the public origin the user's
+ * browser is sent to (post-login redirects, Slack/approval links, page
+ * `app_url` share links). Trailing slashes are stripped.
+ *
+ * Precedence: first configured `APP_URL` entry → first configured
+ * `DASHBOARD_URL` entry (deprecated alias, kept for back-compat) → fallback.
+ * This is the single source of truth; call sites must not re-read
+ * `APP_URL`/`DASHBOARD_URL` directly.
+ */
+export function getAppUrl(fallback = DEFAULT_APP_URL): string {
+  return (getConfiguredAppUrls()[0] || fallback).replace(/\/+$/, "");
+}
+
+/**
+ * Internal API/MCP base URL — how workers/agents and in-process callers reach
+ * the API server. May be a private/cluster address (e.g. the Helm ClusterIP
+ * `http://<release>-api:3013`). Do NOT use for browser-facing or
+ * externally-registered URLs (OAuth redirect URIs, webhook URLs): those must
+ * resolve to a host the browser / third party can reach — use
+ * {@link getPublicMcpBaseUrl} (no request context) or `deriveApiBaseUrl(req)`
+ * (request-scoped) instead. Trailing slashes are stripped.
+ */
+export function getMcpBaseUrl(): string {
+  const raw = process.env.MCP_BASE_URL?.trim();
+  return (raw || `http://localhost:${process.env.PORT || "3013"}`).replace(/\/+$/, "");
+}
+
+/**
+ * Public, browser-/externally-reachable origin of the API server — where
+ * `/api/mcp-oauth/callback`, OAuth redirect URIs, and registered webhook URLs
+ * resolve. Falls back to {@link getMcpBaseUrl} when the public and internal
+ * hosts are the same (local dev, single-box, or an ngrok/tunnel set as
+ * `MCP_BASE_URL`). In split deployments (Helm), set `PUBLIC_MCP_BASE_URL` to
+ * the public ingress URL while `MCP_BASE_URL` stays the internal service
+ * address. Trailing slashes are stripped.
+ */
+export function getPublicMcpBaseUrl(): string {
+  const raw = process.env.PUBLIC_MCP_BASE_URL?.trim();
+  return raw ? raw.replace(/\/+$/, "") : getMcpBaseUrl();
 }
 
 /**

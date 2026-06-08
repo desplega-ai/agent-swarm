@@ -15,25 +15,25 @@ Summarize product, marketing, or sales signals into an operator-friendly weekly 
 
 ## Scheduled Task
 
-This is the full task prompt the schedule runs on each fire — including the accumulated operational learnings baked into it. Adapt the swarm-specific references (channel IDs, agent names, repo paths) to your environment before enabling.
+This is the full task prompt the schedule runs on each fire. Adapt the repositories, Search Console properties, report paths, and campaign goals to your environment before enabling.
 
 Task Type: Research
-Topic: Weekly GTM Metrics Review for agent-swarm
+Topic: Weekly GTM Metrics Review for your product
 
 Goal: Check current GitHub stars, traffic, Google Search Console performance, and content metrics for the GTM campaign.
 
 Instructions:
-1. Check GitHub metrics: `gh api repos/desplega-ai/agent-swarm` (stars, forks, issues)
-2. Check traffic: `gh api repos/desplega-ai/agent-swarm/traffic/views` and `/traffic/clones`
-3. Check referrers: `gh api repos/desplega-ai/agent-swarm/traffic/popular/referrers`
-4. Check popular content: `gh api repos/desplega-ai/agent-swarm/traffic/popular/paths`
+1. Check GitHub metrics: `gh api repos/owner/repo` (stars, forks, issues)
+2. Check traffic: `gh api repos/owner/repo/traffic/views` and `/traffic/clones`
+3. Check referrers: `gh api repos/owner/repo/traffic/popular/referrers`
+4. Check popular content: `gh api repos/owner/repo/traffic/popular/paths`
 
 5. **Pull Google Search Console data** using the `gsc-analytics` skill (already installed on this agent). Do NOT write Python auth code — use the `gsc` CLI at `/workspace/repos/agent-work/gsc/gsc`. The setup script already wires up `GOOGLE_APPLICATION_CREDENTIALS`, so no extra env setup needed.
 
-   Pull the weekly snapshot for each of the 4 Desplega properties:
+   Pull the weekly snapshot for each configured site:
    ```bash
    GSC=/workspace/repos/agent-work/gsc/gsc
-   for site in desplega.ai agent-swarm.dev desplega.sh agent-fs.dev; do
+   for site in example.com docs.example.com; do
      echo "=== $site ==="
      $GSC analytics "sc-domain:$site" --top 20 --json > "/tmp/gsc-$site.json"
      jq '{current, previous, window, prior,
@@ -55,4 +55,4 @@ Instructions:
 
 Save report to /workspace/shared/thoughts/shared/research/gtm-weekly-{date}.md
 
-This is part of the GTM: Agent Swarm → 100k GitHub Stars epic.
+This is part of your team's GTM goal; update the goal statement before enabling the schedule.

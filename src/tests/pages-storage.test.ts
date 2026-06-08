@@ -5,6 +5,7 @@ import {
   closeDb,
   createPage,
   deletePage,
+  getDb,
   getPage,
   getPageBySlug,
   getPageVersion,
@@ -79,6 +80,31 @@ describe("pages storage CRUD", () => {
     expect(getPage(created.id)).toBeNull();
     // Cascade: version rows gone
     expect(getPageVersions(created.id)).toHaveLength(0);
+  });
+
+  test("createPage defaults authMode to authed when omitted", () => {
+    const agentId = makeAgentId();
+    const created = createPage({
+      agentId,
+      slug: "default-auth",
+      title: "Default Auth",
+      contentType: "text/html",
+      body: "<h1>default</h1>",
+    });
+
+    expect(created.authMode).toBe("authed");
+  });
+
+  test("pages table defaults authMode to authed when omitted", () => {
+    const agentId = makeAgentId();
+    const row = getDb()
+      .prepare<{ authMode: string }, [string, string, string, string, string]>(
+        `INSERT INTO pages (agentId, slug, title, contentType, body)
+         VALUES (?, ?, ?, ?, ?) RETURNING authMode`,
+      )
+      .get(agentId, "sql-default-auth", "SQL Default Auth", "text/html", "<h1>default</h1>");
+
+    expect(row?.authMode).toBe("authed");
   });
 
   test("snapshotPage captures PRE-update content; post-update lives on parent", () => {

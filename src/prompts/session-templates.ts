@@ -378,11 +378,9 @@ registerTemplate({
 
 You have access to the \`context-mode\` MCP tools (\`batch_execute\`, \`execute\`, \`execute_file\`, \`search\`, \`fetch_and_index\`, \`index\`) which compress tool output to save context window space. For data-heavy operations (web fetches, large file reads, CLI output processing), prefer these over raw Bash/WebFetch to avoid flooding your context window with raw output.
 
-When a tool returns more than a few dozen lines — JSON payloads, log tails, search results, API responses — route it through \`ctx_execute\` or \`ctx_batch_execute\` so only the derived answer enters your conversation. This is especially important for tasks that make many Bash/Read/MCP calls in sequence; each raw response compounds context pressure.
-
 ### Agent Scripts — for bulk, repetitive, or data-heavy work
 
-Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repetitive SDK calls, large data processing, or deterministic multi-step pipelines. Scripts run out-of-process and return only their final result — none of the intermediate output floods your context window.
+Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repetitive SDK calls, large data processing, or deterministic multi-step pipelines. Scripts run out-of-process and return only their final result.
 
 **Decision rubric — when to use scripts vs. other approaches:**
 
@@ -394,7 +392,6 @@ Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repeti
 | Single expensive web fetch | \`ctx_fetch_and_index\` (context-mode) |
 | Multi-agent fan-out, parallel work, deterministic pipeline | **Workflow** |
 | One-off bash/TS with no reuse needed | \`code-mode run\` (Bash) |
-| Same logic needed across sessions/agents | **Named script** (\`script-upsert\` + reuse) |
 
 The 5 script tools (\`script-search\`, \`script-run\`, \`script-upsert\`, \`script-delete\`, \`script-query-types\`) are deferred tools. Call ToolSearch to load \`script-upsert\`, \`script-run\`, and \`script-query-types\` before using them.
 
@@ -402,6 +399,27 @@ The 5 script tools (\`script-search\`, \`script-run\`, \`script-upsert\`, \`scri
 - \`agentId\` IS propagated to scripts via the \`X-Agent-ID\` header.
 - \`taskId\` is NOT propagated to scripts — there is no ambient task context. Pass \`taskId\` explicitly via \`args\` if the script needs to call \`ctx.swarm.task_storeProgress\`.
 - Use \`script-query-types\` to inspect the live \`swarm-sdk.d.ts\` before authoring a complex script.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.seed_scripts",
+  header: "",
+  defaultBody: `
+### Pre-built Seed Scripts
+
+The swarm ships named scripts at global scope — each replaces a multi-step tool chain.
+See the \`swarm-scripts\` skill for the full catalog, signatures, and usage patterns.
+
+**At every task start (do this FIRST):** Run \`task-context-gathering\` with the task ID and 2-4 queries from the task description. Returns a slimmed task projection + deduped memories in one call — replaces task_get + memory_search loops.
+
+**At task start when you only need memory:** Run \`smart-recall\` with 2-4 search angles from the task description.
+
+**For any other repetitive multi-tool pattern:** Call \`script-search\` with a natural-language description. If a script exists, use it.
+
+Script tools are deferred — load via \`ToolSearch("select:script-search,script-run")\` before first use.
 `,
   variables: [],
   category: "system",
@@ -602,6 +620,7 @@ registerTemplate({
 {{@template[system.agent.filesystem]}}
 {{@template[system.agent.self_awareness]}}
 {{@template[system.agent.context_mode]}}
+{{@template[system.agent.seed_scripts]}}
 
 {{@template[system.agent.system]}}
 {{@template[system.agent.share_urls]}}
@@ -623,6 +642,7 @@ registerTemplate({
 {{@template[system.agent.filesystem]}}
 {{@template[system.agent.self_awareness]}}
 {{@template[system.agent.context_mode]}}
+{{@template[system.agent.seed_scripts]}}
 
 {{@template[system.agent.system]}}
 {{@template[system.agent.share_urls]}}

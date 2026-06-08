@@ -1,5 +1,6 @@
 import {
   assignUnassignedTaskPending,
+  backfillSupersedeTaskResumeTaskId,
   cleanupStaleSessions,
   createTaskExtended,
   deleteActiveSession,
@@ -25,7 +26,7 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
-import { createResumeFollowUp } from "../tasks/worker-follow-up";
+import { createResumeFollowUp, getNextResumeGeneration } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
@@ -59,6 +60,11 @@ const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEAN
 
 /** Max pool tasks to auto-assign per sweep */
 const MAX_AUTO_ASSIGN_PER_SWEEP = Number(process.env.HEARTBEAT_MAX_AUTO_ASSIGN) || 5;
+
+/** Max crash-recovery resume generations before failing for lead triage */
+export const MAX_RESUME_GENERATIONS = Number(process.env.HEARTBEAT_MAX_RESUME_GENERATIONS) || 3;
+
+export const RESUME_BUDGET_EXHAUSTED_REASON = "resume_budget_exhausted";
 
 /** Heartbeat checklist interval: how often to check HEARTBEAT.md (default: 30 min) */
 const HEARTBEAT_CHECKLIST_INTERVAL_MS =
@@ -98,9 +104,16 @@ export interface HeartbeatFindings {
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let checklistInterval: ReturnType<typeof setInterval> | null = null;
 let isSweeping = false;
+let beforeHeartbeatSupersedeForTests: ((task: AgentTask) => void) | null = null;
 
 /** Tasks auto-failed during the reboot sweep, consumed by boot triage */
 let rebootAffectedTasks: Array<{ original: AgentTask; retryTaskId: string | null }> = [];
+
+export function setBeforeHeartbeatSupersedeForTests(
+  hook: ((task: AgentTask) => void) | null,
+): void {
+  beforeHeartbeatSupersedeForTests = hook;
+}
 
 // ============================================================================
 // Tier 1: Preflight Gate
@@ -300,16 +313,40 @@ function remediateCrashedWorkerTask(
     return;
   }
 
-  // Supersede + resume path.
+  const nextResumeGeneration = getNextResumeGeneration(task);
+  if (nextResumeGeneration > MAX_RESUME_GENERATIONS) {
+    const failed = failTask(task.id, RESUME_BUDGET_EXHAUSTED_REASON);
+    if (failed) {
+      findings.autoFailedTasks.push({
+        taskId: task.id,
+        agentId: task.agentId,
+        reason: RESUME_BUDGET_EXHAUSTED_REASON,
+      });
+      if (opts.cleanupActiveSession) deleteActiveSession(task.id);
+      console.warn(
+        `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — ${RESUME_BUDGET_EXHAUSTED_REASON} (${opts.shortLabel})`,
+      );
+      const remaining = getActiveTaskCount(task.agentId);
+      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+    }
+    return;
+  }
+
+  beforeHeartbeatSupersedeForTests?.(task);
+
   const superseded = supersedeTask(task.id, {
     reason: opts.supersedeReason,
     resumeTaskId: null,
   });
-  if (!superseded) return;
+  if (!superseded) {
+    return;
+  }
 
   const resume = createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
 
   if (resume.kind === "created") {
+    backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
+
     findings.autoResumedTasks.push({
       taskId: task.id,
       resumeTaskId: resume.task.id,
@@ -320,10 +357,20 @@ function remediateCrashedWorkerTask(
       `[Heartbeat] Auto-superseded task ${task.id.slice(0, 8)} — created resume ${resume.task.id.slice(0, 8)} (${opts.shortLabel})`,
     );
   } else {
-    // `workflow-skip` is unreachable here (handled above). `skipped` covers
-    // parent-not-found / lead-not-found edge cases — just log for operators.
-    console.log(
-      `[Heartbeat] Task ${task.id.slice(0, 8)} superseded but no resume created (${
+    const reason =
+      resume.kind === "skipped"
+        ? `resume_creation_skipped_${resume.reason}`
+        : "resume_creation_skipped_workflow";
+    const failed = failTask(task.id, reason);
+    if (failed) {
+      findings.autoFailedTasks.push({
+        taskId: task.id,
+        agentId: task.agentId,
+        reason,
+      });
+    }
+    console.warn(
+      `[Heartbeat] Task ${task.id.slice(0, 8)} failed because no resume was created (${
         resume.kind === "skipped" ? resume.reason : "workflow-skip"
       })`,
     );

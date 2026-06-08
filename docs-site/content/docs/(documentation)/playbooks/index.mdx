@@ -3,7 +3,7 @@ title: Playbooks
 description: Eight production playbooks for running an agent swarm — feature development, prospecting, content, UX audits, customer support, code health, cross-source reports, and self-documenting releases. Real flows, real schedules, real agents.
 ---
 
-These playbooks document how we actually run our internal swarm at [Desplega Labs](https://desplega.ai). Each one corresponds to a "Known Use Case" from the [agent-swarm README](https://github.com/desplega-ai/agent-swarm) and gives you the same three things:
+These playbooks document reusable ways to run an agent swarm in production. Each one corresponds to a "Known Use Case" from the [agent-swarm README](https://github.com/desplega-ai/agent-swarm) and gives you the same three things:
 
 1. **Agents** — which roles do the work, with links to the [official agent templates](https://templates.agent-swarm.dev/official).
 2. **Tools & Skills** — what each agent calls, grouped by source (see the legend below).
@@ -21,7 +21,7 @@ Every skill referenced in a playbook is tagged with one of three sources:
 |---|---|---|
 | **`[Built-in]`** | Ships with the `agent-swarm` package | [`desplega-ai/agent-swarm` → `plugin/`](https://github.com/desplega-ai/agent-swarm/tree/main/plugin) |
 | **`[ai-toolbox]`** | Open-source Claude Code plugin | [`desplega-ai/ai-toolbox` → `cc-plugin/`](https://github.com/desplega-ai/ai-toolbox/tree/main/cc-plugin) |
-| **`[Custom]`** | Authored by us, currently swarm-managed via `skill-create` / `skill-install` (publishing model under [discussion](https://linear.app/desplega-labs/issue/DES-510)) | Not in a public repo yet |
+| **`[Custom]`** | Deployment-specific skills that teams author with `skill-create` / `skill-install` | Your swarm's skill registry |
 
 Agent links always point at the matching [official template](https://templates.agent-swarm.dev/official) so new swarm users can clone the template as a starting point.
 
