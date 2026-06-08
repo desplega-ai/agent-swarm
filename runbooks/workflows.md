@@ -17,6 +17,47 @@ Without `inputs`, upstream references silently resolve to empty strings — chec
 
 Schema goes in `config.outputSchema` (not node-level). The agent produces JSON matching it; validated by `store-progress`.
 
+## Large artifact handoffs
+
+Agent-task nodes should not pass large raw artifacts directly into later LLM prompts. If a node writes a full debug/audit artifact such as a commit context, trace bundle, scrape result, or report dataset, it should also write a slim prompt artifact and return both paths:
+
+```json
+{
+  "contextPath": "release-runs/2026-06-08/context.json",
+  "contextSlimPath": "release-runs/2026-06-08/context-slim.json"
+}
+```
+
+Downstream LLM nodes should read the slim path:
+
+```bash
+agent-fs --org <org-id> cat {{context.taskOutput.contextSlimPath}}
+```
+
+Keep the full path for audit/debugging only. Add an explicit prompt guard such as "Do not read `{{context.taskOutput.contextPath}}` unless a human asks for it." This prevents high-volume weeks from turning a normal structured-output task into a context-overflow failure before the agent can call `store-progress`.
+
+Recommended slim commit shape:
+
+```json
+{
+  "commits": [
+    {
+      "hash": "abc123...",
+      "shortHash": "abc123",
+      "author": "Name",
+      "date": "2026-06-08",
+      "message": "feat: add workflow run waterfall",
+      "files": ["src/workflows/engine.ts", "ui/src/pages/workflow-runs/[id]/page.tsx"]
+    }
+  ],
+  "commitCountTotal": 70,
+  "commitCountIncluded": 70,
+  "truncated": false
+}
+```
+
+Do not include patch bodies, diff hunks, raw `git log --stat` output, downloaded HTML, or other bulk text in the slim artifact. Cap arrays before prompt ingestion; for release-note workflows, 150 commits is a reasonable default.
+
 ## Interpolation
 
 `{{path.to.value}}` in any string field inside `config`. Objects get JSON-stringified; nulls become empty strings.

@@ -1,0 +1,13 @@
+{
+  "kind": "workflow",
+  "name": "llm-safe-release-context",
+  "displayName": "LLM-Safe Release Context",
+  "slug": "llm-safe-release-context",
+  "title": "LLM-Safe Release Context",
+  "description": "Pattern for release-note workflows that keep full audit context separate from slim prompt context.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": ["ORG_ID", "REPO_URL"],
+  "runAllSeedersCandidate": false,
+  "tags": ["workflow", "release-notes", "context"]
+}
