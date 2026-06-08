@@ -208,6 +208,211 @@ describe("seed-scripts catalog", () => {
     ).toBeGreaterThan(0.99);
   });
 
+  test("compound-insights reports script usage and cost honesty rails", async () => {
+    const queries: string[] = [];
+    const ctx = {
+      swarm: {
+        async db_query({ sql }: { sql: string }) {
+          queries.push(sql);
+          if (sql.includes("FROM script_runs sr")) {
+            return {
+              columns: ["scriptName", "kind", "status", "startedAt", "finishedAt", "durationMs"],
+              rows: [
+                [
+                  "compound-insights",
+                  "inline",
+                  "completed",
+                  "2026-06-08T00:00:00.000Z",
+                  "2026-06-08T00:00:01.000Z",
+                  1000,
+                ],
+                [
+                  "daily-dashboard",
+                  "workflow",
+                  "failed",
+                  "2026-06-08T01:00:00.000Z",
+                  "2026-06-08T01:00:03.000Z",
+                  3000,
+                ],
+              ],
+            };
+          }
+          if (sql.includes("FROM scripts") && sql.includes("GROUP BY scope, isScratch")) {
+            return {
+              columns: ["scope", "isScratch", "count"],
+              rows: [
+                ["global", 0, 2],
+                ["agent", 1, 1],
+              ],
+            };
+          }
+          if (sql.includes("FROM script_versions sv")) {
+            return {
+              columns: ["scope", "count"],
+              rows: [["global", 3]],
+            };
+          }
+          if (sql.includes("FROM session_logs") && sql.includes("%script-run%")) {
+            return {
+              columns: ["tool", "calls"],
+              rows: [["mcp__agent_swarm__script-run", 5]],
+            };
+          }
+          if (sql.includes("FROM session_costs sc")) {
+            return {
+              columns: [
+                "taskId",
+                "agentId",
+                "agentName",
+                "provider",
+                "totalCostUsd",
+                "inputTokens",
+                "outputTokens",
+                "cacheReadTokens",
+                "cacheWriteTokens",
+                "reasoningOutputTokens",
+                "thinkingTokens",
+                "numTurns",
+                "model",
+                "costSource",
+              ],
+              rows: [
+                [
+                  "task-a",
+                  "agent-a",
+                  "Picateclas",
+                  "codex",
+                  0.3,
+                  100,
+                  20,
+                  10,
+                  null,
+                  3,
+                  4,
+                  null,
+                  "gpt-5.5",
+                  "harness",
+                ],
+                [
+                  "task-b",
+                  "agent-a",
+                  "Picateclas",
+                  "codex",
+                  0.5,
+                  200,
+                  40,
+                  20,
+                  2,
+                  0,
+                  0,
+                  2,
+                  "gpt-5.5",
+                  "pricing-table",
+                ],
+                [
+                  "task-c",
+                  "agent-b",
+                  "Worker",
+                  "claude",
+                  9.9,
+                  300,
+                  60,
+                  30,
+                  3,
+                  0,
+                  0,
+                  3,
+                  "unknown",
+                  "unpriced",
+                ],
+                [
+                  null,
+                  "agent-a",
+                  "Picateclas",
+                  "codex",
+                  0.2,
+                  50,
+                  10,
+                  5,
+                  null,
+                  1,
+                  1,
+                  null,
+                  "gpt-5.5",
+                  "harness",
+                ],
+              ],
+            };
+          }
+          return { columns: [], rows: [] };
+        },
+      },
+    };
+
+    const result = await compoundInsights(
+      {
+        days: 7,
+        includeToolUsage: false,
+        includeScheduleHealth: false,
+        includeMemoryHealth: false,
+        includeScriptCandidates: false,
+        includeByAgent: false,
+        publishPage: false,
+      },
+      ctx,
+    );
+
+    expect(queries.some((sql) => sql.includes("FROM script_runs sr"))).toBe(true);
+    expect(queries.some((sql) => sql.includes("FROM session_costs sc"))).toBe(true);
+    expect(result.scriptUsage.runs).toMatchObject({
+      total: 2,
+      inline: 1,
+      workflow: 1,
+      completed: 1,
+      failed: 1,
+      successRate: 50,
+      durationP50Ms: 1000,
+      durationP95Ms: 3000,
+    });
+    expect(result.scriptUsage.creations).toMatchObject({
+      totalNonScratch: 2,
+      scratch: 1,
+      byScope: { global: 2 },
+    });
+    expect(result.scriptUsage.edits).toMatchObject({
+      total: 3,
+      byScope: { global: 3 },
+    });
+    expect(result.scriptUsage.mcpToolCalls).toEqual([
+      { tool: "mcp__agent_swarm__script-run", calls: 5 },
+    ]);
+    expect(result.costAndTokens).toMatchObject({
+      rows: 4,
+      taskCountForHeadlineAvg: 2,
+      avgCostPerTaskUsd: 0.4,
+      totalSpendUsd: 10.9,
+      trustedSpendUsd: 1,
+      trustedRows: 3,
+      trustedRowPercent: 75,
+      unpricedRows: 1,
+      unpricedSpendUsd: 9.9,
+      nonTaskSessionRows: 1,
+      nonTaskSessionSpendUsd: 0.2,
+      unknownCounts: {
+        cacheWriteTokens: 2,
+        numTurns: 2,
+      },
+    });
+    expect(result.costAndTokens.tokenTotals).toMatchObject({
+      inputTokens: 650,
+      outputTokens: 130,
+      cacheReadTokens: 65,
+      cacheWriteTokens: 5,
+      reasoningOutputTokens: 4,
+      thinkingTokens: 5,
+    });
+  });
+
   test("ops-catalog-audit clusters schedule, workflow, and prompt findings by goal", async () => {
     const queries: string[] = [];
     const result = await opsCatalogAudit(

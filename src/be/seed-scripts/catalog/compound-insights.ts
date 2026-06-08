@@ -18,6 +18,14 @@ export const argsSchema = z.object({
     .boolean()
     .optional()
     .describe("Include high-frequency tool-triplet candidates for future seed scripts (default true)"),
+  includeScriptUsage: z
+    .boolean()
+    .optional()
+    .describe("Include actual script run, creation, and edit metrics (default true)"),
+  includeCostAndTokens: z
+    .boolean()
+    .optional()
+    .describe("Include session cost and token metrics with honesty rails (default true)"),
   includeByAgent: z
     .boolean()
     .optional()
@@ -57,6 +65,17 @@ function round1(value: number): number {
 
 function percent(part: number, total: number): number {
   return total > 0 ? round1((part / total) * 100) : 0;
+}
+
+function round4(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
+function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, Math.min(sorted.length - 1, index))] ?? null;
 }
 
 function extractToolName(content: string): string | null {
@@ -106,6 +125,220 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
+function summarizeScriptUsage(rows: any[], creationRows: any[], editRows: any[], toolRows: any[]) {
+  const terminalStatuses = new Set(["completed", "failed", "cancelled", "aborted_limit"]);
+  const failureStatuses = new Set(["failed", "cancelled", "aborted_limit"]);
+  const durations = rows
+    .map((r) => asNumber(r.durationMs))
+    .filter((duration) => duration > 0);
+  const byScript = new Map<
+    string,
+    {
+      scriptName: string;
+      runs: number;
+      completed: number;
+      failed: number;
+      successRate: number;
+      durationP50Ms: number | null;
+      durationP95Ms: number | null;
+      inline: number;
+      workflow: number;
+      durations: number[];
+    }
+  >();
+
+  for (const row of rows) {
+    const name = String(row.scriptName || "(inline source)");
+    const current =
+      byScript.get(name) ??
+      {
+        scriptName: name,
+        runs: 0,
+        completed: 0,
+        failed: 0,
+        successRate: 0,
+        durationP50Ms: null,
+        durationP95Ms: null,
+        inline: 0,
+        workflow: 0,
+        durations: [],
+      };
+    current.runs += 1;
+    if (row.kind === "inline") current.inline += 1;
+    if (row.kind === "workflow") current.workflow += 1;
+    if (row.status === "completed") current.completed += 1;
+    if (failureStatuses.has(String(row.status))) current.failed += 1;
+    const duration = asNumber(row.durationMs);
+    if (duration > 0) current.durations.push(duration);
+    byScript.set(name, current);
+  }
+
+  const perScript = [...byScript.values()]
+    .map((script) => ({
+      scriptName: script.scriptName,
+      runs: script.runs,
+      completed: script.completed,
+      failed: script.failed,
+      successRate: percent(script.completed, script.runs),
+      durationP50Ms: percentile(script.durations, 50),
+      durationP95Ms: percentile(script.durations, 95),
+      inline: script.inline,
+      workflow: script.workflow,
+    }))
+    .sort((a, b) => b.runs - a.runs)
+    .slice(0, 20);
+
+  const creationsByScope: Record<string, number> = {};
+  let creations = 0;
+  let scratchCreations = 0;
+  for (const row of creationRows) {
+    const count = asNumber(row.count);
+    if (asNumber(row.isScratch) === 1) {
+      scratchCreations += count;
+    } else {
+      creations += count;
+      creationsByScope[String(row.scope || "unknown")] =
+        (creationsByScope[String(row.scope || "unknown")] ?? 0) + count;
+    }
+  }
+
+  const editsByScope: Record<string, number> = {};
+  let edits = 0;
+  for (const row of editRows) {
+    const count = asNumber(row.count);
+    edits += count;
+    editsByScope[String(row.scope || "unknown")] =
+      (editsByScope[String(row.scope || "unknown")] ?? 0) + count;
+  }
+
+  return {
+    source: {
+      authoritativeRuns: "script_runs",
+      mcpCallSignal: "session_logs tool_use for script tools",
+      reconciliation:
+        "`script-run` via MCP calls /api/scripts/run, which records kind='inline' rows in script_runs; launch-script-run/workflows record kind='workflow'. session_logs counts agent tool calls and must not be added to script_runs totals.",
+    },
+    runs: {
+      total: rows.length,
+      inline: rows.filter((r) => r.kind === "inline").length,
+      workflow: rows.filter((r) => r.kind === "workflow").length,
+      completed: rows.filter((r) => r.status === "completed").length,
+      failed: rows.filter((r) => failureStatuses.has(String(r.status))).length,
+      runningOrPaused: rows.filter((r) => !terminalStatuses.has(String(r.status))).length,
+      successRate: percent(
+        rows.filter((r) => r.status === "completed").length,
+        rows.length,
+      ),
+      durationP50Ms: percentile(durations, 50),
+      durationP95Ms: percentile(durations, 95),
+      perScript,
+    },
+    creations: {
+      totalNonScratch: creations,
+      scratch: scratchCreations,
+      byScope: creationsByScope,
+    },
+    edits: {
+      total: edits,
+      byScope: editsByScope,
+    },
+    mcpToolCalls: toolRows.map((r) => ({ tool: r.tool, calls: asNumber(r.calls) })),
+  };
+}
+
+function summarizeCostAndTokens(rows: any[]) {
+  const trustedSources = new Set(["harness", "pricing-table"]);
+  const trustedRows = rows.filter((r) => trustedSources.has(String(r.costSource)));
+  const unpricedRows = rows.filter((r) => String(r.costSource) === "unpriced");
+  const trustedTaskRows = trustedRows.filter((r) => r.taskId);
+  const trustedTaskIds = new Set(trustedTaskRows.map((r) => String(r.taskId)));
+  const trustedTaskSpend = trustedTaskRows.reduce((sum, r) => sum + asNumber(r.totalCostUsd), 0);
+  const nonTaskRows = rows.filter((r) => !r.taskId);
+  const totalSpend = rows.reduce((sum, r) => sum + asNumber(r.totalCostUsd), 0);
+  const trustedSpend = trustedRows.reduce((sum, r) => sum + asNumber(r.totalCostUsd), 0);
+
+  const sumToken = (field: string) =>
+    rows.reduce((sum, r) => (r[field] === null || r[field] === undefined ? sum : sum + asNumber(r[field])), 0);
+  const unknownCount = (field: string) =>
+    rows.filter((r) => r[field] === null || r[field] === undefined).length;
+
+  const groupBy = (field: string) => {
+    const grouped = new Map<
+      string,
+      {
+        key: string;
+        rows: number;
+        spendUsd: number;
+        trustedSpendUsd: number;
+        unpricedRows: number;
+      }
+    >();
+    for (const row of rows) {
+      const key = String(row[field] || "unknown");
+      const current =
+        grouped.get(key) ?? {
+          key,
+          rows: 0,
+          spendUsd: 0,
+          trustedSpendUsd: 0,
+          unpricedRows: 0,
+        };
+      current.rows += 1;
+      current.spendUsd += asNumber(row.totalCostUsd);
+      if (trustedSources.has(String(row.costSource))) current.trustedSpendUsd += asNumber(row.totalCostUsd);
+      if (String(row.costSource) === "unpriced") current.unpricedRows += 1;
+      grouped.set(key, current);
+    }
+    return [...grouped.values()]
+      .map((r) => ({
+        ...r,
+        spendUsd: round4(r.spendUsd),
+        trustedSpendUsd: round4(r.trustedSpendUsd),
+      }))
+      .sort((a, b) => b.spendUsd - a.spendUsd);
+  };
+
+  return {
+    source: {
+      table: "session_costs",
+      providerDerivation:
+        "provider is derived from agents.harness_provider, then agents.provider, because session_costs does not carry a provider column",
+      headlineAvgCostRule:
+        "avgCostPerTaskUsd excludes unpriced rows and rows with null taskId; null-task sessions are reported separately",
+    },
+    rows: rows.length,
+    taskCountForHeadlineAvg: trustedTaskIds.size,
+    avgCostPerTaskUsd:
+      trustedTaskIds.size > 0 ? round4(trustedTaskSpend / trustedTaskIds.size) : null,
+    totalSpendUsd: round4(totalSpend),
+    trustedSpendUsd: round4(trustedSpend),
+    trustedRows: trustedRows.length,
+    trustedRowPercent: percent(trustedRows.length, rows.length),
+    unpricedRows: unpricedRows.length,
+    unpricedSpendUsd: round4(unpricedRows.reduce((sum, r) => sum + asNumber(r.totalCostUsd), 0)),
+    nonTaskSessionRows: nonTaskRows.length,
+    nonTaskSessionSpendUsd: round4(
+      nonTaskRows.reduce((sum, r) => sum + asNumber(r.totalCostUsd), 0),
+    ),
+    tokenTotals: {
+      inputTokens: sumToken("inputTokens"),
+      outputTokens: sumToken("outputTokens"),
+      cacheReadTokens: sumToken("cacheReadTokens"),
+      cacheWriteTokens: sumToken("cacheWriteTokens"),
+      reasoningOutputTokens: sumToken("reasoningOutputTokens"),
+      thinkingTokens: sumToken("thinkingTokens"),
+    },
+    unknownCounts: {
+      cacheWriteTokens: unknownCount("cacheWriteTokens"),
+      numTurns: unknownCount("numTurns"),
+    },
+    byModel: groupBy("model"),
+    byAgent: groupBy("agentName"),
+    byProvider: groupBy("provider"),
+    byCostSource: groupBy("costSource"),
+  };
+}
+
 /**
  * Daily compounding insights — compressed JSON for Phase 0 evolution.
  *
@@ -121,6 +354,8 @@ export default async function compoundInsights(args: any, ctx: any) {
   const includeScheduleHealth = parsed.data.includeScheduleHealth !== false;
   const includeMemoryHealth = parsed.data.includeMemoryHealth !== false;
   const includeScriptCandidates = parsed.data.includeScriptCandidates !== false;
+  const includeScriptUsage = parsed.data.includeScriptUsage !== false;
+  const includeCostAndTokens = parsed.data.includeCostAndTokens !== false;
   const includeByAgent = parsed.data.includeByAgent !== false;
   const publishPage = parsed.data.publishPage !== false;
 
@@ -378,6 +613,101 @@ export default async function compoundInsights(args: any, ctx: any) {
       }));
   }
 
+  // Actual script usage. Authoritative run counts come from `script_runs`;
+  // session_logs tool_use rows are a separate MCP-call signal for reconciliation
+  // and are intentionally not added to run totals.
+  if (includeScriptUsage) {
+    const runRows = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: `WITH journal_durations AS (
+                 SELECT runId, sum(durationMs) AS journalDurationMs
+                 FROM script_run_journal
+                 WHERE durationMs IS NOT NULL
+                 GROUP BY runId
+               )
+               SELECT sr.scriptName, sr.kind, sr.status, sr.startedAt, sr.finishedAt,
+                      COALESCE(
+                        jd.journalDurationMs,
+                        CASE
+                          WHEN sr.finishedAt IS NOT NULL
+                          THEN CAST((julianday(sr.finishedAt) - julianday(sr.startedAt)) * 86400000 AS INTEGER)
+                          ELSE NULL
+                        END
+                      ) AS durationMs
+               FROM script_runs sr
+               LEFT JOIN journal_durations jd ON jd.runId = sr.id
+               WHERE sr.startedAt > ${w}
+               ORDER BY sr.startedAt DESC`,
+      }),
+    );
+    const creationRows = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: `SELECT scope, isScratch, count(*) AS count
+              FROM scripts
+              WHERE createdAt > ${w}
+              GROUP BY scope, isScratch`,
+      }),
+    );
+    const editRows = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: `SELECT s.scope, count(*) AS count
+              FROM script_versions sv
+              JOIN scripts s ON s.id = sv.scriptId
+              WHERE sv.changedAt > ${w} AND sv.version > 1
+              GROUP BY s.scope`,
+      }),
+    );
+    const scriptToolRows = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: `WITH tu AS (
+                 SELECT substr(content, instr(content,'"type":"tool_use"')) AS tail,
+                        json_extract(content, '$.tool_name') as jsonToolName
+                 FROM session_logs
+                 WHERE createdAt > ${w}
+                   AND (content LIKE '%script-run%'
+                     OR content LIKE '%launch-script-run%'
+                     OR content LIKE '%get-script-run%'
+                     OR content LIKE '%list-script-runs%')
+               ),
+               nm AS (
+                 SELECT COALESCE(
+                          jsonToolName,
+                          CASE
+                            WHEN instr(tail,'"name":"') > 0
+                            THEN substr(substr(tail, instr(tail,'"name":"')+8), 1, instr(substr(tail, instr(tail,'"name":"')+8), '"')-1)
+                            ELSE NULL
+                          END
+                        ) AS tool
+                 FROM tu
+               )
+               SELECT tool, count(*) AS calls
+               FROM nm
+               WHERE tool IS NOT NULL AND tool LIKE '%script%'
+               GROUP BY tool
+               ORDER BY calls DESC`,
+      }),
+    );
+    insights.scriptUsage = summarizeScriptUsage(runRows, creationRows, editRows, scriptToolRows);
+  }
+
+  // Cost and token accounting. `costSource='unpriced'` rows are excluded from
+  // the headline per-task average, and null taskId rows are reported separately.
+  if (includeCostAndTokens) {
+    const costRows = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: `SELECT sc.taskId, sc.agentId, COALESCE(a.name, sc.agentId, 'unknown') AS agentName,
+                     COALESCE(a.harness_provider, a.provider, 'unknown') AS provider,
+                     sc.totalCostUsd, sc.inputTokens, sc.outputTokens, sc.cacheReadTokens,
+                     sc.cacheWriteTokens, sc.reasoningOutputTokens, sc.thinkingTokens,
+                     sc.numTurns, sc.model, sc.costSource
+              FROM session_costs sc
+              LEFT JOIN agents a ON a.id = sc.agentId
+              WHERE sc.createdAt > ${w}`,
+      }),
+    );
+    insights.costAndTokens = summarizeCostAndTokens(costRows);
+  }
+
   // Per-agent breakdown — covers every agent that ran a task in the window.
   if (includeByAgent) {
     insights.byAgent = rowsToObjects(
@@ -431,6 +761,31 @@ export default async function compoundInsights(args: any, ctx: any) {
       action: "Consider turning this repeated workflow into a reusable seeded script.",
       samples: [candidate],
     }));
+    const scriptUsageFindings = insights.scriptUsage
+      ? [
+          {
+            id: "script-usage.actual-runs",
+            severity: "low",
+            summary: `${insights.scriptUsage.runs.total} actual script run(s): ${insights.scriptUsage.runs.inline} one-off, ${insights.scriptUsage.runs.workflow} recurring/workflow.`,
+            action: "Use script_runs as the authoritative run count; use session_logs only as an MCP-call reconciliation signal.",
+            samples: [insights.scriptUsage],
+          },
+        ]
+      : [];
+    const costFindings = insights.costAndTokens
+      ? [
+          {
+            id: "cost-and-tokens.headline",
+            severity:
+              insights.costAndTokens.unpricedRows > 0 || insights.costAndTokens.nonTaskSessionRows > 0
+                ? "medium"
+                : "low",
+            summary: `$${insights.costAndTokens.totalSpendUsd} total session spend; avg task cost $${insights.costAndTokens.avgCostPerTaskUsd ?? "n/a"} over trusted task rows.`,
+            action: "Keep unpriced and null-task session spend separate from the headline per-task average.",
+            samples: [insights.costAndTokens],
+          },
+        ]
+      : [];
 
     insights.page = await publishCatalogReportPage(
       {
@@ -444,6 +799,8 @@ export default async function compoundInsights(args: any, ctx: any) {
           ["Completed", insights.taskSummary.completed],
           ["Failed", insights.taskSummary.failed],
           ["Failure clusters", insights.failureClusters?.length || 0],
+          ["Script runs", insights.scriptUsage?.runs?.total ?? 0],
+          ["Total spend", insights.costAndTokens?.totalSpendUsd ?? 0],
         ],
         sections: [
           {
@@ -480,6 +837,20 @@ export default async function compoundInsights(args: any, ctx: any) {
             findingCount: scriptFindings.length,
             checks: { candidates: scriptFindings.length },
             findings: scriptFindings,
+          },
+          {
+            key: "script-usage",
+            goal: "Track actual one-off and recurring script execution without double-counting MCP tool-use logs.",
+            findingCount: scriptUsageFindings.length,
+            checks: insights.scriptUsage ?? {},
+            findings: scriptUsageFindings,
+          },
+          {
+            key: "cost-and-tokens",
+            goal: "Track per-task cost and token consumption while separating unpriced and non-task sessions.",
+            findingCount: costFindings.length,
+            checks: insights.costAndTokens ?? {},
+            findings: costFindings,
           },
         ],
         appendix: insights,
