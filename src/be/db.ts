@@ -2117,6 +2117,14 @@ export function failTask(id: string, reason: string): AgentTask | null {
         });
       });
     } catch {}
+
+    // Cascade-fail any non-terminal tasks that depend on this one.
+    // The cascade is recursive (transitive closure) and cycle-safe.
+    try {
+      cascadeFailDependents(id, "failed");
+    } catch (err) {
+      console.error("[failTask] cascade-fail dependents error:", err);
+    }
   }
   return row ? rowToAgentTask(row) : null;
 }
@@ -2155,6 +2163,12 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
         });
       });
     } catch {}
+
+    try {
+      cascadeFailDependents(id, "cancelled");
+    } catch (err) {
+      console.error("[cancelTask] cascade-fail dependents error:", err);
+    }
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -2218,6 +2232,12 @@ export function supersedeTask(
         });
       });
     } catch {}
+
+    try {
+      cascadeFailDependents(id, "superseded");
+    } catch (err) {
+      console.error("[supersedeTask] cascade-fail dependents error:", err);
+    }
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -3388,6 +3408,75 @@ export function checkDependencies(taskId: string): {
   }
 
   return { ready: blockedBy.length === 0, blockedBy };
+}
+
+/**
+ * Reverse-lookup: find all tasks whose `dependsOn` JSON array contains `parentId`.
+ * Uses SQLite `json_each` to scan the dependsOn column efficiently.
+ * Returns only non-terminal tasks by default (the callers want to cascade-fail
+ * live dependents, not re-process already-finished ones).
+ */
+export function getDependentTasks(
+  parentId: string,
+  opts?: { includeTerminal?: boolean },
+): AgentTask[] {
+  const database = getDb();
+  const rows = database
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT t.*
+       FROM agent_tasks t, json_each(t.dependsOn) AS dep
+       WHERE dep.value = ?`,
+    )
+    .all(parentId);
+
+  const tasks = rows.map(rowToAgentTask);
+  if (opts?.includeTerminal) return tasks;
+  return tasks.filter((t) => !isTerminalTaskStatus(t.status));
+}
+
+export interface CascadeFailResult {
+  taskId: string;
+  taskSubject: string;
+}
+
+/**
+ * Recursively cascade-fail all transitive dependents of a parent task.
+ * Walks the full dependency graph: if A fails, and B depends on A, and C
+ * depends on B, then both B and C are failed.
+ *
+ * Guards against cycles with a visited set. Skips already-terminal tasks.
+ * Returns the list of tasks that were actually cascade-failed (for follow-up
+ * enrichment).
+ */
+export function cascadeFailDependents(
+  parentId: string,
+  parentStatus: string,
+  visited?: Set<string>,
+): CascadeFailResult[] {
+  const seen = visited ?? new Set<string>();
+  if (seen.has(parentId)) return [];
+  seen.add(parentId);
+
+  const dependents = getDependentTasks(parentId);
+  const results: CascadeFailResult[] = [];
+
+  for (const dep of dependents) {
+    if (seen.has(dep.id)) continue;
+
+    const reason = `Blocked dependency ${parentId.slice(0, 8)} was ${parentStatus}`;
+    const failed = failTask(dep.id, reason);
+    if (failed) {
+      results.push({
+        taskId: failed.id,
+        taskSubject: failed.task.slice(0, 120),
+      });
+      // Recurse: this dependent may itself have dependents
+      const transitive = cascadeFailDependents(dep.id, "failed (cascade)", seen);
+      results.push(...transitive);
+    }
+  }
+
+  return results;
 }
 
 // ============================================================================
