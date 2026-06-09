@@ -28,8 +28,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model slug sent to the provider. |
 | `EMBEDDING_DIMENSIONS` | `512` | Vector dimensions requested from the model. Must match what the model supports. |
-| `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for memory recency decay. When unset, recency defaults are source-aware: manual memories do not decay, `file_index` uses 180 days, `task_completion` uses 14 days, and `session_summary` uses 7 days. |
-| `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity required before a memory candidate survives reranking. Filters low-relevance noise before recency/access boosts are applied. |
+| `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Days until memory recency decay reaches 0.5 |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
@@ -60,7 +59,7 @@ Losing the key while keeping the database means losing every encrypted secret wi
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `opencode`, `pi` (pi-mono), `devin` (Devin), or `claude-managed` (Anthropic Managed Agents). See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `opencode`, `pi` (pi-mono), `devin` (Devin), `claude-managed` (Anthropic Managed Agents), or `acp` (any ACP-compatible agent). See [Harness Configuration](/docs/guides/harness-configuration) |
 
 ### Credentials
 
@@ -136,6 +135,19 @@ Starter env file: `.env.docker-devin.example` at the repo root.
 | `MANAGED_GITHUB_TOKEN` | No | — | Literal GitHub PAT injected as `authorization_token` on `github_repository` resources (dev-only fallback) |
 
 Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your laptop to bootstrap the Anthropic-side Agent + Environment and persist IDs into `swarm_config`. See [Harness Configuration § Claude Managed Agents](/docs/guides/harness-configuration#claude-managed-agents).
+
+**ACP** (`HARNESS_PROVIDER=acp`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ACP_TARGET` | No | `custom` | Target selector: `gemini`, `claude-agent-acp`, `codex-acp`, or `custom` |
+| `ACP_TARGET_COMMAND` | Conditional | — | Executable for `custom` target. Required when `ACP_TARGET=custom` (the default) |
+| `ACP_TARGET_ARGS` | No | — | Extra arguments for `ACP_TARGET_COMMAND`. JSON array or whitespace-separated string |
+| `ACP_SYSTEM_PROMPT_PATH` | No | — | File path where the adapter writes the system prompt (for targets that read it from disk) |
+| `GOOGLE_API_KEY` | Conditional | — | Required for `ACP_TARGET=gemini` (or `GEMINI_API_KEY`) |
+| `GEMINI_API_KEY` | Conditional | — | Alternative to `GOOGLE_API_KEY` for the gemini target |
+
+When `ACP_TARGET=claude-agent-acp`, use the same `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` credentials as the `claude` harness. When `ACP_TARGET=codex-acp`, use `OPENAI_API_KEY` or `~/.codex/auth.json`. See [Adding a Harness Provider § ACP](/docs/guides/harness-providers).
 
 ### General Worker Settings
 

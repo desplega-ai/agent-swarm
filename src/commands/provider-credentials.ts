@@ -18,6 +18,7 @@
  * runs the predicate itself — it just reads the agent row.
  */
 
+import { existsSync } from "node:fs";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
@@ -27,7 +28,14 @@ import type { CredCheckOptions, CredStatus } from "../providers/types";
 import type { AgentCredStatus, AgentLatestModel, ProviderName } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
-export type SupportedProvider = "claude" | "claude-managed" | "codex" | "devin" | "opencode" | "pi";
+export type SupportedProvider =
+  | "claude"
+  | "claude-managed"
+  | "codex"
+  | "devin"
+  | "opencode"
+  | "pi"
+  | "acp";
 
 /**
  * Static documentation of which env vars each provider considers when running
@@ -49,6 +57,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   devin: ["DEVIN_API_KEY", "DEVIN_ORG_ID"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
+  acp: ["target-specific; gemini-cli accepts GEMINI_API_KEY or Vertex AI credentials"],
 };
 
 /**
@@ -79,11 +88,83 @@ export async function checkProviderCredentials(
       const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
       return checkPiMonoCredentials(env, opts);
     }
+    case "acp":
+      return checkAcpCredentials(env, opts);
     default:
       throw new Error(
-        `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi.`,
+        `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
       );
   }
+}
+
+function checkAcpCredentials(
+  env: Record<string, string | undefined>,
+  opts: CredCheckOptions = {},
+): CredStatus {
+  const target = env.ACP_TARGET ?? "custom";
+
+  if (target === "claude-agent-acp") {
+    if (env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY || env.CLAUDE_API_KEY) {
+      return { ready: true, missing: [], satisfiedBy: "env" };
+    }
+    return {
+      ready: false,
+      missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+      hint: "ACP target claude-agent-acp requires Claude credentials.",
+    };
+  }
+
+  if (target === "codex-acp") {
+    return checkCodexCredentials(env, opts);
+  }
+
+  if (target === "custom") {
+    const command = env.ACP_COMMAND;
+    if (!command) {
+      return {
+        ready: false,
+        missing: ["ACP_COMMAND"],
+        hint: "ACP target 'custom' requires ACP_COMMAND to be set to the path or command of the ACP-compatible agent binary.",
+      };
+    }
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+
+  const KNOWN_ACP_TARGETS = ["custom", "gemini-cli", "claude-agent-acp", "codex-acp"] as const;
+  if (!(KNOWN_ACP_TARGETS as readonly string[]).includes(target)) {
+    return {
+      ready: false,
+      missing: [],
+      hint: `Unknown ACP_TARGET "${target}". Supported targets: ${KNOWN_ACP_TARGETS.join(", ")}.`,
+    };
+  }
+
+  if (env.GEMINI_API_KEY) return { ready: true, missing: [], satisfiedBy: "env" };
+  if (env.GOOGLE_GENAI_USE_VERTEXAI === "true" && env.GOOGLE_API_KEY) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  if (
+    env.GOOGLE_GENAI_USE_VERTEXAI === "true" &&
+    env.GOOGLE_APPLICATION_CREDENTIALS &&
+    env.GOOGLE_CLOUD_PROJECT &&
+    env.GOOGLE_CLOUD_LOCATION
+  ) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+  if (geminiOAuthFileExists(env, opts)) {
+    return { ready: true, missing: [], satisfiedBy: "file" };
+  }
+
+  return {
+    ready: false,
+    missing: [
+      "GEMINI_API_KEY",
+      "GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_API_KEY",
+      "GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_APPLICATION_CREDENTIALS + GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION",
+      "~/.gemini/oauth_creds.json",
+    ],
+    hint: "ACP target gemini-cli needs Gemini CLI auth before startup. Set GEMINI_API_KEY, configure Vertex AI credentials, or run `gemini` login so ~/.gemini/oauth_creds.json exists.",
+  };
 }
 
 // ─── Live "Test connection" dispatcher ───────────────────────────────────────
@@ -213,6 +294,15 @@ function codexAuthFileExists(env: Record<string, string | undefined>): boolean {
   return checkCodexCredentials(env).satisfiedBy === "file";
 }
 
+function geminiOAuthFileExists(
+  env: Record<string, string | undefined>,
+  opts: CredCheckOptions,
+): boolean {
+  const homeDir = opts.homeDir ?? env.HOME;
+  if (!homeDir) return false;
+  return (opts.fs ?? { existsSync }).existsSync(`${homeDir}/.gemini/oauth_creds.json`);
+}
+
 /**
  * Extract the OAuth `access_token` from a `CODEX_OAUTH` env blob. The blob is
  * a JSON object shaped like `CodexOAuthCredentials` (`{access, refresh,
@@ -244,6 +334,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `opencode`       | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` (pi-style) | matching provider's `/v1/models` |
  * | `pi`             | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY`           | matching provider's `/v1/models` |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (validated at first inference call) |
+ * | `acp`            | target-specific                                                         | presence-only (validated by target process) |
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v1/sessions?limit=1` |
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
@@ -349,10 +440,28 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
           latency_ms: r.latency_ms,
         };
       }
+      case "acp": {
+        const acpTarget = env.ACP_TARGET;
+        if (acpTarget === "claude-agent-acp") {
+          if (env.CLAUDE_CODE_OAUTH_TOKEN) return presenceCheckOk();
+          if (env.ANTHROPIC_API_KEY) return checkAnthropicApiKey(env.ANTHROPIC_API_KEY);
+          if (env.CLAUDE_API_KEY) return presenceCheckOk();
+          return {
+            ok: false,
+            error:
+              "ACP target claude-agent-acp requires Claude credentials (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, or CLAUDE_API_KEY).",
+            latency_ms: Date.now() - startedAt,
+          };
+        }
+        if (acpTarget === "codex-acp") {
+          return validateProviderCredentials("codex");
+        }
+        return presenceCheckOk();
+      }
       default:
         return {
           ok: false,
-          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi.`,
+          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
           latency_ms: Date.now() - startedAt,
         };
     }

@@ -153,6 +153,16 @@ ENV PATH="/home/worker/.opencode/bin:$PATH"
 ARG OPENCODE_SDK_VERSION=1.16.2
 RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
 
+# Install Gemini CLI (ACP target, selected via ACP_TARGET=gemini-cli)
+ARG GEMINI_CLI_VERSION=0.44.1
+RUN sudo npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION}
+RUN which gemini
+
+# Install claude-agent-acp (ACP target, selected via ACP_TARGET=claude-agent-acp)
+ARG CLAUDE_AGENT_ACP_VERSION=0.23.1
+RUN sudo npm install -g @zed-industries/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}
+RUN which claude-agent-acp
+
 # Install context-mode CLI globally (context-window compression tools for all
 # harnesses). The global install puts `context-mode` on PATH (for Claude/Codex
 # stdio MCP) AND makes the package importable (for the OpenCode in-process

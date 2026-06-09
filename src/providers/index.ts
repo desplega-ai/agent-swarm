@@ -47,6 +47,10 @@ export async function createProviderAdapter(provider: string): Promise<ProviderA
       const { OpencodeAdapter } = await import("./opencode-adapter");
       return new OpencodeAdapter();
     }
+    case "acp": {
+      const { ACPAdapter } = await import("./acp-adapter");
+      return new ACPAdapter();
+    }
     default:
       throw new Error(
         `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed, opencode`,

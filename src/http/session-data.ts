@@ -89,7 +89,7 @@ const createSessionCostRoute = route({
      * Phase 2 every provider with seeded pricing rows participates.
      */
     provider: z
-      .enum(["claude", "claude-managed", "codex", "pi", "opencode", "devin", "gemini"])
+      .enum(["claude", "claude-managed", "codex", "pi", "opencode", "devin", "gemini", "acp"])
       .optional(),
     /**
      * Phase 6: epoch-ms timestamp used as the "active price at time T" lookup

@@ -106,6 +106,7 @@ export const ProviderNameSchema = z.enum([
   "devin",
   "claude-managed",
   "opencode",
+  "acp",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -125,6 +126,7 @@ export type ProviderMetaMap = {
   pi: NoProviderMeta;
   "claude-managed": NoProviderMeta;
   opencode: NoProviderMeta;
+  acp: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z.object({
@@ -1948,6 +1950,7 @@ export const PricingProviderSchema = z.enum([
   "opencode",
   "devin",
   "gemini",
+  "acp",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

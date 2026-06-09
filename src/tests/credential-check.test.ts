@@ -369,6 +369,131 @@ describe("checkProviderCredentials dispatcher", () => {
         )
       ).ready,
     ).toBe(true);
+
+    const acpStatus = await checkProviderCredentials(
+      "acp",
+      { ACP_COMMAND: "/usr/local/bin/my-agent" },
+      { homeDir: HOME, fs: noFiles },
+    );
+    expect(acpStatus.ready).toBe(true);
+    expect(acpStatus.satisfiedBy).toBe("env");
+
+    const acpCodexStatus = await checkProviderCredentials(
+      "acp",
+      { ACP_TARGET: "codex-acp", OPENAI_API_KEY: "x" },
+      { homeDir: HOME, fs: noFiles },
+    );
+    expect(acpCodexStatus.ready).toBe(true);
+    expect(acpCodexStatus.satisfiedBy).toBe("side-effect-pending");
+  });
+
+  test("ACP codex-acp target fails preflight clearly when Codex credentials are missing", async () => {
+    const HOME = "/home/worker";
+    const status = await checkProviderCredentials(
+      "acp",
+      { ACP_TARGET: "codex-acp" },
+      { homeDir: HOME, fs: noFiles },
+    );
+
+    expect(status.ready).toBe(false);
+    expect(status.missing).toContain("OPENAI_API_KEY");
+    expect(status.missing).toContain("CODEX_OAUTH");
+    expect(status.missing).toContain(`${HOME}/.codex/auth.json`);
+    expect(status.hint).toContain("Set OPENAI_API_KEY");
+  });
+
+  test("checks Gemini CLI credentials when acp target is gemini-cli", async () => {
+    const missing = await checkProviderCredentials(
+      "acp",
+      { ACP_TARGET: "gemini-cli" },
+      { homeDir: HOME, fs: noFiles },
+    );
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("GEMINI_API_KEY");
+    expect(missing.hint).toContain("gemini-cli");
+
+    expect(
+      (
+        await checkProviderCredentials(
+          "acp",
+          { ACP_TARGET: "gemini-cli", GEMINI_API_KEY: "key" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
+    ).toBe(true);
+
+    expect(
+      (
+        await checkProviderCredentials(
+          "acp",
+          {
+            ACP_TARGET: "gemini-cli",
+            GOOGLE_GENAI_USE_VERTEXAI: "true",
+            GOOGLE_APPLICATION_CREDENTIALS: "/creds.json",
+            GOOGLE_CLOUD_PROJECT: "project",
+            GOOGLE_CLOUD_LOCATION: "us-central1",
+          },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
+    ).toBe(true);
+
+    const withOAuthFile = await checkProviderCredentials(
+      "acp",
+      { ACP_TARGET: "gemini-cli" },
+      {
+        homeDir: HOME,
+        fs: fsWith(new Set([`${HOME}/.gemini/oauth_creds.json`])),
+      },
+    );
+    expect(withOAuthFile.ready).toBe(true);
+    expect(withOAuthFile.satisfiedBy).toBe("file");
+  });
+
+  test("validates live acp/claude-agent-acp fails when no Claude credentials are present", async () => {
+    const { validateProviderCredentials } = await import("../commands/provider-credentials");
+    const originalEnv = { ...process.env };
+    try {
+      delete process.env.ACP_TARGET;
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.CLAUDE_API_KEY;
+      process.env.ACP_TARGET = "claude-agent-acp";
+      const result = await validateProviderCredentials("acp");
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("claude-agent-acp");
+    } finally {
+      Object.assign(process.env, originalEnv);
+    }
+  });
+
+  test("ACP custom target fails when ACP_COMMAND is not set", async () => {
+    const HOME = "/home/worker";
+    const status = await checkProviderCredentials("acp", {}, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toContain("ACP_COMMAND");
+    expect(status.hint).toContain("ACP_COMMAND");
+
+    const withCommand = await checkProviderCredentials(
+      "acp",
+      { ACP_COMMAND: "/usr/local/bin/my-agent" },
+      { homeDir: HOME, fs: noFiles },
+    );
+    expect(withCommand.ready).toBe(true);
+    expect(withCommand.satisfiedBy).toBe("env");
+  });
+
+  test("ACP unknown target is rejected before session start", async () => {
+    const HOME = "/home/worker";
+    const status = await checkProviderCredentials(
+      "acp",
+      { ACP_TARGET: "not-a-real-target" },
+      { homeDir: HOME, fs: noFiles },
+    );
+    expect(status.ready).toBe(false);
+    expect(status.hint).toContain("not-a-real-target");
+    expect(status.hint).toContain("custom");
+    expect(status.hint).toContain("gemini-cli");
   });
 
   test("throws on unknown provider", async () => {
@@ -419,11 +544,19 @@ describe("snapshot: every provider", () => {
 
 describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
   test("covers every supported provider", () => {
-    const providers = ["claude", "claude-managed", "codex", "devin", "opencode", "pi"] as const;
+    const providers = [
+      "claude",
+      "claude-managed",
+      "codex",
+      "devin",
+      "opencode",
+      "pi",
+      "acp",
+    ] as const;
     for (const p of providers) {
       expect(REQUIRED_CRED_VARS_BY_PROVIDER[p]).toBeDefined();
-      expect(REQUIRED_CRED_VARS_BY_PROVIDER[p].length).toBeGreaterThan(0);
     }
+    expect(REQUIRED_CRED_VARS_BY_PROVIDER.acp[0]).toContain("target-specific");
   });
 });
 

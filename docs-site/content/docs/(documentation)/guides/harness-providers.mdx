@@ -14,7 +14,7 @@ A *harness provider* is the runtime that actually drives an LLM: it owns the sub
   For **configuring** an existing provider, see [Harness Configuration](/docs/guides/harness-configuration). This guide is for **implementing a new one**.
 </Callout>
 
-**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK hosted inside a per-task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping; experimental, rolling out across DES-295 → DES-299).
+**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK hosted inside a per-task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping), `acp` (Agent Client Protocol stdio client wrapper — built-in targets for `gemini-cli`, `claude-agent-acp`, `codex-acp`, or fully custom via `ACP_COMMAND`).
 
 ---
 
@@ -103,6 +103,7 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `MODEL_OVERRIDE=amazon-bedrock/*`, anything the AWS SDK default chain accepts (see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`, sends session config over stdin, and receives line-delimited events/results over stdout; the child hosts `@openai/codex-sdk` `Codex` / `Thread` and streams `ThreadEvent`s back | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
+| [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) | Spawns an ACP target over stdio via `@agentclientprotocol/sdk` `ClientSideConnection`; injects the swarm MCP server during `session/new` | Target-dependent — `ACP_TARGET` selects built-in (`gemini-cli`, `claude-agent-acp`, `codex-acp`) or custom (`ACP_COMMAND` + `ACP_ENV_*`) |
 
 ### pi-mono + Amazon Bedrock auth
 
@@ -123,13 +124,35 @@ pi-mono routes to Amazon Bedrock when `MODEL_OVERRIDE=amazon-bedrock/<model-id>`
 
 This is intentionally the same pattern codex uses for OAuth credentials (`codexAuthFileExists` → `presenceCheckOk` in [`src/commands/provider-credentials.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/provider-credentials.ts)) — presence-only gate, runtime validation owned by the adapter/SDK, no upstream call from agent-swarm. pi-ai does not currently expose a Bedrock-specific credential check we could call; if it does in the future, the live-test branch can be upgraded without touching the boot gate.
 
+### ACP custom targets
+
+`HARNESS_PROVIDER=acp` runs an ACP-compatible agent command and treats the swarm
+as the ACP client. The default profile is `ACP_TARGET=custom`.
+
+Set `ACP_COMMAND` to the target executable. `ACP_ARGS` accepts either a JSON
+string array, such as `["--stdio"]`, or a simple whitespace-split string. Only a
+small base environment is forwarded by default; target-specific values use
+`ACP_ENV_<NAME>`, which becomes `<NAME>` in the child process.
+
+System prompt handling is target-neutral. If
+`ACP_SYSTEM_PROMPT_ARTIFACT_PATH` or `ACP_SYSTEM_PROMPT_PATH` is set, the
+adapter writes the composed system prompt to that file before launch. The prompt
+is not prepended to the user message unless
+`ACP_SYSTEM_PROMPT_FALLBACK=user_message` is explicitly set.
+
+Cost and context reporting stay honest. `ACP_COST_PROVIDER` can point cost
+recompute at an existing pricing namespace (`codex`, `gemini`, `opencode`,
+etc.); otherwise rows are tagged `acp` and may be `unpriced`. Context snapshots
+are emitted only when the target sends ACP `usage_update` values with real
+`used` / `size` numbers.
+
 ### Cost & context tracking
 
 Every adapter emits one `CostData` row per CLI invocation and one or more `context_usage` events per session. The dollar value is recomputed server-side against the seeded `pricing` table (Phase 2 of the cost-tracking plan); the resulting `costSource` enum is surfaced in the UI. The unified `input + cache + output` context formula (Phase 9) replaces every adapter's previous per-provider arithmetic so cross-provider percent comparisons make sense.
 
 Full story: [Cost & context computation](./cost-and-context-computation).
 
-All four are wired together by the factory at [`src/providers/index.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/index.ts):
+All providers are wired together by the factory at [`src/providers/index.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/index.ts):
 
 ```ts
 export async function createProviderAdapter(provider: string): Promise<ProviderAdapter> {
@@ -144,8 +167,16 @@ export async function createProviderAdapter(provider: string): Promise<ProviderA
       return new CodexAdapter();
     case "claude-managed":
       return new ClaudeManagedAdapter();
+    case "devin":
+      return new DevinAdapter();
+    case "opencode":
+      return new OpencodeAdapter();
+    case "acp":
+      return new ACPAdapter();
     default:
-      throw new Error(`Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, claude-managed`);
+      throw new Error(
+        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed, opencode, acp`,
+      );
   }
 }
 ```

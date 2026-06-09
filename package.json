@@ -105,6 +105,7 @@
     "bun": ">=1.0.26"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "0.22.1",
     "@ai-sdk/openai": "^3.0.41",
     "@anthropic-ai/sdk": "^0.93.0",
     "@asteasolutions/zod-to-openapi": "^8.0.0",

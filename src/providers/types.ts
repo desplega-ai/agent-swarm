@@ -30,7 +30,7 @@ export interface CostData {
    * for every provider with seeded pricing rows, so every adapter should
    * populate this field.
    */
-  provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin";
+  provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp";
 }
 
 import type { ProviderName } from "../types";
