@@ -15,6 +15,11 @@ RUN bun build ./src/cli.tsx --compile --compile-exec-argv='--expose-gc' --outfil
 # Stage 2: Full development environment
 FROM ubuntu:24.04
 
+# Whether to bake in the PostgreSQL 16 *server* packages (initdb, pg_ctl, …).
+# Off by default — set to "true" for opt-in builds that need a local cluster.
+# postgresql-client is always installed regardless of this flag.
+ARG SWARM_DEP_POSTGRES_BUILD=false
+
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -43,13 +48,21 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 gosu tini \
     openssh-client \
     postgresql-client \
-    postgresql-16 \
-    postgresql-contrib-16 \
     sudo \
     nodejs \
     gh \
     tmux \
     && rm -rf /var/lib/apt/lists/*
+
+# Optional: PostgreSQL 16 server packages — skipped in the default image.
+# libllvm17t64 is the dominant size driver (~118 MiB) pulled via recommends;
+# --no-install-recommends keeps this opt-in install lean.
+RUN if [ "$SWARM_DEP_POSTGRES_BUILD" = "true" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+        postgresql-16 \
+        postgresql-contrib-16 \
+    && rm -rf /var/lib/apt/lists/*; \
+fi
 
 # Install GitLab CLI (glab) for GitLab integration
 ARG GLAB_VERSION=1.89.0
