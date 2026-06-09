@@ -53,7 +53,7 @@ afterAll(async () => {
 });
 
 describe("seed-scripts catalog", () => {
-  test("manifest holds 17 unique, well-described scripts", () => {
+  test("manifest holds 18 unique, well-described scripts", () => {
     expect(SEED_SCRIPTS.length).toBe(18);
     const names = SEED_SCRIPTS.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
@@ -63,6 +63,18 @@ describe("seed-scripts catalog", () => {
       expect(s.intent.length).toBeGreaterThanOrEqual(20);
       expect(s.source).toContain("export default");
       expect(s.source).toContain("argsSchema");
+    }
+  });
+
+  test("inline catalog files stay in sync with their runtime files", async () => {
+    const catalogDir = join(import.meta.dir, "../be/seed-scripts/catalog");
+    const inlineFiles = ["boot-triage", "catalog-report", "compound-insights", "ops-catalog-audit"];
+
+    for (const name of inlineFiles) {
+      const runtimeSource = await Bun.file(join(catalogDir, `${name}.ts`)).text();
+      const inlineSource = await Bun.file(join(catalogDir, `${name}.inline.ts`)).text();
+
+      expect(inlineSource, `${name}.inline.ts drifted from ${name}.ts`).toBe(runtimeSource);
     }
   });
 
