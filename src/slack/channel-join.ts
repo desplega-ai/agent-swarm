@@ -1,5 +1,13 @@
 import type { WebClient } from "@slack/web-api";
 
+// @slack/web-api platform errors set message to "An API error occurred: <code>"
+// and store the raw Slack API code at error.data.error.
+function slackCode(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const d = (error as { data?: { error?: unknown } }).data;
+  return typeof d?.error === "string" ? d.error : undefined;
+}
+
 /**
  * Wraps a Slack API call with automatic channel join for public channels.
  *
@@ -15,13 +23,12 @@ export async function withAutoJoin<T>(
   try {
     return await fn();
   } catch (error) {
-    if (!(error instanceof Error) || error.message !== "not_in_channel") throw error;
+    if (slackCode(error) !== "not_in_channel") throw error;
 
     try {
       await client.conversations.join({ channel: channelId });
     } catch (joinError) {
-      const joinCode = joinError instanceof Error ? joinError.message : String(joinError);
-      if (joinCode === "method_not_supported_for_channel_type") {
+      if (slackCode(joinError) === "method_not_supported_for_channel_type") {
         throw new Error(
           `Cannot access private channel ${channelId} — invite the bot with /invite @<bot-name> first.`,
         );
