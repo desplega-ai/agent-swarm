@@ -427,9 +427,9 @@ describe("Tasks", () => {
     expect(status).toBe(404);
   });
 
-  test("PUT /api/tasks/:id/claude-session — update session ID", async () => {
+  test("PUT /api/tasks/:id/session — update session ID", async () => {
     const sessionId = randomUUID();
-    const { status, body } = await put(`/api/tasks/${ids.task2}/claude-session`, {
+    const { status, body } = await put(`/api/tasks/${ids.task2}/session`, {
       agentId: ids.workerAgent,
       body: { claudeSessionId: sessionId },
     });
@@ -437,8 +437,8 @@ describe("Tasks", () => {
     expect(body.claudeSessionId).toBe(sessionId);
   });
 
-  test("PUT /api/tasks/:id/claude-session — missing fields returns 400", async () => {
-    const { status } = await put(`/api/tasks/${ids.task2}/claude-session`, {
+  test("PUT /api/tasks/:id/session — missing fields returns 400", async () => {
+    const { status } = await put(`/api/tasks/${ids.task2}/session`, {
       body: {},
     });
     expect(status).toBe(400);

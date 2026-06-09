@@ -10764,9 +10764,9 @@
         }
       }
     },
-    "/api/tasks/{id}/claude-session": {
+    "/api/tasks/{id}/session": {
       "put": {
-        "summary": "Update Claude session ID for a task",
+        "summary": "Update provider session ID and harness metadata for a task",
         "tags": [
           "Tasks"
         ],

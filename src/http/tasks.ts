@@ -98,11 +98,11 @@ const createTask = route({
   },
 });
 
-const updateClaudeSession = route({
+const updateSession = route({
   method: "put",
-  path: "/api/tasks/{id}/claude-session",
-  pattern: ["api", "tasks", null, "claude-session"],
-  summary: "Update Claude session ID for a task",
+  path: "/api/tasks/{id}/session",
+  pattern: ["api", "tasks", null, "session"],
+  summary: "Update provider session ID and harness metadata for a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z.union([
@@ -429,8 +429,8 @@ export async function handleTasks(
     return true;
   }
 
-  if (updateClaudeSession.match(req.method, pathSegments)) {
-    const parsed = await updateClaudeSession.parse(req, res, pathSegments, queryParams);
+  if (updateSession.match(req.method, pathSegments)) {
+    const parsed = await updateSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const task = updateTaskClaudeSessionId(
       parsed.params.id,

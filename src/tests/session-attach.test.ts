@@ -29,13 +29,13 @@ async function handleRequest(req: {
 }): Promise<{ status: number; body: unknown }> {
   const pathSegments = getPathSegments(req.url || "");
 
-  // PUT /api/tasks/:id/claude-session - Update Claude session ID
+  // PUT /api/tasks/:id/session - Update Claude session ID
   if (
     req.method === "PUT" &&
     pathSegments[0] === "api" &&
     pathSegments[1] === "tasks" &&
     pathSegments[2] &&
-    pathSegments[3] === "claude-session"
+    pathSegments[3] === "session"
   ) {
     const taskId = pathSegments[2];
     const reqBody = req.body ? JSON.parse(req.body) : {};
@@ -233,7 +233,7 @@ describe("Session Attachment", () => {
     });
   });
 
-  describe("API Layer — PUT /api/tasks/:id/claude-session", () => {
+  describe("API Layer — PUT /api/tasks/:id/session", () => {
     test("should update claudeSessionId and return 200", async () => {
       const task = createTaskExtended("Task for API session update", {
         creatorAgentId: "lead-session-test",
@@ -241,7 +241,7 @@ describe("Session Attachment", () => {
       });
 
       const sessionId = "api-session-id-67890";
-      const response = await fetch(`${baseUrl}/api/tasks/${task.id}/claude-session`, {
+      const response = await fetch(`${baseUrl}/api/tasks/${task.id}/session`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ claudeSessionId: sessionId }),
@@ -253,7 +253,7 @@ describe("Session Attachment", () => {
     });
 
     test("should return 404 for invalid task", async () => {
-      const response = await fetch(`${baseUrl}/api/tasks/non-existent-task/claude-session`, {
+      const response = await fetch(`${baseUrl}/api/tasks/non-existent-task/session`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ claudeSessionId: "some-session" }),
@@ -267,7 +267,7 @@ describe("Session Attachment", () => {
         creatorAgentId: "lead-session-test",
       });
 
-      const response = await fetch(`${baseUrl}/api/tasks/${task.id}/claude-session`, {
+      const response = await fetch(`${baseUrl}/api/tasks/${task.id}/session`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),

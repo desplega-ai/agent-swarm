@@ -211,7 +211,7 @@ export class OpencodeSession implements ProviderSession {
   // The runner attaches its listener after `await adapter.createSession(...)`
   // resolves, but events queued via Promise.resolve().then(...) inside
   // createSession fire on the next microtask — *before* that listener call —
-  // so the runner would miss session_init and never PUT /claude-session,
+  // so the runner would miss session_init and never PUT /session,
   // leaving agent_tasks.provider/.model NULL. Buffer + flush on first attach.
   private pendingEvents: ProviderEvent[] = [];
   private completionResolve!: (result: ProviderResult) => void;

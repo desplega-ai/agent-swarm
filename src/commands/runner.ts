@@ -1632,7 +1632,7 @@ async function saveProviderSessionId(
   if (model !== undefined && model !== "") body.model = model;
   if (harnessVariant !== undefined) body.harnessVariant = harnessVariant;
   if (harnessVariantMeta !== undefined) body.harnessVariantMeta = harnessVariantMeta;
-  await fetch(`${apiUrl}/api/tasks/${taskId}/claude-session`, {
+  await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
     method: "PUT",
     headers,
     body: JSON.stringify(body),
@@ -1662,7 +1662,7 @@ async function updateHarnessVariantMeta(
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-  await fetch(`${apiUrl}/api/tasks/${taskId}/claude-session`, {
+  await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
     method: "PUT",
     headers,
     body: JSON.stringify({ claudeSessionId, harnessVariantMeta: meta }),

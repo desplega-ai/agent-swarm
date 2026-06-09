@@ -336,7 +336,7 @@ async function testBasic() {
   } else if (taskProvider) {
     logFail(testName, `tasks.provider = '${taskProvider}' (expected 'opencode')`);
   } else {
-    // Provider may not be set if runner finishes before the PUT /api/tasks/.../claude-session fires
+    // Provider may not be set if runner finishes before the PUT /api/tasks/.../session fires
     logSkip(`${testName}: tasks.provider check`, "provider field not yet set (runner may not have reported it)");
   }
 
