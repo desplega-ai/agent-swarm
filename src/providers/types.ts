@@ -42,6 +42,8 @@ export type ProviderEvent =
       sessionId: string;
       provider?: ProviderName;
       providerMeta?: Record<string, unknown>;
+      harnessVariant?: string;
+      harnessVariantMeta?: Record<string, unknown>;
     }
   | { type: "message"; role: "assistant" | "user"; content: string }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }

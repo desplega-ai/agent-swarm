@@ -887,6 +887,14 @@ export default function TaskDetailPage() {
             className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
           >
             {task.provider}
+            {task.harnessVariant && (
+              <span className="opacity-60">
+                {" · "}
+                {task.harnessVariant === "bridge"
+                  ? `bridge${task.harnessVariantMeta?.version ? ` ${task.harnessVariantMeta.version}` : ""}`
+                  : "stock"}
+              </span>
+            )}
           </Badge>
         )}
         {(() => {

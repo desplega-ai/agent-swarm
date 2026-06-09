@@ -247,6 +247,10 @@ export const AgentTaskSchema = z.object({
   provider: ProviderNameSchema.optional(),
   providerMeta: z.record(z.string(), z.unknown()).optional(),
 
+  // Harness variant — sub-variant within a provider (e.g. "bridge" vs "stock" for claude)
+  harnessVariant: z.string().optional(),
+  harnessVariantMeta: z.record(z.string(), z.unknown()).optional(),
+
   // Aggregated session cost for task list/read models. Undefined means no
   // session cost rows have been recorded for this task.
   totalCostUsd: z.number().min(0).optional(),

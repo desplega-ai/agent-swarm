@@ -1041,6 +1041,8 @@ type AgentTaskRow = {
   swarmVersion: string | null;
   provider: string | null;
   providerMeta: string | null;
+  harnessVariant: string | null;
+  harnessVariantMeta: string | null;
   totalCostUsd?: number | null;
 };
 
@@ -1127,6 +1129,8 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     swarmVersion: row.swarmVersion ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
     providerMeta: parseProviderMeta(row.provider as ProviderName | null, row.providerMeta),
+    harnessVariant: row.harnessVariant ?? undefined,
+    harnessVariantMeta: row.harnessVariantMeta ? JSON.parse(row.harnessVariantMeta) : undefined,
     totalCostUsd: row.totalCostUsd ?? undefined,
   };
 }
@@ -1398,6 +1402,8 @@ export function updateTaskClaudeSessionId(
   provider?: ProviderName,
   providerMeta?: Record<string, unknown>,
   model?: string,
+  harnessVariant?: string,
+  harnessVariantMeta?: Record<string, unknown>,
 ): AgentTask | null {
   const setClauses = ["claudeSessionId = ?", "lastUpdatedAt = ?"];
   const params: (string | null)[] = [claudeSessionId, new Date().toISOString()];
@@ -1413,6 +1419,14 @@ export function updateTaskClaudeSessionId(
   if (model !== undefined) {
     setClauses.push("model = ?");
     params.push(model);
+  }
+  if (harnessVariant !== undefined) {
+    setClauses.push("harnessVariant = ?");
+    params.push(harnessVariant);
+  }
+  if (harnessVariantMeta !== undefined) {
+    setClauses.push("harnessVariantMeta = ?");
+    params.push(JSON.stringify(harnessVariantMeta));
   }
 
   params.push(taskId);

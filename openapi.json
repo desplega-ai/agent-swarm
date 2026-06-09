@@ -10853,6 +10853,13 @@
                       "providerMeta": {
                         "type": "object",
                         "properties": {}
+                      },
+                      "harnessVariant": {
+                        "type": "string"
+                      },
+                      "harnessVariantMeta": {
+                        "type": "object",
+                        "additionalProperties": {}
                       }
                     },
                     "required": [

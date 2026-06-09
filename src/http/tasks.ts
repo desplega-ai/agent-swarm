@@ -121,6 +121,8 @@ const updateClaudeSession = route({
       provider: ProviderNameSchema.exclude(["devin"]).optional(),
       model: z.string().optional(),
       providerMeta: z.object({}).optional(),
+      harnessVariant: z.string().optional(),
+      harnessVariantMeta: z.record(z.string(), z.unknown()).optional(),
     }),
   ]),
   responses: {
@@ -436,6 +438,8 @@ export async function handleTasks(
       parsed.body.provider,
       parsed.body.providerMeta,
       parsed.body.model,
+      "harnessVariant" in parsed.body ? parsed.body.harnessVariant : undefined,
+      "harnessVariantMeta" in parsed.body ? parsed.body.harnessVariantMeta : undefined,
     );
     if (!task) {
       jsonError(res, "Task not found", 404);

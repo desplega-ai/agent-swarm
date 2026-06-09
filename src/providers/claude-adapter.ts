@@ -470,6 +470,8 @@ class ClaudeSession implements ProviderSession {
     private sessionMcpConfig: string | null = null,
     private claudeBinaryArgv: readonly string[] = ["claude"],
     systemPromptFile: string | null = null,
+    private harnessVariant?: string,
+    private harnessVariantMeta?: Record<string, unknown>,
   ) {
     this.taskFilePid = taskFilePid;
     this.contextWindowSize = getContextWindowSize(model);
@@ -682,7 +684,13 @@ class ClaudeSession implements ProviderSession {
       // Session ID from init message
       if (json.type === "system" && json.subtype === "init" && json.session_id) {
         this._sessionId = json.session_id;
-        this.emit({ type: "session_init", sessionId: json.session_id, provider: "claude" });
+        this.emit({
+          type: "session_init",
+          sessionId: json.session_id,
+          provider: "claude",
+          harnessVariant: this.harnessVariant,
+          harnessVariantMeta: this.harnessVariantMeta,
+        });
         if (json.model) {
           // Phase 4: the CLI's `init.model` reflects the actual model after any
           // backoff/fallback. Update `this.model` so subsequent CostData rows
@@ -970,6 +978,20 @@ export class ClaudeAdapter implements ProviderAdapter {
       }
     }
 
+    const harnessVariant = useClaudeBridge ? "bridge" : "stock";
+    let harnessVariantMeta: Record<string, unknown> | undefined;
+    if (useClaudeBridge) {
+      let bridgeVersion: string | undefined;
+      try {
+        const result = await Bun.$`${CLAUDE_BRIDGE_BINARY} --version`.quiet();
+        const trimmed = result.text().trim();
+        if (trimmed) bridgeVersion = trimmed;
+      } catch {
+        // bridge version is best-effort
+      }
+      harnessVariantMeta = { ...(bridgeVersion ? { version: bridgeVersion } : {}) };
+    }
+
     return new ClaudeSession(
       config,
       model,
@@ -978,6 +1000,8 @@ export class ClaudeAdapter implements ProviderAdapter {
       sessionMcpConfig,
       effectiveClaudeBinaryArgv,
       systemPromptFile,
+      harnessVariant,
+      harnessVariantMeta,
     );
   }
 
