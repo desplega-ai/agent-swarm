@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
+  clearKeyRateLimit,
   closeDb,
   getAvailableKeyIndices,
   getKeyStatuses,
@@ -12,6 +13,7 @@ import {
   markKeyRateLimited,
   recordKeyUsage,
 } from "../be/db";
+import type { CredentialSelection } from "../utils/credentials";
 import { resolveCredentialPools, selectCredential } from "../utils/credentials";
 
 // ─── Credential Selection Unit Tests ────────────────────────────────────────
@@ -53,6 +55,7 @@ describe("selectCredential", () => {
     const value = "key-aaa11,key-bbb22";
     const result = selectCredential(value, []);
     expect(["key-aaa11", "key-bbb22"]).toContain(result.selected);
+    expect(result.isRateLimitFallback).toBe(true);
   });
 
   test("filters out-of-range availableIndices", () => {
@@ -60,6 +63,23 @@ describe("selectCredential", () => {
     const result = selectCredential(value, [99]); // Out of range
     // Falls back to random
     expect(["key-aaa11", "key-bbb22"]).toContain(result.selected);
+    expect(result.isRateLimitFallback).toBe(true);
+  });
+
+  test("isRateLimitFallback is false when indices are available", () => {
+    const result = selectCredential("key-aaa11,key-bbb22", [0, 1]);
+    expect(result.isRateLimitFallback).toBe(false);
+  });
+
+  test("isRateLimitFallback is false when no availability info", () => {
+    const result = selectCredential("key-aaa11,key-bbb22");
+    expect(result.isRateLimitFallback).toBe(false);
+  });
+
+  test("single key with empty availableIndices sets isRateLimitFallback", () => {
+    const result = selectCredential("single-key", []);
+    expect(result.isRateLimitFallback).toBe(true);
+    expect(result.selected).toBe("single-key");
   });
 
   test("keySuffix is last 5 chars of selected key", () => {
@@ -197,5 +217,98 @@ describe("API key tracking DB queries", () => {
     const statuses2 = getKeyStatuses("ANTHROPIC_API_KEY");
     const key1b = statuses2.find((s) => s.keySuffix === "bbb22");
     expect(key1b!.rateLimitCount).toBe(2);
+  });
+
+  test("clearKeyRateLimit clears a rate-limited key", () => {
+    const until = new Date(Date.now() + 300_000).toISOString();
+    recordKeyUsage("OPENAI_API_KEY", "oai01", 0, null);
+    markKeyRateLimited("OPENAI_API_KEY", "oai01", 0, until);
+
+    let statuses = getKeyStatuses("OPENAI_API_KEY");
+    expect(statuses.find((s) => s.keySuffix === "oai01")!.status).toBe("rate_limited");
+
+    const cleared = clearKeyRateLimit("OPENAI_API_KEY", "oai01");
+    expect(cleared).toBe(true);
+
+    statuses = getKeyStatuses("OPENAI_API_KEY");
+    expect(statuses.find((s) => s.keySuffix === "oai01")!.status).toBe("available");
+    expect(statuses.find((s) => s.keySuffix === "oai01")!.rateLimitedUntil).toBeNull();
+  });
+
+  test("clearKeyRateLimit returns false for already-available key", () => {
+    recordKeyUsage("OPENAI_API_KEY", "oai02", 1, null);
+    const cleared = clearKeyRateLimit("OPENAI_API_KEY", "oai02");
+    expect(cleared).toBe(false);
+  });
+});
+
+// ─── Cross-keyType Failover Logic Tests ──────────────────────────────────────
+
+describe("cross-keyType failover", () => {
+  test("prefers non-rate-limited credential when both keyTypes available", () => {
+    const rateLimited: CredentialSelection = {
+      selected: "sk-xxx",
+      index: 0,
+      total: 1,
+      keySuffix: "k-xxx",
+      keyType: "OPENAI_API_KEY",
+      isRateLimitFallback: true,
+    };
+    const healthy: CredentialSelection = {
+      selected: "oauth-yyy",
+      index: 0,
+      total: 2,
+      keySuffix: "h-yyy",
+      keyType: "CODEX_OAUTH",
+      isRateLimitFallback: false,
+    };
+
+    // Simulate the runner's primary selection logic
+    let primarySelection: CredentialSelection | undefined;
+    if (rateLimited && healthy) {
+      if (rateLimited.isRateLimitFallback && !healthy.isRateLimitFallback) {
+        primarySelection = healthy;
+      } else {
+        primarySelection = rateLimited;
+      }
+    } else {
+      primarySelection = rateLimited ?? healthy;
+    }
+
+    expect(primarySelection).toBe(healthy);
+    expect(primarySelection!.keyType).toBe("CODEX_OAUTH");
+  });
+
+  test("uses first credential when neither is rate-limited", () => {
+    const first: CredentialSelection = {
+      selected: "sk-aaa",
+      index: 0,
+      total: 1,
+      keySuffix: "k-aaa",
+      keyType: "OPENAI_API_KEY",
+      isRateLimitFallback: false,
+    };
+    const second: CredentialSelection = {
+      selected: "oauth-bbb",
+      index: 0,
+      total: 1,
+      keySuffix: "h-bbb",
+      keyType: "CODEX_OAUTH",
+      isRateLimitFallback: false,
+    };
+
+    let primarySelection: CredentialSelection | undefined;
+    if (first && second) {
+      if (first.isRateLimitFallback && !second.isRateLimitFallback) {
+        primarySelection = second;
+      } else {
+        primarySelection = first;
+      }
+    } else {
+      primarySelection = first ?? second;
+    }
+
+    expect(primarySelection).toBe(first);
+    expect(primarySelection!.keyType).toBe("OPENAI_API_KEY");
   });
 });

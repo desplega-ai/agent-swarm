@@ -1,7 +1,22 @@
 import type { ColDef } from "ag-grid-community";
-import { BarChart3, DollarSign, Key, Pencil, Search, ShieldAlert, ShieldCheck } from "lucide-react";
+import {
+  BarChart3,
+  DollarSign,
+  Key,
+  Pencil,
+  RotateCcw,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+} from "lucide-react";
 import { useMemo, useState } from "react";
-import { useApiKeyCosts, useApiKeyStatuses, useSetApiKeyName } from "@/api/hooks/use-api-keys";
+import { toast } from "sonner";
+import {
+  useApiKeyCosts,
+  useApiKeyStatuses,
+  useClearApiKeyRateLimit,
+  useSetApiKeyName,
+} from "@/api/hooks/use-api-keys";
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { HarnessIcon } from "@/components/shared/harness-icon";
@@ -104,6 +119,7 @@ export default function ApiKeysPage() {
   const { data: keys, isLoading } = useApiKeyStatuses();
   const { data: costs } = useApiKeyCosts();
   const setKeyName = useSetApiKeyName();
+  const clearRateLimit = useClearApiKeyRateLimit();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -114,6 +130,7 @@ export default function ApiKeysPage() {
   // dialog directly and the mutation flows through useSetApiKeyName.
   const [editingKey, setEditingKey] = useState<ApiKeyStatus | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [clearingKey, setClearingKey] = useState<ApiKeyStatus | null>(null);
 
   const handleSaveName = () => {
     if (!editingKey) return;
@@ -127,6 +144,27 @@ export default function ApiKeysPage() {
     });
     setEditingKey(null);
     setEditingName("");
+  };
+
+  const handleClearRateLimit = () => {
+    if (!clearingKey) return;
+    clearRateLimit.mutate(
+      {
+        keyType: clearingKey.keyType,
+        keySuffix: clearingKey.keySuffix,
+        scope: clearingKey.scope,
+        scopeId: clearingKey.scopeId,
+      },
+      {
+        onSuccess: (result) => {
+          toast.success(result.message || `Rate limit cleared for ...${clearingKey.keySuffix}`);
+          setClearingKey(null);
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : "Failed to clear rate limit");
+        },
+      },
+    );
   };
 
   const costMap = useMemo(() => {
@@ -312,6 +350,32 @@ export default function ApiKeysPage() {
             <span className="text-muted-foreground">-</span>
           ),
       },
+      {
+        headerName: "Actions",
+        width: 150,
+        sortable: false,
+        filter: false,
+        cellRenderer: (params: { data: ApiKeyStatus | undefined }) => {
+          if (!params.data || params.data.status !== "rate_limited") {
+            return <span className="text-muted-foreground">-</span>;
+          }
+          return (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                setClearingKey(params.data ?? null);
+              }}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Clear
+            </Button>
+          );
+        },
+      },
     ],
     [costMap],
   );
@@ -459,6 +523,61 @@ export default function ApiKeysPage() {
             </Button>
             <Button onClick={handleSaveName} disabled={setKeyName.isPending}>
               {setKeyName.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Clear rate-limit dialog */}
+      <Dialog
+        open={clearingKey !== null}
+        onOpenChange={(open) => {
+          if (!open && !clearRateLimit.isPending) {
+            setClearingKey(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Clear Rate Limit</DialogTitle>
+          </DialogHeader>
+          {clearingKey && (
+            <div className="space-y-3 py-2">
+              <div className="text-xs text-muted-foreground space-y-1">
+                <div>
+                  <span className="font-mono uppercase">
+                    {formatProvider(clearingKey.provider)}
+                  </span>
+                  {" · "}
+                  <span className="font-mono">{formatKeyType(clearingKey.keyType)}</span>
+                  {" · "}
+                  <span className="font-mono">...{clearingKey.keySuffix}</span>
+                </div>
+                {clearingKey.rateLimitedUntil && (
+                  <div>
+                    Current expiry:{" "}
+                    <span className="font-mono text-status-error">
+                      {formatExpiry(clearingKey.rateLimitedUntil)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <p className="text-sm text-foreground">
+                Clear this key's active rate-limit record so it can be selected by the credential
+                pool again.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setClearingKey(null)}
+              disabled={clearRateLimit.isPending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleClearRateLimit} disabled={clearRateLimit.isPending}>
+              {clearRateLimit.isPending ? "Clearing…" : "Clear rate limit"}
             </Button>
           </DialogFooter>
         </DialogContent>

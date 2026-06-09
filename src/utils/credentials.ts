@@ -64,6 +64,8 @@ export interface CredentialSelection {
   keySuffix: string;
   /** Which credential pool env var this selection came from */
   keyType: string;
+  /** True when all indices for this keyType were rate-limited (best-effort pick) */
+  isRateLimitFallback: boolean;
 }
 
 /**
@@ -82,10 +84,19 @@ export function selectCredential(
     .filter(Boolean);
   if (credentials.length <= 1) {
     const selected = value.trim();
-    return { selected, index: 0, total: 1, keySuffix: selected.slice(-5), keyType };
+    const isRateLimitFallback = availableIndices !== undefined && availableIndices.length === 0;
+    return {
+      selected,
+      index: 0,
+      total: 1,
+      keySuffix: selected.slice(-5),
+      keyType,
+      isRateLimitFallback,
+    };
   }
 
   let index: number;
+  let isRateLimitFallback = false;
   if (availableIndices && availableIndices.length > 0) {
     // Pick randomly from available (non-rate-limited) indices
     const validIndices = availableIndices.filter((i) => i >= 0 && i < credentials.length);
@@ -94,17 +105,26 @@ export function selectCredential(
     } else {
       // All available indices out of range — fall back to random from all
       index = Math.floor(Math.random() * credentials.length);
+      isRateLimitFallback = true;
     }
   } else if (availableIndices && availableIndices.length === 0) {
     // All keys are rate-limited — pick randomly anyway (best effort)
     index = Math.floor(Math.random() * credentials.length);
+    isRateLimitFallback = true;
   } else {
     // No availability info — pure random (backward compatible)
     index = Math.floor(Math.random() * credentials.length);
   }
 
   const selected = credentials[index]!;
-  return { selected, index, total: credentials.length, keySuffix: selected.slice(-5), keyType };
+  return {
+    selected,
+    index,
+    total: credentials.length,
+    keySuffix: selected.slice(-5),
+    keyType,
+    isRateLimitFallback,
+  };
 }
 
 /**

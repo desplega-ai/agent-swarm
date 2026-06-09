@@ -1395,6 +1395,25 @@ class ApiClient {
     return res.json();
   }
 
+  async clearApiKeyRateLimit(args: {
+    keyType: string;
+    keySuffix: string;
+    scope?: string;
+    scopeId?: string;
+  }): Promise<{ success: boolean; cleared: boolean; message: string }> {
+    const url = `${this.getBaseUrl()}/api/keys/clear-rate-limit`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to clear rate limit" }));
+      throw new Error(err.error || `Failed to clear rate limit: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchAgentMcpServers(agentId: string): Promise<AgentMcpServersResponse> {
     const url = `${this.getBaseUrl()}/api/agents/${agentId}/mcp-servers`;
     const res = await fetch(url, { headers: this.getHeaders() });

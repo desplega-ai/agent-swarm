@@ -27,3 +27,14 @@ export function useSetApiKeyName() {
     },
   });
 }
+
+/** Clear a pooled credential's active rate-limit record. */
+export function useClearApiKeyRateLimit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.clearApiKeyRateLimit.bind(api),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["api-key-statuses"] });
+    },
+  });
+}

@@ -48,6 +48,7 @@ export function authJsonToCredentialSelection(auth: CodexAuthJson, slot = 0, tot
     total,
     keySuffix: suffixSource.slice(-5),
     keyType: "CODEX_OAUTH",
+    isRateLimitFallback: false,
   };
 }
 
