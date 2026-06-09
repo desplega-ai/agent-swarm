@@ -2,14 +2,26 @@
  * Worker-side per-task skill refresh.
  *
  * Polls the cheap signature endpoint; on a hash mismatch, refetches the
- * full skill list and re-runs filesystem sync (claude/pi/codex dirs). The
- * worker stores the signature returned in the list response so the cached
- * hash always corresponds exactly to the snapshot it acted on — avoids a
- * stale-hash race between the signature and list endpoints.
+ * full skill list and writes SKILL.md files to the worker's local HOME via
+ * writeSkillsToFilesystem() from skill-fs-writer.ts. This ensures newly
+ * created/approved skills land on the worker disk mid-session — no container
+ * restart required.
+ *
+ * Previously Step 3 POSTed to /api/skills/sync-filesystem, which wrote to
+ * the API server's HOME instead of the worker disk. Now Step 3 builds
+ * SkillFsEntry[] from the already-fetched skill data and writes locally.
+ * For complex skills the worker fetches bundled files via N+1 HTTP calls
+ * (acceptable for v1 — simple skills need zero extra fetches).
+ *
+ * The /api/skills/sync-filesystem endpoint is retained for single-box local
+ * dev (where API and worker share a HOME). Workers no longer call it.
  *
  * Transient errors are swallowed (returned as `changed: false`) so a flaky
  * API can't churn the system prompt.
  */
+
+import { homedir } from "node:os";
+import { type SkillFsEntry, writeSkillsToFilesystem } from "./skill-fs-writer";
 
 export type SkillsRefreshContext = {
   apiUrl: string;
@@ -27,6 +39,7 @@ export type SkillsRefreshResult = {
 export async function refreshSkillsIfChanged(
   ctx: SkillsRefreshContext,
   lastHashRef: { current: string | null },
+  homeOverride?: string,
 ): Promise<SkillsRefreshResult> {
   const { apiUrl, apiKey, agentId, role } = ctx;
   const authHeaders: Record<string, string> = { "X-Agent-ID": agentId };
@@ -52,70 +65,140 @@ export async function refreshSkillsIfChanged(
     return { changed: false };
   }
 
-  // Step 2: full fetch + sync (only reached when hash differs or first call)
-  let summary: { name: string; description: string }[] | undefined;
+  // Step 2: full fetch (only reached when hash differs or first call)
+  // Keep the full skill rows including content, id, isComplex — data is
+  // already on the wire, was previously discarded.
+  type SkillRow = {
+    id: string;
+    name: string;
+    description: string;
+    content: string | null;
+    isComplex: boolean;
+    isEnabled: boolean;
+    isActive: boolean;
+  };
+  let skillRows: SkillRow[] = [];
   let newHash: string | null = null;
+  let listFetchOk = false;
   try {
     const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
       headers: authHeaders,
     });
     if (skillsResp.ok) {
       const skillsData = (await skillsResp.json()) as {
-        skills: { name: string; description: string; isActive: boolean; isEnabled: boolean }[];
+        skills: SkillRow[];
         signature?: string;
       };
-      summary = skillsData.skills
-        .filter((s) => s.isActive && s.isEnabled)
-        .map((s) => ({ name: s.name, description: s.description }));
+      skillRows = skillsData.skills;
       if (typeof skillsData.signature === "string") {
         newHash = skillsData.signature;
       }
+      listFetchOk = true;
     }
   } catch {
-    // Non-fatal — skills are optional
+    // Transient network / parse error — bail out without touching the local FS
   }
 
-  // Step 3: filesystem sync (claude/pi/codex dirs)
+  // Guard: a failed list fetch must not proceed to writeSkillsToFilesystem.
+  // An empty entries array would wipe every swarm-managed skill directory from
+  // the worker disk, which is worse than leaving the cache stale.
+  if (!listFetchOk) {
+    return { changed: false };
+  }
+
+  const summary = skillRows
+    .filter((s) => s.isActive && s.isEnabled)
+    .map((s) => ({ name: s.name, description: s.description }));
+
+  // Step 3: build SkillFsEntry[] and write to THIS worker's local HOME.
+  //
+  // For complex+enabled skills, fetch bundled files via N+1 HTTP calls
+  // (GET /api/skills/:id/files for manifest, then per non-binary file).
+  // Simple skills (the common case) need zero extra fetches.
   let syncOk = false;
   try {
-    const syncHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
-      "X-Agent-ID": agentId,
-    };
-    if (apiKey) syncHeaders.Authorization = `Bearer ${apiKey}`;
-    const syncRes = await fetch(`${apiUrl}/api/skills/sync-filesystem`, {
-      method: "POST",
-      headers: syncHeaders,
-    });
-    if (syncRes.ok) {
-      const syncResult = (await syncRes.json()) as {
-        synced: number;
-        removed: number;
-        errors: string[];
-      };
-      console.log(
-        `[${role}] Skills synced: ${syncResult.synced} written, ${syncResult.removed} removed`,
-      );
-      if (syncResult.errors.length > 0) {
-        console.warn(`[${role}] Skill sync errors: ${syncResult.errors.join(", ")}`);
+    const entries: SkillFsEntry[] = [];
+
+    for (const skill of skillRows) {
+      if (!skill.isActive || !skill.isEnabled) continue;
+
+      const files: { path: string; content: string; isBinary: boolean }[] = [];
+
+      if (skill.isComplex) {
+        // Fetch manifest to know which files exist + which are binary
+        try {
+          const manifestResp = await fetch(`${apiUrl}/api/skills/${skill.id}/files`, {
+            headers: authHeaders,
+          });
+          if (manifestResp.ok) {
+            const manifestData = (await manifestResp.json()) as {
+              files: { path: string; isBinary: boolean }[];
+            };
+
+            // Fetch content for each non-binary file (N+1 — acceptable for v1)
+            for (const manifestEntry of manifestData.files) {
+              if (manifestEntry.isBinary) {
+                files.push({ path: manifestEntry.path, content: "", isBinary: true });
+                continue;
+              }
+              try {
+                const encodedPath = manifestEntry.path.split("/").map(encodeURIComponent).join("/");
+                const fileResp = await fetch(
+                  `${apiUrl}/api/skills/${skill.id}/files/${encodedPath}`,
+                  { headers: authHeaders },
+                );
+                if (fileResp.ok) {
+                  const fileData = (await fileResp.json()) as {
+                    file: { path: string; content: string; isBinary: boolean };
+                  };
+                  files.push({
+                    path: fileData.file.path,
+                    content: fileData.file.content,
+                    isBinary: fileData.file.isBinary,
+                  });
+                }
+              } catch {
+                // Non-fatal — skip this file
+              }
+            }
+          }
+        } catch {
+          // Non-fatal — treat as no files (will skip complex skill per writer logic)
+        }
       }
-      syncOk = true;
-    } else {
-      console.warn(`[${role}] Skill sync failed: HTTP ${syncRes.status}`);
+
+      entries.push({
+        id: skill.id,
+        name: skill.name,
+        content: skill.content ?? null,
+        isComplex: skill.isComplex,
+        isEnabled: skill.isEnabled,
+        isActive: skill.isActive,
+        files,
+      });
     }
+
+    const writeResult = writeSkillsToFilesystem(entries, "all", homeOverride ?? homedir());
+    console.log(
+      `[${role}] Skills synced: ${writeResult.synced} written, ${writeResult.removed} removed`,
+    );
+    if (writeResult.errors.length > 0) {
+      console.warn(`[${role}] Skill sync errors: ${writeResult.errors.join(", ")}`);
+    }
+    syncOk = true;
   } catch (err) {
     console.warn(`[${role}] Skill sync failed: ${(err as Error).message}`);
   }
 
-  if (summary === undefined && newHash === null) {
+  if (skillRows.length === 0 && newHash === null) {
     return { changed: false };
   }
 
-  // Only cache the new hash once the FS sync has actually succeeded —
-  // otherwise a transient sync failure would leave the cached hash matching
+  // Only cache the new hash once the local FS write has actually succeeded —
+  // otherwise a transient write failure would leave the cached hash matching
   // the current signature, causing later polls to short-circuit and the
-  // disk state to stay stale until an unrelated skill mutation. The next
-  // poll re-enters this code path (lastHashRef unchanged) and retries.
+  // disk state to stay stale forever. The next poll re-enters this code path
+  // (lastHashRef unchanged) and retries.
   if (syncOk && newHash !== null) {
     lastHashRef.current = newHash;
   }

@@ -21,6 +21,7 @@ WORKER_PATHS=(
   src/providers/
   src/prompts/
   src/scripts-runtime/
+  src/utils/
   src/cli.tsx
   src/claude.ts
   plugin/opencode-plugins/
