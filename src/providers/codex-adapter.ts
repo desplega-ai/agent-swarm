@@ -83,6 +83,7 @@ import { getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
+import { readPkgVersion } from "./harness-version";
 import { buildOtelTraceparentEnv } from "./otel-env";
 import type {
   CostData,
@@ -694,7 +695,13 @@ export class CodexSession implements ProviderSession {
     switch (event.type) {
       case "thread.started": {
         this._sessionId = event.thread_id;
-        this.emit({ type: "session_init", sessionId: event.thread_id, provider: "codex" });
+        const codexVersion = readPkgVersion("@openai/codex-sdk");
+        this.emit({
+          type: "session_init",
+          sessionId: event.thread_id,
+          provider: "codex",
+          ...(codexVersion ? { harnessVariantMeta: { version: codexVersion } } : {}),
+        });
         break;
       }
       case "turn.started": {

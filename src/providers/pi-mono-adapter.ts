@@ -26,6 +26,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient } from "./pi-mono-mcp-client";
 import type {
@@ -367,7 +368,13 @@ export class PiMonoSession implements ProviderSession {
     this.sessionStartedAt = Date.now();
 
     // Emit session_init immediately
-    this.emit({ type: "session_init", sessionId: this._sessionId, provider: "pi" });
+    const piVersion = readPkgVersion("@earendil-works/pi-coding-agent");
+    this.emit({
+      type: "session_init",
+      sessionId: this._sessionId,
+      provider: "pi",
+      ...(piVersion ? { harnessVariantMeta: { version: piVersion } } : {}),
+    });
 
     // Subscribe to agent events and normalize
     this.agentSession.subscribe((event) => this.handleAgentEvent(event));

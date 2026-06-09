@@ -69,6 +69,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { computeClaudeManagedCostUsd } from "./claude-managed-models";
 import { getRuntimeFeePerHour } from "./claude-managed-pricing";
 import { createClaudeManagedSwarmEventHandler } from "./claude-managed-swarm-events";
+import { readPkgVersion } from "./harness-version";
 import type {
   CostData,
   CredStatus,
@@ -639,11 +640,13 @@ class ClaudeManagedSession implements ProviderSession {
       // 3. Emit `session_init` once the session is wired up. Listeners
       //    attached via `onEvent` will see this either immediately (if they
       //    attached pre-emit) or via the queue flush.
+      const sdkVersion = readPkgVersion("@anthropic-ai/sdk");
       this.emit({
         type: "session_init",
         sessionId: this._sessionId,
         provider: "claude-managed",
         providerMeta: { managed: true },
+        ...(sdkVersion ? { harnessVariantMeta: { version: sdkVersion } } : {}),
       });
 
       // 4. Drain the SSE stream.

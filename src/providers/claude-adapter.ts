@@ -688,8 +688,8 @@ class ClaudeSession implements ProviderSession {
           type: "session_init",
           sessionId: json.session_id,
           provider: "claude",
-          harnessVariant: this.harnessVariant,
-          harnessVariantMeta: this.harnessVariantMeta,
+          ...(this.harnessVariant ? { harnessVariant: this.harnessVariant } : {}),
+          ...(this.harnessVariantMeta ? { harnessVariantMeta: this.harnessVariantMeta } : {}),
         });
         if (json.model) {
           // Phase 4: the CLI's `init.model` reflects the actual model after any
@@ -981,15 +981,23 @@ export class ClaudeAdapter implements ProviderAdapter {
     const harnessVariant = useClaudeBridge ? "bridge" : "stock";
     let harnessVariantMeta: Record<string, unknown> | undefined;
     if (useClaudeBridge) {
-      let bridgeVersion: string | undefined;
       try {
-        const result = await Bun.$`${CLAUDE_BRIDGE_BINARY} --version`.quiet();
+        const bin = effectiveClaudeBinaryArgv[0] ?? "claude-bridge";
+        const result = await Bun.$`${bin} --version`.quiet();
         const trimmed = result.text().trim();
-        if (trimmed) bridgeVersion = trimmed;
+        if (trimmed) harnessVariantMeta = { version: trimmed };
       } catch {
         // bridge version is best-effort
       }
-      harnessVariantMeta = { ...(bridgeVersion ? { version: bridgeVersion } : {}) };
+    } else {
+      try {
+        const bin = effectiveClaudeBinaryArgv[0] ?? "claude";
+        const result = await Bun.$`${bin} --version`.quiet();
+        const trimmed = result.text().trim();
+        if (trimmed) harnessVariantMeta = { version: trimmed };
+      } catch {
+        // stock version is best-effort
+      }
     }
 
     return new ClaudeSession(

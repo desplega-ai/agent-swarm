@@ -21,6 +21,7 @@ import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
+import { readPkgVersion } from "./harness-version";
 import type {
   CostData,
   CredCheckOptions,
@@ -280,8 +281,13 @@ export class OpencodeSession implements ProviderSession {
 
   /** Emit the synthetic session_init event. Called by the adapter immediately
    * after construction; buffers if no listener is attached yet. */
-  emitSessionInit(provider: "opencode"): void {
-    this.emit({ type: "session_init", sessionId: this._sessionId, provider });
+  emitSessionInit(provider: "opencode", harnessVariantMeta?: Record<string, unknown>): void {
+    this.emit({
+      type: "session_init",
+      sessionId: this._sessionId,
+      provider,
+      ...(harnessVariantMeta ? { harnessVariantMeta } : {}),
+    });
   }
 
   onEvent(listener: (event: ProviderEvent) => void): void {
@@ -767,7 +773,8 @@ export class OpencodeAdapter implements ProviderAdapter {
 
     // Emit session_init synchronously; the session buffers events until the
     // runner's `onEvent(listener)` call attaches a listener.
-    session.emitSessionInit("opencode");
+    const opcVersion = readPkgVersion("@opencode-ai/sdk");
+    session.emitSessionInit("opencode", opcVersion ? { version: opcVersion } : undefined);
 
     // Subscribe to SSE events and drive the session
     client.event
