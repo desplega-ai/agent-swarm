@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
+import { withAutoJoin } from "@/slack/channel-join";
 import { markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar } from "@/tools/utils";
 
@@ -62,21 +63,23 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
       try {
         const slackMessage = markdownToSlack(message);
 
-        const result = await app.client.chat.postMessage({
-          channel: channelId,
-          text: slackMessage, // Fallback for notifications
-          username: agent.name,
-          icon_emoji: ":crown:",
-          blocks: [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: slackMessage,
+        const result = await withAutoJoin(app.client, channelId, () =>
+          app.client.chat.postMessage({
+            channel: channelId,
+            text: slackMessage, // Fallback for notifications
+            username: agent.name,
+            icon_emoji: ":crown:",
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: slackMessage,
+                },
               },
-            },
-          ],
-        });
+            ],
+          }),
+        );
 
         const ts = result.ts;
         const resolvedChannelId = result.channel ?? channelId;
