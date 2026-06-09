@@ -1,4 +1,5 @@
 import { buildCtx } from "./ctx";
+import { patchFetchWithEgressSubstitution } from "./egress-secrets";
 import type { SwarmConfigPayload } from "./executors/types";
 import { SwarmConfig } from "./swarm-config";
 
@@ -84,6 +85,9 @@ try {
   }
 
   const payload = JSON.parse(stdin) as SwarmConfigPayload;
+  if (payload.egressSecrets?.length) {
+    patchFetchWithEgressSubstitution(payload.egressSecrets);
+  }
   const swarmConfig = new SwarmConfig(payload);
   const rawArgs = JSON.parse(await Bun.file(requiredEnv("SWARM_SCRIPT_ARGS_FILE")).text());
   // Accept both shapes: callers may pass an already-serialized JSON string.

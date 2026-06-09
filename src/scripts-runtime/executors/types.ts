@@ -1,5 +1,11 @@
 export type ScriptFsMode = "none" | "workspace-rw";
 
+export type EgressSecretEntry = {
+  placeholder: string;
+  hosts: string[];
+  value: string;
+};
+
 export type SwarmConfigPayload = {
   system: {
     apiKey: { value: string; isSecret: true };
@@ -7,6 +13,7 @@ export type SwarmConfigPayload = {
     mcpBaseUrl: { value: string; isSecret: false };
   };
   user: Record<string, { value: string; isSecret: boolean }>;
+  egressSecrets?: EgressSecretEntry[];
 };
 
 export type ScriptResourcePolicy = {

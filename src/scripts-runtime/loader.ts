@@ -1,5 +1,6 @@
 import { getApiKey } from "../utils/api-key";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { buildEgressSecrets } from "./egress-secrets";
 import { getScriptExecutor } from "./executors/registry";
 import {
   DEFAULT_SCRIPT_RESOURCES,
@@ -44,6 +45,7 @@ function buildConfigPayload(input: RunScriptInput): SwarmConfigPayload {
       },
     },
     user: input.userConfig ?? {},
+    egressSecrets: buildEgressSecrets(),
   };
 }
 
