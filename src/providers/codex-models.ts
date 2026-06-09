@@ -36,6 +36,7 @@ export const CODEX_DEFAULT_MODEL: CodexModel = "gpt-5.4";
  * a task authored for Claude works unchanged when pointed at a Codex worker.
  */
 const CLAUDE_SHORTNAMES: Record<string, CodexModel> = {
+  fable: "gpt-5.5",
   opus: "gpt-5.4",
   sonnet: "gpt-5.4",
   haiku: "gpt-5.4-mini",

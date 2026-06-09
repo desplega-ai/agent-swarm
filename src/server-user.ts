@@ -28,9 +28,9 @@ const userSendTaskInputSchema = z.object({
   tags: z.array(z.string()).optional().describe("Tags for filtering (e.g., ['urgent'])."),
   priority: z.number().int().min(0).max(100).optional().describe("Priority 0-100 (default: 50)."),
   model: z
-    .enum(["haiku", "sonnet", "opus"])
+    .enum(["haiku", "sonnet", "opus", "fable"])
     .optional()
-    .describe("Model to use for this task ('haiku', 'sonnet', or 'opus')."),
+    .describe("Model to use for this task ('haiku', 'sonnet', 'opus', or 'fable')."),
 });
 
 export function createUserServer(user: User): McpServer {

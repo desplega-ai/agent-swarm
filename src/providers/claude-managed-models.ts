@@ -25,6 +25,7 @@
 
 /** Models supported by the managed-agents surface for the swarm worker. */
 export const CLAUDE_MANAGED_MODELS = [
+  "claude-fable-5",
   "claude-sonnet-4-6",
   "claude-opus-4-8",
   "claude-opus-4-7",
@@ -57,6 +58,12 @@ export interface ClaudeManagedModelPricing {
  * - claude-haiku-4-5:  $1 / $5 / $0.10 / $1.25
  */
 export const CLAUDE_MANAGED_MODEL_PRICING: Record<ClaudeManagedModel, ClaudeManagedModelPricing> = {
+  "claude-fable-5": {
+    inputPerMillion: 10.0,
+    outputPerMillion: 50.0,
+    cacheReadPerMillion: 1.0,
+    cacheWritePerMillion: 12.5,
+  },
   "claude-sonnet-4-6": {
     inputPerMillion: 3.0,
     outputPerMillion: 15.0,

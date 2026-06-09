@@ -66,10 +66,10 @@ export const taskActionInputSchema = z.object({
       "Working directory (absolute path) for the agent to start in. Only used with 'create' action.",
     ),
   model: z
-    .enum(["haiku", "sonnet", "opus"])
+    .enum(["haiku", "sonnet", "opus", "fable"])
     .optional()
     .describe(
-      "Model to use for the created task ('haiku', 'sonnet', or 'opus'). Only used with 'create' action.",
+      "Model to use for the created task ('haiku', 'sonnet', 'opus', or 'fable'). Only used with 'create' action.",
     ),
 });
 

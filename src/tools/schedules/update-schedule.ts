@@ -44,7 +44,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         timezone: z.string().optional().describe("New timezone"),
         enabled: z.boolean().optional().describe("Enable or disable the schedule"),
         model: z
-          .enum(["haiku", "sonnet", "opus"])
+          .enum(["haiku", "sonnet", "opus", "fable"])
           .nullable()
           .optional()
           .describe("Model to use for tasks created by this schedule. Set to null to clear."),

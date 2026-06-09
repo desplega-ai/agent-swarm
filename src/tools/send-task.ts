@@ -54,10 +54,10 @@ export const sendTaskInputSchema = z.object({
       "VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context.",
     ),
   model: z
-    .enum(["haiku", "sonnet", "opus"])
+    .enum(["haiku", "sonnet", "opus", "fable"])
     .optional()
     .describe(
-      "Model to use for this task ('haiku', 'sonnet', or 'opus'). If not set, uses agent/global config MODEL_OVERRIDE or defaults to 'opus'.",
+      "Model to use for this task ('haiku', 'sonnet', 'opus', or 'fable'). If not set, uses agent/global config MODEL_OVERRIDE or defaults to 'opus'.",
     ),
   allowDuplicate: z
     .boolean()

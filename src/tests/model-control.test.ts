@@ -102,7 +102,7 @@ describe("Model Control - Schedule Creation", () => {
   });
 
   test("should store all valid model values on schedules", () => {
-    for (const model of ["haiku", "sonnet", "opus"] as const) {
+    for (const model of ["haiku", "sonnet", "opus", "fable"] as const) {
       const schedule = createScheduledTask({
         name: `model-schedule-all-${model}-${Date.now()}`,
         intervalMs: 60000,

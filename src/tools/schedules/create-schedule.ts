@@ -76,10 +76,10 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           .optional()
           .describe("Whether the schedule is enabled (default: true)"),
         model: z
-          .enum(["haiku", "sonnet", "opus"])
+          .enum(["haiku", "sonnet", "opus", "fable"])
           .optional()
           .describe(
-            "Model to use for tasks created by this schedule ('haiku', 'sonnet', or 'opus'). If not set, uses agent/global config or defaults to 'opus'.",
+            "Model to use for tasks created by this schedule ('haiku', 'sonnet', 'opus', or 'fable'). If not set, uses agent/global config or defaults to 'opus'.",
           ),
       }),
       outputSchema: z.object({

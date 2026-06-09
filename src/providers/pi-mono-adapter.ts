@@ -173,6 +173,7 @@ function mcpToolsToDefinitions(
  * (`anthropic/claude-{opus,sonnet,haiku}-*`).
  */
 const ANTHROPIC_SHORTNAME_OPENROUTER_MIRROR: Record<string, string> = {
+  fable: "anthropic/claude-fable-5",
   opus: "anthropic/claude-opus-4",
   sonnet: "anthropic/claude-sonnet-4",
   haiku: "anthropic/claude-haiku-4.5",
@@ -233,7 +234,8 @@ export function resolveModel(
   if (!modelStr) return undefined;
 
   const lower = modelStr.toLowerCase();
-  const isAnthropicShortname = lower === "opus" || lower === "sonnet" || lower === "haiku";
+  const isAnthropicShortname =
+    lower === "opus" || lower === "sonnet" || lower === "haiku" || lower === "fable";
 
   // Reroute anthropic shortnames through OpenRouter when no anthropic cred
   // is available. The OpenRouter mirror IDs (`anthropic/claude-sonnet-4`,
@@ -251,6 +253,7 @@ export function resolveModel(
 
   // Map common shortnames to provider/model pairs (native anthropic path).
   const shortnames: Record<string, [string, string]> = {
+    fable: ["anthropic", "claude-fable-5"],
     opus: ["anthropic", "claude-opus-4-20250514"],
     sonnet: ["anthropic", "claude-sonnet-4-20250514"],
     haiku: ["anthropic", "claude-haiku-4-5-20251001"],
