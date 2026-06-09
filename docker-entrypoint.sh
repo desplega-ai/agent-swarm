@@ -983,26 +983,6 @@ echo ""
 # into .local would otherwise block worker-side mkdir into .local/share.
 chown -R worker:worker /home/worker/.local 2>/dev/null || true
 
-# === Local PostgreSQL ===
-# Starts an embedded Postgres 16 for integration tests.
-# Defaults to ON for worker-role containers, OFF for all other roles.
-# All settings are env-overridable:
-#   ENABLE_LOCAL_POSTGRES     — true/false (default: true for worker, false otherwise)
-#   LOCAL_POSTGRES_DATA_DIR   — cluster data directory (default: /tmp/postgres-test)
-#   LOCAL_POSTGRES_PORT       — port to listen on (default: 5433, avoids clashing with system PG)
-#   LOCAL_POSTGRES_USER       — superuser name (default: postgres)
-#   LOCAL_POSTGRES_PASSWORD   — superuser password (default: postgres)
-#   LOCAL_POSTGRES_DB         — extra database to create (default: app)
-_pg_default="false"
-if [ "$ROLE" = "worker" ]; then
-    _pg_default="true"
-fi
-if [ "${ENABLE_LOCAL_POSTGRES:-${_pg_default}}" = "true" ]; then
-    echo "=== Local PostgreSQL ==="
-    /usr/local/bin/init-local-postgres.sh
-    echo ""
-fi
-
 # Run the agent using compiled binary.
 #
 # `tini` is prepended so PID 1 is a real init. The agent-swarm process spawns

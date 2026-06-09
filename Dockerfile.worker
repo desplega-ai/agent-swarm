@@ -278,7 +278,7 @@ RUN curl https://s3.amazonaws.com/archil-client/install | sh
 COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
 RUN chmod +x /usr/local/bin/agent-swarm
 
-# Embedded Postgres 16 init script for local integration tests
+# Optional helper to start a local PostgreSQL 16 cluster (not invoked automatically)
 COPY scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 RUN chmod +x /usr/local/bin/init-local-postgres.sh
 

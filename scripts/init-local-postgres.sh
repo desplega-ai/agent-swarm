@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # init-local-postgres.sh
 #
-# Idempotent: safe to call on every container start.
-# Initializes and starts an embedded PostgreSQL 16 cluster for integration tests.
+# Optionally initialize and start a local PostgreSQL 16 cluster.
+# Run it manually — it is NOT invoked automatically.
 #
-# Must run as root (before gosu-drop); uses `gosu worker` for PG commands so
-# the cluster is owned by the worker user, not root.
+# Idempotent: safe to call multiple times.
+# Must run as root; uses `gosu worker` for PG commands so the cluster
+# is owned by the worker user, not root.
 #
-# Configuration (all have defaults; override via env vars in deployment config):
-#   LOCAL_POSTGRES_DATA_DIR  — cluster data directory  (default: /tmp/postgres-test)
-#   ENABLE_LOCAL_POSTGRES    — set to "true" to activate  (defaulted by role in entrypoint)
+# All settings are env-overridable; the defaults below are just defaults, not policy:
+#   LOCAL_POSTGRES_DATA_DIR  — cluster data directory  (default: /tmp/postgres-data)
+#   LOCAL_POSTGRES_PORT      — port to listen on        (default: 5433)
+#   LOCAL_POSTGRES_USER      — superuser name            (default: postgres)
+#   LOCAL_POSTGRES_PASSWORD  — superuser password        (default: postgres)
+#   LOCAL_POSTGRES_DB        — database to create        (default: app)
 set -euo pipefail
 
 PG_VERSION=16
 PG_BINDIR="/usr/lib/postgresql/${PG_VERSION}/bin"
-PG_CLUSTER_DIR="${LOCAL_POSTGRES_DATA_DIR:-/tmp/postgres-test}"
+PG_CLUSTER_DIR="${LOCAL_POSTGRES_DATA_DIR:-/tmp/postgres-data}"
 PG_DATA_DIR="${PG_CLUSTER_DIR}/data"
 PG_LOG="${PG_CLUSTER_DIR}/postgres.log"
 PG_PORT="${LOCAL_POSTGRES_PORT:-5433}"
@@ -48,7 +52,7 @@ if [ ! -s "${PG_DATA_DIR}/PG_VERSION" ]; then
     printf "shared_preload_libraries = 'pg_stat_statements'\n"
   } >> "${PG_DATA_DIR}/postgresql.conf"
 
-  # Trust all localhost connections (ephemeral test cluster — no secrets at risk)
+  # Trust all localhost connections
   cat > "${PG_DATA_DIR}/pg_hba.conf" <<EOF
 local   all   all              trust
 host    all   all   127.0.0.1/32   trust
@@ -74,7 +78,7 @@ else
   fi
 fi
 
-# --- 3. Create the 'tests' template database if absent ---
+# --- 3. Create database if absent ---
 DB_EXISTS=$(gosu worker "${PG_BINDIR}/psql" \
   -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d postgres \
   -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_DB}'" 2>/dev/null || echo "")
@@ -84,4 +88,4 @@ if [ "$DB_EXISTS" != "1" ]; then
   log "Database '${PG_DB}' created."
 fi
 
-log "Local PostgreSQL ready at localhost:${PG_PORT} (data dir: ${PG_CLUSTER_DIR})."
+log "PostgreSQL ready at localhost:${PG_PORT} (data dir: ${PG_CLUSTER_DIR})."
