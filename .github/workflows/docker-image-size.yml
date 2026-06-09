@@ -6,35 +6,27 @@ on:
       - main
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - "src/**"
       - "Dockerfile"
       - "Dockerfile.worker"
       - "docker-entrypoint.sh"
       - "api-entrypoint.sh"
       - "package.json"
       - "bun.lock*"
-      - "tsconfig.json"
-      - "scripts/**"
       - "templates/**"
       - "plugin/**"
-      - "deploy/**"
       - ".github/workflows/docker-image-size.yml"
   push:
     branches:
       - main
     paths:
-      - "src/**"
       - "Dockerfile"
       - "Dockerfile.worker"
       - "docker-entrypoint.sh"
       - "api-entrypoint.sh"
       - "package.json"
       - "bun.lock*"
-      - "tsconfig.json"
-      - "scripts/**"
       - "templates/**"
       - "plugin/**"
-      - "deploy/**"
       - ".github/workflows/docker-image-size.yml"
   workflow_dispatch:
 
