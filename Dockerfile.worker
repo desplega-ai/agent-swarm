@@ -43,6 +43,8 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 gosu tini \
     openssh-client \
     postgresql-client \
+    postgresql-16 \
+    postgresql-contrib-16 \
     sudo \
     nodejs \
     gh \
@@ -275,6 +277,10 @@ RUN curl https://s3.amazonaws.com/archil-client/install | sh
 # Copy binary from builder (changes on every code change — keep late)
 COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
 RUN chmod +x /usr/local/bin/agent-swarm
+
+# Copy local Postgres init script (Capchase-only: starts embedded PG 16 for integration tests)
+COPY scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
+RUN chmod +x /usr/local/bin/init-local-postgres.sh
 
 # Copy commands (changes on code change — keep late)
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
