@@ -10059,6 +10059,28 @@ export function setApiKeyName(
 }
 
 /**
+ * Clear a stale rate-limit record after a successful use proves the key is healthy.
+ */
+export function clearKeyRateLimit(
+  keyType: string,
+  keySuffix: string,
+  scope = "global",
+  scopeId: string | null = null,
+): boolean {
+  const now = new Date().toISOString();
+  const effectiveScopeId = scopeId ?? "";
+  const result = getDb()
+    .prepare(
+      `UPDATE api_key_status
+       SET status = 'available', rateLimitedUntil = NULL, updatedAt = ?
+       WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?
+         AND status = 'rate_limited'`,
+    )
+    .run(now, keyType, keySuffix, scope, effectiveScopeId);
+  return result.changes > 0;
+}
+
+/**
  * Get all key status records for a credential type.
  */
 export function getKeyStatuses(

@@ -1110,6 +1110,35 @@ async function reportKeyRateLimit(
   }
 }
 
+/** Clear a stale rate-limit record after a successful task (fire-and-forget) */
+async function reportKeyClearRateLimit(
+  apiUrl: string,
+  apiKey: string,
+  keyType: string,
+  keySuffix: string,
+): Promise<void> {
+  try {
+    const resp = await fetch(`${apiUrl}/api/keys/clear-rate-limit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ keyType, keySuffix }),
+    });
+    if (resp.ok) {
+      const data = (await resp.json()) as { cleared?: boolean };
+      if (data.cleared) {
+        console.log(
+          `[credentials] Cleared stale rate-limit for ...${keySuffix} after successful task`,
+        );
+      }
+    }
+  } catch {
+    // Non-blocking
+  }
+}
+
 /**
  * Supersede a task via the API (for graceful shutdown / context-limit /
  * operator-triggered). Returns `{ ok: true, resumeTaskId }` on success.
@@ -2493,10 +2522,19 @@ async function spawnProviderProcess(
   // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
   // can pass codexSlot through and the adapter writes token refreshes back to
   // the correct slot key (codex_oauth_<slot>) instead of defaulting to slot 0.
+  //
+  // Always resolve for codex (not just when credentialSelections is empty) so
+  // that if the OPENAI_API_KEY credential is rate-limited we can fail over to
+  // a CODEX_OAUTH slot — even though the keyType differs.
   let oauthSelection: CredentialSelection | undefined;
-  if (adapter.name === "codex" && credentialSelections.length === 0) {
+  if (adapter.name === "codex") {
     oauthSelection = (await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey)) ?? undefined;
-    if (oauthSelection && realTaskId) {
+    const oauthIsPrimary =
+      credentialSelections.length === 0 ||
+      (credentialSelections[0]?.isRateLimitFallback &&
+        oauthSelection &&
+        !oauthSelection.isRateLimitFallback);
+    if (oauthSelection && realTaskId && oauthIsPrimary) {
       reportKeyUsage(
         opts.apiUrl,
         opts.apiKey,
@@ -3085,8 +3123,23 @@ async function spawnProviderProcess(
       }),
     );
 
-  // Build credential info for rate limit tracking
-  const primarySelection = credentialSelections[0] ?? oauthSelection;
+  // Build credential info for rate limit tracking.
+  // For codex: when OPENAI_API_KEY is rate-limited but CODEX_OAUTH has
+  // available slots (or vice versa), prefer the healthy credential.
+  let primarySelection: CredentialSelection | undefined;
+  const firstCred = credentialSelections[0];
+  if (firstCred && oauthSelection) {
+    if (firstCred.isRateLimitFallback && !oauthSelection.isRateLimitFallback) {
+      primarySelection = oauthSelection;
+      console.log(
+        `[credentials] Cross-keyType failover: ${firstCred.keyType} all rate-limited, using ${oauthSelection.keyType} [...${oauthSelection.keySuffix}]`,
+      );
+    } else {
+      primarySelection = firstCred;
+    }
+  } else {
+    primarySelection = firstCred ?? oauthSelection;
+  }
   const credentialInfo = primarySelection
     ? {
         keyType: primarySelection.keyType,
@@ -3253,6 +3306,15 @@ async function checkCompletedProcesses(
         result.output,
         state.harnessProvider,
       );
+
+      if (result.exitCode === 0 && credentialInfo) {
+        reportKeyClearRateLimit(
+          apiConfig.apiUrl,
+          apiConfig.apiKey,
+          credentialInfo.keyType,
+          credentialInfo.keySuffix,
+        ).catch(() => {});
+      }
 
       ensure({
         id: "worker_process_finished",

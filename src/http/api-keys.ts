@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
+  clearKeyRateLimit,
   getAvailableKeyIndices,
   getKeyCostSummary,
   getKeyStatuses,
@@ -134,6 +135,26 @@ const setKeyName = route({
   auth: { apiKey: true },
 });
 
+const clearRateLimitRoute = route({
+  method: "post",
+  path: "/api/keys/clear-rate-limit",
+  pattern: ["api", "keys", "clear-rate-limit"],
+  summary: "Clear rate-limited status for a key after a successful use proves it is healthy",
+  tags: ["API Keys"],
+  body: z.object({
+    keyType: z.string(),
+    keySuffix: z.string().min(1).max(10),
+    scope: z.string().optional(),
+    scopeId: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Rate limit cleared (or key was not rate-limited)" },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleApiKeys(
@@ -238,6 +259,27 @@ export async function handleApiKeys(
       json(res, { success: true, keyType, keySuffix, name: value });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to set key name", 500);
+    }
+    return true;
+  }
+
+  // POST /api/keys/clear-rate-limit
+  if (clearRateLimitRoute.match(req.method, pathSegments)) {
+    const parsed = await clearRateLimitRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { keyType, keySuffix, scope, scopeId } = parsed.body;
+    try {
+      const cleared = clearKeyRateLimit(keyType, keySuffix, scope, scopeId ?? null);
+      json(res, {
+        success: true,
+        cleared,
+        message: cleared
+          ? `Rate limit cleared for ...${keySuffix}`
+          : `Key ...${keySuffix} was not rate-limited`,
+      });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to clear rate limit", 500);
     }
     return true;
   }
