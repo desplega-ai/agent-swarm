@@ -182,17 +182,17 @@ docker build -f Dockerfile.worker -t agent-swarm-worker .
 # Or using npm script
 bun run docker:build:worker
 
-# Override the pinned Claude Code version (default: 2.1.158)
+# Override the pinned Claude Code version (default: 2.1.168)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.158`
-- `PI_CODING_AGENT_VERSION=0.78.0`
-- `CODEX_VERSION=0.135.0`
-- `OPENCODE_VERSION=1.15.13`
-- `OPENCODE_SDK_VERSION=1.15.13`
+- `CLAUDE_CODE_VERSION=2.1.168`
+- `PI_CODING_AGENT_VERSION=0.78.1`
+- `CODEX_VERSION=0.137.0`
+- `OPENCODE_VERSION=1.16.2`
+- `OPENCODE_SDK_VERSION=1.16.2`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 

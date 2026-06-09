@@ -90,7 +90,7 @@ send-task(
 )
 ```
 
-A task with dependencies won't be offered or claimable until all dependencies are completed.
+A task with dependencies won't be offered or claimable until all dependencies are completed. If an upstream task fails, is cancelled, or is superseded, its dependents are now cascade-failed with a descriptive reason instead of staying blocked forever.
 
 ## Task Properties
 
@@ -100,7 +100,7 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `priority` | 0-100 (default: 50). Higher priority tasks are processed first |
 | `tags` | Labels for filtering (e.g., `['urgent', 'frontend']`) |
 | `taskType` | Classification (e.g., `bug`, `feature`, `review`) |
-| `dependsOn` | Array of task IDs that must complete first |
+| `dependsOn` | Array of task IDs that must complete first; non-success terminal parents cascade-fail their dependents |
 | `parentTaskId` | For follow-up continuity — child tasks inherit a bounded prior-task context preamble rebuilt from the task chain, so continuity survives restarts and works the same across every harness |
 | `followUpConfig` | Optional control over the lead follow-up created when this task completes or fails. Useful for long-running flows that need custom completion instructions or no follow-up at all |
 | `dir` | Working directory (absolute path) for the agent to start in. Falls back to repo clone path or default cwd |

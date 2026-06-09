@@ -28,7 +28,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model slug sent to the provider. |
 | `EMBEDDING_DIMENSIONS` | `512` | Vector dimensions requested from the model. Must match what the model supports. |
-| `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Days until memory recency decay reaches 0.5 |
+| `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for memory recency decay. When unset, recency defaults are source-aware: manual memories do not decay, `file_index` uses 180 days, `task_completion` uses 14 days, and `session_summary` uses 7 days. |
+| `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity required before a memory candidate survives reranking. Filters low-relevance noise before recency/access boosts are applied. |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |

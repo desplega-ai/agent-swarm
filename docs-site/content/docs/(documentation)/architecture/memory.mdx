@@ -58,23 +58,24 @@ Before starting each task, the runner automatically searches for relevant memori
 1. Task description is used as the search query
 2. An embedding is generated via the `EmbeddingProvider`
 3. Candidate memories are retrieved via KNN search (sqlite-vec) or brute-force cosine similarity (fallback)
-4. Candidates are **reranked** using a composite score
+4. Candidates below the minimum similarity floor are dropped, then the survivors are **reranked** using a composite score
 5. Top matches are included in the task context as "Relevant Past Knowledge"
 
 ### Reranking
 
-Raw vector similarity alone isn't enough — a memory from yesterday about the same topic should rank higher than a similar but month-old memory. The reranker computes:
+Raw vector similarity alone isn't enough — a curated manual memory from last month can still be more useful than a noisy session summary from yesterday. The reranker computes:
 
 ```
-finalScore = similarity × recencyDecay × accessBoost
+finalScore = similarity × sourceQuality × recencyDecay × accessBoost
 ```
 
 | Signal | Formula | Effect |
 |--------|---------|--------|
-| **Recency decay** | `2^(-ageDays / 14)` | Memories lose half their score every 14 days |
+| **Source quality** | manual `1.5`, file notes `1.0`, task completions `0.7`, session summaries `0.5` | Curated knowledge ranks above ephemeral auto-generated snapshots |
+| **Recency decay** | Source-aware by default: manual `∞`, file notes `180d`, task completions `14d`, session summaries `7d` | Long-lived curated memories stay relevant; ephemeral memories decay faster |
 | **Access boost** | `1 + min(accessCount/10, 0.5) × recencyFactor` | Frequently accessed memories get up to 1.5× boost |
 
-The candidate set is fetched at 3× the requested limit, then narrowed after reranking. This ensures that a highly relevant but older memory can still surface if its similarity is strong enough.
+Before reranking, candidates with raw cosine similarity below `MEMORY_MIN_SIMILARITY` (default `0.1`) are discarded as noise. The remaining candidate set is fetched at 3× the requested limit, then narrowed after reranking. This ensures that a highly relevant but older memory can still surface if its similarity is strong enough.
 
 ### Manual Search
 
@@ -128,7 +129,8 @@ Reranking parameters are tunable via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Days until recency decay reaches 0.5 |
+| `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for recency half-life across all memory sources. Leave unset to use the source-aware defaults above. |
+| `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity a candidate must meet before reranking. |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
@@ -139,7 +141,7 @@ Reranking parameters are tunable via environment variables:
 src/be/memory/
 ├── types.ts              # EmbeddingProvider + MemoryStore interfaces
 ├── constants.ts          # TTL defaults + reranking params (env-overridable)
-├── reranker.ts           # Scoring: similarity × recency × access
+├── reranker.ts           # Scoring: similarity × source quality × recency × access
 ├── index.ts              # Singleton getters
 └── providers/
     ├── openai-embedding.ts   # OpenAI text-embedding-3-small

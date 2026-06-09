@@ -336,9 +336,11 @@ This is why step labels matter. A label is not display text. It is the durabilit
 await ctx.step.swarmScript("daily-ops-snapshot", {
   name: "compound-insights",
   scope: "global",
-  args: { hours: 24 },
+  args: { days: 1, includeScriptUsage: true, includeCostAndTokens: true },
 });
 ```
+
+`compound-insights` now reports actual `script_runs` usage separately from MCP-call log signals and can surface a cost-and-token headline in the same snapshot.
 
 or an inline script:
 

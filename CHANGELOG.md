@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.92.2] - 2026-06-09
+
+### Added
+- **`compound-insights` now reports script usage and spend snapshots** (#695) — the global script now distinguishes authoritative `script_runs` totals from MCP-call log signals, adds per-script run metrics, and surfaces cost/token honesty rails in the same operational report.
+
+### Changed
+- **Worker-image harness pins refreshed** (#698) — `Dockerfile.worker` now ships Claude Code `2.1.168`, pi-mono `0.78.1`, Codex CLI / SDK `0.137.0`, and opencode / `@opencode-ai/sdk` `1.16.2`.
+- **Bundled model pricing metadata refreshed** (#692) — the daily models.dev sync updated the built-in pricing data that powers model-cost lookups and related guidance.
+
+### Fixed
+- **Dependent tasks now cascade-fail on upstream non-success terminal states** (#697) — tasks that depend on a failed, cancelled, or superseded parent no longer stay blocked forever; the system now recursively marks them failed with a descriptive reason and reports the impact in the lead follow-up.
+- **Memory search reranking now filters noise and respects source quality** (#696) — memory retrieval now applies source-aware recency, a minimum similarity floor, response-side embedding-dimension validation, and protected manual-memory handling so relevant memories outrank recent noise.
+
 ## [1.92.1] - 2026-06-07
 
 ### Added
