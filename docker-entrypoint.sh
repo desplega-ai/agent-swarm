@@ -983,6 +983,12 @@ echo ""
 # into .local would otherwise block worker-side mkdir into .local/share.
 chown -R worker:worker /home/worker/.local 2>/dev/null || true
 
+# Optional: initialize a local PostgreSQL 16 cluster before dropping privileges.
+# Requires the image was built with SWARM_DEP_POSTGRES_BUILD=true.
+if [ "${SWARM_DEP_POSTGRES_ENABLED:-false}" = "true" ]; then
+  /usr/local/bin/init-local-postgres.sh
+fi
+
 # Run the agent using compiled binary.
 #
 # `tini` is prepended so PID 1 is a real init. The agent-swarm process spawns
