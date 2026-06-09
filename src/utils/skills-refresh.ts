@@ -79,6 +79,7 @@ export async function refreshSkillsIfChanged(
   };
   let skillRows: SkillRow[] = [];
   let newHash: string | null = null;
+  let fetchedSkillSnapshot = false;
   try {
     const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
       headers: authHeaders,
@@ -88,13 +89,21 @@ export async function refreshSkillsIfChanged(
         skills: SkillRow[];
         signature?: string;
       };
+      if (!Array.isArray(skillsData.skills)) {
+        return { changed: false };
+      }
       skillRows = skillsData.skills;
+      fetchedSkillSnapshot = true;
       if (typeof skillsData.signature === "string") {
         newHash = skillsData.signature;
       }
     }
   } catch {
     // Non-fatal — skills are optional
+  }
+
+  if (!fetchedSkillSnapshot) {
+    return { changed: false };
   }
 
   const summary = skillRows

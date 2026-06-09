@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SWARM_MARKER_FILE } from "../utils/skill-fs-writer";
 import { refreshSkillsIfChanged, type SkillsRefreshContext } from "../utils/skills-refresh";
 
 // ── Bun.serve() stub backing fake signature/list endpoints ───────────────────
@@ -31,6 +32,7 @@ type StubState = {
     skills: SkillStub[];
     signature: string;
   };
+  skillsStatus: number;
   calls: { signature: number; list: number; sync: number };
   skillFilesStatus: number;
 };
@@ -40,6 +42,7 @@ const FAKE_HOME = join(tmpdir(), `runner-refresh-test-${process.pid}`);
 const state: StubState = {
   signatureHash: "hash-v1",
   signatureStatus: 200,
+  skillsStatus: 200,
   skillFilesStatus: 200,
   skillsBody: {
     skills: [
@@ -91,6 +94,9 @@ describe("refreshSkillsIfChanged", () => {
         }
         if (url.pathname.match(/\/api\/agents\/[^/]+\/skills$/)) {
           state.calls.list++;
+          if (state.skillsStatus !== 200) {
+            return new Response("err", { status: state.skillsStatus });
+          }
           return Response.json({
             skills: state.skillsBody.skills,
             total: state.skillsBody.skills.length,
@@ -280,6 +286,35 @@ describe("refreshSkillsIfChanged", () => {
     expect(state.calls).toEqual({ signature: 1, list: 0, sync: 0 });
 
     state.signatureStatus = 200; // restore
+  });
+
+  test("full list fetch failure after hash drift preserves local skills and cached hash", async () => {
+    const failureHome = join(FAKE_HOME, "list-failure-home");
+    const preexistingSkillDir = join(failureHome, ".claude", "skills", "preexisting");
+    const preexistingSkillFile = join(preexistingSkillDir, "SKILL.md");
+    mkdirSync(preexistingSkillDir, { recursive: true });
+    writeFileSync(preexistingSkillFile, "# Preexisting\n\nKeep me.");
+    writeFileSync(join(preexistingSkillDir, SWARM_MARKER_FILE), "");
+
+    state.calls = { signature: 0, list: 0, sync: 0 };
+    state.signatureStatus = 200;
+    state.signatureHash = "hash-v4";
+    state.skillsStatus = 500;
+    state.skillsBody.signature = "hash-v4";
+    state.skillsBody.skills = [];
+
+    const lastHash = { current: "hash-v3" };
+    const result = await refreshWithHome(makeCtx(), lastHash, failureHome);
+
+    expect(result.changed).toBe(false);
+    expect(result.summary).toBeUndefined();
+    expect(lastHash.current).toBe("hash-v3");
+    expect(existsSync(preexistingSkillFile)).toBe(true);
+    expect(readFileSync(preexistingSkillFile, "utf-8")).toContain("Keep me.");
+    expect(state.calls).toEqual({ signature: 1, list: 1, sync: 0 });
+
+    state.skillsStatus = 200; // restore
+    rmSync(failureHome, { recursive: true, force: true });
   });
 
   test("local write failure leaves cached hash unchanged so the next poll retries", async () => {
