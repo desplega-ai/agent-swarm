@@ -5,7 +5,6 @@
 #
 # Called automatically from docker-entrypoint.sh when
 # SWARM_DEP_POSTGRES_ENABLED=true.  Can also be run manually.
-# Requires the image was built with SWARM_DEP_POSTGRES_BUILD=true.
 #
 # Idempotent: safe to call multiple times.
 # Must run as root; uses `gosu worker` for PG commands so the cluster
