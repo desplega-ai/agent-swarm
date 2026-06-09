@@ -22,6 +22,7 @@ export interface MemoryStore {
   peek(id: string): AgentMemory | null;
   search(embedding: Float32Array, agentId: string, options: MemorySearchOptions): MemoryCandidate[];
   list(agentId: string, options: MemoryListOptions): AgentMemory[];
+  count(agentId: string, options: MemoryListOptions): number;
   isSourceProtected(source: AgentMemorySource): boolean;
   listForCuration(
     agentId?: string,
@@ -80,7 +81,9 @@ export interface MemoryListOptions {
   limit?: number;
   offset?: number;
   isLead?: boolean;
+  ownerAgentId?: string;
   source?: AgentMemorySource;
+  sourcePath?: string;
 }
 
 export interface MemoryStats {

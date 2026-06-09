@@ -1,6 +1,6 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { Brain, FileText, Loader2, Search, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Brain, ChevronLeft, ChevronRight, FileText, Loader2, Search, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -48,6 +48,8 @@ const SOURCE_OPTIONS: { value: MemorySource; label: string }[] = [
   { value: "session_summary", label: "session_summary" },
   { value: "task_completion", label: "task_completion" },
 ];
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 50;
 
 function truncate(text: string, max = 120): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -64,14 +66,25 @@ export default function MemoryPage() {
   const [draftScope, setDraftScope] = useState<MemoryScopeFilter>(ANY_SCOPE);
   const [draftSource, setDraftSource] = useState<string>(ANY_SOURCE);
 
-  // Submitted params — what's actually being queried
-  const [submitted, setSubmitted] = useState<MemoryListRequest>({ limit: 50, scope: ANY_SCOPE });
+  // Submitted filters — combined with page state to form the actual request.
+  const [submittedFilters, setSubmittedFilters] = useState<MemoryListRequest>({ scope: ANY_SCOPE });
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const submitted = useMemo<MemoryListRequest>(
+    () => ({
+      ...submittedFilters,
+      limit: pageSize,
+      offset: page * pageSize,
+    }),
+    [submittedFilters, page, pageSize],
+  );
 
   const { data, isLoading, isFetching, error } = useMemoryList(submitted);
 
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [selected, setSelected] = useState<MemoryEntry | null>(null);
+  const dismissedMemoryIdRef = useRef<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MemoryEntry | null>(null);
   const deleteMemory = useDeleteMemory();
 
@@ -92,20 +105,27 @@ export default function MemoryPage() {
 
   const selectMemory = useCallback(
     (entry: MemoryEntry | null) => {
+      if (entry) dismissedMemoryIdRef.current = null;
       setSelected(entry);
       setMemoryIdParam(entry?.id ?? null);
     },
     [setMemoryIdParam],
   );
 
+  const closeSelectedMemory = useCallback(() => {
+    dismissedMemoryIdRef.current = selected?.id ?? searchParams.get("memoryId");
+    setSelected(null);
+    setMemoryIdParam(null);
+  }, [searchParams, selected?.id, setMemoryIdParam]);
+
   const submit = useCallback(() => {
-    setSubmitted({
+    setPage(0);
+    setSubmittedFilters({
       query: draftQuery.trim() || undefined,
       sourcePath: draftPath.trim() || undefined,
       agentId: draftAgentId === ANY_AGENT ? undefined : draftAgentId,
       scope: draftScope,
       source: draftSource === ANY_SOURCE ? undefined : (draftSource as MemorySource),
-      limit: 50,
     });
   }, [draftQuery, draftPath, draftAgentId, draftScope, draftSource]);
 
@@ -115,7 +135,9 @@ export default function MemoryPage() {
     setDraftAgentId(ANY_AGENT);
     setDraftScope(ANY_SCOPE);
     setDraftSource(ANY_SOURCE);
-    setSubmitted({ limit: 50, scope: ANY_SCOPE });
+    setPage(0);
+    setPageSize(DEFAULT_PAGE_SIZE);
+    setSubmittedFilters({ scope: ANY_SCOPE });
   }, []);
 
   const handleConfirmDelete = useCallback(() => {
@@ -124,10 +146,10 @@ export default function MemoryPage() {
     deleteMemory.mutate(id, {
       onSettled: () => {
         setDeleteTarget(null);
-        if (selected?.id === id) selectMemory(null);
+        if (selected?.id === id) closeSelectedMemory();
       },
     });
-  }, [deleteMemory, deleteTarget, selected, selectMemory]);
+  }, [closeSelectedMemory, deleteMemory, deleteTarget, selected]);
 
   const agentName = useCallback(
     (id: string | null) => {
@@ -254,14 +276,28 @@ export default function MemoryPage() {
   );
 
   const results = data?.results ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const firstRow = total > 0 ? page * pageSize + 1 : 0;
+  const lastRow = Math.min((page + 1) * pageSize, total);
 
   // Auto-select the memory referenced by ?memoryId= once it appears in results.
   const memoryIdParam = searchParams.get("memoryId");
   useEffect(() => {
-    if (!memoryIdParam || selected) return;
+    if (!memoryIdParam) {
+      dismissedMemoryIdRef.current = null;
+      return;
+    }
+    if (dismissedMemoryIdRef.current === memoryIdParam) return;
+    if (selected?.id === memoryIdParam) return;
     const match = results.find((r) => r.id === memoryIdParam);
     if (match) setSelected(match);
-  }, [memoryIdParam, selected, results]);
+  }, [memoryIdParam, selected?.id, results]);
+
+  useEffect(() => {
+    const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
+    if (page > lastPage) setPage(lastPage);
+  }, [page, pageSize, total]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -367,7 +403,10 @@ export default function MemoryPage() {
                 {data.mode}
               </Badge>
               <Badge variant="outline" size="tag">
-                {results.length} {results.length === 1 ? "result" : "results"}
+                {total} {data.mode === "semantic" ? "matches" : "memories"}
+              </Badge>
+              <Badge variant="outline" size="tag">
+                {results.length} shown
               </Badge>
             </>
           )}
@@ -388,9 +427,66 @@ export default function MemoryPage() {
         }
         onRowClicked={onRowClicked}
         getRowId={(p) => p.data.id}
+        pagination={false}
       />
 
-      <Sheet open={!!selected} onOpenChange={(open) => !open && selectMemory(null)}>
+      <div className="flex items-center justify-between shrink-0 text-sm text-muted-foreground">
+        <span>
+          {total > 0
+            ? `${firstRow}–${lastRow} of ${total}`
+            : data?.mode === "semantic"
+              ? "0 matches"
+              : "0 memories"}
+        </span>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">Rows</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(value) => {
+                setPage(0);
+                setPageSize(Number(value));
+              }}
+            >
+              <SelectTrigger className="h-8 w-[72px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            disabled={page === 0}
+            onClick={() => setPage((current) => Math.max(0, current - 1))}
+            aria-label="Previous page"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="px-2 text-xs">
+            Page {page + 1} of {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
+            aria-label="Next page"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <Sheet open={!!selected} onOpenChange={(open) => !open && closeSelectedMemory()}>
         <SheetContent className="w-[640px] sm:max-w-[640px] p-0">
           {selected && (
             <div className="flex flex-col h-full">

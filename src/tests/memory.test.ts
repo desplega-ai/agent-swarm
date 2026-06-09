@@ -479,6 +479,57 @@ describe("Memory System", () => {
       const page2 = store.list(listAgent, { scope: "agent", limit: 3, offset: 3 });
       expect(page2.length).toBe(2);
     });
+
+    test("counts memories with the same filters used by list", () => {
+      const countAgent = "eeee0000-0000-4000-8000-000000000105";
+      createAgent({ id: countAgent, name: "Count Agent", isLead: false, status: "idle" });
+
+      store.store({
+        agentId: countAgent,
+        scope: "agent",
+        name: "Count match 1",
+        content: "Content",
+        source: "file_index",
+        sourcePath: "/workspace/src/MemoryPage.tsx",
+      });
+      store.store({
+        agentId: countAgent,
+        scope: "swarm",
+        name: "Count match 2",
+        content: "Content",
+        source: "file_index",
+        sourcePath: "/workspace/SRC/memory-page.tsx",
+      });
+      store.store({
+        agentId: countAgent,
+        scope: "agent",
+        name: "Wrong source",
+        content: "Content",
+        source: "manual",
+        sourcePath: "/workspace/src/MemoryPage.tsx",
+      });
+      store.store({
+        agentId: agentA,
+        scope: "agent",
+        name: "Wrong owner",
+        content: "Content",
+        source: "file_index",
+        sourcePath: "/workspace/src/MemoryPage.tsx",
+      });
+
+      const filters = {
+        scope: "all" as const,
+        isLead: true,
+        ownerAgentId: countAgent,
+        source: "file_index" as const,
+        sourcePath: "src/memory",
+      };
+
+      expect(store.count("", filters)).toBe(2);
+      expect(store.list("", { ...filters, limit: 1, offset: 0 })).toHaveLength(1);
+      expect(store.list("", { ...filters, limit: 1, offset: 1 })).toHaveLength(1);
+      expect(store.list("", { ...filters, limit: 1, offset: 2 })).toHaveLength(0);
+    });
   });
 
   describe("store.delete (deleteMemory)", () => {

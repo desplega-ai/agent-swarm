@@ -973,6 +973,8 @@ export interface ScriptRun {
   requestedByUserId?: string;
 }
 
+export type ScriptRunListItem = Omit<ScriptRun, "source" | "args" | "output">;
+
 export type ScriptRunJournalStepType = "swarm-script" | "raw-llm" | "agent-task" | string;
 
 export interface ScriptRunJournalEntry {
@@ -995,7 +997,7 @@ export interface ScriptRunJournalEntry {
 }
 
 export interface ScriptRunsResponse {
-  runs: ScriptRun[];
+  runs: ScriptRunListItem[];
   total: number;
 }
 
@@ -1433,6 +1435,8 @@ export interface MemoryEntry {
 export interface MemoryListResponse {
   results: MemoryEntry[];
   total: number;
+  limit?: number;
+  offset?: number;
   mode: "semantic" | "list";
 }
 

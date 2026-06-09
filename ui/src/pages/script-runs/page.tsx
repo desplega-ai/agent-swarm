@@ -1,9 +1,9 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { FileClock, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileClock, Search } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useScriptRuns } from "@/api/hooks/use-script-runs";
-import type { ScriptRun, ScriptRunKind, ScriptRunStatus } from "@/api/types";
+import type { ScriptRunKind, ScriptRunListItem, ScriptRunStatus } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { DataGrid } from "@/components/shared/data-grid";
 import { ScriptRunKindBadge } from "@/components/shared/script-run-kind-badge";
@@ -31,6 +31,9 @@ const STATUS_OPTIONS: Array<ScriptRunStatus | "all"> = [
   "aborted_limit",
 ];
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 50;
+
 function formatDuration(startedAt: string, finishedAt?: string): string {
   if (!finishedAt) return "—";
   return formatElapsed(startedAt, finishedAt);
@@ -40,9 +43,15 @@ export default function ScriptRunsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ScriptRunStatus | "all">("all");
-  const { data, isLoading } = useScriptRuns({ status: statusFilter, limit: 200 });
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  const { data, isLoading } = useScriptRuns({
+    status: statusFilter,
+    limit: pageSize,
+    offset: page * pageSize,
+  });
 
-  const columns = useMemo<ColDef<ScriptRun>[]>(
+  const columns = useMemo<ColDef<ScriptRunListItem>[]>(
     () => [
       {
         field: "scriptName",
@@ -126,7 +135,7 @@ export default function ScriptRunsPage() {
   );
 
   const onRowClicked = useCallback(
-    (event: RowClickedEvent<ScriptRun>) => {
+    (event: RowClickedEvent<ScriptRunListItem>) => {
       // Don't hijack clicks on interactive cell content (e.g. the agent link) —
       // AG Grid's native row listener fires before React's stopPropagation, so
       // guard on the click target instead.
@@ -138,6 +147,10 @@ export default function ScriptRunsPage() {
   );
 
   const runs = data?.runs ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const firstVisible = total > 0 ? page * pageSize + 1 : 0;
+  const lastVisible = Math.min((page + 1) * pageSize, total);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -155,7 +168,10 @@ export default function ScriptRunsPage() {
         </div>
         <Select
           value={statusFilter}
-          onValueChange={(value) => setStatusFilter(value as ScriptRunStatus | "all")}
+          onValueChange={(value) => {
+            setStatusFilter(value as ScriptRunStatus | "all");
+            setPage(0);
+          }}
         >
           <SelectTrigger className="w-[170px]">
             <SelectValue placeholder="Status" />
@@ -169,13 +185,20 @@ export default function ScriptRunsPage() {
           </SelectContent>
         </Select>
         {statusFilter !== "all" && (
-          <Button variant="ghost" size="sm" onClick={() => setStatusFilter("all")}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setStatusFilter("all");
+              setPage(0);
+            }}
+          >
             Clear filters
           </Button>
         )}
         <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           <FileClock className="h-4 w-4" />
-          <span>{data?.total ?? runs.length} total</span>
+          <span>{total.toLocaleString()} total</span>
         </div>
       </div>
 
@@ -186,7 +209,62 @@ export default function ScriptRunsPage() {
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No script runs"
+        pagination={false}
       />
+
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+        <span>
+          {total > 0
+            ? `${firstVisible.toLocaleString()}-${lastVisible.toLocaleString()} of ${total.toLocaleString()}`
+            : "0 script runs"}
+        </span>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">Rows</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(value) => {
+                setPageSize(Number(value));
+                setPage(0);
+              }}
+            >
+              <SelectTrigger className="h-8 w-[72px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            disabled={page === 0}
+            onClick={() => setPage((current) => Math.max(0, current - 1))}
+            aria-label="Previous page"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="px-2 text-xs">
+            Page {page + 1} of {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage((current) => current + 1)}
+            aria-label="Next page"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

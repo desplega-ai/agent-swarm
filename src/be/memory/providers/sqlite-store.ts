@@ -488,29 +488,19 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
-  list(agentId: string, options: MemoryListOptions = {}): AgentMemory[] {
-    const { scope = "all", limit = 20, offset = 0, isLead = false, source } = options;
-    const db = getDb();
-
+  private buildListWhereClause(
+    agentId: string,
+    options: MemoryListOptions,
+  ): { whereClause: string; params: (Buffer | string | number | null)[] } {
+    const { scope = "all", isLead = false, ownerAgentId, source, sourcePath } = options;
     const conditions: string[] = [];
-    const params: (string | number)[] = [];
+    const params: (Buffer | string | number | null)[] = [];
 
-    if (!isLead) {
-      if (scope === "agent") {
-        conditions.push("agentId = ? AND scope = 'agent'");
-        params.push(agentId);
-      } else if (scope === "swarm") {
-        conditions.push("scope = 'swarm'");
-      } else {
-        conditions.push("(agentId = ? OR scope = 'swarm')");
-        params.push(agentId);
-      }
-    } else {
-      if (scope === "agent") {
-        conditions.push("scope = 'agent'");
-      } else if (scope === "swarm") {
-        conditions.push("scope = 'swarm'");
-      }
+    this.addScopeConditions(conditions, params, agentId, scope, isLead);
+
+    if (ownerAgentId) {
+      conditions.push("agentId = ?");
+      params.push(ownerAgentId);
     }
 
     if (source) {
@@ -518,16 +508,43 @@ export class SqliteMemoryStore implements MemoryStore {
       params.push(source);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    params.push(limit, offset);
+    const sourcePathNeedle = sourcePath?.trim().toLowerCase();
+    if (sourcePathNeedle) {
+      conditions.push("instr(lower(coalesce(sourcePath, '')), ?) > 0");
+      params.push(sourcePathNeedle);
+    }
+
+    return {
+      whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "",
+      params,
+    };
+  }
+
+  list(agentId: string, options: MemoryListOptions = {}): AgentMemory[] {
+    const { limit = 20, offset = 0 } = options;
+    const db = getDb();
+    const { whereClause, params } = this.buildListWhereClause(agentId, options);
+    const queryParams = [...params, limit, offset];
 
     const rows = db
-      .prepare<AgentMemoryRow, (string | number)[]>(
+      .prepare<AgentMemoryRow, (Buffer | string | number | null)[]>(
         `SELECT * FROM agent_memory ${whereClause} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
       )
-      .all(...params);
+      .all(...queryParams);
 
     return rows.map(rowToAgentMemory);
+  }
+
+  count(agentId: string, options: MemoryListOptions = {}): number {
+    const db = getDb();
+    const { whereClause, params } = this.buildListWhereClause(agentId, options);
+    const row = db
+      .prepare<{ count: number }, (Buffer | string | number | null)[]>(
+        `SELECT COUNT(*) AS count FROM agent_memory ${whereClause}`,
+      )
+      .get(...params);
+
+    return row?.count ?? 0;
   }
 
   isSourceProtected(source: AgentMemorySource): boolean {

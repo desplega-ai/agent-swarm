@@ -141,9 +141,15 @@ describe("/api/script-runs HTTP", () => {
 
     const listed = await dispatch("/api/script-runs", { agentId });
     expect(listed.status).toBe(200);
-    const listBody = (await listed.json()) as { runs: Array<{ id: string }>; total: number };
+    const listBody = (await listed.json()) as {
+      runs: Array<{ id: string; source?: string; args?: unknown; output?: unknown }>;
+      total: number;
+    };
     expect(listBody.total).toBe(1);
     expect(listBody.runs[0]?.id).toBe(body.id);
+    expect(listBody.runs[0]?.source).toBeUndefined();
+    expect(listBody.runs[0]?.args).toBeUndefined();
+    expect(listBody.runs[0]?.output).toBeUndefined();
   });
 
   test("returns the existing run for an idempotency key", async () => {

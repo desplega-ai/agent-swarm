@@ -1579,6 +1579,13 @@ export const ScriptRunSchema = z.object({
 });
 export type ScriptRun = z.infer<typeof ScriptRunSchema>;
 
+export const ScriptRunListItemSchema = ScriptRunSchema.omit({
+  source: true,
+  args: true,
+  output: true,
+});
+export type ScriptRunListItem = z.infer<typeof ScriptRunListItemSchema>;
+
 export const ScriptRunJournalEntrySchema = z.object({
   id: z.string().uuid(),
   runId: z.string().uuid(),

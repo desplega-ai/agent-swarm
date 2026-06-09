@@ -65,6 +65,7 @@ import type {
   ScriptRun,
   ScriptRunJournalEntry,
   ScriptRunKind,
+  ScriptRunListItem,
   ScriptRunStatus,
   Service,
   ServiceStatus,
@@ -11574,6 +11575,22 @@ type ScriptRunRow = {
   updated_by: string | null;
 };
 
+type ScriptRunListRow = Pick<
+  ScriptRunRow,
+  | "id"
+  | "agentId"
+  | "scriptName"
+  | "kind"
+  | "status"
+  | "pid"
+  | "startedAt"
+  | "finishedAt"
+  | "error"
+  | "last_heartbeat_at"
+  | "idempotencyKey"
+  | "requestedByUserId"
+>;
+
 function parseJsonColumn(value: string | null): unknown | undefined {
   if (value === null) return undefined;
   return JSON.parse(value);
@@ -11592,6 +11609,23 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
     startedAt: row.startedAt,
     finishedAt: row.finishedAt ?? undefined,
     output: parseJsonColumn(row.output),
+    error: row.error ?? undefined,
+    lastHeartbeatAt: row.last_heartbeat_at ?? undefined,
+    idempotencyKey: row.idempotencyKey ?? undefined,
+    requestedByUserId: row.requestedByUserId ?? undefined,
+  };
+}
+
+function rowToScriptRunListItem(row: ScriptRunListRow): ScriptRunListItem {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    scriptName: row.scriptName ?? undefined,
+    kind: row.kind as ScriptRunKind,
+    status: row.status as ScriptRunStatus,
+    pid: row.pid ?? undefined,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt ?? undefined,
     error: row.error ?? undefined,
     lastHeartbeatAt: row.last_heartbeat_at ?? undefined,
     idempotencyKey: row.idempotencyKey ?? undefined,
@@ -11733,7 +11767,7 @@ export function listScriptRuns(opts?: {
   agentId?: string;
   limit?: number;
   offset?: number;
-}): ScriptRun[] {
+}): ScriptRunListItem[] {
   const conditions: string[] = [];
   const params: Array<string | number> = [];
   if (opts?.status) {
@@ -11750,11 +11784,26 @@ export function listScriptRuns(opts?: {
   params.push(limit, offset);
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = getDb()
-    .prepare<ScriptRunRow, Array<string | number>>(
-      `SELECT * FROM script_runs ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?`,
+    .prepare<ScriptRunListRow, Array<string | number>>(
+      `SELECT
+        id,
+        agentId,
+        scriptName,
+        kind,
+        status,
+        pid,
+        startedAt,
+        finishedAt,
+        error,
+        last_heartbeat_at,
+        idempotencyKey,
+        requestedByUserId
+       FROM script_runs ${where}
+       ORDER BY startedAt DESC
+       LIMIT ? OFFSET ?`,
     )
     .all(...params);
-  return rows.map(rowToScriptRun);
+  return rows.map(rowToScriptRunListItem);
 }
 
 export function countScriptRuns(opts?: { status?: ScriptRunStatus; agentId?: string }): number {

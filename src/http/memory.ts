@@ -406,6 +406,7 @@ export async function handleMemory(
 
     const { query, agentId, scope, source, sourcePath, limit, offset } = parsed.body;
     const store = getMemoryStore();
+    const pageLimit = Math.min(limit, 100);
     const pathNeedle = sourcePath?.trim().toLowerCase();
     const matchesPath = (p: string | null) =>
       !pathNeedle || (p?.toLowerCase().includes(pathNeedle) ?? false);
@@ -416,11 +417,14 @@ export async function handleMemory(
         const queryEmbedding = await provider.embed(query.trim());
 
         if (!queryEmbedding) {
-          json(res, { results: [], total: 0, mode: "semantic" });
+          json(res, { results: [], total: 0, limit: pageLimit, offset, mode: "semantic" });
           return true;
         }
 
-        const candidateLimit = Math.min(limit, 100) * CANDIDATE_SET_MULTIPLIER;
+        const candidateLimit = Math.min(
+          4096,
+          Math.max(offset + pageLimit, pageLimit) * CANDIDATE_SET_MULTIPLIER,
+        );
         let candidates = store.search(queryEmbedding, agentId ?? "", {
           scope,
           limit: candidateLimit,
@@ -433,10 +437,11 @@ export async function handleMemory(
         if (pathNeedle) {
           candidates = candidates.filter((c) => matchesPath(c.sourcePath));
         }
-        const ranked = rerank(candidates, { limit: Math.min(limit, 100) });
+        const ranked = rerank(candidates, { limit: candidates.length });
+        const page = ranked.slice(offset, offset + pageLimit);
 
         json(res, {
-          results: ranked.map((r) => ({
+          results: page.map((r) => ({
             id: r.id,
             name: r.name,
             content: r.content,
@@ -457,33 +462,25 @@ export async function handleMemory(
             totalChunks: r.totalChunks,
             tags: r.tags,
           })),
-          total: ranked.length,
+          total: candidates.length,
+          limit: pageLimit,
+          offset,
           mode: "semantic",
         });
         return true;
       }
 
-      // When filtering by sourcePath, over-fetch then post-filter so the visible
-      // page isn't gutted by the in-memory filter.
-      const fetchLimit = pathNeedle
-        ? Math.min(500, Math.max(limit * 10, 100))
-        : Math.min(limit, 100);
-      let rows = store.list(agentId ?? "", {
+      const listOptions = {
         scope,
-        limit: fetchLimit,
+        limit: pageLimit,
         offset,
         isLead: true,
-      });
-      if (agentId) {
-        rows = rows.filter((r) => r.agentId === agentId);
-      }
-      if (source) {
-        rows = rows.filter((r) => r.source === source);
-      }
-      if (pathNeedle) {
-        rows = rows.filter((r) => matchesPath(r.sourcePath));
-      }
-      rows = rows.slice(0, Math.min(limit, 100));
+        ownerAgentId: agentId,
+        source,
+        sourcePath: pathNeedle,
+      };
+      const rows = store.list(agentId ?? "", listOptions);
+      const total = store.count(agentId ?? "", listOptions);
 
       json(res, {
         results: rows.map((r) => ({
@@ -504,7 +501,9 @@ export async function handleMemory(
           totalChunks: r.totalChunks,
           tags: r.tags,
         })),
-        total: rows.length,
+        total,
+        limit: pageLimit,
+        offset,
         mode: "list",
       });
     } catch (err) {
