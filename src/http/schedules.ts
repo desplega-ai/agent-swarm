@@ -12,6 +12,7 @@ import {
   updateScheduledTask,
 } from "../be/db";
 import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/validate";
+import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
 import { calculateNextRun } from "../scheduler/scheduler";
 import { scheduleContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -41,6 +42,7 @@ const createSchedule = route({
     enabled: z.boolean().optional(),
     timezone: z.string().optional(),
     model: z.string().optional(),
+    modelTier: ModelTierSchema.optional(),
     scheduleType: z.enum(["recurring", "one_time"]).optional(),
     delayMs: z.number().int().optional(),
     runAt: z.string().optional(),
@@ -126,6 +128,7 @@ const updateSchedule = route({
     enabled: z.boolean().optional(),
     timezone: z.string().optional(),
     model: z.string().optional(),
+    modelTier: ModelTierSchema.nullable().optional(),
     nextRunAt: z.string().nullable().optional(),
   }),
   responses: {
@@ -270,7 +273,7 @@ export async function handleSchedules(
         enabled: body.enabled,
         nextRunAt,
         timezone: body.timezone,
-        model: body.model,
+        ...splitLegacyModelAlias({ model: body.model, modelTier: body.modelTier }),
         scheduleType: body.scheduleType,
       });
 
@@ -388,6 +391,16 @@ export async function handleSchedules(
     const parsed = await updateSchedule.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const body = parsed.body as Record<string, unknown>;
+    if (parsed.body.model !== undefined || parsed.body.modelTier !== undefined) {
+      const normalizedModel = splitLegacyModelAlias({
+        model: parsed.body.model,
+        modelTier: parsed.body.modelTier,
+      });
+      if (parsed.body.model !== undefined) body.model = normalizedModel.model ?? null;
+      if (parsed.body.modelTier !== undefined || normalizedModel.modelTier) {
+        body.modelTier = normalizedModel.modelTier ?? null;
+      }
+    }
 
     const existing = getScheduledTaskById(parsed.params.id);
     if (!existing) {

@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import pkg from "../package.json";
+import { ModelTierSchema } from "./model-tiers";
 import {
   cancelTaskHandler,
   cancelTaskInputSchema,
@@ -28,9 +29,14 @@ const userSendTaskInputSchema = z.object({
   tags: z.array(z.string()).optional().describe("Tags for filtering (e.g., ['urgent'])."),
   priority: z.number().int().min(0).max(100).optional().describe("Priority 0-100 (default: 50)."),
   model: z
-    .enum(["haiku", "sonnet", "opus", "fable"])
+    .string()
+    .trim()
+    .min(1)
     .optional()
-    .describe("Model to use for this task ('haiku', 'sonnet', 'opus', or 'fable')."),
+    .describe("Concrete model override interpreted by the assignee's harness/provider."),
+  modelTier: ModelTierSchema.optional().describe(
+    "Portable model tier: 'smol', 'regular', 'smart', or 'ultra'. Resolved by the assignee's harness/provider.",
+  ),
 });
 
 export function createUserServer(user: User): McpServer {

@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { ensure, initialize } from "@desplega.ai/business-use";
 import type { TemplateResponse } from "../../templates/schema.ts";
+import { resolveTaskModelSelection } from "../model-tiers.ts";
 import {
   type Attributes,
   initOtel,
@@ -2549,6 +2550,7 @@ async function spawnProviderProcess(
     iteration: number;
     taskId?: string;
     model?: string;
+    modelTier?: string;
     resumeSessionId?: string;
     harnessProvider: ProviderName;
     cwd?: string;
@@ -2583,7 +2585,14 @@ async function spawnProviderProcess(
   }
 
   const configModel = (freshEnv.MODEL_OVERRIDE as string | undefined) || "";
-  const model = opts.model || configModel || "";
+  const taskModelSelection = resolveTaskModelSelection({
+    model: opts.model,
+    modelTier: opts.modelTier,
+    harnessProvider: opts.harnessProvider,
+    env: freshEnv,
+  });
+  const taskModel = taskModelSelection.model || "";
+  const model = taskModel || configModel || "";
 
   // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
   // can pass codexSlot through and the adapter writes token refreshes back to
@@ -2674,7 +2683,7 @@ async function spawnProviderProcess(
   );
   const initialModelReport = buildLatestModelReport({
     model,
-    taskModel: opts.model,
+    taskModel,
     configModel,
     taskId: realTaskId,
     harnessProvider: opts.harnessProvider,
@@ -4426,6 +4435,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: task.id,
               model: (task as { model?: string }).model,
+              modelTier: (task as { modelTier?: string }).modelTier,
               harnessProvider: state.harnessProvider,
               cwd: resumeCwd,
               vcsRepo: task.vcsRepo,
@@ -4745,6 +4755,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Extract model from task data for per-task model selection
         const taskModel = (trigger.task as { model?: string } | undefined)?.model;
+        const taskModelTier = (trigger.task as { modelTier?: string } | undefined)?.modelTier;
 
         // Detect Slack context for conditional prompt sections
         const taskSlackChannelId = (trigger.task as { slackChannelId?: string } | undefined)
@@ -4887,6 +4898,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: trigger.taskId,
               model: taskModel,
+              modelTier: taskModelTier,
               harnessProvider: state.harnessProvider,
               cwd: effectiveCwd,
               vcsRepo: taskVcsRepo,

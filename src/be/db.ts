@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
 import { addEyesReactionOnTaskStart } from "../github/task-reactions";
+import { type ModelTier, parseModelTier } from "../model-tiers";
 import { configureDbResolver } from "../prompts/resolver";
 import type {
   ActiveSession,
@@ -1018,6 +1019,7 @@ type AgentTaskRow = {
   parentTaskId: string | null;
   claudeSessionId: string | null;
   model: string | null;
+  modelTier: string | null;
   scheduleId: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
@@ -1105,7 +1107,8 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     dir: row.dir ?? undefined,
     parentTaskId: row.parentTaskId ?? undefined,
     claudeSessionId: row.claudeSessionId ?? undefined,
-    model: (row.model as "haiku" | "sonnet" | "opus" | "fable" | null) ?? undefined,
+    model: row.model ?? undefined,
+    modelTier: parseModelTier(row.modelTier) ?? undefined,
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
@@ -1161,6 +1164,7 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
     parentTaskId: t.parentTaskId,
     scheduleId: t.scheduleId,
     model: t.model,
+    modelTier: t.modelTier,
     provider: t.provider,
     requestedByUserId: t.requestedByUserId,
     progress: t.progress,
@@ -2850,6 +2854,7 @@ export interface CreateTaskOptions {
   dir?: string;
   parentTaskId?: string;
   model?: string;
+  modelTier?: ModelTier;
   scheduleId?: string;
   workflowRunId?: string;
   workflowRunStepId?: string;
@@ -3056,9 +3061,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, model, scheduleId,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -3093,6 +3098,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.dir ?? null,
       options?.parentTaskId ?? null,
       options?.model ?? null,
+      options?.modelTier ?? null,
       options?.scheduleId ?? null,
       options?.workflowRunId ?? null,
       options?.workflowRunStepId ?? null,
@@ -5266,6 +5272,7 @@ type ScheduledTaskRow = {
   lastErrorAt: string | null;
   lastErrorMessage: string | null;
   model: string | null;
+  modelTier: string | null;
   scheduleType: string;
   createdAt: string;
   lastUpdatedAt: string;
@@ -5306,7 +5313,8 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     consecutiveErrors: row.consecutiveErrors ?? 0,
     lastErrorAt: normalizeDate(row.lastErrorAt) ?? undefined,
     lastErrorMessage: row.lastErrorMessage ?? undefined,
-    model: (row.model as "haiku" | "sonnet" | "opus" | "fable" | null) ?? undefined,
+    model: row.model ?? undefined,
+    modelTier: parseModelTier(row.modelTier) ?? undefined,
     scheduleType: row.scheduleType as "recurring" | "one_time",
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
@@ -5401,6 +5409,7 @@ export interface CreateScheduledTaskData {
   createdByAgentId?: string;
   timezone?: string;
   model?: string;
+  modelTier?: ModelTier;
   scheduleType?: "recurring" | "one_time";
 }
 
@@ -5413,8 +5422,8 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       `INSERT INTO scheduled_tasks (
         id, name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, timezone, model, scheduleType, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        createdByAgentId, timezone, model, modelTier, scheduleType, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -5432,6 +5441,7 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       data.createdByAgentId ?? null,
       data.timezone ?? "UTC",
       data.model ?? null,
+      data.modelTier ?? null,
       data.scheduleType ?? "recurring",
       now,
       now,
@@ -5459,6 +5469,7 @@ export interface UpdateScheduledTaskData {
   lastErrorAt?: string | null;
   lastErrorMessage?: string | null;
   model?: string | null;
+  modelTier?: ModelTier | null;
   scheduleType?: "recurring" | "one_time";
   lastUpdatedAt?: string;
 }
@@ -5537,6 +5548,10 @@ export function updateScheduledTask(
   if (data.model !== undefined) {
     updates.push("model = ?");
     params.push(data.model);
+  }
+  if (data.modelTier !== undefined) {
+    updates.push("modelTier = ?");
+    params.push(data.modelTier);
   }
   if (data.scheduleType !== undefined) {
     updates.push("scheduleType = ?");

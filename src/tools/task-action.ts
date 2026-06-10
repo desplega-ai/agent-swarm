@@ -28,6 +28,7 @@ import {
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema, BudgetRefusalCauseSchema } from "@/types";
+import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
 
 export const TaskActionSchema = z.enum([
   "create",
@@ -66,11 +67,16 @@ export const taskActionInputSchema = z.object({
       "Working directory (absolute path) for the agent to start in. Only used with 'create' action.",
     ),
   model: z
-    .enum(["haiku", "sonnet", "opus", "fable"])
+    .string()
+    .trim()
+    .min(1)
     .optional()
     .describe(
-      "Model to use for the created task ('haiku', 'sonnet', 'opus', or 'fable'). Only used with 'create' action.",
+      "Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action.",
     ),
+  modelTier: ModelTierSchema.optional().describe(
+    "Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action.",
+  ),
 });
 
 export const taskActionOutputSchema = z.object({
@@ -144,6 +150,7 @@ export async function taskActionHandler(
   input: TaskActionArgs,
 ): Promise<CallToolResult> {
   const { action, task, taskType, tags, priority, dependsOn, taskId, reason, dir, model } = input;
+  const normalizedModel = splitLegacyModelAlias({ model, modelTier: input.modelTier });
 
   if (ctx.kind === "user") {
     if (action !== "to_backlog" && action !== "from_backlog") {
@@ -229,7 +236,8 @@ export async function taskActionHandler(
           priority,
           dependsOn,
           dir,
-          model,
+          model: normalizedModel.model,
+          modelTier: normalizedModel.modelTier,
         });
         return {
           success: true,
