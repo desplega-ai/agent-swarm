@@ -1757,6 +1757,18 @@ export const ScriptVersionRecordSchema = z.object({
 });
 export type ScriptVersionRecord = z.infer<typeof ScriptVersionRecordSchema>;
 
+/** Lean projection served by `GET /api/scripts` — omits `source` (payload size) and raw JSON blobs. */
+export type ScriptListItem = Omit<
+  ScriptRecord,
+  "source" | "signatureJson" | "argsJsonSchema" | "contentHash"
+>;
+
+/** Full record served by `GET /api/scripts/{id}` — includes `source` plus parsed `signature`/`argsJsonSchema`. */
+export type ScriptDetail = Omit<ScriptRecord, "argsJsonSchema"> & {
+  signature: unknown;
+  argsJsonSchema: unknown;
+};
+
 // ============================================================================
 // Skill Types
 // ============================================================================

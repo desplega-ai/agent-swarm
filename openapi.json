@@ -7299,6 +7299,14 @@
           },
           {
             "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scriptName",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 500
@@ -9242,6 +9250,143 @@
         "responses": {
           "200": {
             "description": "Script signature and type blobs"
+          },
+          "404": {
+            "description": "Script not found"
+          }
+        }
+      }
+    },
+    "/api/scripts": {
+      "get": {
+        "operationId": "scripts_list",
+        "summary": "List saved scripts",
+        "description": "Dashboard read: lean projection without source. Scratch scripts are excluded unless includeScratch=true.",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "global",
+                "agent"
+              ]
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeScratch",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved scripts"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/scripts/type-defs": {
+      "get": {
+        "operationId": "scripts_type_defs",
+        "summary": "Get script SDK and stdlib type definitions",
+        "description": "Static .d.ts blobs for editor integration (e.g. Monaco extraLibs). Cacheable.",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SDK and stdlib type definition blobs"
+          }
+        }
+      }
+    },
+    "/api/scripts/{id}": {
+      "get": {
+        "operationId": "scripts_get",
+        "summary": "Get a saved script by id",
+        "description": "Dashboard read: full record including source and parsed signature.",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Script detail"
+          },
+          "404": {
+            "description": "Script not found"
+          }
+        }
+      }
+    },
+    "/api/scripts/{id}/versions": {
+      "get": {
+        "operationId": "scripts_versions",
+        "summary": "List versions of a saved script",
+        "description": "Dashboard read: version history, newest first.",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Script versions"
           },
           "404": {
             "description": "Script not found"

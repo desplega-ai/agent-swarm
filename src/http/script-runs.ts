@@ -51,6 +51,7 @@ const createScriptRunBodySchema = z.object({
 const listScriptRunsQuerySchema = z.object({
   status: ScriptRunStatusSchema.optional(),
   agentId: z.string().optional(),
+  scriptName: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 });
@@ -367,12 +368,17 @@ export async function handleScriptRuns(
     const opts = {
       status: parsed.query.status,
       agentId: parsed.query.agentId,
+      scriptName: parsed.query.scriptName,
       limit: parsed.query.limit ?? 50,
       offset: parsed.query.offset ?? 0,
     };
     json(res, {
       runs: listScriptRuns(opts),
-      total: countScriptRuns({ status: opts.status, agentId: opts.agentId }),
+      total: countScriptRuns({
+        status: opts.status,
+        agentId: opts.agentId,
+        scriptName: opts.scriptName,
+      }),
     });
     return true;
   }

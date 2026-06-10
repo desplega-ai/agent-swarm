@@ -11801,6 +11801,7 @@ export function getScriptRunByIdempotencyKey(idempotencyKey: string): ScriptRun 
 export function listScriptRuns(opts?: {
   status?: ScriptRunStatus;
   agentId?: string;
+  scriptName?: string;
   limit?: number;
   offset?: number;
 }): ScriptRunListItem[] {
@@ -11813,6 +11814,10 @@ export function listScriptRuns(opts?: {
   if (opts?.agentId) {
     conditions.push("agentId = ?");
     params.push(opts.agentId);
+  }
+  if (opts?.scriptName) {
+    conditions.push("scriptName = ?");
+    params.push(opts.scriptName);
   }
 
   const limit = opts?.limit ?? 50;
@@ -11842,7 +11847,11 @@ export function listScriptRuns(opts?: {
   return rows.map(rowToScriptRunListItem);
 }
 
-export function countScriptRuns(opts?: { status?: ScriptRunStatus; agentId?: string }): number {
+export function countScriptRuns(opts?: {
+  status?: ScriptRunStatus;
+  agentId?: string;
+  scriptName?: string;
+}): number {
   const conditions: string[] = [];
   const params: string[] = [];
   if (opts?.status) {
@@ -11852,6 +11861,10 @@ export function countScriptRuns(opts?: { status?: ScriptRunStatus; agentId?: str
   if (opts?.agentId) {
     conditions.push("agentId = ?");
     params.push(opts.agentId);
+  }
+  if (opts?.scriptName) {
+    conditions.push("scriptName = ?");
+    params.push(opts.scriptName);
   }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const row = getDb()

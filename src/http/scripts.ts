@@ -2,14 +2,23 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
-import { deleteScript, getScript, upsertScriptByName } from "../be/scripts/db";
+import {
+  deleteScript,
+  getScript,
+  getScriptById,
+  listScripts,
+  listScriptVersions,
+  upsertScriptByName,
+} from "../be/scripts/db";
 import { searchScripts } from "../be/scripts/embeddings";
 import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
 import { SCRIPT_SDK_TYPES, SCRIPT_STDLIB_TYPES, typecheckScript } from "../be/scripts/typecheck";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { runScript } from "../scripts-runtime/loader";
 import {
+  type ScriptDetail,
   ScriptFsModeSchema,
+  type ScriptListItem,
   type ScriptRecord,
   type ScriptScope,
   ScriptScopeSchema,
@@ -52,6 +61,11 @@ const searchBodySchema = z.object({
 const nameParamsSchema = z.object({ name: scriptNameSchema });
 const scopeQuerySchema = z.object({ scope: ScriptScopeSchema.default("agent") });
 const optionalScopeQuerySchema = z.object({ scope: ScriptScopeSchema.optional() });
+const idParamsSchema = z.object({ id: z.string().uuid() });
+const listScriptsQuerySchema = z.object({
+  scope: ScriptScopeSchema.optional(),
+  includeScratch: z.enum(["true", "false"]).optional(),
+});
 
 const upsertRoute = route({
   method: "post",
@@ -129,6 +143,74 @@ const typesRoute = route({
   query: optionalScopeQuerySchema,
   responses: {
     200: { description: "Script signature and type blobs" },
+    404: { description: "Script not found" },
+  },
+});
+
+// ── Dashboard read routes ──
+// The worker-facing routes above resolve scripts relative to the calling agent
+// and therefore requireAgent (X-Agent-ID). The routes below are cross-scope
+// admin reads for the dashboard: API-key auth only, no agent identity — the
+// same model as /api/script-runs.
+
+const listScriptsRoute = route({
+  method: "get",
+  path: "/api/scripts",
+  pattern: ["api", "scripts"],
+  operationId: "scripts_list",
+  summary: "List saved scripts",
+  description:
+    "Dashboard read: lean projection without source. Scratch scripts are excluded unless includeScratch=true.",
+  tags: ["Scripts"],
+  query: listScriptsQuerySchema,
+  responses: {
+    200: { description: "Saved scripts" },
+    400: { description: "Validation error" },
+  },
+});
+
+// Declared (and matched) BEFORE the by-id route: the by-id pattern
+// ["api", "scripts", null] matches any single segment, so the literal
+// "type-defs" segment must win first.
+const typeDefsRoute = route({
+  method: "get",
+  path: "/api/scripts/type-defs",
+  pattern: ["api", "scripts", "type-defs"],
+  operationId: "scripts_type_defs",
+  summary: "Get script SDK and stdlib type definitions",
+  description: "Static .d.ts blobs for editor integration (e.g. Monaco extraLibs). Cacheable.",
+  tags: ["Scripts"],
+  responses: {
+    200: { description: "SDK and stdlib type definition blobs" },
+  },
+});
+
+const getScriptByIdRoute = route({
+  method: "get",
+  path: "/api/scripts/{id}",
+  pattern: ["api", "scripts", null],
+  operationId: "scripts_get",
+  summary: "Get a saved script by id",
+  description: "Dashboard read: full record including source and parsed signature.",
+  tags: ["Scripts"],
+  params: idParamsSchema,
+  responses: {
+    200: { description: "Script detail" },
+    404: { description: "Script not found" },
+  },
+});
+
+const listVersionsRoute = route({
+  method: "get",
+  path: "/api/scripts/{id}/versions",
+  pattern: ["api", "scripts", null, "versions"],
+  operationId: "scripts_versions",
+  summary: "List versions of a saved script",
+  description: "Dashboard read: version history, newest first.",
+  tags: ["Scripts"],
+  params: idParamsSchema,
+  responses: {
+    200: { description: "Script versions" },
     404: { description: "Script not found" },
   },
 });
@@ -410,6 +492,70 @@ export async function handleScripts(
         score,
       })),
     });
+    return true;
+  }
+
+  // ── Dashboard reads (no requireAgent — API-key auth only, like /api/script-runs) ──
+
+  if (listScriptsRoute.match(req.method, pathSegments)) {
+    const parsed = await listScriptsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const scripts: ScriptListItem[] = listScripts({
+      scope: parsed.query.scope,
+      includeScratch: parsed.query.includeScratch === "true",
+    }).map((script) => ({
+      id: script.id,
+      name: script.name,
+      scope: script.scope,
+      scopeId: script.scopeId,
+      description: script.description,
+      intent: script.intent,
+      version: script.version,
+      isScratch: script.isScratch,
+      typeChecked: script.typeChecked,
+      fsMode: script.fsMode,
+      createdByAgentId: script.createdByAgentId,
+      createdAt: script.createdAt,
+      updatedAt: script.updatedAt,
+    }));
+    json(res, { scripts });
+    return true;
+  }
+
+  // Must be matched before getScriptByIdRoute — its ["api", "scripts", null]
+  // pattern would otherwise swallow the literal "type-defs" segment.
+  if (typeDefsRoute.match(req.method, pathSegments)) {
+    json(res, { sdkTypes: SCRIPT_SDK_TYPES, stdlibTypes: SCRIPT_STDLIB_TYPES });
+    return true;
+  }
+
+  if (getScriptByIdRoute.match(req.method, pathSegments)) {
+    const parsed = await getScriptByIdRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const script = getScriptById(parsed.params.id);
+    if (!script) {
+      jsonError(res, "Script not found", 404);
+      return true;
+    }
+    // `source` is author-supplied TS (same trust surface as script_runs.source,
+    // already served raw by GET /api/script-runs/{id}) — no env/secret material.
+    const detail: ScriptDetail = {
+      ...script,
+      signature: JSON.parse(script.signatureJson) as unknown,
+      argsJsonSchema: script.argsJsonSchema ? (JSON.parse(script.argsJsonSchema) as unknown) : null,
+    };
+    json(res, { script: detail });
+    return true;
+  }
+
+  if (listVersionsRoute.match(req.method, pathSegments)) {
+    const parsed = await listVersionsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getScriptById(parsed.params.id)) {
+      jsonError(res, "Script not found", 404);
+      return true;
+    }
+    json(res, { versions: listScriptVersions(parsed.params.id) });
     return true;
   }
 

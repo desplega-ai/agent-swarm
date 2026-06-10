@@ -347,6 +347,11 @@ export function getScript(args: ScriptIdentity): ScriptRecord | null {
   return row ? rowToScript(row) : null;
 }
 
+export function getScriptById(id: string): ScriptRecord | null {
+  const row = getDb().prepare<ScriptRow, [string]>("SELECT * FROM scripts WHERE id = ?").get(id);
+  return row ? rowToScript(row) : null;
+}
+
 export function getScriptVersion(args: {
   scriptId: string;
   version?: number;
@@ -406,6 +411,15 @@ export function listScripts(args?: {
     )
     .all(...params)
     .map(rowToScript);
+}
+
+export function listScriptVersions(scriptId: string): ScriptVersionRecord[] {
+  return getDb()
+    .prepare<ScriptVersionRow, [string]>(
+      "SELECT * FROM script_versions WHERE scriptId = ? ORDER BY version DESC",
+    )
+    .all(scriptId)
+    .map(rowToScriptVersion);
 }
 
 export function deleteScript(args: ScriptIdentity): boolean {
