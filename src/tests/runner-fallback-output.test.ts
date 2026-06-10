@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type ApiConfig,
   ensureTaskFinished,
+  getBridgeFailureDiagnostics,
   handleStructuredOutputFallback,
 } from "../commands/runner";
 
@@ -381,6 +385,27 @@ describe("ensureTaskFinished", () => {
     expect(lastFinishBody!.failureReason).toBe("Out of memory");
   });
 
+  test("appends failure diagnostics when exit code is non-zero", async () => {
+    resetMocks();
+
+    await ensureTaskFinished(
+      makeConfig(),
+      "worker",
+      "task-14b",
+      1,
+      "Session error (exit code 1): Unknown error",
+      undefined,
+      "claude",
+      "Claude bridge final tmux pane tail (/tmp/run/tmux-pane-final.txt):\nraw pane tail",
+    );
+
+    expect(lastFinishBody).toBeTruthy();
+    expect(lastFinishBody!.status).toBe("failed");
+    expect(lastFinishBody!.failureReason).toBe(
+      "Session error (exit code 1): Unknown error\n\nClaude bridge final tmux pane tail (/tmp/run/tmux-pane-final.txt):\nraw pane tail",
+    );
+  });
+
   test("truncates long progress to 2000 chars", async () => {
     resetMocks();
     const longProgress = "x".repeat(3000);
@@ -397,5 +422,30 @@ describe("ensureTaskFinished", () => {
 
     expect(lastFinishBody).toBeTruthy();
     expect((lastFinishBody!.output as string).length).toBe(2000);
+  });
+});
+
+describe("getBridgeFailureDiagnostics", () => {
+  test("returns latest tmux pane artifact and 40-line tail", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "runner-bridge-diagnostics-"));
+    try {
+      const older = join(cwd, ".claude-bridge/runs/2026-01-01T00-00-00-000Z-old");
+      const newer = join(cwd, ".claude-bridge/runs/2026-01-01T00-00-01-000Z-new");
+      await mkdir(older, { recursive: true });
+      await mkdir(newer, { recursive: true });
+      await Bun.write(join(older, "tmux-pane-final.txt"), "old pane");
+      await Bun.write(
+        join(newer, "tmux-pane-final.txt"),
+        Array.from({ length: 45 }, (_, i) => `line ${i + 1}`).join("\n"),
+      );
+
+      const diagnostics = await getBridgeFailureDiagnostics(cwd);
+
+      expect(diagnostics?.artifactPath).toBe(join(newer, "tmux-pane-final.txt"));
+      expect(diagnostics?.paneTail?.startsWith("line 6\nline 7")).toBe(true);
+      expect(diagnostics?.paneTail?.endsWith("line 45")).toBe(true);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });

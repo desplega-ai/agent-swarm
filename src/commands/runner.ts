@@ -867,6 +867,7 @@ export async function ensureTaskFinished(
    * from the resolved swarm_config value. Falls back to env when omitted.
    */
   provider?: ProviderName,
+  failureDiagnostics?: string,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
@@ -883,6 +884,9 @@ export async function ensureTaskFinished(
 
   if (status === "failed") {
     body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
+    if (failureDiagnostics) {
+      body.failureReason = `${body.failureReason}\n\n${failureDiagnostics}`;
+    }
   } else if (providerOutput) {
     const validation = await validateProviderOutputIfNeeded(config, taskId, providerOutput);
     if (validation.ok) {
@@ -1651,6 +1655,32 @@ async function findBridgeFailureArtifact(cwd: string): Promise<string | undefine
   } catch {
     return undefined;
   }
+}
+
+async function readBridgeFailureTail(
+  artifactPath: string,
+  maxLines = 40,
+  maxChars = 4000,
+): Promise<string | undefined> {
+  try {
+    const text = await Bun.file(artifactPath).text();
+    const tail = text.split(/\r?\n/).slice(-maxLines).join("\n").trim();
+    if (!tail) return undefined;
+    return tail.length > maxChars ? tail.slice(-maxChars) : tail;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getBridgeFailureDiagnostics(
+  cwd: string,
+): Promise<{ artifactPath: string; paneTail?: string } | undefined> {
+  const artifactPath = await findBridgeFailureArtifact(cwd);
+  if (!artifactPath) return undefined;
+  return {
+    artifactPath,
+    paneTail: await readBridgeFailureTail(artifactPath),
+  };
 }
 
 async function updateHarnessVariantMeta(
@@ -3342,6 +3372,20 @@ async function checkCompletedProcesses(
           rateLimitedUntil,
         ).catch(() => {});
       }
+      let bridgeDiagnostics: Awaited<ReturnType<typeof getBridgeFailureDiagnostics>> | undefined;
+      if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir) {
+        bridgeDiagnostics = await getBridgeFailureDiagnostics(workingDir);
+        if (bridgeDiagnostics?.artifactPath && result.sessionId) {
+          console.log(`[${role}] Bridge failure artifact found: ${bridgeDiagnostics.artifactPath}`);
+          updateHarnessVariantMeta(apiConfig.apiUrl, apiConfig.apiKey, taskId, result.sessionId, {
+            failureArtifact: bridgeDiagnostics.artifactPath,
+          }).catch((err) => console.warn(`[runner] Failed to update harness variant meta: ${err}`));
+        }
+      }
+      const bridgeFailureDiagnostics =
+        bridgeDiagnostics?.paneTail != null
+          ? `Claude bridge final tmux pane tail (${bridgeDiagnostics.artifactPath}):\n${bridgeDiagnostics.paneTail}`
+          : undefined;
       await ensureTaskFinished(
         apiConfig,
         role,
@@ -3350,6 +3394,7 @@ async function checkCompletedProcesses(
         failureReason,
         result.output,
         harnessProvider,
+        bridgeFailureDiagnostics,
       );
 
       if (result.exitCode === 0 && credentialInfo) {
@@ -3359,16 +3404,6 @@ async function checkCompletedProcesses(
           credentialInfo.keyType,
           credentialInfo.keySuffix,
         ).catch(() => {});
-      }
-
-      if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir && result.sessionId) {
-        const artifactPath = await findBridgeFailureArtifact(workingDir);
-        if (artifactPath) {
-          console.log(`[${role}] Bridge failure artifact found: ${artifactPath}`);
-          updateHarnessVariantMeta(apiConfig.apiUrl, apiConfig.apiKey, taskId, result.sessionId, {
-            failureArtifact: artifactPath,
-          }).catch((err) => console.warn(`[runner] Failed to update harness variant meta: ${err}`));
-        }
       }
 
       ensure({
