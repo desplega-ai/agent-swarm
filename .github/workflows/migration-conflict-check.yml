@@ -13,6 +13,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          # Full history so the script can diff migrations against the base branch.
+          fetch-depth: 0
 
-      - name: Check for duplicate migration numbers
+      - name: Check for duplicate and mutated migration numbers
         run: bash scripts/check-migration-conflicts.sh
+        env:
+          MIGRATION_BASE_REF: origin/${{ github.base_ref }}
