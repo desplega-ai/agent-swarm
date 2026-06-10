@@ -1,5 +1,5 @@
 import { Plug, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { IntegrationCard } from "@/components/integrations/integration-card";
@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import {
   getIntegrationFields,
   INTEGRATIONS,
@@ -32,10 +33,15 @@ const CATEGORY_LABELS: Record<IntegrationCategory, string> = {
 
 type CategoryFilter = "all" | IntegrationCategory;
 
+function coerceCategory(value: string): CategoryFilter {
+  return value in CATEGORY_LABELS ? (value as IntegrationCategory) : "all";
+}
+
 export default function IntegrationsPage() {
   const { data: configs, isLoading, error } = useConfigs({ scope: "global" });
-  const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<CategoryFilter>("all");
+  const { searchParams, setParam } = useUrlSearchState();
+  const search = readStringParam(searchParams, "search");
+  const category = coerceCategory(readStringParam(searchParams, "category", "all"));
 
   // Gather every catalog key (+ disableKey) so a single env-presence request
   // covers status derivation for the whole grid.
@@ -213,7 +219,7 @@ export default function IntegrationsPage() {
             type="search"
             placeholder="Search integrations..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setParam("search", e.target.value)}
             className="pl-8"
             aria-label="Search integrations"
           />
@@ -224,14 +230,14 @@ export default function IntegrationsPage() {
           <CategoryChip
             label="All"
             active={category === "all"}
-            onClick={() => setCategory("all")}
+            onClick={() => setParam("category", "all", { defaultValue: "all" })}
           />
           {availableCategories.map((cat) => (
             <CategoryChip
               key={cat}
               label={CATEGORY_LABELS[cat]}
               active={category === cat}
-              onClick={() => setCategory(cat)}
+              onClick={() => setParam("category", cat, { defaultValue: "all" })}
             />
           ))}
         </fieldset>

@@ -47,6 +47,9 @@ export interface TemplateRecommendationCardProps {
  * Reads `/status` from the shared context. If `/status` is unavailable
  * (loading, errored, or older API returned 404), renders nothing — empty
  * states stay generic.
+ *
+ * TODO(taras): Refactor this to be actually useful,
+ * redirecting to templates is useless
  */
 export function TemplateRecommendationCard({
   eyebrow = "Recommended template",

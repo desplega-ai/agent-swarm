@@ -515,6 +515,7 @@ export interface TasksTableProps {
    * at whatever the server returned for the current page.
    */
   pagination?: boolean;
+  paginationQueryKey?: string;
 }
 
 export function TasksTable({
@@ -526,6 +527,7 @@ export function TasksTable({
   emptyMessage = "No tasks found",
   domLayout,
   pagination,
+  paginationQueryKey,
 }: TasksTableProps) {
   // Build a `userId → User` lookup for the "Requested by" column. We skip the
   // network call entirely on swarms that don't support the column — the
@@ -689,6 +691,7 @@ export function TasksTable({
       emptyMessage={emptyMessage}
       domLayout={domLayout}
       pagination={pagination}
+      paginationQueryKey={paginationQueryKey}
     />
   );
 }

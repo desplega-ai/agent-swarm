@@ -4,7 +4,7 @@
  * `/sessions/:rootTaskId` mount this so they share visuals.
  *
  * Filtering and search are pushed up to the API: the shell owns the
- * `query` and `showSystem` state and passes them as `q` and `source` to
+ * URL-backed `q` and `system` state and passes them as `q` and `source` to
  * `useSessions`. Search is debounced (~200ms) so each keystroke doesn't
  * fire a request.
  *
@@ -15,15 +15,7 @@
  */
 
 import { ChevronLeft, Filter, MessageSquare, PanelLeftOpen, Plus, Search } from "lucide-react";
-import {
-  createContext,
-  type ReactNode,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSessions } from "@/api/hooks/use-sessions";
 import type { SessionListItem } from "@/api/types";
@@ -49,6 +41,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 const COLLAPSE_STORAGE_KEY = "agent-swarm-sessions-sidebar-collapsed";
@@ -355,12 +348,28 @@ export interface SessionsShellProps {
 export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps) {
   const navigate = useNavigate();
   const { userId, state: identityState } = useCurrentUser();
-  const [collapsed, setCollapsed] = useState<boolean>(() => readBool(COLLAPSE_STORAGE_KEY, false));
-  const [showSystem, setShowSystem] = useState<boolean>(() =>
-    readBool(SHOW_SYSTEM_STORAGE_KEY, false),
-  );
-  const [query, setQuery] = useState("");
+  const { searchParams, setParam } = useUrlSearchState();
+  const railParam = readStringParam(searchParams, "rail");
+  const collapsed =
+    railParam === "expanded"
+      ? false
+      : railParam === "collapsed"
+        ? true
+        : readBool(COLLAPSE_STORAGE_KEY, false);
+  const systemParam = searchParams.get("system");
+  const showSystem =
+    systemParam == null ? readBool(SHOW_SYSTEM_STORAGE_KEY, false) : systemParam === "true";
+  const query = readStringParam(searchParams, "q");
   const debouncedQuery = useDebouncedValue(query, 200);
+  const setCollapsed = useCallback(
+    (value: boolean) => setParam("rail", value ? "collapsed" : "expanded"),
+    [setParam],
+  );
+  const setShowSystem = useCallback(
+    (value: boolean) => setParam("system", value ? "true" : "false"),
+    [setParam],
+  );
+  const setQuery = useCallback((value: string) => setParam("q", value), [setParam]);
 
   useEffect(() => {
     writeBool(COLLAPSE_STORAGE_KEY, collapsed);

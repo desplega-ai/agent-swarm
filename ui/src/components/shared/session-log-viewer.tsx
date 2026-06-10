@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { useTheme } from "@/hooks/use-theme";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatTokens } from "@/lib/format-tokens";
 import { cn, normalizeNewlines } from "@/lib/utils";
 import { type ParsedMessage, type ProviderMetaBlock, parseSessionLogs } from "@/logs-parser";
@@ -1886,7 +1887,9 @@ export function SessionLogViewer({
     [messages, compactionSnapshots, newIds, isRunning],
   );
 
-  const [query, setQuery] = useState("");
+  const { searchParams, setParam } = useUrlSearchState();
+  const query = readStringParam(searchParams, "logSearch");
+  const setQuery = useCallback((value: string) => setParam("logSearch", value), [setParam]);
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;

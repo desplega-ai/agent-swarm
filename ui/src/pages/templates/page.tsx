@@ -1,11 +1,10 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { Search } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePromptTemplates } from "@/api/hooks/use-prompt-templates";
 import type { PromptTemplate } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
-import { TemplateRecommendationCard } from "@/components/shared/template-recommendation-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
 
 const STATE_VARIANTS: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
@@ -28,10 +28,11 @@ const STATE_VARIANTS: Record<string, "default" | "secondary" | "outline" | "dest
 
 export default function TemplatesPage() {
   const navigate = useNavigate();
+  const { searchParams, setParam } = useUrlSearchState();
   const { data: templates, isLoading, isError } = usePromptTemplates();
-  const [search, setSearch] = useState("");
-  const [scopeFilter, setScopeFilter] = useState("all");
-  const [showDefaultsOnly, setShowDefaultsOnly] = useState(false);
+  const search = readStringParam(searchParams, "search");
+  const scopeFilter = readStringParam(searchParams, "scope", "all");
+  const showDefaultsOnly = readBooleanParam(searchParams, "defaults");
 
   const filteredTemplates = useMemo(() => {
     if (!templates) return [];
@@ -124,11 +125,16 @@ export default function TemplatesPage() {
           <Input
             placeholder="Search event types..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setParam("search", e.target.value, { reset: ["templatesPage"] })}
             className="pl-9"
           />
         </div>
-        <Select value={scopeFilter} onValueChange={setScopeFilter}>
+        <Select
+          value={scopeFilter}
+          onValueChange={(value) =>
+            setParam("scope", value, { defaultValue: "all", reset: ["templatesPage"] })
+          }
+        >
           <SelectTrigger className="w-[140px]">
             <SelectValue placeholder="All scopes" />
           </SelectTrigger>
@@ -142,20 +148,13 @@ export default function TemplatesPage() {
         <Button
           variant={showDefaultsOnly ? "default" : "outline"}
           size="sm"
-          onClick={() => setShowDefaultsOnly(!showDefaultsOnly)}
+          onClick={() =>
+            setParam("defaults", showDefaultsOnly ? "" : "true", { reset: ["templatesPage"] })
+          }
         >
           Defaults only
         </Button>
       </div>
-
-      {/* Phase 3: smart empty state — promote a starter template when the
-          prompt-templates list is empty. The recommendation pulls from
-          /status's setup milestones (Slack/GitHub/Linear/Jira). */}
-      {!isLoading && filteredTemplates.length === 0 ? (
-        <div className="py-8">
-          <TemplateRecommendationCard eyebrow="Try this template" actionLabel="Browse templates" />
-        </div>
-      ) : null}
 
       <DataGrid
         rowData={filteredTemplates}
@@ -164,6 +163,7 @@ export default function TemplatesPage() {
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No templates found"
+        paginationQueryKey="templates"
       />
     </div>
   );

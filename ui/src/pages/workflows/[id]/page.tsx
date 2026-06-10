@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api, TriggerSchemaApiError } from "@/api/client";
 import {
@@ -69,6 +69,7 @@ import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useTheme } from "@/hooks/use-theme";
+import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { getConfig } from "@/lib/config";
 import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
@@ -81,24 +82,45 @@ export default function WorkflowDetailPage() {
   const updateWorkflow = useUpdateWorkflow();
   const deleteWorkflow = useDeleteWorkflow();
   const triggerWorkflow = useTriggerWorkflow();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get("tab") ?? "definition";
+  const { searchParams, setParam } = useUrlSearchState();
+  const activeTab = readStringParam(searchParams, "tab", "definition");
+  const selectedNodeId = readStringParam(searchParams, "node") || null;
+  const graphMaximized = readBooleanParam(searchParams, "graph");
   const setActiveTab = useCallback(
-    (tab: string) => setSearchParams({ tab }, { replace: true }),
-    [setSearchParams],
+    (tab: string) => setParam("tab", tab, { defaultValue: "definition" }),
+    [setParam],
+  );
+  const setSelectedNodeId = useCallback(
+    (nodeId: string | null) => setParam("node", nodeId),
+    [setParam],
+  );
+  const setGraphMaximized = useCallback(
+    (open: boolean) => setParam("graph", open ? "true" : ""),
+    [setParam],
   );
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [graphMaximized, setGraphMaximized] = useState(false);
 
   const selectedNode = useMemo(() => {
     if (!selectedNodeId || !workflow) return null;
     return workflow.definition.nodes.find((n) => n.id === selectedNodeId) ?? null;
   }, [selectedNodeId, workflow]);
 
-  const handleNodeClick = useCallback((nodeId: string) => {
-    setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId));
-  }, []);
+  const handleNodeClick = useCallback(
+    (nodeId: string) => {
+      setSelectedNodeId(selectedNodeId === nodeId ? null : nodeId);
+    },
+    [selectedNodeId, setSelectedNodeId],
+  );
+
+  useEffect(() => {
+    if (
+      selectedNodeId &&
+      workflow &&
+      !workflow.definition.nodes.some((node) => node.id === selectedNodeId)
+    ) {
+      setSelectedNodeId(null);
+    }
+  }, [selectedNodeId, setSelectedNodeId, workflow]);
 
   const runColumns = useMemo<ColDef<WorkflowRun>[]>(
     () => [
@@ -331,6 +353,7 @@ export default function WorkflowDetailPage() {
             onRowClicked={onRunRowClicked}
             loading={runsLoading}
             emptyMessage="No runs yet"
+            paginationQueryKey="workflowRuns"
           />
         </TabsContent>
 
@@ -390,7 +413,8 @@ export default function WorkflowDetailPage() {
 
 function NodeInspector({ node, allNodes }: { node: WorkflowNode; allNodes: WorkflowNode[] }) {
   const { data: executorInfo } = useExecutorType(node.type);
-  const [rawConfigOpen, setRawConfigOpen] = useState(false);
+  const { searchParams, setParam } = useUrlSearchState();
+  const rawConfigOpen = readBooleanParam(searchParams, "rawConfig");
 
   const resolveNodeLabel = useCallback(
     (nodeId: string) => {
@@ -469,7 +493,7 @@ function NodeInspector({ node, allNodes }: { node: WorkflowNode; allNodes: Workf
         <div className="space-y-1.5">
           <button
             type="button"
-            onClick={() => setRawConfigOpen((o) => !o)}
+            onClick={() => setParam("rawConfig", rawConfigOpen ? "" : "true")}
             className="flex items-center gap-1 text-xs text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors"
           >
             {rawConfigOpen ? (
@@ -530,7 +554,8 @@ function HighlightedTemplate({ text }: { text: string }) {
 }
 
 function AgentTaskConfig({ config }: { config: Record<string, unknown> }) {
-  const [outputSchemaOpen, setOutputSchemaOpen] = useState(false);
+  const { searchParams, setParam } = useUrlSearchState();
+  const outputSchemaOpen = readBooleanParam(searchParams, "outputSchema");
   const template = typeof config.template === "string" ? config.template : null;
   const agentId = typeof config.agentId === "string" ? config.agentId : null;
   const outputSchema =
@@ -599,7 +624,7 @@ function AgentTaskConfig({ config }: { config: Record<string, unknown> }) {
           <div className="space-y-1.5">
             <button
               type="button"
-              onClick={() => setOutputSchemaOpen((o) => !o)}
+              onClick={() => setParam("outputSchema", outputSchemaOpen ? "" : "true")}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               {outputSchemaOpen ? (
@@ -1738,13 +1763,14 @@ function VersionHistory({ workflowId }: { workflowId: string }) {
 }
 
 function VersionEntry({ version }: { version: WorkflowVersion }) {
-  const [expanded, setExpanded] = useState(false);
+  const { searchParams, setParam } = useUrlSearchState();
+  const expanded = readStringParam(searchParams, "version") === version.id;
 
   return (
     <div className="rounded-lg border bg-card">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setParam("version", expanded ? "" : version.id)}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
       >
         {expanded ? (

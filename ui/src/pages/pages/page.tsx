@@ -174,6 +174,7 @@ export default function PagesListingPage() {
           onRowClicked={onRowClicked}
           loading={isLoading}
           emptyMessage="No pages found"
+          paginationQueryKey="pages"
         />
       )}
     </div>

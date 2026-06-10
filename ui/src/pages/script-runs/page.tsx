@@ -1,6 +1,6 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ChevronLeft, ChevronRight, FileClock, Search } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import type { ScriptRunKind, ScriptRunListItem, ScriptRunStatus } from "@/api/types";
@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { readNumberParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 const STATUS_OPTIONS: Array<ScriptRunStatus | "all"> = [
@@ -41,10 +42,16 @@ function formatDuration(startedAt: string, finishedAt?: string): string {
 
 export default function ScriptRunsPage() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ScriptRunStatus | "all">("all");
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  const { searchParams, setParam } = useUrlSearchState();
+  const search = readStringParam(searchParams, "search");
+  const statusParam = readStringParam(searchParams, "status", "all");
+  const statusFilter = STATUS_OPTIONS.includes(statusParam as ScriptRunStatus | "all")
+    ? (statusParam as ScriptRunStatus | "all")
+    : "all";
+  const page = readNumberParam(searchParams, "page", 0, { min: 0 });
+  const pageSize = readNumberParam(searchParams, "pageSize", DEFAULT_PAGE_SIZE, {
+    allowed: PAGE_SIZE_OPTIONS,
+  });
   const { data, isLoading } = useScriptRuns({
     status: statusFilter,
     limit: pageSize,
@@ -152,6 +159,11 @@ export default function ScriptRunsPage() {
   const firstVisible = total > 0 ? page * pageSize + 1 : 0;
   const lastVisible = Math.min((page + 1) * pageSize, total);
 
+  useEffect(() => {
+    const lastPage = Math.max(0, totalPages - 1);
+    if (page > lastPage) setParam("page", lastPage, { defaultValue: "0" });
+  }, [page, setParam, totalPages]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <PageHeader title="Script Runs" />
@@ -162,16 +174,15 @@ export default function ScriptRunsPage() {
           <Input
             placeholder="Search runs…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setParam("search", e.target.value, { reset: ["page"] })}
             className="pl-9"
           />
         </div>
         <Select
           value={statusFilter}
-          onValueChange={(value) => {
-            setStatusFilter(value as ScriptRunStatus | "all");
-            setPage(0);
-          }}
+          onValueChange={(value) =>
+            setParam("status", value, { defaultValue: "all", reset: ["page"] })
+          }
         >
           <SelectTrigger className="w-[170px]">
             <SelectValue placeholder="Status" />
@@ -188,10 +199,7 @@ export default function ScriptRunsPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => {
-              setStatusFilter("all");
-              setPage(0);
-            }}
+            onClick={() => setParam("status", "all", { defaultValue: "all", reset: ["page"] })}
           >
             Clear filters
           </Button>
@@ -223,10 +231,12 @@ export default function ScriptRunsPage() {
             <span className="text-xs">Rows</span>
             <Select
               value={String(pageSize)}
-              onValueChange={(value) => {
-                setPageSize(Number(value));
-                setPage(0);
-              }}
+              onValueChange={(value) =>
+                setParam("pageSize", value, {
+                  defaultValue: String(DEFAULT_PAGE_SIZE),
+                  reset: ["page"],
+                })
+              }
             >
               <SelectTrigger className="h-8 w-[72px]">
                 <SelectValue />
@@ -245,7 +255,7 @@ export default function ScriptRunsPage() {
             size="icon"
             className="h-8 w-8"
             disabled={page === 0}
-            onClick={() => setPage((current) => Math.max(0, current - 1))}
+            onClick={() => setParam("page", Math.max(0, page - 1), { defaultValue: "0" })}
             aria-label="Previous page"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -258,7 +268,7 @@ export default function ScriptRunsPage() {
             size="icon"
             className="h-8 w-8"
             disabled={page >= totalPages - 1}
-            onClick={() => setPage((current) => current + 1)}
+            onClick={() => setParam("page", page + 1, { defaultValue: "0" })}
             aria-label="Next page"
           >
             <ChevronRight className="h-4 w-4" />

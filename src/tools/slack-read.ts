@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
+import { withAutoJoin } from "@/slack/channel-join";
 import { downloadFile } from "@/slack/files";
 import { extractSlackMessageText } from "@/slack/message-text";
 import { createToolRegistrar } from "@/tools/utils";
@@ -216,19 +217,16 @@ export const registerSlackReadTool = (server: McpServer) => {
         let rawMessages: RawMessage[] = [];
 
         if (slackThreadTs) {
-          // Fetch thread replies
-          const result = await client.conversations.replies({
-            channel: slackChannelId,
-            ts: slackThreadTs,
-            limit,
-          });
+          // Fetch thread replies — auto-join public channels on not_in_channel
+          const result = await withAutoJoin(client, slackChannelId, () =>
+            client.conversations.replies({ channel: slackChannelId, ts: slackThreadTs!, limit }),
+          );
           rawMessages = (result.messages || []) as RawMessage[];
         } else {
-          // Fetch channel history
-          const result = await client.conversations.history({
-            channel: slackChannelId,
-            limit,
-          });
+          // Fetch channel history — auto-join public channels on not_in_channel
+          const result = await withAutoJoin(client, slackChannelId, () =>
+            client.conversations.history({ channel: slackChannelId, limit }),
+          );
           rawMessages = (result.messages || []) as RawMessage[];
         }
 

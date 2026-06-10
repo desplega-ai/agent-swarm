@@ -1,7 +1,6 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
 import { Brain, ChevronLeft, ChevronRight, FileText, Loader2, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useDeleteMemory, useMemoryList } from "@/api/hooks/use-memory";
@@ -36,6 +35,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { readNumberParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
 
 const ANY_AGENT = "__all__";
@@ -51,6 +51,14 @@ const SOURCE_OPTIONS: { value: MemorySource; label: string }[] = [
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 50;
 
+function coerceMemoryScope(value: string | null): MemoryScopeFilter {
+  return value === "agent" || value === "swarm" ? value : ANY_SCOPE;
+}
+
+function coerceMemorySource(value: string | null): string {
+  return value && SOURCE_OPTIONS.some((option) => option.value === value) ? value : ANY_SOURCE;
+}
+
 function truncate(text: string, max = 120): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
@@ -58,30 +66,38 @@ function truncate(text: string, max = 120): string {
 
 export default function MemoryPage() {
   const { data: agents } = useAgents();
+  const { searchParams, setParam, setParams } = useUrlSearchState();
+  const queryParam = readStringParam(searchParams, "query");
+  const pathParam = readStringParam(searchParams, "path");
+  const agentIdParam = readStringParam(searchParams, "agentId", ANY_AGENT);
+  const scopeParam = coerceMemoryScope(searchParams.get("scope"));
+  const sourceParam = coerceMemorySource(searchParams.get("source"));
+  const page = readNumberParam(searchParams, "page", 0, { min: 0 });
+  const pageSize = readNumberParam(searchParams, "pageSize", DEFAULT_PAGE_SIZE, {
+    allowed: PAGE_SIZE_OPTIONS,
+  });
 
   // Form state — what the user is editing
-  const [draftQuery, setDraftQuery] = useState("");
-  const [draftPath, setDraftPath] = useState("");
-  const [draftAgentId, setDraftAgentId] = useState<string>(ANY_AGENT);
-  const [draftScope, setDraftScope] = useState<MemoryScopeFilter>(ANY_SCOPE);
-  const [draftSource, setDraftSource] = useState<string>(ANY_SOURCE);
+  const [draftQuery, setDraftQuery] = useState(queryParam);
+  const [draftPath, setDraftPath] = useState(pathParam);
+  const [draftAgentId, setDraftAgentId] = useState<string>(agentIdParam);
+  const [draftScope, setDraftScope] = useState<MemoryScopeFilter>(scopeParam);
+  const [draftSource, setDraftSource] = useState<string>(sourceParam);
 
-  // Submitted filters — combined with page state to form the actual request.
-  const [submittedFilters, setSubmittedFilters] = useState<MemoryListRequest>({ scope: ANY_SCOPE });
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const submitted = useMemo<MemoryListRequest>(
     () => ({
-      ...submittedFilters,
+      query: queryParam.trim() || undefined,
+      sourcePath: pathParam.trim() || undefined,
+      agentId: agentIdParam === ANY_AGENT ? undefined : agentIdParam,
+      scope: scopeParam,
+      source: sourceParam === ANY_SOURCE ? undefined : (sourceParam as MemorySource),
       limit: pageSize,
       offset: page * pageSize,
     }),
-    [submittedFilters, page, pageSize],
+    [agentIdParam, page, pageSize, pathParam, queryParam, scopeParam, sourceParam],
   );
 
   const { data, isLoading, isFetching, error } = useMemoryList(submitted);
-
-  const [searchParams, setSearchParams] = useSearchParams();
 
   const [selected, setSelected] = useState<MemoryEntry | null>(null);
   const dismissedMemoryIdRef = useRef<string | null>(null);
@@ -90,17 +106,9 @@ export default function MemoryPage() {
 
   const setMemoryIdParam = useCallback(
     (memoryId: string | null) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (memoryId) next.set("memoryId", memoryId);
-          else next.delete("memoryId");
-          return next;
-        },
-        { replace: true },
-      );
+      setParam("memoryId", memoryId);
     },
-    [setSearchParams],
+    [setParam],
   );
 
   const selectMemory = useCallback(
@@ -118,16 +126,33 @@ export default function MemoryPage() {
     setMemoryIdParam(null);
   }, [searchParams, selected?.id, setMemoryIdParam]);
 
+  useEffect(() => {
+    setDraftQuery(queryParam);
+    setDraftPath(pathParam);
+    setDraftAgentId(agentIdParam);
+    setDraftScope(scopeParam);
+    setDraftSource(sourceParam);
+  }, [agentIdParam, pathParam, queryParam, scopeParam, sourceParam]);
+
   const submit = useCallback(() => {
-    setPage(0);
-    setSubmittedFilters({
-      query: draftQuery.trim() || undefined,
-      sourcePath: draftPath.trim() || undefined,
-      agentId: draftAgentId === ANY_AGENT ? undefined : draftAgentId,
-      scope: draftScope,
-      source: draftSource === ANY_SOURCE ? undefined : (draftSource as MemorySource),
-    });
-  }, [draftQuery, draftPath, draftAgentId, draftScope, draftSource]);
+    setParams(
+      {
+        query: draftQuery.trim(),
+        path: draftPath.trim(),
+        agentId: draftAgentId,
+        scope: draftScope,
+        source: draftSource,
+      },
+      {
+        defaultValues: {
+          agentId: ANY_AGENT,
+          scope: ANY_SCOPE,
+          source: ANY_SOURCE,
+        },
+        reset: ["page"],
+      },
+    );
+  }, [draftAgentId, draftPath, draftQuery, draftScope, draftSource, setParams]);
 
   const clear = useCallback(() => {
     setDraftQuery("");
@@ -135,10 +160,27 @@ export default function MemoryPage() {
     setDraftAgentId(ANY_AGENT);
     setDraftScope(ANY_SCOPE);
     setDraftSource(ANY_SOURCE);
-    setPage(0);
-    setPageSize(DEFAULT_PAGE_SIZE);
-    setSubmittedFilters({ scope: ANY_SCOPE });
-  }, []);
+    setParams(
+      {
+        query: "",
+        path: "",
+        agentId: ANY_AGENT,
+        scope: ANY_SCOPE,
+        source: ANY_SOURCE,
+        page: "0",
+        pageSize: String(DEFAULT_PAGE_SIZE),
+      },
+      {
+        defaultValues: {
+          agentId: ANY_AGENT,
+          scope: ANY_SCOPE,
+          source: ANY_SOURCE,
+          page: "0",
+          pageSize: String(DEFAULT_PAGE_SIZE),
+        },
+      },
+    );
+  }, [setParams]);
 
   const handleConfirmDelete = useCallback(() => {
     if (!deleteTarget) return;
@@ -296,8 +338,8 @@ export default function MemoryPage() {
 
   useEffect(() => {
     const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
-    if (page > lastPage) setPage(lastPage);
-  }, [page, pageSize, total]);
+    if (page > lastPage) setParam("page", lastPage, { defaultValue: "0" });
+  }, [page, pageSize, setParam, total]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -443,10 +485,12 @@ export default function MemoryPage() {
             <span className="text-xs">Rows</span>
             <Select
               value={String(pageSize)}
-              onValueChange={(value) => {
-                setPage(0);
-                setPageSize(Number(value));
-              }}
+              onValueChange={(value) =>
+                setParam("pageSize", value, {
+                  defaultValue: String(DEFAULT_PAGE_SIZE),
+                  reset: ["page"],
+                })
+              }
             >
               <SelectTrigger className="h-8 w-[72px]">
                 <SelectValue />
@@ -465,7 +509,7 @@ export default function MemoryPage() {
             size="icon"
             className="h-8 w-8"
             disabled={page === 0}
-            onClick={() => setPage((current) => Math.max(0, current - 1))}
+            onClick={() => setParam("page", Math.max(0, page - 1), { defaultValue: "0" })}
             aria-label="Previous page"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -478,7 +522,9 @@ export default function MemoryPage() {
             size="icon"
             className="h-8 w-8"
             disabled={page >= totalPages - 1}
-            onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
+            onClick={() =>
+              setParam("page", Math.min(totalPages - 1, page + 1), { defaultValue: "0" })
+            }
             aria-label="Next page"
           >
             <ChevronRight className="h-4 w-4" />

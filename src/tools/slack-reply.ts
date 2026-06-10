@@ -8,6 +8,7 @@ import {
   markTaskSlackReplySent,
 } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
+import { withAutoJoin } from "@/slack/channel-join";
 import { markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar } from "@/tools/utils";
 
@@ -118,22 +119,24 @@ export const registerSlackReplyTool = (server: McpServer) => {
       try {
         const slackMessage = markdownToSlack(message);
 
-        await app.client.chat.postMessage({
-          channel: slackChannelId,
-          thread_ts: slackThreadTs,
-          text: slackMessage, // Fallback for notifications
-          username: agent.name,
-          icon_emoji: agent.isLead ? ":crown:" : ":robot_face:",
-          blocks: [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: slackMessage,
+        await withAutoJoin(app.client, slackChannelId, () =>
+          app.client.chat.postMessage({
+            channel: slackChannelId,
+            thread_ts: slackThreadTs,
+            text: slackMessage, // Fallback for notifications
+            username: agent.name,
+            icon_emoji: agent.isLead ? ":crown:" : ":robot_face:",
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: slackMessage,
+                },
               },
-            },
-          ],
-        });
+            ],
+          }),
+        );
 
         // After successful postMessage, mark task as having a Slack reply
         if (taskId) {

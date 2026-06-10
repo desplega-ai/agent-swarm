@@ -202,6 +202,7 @@ export function SwarmConfigSection() {
         loading={isLoading}
         emptyMessage="No configuration entries"
         enableCellTextSelection
+        paginationQueryKey="swarmConfig"
       />
 
       <ConfigDetailDialog

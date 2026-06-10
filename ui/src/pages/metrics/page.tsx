@@ -183,10 +183,12 @@ function MetricTable({
   rows,
   columns,
   loading,
+  paginationQueryKey,
 }: {
   rows: Record<string, unknown>[];
   columns?: MetricVizColumn[];
   loading?: boolean;
+  paginationQueryKey?: string;
 }) {
   const columnDefs = useMemo<ColDef<Record<string, unknown>>[]>(
     () =>
@@ -210,6 +212,7 @@ function MetricTable({
       domLayout="autoHeight"
       enableCellTextSelection
       className="min-h-[220px]"
+      paginationQueryKey={paginationQueryKey}
     />
   );
 }
@@ -281,12 +284,24 @@ function WidgetViz({
     return (
       <div className="space-y-4">
         <MetricChart rows={rows} widget={widget} />
-        <MetricTable rows={rows} columns={widget.viz.columns} loading={loading} />
+        <MetricTable
+          rows={rows}
+          columns={widget.viz.columns}
+          loading={loading}
+          paginationQueryKey={`metric${widget.id}`}
+        />
       </div>
     );
   }
 
-  return <MetricTable rows={rows} columns={widget.viz.columns} loading={loading} />;
+  return (
+    <MetricTable
+      rows={rows}
+      columns={widget.viz.columns}
+      loading={loading}
+      paginationQueryKey={`metric${widget.id}`}
+    />
+  );
 }
 
 function widgetIcon(type: MetricVisualization) {

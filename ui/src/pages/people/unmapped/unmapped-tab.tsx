@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { IdentityBadge } from "../identity-badges";
 import { IntegrationIcon } from "../integration-icons";
@@ -35,6 +36,10 @@ const KIND_LABEL: Record<KindFilter, string> = {
   github: "GitHub",
   gitlab: "GitLab",
 };
+
+function coerceKind(value: string): KindFilter {
+  return KIND_FILTERS.includes(value as KindFilter) ? (value as KindFilter) : "all";
+}
 
 /**
  * Build a single lower-cased haystack from the fields a triager would actually
@@ -68,7 +73,8 @@ function unmappedMatches(row: UnmappedIdentity, query: string): boolean {
 }
 
 export function UnmappedTab() {
-  const [kind, setKind] = useState<KindFilter>("all");
+  const { searchParams, setParam } = useUrlSearchState();
+  const kind = coerceKind(readStringParam(searchParams, "kind", "all"));
   const [filterOpen, setFilterOpen] = useState(false);
   const { data, isLoading } = useUnmapped({ kind: kind === "all" ? undefined : kind });
   const resolve = useResolveUnmapped();
@@ -79,7 +85,7 @@ export function UnmappedTab() {
   // FE-only search across externalId, displayName (meta), kind, and sample
   // event type. Payload is small (triage queue, typically <100 entries), so
   // no server-side query param needed.
-  const [query, setQuery] = useState("");
+  const query = readStringParam(searchParams, "unmappedQ");
   const deferredQuery = useDeferredValue(query);
 
   const filteredData = useMemo(() => {
@@ -243,7 +249,9 @@ export function UnmappedTab() {
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) =>
+              setParam("unmappedQ", e.target.value, { reset: ["unmappedPeoplePage"] })
+            }
             placeholder="Search unmapped — ID, name, event…"
             className="pl-8 h-9"
             disabled={showEmpty}
@@ -290,7 +298,10 @@ export function UnmappedTab() {
                       key={k}
                       value={KIND_LABEL[k]}
                       onSelect={() => {
-                        setKind(k);
+                        setParam("kind", k, {
+                          defaultValue: "all",
+                          reset: ["unmappedPeoplePage"],
+                        });
                         setFilterOpen(false);
                       }}
                       className="gap-2"
@@ -327,6 +338,7 @@ export function UnmappedTab() {
           rowData={filteredData}
           columnDefs={columnDefs}
           loading={isLoading}
+          paginationQueryKey="unmappedPeople"
           emptyMessage={
             query.trim()
               ? "No unmapped identities match this search."

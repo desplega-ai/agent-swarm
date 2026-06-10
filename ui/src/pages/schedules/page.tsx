@@ -29,6 +29,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
 
@@ -272,12 +273,13 @@ function ScheduleDialog({
 
 export default function SchedulesPage() {
   const navigate = useNavigate();
+  const { searchParams, setParam } = useUrlSearchState();
   const { data: schedules, isLoading } = useScheduledTasks();
   const { data: agents } = useAgents();
   const createSchedule = useCreateSchedule();
   const updateSchedule = useUpdateSchedule();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [search, setSearch] = useState("");
+  const search = readStringParam(searchParams, "search");
 
   function handleCreateSubmit(data: ScheduleFormData) {
     const tags = data.tags
@@ -499,7 +501,7 @@ export default function SchedulesPage() {
           <Input
             placeholder="Search schedules…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setParam("search", e.target.value, { reset: ["schedulesPage"] })}
             className="pl-9"
           />
         </div>
@@ -512,6 +514,7 @@ export default function SchedulesPage() {
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No scheduled tasks"
+        paginationQueryKey="schedules"
       />
 
       <ScheduleDialog

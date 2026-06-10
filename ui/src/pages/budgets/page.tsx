@@ -793,6 +793,7 @@ export default function BudgetsPage() {
             loading={loadingAgents || loadingSummary || loadingBudgets}
             emptyMessage="No agents found"
             domLayout="autoHeight"
+            paginationQueryKey="budgetAgents"
           />
         </CardContent>
       </Card>
@@ -809,6 +810,7 @@ export default function BudgetsPage() {
             loading={loadingRefusals}
             emptyMessage="No budget refusals recorded"
             domLayout="autoHeight"
+            paginationQueryKey="budgetRefusals"
           />
         </CardContent>
       </Card>
@@ -831,6 +833,7 @@ export default function BudgetsPage() {
             loading={loadingPricing}
             emptyMessage="No pricing rows configured (provider falls back to harness-reported cost)"
             domLayout="autoHeight"
+            paginationQueryKey="budgetPricing"
           />
         </CardContent>
       </Card>

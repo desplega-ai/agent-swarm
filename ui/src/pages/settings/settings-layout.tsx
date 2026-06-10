@@ -9,7 +9,7 @@ import {
   Plug,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn } from "@/lib/utils";
 
 interface SettingsNavItem {
@@ -58,7 +59,14 @@ function readCollapsed(): boolean {
 export function SettingsLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
+  const { searchParams, setParam } = useUrlSearchState();
+  const railParam = readStringParam(searchParams, "rail");
+  const collapsed =
+    railParam === "expanded" ? false : railParam === "collapsed" ? true : readCollapsed();
+  const setCollapsed = useCallback(
+    (value: boolean) => setParam("rail", value ? "collapsed" : "expanded"),
+    [setParam],
+  );
 
   useEffect(() => {
     try {

@@ -1,6 +1,6 @@
 import { ArrowLeft, Check, Crown, Pencil, Search, X } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useAgent, useUpdateAgentName, useUpdateAgentProfile } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useAgentMcpServers, useUninstallMcpServer } from "@/api/hooks/use-mcp-servers";
@@ -38,6 +38,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { readNumberParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
 import { CredentialsPanel } from "./credentials-panel";
 
@@ -147,23 +148,16 @@ export default function AgentDetailPage() {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
 
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setParam } = useUrlSearchState();
   const tabParam = searchParams.get("tab");
   const activeTab = AGENT_TABS.includes(tabParam as (typeof AGENT_TABS)[number])
     ? (tabParam as string)
     : "profile";
   const setActiveTab = useCallback(
     (value: string) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          next.set("tab", value);
-          return next;
-        },
-        { replace: true },
-      );
+      setParam("tab", value, { defaultValue: "profile" });
     },
-    [setSearchParams],
+    [setParam],
   );
 
   const docTypeParam = searchParams.get("docType");
@@ -172,22 +166,15 @@ export default function AgentDetailPage() {
     : "soul";
   const setActiveDocType = useCallback(
     (value: string) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          next.set("docType", value);
-          return next;
-        },
-        { replace: true },
-      );
+      setParam("docType", value, { defaultValue: "soul" });
     },
-    [setSearchParams],
+    [setParam],
   );
 
   // Task tab filters
-  const [taskSearch, setTaskSearch] = useState("");
-  const [taskStatus, setTaskStatus] = useState("all");
-  const [taskPage, setTaskPage] = useState(0);
+  const taskSearch = readStringParam(searchParams, "taskSearch");
+  const taskStatus = readStringParam(searchParams, "taskStatus", "all");
+  const taskPage = readNumberParam(searchParams, "taskPage", 0, { min: 0 });
 
   const taskFilters = useMemo(() => {
     const f: { agentId?: string; status?: string; search?: string; limit: number; offset: number } =
@@ -216,6 +203,11 @@ export default function AgentDetailPage() {
 
   const taskTotal = tasksData?.total ?? 0;
   const taskTotalPages = Math.max(1, Math.ceil(taskTotal / PAGE_SIZE));
+
+  useEffect(() => {
+    const lastPage = Math.max(0, taskTotalPages - 1);
+    if (taskPage > lastPage) setParam("taskPage", lastPage, { defaultValue: "0" });
+  }, [setParam, taskPage, taskTotalPages]);
 
   function startEditing() {
     setEditName(agent?.name ?? "");
@@ -433,19 +425,18 @@ export default function AgentDetailPage() {
               <Input
                 placeholder="Search tasks..."
                 value={taskSearch}
-                onChange={(e) => {
-                  setTaskSearch(e.target.value);
-                  setTaskPage(0);
-                }}
+                onChange={(e) => setParam("taskSearch", e.target.value, { reset: ["taskPage"] })}
                 className="pl-9"
               />
             </div>
             <Select
               value={taskStatus}
-              onValueChange={(v) => {
-                setTaskStatus(v);
-                setTaskPage(0);
-              }}
+              onValueChange={(value) =>
+                setParam("taskStatus", value, {
+                  defaultValue: "all",
+                  reset: ["taskPage"],
+                })
+              }
             >
               <SelectTrigger className="w-[160px]">
                 <SelectValue placeholder="Status" />
@@ -470,6 +461,7 @@ export default function AgentDetailPage() {
             onRowClicked={onTaskClicked}
             columns={taskColumns}
             emptyMessage="No tasks for this agent"
+            pagination={false}
           />
 
           <div className="flex items-center justify-between shrink-0 text-sm text-muted-foreground">
@@ -484,7 +476,7 @@ export default function AgentDetailPage() {
                 size="icon"
                 className="h-8 w-8"
                 disabled={taskPage === 0}
-                onClick={() => setTaskPage(taskPage - 1)}
+                onClick={() => setParam("taskPage", taskPage - 1, { defaultValue: "0" })}
               >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -496,7 +488,7 @@ export default function AgentDetailPage() {
                 size="icon"
                 className="h-8 w-8"
                 disabled={taskPage >= taskTotalPages - 1}
-                onClick={() => setTaskPage(taskPage + 1)}
+                onClick={() => setParam("taskPage", taskPage + 1, { defaultValue: "0" })}
               >
                 <ArrowLeft className="h-4 w-4 rotate-180" />
               </Button>

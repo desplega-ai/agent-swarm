@@ -11,12 +11,15 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTheme } from "@/hooks/use-theme";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
 
 export default function TemplateVersionDetailPage() {
   const { id, version: versionParam } = useParams<{ id: string; version: string }>();
   const navigate = useNavigate();
   const { theme } = useTheme();
+  const { searchParams, setParam } = useUrlSearchState();
+  const activeTab = readStringParam(searchParams, "tab") === "rendered" ? "rendered" : "raw";
   const versionNum = Number(versionParam);
 
   const { data, isLoading, isError } = usePromptTemplate(id);
@@ -119,7 +122,11 @@ export default function TemplateVersionDetailPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="raw" className="flex flex-col flex-1 min-h-0">
+      <Tabs
+        value={activeTab}
+        onValueChange={(tab) => setParam("tab", tab, { defaultValue: "raw" })}
+        className="flex flex-col flex-1 min-h-0"
+      >
         <TabsList>
           <TabsTrigger value="raw">Raw</TabsTrigger>
           <TabsTrigger value="rendered">Rendered</TabsTrigger>

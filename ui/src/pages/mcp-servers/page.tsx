@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useMcpServers } from "@/api/hooks";
@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelativeTime } from "@/lib/utils";
 
 /**
@@ -70,9 +71,10 @@ function ScopeBadge({ scope }: { scope: string }) {
 
 export default function McpServersPage() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [scopeFilter, setScopeFilter] = useState<string>("all");
-  const [transportFilter, setTransportFilter] = useState<string>("all");
+  const { searchParams, setParam } = useUrlSearchState();
+  const search = readStringParam(searchParams, "search");
+  const scopeFilter = readStringParam(searchParams, "scope", "all");
+  const transportFilter = readStringParam(searchParams, "transport", "all");
 
   const filters = useMemo(() => {
     const f: Record<string, string> = {};
@@ -165,10 +167,18 @@ export default function McpServersPage() {
         <Input
           placeholder="Search servers..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => setParam("search", e.target.value, { reset: ["mcpServersPage"] })}
           className="max-w-xs"
         />
-        <Select value={transportFilter} onValueChange={setTransportFilter}>
+        <Select
+          value={transportFilter}
+          onValueChange={(value) =>
+            setParam("transport", value, {
+              defaultValue: "all",
+              reset: ["mcpServersPage"],
+            })
+          }
+        >
           <SelectTrigger className="w-[130px]">
             <SelectValue placeholder="Transport" />
           </SelectTrigger>
@@ -179,7 +189,15 @@ export default function McpServersPage() {
             <SelectItem value="sse">sse</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={scopeFilter} onValueChange={setScopeFilter}>
+        <Select
+          value={scopeFilter}
+          onValueChange={(value) =>
+            setParam("scope", value, {
+              defaultValue: "all",
+              reset: ["mcpServersPage"],
+            })
+          }
+        >
           <SelectTrigger className="w-[130px]">
             <SelectValue placeholder="Scope" />
           </SelectTrigger>
@@ -199,6 +217,7 @@ export default function McpServersPage() {
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No MCP servers found"
+        paginationQueryKey="mcpServers"
       />
     </div>
   );

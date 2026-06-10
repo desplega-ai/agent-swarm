@@ -1,7 +1,7 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { Search } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -20,16 +20,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { getAgentModelDisplay, getAgentModelPresentation } from "@/lib/agents-list-model-display";
 import { formatSmartTime } from "@/lib/utils";
 
 export default function AgentsPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const { searchParams, setParam } = useUrlSearchState();
   const { data: agents, isLoading } = useAgents();
   const { data: agentConfigs } = useConfigs({ scope: "agent" });
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") ?? "all");
+  const search = readStringParam(searchParams, "search");
+  const statusFilter = readStringParam(searchParams, "status", "all");
 
   const modelColumnGate = useFeatureGate("1.77.2");
 
@@ -185,11 +186,16 @@ export default function AgentsPage() {
           <Input
             placeholder="Search agents..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setParam("search", e.target.value, { reset: ["agentsPage"] })}
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) =>
+            setParam("status", value, { defaultValue: "all", reset: ["agentsPage"] })
+          }
+        >
           <SelectTrigger className="w-[140px]">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
@@ -210,6 +216,7 @@ export default function AgentsPage() {
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No agents found"
+        paginationQueryKey="agents"
       />
     </div>
   );

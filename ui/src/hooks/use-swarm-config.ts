@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs, useDeleteConfig, useUpsertConfig } from "@/api/hooks/use-config-api";
 import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 
 export interface ConfigFormData {
   scope: SwarmConfigScope;
@@ -22,11 +23,20 @@ export const emptyConfigForm: ConfigFormData = {
   description: "",
 };
 
+type SwarmConfigScopeFilter = SwarmConfigScope | "all";
+
+const CONFIG_SCOPE_FILTERS = new Set<string>(["all", "global", "agent", "repo"]);
+
+function coerceScopeFilter(value: string): SwarmConfigScopeFilter {
+  return CONFIG_SCOPE_FILTERS.has(value) ? (value as SwarmConfigScopeFilter) : "all";
+}
+
 export function useSwarmConfig() {
   const { data: configs, isLoading } = useConfigs({ includeSecrets: true });
   const { data: agents } = useAgents();
   const upsertConfig = useUpsertConfig();
   const deleteConfig = useDeleteConfig();
+  const { searchParams, setParam, setParams } = useUrlSearchState();
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -40,13 +50,29 @@ export function useSwarmConfig() {
   const [editEntry, setEditEntry] = useState<SwarmConfig | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SwarmConfig | null>(null);
   const [detailEntry, setDetailEntry] = useState<SwarmConfig | null>(null);
-  const [scopeFilter, setScopeFilter] = useState<string>("all");
-  const [search, setSearch] = useState("");
-  const [agentFilter, setAgentFilter] = useState<string | null>(null);
+  const scopeFilter = coerceScopeFilter(readStringParam(searchParams, "scope", "all"));
+  const search = readStringParam(searchParams, "search");
+  const agentFilter = readStringParam(searchParams, "agent") || null;
+  const setScopeFilter = useCallback(
+    (scope: string) =>
+      setParams(
+        { scope: coerceScopeFilter(scope), agent: "" },
+        { defaultValues: { scope: "all" }, reset: ["swarmConfigPage"] },
+      ),
+    [setParams],
+  );
+  const setSearch = useCallback(
+    (value: string) => setParam("search", value, { reset: ["swarmConfigPage"] }),
+    [setParam],
+  );
+  const setAgentFilter = useCallback(
+    (value: string | null) => setParam("agent", value, { reset: ["swarmConfigPage"] }),
+    [setParam],
+  );
 
   useEffect(() => {
-    if (scopeFilter !== "agent") setAgentFilter(null);
-  }, [scopeFilter]);
+    if (scopeFilter !== "agent" && agentFilter) setAgentFilter(null);
+  }, [agentFilter, scopeFilter, setAgentFilter]);
 
   function handleAdd() {
     setEditEntry(null);

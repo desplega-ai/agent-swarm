@@ -1,11 +1,12 @@
 import { LayoutGrid, Table2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useFeatureGate } from "@/api/hooks";
 import { useAgentActivity } from "@/api/hooks/use-agent-activity";
 import { AgentCanvas } from "@/components/dashboard/agent-canvas";
 import { AgentTable } from "@/components/dashboard/agent-table";
 import { InboxPanel } from "@/components/dashboard/inbox-panel";
 import { Button } from "@/components/ui/button";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn } from "@/lib/utils";
 import LegacyDashboard from "./legacy-dashboard";
 
@@ -34,7 +35,9 @@ function readPersistedView(): DashboardView {
 
 function NewDashboard() {
   const activity = useAgentActivity({ windowHours: 24 });
-  const [view, setView] = useState<DashboardView>(() => readPersistedView());
+  const { searchParams, setParam } = useUrlSearchState();
+  const viewParam = readStringParam(searchParams, "view", readPersistedView());
+  const view: DashboardView = viewParam === "table" ? "table" : "canvas";
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -55,7 +58,7 @@ function NewDashboard() {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setView("canvas")}
+            onClick={() => setParam("view", "canvas", { defaultValue: "canvas" })}
             className={cn("h-7 px-2.5 text-xs", view === "canvas" && "bg-muted text-foreground")}
             aria-pressed={view === "canvas"}
           >
@@ -66,7 +69,7 @@ function NewDashboard() {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setView("table")}
+            onClick={() => setParam("view", "table", { defaultValue: "canvas" })}
             className={cn("h-7 px-2.5 text-xs", view === "table" && "bg-muted text-foreground")}
             aria-pressed={view === "table"}
           >

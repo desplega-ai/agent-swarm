@@ -1,6 +1,6 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
 import { RefreshCw, ShieldCheck } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useSkills, useSyncRemoteSkills } from "@/api/hooks";
@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelativeTime } from "@/lib/utils";
 
 function TypeBadge({ type }: { type: string }) {
@@ -55,9 +56,10 @@ function SystemDefaultBadge() {
 
 export default function SkillsPage() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [scopeFilter, setScopeFilter] = useState<string>("all");
+  const { searchParams, setParam } = useUrlSearchState();
+  const search = readStringParam(searchParams, "search");
+  const typeFilter = readStringParam(searchParams, "type", "all");
+  const scopeFilter = readStringParam(searchParams, "scope", "all");
   const syncRemote = useSyncRemoteSkills();
 
   const filters = useMemo(() => {
@@ -170,10 +172,15 @@ export default function SkillsPage() {
         <Input
           placeholder="Search skills..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => setParam("search", e.target.value, { reset: ["skillsPage"] })}
           className="max-w-xs"
         />
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
+        <Select
+          value={typeFilter}
+          onValueChange={(value) =>
+            setParam("type", value, { defaultValue: "all", reset: ["skillsPage"] })
+          }
+        >
           <SelectTrigger className="w-[130px]">
             <SelectValue placeholder="Type" />
           </SelectTrigger>
@@ -183,7 +190,12 @@ export default function SkillsPage() {
             <SelectItem value="remote">Remote</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={scopeFilter} onValueChange={setScopeFilter}>
+        <Select
+          value={scopeFilter}
+          onValueChange={(value) =>
+            setParam("scope", value, { defaultValue: "all", reset: ["skillsPage"] })
+          }
+        >
           <SelectTrigger className="w-[130px]">
             <SelectValue placeholder="Scope" />
           </SelectTrigger>
@@ -209,6 +221,7 @@ export default function SkillsPage() {
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No skills found"
+        paginationQueryKey="skills"
       />
     </div>
   );

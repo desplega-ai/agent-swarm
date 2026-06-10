@@ -1,7 +1,7 @@
 import type { ColDef } from "ag-grid-community";
 import { GitMerge, Inbox, Search, UserPlus, Users } from "lucide-react";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useDeferredValue, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useUnmapped, useUsers } from "@/api/hooks/use-users";
 import type { User } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelative } from "@/lib/relative-time";
 import { IdentityBadgeList } from "./identity-badges";
 import { MergeModal } from "./merge-modal";
@@ -152,6 +153,7 @@ function PeopleTable({
       columnDefs={columnDefs}
       loading={isLoading}
       emptyMessage="No users yet — invite the first one with the New user button."
+      paginationQueryKey="people"
       onRowClicked={(e) => {
         if (e.data) onRowClick(e.data.id);
       }}
@@ -162,35 +164,21 @@ function PeopleTable({
 export default function PeoplePage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setParam } = useUrlSearchState();
 
   // Tabs are URL-driven so deep-linking works (/people, /people/unmapped).
-  const initialTab = location.pathname.includes("/unmapped") ? "unmapped" : "people";
-  const [tab, setTab] = useState<"people" | "unmapped">(initialTab);
+  const tab =
+    readStringParam(searchParams, "tab") === "unmapped" || location.pathname.includes("/unmapped")
+      ? "unmapped"
+      : "people";
 
   const { data: users, isLoading } = useUsers();
   const { data: unmapped } = useUnmapped();
   const unmappedCount = unmapped?.length ?? 0;
 
-  // Search — persisted in URL ?q= for reload survival. Scoped to the People
-  // tab only; Unmapped tab owns its own search input.
-  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
+  // Search is URL-backed and scoped to the People tab. Unmapped owns its own params.
+  const query = readStringParam(searchParams, "q");
   const deferredQuery = useDeferredValue(query);
-
-  // Mirror local state into the URL (?q=…). Reads the current params at call
-  // time via the setter (functional form) so we don't need `searchParams` in
-  // the dep array — that would re-trigger the effect on every URL change.
-  useEffect(() => {
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        if (query.trim()) next.set("q", query);
-        else next.delete("q");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [query, setSearchParams]);
 
   const filteredUsers = useMemo(() => {
     if (!users) return undefined;
@@ -225,8 +213,16 @@ export default function PeoplePage() {
         value={tab}
         onValueChange={(v) => {
           const next = v === "unmapped" ? "unmapped" : "people";
-          setTab(next);
-          navigate(next === "unmapped" ? "/people/unmapped" : "/people", { replace: true });
+          const nextParams = new URLSearchParams(searchParams);
+          if (next === "people") nextParams.delete("tab");
+          else nextParams.set("tab", next);
+          navigate(
+            {
+              pathname: next === "unmapped" ? "/people/unmapped" : "/people",
+              search: nextParams.toString(),
+            },
+            { replace: true },
+          );
         }}
         className="flex flex-col flex-1 min-h-0"
       >
@@ -241,7 +237,7 @@ export default function PeoplePage() {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => setParam("q", e.target.value, { reset: ["peoplePage"] })}
                 placeholder="Search people, emails, aliases, identities…"
                 className="pl-8 h-9"
               />

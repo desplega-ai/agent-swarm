@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatPanel } from "@/components/ui/stat-panel";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatCost } from "@/lib/cost-format";
 import { cn, formatSmartTime } from "@/lib/utils";
 
@@ -120,10 +121,11 @@ export default function ApiKeysPage() {
   const { data: costs } = useApiKeyCosts();
   const setKeyName = useSetApiKeyName();
   const clearRateLimit = useClearApiKeyRateLimit();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [providerFilter, setProviderFilter] = useState<string>("all");
+  const { searchParams, setParam } = useUrlSearchState();
+  const search = readStringParam(searchParams, "search");
+  const statusFilter = readStringParam(searchParams, "status", "all");
+  const typeFilter = readStringParam(searchParams, "type", "all");
+  const providerFilter = readStringParam(searchParams, "provider", "all");
   // Dialog state for renaming a single key. Decoupled from AG Grid edit
   // mode (which has too many gotchas around cell focus / suppressCellFocus
   // / cellRenderer click forwarding) — clicking the pencil icon opens this
@@ -412,11 +414,19 @@ export default function ApiKeysPage() {
           <Input
             placeholder="Search by name, suffix, type…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setParam("search", e.target.value, { reset: ["apiKeysPage"] })}
             className="pl-9"
           />
         </div>
-        <Select value={providerFilter} onValueChange={setProviderFilter}>
+        <Select
+          value={providerFilter}
+          onValueChange={(value) =>
+            setParam("provider", value, {
+              defaultValue: "all",
+              reset: ["apiKeysPage"],
+            })
+          }
+        >
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="Provider" />
           </SelectTrigger>
@@ -429,7 +439,15 @@ export default function ApiKeysPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) =>
+            setParam("status", value, {
+              defaultValue: "all",
+              reset: ["apiKeysPage"],
+            })
+          }
+        >
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
@@ -440,7 +458,15 @@ export default function ApiKeysPage() {
           </SelectContent>
         </Select>
         {keyTypes.length > 1 && (
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <Select
+            value={typeFilter}
+            onValueChange={(value) =>
+              setParam("type", value, {
+                defaultValue: "all",
+                reset: ["apiKeysPage"],
+              })
+            }
+          >
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Key Type" />
             </SelectTrigger>
@@ -463,6 +489,7 @@ export default function ApiKeysPage() {
         quickFilterText={search}
         loading={isLoading}
         emptyMessage="No API keys tracked yet"
+        paginationQueryKey="apiKeys"
       />
 
       {/* Rename dialog */}

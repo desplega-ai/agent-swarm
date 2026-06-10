@@ -1,7 +1,7 @@
 import Editor from "@monaco-editor/react";
 import type { ColDef, GetRowIdParams } from "ag-grid-community";
 import { Bug, ChevronDown, ChevronRight, Loader2, Play, Table2 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { useDbQuery, useTableColumns, useTableList } from "@/api/hooks";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
@@ -9,23 +9,27 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTheme } from "@/hooks/use-theme";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 
 const DEFAULT_SQL = "SELECT name, type FROM sqlite_master WHERE type='table' ORDER BY name";
 
 // ── Table Browser Sidebar ──────────────────────────────────────────────────
 
-function TableBrowser({ onSelectTable }: { onSelectTable: (tableName: string) => void }) {
+function TableBrowser({
+  expandedTable,
+  onSelectTable,
+  onToggleTable,
+}: {
+  expandedTable: string;
+  onSelectTable: (tableName: string) => void;
+  onToggleTable: (tableName: string) => void;
+}) {
   const { data: tablesResult, isLoading } = useTableList();
-  const [expandedTable, setExpandedTable] = useState<string | null>(null);
 
   const tables = useMemo(() => {
     if (!tablesResult?.rows) return [];
     return tablesResult.rows.map((row) => String(row[0]));
   }, [tablesResult]);
-
-  function handleToggle(name: string) {
-    setExpandedTable((prev) => (prev === name ? null : name));
-  }
 
   return (
     <div className="w-[220px] shrink-0 border-r border-border flex flex-col min-h-0 overflow-hidden">
@@ -46,7 +50,7 @@ function TableBrowser({ onSelectTable }: { onSelectTable: (tableName: string) =>
               key={name}
               name={name}
               expanded={expandedTable === name}
-              onToggle={() => handleToggle(name)}
+              onToggle={() => onToggleTable(name)}
               onSelect={() => onSelectTable(name)}
             />
           ))}
@@ -122,8 +126,10 @@ function TableItem({
 
 export default function DebugPage() {
   const { theme } = useTheme();
+  const { searchParams, setParam, setParams } = useUrlSearchState();
   const dbQuery = useDbQuery();
-  const [sql, setSql] = useState(DEFAULT_SQL);
+  const sql = readStringParam(searchParams, "sql", DEFAULT_SQL);
+  const expandedTable = readStringParam(searchParams, "table");
   const editorRef = useRef<{ getValue: () => string } | null>(null);
 
   const executeQuery = useCallback(() => {
@@ -135,8 +141,12 @@ export default function DebugPage() {
 
   function handleSelectTable(tableName: string) {
     const newSql = `SELECT * FROM ${tableName} LIMIT 50`;
-    setSql(newSql);
+    setParams({ table: tableName, sql: newSql }, { defaultValues: { sql: DEFAULT_SQL } });
     dbQuery.mutate({ sql: newSql });
+  }
+
+  function handleToggleTable(tableName: string) {
+    setParam("table", expandedTable === tableName ? "" : tableName);
   }
 
   function handleEditorMount(editor: { getValue: () => string }) {
@@ -185,7 +195,11 @@ export default function DebugPage() {
       {/* Main content: sidebar + editor/results */}
       <div className="flex flex-1 min-h-0 border border-border rounded-md overflow-hidden">
         {/* Table browser sidebar */}
-        <TableBrowser onSelectTable={handleSelectTable} />
+        <TableBrowser
+          expandedTable={expandedTable}
+          onSelectTable={handleSelectTable}
+          onToggleTable={handleToggleTable}
+        />
 
         {/* Right panel: editor + results */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
@@ -195,7 +209,7 @@ export default function DebugPage() {
               language="sql"
               theme={theme === "dark" ? "vs-dark" : "vs"}
               value={sql}
-              onChange={(value) => setSql(value ?? "")}
+              onChange={(value) => setParam("sql", value ?? "", { defaultValue: DEFAULT_SQL })}
               onMount={handleEditorMount}
               options={{
                 minimap: { enabled: false },
@@ -258,6 +272,7 @@ export default function DebugPage() {
               getRowId={getRowId}
               pagination
               paginationPageSize={50}
+              paginationQueryKey="debugResults"
             />
           </div>
         </div>

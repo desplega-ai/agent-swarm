@@ -102,6 +102,7 @@ function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
         columns={columns}
         emptyMessage="No tasks created by this schedule"
         domLayout="autoHeight"
+        paginationQueryKey="scheduleTasks"
       />
     </div>
   );

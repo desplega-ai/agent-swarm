@@ -1,6 +1,6 @@
 import { ArrowLeft, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { useDeleteMcpServer, useMcpServer, useUpdateMcpServer } from "@/api/hooks";
@@ -30,6 +30,7 @@ import { InfoRow } from "@/components/ui/info-row";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelativeTime } from "@/lib/utils";
 import { McpOAuthPanel } from "./mcp-oauth-panel";
 
@@ -66,12 +67,16 @@ function ScopeBadge({ scope }: { scope: string }) {
 export default function McpServerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setParam, setParams } = useUrlSearchState();
   const { data: server, isLoading } = useMcpServer(id!);
   const updateServer = useUpdateMcpServer();
   const deleteServer = useDeleteMcpServer();
   const oauthParam = searchParams.get("oauth");
-  const [tab, setTab] = useState<string>(oauthParam ? "auth" : "config");
+  const tab = oauthParam
+    ? "auth"
+    : readStringParam(searchParams, "tab", "config") === "auth"
+      ? "auth"
+      : "config";
 
   useEffect(() => {
     if (!oauthParam) return;
@@ -84,12 +89,13 @@ export default function McpServerDetailPage() {
         "OAuth authorization failed";
       toast.error(msg);
     }
-    const next = new URLSearchParams(searchParams);
-    next.delete("oauth");
-    next.delete("error");
-    next.delete("error_description");
-    setSearchParams(next, { replace: true });
-  }, [oauthParam, searchParams, setSearchParams]);
+    setParams(
+      { tab: "auth", oauth: "", error: "", error_description: "" },
+      {
+        defaultValues: { tab: "config" },
+      },
+    );
+  }, [oauthParam, searchParams, setParams]);
 
   if (isLoading) {
     return (
@@ -191,7 +197,11 @@ export default function McpServerDetailPage() {
       <DetailPageBody
         className="flex-1 min-h-0"
         main={
-          <Tabs value={tab} onValueChange={setTab} className="flex flex-col flex-1 min-h-0">
+          <Tabs
+            value={tab}
+            onValueChange={(value) => setParam("tab", value, { defaultValue: "config" })}
+            className="flex flex-col flex-1 min-h-0"
+          >
             <TabsList className="shrink-0">
               <TabsTrigger value="config">Configuration</TabsTrigger>
               <TabsTrigger value="auth">Authentication</TabsTrigger>

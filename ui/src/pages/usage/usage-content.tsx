@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useUsageSummary } from "@/api/hooks/use-costs";
@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatCost } from "@/lib/cost-format";
 import { rechartsTooltipStyle } from "@/lib/recharts-tooltip-style";
 import { formatCompactNumber } from "@/lib/utils";
@@ -19,6 +20,11 @@ import { formatCompactNumber } from "@/lib/utils";
 type DateRange = "7d" | "30d" | "90d" | "all";
 
 const DAYS_MAP: Record<DateRange, number | null> = { "7d": 7, "30d": 30, "90d": 90, all: null };
+const DATE_RANGES = new Set<string>(["7d", "30d", "90d", "all"]);
+
+function coerceDateRange(value: string): DateRange {
+  return DATE_RANGES.has(value) ? (value as DateRange) : "30d";
+}
 
 function getStartDateISO(range: DateRange): string | undefined {
   const days = DAYS_MAP[range];
@@ -29,8 +35,17 @@ function getStartDateISO(range: DateRange): string | undefined {
 }
 
 export function UsageContent() {
-  const [dateRange, setDateRange] = useState<DateRange>("30d");
-  const [agentFilter, setAgentFilter] = useState("all");
+  const { searchParams, setParam } = useUrlSearchState();
+  const dateRange = coerceDateRange(readStringParam(searchParams, "range", "30d"));
+  const agentFilter = readStringParam(searchParams, "agent", "all");
+  const setDateRange = useCallback(
+    (range: string) => setParam("range", coerceDateRange(range), { defaultValue: "30d" }),
+    [setParam],
+  );
+  const setAgentFilter = useCallback(
+    (agent: string) => setParam("agent", agent, { defaultValue: "all" }),
+    [setParam],
+  );
 
   const startDate = getStartDateISO(dateRange);
   const agentId = agentFilter !== "all" ? agentFilter : undefined;
@@ -83,7 +98,7 @@ export function UsageContent() {
         title="Usage"
         action={
           <>
-            <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
+            <Select value={dateRange} onValueChange={setDateRange}>
               <SelectTrigger className="w-[130px]">
                 <SelectValue />
               </SelectTrigger>

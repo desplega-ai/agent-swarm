@@ -29,7 +29,7 @@ import {
   User,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -78,6 +78,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
@@ -85,6 +86,18 @@ import { progressBarTone } from "@/lib/percent-progress-tone";
 import { statusTextClass } from "@/lib/status-tone";
 import { taskIsRunning } from "@/lib/task-activity";
 import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
+
+const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
+
+function coerceTaskDetailTab(value: string): string {
+  return TASK_DETAIL_TABS.has(value) ? value : "details";
+}
+
+function readStoredRailCollapsed(): boolean {
+  if (typeof window === "undefined") return true;
+  const stored = window.localStorage.getItem("agent-swarm-task-rail-collapsed-v2");
+  return stored === null ? true : stored === "1";
+}
 
 function logDotColor(eventType: string, newValue?: string): string {
   if (eventType === "task_status_change") {
@@ -487,6 +500,23 @@ export default function TaskDetailPage() {
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
   const resumeTask = useResumeTask();
+  const { searchParams, setParam } = useUrlSearchState();
+  const activeTab = coerceTaskDetailTab(readStringParam(searchParams, "tab", "details"));
+  const railParam = readStringParam(searchParams, "rail");
+  const railCollapsed =
+    railParam === "expanded" ? false : railParam === "collapsed" ? true : readStoredRailCollapsed();
+  const setActiveTab = useCallback(
+    (tab: string) => setParam("tab", coerceTaskDetailTab(tab), { defaultValue: "details" }),
+    [setParam],
+  );
+  const setRailCollapsed = useCallback(
+    (collapsed: boolean) => setParam("rail", collapsed ? "collapsed" : "expanded"),
+    [setParam],
+  );
+  const toggleRailCollapsed = useCallback(
+    () => setRailCollapsed(!railCollapsed),
+    [railCollapsed, setRailCollapsed],
+  );
   const agentName = useMemo(() => {
     if (!task?.agentId || !agents) return null;
     return agents.find((a) => a.id === task.agentId)?.name ?? null;
@@ -498,14 +528,9 @@ export default function TaskDetailPage() {
     return users.find((u) => u.id === task.requestedByUserId)?.name ?? null;
   }, [task, users]);
 
-  // Phase 17 — collapsible right rail (Activity feed). Persists to
-  // localStorage so the choice survives reloads and route changes.
-  const [railCollapsed, setRailCollapsed] = useState(() => {
-    if (typeof window === "undefined") return true;
-    // Collapsed by default on first visit; respect a stored preference thereafter.
-    const stored = window.localStorage.getItem("agent-swarm-task-rail-collapsed-v2");
-    return stored === null ? true : stored === "1";
-  });
+  // Phase 17 — collapsible right rail (Activity feed). The URL is the primary
+  // source for shareable state; localStorage remains the fallback preference
+  // when the `rail` query param is absent.
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("agent-swarm-task-rail-collapsed-v2", railCollapsed ? "1" : "0");
@@ -1001,7 +1026,11 @@ export default function TaskDetailPage() {
       <div className="lg:hidden flex flex-col flex-1 min-h-0">
         {heroBlock}
         <Separator className="shrink-0" />
-        <Tabs defaultValue="details" className="flex flex-col flex-1 min-h-0">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="flex flex-col flex-1 min-h-0"
+        >
           <TabsList className="shrink-0 mx-1 mt-2">
             <TabsTrigger value="details">Details</TabsTrigger>
             <TabsTrigger value="outcome">Outcome</TabsTrigger>
@@ -1115,7 +1144,7 @@ export default function TaskDetailPage() {
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => setRailCollapsed((v) => !v)}
+                onClick={toggleRailCollapsed}
                 aria-label={railCollapsed ? "Expand activity rail" : "Collapse activity rail"}
                 className={cn(
                   "absolute z-40 top-2 h-6 w-6 inline-flex cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",

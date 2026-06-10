@@ -1,5 +1,5 @@
 import { ArrowLeft, ChevronsDownUp, ChevronsUpDown, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useRetryWorkflowRun, useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { StepCard } from "@/components/workflows/step-card";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 export default function WorkflowRunDetailPage() {
@@ -22,44 +23,67 @@ export default function WorkflowRunDetailPage() {
   const { data: workflow } = useWorkflow(run?.workflowId ?? "");
   const retryRun = useRetryWorkflowRun();
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [expandedStepIds, setExpandedStepIds] = useState<Set<string>>(new Set());
+  const { searchParams, setParam } = useUrlSearchState();
+  const selectedNodeId = readStringParam(searchParams, "node") || null;
+  const expandedStepsParam = readStringParam(searchParams, "steps");
+  const expandedStepIds = useMemo(
+    () => new Set(expandedStepsParam.split(",").filter(Boolean)),
+    [expandedStepsParam],
+  );
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  const setSelectedNodeId = useCallback(
+    (nodeId: string | null) => setParam("node", nodeId),
+    [setParam],
+  );
+
+  const setExpandedSteps = useCallback(
+    (nodeIds: Iterable<string>) => {
+      const value = Array.from(new Set(nodeIds)).filter(Boolean).join(",");
+      setParam("steps", value);
+    },
+    [setParam],
+  );
 
   const duration =
     run?.startedAt && run?.finishedAt ? formatElapsed(run.startedAt, run.finishedAt) : null;
 
-  const toggleStep = useCallback((nodeId: string) => {
-    setExpandedStepIds((prev) => {
-      const next = new Set(prev);
+  const toggleStep = useCallback(
+    (nodeId: string) => {
+      const next = new Set(expandedStepIds);
       if (next.has(nodeId)) {
         next.delete(nodeId);
       } else {
         next.add(nodeId);
       }
-      return next;
-    });
-  }, []);
+      setExpandedSteps(next);
+    },
+    [expandedStepIds, setExpandedSteps],
+  );
 
   // When a graph node is clicked, expand and scroll to that step
-  const handleGraphNodeClick = useCallback((nodeId: string) => {
-    setSelectedNodeId(nodeId);
-    setExpandedStepIds((prev) => {
-      const next = new Set(prev);
+  const handleGraphNodeClick = useCallback(
+    (nodeId: string) => {
+      setSelectedNodeId(nodeId);
+      const next = new Set(expandedStepIds);
       next.add(nodeId);
-      return next;
-    });
-    // Scroll to the step card after a tick (to allow expansion to render)
-    requestAnimationFrame(() => {
-      const el = stepRefs.current.get(nodeId);
-      el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
-  }, []);
+      setExpandedSteps(next);
+      // Scroll to the step card after a tick (to allow expansion to render)
+      requestAnimationFrame(() => {
+        const el = stepRefs.current.get(nodeId);
+        el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    },
+    [expandedStepIds, setExpandedSteps, setSelectedNodeId],
+  );
 
   // When a step card is clicked, highlight the node in the graph (don't toggle expand)
-  const handleStepClick = useCallback((nodeId: string) => {
-    setSelectedNodeId(nodeId);
-  }, []);
+  const handleStepClick = useCallback(
+    (nodeId: string) => {
+      setSelectedNodeId(nodeId);
+    },
+    [setSelectedNodeId],
+  );
 
   const steps = run?.steps ?? [];
 
@@ -77,7 +101,18 @@ export default function WorkflowRunDetailPage() {
     if (selectedNodeId && run?.steps && !run.steps.find((s) => s.nodeId === selectedNodeId)) {
       setSelectedNodeId(null);
     }
-  }, [selectedNodeId, run?.steps]);
+  }, [selectedNodeId, run?.steps, setSelectedNodeId]);
+
+  useEffect(() => {
+    if (!run?.steps || expandedStepIds.size === 0) return;
+    const validStepIds = new Set(run.steps.map((step) => step.nodeId));
+    const validExpandedStepIds = Array.from(expandedStepIds).filter((nodeId) =>
+      validStepIds.has(nodeId),
+    );
+    if (validExpandedStepIds.length !== expandedStepIds.size) {
+      setExpandedSteps(validExpandedStepIds);
+    }
+  }, [expandedStepIds, run?.steps, setExpandedSteps]);
 
   if (isLoading) {
     return (
@@ -210,7 +245,7 @@ export default function WorkflowRunDetailPage() {
                   variant="ghost"
                   size="sm"
                   className="h-6 px-1.5 text-xs text-muted-foreground"
-                  onClick={() => setExpandedStepIds(new Set(steps.map((s) => s.nodeId)))}
+                  onClick={() => setExpandedSteps(steps.map((s) => s.nodeId))}
                   title="Expand all"
                 >
                   <ChevronsUpDown className="h-3.5 w-3.5" />
@@ -219,7 +254,7 @@ export default function WorkflowRunDetailPage() {
                   variant="ghost"
                   size="sm"
                   className="h-6 px-1.5 text-xs text-muted-foreground"
-                  onClick={() => setExpandedStepIds(new Set())}
+                  onClick={() => setExpandedSteps([])}
                   title="Collapse all"
                 >
                   <ChevronsDownUp className="h-3.5 w-3.5" />

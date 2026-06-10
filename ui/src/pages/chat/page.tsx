@@ -60,6 +60,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 // --- Channel sidebar ---
@@ -479,11 +480,11 @@ function ThreadPanel({
 
 export default function ChatPage() {
   const { channelId: urlChannelId } = useParams<{ channelId?: string }>();
+  const { searchParams, setParam, setParams } = useUrlSearchState();
   const { data: channels, isLoading: channelsLoading } = useChannels();
   const { data: agents } = useAgents();
-  const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
-  const [prevChannelId, setPrevChannelId] = useState<string | null>(null);
+  const channelParam = readStringParam(searchParams, "channel", urlChannelId ?? "");
+  const selectedThreadId = readStringParam(searchParams, "thread") || null;
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -493,24 +494,16 @@ export default function ChatPage() {
     return m;
   }, [agents]);
 
-  // Derive active channel from URL or first available — no useEffect needed
-  const resolvedChannelId =
-    urlChannelId && channels?.some((c) => c.id === urlChannelId)
-      ? urlChannelId
-      : (activeChannelId ?? (channels && channels.length > 0 ? channels[0].id : null));
-
-  // Sync resolved channel into state when it changes from URL/channels loading
-  if (resolvedChannelId !== activeChannelId && resolvedChannelId !== null) {
-    setActiveChannelId(resolvedChannelId);
-  }
-
-  // Reset thread when channel changes
-  if (activeChannelId !== prevChannelId) {
-    setPrevChannelId(activeChannelId);
-    if (prevChannelId !== null) {
-      setSelectedThreadId(null);
-    }
-  }
+  const activeChannelId =
+    channelParam && channels?.some((c) => c.id === channelParam)
+      ? channelParam
+      : (channels?.[0]?.id ?? null);
+  const setActiveChannelId = useCallback(
+    (channelId: string | null) => {
+      setParams({ channel: channelId, thread: "" }, { reset: ["thread"] });
+    },
+    [setParams],
+  );
 
   const activeChannel = channels?.find((c) => c.id === activeChannelId);
 
@@ -632,7 +625,7 @@ export default function ChatPage() {
                         message={msg}
                         agentMap={agentMap}
                         threadCount={replyCounts.get(msg.id)}
-                        onOpenThread={() => setSelectedThreadId(msg.id)}
+                        onOpenThread={() => setParam("thread", msg.id)}
                       />
                     ))}
                   </div>
@@ -663,7 +656,7 @@ export default function ChatPage() {
             channelId={activeChannelId}
             parentMessage={threadParent}
             agentMap={agentMap}
-            onClose={() => setSelectedThreadId(null)}
+            onClose={() => setParam("thread", "")}
           />
         )}
       </div>

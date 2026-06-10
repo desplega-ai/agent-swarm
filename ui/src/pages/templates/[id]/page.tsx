@@ -2,7 +2,7 @@ import Editor from "@monaco-editor/react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ArrowLeft, ChevronDown, ChevronRight, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { toast } from "sonner";
@@ -40,6 +40,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTheme } from "@/hooks/use-theme";
+import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
 
 const STATE_VARIANTS: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
@@ -53,9 +54,10 @@ export default function TemplateDetailPage() {
   const navigate = useNavigate();
   const { theme } = useTheme();
 
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tabParam = searchParams.get("tab");
+  const { searchParams, setParam } = useUrlSearchState();
+  const tabParam = readStringParam(searchParams, "tab", "raw");
   const activeTab = tabParam === "rendered" || tabParam === "history" ? tabParam : "raw";
+  const varsOpen = readBooleanParam(searchParams, "vars");
 
   const { data, isLoading, isError } = usePromptTemplate(id);
   const { data: events } = usePromptTemplateEvents();
@@ -78,7 +80,6 @@ export default function TemplateDetailPage() {
   // Rendered tab state
   const [rendered, setRendered] = useState("");
   const [unresolved, setUnresolved] = useState<string[]>([]);
-  const [varsOpen, setVarsOpen] = useState(false);
 
   // Sync body/state from template data
   useEffect(() => {
@@ -330,16 +331,7 @@ export default function TemplateDetailPage() {
       {/* Tabs */}
       <Tabs
         value={activeTab}
-        onValueChange={(value) => {
-          setSearchParams(
-            (prev) => {
-              const next = new URLSearchParams(prev);
-              next.set("tab", value);
-              return next;
-            },
-            { replace: true },
-          );
-        }}
+        onValueChange={(value) => setParam("tab", value, { defaultValue: "raw" })}
         className="flex flex-col flex-1 min-h-0"
       >
         <TabsList>
@@ -529,7 +521,7 @@ export default function TemplateDetailPage() {
                 <button
                   type="button"
                   className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => setVarsOpen(!varsOpen)}
+                  onClick={() => setParam("vars", varsOpen ? "" : "true")}
                 >
                   {varsOpen ? (
                     <ChevronDown className="h-3.5 w-3.5" />

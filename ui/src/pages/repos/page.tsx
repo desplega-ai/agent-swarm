@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Switch } from "@/components/ui/switch";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 
 interface RepoFormData {
   url: string;
@@ -154,10 +155,11 @@ export default function ReposPage() {
   const deleteRepo = useDeleteRepo();
 
   const navigate = useNavigate();
+  const { searchParams, setParam } = useUrlSearchState();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRepo, setEditingRepo] = useState<SwarmRepo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SwarmRepo | null>(null);
-  const [search, setSearch] = useState("");
+  const search = readStringParam(searchParams, "search");
 
   function handleAdd() {
     setEditingRepo(null);
@@ -348,7 +350,7 @@ export default function ReposPage() {
           <Input
             placeholder="Search repos…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setParam("search", e.target.value, { reset: ["reposPage"] })}
             className="pl-9"
           />
         </div>
@@ -361,6 +363,7 @@ export default function ReposPage() {
         onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No repositories registered"
+        paginationQueryKey="repos"
       />
 
       <RepoDialog

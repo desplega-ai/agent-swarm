@@ -1,12 +1,11 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
 import { Search, Workflow as WorkflowIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks/use-workflows";
 import type { WorkflowRun, WorkflowRunStatus, WorkflowSummary } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { TemplateRecommendationCard } from "@/components/shared/template-recommendation-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
@@ -19,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 function formatDuration(startedAt: string, finishedAt?: string): string {
@@ -28,19 +28,16 @@ function formatDuration(startedAt: string, finishedAt?: string): string {
 
 export default function WorkflowsPage() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get("tab") ?? "workflows";
+  const { searchParams, setParam, setParams } = useUrlSearchState();
+  const activeTab =
+    readStringParam(searchParams, "tab", "workflows") === "runs" ? "runs" : "workflows";
+  const search = readStringParam(searchParams, "search");
+  const statusFilter = readStringParam(searchParams, "runStatus", "all");
+  const workflowFilter = readStringParam(searchParams, "workflow", "all");
 
   const { data: workflows, isLoading: wfLoading } = useWorkflows();
   const { data: allRuns, isLoading: runsLoading } = useAllWorkflowRuns();
   const updateWorkflow = useUpdateWorkflow();
-
-  // Workflows tab search
-  const [search, setSearch] = useState("");
-
-  // Run filters
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [workflowFilter, setWorkflowFilter] = useState<string>("all");
 
   const workflowMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -190,9 +187,6 @@ export default function WorkflowsPage() {
             <WorkflowIcon className="h-8 w-8 mb-2" />
             <p className="text-sm">No workflows configured</p>
           </div>
-          {/* Phase 3: smart empty state — promote a starter template based
-              on detected integrations from /status. */}
-          <TemplateRecommendationCard eyebrow="Try this template" actionLabel="Browse templates" />
         </div>
       </div>
     );
@@ -204,7 +198,7 @@ export default function WorkflowsPage() {
 
       <Tabs
         value={activeTab}
-        onValueChange={(v) => setSearchParams({ tab: v })}
+        onValueChange={(value) => setParam("tab", value, { defaultValue: "workflows" })}
         className="flex flex-col flex-1 min-h-0"
       >
         <TabsList>
@@ -219,7 +213,7 @@ export default function WorkflowsPage() {
               <Input
                 placeholder="Search workflows…"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => setParam("search", e.target.value, { reset: ["workflowsPage"] })}
                 className="pl-9"
               />
             </div>
@@ -231,12 +225,21 @@ export default function WorkflowsPage() {
             onRowClicked={onWorkflowRowClicked}
             loading={wfLoading}
             emptyMessage="No workflows configured"
+            paginationQueryKey="workflows"
           />
         </TabsContent>
 
         <TabsContent value="runs" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) =>
+                setParam("runStatus", value, {
+                  defaultValue: "all",
+                  reset: ["workflowRunsPage"],
+                })
+              }
+            >
               <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -249,7 +252,15 @@ export default function WorkflowsPage() {
                 <SelectItem value="skipped">Skipped</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={workflowFilter} onValueChange={setWorkflowFilter}>
+            <Select
+              value={workflowFilter}
+              onValueChange={(value) =>
+                setParam("workflow", value, {
+                  defaultValue: "all",
+                  reset: ["workflowRunsPage"],
+                })
+              }
+            >
               <SelectTrigger className="w-[200px]">
                 <SelectValue placeholder="Workflow" />
               </SelectTrigger>
@@ -266,10 +277,15 @@ export default function WorkflowsPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => {
-                  setStatusFilter("all");
-                  setWorkflowFilter("all");
-                }}
+                onClick={() =>
+                  setParams(
+                    { runStatus: "all", workflow: "all" },
+                    {
+                      defaultValues: { runStatus: "all", workflow: "all" },
+                      reset: ["workflowRunsPage"],
+                    },
+                  )
+                }
               >
                 Clear filters
               </Button>
@@ -281,6 +297,7 @@ export default function WorkflowsPage() {
             onRowClicked={onRunRowClicked}
             loading={runsLoading}
             emptyMessage="No workflow runs"
+            paginationQueryKey="workflowRuns"
           />
         </TabsContent>
       </Tabs>

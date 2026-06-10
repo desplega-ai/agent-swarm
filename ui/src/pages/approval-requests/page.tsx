@@ -1,5 +1,5 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApprovalRequests } from "@/api/hooks/use-approval-requests";
 import type { ApprovalRequest, ApprovalRequestStatus } from "@/api/types";
@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -25,7 +26,8 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
 ];
 
 export default function ApprovalRequestsPage() {
-  const [statusFilter, setStatusFilter] = useState("all");
+  const { searchParams, setParam } = useUrlSearchState();
+  const statusFilter = readStringParam(searchParams, "status", "all");
   const navigate = useNavigate();
 
   const { data: requests, isLoading } = useApprovalRequests(
@@ -117,7 +119,10 @@ export default function ApprovalRequestsPage() {
       <PageHeader title="Approval Requests" />
 
       <div className="flex items-center gap-3">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => setParam("status", value, { defaultValue: "all" })}
+        >
           <SelectTrigger className="w-40 h-8 text-xs">
             <SelectValue />
           </SelectTrigger>
