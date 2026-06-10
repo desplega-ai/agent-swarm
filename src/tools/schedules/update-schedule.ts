@@ -10,6 +10,39 @@ import {
 import { mergeScheduleTiming, validateRecurringTiming } from "@/be/schedules/validate";
 import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar } from "@/tools/utils";
+import { ModelTierSchema, splitLegacyModelAlias } from "../../model-tiers";
+
+export const updateScheduleInputSchema = z.object({
+  scheduleId: z.string().uuid().optional().describe("Schedule ID to update"),
+  name: z.string().optional().describe("Schedule name to update (alternative to ID)"),
+  newName: z.string().min(1).max(100).optional().describe("New name for the schedule"),
+  taskTemplate: z.string().min(1).optional().describe("New task template"),
+  cronExpression: z.string().nullable().optional().describe("New cron expression (null to clear)"),
+  intervalMs: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .describe("New interval in milliseconds (null to clear)"),
+  description: z.string().optional().describe("New description"),
+  taskType: z.string().max(50).optional().describe("New task type"),
+  tags: z.array(z.string()).optional().describe("New tags"),
+  priority: z.number().int().min(0).max(100).optional().describe("New priority"),
+  targetAgentId: z.string().uuid().nullable().optional().describe("New target agent ID"),
+  timezone: z.string().optional().describe("New timezone"),
+  enabled: z.boolean().optional().describe("Enable or disable the schedule"),
+  model: z
+    .string()
+    .trim()
+    .min(1)
+    .nullable()
+    .optional()
+    .describe("Concrete model override for tasks created by this schedule. Set to null to clear."),
+  modelTier: ModelTierSchema.nullable()
+    .optional()
+    .describe("Portable model tier for tasks created by this schedule. Set to null to clear."),
+});
 
 export const registerUpdateScheduleTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -19,36 +52,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       annotations: { idempotentHint: true },
       description:
         "Update an existing scheduled task. Only the creator or lead agent can update schedules.",
-      inputSchema: z.object({
-        scheduleId: z.string().uuid().optional().describe("Schedule ID to update"),
-        name: z.string().optional().describe("Schedule name to update (alternative to ID)"),
-        newName: z.string().min(1).max(100).optional().describe("New name for the schedule"),
-        taskTemplate: z.string().min(1).optional().describe("New task template"),
-        cronExpression: z
-          .string()
-          .nullable()
-          .optional()
-          .describe("New cron expression (null to clear)"),
-        intervalMs: z
-          .number()
-          .int()
-          .positive()
-          .nullable()
-          .optional()
-          .describe("New interval in milliseconds (null to clear)"),
-        description: z.string().optional().describe("New description"),
-        taskType: z.string().max(50).optional().describe("New task type"),
-        tags: z.array(z.string()).optional().describe("New tags"),
-        priority: z.number().int().min(0).max(100).optional().describe("New priority"),
-        targetAgentId: z.string().uuid().nullable().optional().describe("New target agent ID"),
-        timezone: z.string().optional().describe("New timezone"),
-        enabled: z.boolean().optional().describe("Enable or disable the schedule"),
-        model: z
-          .enum(["haiku", "sonnet", "opus", "fable"])
-          .nullable()
-          .optional()
-          .describe("Model to use for tasks created by this schedule. Set to null to clear."),
-      }),
+      inputSchema: updateScheduleInputSchema,
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
@@ -71,6 +75,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
             createdByAgentId: z.string().optional(),
             timezone: z.string(),
             model: z.string().optional(),
+            modelTier: ModelTierSchema.optional(),
             scheduleType: z.string(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
@@ -94,6 +99,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         timezone,
         enabled,
         model,
+        modelTier,
       },
       requestInfo,
       _meta,
@@ -217,7 +223,13 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         if (targetAgentId !== undefined) updateData.targetAgentId = targetAgentId;
         if (timezone !== undefined) updateData.timezone = timezone;
         if (enabled !== undefined) updateData.enabled = enabled;
-        if (model !== undefined) updateData.model = model;
+        if (model !== undefined || modelTier !== undefined) {
+          const normalizedModel = splitLegacyModelAlias({ model, modelTier });
+          if (model !== undefined) updateData.model = normalizedModel.model ?? null;
+          if (modelTier !== undefined || normalizedModel.modelTier) {
+            updateData.modelTier = normalizedModel.modelTier ?? null;
+          }
+        }
 
         // Recalculate nextRunAt based on schedule type
         if (schedule.scheduleType === "one_time") {

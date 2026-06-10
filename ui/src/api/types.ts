@@ -26,6 +26,7 @@ export type AgentTaskSource =
   | "linear"
   | "jira";
 export type ChannelType = "public" | "dm";
+export type ModelTier = "smol" | "regular" | "smart" | "ultra";
 
 export interface Agent {
   id: string;
@@ -115,6 +116,7 @@ export interface AgentTask {
   output?: string;
   progress?: string;
   model?: string;
+  modelTier?: ModelTier;
   scheduleId?: string;
   parentTaskId?: string;
   dir?: string;
@@ -732,6 +734,7 @@ export interface ScheduledTask {
   createdByAgentId?: string;
   timezone: string;
   model?: string;
+  modelTier?: ModelTier;
   scheduleType?: "recurring" | "one_time";
   createdAt: string;
   lastUpdatedAt: string;

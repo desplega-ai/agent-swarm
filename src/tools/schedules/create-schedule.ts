@@ -4,6 +4,71 @@ import * as z from "zod";
 import { createScheduledTask, getAgentById, getScheduledTaskByName } from "@/be/db";
 import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar } from "@/tools/utils";
+import { ModelTierSchema, splitLegacyModelAlias } from "../../model-tiers";
+
+export const createScheduleInputSchema = z.object({
+  name: z.string().min(1).max(100).describe("Unique name for the schedule (e.g., 'daily-cleanup')"),
+  taskTemplate: z.string().min(1).describe("The task description that will be created each time"),
+  scheduleType: z
+    .enum(["recurring", "one_time"])
+    .default("recurring")
+    .optional()
+    .describe("Schedule type: 'recurring' (default) or 'one_time'"),
+  cronExpression: z
+    .string()
+    .optional()
+    .describe("Cron expression for recurring schedules (e.g., '0 9 * * *')"),
+  intervalMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Interval in milliseconds for recurring schedules (e.g., 3600000 for hourly)"),
+  delayMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Delay in milliseconds for one-time schedules (e.g., 1800000 for 30 min)"),
+  runAt: z
+    .string()
+    .datetime()
+    .optional()
+    .describe("ISO datetime for one-time schedules (e.g., '2026-03-06T15:00:00Z')"),
+  description: z.string().optional().describe("Human-readable description of the schedule"),
+  taskType: z.string().max(50).optional().describe("Task type (e.g., 'maintenance', 'report')"),
+  tags: z.array(z.string()).optional().describe("Tags to apply to created tasks"),
+  priority: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .default(50)
+    .optional()
+    .describe("Task priority 0-100 (default: 50)"),
+  targetAgentId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Agent to assign tasks to (omit for task pool)"),
+  timezone: z.string().default("UTC").optional().describe("Timezone for cron schedules"),
+  enabled: z
+    .boolean()
+    .default(true)
+    .optional()
+    .describe("Whether the schedule is enabled (default: true)"),
+  model: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      "Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer modelTier for portable intent.",
+    ),
+  modelTier: ModelTierSchema.optional().describe(
+    "Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved by each assignee's harness/provider at run time.",
+  ),
+});
 
 export const registerCreateScheduleTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -13,75 +78,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       annotations: { destructiveHint: false },
       description:
         "Create a new scheduled task. For recurring: provide cronExpression or intervalMs. For one-time: provide delayMs or runAt with scheduleType 'one_time'.",
-      inputSchema: z.object({
-        name: z
-          .string()
-          .min(1)
-          .max(100)
-          .describe("Unique name for the schedule (e.g., 'daily-cleanup')"),
-        taskTemplate: z
-          .string()
-          .min(1)
-          .describe("The task description that will be created each time"),
-        scheduleType: z
-          .enum(["recurring", "one_time"])
-          .default("recurring")
-          .optional()
-          .describe("Schedule type: 'recurring' (default) or 'one_time'"),
-        cronExpression: z
-          .string()
-          .optional()
-          .describe("Cron expression for recurring schedules (e.g., '0 9 * * *')"),
-        intervalMs: z
-          .number()
-          .int()
-          .positive()
-          .optional()
-          .describe("Interval in milliseconds for recurring schedules (e.g., 3600000 for hourly)"),
-        delayMs: z
-          .number()
-          .int()
-          .positive()
-          .optional()
-          .describe("Delay in milliseconds for one-time schedules (e.g., 1800000 for 30 min)"),
-        runAt: z
-          .string()
-          .datetime()
-          .optional()
-          .describe("ISO datetime for one-time schedules (e.g., '2026-03-06T15:00:00Z')"),
-        description: z.string().optional().describe("Human-readable description of the schedule"),
-        taskType: z
-          .string()
-          .max(50)
-          .optional()
-          .describe("Task type (e.g., 'maintenance', 'report')"),
-        tags: z.array(z.string()).optional().describe("Tags to apply to created tasks"),
-        priority: z
-          .number()
-          .int()
-          .min(0)
-          .max(100)
-          .default(50)
-          .optional()
-          .describe("Task priority 0-100 (default: 50)"),
-        targetAgentId: z
-          .string()
-          .uuid()
-          .optional()
-          .describe("Agent to assign tasks to (omit for task pool)"),
-        timezone: z.string().default("UTC").optional().describe("Timezone for cron schedules"),
-        enabled: z
-          .boolean()
-          .default(true)
-          .optional()
-          .describe("Whether the schedule is enabled (default: true)"),
-        model: z
-          .enum(["haiku", "sonnet", "opus", "fable"])
-          .optional()
-          .describe(
-            "Model to use for tasks created by this schedule ('haiku', 'sonnet', 'opus', or 'fable'). If not set, uses agent/global config or defaults to 'opus'.",
-          ),
-      }),
+      inputSchema: createScheduleInputSchema,
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
@@ -104,6 +101,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
             createdByAgentId: z.string().optional(),
             timezone: z.string(),
             model: z.string().optional(),
+            modelTier: ModelTierSchema.optional(),
             scheduleType: z.string(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
@@ -128,6 +126,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         timezone,
         enabled,
         model,
+        modelTier,
       },
       requestInfo,
       _meta,
@@ -270,6 +269,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       }
 
       try {
+        const normalizedModel = splitLegacyModelAlias({ model, modelTier });
         // Calculate initial nextRunAt
         let nextRunAt: string | undefined;
         if (enabled === false) {
@@ -299,7 +299,8 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           enabled,
           nextRunAt,
           createdByAgentId: requestInfo.agentId,
-          model,
+          model: normalizedModel.model,
+          modelTier: normalizedModel.modelTier,
           scheduleType: scheduleType ?? "recurring",
         });
 

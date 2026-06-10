@@ -52,6 +52,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { findKnownModel } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
+import { modelTierLabel } from "@/lib/model-tiers";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 // ─── Column model ────────────────────────────────────────────────────────────
@@ -192,8 +193,22 @@ function DescriptionCell({ value }: { value: string | undefined }) {
   );
 }
 
-function ModelCell({ value }: { value: string | undefined }) {
-  if (!value) return DASH;
+function ModelCell({
+  model,
+  modelTier,
+}: {
+  model: string | undefined;
+  modelTier: string | undefined;
+}) {
+  if (!model && !modelTier) return DASH;
+  if (!model) {
+    return (
+      <Badge variant="outline" size="tag">
+        tier: {modelTierLabel(modelTier)}
+      </Badge>
+    );
+  }
+  const value = model;
   const known = findKnownModel(value);
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -595,7 +610,9 @@ export function TasksTable({
         headerName: "Model",
         width: 180,
         ...fixed,
-        cellRenderer: (p: { value: string | undefined }) => <ModelCell value={p.value} />,
+        cellRenderer: (p: { data?: AgentTask }) => (
+          <ModelCell model={p.data?.model} modelTier={p.data?.modelTier} />
+        ),
       },
       {
         _id: "agent",

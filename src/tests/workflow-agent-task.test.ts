@@ -94,13 +94,14 @@ afterAll(async () => {
 // ─── Tests ───────────────────────────────────────────────────
 
 describe("AgentTaskExecutor — workspace scoping", () => {
-  test("config schema accepts dir, vcsRepo, model, parentTaskId", () => {
+  test("config schema accepts dir, vcsRepo, model, modelTier, parentTaskId", () => {
     const executor = new AgentTaskExecutor(mockDeps);
     const config = {
       template: "Do something",
       dir: "/workspace/repos/my-project",
       vcsRepo: "org/repo",
       model: "sonnet",
+      modelTier: "smart",
       parentTaskId: "f1b14078-5df1-457d-88a2-33f1d3e621fd",
     };
     const parsed = executor.configSchema.safeParse(config);
@@ -109,6 +110,7 @@ describe("AgentTaskExecutor — workspace scoping", () => {
       expect(parsed.data.dir).toBe("/workspace/repos/my-project");
       expect(parsed.data.vcsRepo).toBe("org/repo");
       expect(parsed.data.model).toBe("sonnet");
+      expect(parsed.data.modelTier).toBe("smart");
       expect(parsed.data.parentTaskId).toBe("f1b14078-5df1-457d-88a2-33f1d3e621fd");
     }
   });
@@ -166,7 +168,8 @@ describe("AgentTaskExecutor — workspace scoping", () => {
     expect(task).toBeDefined();
     expect(task!.dir).toBe("/workspace/repos/agent-swarm");
     expect(task!.vcsRepo).toBe("desplega-ai/agent-swarm");
-    expect(task!.model).toBe("sonnet");
+    expect(task!.model).toBeUndefined();
+    expect(task!.modelTier).toBe("regular");
     expect(task!.source).toBe("workflow");
   });
 
