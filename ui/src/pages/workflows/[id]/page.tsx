@@ -71,6 +71,7 @@ import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useTheme } from "@/hooks/use-theme";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { getConfig } from "@/lib/config";
+import { modelTierLabel } from "@/lib/model-tiers";
 import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
@@ -568,6 +569,7 @@ function AgentTaskConfig({ config }: { config: Record<string, unknown> }) {
   const dir = typeof config.dir === "string" ? config.dir : null;
   const vcsRepo = typeof config.vcsRepo === "string" ? config.vcsRepo : null;
   const model = typeof config.model === "string" ? config.model : null;
+  const modelTier = typeof config.modelTier === "string" ? config.modelTier : null;
 
   return (
     <InspectorSection label="Configuration">
@@ -581,7 +583,7 @@ function AgentTaskConfig({ config }: { config: Record<string, unknown> }) {
           </div>
         )}
 
-        {(tags || priority != null || offerMode != null || model) && (
+        {(tags || priority != null || offerMode != null || model || modelTier) && (
           <div className="flex flex-wrap gap-1.5">
             {tags?.map((tag) => (
               <Badge key={tag} variant="outline" size="tag">
@@ -601,6 +603,11 @@ function AgentTaskConfig({ config }: { config: Record<string, unknown> }) {
             {model && (
               <Badge variant="outline" size="tag">
                 {model}
+              </Badge>
+            )}
+            {modelTier && (
+              <Badge variant="outline" size="tag">
+                tier: {modelTierLabel(modelTier)}
               </Badge>
             )}
           </div>

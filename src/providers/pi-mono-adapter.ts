@@ -376,6 +376,7 @@ export class PiMonoSession implements ProviderSession {
       type: "session_init",
       sessionId: this._sessionId,
       provider: "pi",
+      harnessVariant: "stock",
       ...(piVersion ? { harnessVariantMeta: { version: piVersion } } : {}),
     });
 

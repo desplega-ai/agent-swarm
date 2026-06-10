@@ -2,6 +2,8 @@ import Editor from "@monaco-editor/react";
 import type { ColDef } from "ag-grid-community";
 import {
   BarChart3,
+  ChevronDown,
+  ChevronRight,
   Code2,
   Expand,
   LayoutDashboard,
@@ -184,12 +186,15 @@ function MetricTable({
   columns,
   loading,
   paginationQueryKey,
+  collapsedByDefault = true,
 }: {
   rows: Record<string, unknown>[];
   columns?: MetricVizColumn[];
   loading?: boolean;
   paginationQueryKey?: string;
+  collapsedByDefault?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(!collapsedByDefault);
   const columnDefs = useMemo<ColDef<Record<string, unknown>>[]>(
     () =>
       inferColumns(rows, columns).map((column) => ({
@@ -202,18 +207,39 @@ function MetricTable({
   );
 
   return (
-    <DataGrid
-      rowData={rows}
-      columnDefs={columnDefs}
-      loading={loading}
-      emptyMessage="No rows"
-      pagination={rows.length > 20}
-      paginationPageSize={20}
-      domLayout="autoHeight"
-      enableCellTextSelection
-      className="min-h-[220px]"
-      paginationQueryKey={paginationQueryKey}
-    />
+    <div className="space-y-2">
+      <div
+        className={cn(
+          "overflow-hidden rounded-md border",
+          !expanded && rows.length > 6 && "max-h-[260px]",
+        )}
+      >
+        <DataGrid
+          rowData={rows}
+          columnDefs={columnDefs}
+          loading={loading}
+          emptyMessage="No rows"
+          pagination={expanded && rows.length > 20}
+          paginationPageSize={20}
+          domLayout="autoHeight"
+          enableCellTextSelection
+          className="min-h-[180px] border-0"
+          paginationQueryKey={paginationQueryKey}
+        />
+      </div>
+      {rows.length > 6 && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          {expanded ? "Collapse table" : `Expand table (${rows.length} rows)`}
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -310,6 +336,29 @@ function widgetIcon(type: MetricVisualization) {
   return BarChart3;
 }
 
+function widgetSpanClass(widget: MetricWidget): string {
+  const colSpan = Math.min(Math.max(widget.colSpan ?? 1, 1), 4);
+  const rowSpan = Math.min(Math.max(widget.rowSpan ?? 1, 1), 4);
+  return cn(
+    colSpan === 2 && "md:col-span-2",
+    colSpan === 3 && "xl:col-span-3",
+    colSpan === 4 && "2xl:col-span-4",
+    rowSpan === 2 && "md:row-span-2",
+    rowSpan === 3 && "xl:row-span-3",
+    rowSpan === 4 && "2xl:row-span-4",
+  );
+}
+
+function layoutGridClass(columns: number | undefined): string {
+  const columnCount = Math.min(Math.max(columns ?? 2, 1), 4);
+  return cn(
+    "grid grid-cols-1 gap-4 auto-rows-[minmax(280px,auto)]",
+    columnCount >= 2 && "md:grid-cols-2",
+    columnCount >= 3 && "xl:grid-cols-3",
+    columnCount >= 4 && "2xl:grid-cols-4",
+  );
+}
+
 function WidgetCard({
   widget,
   rows,
@@ -329,7 +378,7 @@ function WidgetCard({
 }) {
   const Icon = widgetIcon(widget.viz.type);
   return (
-    <Card className="min-w-0 rounded-md">
+    <Card className={cn("h-full min-w-0 rounded-md", widgetSpanClass(widget))}>
       <CardHeader className="border-b">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -501,7 +550,7 @@ function MetricEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
+      <DialogContent className="w-[90vw] max-w-[90vw]">
         <DialogHeader>
           <DialogTitle>{metric ? "Edit dashboard" : "Add dashboard"}</DialogTitle>
           <DialogDescription>{metric?.slug ?? "JSON dashboard definition"}</DialogDescription>
@@ -540,9 +589,9 @@ function MetricEditorDialog({
             )}
           </div>
 
-          <div className="min-h-[420px] overflow-hidden rounded-md border">
+          <div className="min-h-[60vh] overflow-hidden rounded-md border">
             <Editor
-              height="420px"
+              height="60vh"
               defaultLanguage="json"
               value={definitionText}
               onChange={(value) => setDefinitionText(value ?? "")}
@@ -648,6 +697,8 @@ function MetricsDetailPage() {
     [variables, searchParams],
   );
   const run = useMetricRun(selected?.id, selected?.definition?.refreshSeconds, variableValues);
+  const resolvedVariables = run.data?.metric.definition.variables ?? variables;
+  const controlValues = run.data?.variables ?? variableValues;
   const [editorOpen, setEditorOpen] = useState(false);
 
   const widgetResults = run.data?.widgets ?? [];
@@ -729,7 +780,11 @@ function MetricsDetailPage() {
       </div>
 
       <TabsContent value="dashboard" className="mt-4 space-y-4">
-        <VariableControls variables={variables} values={variableValues} onChange={setVariable} />
+        <VariableControls
+          variables={resolvedVariables}
+          values={controlValues}
+          onChange={setVariable}
+        />
         {run.isError ? (
           <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
             {run.error instanceof Error ? run.error.message : "Failed to run metric"}
@@ -741,12 +796,7 @@ function MetricsDetailPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div
-              className={cn(
-                "grid gap-4",
-                (run.data.metric.definition.layout?.columns ?? 2) > 1 && "xl:grid-cols-2",
-              )}
-            >
+            <div className={layoutGridClass(run.data.metric.definition.layout?.columns)}>
               {run.data.metric.definition.widgets.map((widget) => {
                 const result = widgetResultById.get(widget.id);
                 return (
@@ -790,7 +840,7 @@ function MetricsDetailPage() {
       open={!!expandedWidget}
       onOpenChange={(open) => !open && updateSearch({ widget: null })}
     >
-      <DialogContent className="max-w-6xl">
+      <DialogContent className="w-[90vw] max-w-[90vw]">
         <DialogHeader>
           <DialogTitle>{expandedWidget?.title}</DialogTitle>
           <DialogDescription>

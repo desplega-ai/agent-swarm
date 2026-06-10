@@ -64,6 +64,7 @@ const OPENAI_META = {
 const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
   claude: [
     { id: "claude-fable-5", label: "Claude Fable 5", ...ANTHROPIC_META },
+    { id: "claude-mythos-5", label: "Claude Mythos 5", ...ANTHROPIC_META },
     { id: "claude-opus-4-8", label: "Claude Opus 4.8", ...ANTHROPIC_META },
     { id: "claude-opus-4-7", label: "Claude Opus 4.7", ...ANTHROPIC_META },
     { id: "claude-opus-4-6", label: "Claude Opus 4.6", ...ANTHROPIC_META },
@@ -193,6 +194,7 @@ export function findModelOption(
 // "Claude Sonnet 4.6" instead of a bare "sonnet".
 const ANTHROPIC_SHORTNAME_TO_ID: Record<string, string> = {
   fable: "claude-fable-5",
+  mythos: "claude-mythos-5",
   opus: "claude-opus-4-8",
   sonnet: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5",

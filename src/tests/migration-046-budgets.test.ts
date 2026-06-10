@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
+import { seedPricingFromModelsDev } from "../be/seed-pricing";
 import { CODEX_MODEL_PRICING } from "../providers/codex-models";
 
 const TEST_DB_PATH = "./test-migration-046.sqlite";
@@ -170,6 +171,38 @@ describe("migration 046 — budgets and pricing", () => {
         )
         .get(model, "output", 0);
       expect(outputRow?.price_per_million_usd).toBe(pricing.outputPerMillion);
+    }
+  });
+
+  test("models.dev seed includes Claude Mythos 5 pricing rows", () => {
+    const db = getDb();
+    const result = seedPricingFromModelsDev({ quiet: true });
+    expect(result.modelsdevFound).toBe(true);
+
+    const expectedPrices = {
+      input: 10,
+      cached_input: 1,
+      cache_write: 12.5,
+      output: 50,
+    } as const;
+    const seededKeys = [
+      ["claude", "claude-mythos-5"],
+      ["claude-managed", "claude-mythos-5"],
+      ["claude", "mythos"],
+      ["claude-managed", "mythos"],
+      ["pi", "mythos"],
+    ] as const;
+
+    for (const [provider, model] of seededKeys) {
+      for (const [tokenClass, price] of Object.entries(expectedPrices)) {
+        const row = db
+          .prepare<PricingRow, [string, string, string]>(
+            `SELECT * FROM pricing
+             WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = 0`,
+          )
+          .get(provider, model, tokenClass);
+        expect(row?.price_per_million_usd).toBe(price);
+      }
     }
   });
 

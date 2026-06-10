@@ -30,6 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
 
@@ -46,6 +47,7 @@ interface ScheduleFormData {
   targetAgentId: string;
   timezone: string;
   model: string;
+  modelTier: string;
   enabled: boolean;
 }
 
@@ -62,6 +64,7 @@ const emptyScheduleForm: ScheduleFormData = {
   targetAgentId: "",
   timezone: "UTC",
   model: "",
+  modelTier: "",
   enabled: true,
 };
 
@@ -166,6 +169,25 @@ function ScheduleDialog({
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Model Tier</Label>
+              <Select
+                value={form.modelTier}
+                onValueChange={(v) => setForm({ ...form, modelTier: v === "_none" ? "" : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Default</SelectItem>
+                  {MODEL_TIER_OPTIONS.map((tier) => (
+                    <SelectItem key={tier.value} value={tier.value}>
+                      {tier.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -299,6 +321,7 @@ export default function SchedulesPage() {
       ...(data.targetAgentId && { targetAgentId: data.targetAgentId }),
       ...(data.timezone !== "UTC" && { timezone: data.timezone }),
       ...(data.model && { model: data.model }),
+      ...(data.modelTier && { modelTier: data.modelTier }),
       enabled: data.enabled,
     });
   }
@@ -390,6 +413,21 @@ export default function SchedulesPage() {
           }
 
           return <span className="text-xs text-muted-foreground">—</span>;
+        },
+      },
+      {
+        headerName: "Model",
+        width: 150,
+        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+          const data = params.data;
+          if (!data?.model && !data?.modelTier) return "—";
+          return data.model ? (
+            <span className="font-mono text-xs">{data.model}</span>
+          ) : (
+            <Badge variant="outline" size="tag">
+              tier: {modelTierLabel(data.modelTier)}
+            </Badge>
+          );
         },
       },
       {

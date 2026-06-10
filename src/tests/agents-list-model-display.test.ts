@@ -42,4 +42,17 @@ describe("agents list model display", () => {
       providerId: "openrouter",
     });
   });
+
+  test("presents latest Anthropic direct model ids as readable labels", () => {
+    expect(getAgentModelPresentation("claude-fable-5")).toMatchObject({
+      label: "Claude Fable 5",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
+    expect(getAgentModelPresentation("claude-mythos-5")).toMatchObject({
+      label: "Claude Mythos 5",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
+  });
 });

@@ -23,6 +23,7 @@ import {
   updateTaskProgress,
   updateTaskVcs,
 } from "../be/db";
+import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { telemetry } from "../telemetry";
@@ -91,6 +92,8 @@ const createTask = route({
     outputSchema: z.record(z.string(), z.unknown()).optional(),
     contextKey: z.string().optional(),
     requestedByUserId: z.string().optional(),
+    model: z.string().optional(),
+    modelTier: ModelTierSchema.optional(),
   }),
   responses: {
     201: { description: "Task created" },
@@ -395,6 +398,10 @@ export async function handleTasks(
         outputSchema: parsed.body.outputSchema || undefined,
         contextKey: parsed.body.contextKey || undefined,
         requestedByUserId,
+        ...splitLegacyModelAlias({
+          model: parsed.body.model,
+          modelTier: parsed.body.modelTier,
+        }),
       });
 
       ensure({

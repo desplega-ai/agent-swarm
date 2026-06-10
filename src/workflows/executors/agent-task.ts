@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ModelTierSchema, splitLegacyModelAlias } from "../../model-tiers";
 import { workflowContextKey } from "../../tasks/context-key";
 import { withSiblingAwareness } from "../../tasks/sibling-awareness";
 import type { ExecutorMeta } from "../../types";
@@ -17,6 +18,7 @@ const AgentTaskConfigSchema = z.object({
   dir: z.string().min(1).optional(),
   vcsRepo: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
+  modelTier: ModelTierSchema.optional(),
   parentTaskId: z.string().uuid().optional(),
   requestedByUserId: z.string().optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
@@ -94,7 +96,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         workflowRunStepId: meta.stepId,
         dir: effectiveDir,
         vcsRepo: effectiveVcsRepo,
-        model: config.model,
+        ...splitLegacyModelAlias({ model: config.model, modelTier: config.modelTier }),
         parentTaskId: config.parentTaskId,
         requestedByUserId: config.requestedByUserId ?? meta.requestedByUserId,
         outputSchema: config.outputSchema,

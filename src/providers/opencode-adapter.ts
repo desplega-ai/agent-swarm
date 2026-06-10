@@ -286,6 +286,7 @@ export class OpencodeSession implements ProviderSession {
       type: "session_init",
       sessionId: this._sessionId,
       provider,
+      harnessVariant: "stock",
       ...(harnessVariantMeta ? { harnessVariantMeta } : {}),
     });
   }

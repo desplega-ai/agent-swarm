@@ -35,6 +35,12 @@ The swarm API key MUST be read via `getApiKey()` from `src/utils/api-key.ts` —
 
 System prompt and task prompt text MUST go through the prompt-template registry in `src/prompts/`; do not hardcode new prompt sections with string concatenation in runners, hooks, or providers. Add or update a registered template, then resolve it from the call site.
 
+<important if="you are adding, changing, or using task/schedule/workflow model selection">
+
+Prefer portable `modelTier` (`smol` / `regular` / `smart` / `ultra`) for cross-harness task intent and reserve `model` for concrete provider-specific overrides. Tier defaults, env/JSON overrides, legacy alias normalization, and claim-time resolution are documented in [runbooks/model-tiers.md](./runbooks/model-tiers.md).
+
+</important>
+
 <important if="you are modifying scripts-runtime code (src/scripts-runtime/*, src/be/scripts/*, src/tools/script-*.ts, src/http/scripts.ts)">
 
 Architecture: API server owns the `scripts` + `script_versions` tables. Workers + the runtime invoke via HTTP. The runtime evaluates user-supplied TS in a `Bun.spawn` subprocess wrapped in `ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`, 30s AbortController, 1 MB stdout cap.

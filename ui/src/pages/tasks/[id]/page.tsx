@@ -82,6 +82,7 @@ import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
+import { modelTierLabel } from "@/lib/model-tiers";
 import { progressBarTone } from "@/lib/percent-progress-tone";
 import { statusTextClass } from "@/lib/status-tone";
 import { taskIsRunning } from "@/lib/task-activity";
@@ -934,12 +935,22 @@ export default function TaskDetailPage() {
           // task-level model today, so the cost record is the source of
           // truth for what was actually used.
           const displayModel = task.model ?? costs?.[0]?.model;
-          return displayModel ? (
+          if (displayModel) {
+            return (
+              <Badge
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
+              >
+                {displayModel}
+              </Badge>
+            );
+          }
+          return task.modelTier ? (
             <Badge
               variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
             >
-              {displayModel}
+              tier: {modelTierLabel(task.modelTier)}
             </Badge>
           ) : null;
         })()}

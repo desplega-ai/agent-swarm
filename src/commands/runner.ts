@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { ensure, initialize } from "@desplega.ai/business-use";
 import type { TemplateResponse } from "../../templates/schema.ts";
+import { resolveTaskModelSelection } from "../model-tiers.ts";
 import {
   type Attributes,
   initOtel,
@@ -350,6 +351,7 @@ async function fetchResolvedEnv(
   apiKey: string,
   agentId: string,
   baseEnv: Record<string, string | undefined> = process.env,
+  taskModel?: string,
 ): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
 
@@ -382,6 +384,12 @@ async function fetchResolvedEnv(
 
   const resolvedProvider = resolveHarnessProvider(env, baseEnv);
 
+  // Effective model: per-task model takes priority over the agent-level
+  // MODEL_OVERRIDE from swarm_config. Passed to resolveCredentialPools so
+  // the harness × model matrix can exclude incompatible credential vars
+  // (e.g. OPENAI_API_KEY when an OpenRouter model is selected on opencode).
+  const effectiveModel = taskModel || (env.MODEL_OVERRIDE as string | undefined) || "";
+
   const credentialSelections = await resolveCredentialPools(env, {
     apiUrl,
     apiKey,
@@ -393,6 +401,7 @@ async function fetchResolvedEnv(
     // Use the resolved provider (swarm_config > env) so an operator can flip
     // the worker's harness from the dashboard without restarting the container.
     provider: resolvedProvider,
+    model: effectiveModel,
   });
 
   return { env, credentialSelections, resolvedProvider };
@@ -2549,6 +2558,7 @@ async function spawnProviderProcess(
     iteration: number;
     taskId?: string;
     model?: string;
+    modelTier?: string;
     resumeSessionId?: string;
     harnessProvider: ProviderName;
     cwd?: string;
@@ -2562,11 +2572,15 @@ async function spawnProviderProcess(
   // Correlation ID for logs/display — always defined
   const effectiveTaskId = realTaskId || crypto.randomUUID();
 
-  // Resolve env first so we can use MODEL_OVERRIDE from config
+  // Resolve env first so we can use MODEL_OVERRIDE from config.
+  // Pass opts.model (per-task model) so the credential picker can apply
+  // the harness × model matrix (e.g. exclude OPENAI_API_KEY for OpenRouter models).
   const { env: freshEnv, credentialSelections } = await fetchResolvedEnv(
     opts.apiUrl,
     opts.apiKey,
     opts.agentId,
+    process.env,
+    opts.model,
   );
 
   // Report which key was selected for this task (fire-and-forget)
@@ -2583,7 +2597,14 @@ async function spawnProviderProcess(
   }
 
   const configModel = (freshEnv.MODEL_OVERRIDE as string | undefined) || "";
-  const model = opts.model || configModel || "";
+  const taskModelSelection = resolveTaskModelSelection({
+    model: opts.model,
+    modelTier: opts.modelTier,
+    harnessProvider: opts.harnessProvider,
+    env: freshEnv,
+  });
+  const taskModel = taskModelSelection.model || "";
+  const model = taskModel || configModel || "";
 
   // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
   // can pass codexSlot through and the adapter writes token refreshes back to
@@ -2674,7 +2695,7 @@ async function spawnProviderProcess(
   );
   const initialModelReport = buildLatestModelReport({
     model,
-    taskModel: opts.model,
+    taskModel,
     configModel,
     taskId: realTaskId,
     harnessProvider: opts.harnessProvider,
@@ -2793,6 +2814,17 @@ async function spawnProviderProcess(
               event.sessionId,
             ).catch((err) =>
               console.warn(`[runner] Failed to save provider session on active session: ${err}`),
+            );
+          }
+
+          // Structured session-start log for observability (covers all providers)
+          {
+            const variant = event.harnessVariant ?? "unknown";
+            const version =
+              (event.harnessVariantMeta as Record<string, unknown> | undefined)?.version ??
+              "unknown";
+            console.log(
+              `[${opts.role}] [harness] provider=${event.provider ?? opts.harnessProvider} variant=${variant} version=${version} model=${model || "default"}`,
             );
           }
 
@@ -4426,6 +4458,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: task.id,
               model: (task as { model?: string }).model,
+              modelTier: (task as { modelTier?: string }).modelTier,
               harnessProvider: state.harnessProvider,
               cwd: resumeCwd,
               vcsRepo: task.vcsRepo,
@@ -4745,6 +4778,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Extract model from task data for per-task model selection
         const taskModel = (trigger.task as { model?: string } | undefined)?.model;
+        const taskModelTier = (trigger.task as { modelTier?: string } | undefined)?.modelTier;
 
         // Detect Slack context for conditional prompt sections
         const taskSlackChannelId = (trigger.task as { slackChannelId?: string } | undefined)
@@ -4887,6 +4921,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: trigger.taskId,
               model: taskModel,
+              modelTier: taskModelTier,
               harnessProvider: state.harnessProvider,
               cwd: effectiveCwd,
               vcsRepo: taskVcsRepo,

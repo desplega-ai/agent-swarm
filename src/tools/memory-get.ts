@@ -2,7 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getMemoryStore } from "@/be/memory";
 import { createToolRegistrar } from "@/tools/utils";
+import type { AgentMemorySource } from "@/types";
 import { AgentMemorySchema } from "@/types";
+
+const NUDGE_ELIGIBLE_SOURCES: ReadonlySet<AgentMemorySource> = new Set(["manual", "file_index"]);
 
 export const registerMemoryGetTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -21,6 +24,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
         success: z.boolean(),
         message: z.string(),
         memory: AgentMemorySchema.optional(),
+        rateHint: z.string().optional(),
       }),
     },
     async ({ memoryId }, requestInfo, _meta) => {
@@ -37,6 +41,12 @@ export const registerMemoryGetTool = (server: McpServer) => {
         };
       }
 
+      const inTaskContext = !!requestInfo.sourceTaskId;
+      const rateHint =
+        inTaskContext && NUDGE_ELIGIBLE_SOURCES.has(memory.source as AgentMemorySource)
+          ? `memory_rate(id="${memory.id}", useful=true|false)`
+          : undefined;
+
       return {
         content: [
           {
@@ -49,6 +59,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
           success: true,
           message: `Memory "${memory.name}" retrieved.`,
           memory,
+          rateHint,
         },
       };
     },
