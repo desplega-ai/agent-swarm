@@ -6,7 +6,14 @@ import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
 import { recordRetrievals } from "@/be/memory/raters/retrieval";
 import { rerank } from "@/be/memory/reranker";
 import { createToolRegistrar } from "@/tools/utils";
+import type { AgentMemorySource } from "@/types";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@/types";
+
+const NUDGE_ELIGIBLE_SOURCES: ReadonlySet<AgentMemorySource> = new Set(["manual", "file_index"]);
+
+function rateHintFor(memoryId: string): string {
+  return `memory_rate(id="${memoryId}", useful=true|false)`;
+}
 
 export const registerMemorySearchTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -42,9 +49,11 @@ export const registerMemorySearchTool = (server: McpServer) => {
               scope: AgentMemoryScopeSchema,
               similarity: z.number().optional(),
               createdAt: z.string(),
+              rateHint: z.string().optional(),
             }),
           )
           .optional(),
+        _ratingNudge: z.string().optional(),
       }),
     },
     async ({ query, scope, limit, source }, requestInfo, _meta) => {
@@ -94,6 +103,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
           }
         }
 
+        const inTaskContext = !!requestInfo.sourceTaskId;
         const mapped = ranked.map((r) => ({
           id: r.id,
           name: r.name,
@@ -102,7 +112,14 @@ export const registerMemorySearchTool = (server: McpServer) => {
           scope: r.scope,
           similarity: r.similarity,
           createdAt: r.createdAt,
+          ...(inTaskContext && NUDGE_ELIGIBLE_SOURCES.has(r.source as AgentMemorySource)
+            ? { rateHint: rateHintFor(r.id) }
+            : {}),
         }));
+
+        const nudgeCount = mapped.filter((r) => r.rateHint).length;
+        const _ratingNudge =
+          nudgeCount > 0 ? "Rate memories that help or mislead you with memory_rate." : undefined;
 
         return {
           content: [
@@ -116,6 +133,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
             success: true,
             message: `Found ${mapped.length} memories matching "${query}".`,
             results: mapped,
+            _ratingNudge,
           },
         };
       }
