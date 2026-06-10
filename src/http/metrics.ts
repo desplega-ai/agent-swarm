@@ -48,10 +48,46 @@ function slugify(input: string): string {
 
 function validateMetricDefinition(definition: unknown) {
   const parsed = MetricDefinitionSchema.parse(definition);
+  for (const variable of parsed.variables ?? []) {
+    if (variable.optionsQuery) {
+      assertSelectOnlyQuery(variable.optionsQuery.sql);
+    }
+  }
   for (const widget of parsed.widgets) {
     assertSelectOnlyQuery(widget.query.sql);
   }
   return parsed;
+}
+
+function resolveVariableOptionValues(variable: MetricVariable) {
+  if (!variable.optionsQuery) return variable.options ?? [];
+  assertSelectOnlyQuery(variable.optionsQuery.sql);
+  const result = executeReadOnlyQuery(variable.optionsQuery.sql, [], HARD_METRIC_MAX_ROWS);
+  return result.rows.map((row) => {
+    const record = Object.fromEntries(
+      result.columns.map((column, index) => [column, row[index] as MetricParam]),
+    );
+    const value = record[variable.optionsQuery!.valueKey];
+    const labelKey = variable.optionsQuery!.labelKey ?? variable.optionsQuery!.valueKey;
+    const label = record[labelKey] ?? value;
+    return {
+      label: label == null ? "" : String(label),
+      value: value == null ? null : value,
+    };
+  });
+}
+
+function resolveVariableOptions(metric: Metric) {
+  const optionsByKey: Record<string, Array<{ label: string; value: MetricParam }>> = {};
+  const variables = (metric.definition.variables ?? []).map((variable) => {
+    if (!variable.optionsQuery) {
+      return variable;
+    }
+    const options = resolveVariableOptionValues(variable);
+    optionsByKey[variable.key] = options;
+    return { ...variable, options };
+  });
+  return { variables, optionsByKey };
 }
 
 function coerceVariableValue(variable: MetricVariable, raw: unknown): MetricParam {
@@ -71,12 +107,21 @@ function coerceVariableValue(variable: MetricVariable, raw: unknown): MetricPara
   return String(raw);
 }
 
-function resolveMetricVariables(metric: Metric, provided: Record<string, unknown>) {
+function resolveMetricVariables(
+  metric: Metric,
+  provided: Record<string, unknown>,
+  dynamicOptionsByKey: Record<string, Array<{ label: string; value: MetricParam }>> = {},
+) {
   const values: Record<string, MetricParam> = {};
   for (const variable of metric.definition.variables ?? []) {
-    const value = coerceVariableValue(variable, provided[variable.key]);
-    if (variable.options?.length) {
-      const allowed = variable.options.some((option) => option.value === value);
+    const options = dynamicOptionsByKey[variable.key] ?? variable.options;
+    const raw = provided[variable.key];
+    const value =
+      (raw == null || raw === "") && variable.defaultValue === undefined && options?.length
+        ? options[0]!.value
+        : coerceVariableValue(variable, raw);
+    if (options?.length) {
+      const allowed = options.some((option) => option.value === value);
       if (!allowed) {
         throw new Error(`Metric variable "${variable.key}" must match one of its options`);
       }
@@ -125,10 +170,14 @@ function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricP
 }
 
 function runMetric(metric: Metric, providedVariables: Record<string, unknown> = {}) {
-  const variables = resolveMetricVariables(metric, providedVariables);
+  const resolved = resolveVariableOptions(metric);
+  const variables = resolveMetricVariables(metric, providedVariables, resolved.optionsByKey);
   const widgets = metric.definition.widgets.map((widget) => runMetricWidget(widget, variables));
   return {
-    metric,
+    metric: {
+      ...metric,
+      definition: { ...metric.definition, variables: resolved.variables },
+    },
     variables,
     widgets,
     // Kept as the first widget result for older callers during the PR cycle.
