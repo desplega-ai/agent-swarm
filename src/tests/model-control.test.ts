@@ -364,6 +364,9 @@ describe("Model Control - Priority Resolution Logic", () => {
     expect(resolveModelTier({ tier: "smol", harnessProvider: "claude" })).toBe("haiku");
     expect(resolveModelTier({ tier: "smol", harnessProvider: "codex" })).toBe("gpt-5.4-mini");
     expect(resolveModelTier({ tier: "smart", harnessProvider: "opencode" })).toBe(
+      "openrouter/deepseek/deepseek-v4-pro",
+    );
+    expect(resolveModelTier({ tier: "ultra", harnessProvider: "pi" })).toBe(
       "openrouter/anthropic/claude-opus-4.8",
     );
   });
