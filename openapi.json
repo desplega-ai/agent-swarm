@@ -6894,6 +6894,15 @@
                   "model": {
                     "type": "string"
                   },
+                  "modelTier": {
+                    "type": "string",
+                    "enum": [
+                      "smol",
+                      "regular",
+                      "smart",
+                      "ultra"
+                    ]
+                  },
                   "scheduleType": {
                     "type": "string",
                     "enum": [
@@ -7140,6 +7149,19 @@
                   },
                   "model": {
                     "type": "string"
+                  },
+                  "modelTier": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "smol",
+                      "regular",
+                      "smart",
+                      "ultra",
+                      null
+                    ]
                   },
                   "nextRunAt": {
                     "type": [
@@ -10890,6 +10912,18 @@
                   },
                   "requestedByUserId": {
                     "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "modelTier": {
+                    "type": "string",
+                    "enum": [
+                      "smol",
+                      "regular",
+                      "smart",
+                      "ultra"
+                    ]
                   }
                 },
                 "required": [

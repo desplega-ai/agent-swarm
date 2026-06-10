@@ -87,6 +87,17 @@ export function prettyPrintLine(line: string, role: string): void {
     const prefix = `${c.dim}[${role}]${c.reset}`;
 
     switch (type) {
+      case "session_init": {
+        const provider = json.provider as string;
+        const variant = json.harnessVariant as string;
+        const meta = json.harnessVariantMeta as Record<string, unknown> | undefined;
+        const version = meta?.version ?? "";
+        console.log(
+          `${prefix} ${c.cyan}●${c.reset} ${c.bold}Session started${c.reset} ${c.dim}(${provider}${variant ? ` ${variant}` : ""}${version ? ` v${version}` : ""})${c.reset}`,
+        );
+        break;
+      }
+
       case "system": {
         const subtype = json.subtype as string;
         if (subtype === "init") {
@@ -190,20 +201,24 @@ export function prettyPrintLine(line: string, role: string): void {
       }
 
       case "result": {
-        const subtype = json.subtype as string;
-        const isError = json.is_error as boolean;
-        const duration = json.duration_ms as number;
-        const cost = json.total_cost_usd as number;
-        const numTurns = json.num_turns as number;
-        const result = json.result as string;
+        // Claude CLI emits flat fields (subtype, num_turns, duration_ms, total_cost_usd).
+        // Non-Claude adapters (opencode, pi) emit a nested `cost` object with
+        // CostData fields. Handle both formats gracefully.
+        const costObj = json.cost as Record<string, unknown> | undefined;
+        const subtype = (json.subtype as string) ?? (json.isError ? "error" : "success");
+        const isError = (json.is_error as boolean) ?? (json.isError as boolean) ?? false;
+        const duration = (json.duration_ms as number) ?? (costObj?.durationMs as number);
+        const costUsd = (json.total_cost_usd as number) ?? (costObj?.totalCostUsd as number);
+        const numTurns = (json.num_turns as number) ?? (costObj?.numTurns as number | null);
+        const result = (json.result as string) ?? (json.output as string);
 
         const icon = isError ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
         const durationStr = duration ? `${(duration / 1000).toFixed(1)}s` : "";
-        const costStr = cost ? `$${cost.toFixed(4)}` : "";
+        const costStr = costUsd ? `$${costUsd.toFixed(4)}` : "";
+        const turnsStr = numTurns != null ? `${numTurns} turns` : "";
 
-        console.log(
-          `${prefix} ${icon} ${c.bold}Done${c.reset} ${c.dim}(${subtype}, ${numTurns} turns, ${durationStr}, ${costStr})${c.reset}`,
-        );
+        const details = [subtype, turnsStr, durationStr, costStr].filter(Boolean).join(", ");
+        console.log(`${prefix} ${icon} ${c.bold}Done${c.reset} ${c.dim}(${details})${c.reset}`);
 
         if (result) {
           const lines = result.split("\n").filter((l) => l.trim());

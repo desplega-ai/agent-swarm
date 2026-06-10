@@ -38,6 +38,7 @@ export function useCreateSchedule() {
       targetAgentId?: string;
       timezone?: string;
       model?: string;
+      modelTier?: string;
       enabled?: boolean;
     }) => api.createSchedule(data),
     onSuccess: () => {

@@ -301,6 +301,8 @@ class ApiClient {
     requestedByUserId?: string;
     /** Phase 3 (≥1.76.0): cross-ingress conversation/thread context key. */
     contextKey?: string;
+    model?: string;
+    modelTier?: string;
   }): Promise<TaskWithLogs> {
     const url = `${this.getBaseUrl()}/api/tasks`;
     const res = await fetch(url, {
@@ -605,6 +607,7 @@ class ApiClient {
     targetAgentId?: string;
     timezone?: string;
     model?: string;
+    modelTier?: string;
     enabled?: boolean;
   }): Promise<ScheduledTask> {
     const url = `${this.getBaseUrl()}/api/schedules`;

@@ -15,6 +15,7 @@ import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema, FollowUpConfigSchema } from "@/types";
+import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
 
 export const sendTaskInputSchema = z.object({
   agentId: z
@@ -54,11 +55,16 @@ export const sendTaskInputSchema = z.object({
       "VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context.",
     ),
   model: z
-    .enum(["haiku", "sonnet", "opus", "fable"])
+    .string()
+    .trim()
+    .min(1)
     .optional()
     .describe(
-      "Model to use for this task ('haiku', 'sonnet', 'opus', or 'fable'). If not set, uses agent/global config MODEL_OVERRIDE or defaults to 'opus'.",
+      "Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent.",
     ),
+  modelTier: ModelTierSchema.optional().describe(
+    "Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
+  ),
   allowDuplicate: z
     .boolean()
     .default(false)
@@ -111,6 +117,7 @@ export async function sendTaskHandler(
     parentTaskId,
     vcsRepo,
     model,
+    modelTier,
     allowDuplicate,
     slackChannelId,
     slackThreadTs,
@@ -160,6 +167,7 @@ export async function sendTaskHandler(
   }
 
   const effectiveVcsRepo = vcsRepo;
+  const normalizedModel = splitLegacyModelAlias({ model, modelTier });
 
   // Auto-default parentTaskId to caller's current task for tree tracking
   const effectiveParentTaskId = parentTaskId ?? sourceTaskId;
@@ -263,7 +271,8 @@ export async function sendTaskHandler(
         dir,
         parentTaskId: effectiveParentTaskId,
         vcsRepo: effectiveVcsRepo,
-        model,
+        model: normalizedModel.model,
+        modelTier: normalizedModel.modelTier,
         slackChannelId,
         slackThreadTs,
         slackUserId,
@@ -316,7 +325,8 @@ export async function sendTaskHandler(
         dir,
         parentTaskId: effectiveParentTaskId,
         vcsRepo: effectiveVcsRepo,
-        model,
+        model: normalizedModel.model,
+        modelTier: normalizedModel.modelTier,
         slackChannelId,
         slackThreadTs,
         slackUserId,
@@ -343,7 +353,8 @@ export async function sendTaskHandler(
       dir,
       parentTaskId: effectiveParentTaskId,
       vcsRepo: effectiveVcsRepo,
-      model,
+      model: normalizedModel.model,
+      modelTier: normalizedModel.modelTier,
       slackChannelId,
       slackThreadTs,
       slackUserId,

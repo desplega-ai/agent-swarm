@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { ModelTierSchema } from "./model-tiers";
 
 // Task status - includes new unassigned and offered states
 export const AgentTaskStatusSchema = z.enum([
@@ -200,7 +201,10 @@ export const AgentTaskSchema = z.object({
 
   // Model selection (optional — provider-specific; can be "opus", "gpt-4o",
   // "openrouter/openai/gpt-5-nano", etc. depending on HARNESS_PROVIDER).
+  // Prefer modelTier for portable task intent; model is a concrete override
+  // interpreted by the claiming worker's harness and never switches provider.
   model: z.string().optional(),
+  modelTier: ModelTierSchema.optional(),
 
   // Schedule linking (optional — set when task was created by a schedule)
   scheduleId: z.uuid().optional(),
@@ -874,6 +878,7 @@ export const ScheduledTaskSchema = z
     lastErrorAt: z.iso.datetime().optional(),
     lastErrorMessage: z.string().optional(),
     model: z.string().optional(),
+    modelTier: ModelTierSchema.optional(),
     scheduleType: z.enum(["recurring", "one_time"]).default("recurring"),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
@@ -1375,6 +1380,7 @@ export type AgentTaskSummary = Pick<
   | "parentTaskId"
   | "scheduleId"
   | "model"
+  | "modelTier"
   | "provider"
   | "requestedByUserId"
   | "progress"

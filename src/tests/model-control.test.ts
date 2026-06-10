@@ -12,7 +12,17 @@ import {
   updateScheduledTask,
   upsertSwarmConfig,
 } from "../be/db";
+import {
+  parseModelTier,
+  resolveModelTier,
+  resolveTaskModelSelection,
+  splitLegacyModelAlias,
+} from "../model-tiers";
 import { runScheduleNow } from "../scheduler";
+import { createScheduleInputSchema } from "../tools/schedules/create-schedule";
+import { updateScheduleInputSchema } from "../tools/schedules/update-schedule";
+import { sendTaskInputSchema } from "../tools/send-task";
+import { taskActionInputSchema } from "../tools/task-action";
 
 const TEST_DB_PATH = "./test-model-control.sqlite";
 
@@ -84,6 +94,24 @@ describe("Model Control - Task Creation", () => {
     expect(task.model).toBe("sonnet");
     expect(task.status).toBe("offered");
   });
+
+  test("should store modelTier when creating a task with portable tier", () => {
+    const task = createTaskExtended("Test task with tier", { modelTier: "smart" });
+    expect(task.model).toBeUndefined();
+    expect(task.modelTier).toBe("smart");
+
+    const retrieved = getTaskById(task.id);
+    expect(retrieved?.modelTier).toBe("smart");
+  });
+
+  test("should preserve freeform concrete model strings", () => {
+    const task = createTaskExtended("Test task with freeform model", {
+      model: "openrouter/anthropic/claude-sonnet-4.6",
+    });
+
+    expect(task.model).toBe("openrouter/anthropic/claude-sonnet-4.6");
+    expect(task.modelTier).toBeUndefined();
+  });
 });
 
 describe("Model Control - Schedule Creation", () => {
@@ -102,7 +130,7 @@ describe("Model Control - Schedule Creation", () => {
   });
 
   test("should store all valid model values on schedules", () => {
-    for (const model of ["haiku", "sonnet", "opus", "fable"] as const) {
+    for (const model of ["haiku", "sonnet", "opus", "fable", "gpt-5.5"] as const) {
       const schedule = createScheduledTask({
         name: `model-schedule-all-${model}-${Date.now()}`,
         intervalMs: 60000,
@@ -122,6 +150,21 @@ describe("Model Control - Schedule Creation", () => {
     });
 
     expect(schedule.model).toBeUndefined();
+  });
+
+  test("should store modelTier on scheduled task creation", () => {
+    const schedule = createScheduledTask({
+      name: "model-schedule-tier",
+      intervalMs: 60000,
+      taskTemplate: "Scheduled with portable tier",
+      modelTier: "regular",
+    });
+
+    expect(schedule.model).toBeUndefined();
+    expect(schedule.modelTier).toBe("regular");
+
+    const retrieved = getScheduledTaskById(schedule.id);
+    expect(retrieved?.modelTier).toBe("regular");
   });
 });
 
@@ -169,6 +212,23 @@ describe("Model Control - Schedule Update", () => {
     expect(updated?.model).toBe("haiku");
     expect(updated?.priority).toBe(90);
   });
+
+  test("should update and clear modelTier on existing schedule", () => {
+    const schedule = createScheduledTask({
+      name: "model-tier-update-test",
+      intervalMs: 60000,
+      taskTemplate: "Update model tier test",
+      modelTier: "regular",
+    });
+
+    expect(schedule.modelTier).toBe("regular");
+
+    const updated = updateScheduledTask(schedule.id, { modelTier: "ultra" });
+    expect(updated?.modelTier).toBe("ultra");
+
+    const cleared = updateScheduledTask(schedule.id, { modelTier: null });
+    expect(cleared?.modelTier).toBeUndefined();
+  });
 });
 
 describe("Model Control - Schedule to Task Propagation", () => {
@@ -212,6 +272,28 @@ describe("Model Control - Schedule to Task Propagation", () => {
     expect(row).not.toBeNull();
     const task = getTaskById(row!.id);
     expect(task?.model).toBeUndefined();
+  });
+
+  test("should propagate modelTier from schedule to task on manual run", async () => {
+    const schedule = createScheduledTask({
+      name: "model-tier-propagate-manual",
+      intervalMs: 60000,
+      taskTemplate: "Propagated model tier task (manual)",
+      modelTier: "smart",
+      enabled: true,
+    });
+
+    await runScheduleNow(schedule.id);
+
+    const { getDb } = await import("../be/db");
+    const row = getDb()
+      .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
+      .get("Propagated model tier task (manual)") as { id: string } | null;
+
+    expect(row).not.toBeNull();
+    const task = getTaskById(row!.id);
+    expect(task?.model).toBeUndefined();
+    expect(task?.modelTier).toBe("smart");
   });
 });
 
@@ -268,71 +350,105 @@ describe("Model Control - Config MODEL_OVERRIDE Resolution", () => {
 });
 
 describe("Model Control - Priority Resolution Logic", () => {
-  // The runner resolves model as: task.model || freshEnv.MODEL_OVERRIDE || "opus"
-  // We test the same logic pattern here to ensure correctness
-
-  function resolveModel(taskModel?: string, configOverride?: string): string {
-    return taskModel || configOverride || "opus";
-  }
-
   test("task.model takes highest priority", () => {
-    expect(resolveModel("haiku", "sonnet")).toBe("haiku");
+    expect(
+      resolveTaskModelSelection({
+        model: "gpt-5.5",
+        modelTier: "smol",
+        harnessProvider: "codex",
+      }).model,
+    ).toBe("gpt-5.5");
   });
 
-  test("config MODEL_OVERRIDE is used when task has no model", () => {
-    expect(resolveModel(undefined, "sonnet")).toBe("sonnet");
+  test("task.modelTier resolves using the claiming worker harness", () => {
+    expect(resolveModelTier({ tier: "smol", harnessProvider: "claude" })).toBe("haiku");
+    expect(resolveModelTier({ tier: "smol", harnessProvider: "codex" })).toBe("gpt-5.4-mini");
+    expect(resolveModelTier({ tier: "smart", harnessProvider: "opencode" })).toBe(
+      "openrouter/deepseek/deepseek-v4-pro",
+    );
+    expect(resolveModelTier({ tier: "ultra", harnessProvider: "pi" })).toBe(
+      "openrouter/anthropic/claude-opus-4.8",
+    );
   });
 
-  test("defaults to 'opus' when no task model and no config override", () => {
-    expect(resolveModel(undefined, undefined)).toBe("opus");
+  test("task.modelTier supports env map and direct tier overrides", () => {
+    expect(
+      resolveModelTier({
+        tier: "regular",
+        harnessProvider: "codex",
+        env: { MODEL_TIER_MAP: JSON.stringify({ regular: "gpt-5.3-codex" }) },
+      }),
+    ).toBe("gpt-5.3-codex");
+    expect(
+      resolveModelTier({
+        tier: "regular",
+        harnessProvider: "codex",
+        env: {
+          MODEL_TIER_MAP: JSON.stringify({ regular: "gpt-5.3-codex" }),
+          MODEL_TIER_REGULAR: "gpt-5.5",
+        },
+      }),
+    ).toBe("gpt-5.5");
   });
 
-  test("empty string task model falls through to config", () => {
-    expect(resolveModel("", "sonnet")).toBe("sonnet");
+  test("legacy model aliases parse as tiers", () => {
+    expect(parseModelTier("haiku")).toBe("smol");
+    expect(parseModelTier("sonnet")).toBe("regular");
+    expect(parseModelTier("opus")).toBe("smart");
+    expect(parseModelTier("fable")).toBe("ultra");
+    expect(splitLegacyModelAlias({ model: "opus" })).toEqual({ modelTier: "smart" });
   });
 
-  test("empty string config override falls through to default", () => {
-    expect(resolveModel(undefined, "")).toBe("opus");
+  test("freeform concrete model strings stay concrete", () => {
+    expect(splitLegacyModelAlias({ model: "gpt-5.5" })).toEqual({
+      model: "gpt-5.5",
+      modelTier: undefined,
+    });
   });
 
-  test("all three levels specified — task wins", () => {
-    expect(resolveModel("haiku", "sonnet")).toBe("haiku");
-    // "opus" is the hardcoded default, tested implicitly
+  test("missing task model selection falls through to adapter/config", () => {
+    expect(
+      resolveTaskModelSelection({ model: "", modelTier: undefined, harnessProvider: "codex" }),
+    ).toEqual({ source: "none" });
   });
 });
 
 describe("Model Control - Zod Validation Schema", () => {
-  // The MCP tools use z.enum(["haiku", "sonnet", "opus"]) for validation.
-  // We test the schema directly to ensure only valid values are accepted.
-
-  test("should accept valid model values", async () => {
-    const { z } = await import("zod");
-    const modelSchema = z.enum(["haiku", "sonnet", "opus"]).optional();
-
-    expect(modelSchema.parse("haiku")).toBe("haiku");
-    expect(modelSchema.parse("sonnet")).toBe("sonnet");
-    expect(modelSchema.parse("opus")).toBe("opus");
-    expect(modelSchema.parse(undefined)).toBeUndefined();
+  test("task tools accept freeform concrete models and model tiers", () => {
+    expect(
+      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", model: "gpt-5.5" })
+        .model,
+    ).toBe("gpt-5.5");
+    expect(
+      taskActionInputSchema.parse({ action: "create", task: "x", modelTier: "ultra" }).modelTier,
+    ).toBe("ultra");
   });
 
-  test("should reject invalid model values", async () => {
-    const { z } = await import("zod");
-    const modelSchema = z.enum(["haiku", "sonnet", "opus"]).optional();
-
-    expect(() => modelSchema.parse("gpt-4")).toThrow();
-    expect(() => modelSchema.parse("claude")).toThrow();
-    expect(() => modelSchema.parse("turbo")).toThrow();
-    expect(() => modelSchema.parse("")).toThrow();
-    expect(() => modelSchema.parse(123)).toThrow();
-    expect(() => modelSchema.parse(null)).toThrow();
+  test("task tools reject empty model strings and invalid tiers", () => {
+    expect(() =>
+      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", model: "" }),
+    ).toThrow();
+    expect(() =>
+      taskActionInputSchema.parse({ action: "create", task: "x", modelTier: "massive" }),
+    ).toThrow();
   });
 
   test("nullable model schema (update-schedule) should accept null", async () => {
-    const { z } = await import("zod");
-    const modelSchema = z.enum(["haiku", "sonnet", "opus"]).nullable().optional();
+    expect(updateScheduleInputSchema.shape.model.parse(null)).toBeNull();
+    expect(updateScheduleInputSchema.shape.model.parse("gpt-5.5")).toBe("gpt-5.5");
+    expect(updateScheduleInputSchema.shape.modelTier.parse(null)).toBeNull();
+    expect(updateScheduleInputSchema.shape.modelTier.parse("smol")).toBe("smol");
+  });
 
-    expect(modelSchema.parse(null)).toBeNull();
-    expect(modelSchema.parse("haiku")).toBe("haiku");
-    expect(modelSchema.parse(undefined)).toBeUndefined();
+  test("create schedule schema accepts freeform model and modelTier", () => {
+    const parsed = createScheduleInputSchema.parse({
+      name: "schema-model-tier",
+      taskTemplate: "x",
+      intervalMs: 60000,
+      model: "openrouter/openai/gpt-5.5",
+      modelTier: "smart",
+    });
+    expect(parsed.model).toBe("openrouter/openai/gpt-5.5");
+    expect(parsed.modelTier).toBe("smart");
   });
 });

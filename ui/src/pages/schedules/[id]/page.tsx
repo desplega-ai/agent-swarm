@@ -59,6 +59,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
 
@@ -392,6 +393,15 @@ export default function ScheduleDetailPage() {
                 label="Last Run"
                 value={schedule.lastRunAt ? formatSmartTime(schedule.lastRunAt) : "Never"}
               />
+              {(schedule.model || schedule.modelTier) && (
+                <QuickStat
+                  label="Model"
+                  value={
+                    schedule.model ? schedule.model : `tier: ${modelTierLabel(schedule.modelTier)}`
+                  }
+                  mono={Boolean(schedule.model)}
+                />
+              )}
               <QuickStat label="Created" value={formatSmartTime(schedule.createdAt)} />
             </QuickStats>
 
@@ -466,6 +476,7 @@ function EditScheduleDialog({
     targetAgentId?: string;
     timezone: string;
     model?: string;
+    modelTier?: string;
   };
   agents: { id: string; name: string; isLead?: boolean }[] | undefined;
   open: boolean;
@@ -488,6 +499,7 @@ function EditScheduleDialog({
   const [targetAgentId, setTargetAgentId] = useState(schedule.targetAgentId ?? "");
   const [timezone, setTimezone] = useState(schedule.timezone);
   const [model, setModel] = useState(schedule.model ?? "");
+  const [modelTier, setModelTier] = useState(schedule.modelTier ?? "");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -508,6 +520,7 @@ function EditScheduleDialog({
       targetAgentId: targetAgentId || null,
       timezone,
       model: model || null,
+      modelTier: modelTier || null,
     });
   }
 
@@ -606,6 +619,22 @@ function EditScheduleDialog({
                   onChange={(e) => setPriority(Number(e.target.value))}
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Model Tier</Label>
+              <Select value={modelTier} onValueChange={(v) => setModelTier(v === "_none" ? "" : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Default</SelectItem>
+                  {MODEL_TIER_OPTIONS.map((tier) => (
+                    <SelectItem key={tier.value} value={tier.value}>
+                      {tier.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

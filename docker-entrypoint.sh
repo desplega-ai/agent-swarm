@@ -976,6 +976,15 @@ else
     echo "[entrypoint] Skipping skill sync (missing AGENT_ID, API_KEY, or MCP_BASE_URL)"
 fi
 
+# Reclaim skill directories for the worker user. The entrypoint runs as root
+# with HOME=/home/worker, so mkdir/cp above creates root-owned dirs. Without
+# this chown the runner-side skill-fs-writer (running as worker) gets EACCES on
+# every write attempt — ~165 errors per container per day.
+chown -R worker:worker /home/worker/.claude/skills 2>/dev/null || true
+chown -R worker:worker /home/worker/.pi/agent/skills 2>/dev/null || true
+chown -R worker:worker /home/worker/.codex/skills 2>/dev/null || true
+chown -R worker:worker /home/worker/.agents/skills 2>/dev/null || true
+
 echo ""
 
 # Reclaim /home/worker/.local for worker before dropping privileges.

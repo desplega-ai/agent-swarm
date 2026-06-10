@@ -37,6 +37,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { MODEL_TIER_OPTIONS } from "@/lib/model-tiers";
 
 interface TaskFormData {
   task: string;
@@ -45,6 +46,7 @@ interface TaskFormData {
   tags: string;
   priority: number;
   dependsOn: string[];
+  modelTier: string;
 }
 
 const emptyTaskForm: TaskFormData = {
@@ -54,6 +56,7 @@ const emptyTaskForm: TaskFormData = {
   tags: "",
   priority: 50,
   dependsOn: [],
+  modelTier: "",
 };
 
 function CreateTaskDialog({
@@ -191,6 +194,25 @@ function CreateTaskDialog({
                 value={form.tags}
                 onChange={(e) => setForm({ ...form, tags: e.target.value })}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Model Tier</Label>
+              <Select
+                value={form.modelTier}
+                onValueChange={(v) => setForm({ ...form, modelTier: v === "_none" ? "" : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Default</SelectItem>
+                  {MODEL_TIER_OPTIONS.map((tier) => (
+                    <SelectItem key={tier.value} value={tier.value}>
+                      {tier.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Dependencies</Label>
@@ -404,6 +426,7 @@ export default function TasksPage() {
       ...(tags.length > 0 && { tags }),
       ...(data.priority !== 50 && { priority: data.priority }),
       ...(data.dependsOn.length > 0 && { dependsOn: data.dependsOn }),
+      ...(data.modelTier && { modelTier: data.modelTier }),
       // Phase 3: attribute the task to the current identity. `source` is left
       // unset so the server's "api" default applies.
       ...(currentUserId && { requestedByUserId: currentUserId }),
