@@ -26,6 +26,7 @@ type ScriptWriteArgs = ScriptIdentity & {
   fsMode?: ScriptFsMode;
   agentId?: string | null;
   changeReason?: string | null;
+  embeddingMode?: "sync" | "skip";
 };
 
 export type UpsertScriptResult = {
@@ -178,10 +179,11 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
  * immediately consistent for authored/promoted scripts.
  */
 export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertScriptResult> {
+  const shouldEmbed = args.embeddingMode !== "skip";
   const existing = getScript(args);
   if (!existing) {
     const script = insertScript(args);
-    if (!script.isScratch) {
+    if (!script.isScratch && shouldEmbed) {
       await embedScript(script);
     }
     return {
@@ -235,7 +237,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
 
       if (!row) throw new Error("Failed to update script metadata");
       const script = rowToScript(row);
-      if (!script.isScratch && (trackedMetadataChanged || promotedFromScratch)) {
+      if (!script.isScratch && shouldEmbed && (trackedMetadataChanged || promotedFromScratch)) {
         await embedScript(script);
       }
       return {
@@ -318,7 +320,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   });
 
   const script = txn();
-  if (!script.isScratch) {
+  if (!script.isScratch && shouldEmbed) {
     await embedScript(script);
   }
 

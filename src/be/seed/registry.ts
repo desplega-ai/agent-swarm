@@ -9,11 +9,11 @@
 import { scriptsSeeder } from "../seed-scripts";
 import { skillsSeeder } from "../seed-skills";
 import { runSeeders } from "./runner";
-import type { Seeder, SeederResult } from "./types";
+import type { Seeder, SeederResult, SeederRunOptions } from "./types";
 
 export const SEEDERS: Seeder[] = [scriptsSeeder, skillsSeeder];
 
 /** Apply every registered seeder. Called at API boot and by the seed CLI. */
-export function runAllSeeders(opts?: { quiet?: boolean }): Promise<SeederResult[]> {
+export function runAllSeeders(opts?: SeederRunOptions): Promise<SeederResult[]> {
   return runSeeders(SEEDERS, opts);
 }

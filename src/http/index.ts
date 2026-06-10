@@ -458,10 +458,12 @@ try {
 // Seed the built-in entity catalog (scripts today; more kinds later) so
 // `script-search` & co. return useful hits from a fresh DB. Idempotent and
 // version-aware: a pristine entity updates when its source changes, a
-// user-modified one is preserved. See src/be/seed for the framework.
+// user-modified one is preserved. Script embeddings are deferred to a
+// post-listen backfill so boot doesn't block on embedding provider calls.
+// See src/be/seed for the framework.
 try {
   const { runAllSeeders } = await import("../be/seed");
-  await runAllSeeders();
+  await runAllSeeders({ scriptEmbeddingMode: "skip" });
 } catch (err) {
   console.error("[startup] Failed to seed built-in entities:", err);
 }
@@ -564,6 +566,15 @@ httpServer
       .then(({ runBootReembed }) => runBootReembed())
       .catch((err) => {
         console.error("[boot-reembed] startup backfill failed (non-fatal):", err);
+      });
+
+    // Background backfill: embed any scripts that were seeded without embeddings
+    // (scriptEmbeddingMode: "skip" during boot). Non-blocking, idempotent, no-op
+    // when every non-scratch script already has an embedding.
+    import("../be/scripts/boot-reembed")
+      .then(({ runBootReembedScripts }) => runBootReembedScripts())
+      .catch((err) => {
+        console.error("[boot-reembed-scripts] startup backfill failed (non-fatal):", err);
       });
   })
   .on("error", (err) => {

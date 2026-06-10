@@ -268,6 +268,96 @@ describe("script embeddings", () => {
     expect(topOneHits).toBeGreaterThanOrEqual(4);
   });
 
+  test("embeddingMode: skip prevents embedding on new script", async () => {
+    provider.reset();
+    const result = await upsertScriptByName({
+      name: "skip-new",
+      scope: "agent",
+      scopeId: "agent-1",
+      source: source("skip-new"),
+      description: "Should not embed",
+      intent: "Skip mode test",
+      signatureJson,
+      agentId: "agent-1",
+      embeddingMode: "skip",
+    });
+    expect(result.isNew).toBe(true);
+    expect(embeddingCount(result.script.id)).toBe(0);
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  test("embeddingMode: skip prevents embedding on source change", async () => {
+    const first = await upsertScriptByName({
+      name: "skip-update",
+      scope: "agent",
+      scopeId: "agent-1",
+      source: source("v1"),
+      description: "Will update",
+      intent: "Skip mode update test",
+      signatureJson,
+      agentId: "agent-1",
+    });
+    expect(embeddingCount(first.script.id)).toBe(1);
+
+    provider.reset();
+    const second = await upsertScriptByName({
+      name: "skip-update",
+      scope: "agent",
+      scopeId: "agent-1",
+      source: source("v2"),
+      description: "Updated source",
+      intent: "Skip mode update test",
+      signatureJson,
+      agentId: "agent-1",
+      embeddingMode: "skip",
+    });
+    expect(second.contentDeduped).toBe(false);
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  test("embeddingMode: skip prevents embedding on metadata change", async () => {
+    await upsertScriptByName({
+      name: "skip-meta",
+      scope: "agent",
+      scopeId: "agent-1",
+      source: source("skip-meta"),
+      description: "Original description",
+      intent: "Original intent",
+      signatureJson,
+      agentId: "agent-1",
+    });
+
+    provider.reset();
+    await upsertScriptByName({
+      name: "skip-meta",
+      scope: "agent",
+      scopeId: "agent-1",
+      source: source("skip-meta"),
+      description: "Changed description",
+      intent: "Changed intent",
+      signatureJson,
+      agentId: "agent-1",
+      embeddingMode: "skip",
+    });
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  test("embeddingMode defaults to sync (embeds normally)", async () => {
+    provider.reset();
+    const result = await upsertScriptByName({
+      name: "default-sync",
+      scope: "agent",
+      scopeId: "agent-1",
+      source: source("default-sync"),
+      description: "Should embed by default",
+      intent: "Default mode test",
+      signatureJson,
+      agentId: "agent-1",
+    });
+    expect(embeddingCount(result.script.id)).toBe(1);
+    expect(provider.calls).toHaveLength(1);
+  });
+
   test("reembedAllScripts updates every explicit script", async () => {
     await upsertFixture({ name: "linear-one", description: "Linear issue parser" });
     await upsertFixture({ name: "slack-one", description: "Slack message digest" });

@@ -35,6 +35,11 @@ export interface SeedItem {
   readonly contentHash: string;
 }
 
+export type SeederRunOptions = {
+  quiet?: boolean;
+  scriptEmbeddingMode?: "sync" | "skip";
+};
+
 export interface Seeder<TItem extends SeedItem = SeedItem> {
   /** Kind discriminator — namespaces this seeder's rows in `seed_state`. */
   readonly kind: string;
@@ -46,7 +51,7 @@ export interface Seeder<TItem extends SeedItem = SeedItem> {
    */
   upstreamHash(item: TItem): string | null | Promise<string | null>;
   /** Create or update the upstream entity so it matches the source definition. */
-  apply(item: TItem, action: "create" | "update"): void | Promise<void>;
+  apply(item: TItem, action: "create" | "update", opts?: SeederRunOptions): void | Promise<void>;
 }
 
 export type SeederResult = {

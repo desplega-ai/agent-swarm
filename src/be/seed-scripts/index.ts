@@ -21,7 +21,7 @@ import { computeContentHash } from "../db";
 import { getScript, upsertScriptByName } from "../scripts/db";
 import { extractArgsJsonSchema } from "../scripts/extract-schema";
 import { typecheckScript } from "../scripts/typecheck";
-import type { Seeder, SeedItem } from "../seed/types";
+import type { Seeder, SeederRunOptions, SeedItem } from "../seed/types";
 import bootTriageSrc from "./catalog/boot-triage.inline.ts" with { type: "text" };
 // @ts-expect-error Bun text imports synthesize a default string for this helper.
 import catalogReportSrc from "./catalog/catalog-report.inline.ts" with { type: "text" };
@@ -234,7 +234,7 @@ export const scriptsSeeder: Seeder<ScriptSeedItem> = {
     return existing ? existing.contentHash : null;
   },
 
-  async apply(item): Promise<void> {
+  async apply(item, _action, opts?: SeederRunOptions): Promise<void> {
     const { script } = item;
 
     const imports = validateScriptImports(script.source);
@@ -260,6 +260,7 @@ export const scriptsSeeder: Seeder<ScriptSeedItem> = {
       isScratch: false,
       typeChecked: true,
       changeReason: "Seeded from the built-in scripts catalog (src/be/seed-scripts)",
+      embeddingMode: opts?.scriptEmbeddingMode ?? "sync",
     });
   },
 };

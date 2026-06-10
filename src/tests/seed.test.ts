@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "../be/db";
-import { getSeedState, runSeeder, type Seeder, type SeedItem } from "../be/seed";
+import {
+  getSeedState,
+  runSeeder,
+  type Seeder,
+  type SeederRunOptions,
+  type SeedItem,
+} from "../be/seed";
 
 const TEST_DB_PATH = "./test-seed.sqlite";
 
@@ -135,6 +141,25 @@ describe("seeder harness — versioning rule", () => {
     expect(result.updated).toBe(0);
     expect(result.skippedUserModified).toBe(1);
     expect(upstream.get("y")).toBe("h-pre-existing");
+  });
+
+  test("runner passes opts through to apply()", async () => {
+    const capturedOpts: (SeederRunOptions | undefined)[] = [];
+    const source = new Map([["a", "h-a1"]]);
+    const upstream = new Map<string, string>();
+    const seeder: Seeder<SeedItem> = {
+      kind: "opts-passthrough-test",
+      items: () => [...source.entries()].map(([key, contentHash]) => ({ key, contentHash })),
+      upstreamHash: (item) => upstream.get(item.key) ?? null,
+      apply: (item, _action, opts) => {
+        capturedOpts.push(opts);
+        upstream.set(item.key, item.contentHash);
+      },
+    };
+
+    await runSeeder(seeder, { quiet: true, scriptEmbeddingMode: "skip" });
+    expect(capturedOpts).toHaveLength(1);
+    expect(capturedOpts[0]?.scriptEmbeddingMode).toBe("skip");
   });
 
   test("a throwing apply is captured per-item without aborting the run", async () => {

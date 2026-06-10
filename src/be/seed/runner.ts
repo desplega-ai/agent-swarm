@@ -5,7 +5,7 @@
  */
 
 import { getSeedState, recordSeedState } from "./state-db";
-import type { Seeder, SeederResult } from "./types";
+import type { Seeder, SeederResult, SeederRunOptions } from "./types";
 
 /**
  * Apply one seeder. Idempotent and version-aware:
@@ -14,7 +14,7 @@ import type { Seeder, SeederResult } from "./types";
  *   - upstream pristine, src same  -> no-op
  *   - upstream user-modified       -> preserve (never overwrite)
  */
-export async function runSeeder(seeder: Seeder, opts?: { quiet?: boolean }): Promise<SeederResult> {
+export async function runSeeder(seeder: Seeder, opts?: SeederRunOptions): Promise<SeederResult> {
   const result: SeederResult = {
     kind: seeder.kind,
     created: 0,
@@ -31,7 +31,7 @@ export async function runSeeder(seeder: Seeder, opts?: { quiet?: boolean }): Pro
 
       // Absent upstream -> create.
       if (upstream === null) {
-        await seeder.apply(item, "create");
+        await seeder.apply(item, "create", opts);
         recordSeedState(seeder.kind, item.key, item.contentHash);
         result.created += 1;
         continue;
@@ -60,7 +60,7 @@ export async function runSeeder(seeder: Seeder, opts?: { quiet?: boolean }): Pro
       }
 
       // Pristine upstream + changed source -> update to the new source version.
-      await seeder.apply(item, "update");
+      await seeder.apply(item, "update", opts);
       recordSeedState(seeder.kind, item.key, item.contentHash);
       result.updated += 1;
     } catch (err) {
@@ -88,7 +88,7 @@ export async function runSeeder(seeder: Seeder, opts?: { quiet?: boolean }): Pro
 /** Apply a list of seeders in order. */
 export async function runSeeders(
   seeders: Seeder[],
-  opts?: { quiet?: boolean },
+  opts?: SeederRunOptions,
 ): Promise<SeederResult[]> {
   const results: SeederResult[] = [];
   for (const seeder of seeders) {
