@@ -13,9 +13,7 @@ import {
 } from "../be/db";
 import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/validate";
 import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
-import { calculateNextRun } from "../scheduler/scheduler";
-import { scheduleContextKey } from "../tasks/context-key";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { calculateNextRun, createStandaloneScheduleTask } from "../scheduler/scheduler";
 import { getExecutorRegistry } from "../workflows";
 import { handleScheduleTrigger } from "../workflows/triggers";
 import { route } from "./route-def";
@@ -336,17 +334,7 @@ export async function handleSchedules(
       const now = new Date().toISOString();
 
       const task = getDb().transaction(() => {
-        const createdTask = createTaskWithSiblingAwareness(schedule.taskTemplate, {
-          creatorAgentId: schedule.createdByAgentId,
-          taskType: schedule.taskType,
-          tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
-          priority: schedule.priority,
-          agentId: schedule.targetAgentId,
-          model: schedule.model,
-          scheduleId: schedule.id,
-          source: "schedule",
-          contextKey: scheduleContextKey({ scheduleId: schedule.id }),
-        });
+        const createdTask = createStandaloneScheduleTask(schedule, ["manual-run"]);
 
         if (schedule.scheduleType === "one_time") {
           updateScheduledTask(schedule.id, {

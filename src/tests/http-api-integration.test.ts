@@ -1012,6 +1012,25 @@ describe("Schedule CRUD", () => {
     expect(body.task.id).toBeDefined();
   });
 
+  test("POST /api/schedules/:id/run — propagates modelTier to the created task", async () => {
+    const { body: created } = await post("/api/schedules", {
+      body: {
+        name: "model-tier-manual-run",
+        taskTemplate: "Run model tier integration test",
+        cronExpression: "0 * * * *",
+        modelTier: "smart",
+      },
+    });
+
+    const { status, body } = await post(`/api/schedules/${created.id}/run`);
+    expect(status).toBe(200);
+    expect(body.task).toBeDefined();
+    expect(body.task.model).toBeUndefined();
+    expect(body.task.modelTier).toBe("smart");
+
+    await del(`/api/schedules/${created.id}`);
+  });
+
   test("POST /api/schedules/:id/run — disabled schedule returns 400", async () => {
     // Disable the schedule first
     await put(`/api/schedules/${scheduleId}`, {

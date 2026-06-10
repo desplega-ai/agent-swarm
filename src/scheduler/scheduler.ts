@@ -3,13 +3,31 @@ import { CronExpressionParser } from "cron-parser";
 import { getDb, getDueScheduledTasks, getScheduledTaskById, updateScheduledTask } from "@/be/db";
 import { scheduleContextKey } from "@/tasks/context-key";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
-import type { ScheduledTask } from "@/types";
+import type { AgentTask, ScheduledTask } from "@/types";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let isProcessing = false;
 let executorRegistry: ExecutorRegistry | null = null;
+
+export function createStandaloneScheduleTask(
+  schedule: ScheduledTask,
+  extraTags: string[] = [],
+): AgentTask {
+  return createTaskWithSiblingAwareness(schedule.taskTemplate, {
+    creatorAgentId: schedule.createdByAgentId,
+    taskType: schedule.taskType,
+    tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, ...extraTags],
+    priority: schedule.priority,
+    agentId: schedule.targetAgentId,
+    model: schedule.model,
+    modelTier: schedule.modelTier,
+    scheduleId: schedule.id,
+    source: "schedule",
+    contextKey: scheduleContextKey({ scheduleId: schedule.id }),
+  });
+}
 
 /**
  * Recover missed scheduled task runs from downtime.
@@ -45,17 +63,7 @@ async function recoverMissedSchedules(): Promise<void> {
 
       if (!triggeredWorkflows) {
         const tx = getDb().transaction(() => {
-          createTaskWithSiblingAwareness(schedule.taskTemplate, {
-            creatorAgentId: schedule.createdByAgentId,
-            taskType: schedule.taskType,
-            tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "recovered"],
-            priority: schedule.priority,
-            agentId: schedule.targetAgentId,
-            model: schedule.model,
-            scheduleId: schedule.id,
-            source: "schedule",
-            contextKey: scheduleContextKey({ scheduleId: schedule.id }),
-          });
+          createStandaloneScheduleTask(schedule, ["recovered"]);
         });
         tx();
       }
@@ -150,18 +158,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
     if (!triggeredWorkflows) {
       // No workflows linked — create standalone task (existing behavior)
       getDb().transaction(() => {
-        createTaskWithSiblingAwareness(schedule.taskTemplate, {
-          creatorAgentId: schedule.createdByAgentId,
-          taskType: schedule.taskType,
-          tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
-          priority: schedule.priority,
-          agentId: schedule.targetAgentId,
-          model: schedule.model,
-          modelTier: schedule.modelTier,
-          scheduleId: schedule.id,
-          source: "schedule",
-          contextKey: scheduleContextKey({ scheduleId: schedule.id }),
-        });
+        createStandaloneScheduleTask(schedule);
       })();
     }
 
@@ -342,18 +339,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
   if (!triggeredWorkflows) {
     // No workflows linked — create standalone task (existing behavior)
     getDb().transaction(() => {
-      createTaskWithSiblingAwareness(schedule.taskTemplate, {
-        creatorAgentId: schedule.createdByAgentId,
-        taskType: schedule.taskType,
-        tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
-        priority: schedule.priority,
-        agentId: schedule.targetAgentId,
-        model: schedule.model,
-        modelTier: schedule.modelTier,
-        scheduleId: schedule.id,
-        source: "schedule",
-        contextKey: scheduleContextKey({ scheduleId: schedule.id }),
-      });
+      createStandaloneScheduleTask(schedule, ["manual-run"]);
     })();
   }
 
