@@ -125,7 +125,7 @@ When enabled, the adapter ignores `CLAUDE_BINARY` for the effective argv and use
 |---|---|
 | `claude-bridge` | `["claude-bridge"]` |
 
-The published npm package is `@desplega.ai/claude-bridge`; version `0.1.10` is pinned in `Dockerfile.worker` under `/opt/global-deps/package.json`, with bin `claude-bridge` pointing at `src/cli.ts` and a Bun shebang. The global-deps install symlinks that bin onto `PATH`, so bridge mode does not perform a runtime `bunx` fetch.
+The published npm package is `@desplega.ai/claude-bridge`; version `0.1.11` is pinned in `Dockerfile.worker` under `/opt/global-deps/package.json`, with bin `claude-bridge` pointing at `src/cli.ts` and a Bun shebang. The global-deps install symlinks that bin onto `PATH`, so bridge mode does not perform a runtime `bunx` fetch.
 
 `src/utils/internal-ai/complete-structured.ts` (the `claude -p --json-schema` fallback used when the harness can't enforce `outputSchema` directly) applies the same bridge toggle before falling back to `CLAUDE_BINARY`.
 
