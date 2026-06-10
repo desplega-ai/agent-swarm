@@ -28,6 +28,7 @@ export const CONTEXT_FORMULA = "input-cache-output" as const;
 const CONTEXT_WINDOW_DEFAULTS: Record<string, number> = {
   // Anthropic Fable / Mythos tier
   "claude-fable-5": 1_000_000,
+  "claude-mythos-5": 1_000_000,
   // Anthropic 4.x family
   "claude-opus-4-8": 1_000_000,
   "claude-opus-4-7": 1_000_000,
@@ -48,6 +49,7 @@ const CONTEXT_WINDOW_DEFAULTS: Record<string, number> = {
   "claude-3-haiku": 200_000,
   // Shortnames used by the local-CLI adapter and pi-mono OpenRouter mirror.
   fable: 1_000_000,
+  mythos: 1_000_000,
   opus: 1_000_000,
   sonnet: 1_000_000,
   haiku: 200_000,

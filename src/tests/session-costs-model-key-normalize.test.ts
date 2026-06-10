@@ -134,6 +134,8 @@ describe("normalizeModelKey()", () => {
 
   test("is a no-op for canonical claude ids", () => {
     expect(normalizeModelKey("claude", "claude-opus-4-7")).toBe("claude-opus-4-7");
+    expect(normalizeModelKey("claude", "claude-fable-5")).toBe("claude-fable-5");
+    expect(normalizeModelKey("claude", "claude-mythos-5")).toBe("claude-mythos-5");
   });
 
   test("is idempotent", () => {
