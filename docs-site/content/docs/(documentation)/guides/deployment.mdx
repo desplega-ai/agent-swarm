@@ -409,6 +409,8 @@ Current worker-image defaults in `Dockerfile.worker`:
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
+The worker image also includes PostgreSQL 16 server binaries for local test setups. Nothing auto-starts unless you set `SWARM_DEP_POSTGRES_ENABLED=true`; in that case the entrypoint runs [`scripts/init-local-postgres.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-postgres.sh), which initializes a local cluster on `localhost:5433` by default. Override with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB` as needed.
+
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
 ### Run

@@ -779,7 +779,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 | `targetAgentId` | `string` | No | - | Agent to assign tasks to (omit for task pool) |
 | `timezone` | `string` | No | "UTC" | Timezone for cron schedules |
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
-| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for tasks created by this schedule ('haiku', 'sonnet', or 'opus'). If not set, uses agent/global config or defaults to 'opus'. |
+| `model` | `haiku \| sonnet \| opus \| fable` | No | - | Model to use for tasks created by this schedule ('haiku', 'sonnet', 'opus', or 'fable'). If not set, uses agent/global config or defaults to 'opus'. |
 
 ### update-schedule
 
@@ -802,7 +802,7 @@ Update an existing scheduled task. Only the creator or lead agent can update sch
 | `targetAgentId` | `string` | No | - | New target agent ID |
 | `timezone` | `string` | No | - | New timezone |
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
-| `model` | `haiku \| sonnet \| opus` | No | - | Model to use for tasks created by this schedule. Set to null to clear. |
+| `model` | `haiku \| sonnet \| opus \| fable` | No | - | Model to use for tasks created by this schedule. Set to null to clear. |
 
 ### delete-schedule
 

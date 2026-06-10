@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.93.0] - 2026-06-10
+
+### Added
+- **Per-task harness variant capture and task-detail badge** (#699) — workers now record which harness variant actually executed a task (for example `claude` stock vs bridge, plus provider version metadata), and the dashboard surfaces that directly on the task detail view for faster debugging.
+- **`fable` model shortname across task and schedule entry points** (#709) — `send-task`, `task-action`, and schedule creation/update flows now accept `fable`, with provider-specific mappings, pricing, and context-window sizing wired in.
+- **Script-runtime GitHub egress substitution** (#708) — sandboxed scripts can now call allowlisted GitHub endpoints using the default `GITHUB_TOKEN` flow without exposing the raw secret value to the script itself.
+- **Worker image ships optional PostgreSQL 16 tooling** (#702) — `Dockerfile.worker` now includes PostgreSQL 16 binaries and an entrypoint-backed `scripts/init-local-postgres.sh` helper for opt-in local database bootstrapping inside worker containers.
+
+### Changed
+- **Bundled model pricing metadata refreshed** (#701) — the daily models.dev sync updated the built-in pricing data that powers model-cost lookups and related guidance.
+
+### Fixed
+- **Codex credential pools now fail over across key types** (#706) — when one Codex credential source is exhausted, the runner can fall back between `OPENAI_API_KEY` and `codex_oauth_*` pools instead of reusing a known-rate-limited slot, and successful tasks clear stale rate-limit marks.
+- **Worker skill refresh now writes to the worker filesystem safely** (#699) — runtime skill refreshes now write managed `SKILL.md` bundles to the local worker disk and avoid wiping the skill cache on transient list-fetch failures.
+
 ## [1.92.2] - 2026-06-09
 
 ### Added
