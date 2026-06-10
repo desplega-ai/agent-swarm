@@ -14,7 +14,7 @@ Enable Slack for task creation, agent communication, and interactive workflows v
 5. Add required bot token scopes:
    - `app_mentions:read`
    - `assistant:write`
-   - `channels:history`, `channels:read`
+   - `channels:history`, `channels:join`, `channels:read`
    - `chat:write`, `chat:write.customize`, `chat:write.public`
    - `commands`
    - `files:read`, `files:write`
@@ -159,6 +159,10 @@ Agents can read Slack threads using `slack-read`:
 ### Posting Messages
 
 The lead agent can post messages to channels using `slack-post`. By default each call creates a new top-level message. To run a multi-message conversation under a single Slack thread, the lead first calls `slack-start-thread` to create the parent message, then passes the returned `ts` as `threadTs` on subsequent `slack-post` calls — keeping the channel tidy and the conversation discoverable.
+
+### Channel Membership
+
+If the bot is not yet a member of a **public** channel, `slack-read`, `slack-post`, `slack-reply`, and `slack-start-thread` automatically join it (via the `channels:join` scope) and retry — no manual `/invite` needed. **Private** channels cannot be self-joined: the tools return a clear error asking you to invite the bot with `/invite @<bot-name>` first.
 
 ## User Filtering
 

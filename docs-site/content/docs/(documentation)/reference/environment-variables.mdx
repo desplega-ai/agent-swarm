@@ -161,6 +161,12 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `PM2_HOME` | No | `/workspace/.pm2` | PM2 state directory |
 | `TEMPLATE_ID` | No | — | Template for initial profile on first boot (e.g., `official/coder`) |
 | `TEMPLATE_REGISTRY_URL` | No | `https://templates.agent-swarm.dev` | URL of the templates registry |
+| `SWARM_DEP_POSTGRES_ENABLED` | No | `false` | Set to `true` to start the optional bundled PostgreSQL 16 cluster on worker boot (entrypoint runs `scripts/init-local-postgres.sh`). Binaries ship dormant in the worker image since `v1.93.0` |
+| `LOCAL_POSTGRES_DATA_DIR` | No | `/tmp/postgres-data` | Data directory for the optional local Postgres cluster |
+| `LOCAL_POSTGRES_PORT` | No | `5433` | Port for the optional local Postgres cluster |
+| `LOCAL_POSTGRES_USER` | No | `postgres` | Superuser name for the optional local Postgres cluster |
+| `LOCAL_POSTGRES_PASSWORD` | No | `postgres` | Superuser password for the optional local Postgres cluster |
+| `LOCAL_POSTGRES_DB` | No | `app` | Database created in the optional local Postgres cluster |
 
 ## Git Configuration
 

@@ -15,11 +15,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Worker image ships optional PostgreSQL 16 tooling** (#702) — `Dockerfile.worker` now includes PostgreSQL 16 binaries and an entrypoint-backed `scripts/init-local-postgres.sh` helper for opt-in local database bootstrapping inside worker containers.
 
 ### Changed
-- **Bundled model pricing metadata refreshed** (#701) — the daily models.dev sync updated the built-in pricing data that powers model-cost lookups and related guidance.
+- **Worker-image harness pins refreshed** (#712) — `Dockerfile.worker` now ships Claude Code `2.1.170`, pi-mono `0.79.1`, and Codex CLI / SDK `0.139.0` (opencode / `@opencode-ai/sdk` stay at `1.16.2`).
+- **Bundled model pricing metadata refreshed** (#701, #713) — the daily models.dev syncs updated the built-in pricing data that powers model-cost lookups and related guidance.
 
 ### Fixed
+- **Slack tools now auto-join public channels** (#710) — `slack-read`, `slack-post`, `slack-reply`, and `slack-start-thread` recover from `not_in_channel` by joining the public channel and retrying, instead of failing; private channels surface a clear "invite the bot with `/invite` first" error. The bundled `slack-manifest.json` now includes the `channels:join` bot scope.
 - **Codex credential pools now fail over across key types** (#706) — when one Codex credential source is exhausted, the runner can fall back between `OPENAI_API_KEY` and `codex_oauth_*` pools instead of reusing a known-rate-limited slot, and successful tasks clear stale rate-limit marks.
-- **Worker skill refresh now writes to the worker filesystem safely** (#699) — runtime skill refreshes now write managed `SKILL.md` bundles to the local worker disk and avoid wiping the skill cache on transient list-fetch failures.
+- **Worker skill refresh now writes to the worker filesystem safely** (#707) — runtime skill refreshes now write managed `SKILL.md` bundles to the local worker disk and avoid wiping the skill cache on transient list-fetch failures.
 
 ## [1.92.2] - 2026-06-09
 
