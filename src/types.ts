@@ -1438,6 +1438,13 @@ export const MetricVariableSchema = z.object({
       }),
     )
     .optional(),
+  optionsQuery: z
+    .object({
+      sql: z.string().min(1).max(10_000),
+      valueKey: z.string().min(1),
+      labelKey: z.string().min(1).optional(),
+    })
+    .optional(),
 });
 export type MetricVariable = z.infer<typeof MetricVariableSchema>;
 
@@ -1467,6 +1474,8 @@ export const MetricWidgetSchema = z.object({
   description: z.string().optional(),
   query: MetricQuerySchema,
   viz: MetricVizConfigSchema,
+  colSpan: z.number().int().min(1).max(4).optional(),
+  rowSpan: z.number().int().min(1).max(4).optional(),
 });
 export type MetricWidget = z.infer<typeof MetricWidgetSchema>;
 

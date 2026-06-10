@@ -1638,6 +1638,11 @@ export interface MetricVariable {
     label: string;
     value: MetricParam;
   }>;
+  optionsQuery?: {
+    sql: string;
+    valueKey: string;
+    labelKey?: string;
+  };
 }
 
 export interface MetricVizColumn {
@@ -1665,6 +1670,8 @@ export interface MetricWidget {
     columns?: MetricVizColumn[];
     format?: MetricFormat;
   };
+  colSpan?: number;
+  rowSpan?: number;
 }
 
 export interface MetricDefinition {
