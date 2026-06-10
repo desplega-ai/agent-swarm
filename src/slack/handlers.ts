@@ -35,6 +35,22 @@ const allowedUserIds = (process.env.SLACK_ALLOWED_USER_IDS || "")
 
 const filteringEnabled = allowedEmailDomains.length > 0 || allowedUserIds.length > 0;
 
+// Channel allowlist for every-message auto-reply (no @mention needed)
+const autoReplyChannels = new Set(
+  (process.env.SLACK_AUTO_REPLY_CHANNELS || "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean),
+);
+
+// Agent ID to route data-reply tasks to (must have bq runtime). Falls back to lead.
+const SLACK_AUTO_REPLY_AGENT_ID = (process.env.SLACK_AUTO_REPLY_AGENT_ID || "").trim();
+
+// Disclaimer prefix prepended to every auto-reply
+export const AUTO_REPLY_DISCLAIMER =
+  process.env.SLACK_AUTO_REPLY_DISCLAIMER ||
+  ":robot_face: _Still in beta — double-check anything important._";
+
 /**
  * Configuration for user filtering.
  */
@@ -127,6 +143,22 @@ async function isUserAllowed(client: WebClient, userId: string): Promise<boolean
     console.log(`[Slack] User ${userId} email domain "${domain}" not in allowed list`);
   }
   return allowed;
+}
+
+/**
+ * Conservative pre-filter: returns true only if the message plausibly contains
+ * a data question. Cheap heuristic — the LLM gate in the spawned task is the
+ * real classifier. Purpose: suppress obvious non-data messages (greetings,
+ * reactions, chatter) before spawning any task.
+ * Exported for unit testing.
+ */
+export function looksLikeDataQuestion(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 20) return false;
+  if (/^[\p{Emoji}\s]+$/u.test(t)) return false;
+  const dataKeywords =
+    /\b(how many|how much|what (is|are|was|were)|count|total|average|avg|sum|revenue|arr|mrr|churn|customer|compan(y|ies)|payment|deal|pipeline|metric|kpi|report|number|percent|rate|growth|breakdown|trend|last (week|month|quarter|year)|ytd|mtd)\b/i;
+  return dataKeywords.test(t);
 }
 
 interface MessageEvent {
@@ -581,6 +613,29 @@ export function registerMessageHandler(app: App): void {
     );
 
     if (matches.length === 0) {
+      // --- AUTO-REPLY path: channel-allowlist without @mention ---
+      if (autoReplyChannels.has(msg.channel) && !botMentioned && !isImplicitMention) {
+        if (!looksLikeDataQuestion(effectiveText)) return; // pre-filter: silent on chatter
+        if (!checkRateLimit(msg.user)) return; // rate-limit still applies
+
+        const targetAgentId = SLACK_AUTO_REPLY_AGENT_ID || getLeadAgent()?.id;
+        const ctxResult = resolveTemplate("slack.auto_reply.data_classifier", {
+          channel_id: msg.channel,
+          message_text: effectiveText,
+          disclaimer: AUTO_REPLY_DISCLAIMER,
+        });
+        createTaskWithSiblingAwareness(ctxResult.text, {
+          agentId: targetAgentId,
+          source: "slack",
+          slackChannelId: msg.channel,
+          slackThreadTs: msg.ts, // msg.ts = root message; reply creates a thread from it
+          slackUserId: msg.user,
+          requestedByUserId,
+          contextKey: slackContextKey({ channelId: msg.channel, threadTs: msg.ts }),
+        });
+        return; // DO NOT post an acknowledgment — bot stays silent until worker replies
+      }
+      // --- Existing path: @mention required ---
       if (!botMentioned && !isImplicitMention) return;
 
       // Bot was mentioned (or message is in assistant thread) but no online agents matched — queue the request

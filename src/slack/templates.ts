@@ -53,3 +53,32 @@ registerTemplate({
   ],
   category: "system",
 });
+
+registerTemplate({
+  eventType: "slack.auto_reply.data_classifier",
+  header: "",
+  defaultBody: `AUTO-REPLY CLASSIFIER TASK
+Channel: {{channel_id}}
+Original message: "{{message_text}}"
+
+STEP 1 — CLASSIFY (strict gate):
+Is this CLEARLY a data question answerable from BigQuery (e.g. counts, revenue, ARR, churn, customers, pipelines, payments)?
+
+If NOT clearly a data question — general chat, process question, opinion, off-topic, ambiguous — call store-progress status:completed output:"Classified as non-data — no reply sent." and STOP. Do not post anything.
+
+STEP 2 — EXECUTE (only if YES):
+Use the bq-query skill to answer the question. Run a focused SQL query. The main project is capchase; start from analytics.* tables. Keep the query narrow.
+
+STEP 3 — COMPOSE A SHORT REPLY:
+2-4 sentences max, or a bullet list of ≤5 items. Include numbers/dates from the query result. No preamble. Start the reply with EXACTLY this line (preserve formatting):
+{{disclaimer}}
+
+STEP 4 — POST:
+Call slack-reply with your taskId to send the reply in-thread.`,
+  variables: [
+    { name: "channel_id", description: "Slack channel ID (e.g. C03FFSNF5U4)" },
+    { name: "message_text", description: "The original Slack message text" },
+    { name: "disclaimer", description: "Beta disclaimer string to prepend to every reply" },
+  ],
+  category: "system",
+});

@@ -7,6 +7,7 @@ import {
   formatFileSize,
   isBotMessage,
   isSwarmThreadRoot,
+  looksLikeDataQuestion,
   type UserFilterConfig,
 } from "./handlers";
 
@@ -392,5 +393,55 @@ describe("isSwarmThreadRoot", () => {
 
   test("falls back to bot_id when bot user ID is unknown but bot_id is", () => {
     expect(isSwarmThreadRoot({ bot_id: "B_SWARM" }, null, "B_SWARM")).toBe(true);
+  });
+});
+
+describe("looksLikeDataQuestion", () => {
+  describe("returns true for data questions", () => {
+    test("how many question", () => {
+      expect(looksLikeDataQuestion("how many companies signed up last month?")).toBe(true);
+    });
+
+    test("ARR by cohort", () => {
+      expect(looksLikeDataQuestion("what is our ARR by cohort?")).toBe(true);
+    });
+
+    test("churn rate keyword without question mark", () => {
+      expect(looksLikeDataQuestion("show me churn rate Q1")).toBe(true);
+    });
+
+    test("revenue keyword", () => {
+      expect(looksLikeDataQuestion("can we see total revenue for last quarter?")).toBe(true);
+    });
+
+    test("MRR keyword", () => {
+      expect(looksLikeDataQuestion("what is mrr breakdown by plan?")).toBe(true);
+    });
+
+    test("last week keyword", () => {
+      expect(looksLikeDataQuestion("How did we perform last week overall?")).toBe(true);
+    });
+  });
+
+  describe("returns false for non-data messages", () => {
+    test("too short", () => {
+      expect(looksLikeDataQuestion("thanks!")).toBe(false);
+    });
+
+    test("short emoji-only message", () => {
+      expect(looksLikeDataQuestion("👏")).toBe(false);
+    });
+
+    test("chatter without data keywords", () => {
+      expect(looksLikeDataQuestion("great presentation everyone :clap:")).toBe(false);
+    });
+
+    test("process question without data keywords", () => {
+      expect(looksLikeDataQuestion("can we schedule the Q2 roadmap review?")).toBe(false);
+    });
+
+    test("opinion without data keywords", () => {
+      expect(looksLikeDataQuestion("I think we should move faster on this initiative")).toBe(false);
+    });
   });
 });
