@@ -983,6 +983,7 @@ fi
 chown -R worker:worker /home/worker/.claude/skills 2>/dev/null || true
 chown -R worker:worker /home/worker/.pi/agent/skills 2>/dev/null || true
 chown -R worker:worker /home/worker/.codex/skills 2>/dev/null || true
+chown -R worker:worker /home/worker/.agents/skills 2>/dev/null || true
 
 echo ""
 

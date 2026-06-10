@@ -350,6 +350,7 @@ async function fetchResolvedEnv(
   apiKey: string,
   agentId: string,
   baseEnv: Record<string, string | undefined> = process.env,
+  taskModel?: string,
 ): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
 
@@ -382,6 +383,12 @@ async function fetchResolvedEnv(
 
   const resolvedProvider = resolveHarnessProvider(env, baseEnv);
 
+  // Effective model: per-task model takes priority over the agent-level
+  // MODEL_OVERRIDE from swarm_config. Passed to resolveCredentialPools so
+  // the harness × model matrix can exclude incompatible credential vars
+  // (e.g. OPENAI_API_KEY when an OpenRouter model is selected on opencode).
+  const effectiveModel = taskModel || (env.MODEL_OVERRIDE as string | undefined) || "";
+
   const credentialSelections = await resolveCredentialPools(env, {
     apiUrl,
     apiKey,
@@ -393,6 +400,7 @@ async function fetchResolvedEnv(
     // Use the resolved provider (swarm_config > env) so an operator can flip
     // the worker's harness from the dashboard without restarting the container.
     provider: resolvedProvider,
+    model: effectiveModel,
   });
 
   return { env, credentialSelections, resolvedProvider };
@@ -2562,11 +2570,15 @@ async function spawnProviderProcess(
   // Correlation ID for logs/display — always defined
   const effectiveTaskId = realTaskId || crypto.randomUUID();
 
-  // Resolve env first so we can use MODEL_OVERRIDE from config
+  // Resolve env first so we can use MODEL_OVERRIDE from config.
+  // Pass opts.model (per-task model) so the credential picker can apply
+  // the harness × model matrix (e.g. exclude OPENAI_API_KEY for OpenRouter models).
   const { env: freshEnv, credentialSelections } = await fetchResolvedEnv(
     opts.apiUrl,
     opts.apiKey,
     opts.agentId,
+    process.env,
+    opts.model,
   );
 
   // Report which key was selected for this task (fire-and-forget)

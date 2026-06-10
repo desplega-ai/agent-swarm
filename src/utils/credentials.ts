@@ -27,8 +27,32 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   pi: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY"],
-  opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"],
+  opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
 };
+
+/**
+ * Given a provider and model string, return the credential vars that are
+ * actually relevant. This implements the harness × model matrix constraint:
+ *
+ * - opencode + model with "/" (e.g. "google/gemini-3-flash-preview",
+ *   "openrouter/openai/gpt-4o"): the model is routed through OpenRouter →
+ *   OPENAI_API_KEY must not be selected (it would auth against the wrong
+ *   endpoint).
+ * - opencode + model without "/" (e.g. "gpt-4o", "o3-mini") or empty: the
+ *   model is either a direct OpenAI model or the default → keep all creds
+ *   including OPENAI_API_KEY.
+ *
+ * All other providers return their static list unchanged.
+ */
+export function getModelAwareCredentialVars(provider: string, model?: string): readonly string[] {
+  const base = PROVIDER_CREDENTIAL_VARS[provider];
+  if (!base) return CREDENTIAL_POOL_VARS;
+  if (provider !== "opencode" || !model) return base;
+  if (model.includes("/")) {
+    return base.filter((v) => v !== "OPENAI_API_KEY");
+  }
+  return base;
+}
 
 /**
  * Derive a canonical harness provider from a credential env var name. Used
@@ -228,10 +252,17 @@ export async function resolveCredentialPools(
      * container env. Defaults to ALL pool vars for backwards compatibility.
      */
     provider?: string;
+    /**
+     * Optional model string (e.g. "google/gemini-3-flash-preview", "gpt-4o").
+     * Used together with `provider` to apply the harness × model matrix:
+     * an OpenRouter-routed model (contains "/") on the opencode harness must
+     * not select OPENAI_API_KEY, while a direct OpenAI model may.
+     */
+    model?: string;
   },
 ): Promise<CredentialSelection[]> {
   const providerVars = opts?.provider
-    ? (PROVIDER_CREDENTIAL_VARS[opts.provider] ?? CREDENTIAL_POOL_VARS)
+    ? getModelAwareCredentialVars(opts.provider, opts.model)
     : CREDENTIAL_POOL_VARS;
 
   const availableIndicesMap =
