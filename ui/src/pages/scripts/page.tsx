@@ -177,7 +177,7 @@ export default function ScriptsPage() {
                 size="sm"
                 checked={includeScratch}
                 onCheckedChange={(checked) =>
-                  setParam("scratch", checked, { reset: ["scriptsPage"] })
+                  setParam("scratch", checked ? "true" : "", { reset: ["scriptsPage"] })
                 }
               />
               <Label htmlFor="include-scratch" className="text-xs text-muted-foreground">
