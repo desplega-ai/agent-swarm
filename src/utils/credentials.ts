@@ -23,31 +23,41 @@ export const CREDENTIAL_POOL_VARS = [
  */
 export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   claude: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
-  // pi-mono accepts either router or anthropic keys
-  pi: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"],
+  pi: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
 };
 
 /**
+ * Providers where models use `provider_id/model_id` format — a slash in the
+ * model string means the model is routed through an upstream provider (e.g.
+ * OpenRouter) and OPENAI_API_KEY must not be selected (it would auth against
+ * the wrong endpoint). Without a slash the model targets a direct API (e.g.
+ * OpenAI) and OPENAI_API_KEY is valid.
+ *
+ * Both opencode and pi follow this convention:
+ * - opencode: https://opencode.ai/docs/models/
+ * - pi: https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md
+ */
+const SLASH_MODEL_PROVIDERS = new Set(["opencode", "pi"]);
+
+/**
  * Given a provider and model string, return the credential vars that are
  * actually relevant. This implements the harness × model matrix constraint:
  *
- * - opencode + model with "/" (e.g. "google/gemini-3-flash-preview",
+ * - (opencode | pi) + model with "/" (e.g. "google/gemini-3-flash-preview",
  *   "openrouter/openai/gpt-4o"): the model is routed through OpenRouter →
- *   OPENAI_API_KEY must not be selected (it would auth against the wrong
- *   endpoint).
- * - opencode + model without "/" (e.g. "gpt-4o", "o3-mini") or empty: the
- *   model is either a direct OpenAI model or the default → keep all creds
- *   including OPENAI_API_KEY.
+ *   OPENAI_API_KEY must not be selected.
+ * - (opencode | pi) + model without "/" (e.g. "gpt-4o", "o3-mini") or empty:
+ *   the model targets a direct API → keep all creds including OPENAI_API_KEY.
  *
  * All other providers return their static list unchanged.
  */
 export function getModelAwareCredentialVars(provider: string, model?: string): readonly string[] {
   const base = PROVIDER_CREDENTIAL_VARS[provider];
   if (!base) return CREDENTIAL_POOL_VARS;
-  if (provider !== "opencode" || !model) return base;
+  if (!SLASH_MODEL_PROVIDERS.has(provider) || !model) return base;
   if (model.includes("/")) {
     return base.filter((v) => v !== "OPENAI_API_KEY");
   }

@@ -181,7 +181,26 @@ describe("getModelAwareCredentialVars", () => {
     expect(vars).toContain("OPENAI_API_KEY");
   });
 
-  it("returns static list for non-opencode providers regardless of model", () => {
+  it("excludes OPENAI_API_KEY for pi with OpenRouter model (slash in name)", () => {
+    const vars = getModelAwareCredentialVars("pi", "anthropic/claude-sonnet-4-20250514");
+    expect(vars).toContain("OPENROUTER_API_KEY");
+    expect(vars).toContain("ANTHROPIC_API_KEY");
+    expect(vars).not.toContain("OPENAI_API_KEY");
+  });
+
+  it("keeps OPENAI_API_KEY for pi with direct model (no slash)", () => {
+    const vars = getModelAwareCredentialVars("pi", "gpt-4o");
+    expect(vars).toContain("OPENROUTER_API_KEY");
+    expect(vars).toContain("ANTHROPIC_API_KEY");
+    expect(vars).toContain("OPENAI_API_KEY");
+  });
+
+  it("keeps OPENAI_API_KEY for pi when model is undefined", () => {
+    const vars = getModelAwareCredentialVars("pi");
+    expect(vars).toContain("OPENAI_API_KEY");
+  });
+
+  it("returns static list for non-slash providers regardless of model", () => {
     const vars = getModelAwareCredentialVars("claude", "google/gemini-3-flash-preview");
     expect(vars).toContain("CLAUDE_CODE_OAUTH_TOKEN");
     expect(vars).toContain("ANTHROPIC_API_KEY");
