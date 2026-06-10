@@ -107,6 +107,15 @@ describe("PiMonoSession — provider tag on CostData", () => {
       const session = new PiMonoSession(fake, makeConfig(logFile), false);
       session.onEvent((e) => events.push(e));
 
+      const sessionInit = events.find((e) => e.type === "session_init");
+      expect(sessionInit).toBeDefined();
+      if (sessionInit?.type === "session_init") {
+        expect(sessionInit.provider).toBe("pi");
+        expect(sessionInit.harnessVariant).toBe("stock");
+        expect(typeof sessionInit.harnessVariantMeta?.version).toBe("string");
+        expect((sessionInit.harnessVariantMeta?.version as string).length).toBeGreaterThan(0);
+      }
+
       const result = await session.waitForCompletion();
 
       // The load-bearing assertion. Phase 2's API recompute path keys off
