@@ -2,6 +2,7 @@ import Editor from "@monaco-editor/react";
 import type { ColDef } from "ag-grid-community";
 import {
   BarChart3,
+  Check,
   ChevronDown,
   ChevronRight,
   Code2,
@@ -41,6 +42,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -51,13 +60,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, formatSmartTime } from "@/lib/utils";
@@ -179,6 +182,125 @@ function readVariableValues(
 
 function variableParamValue(value: MetricParam): string {
   return value == null ? "" : String(value);
+}
+
+function variableParamEquals(left: MetricParam, right: MetricParam): boolean {
+  return Object.is(left, right);
+}
+
+function normalizeSearchValue(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function fuzzyScore(option: string, query: string): number {
+  const normalizedOption = normalizeSearchValue(option);
+  const normalizedQuery = normalizeSearchValue(query);
+  if (!normalizedQuery) return 0;
+  if (normalizedOption === normalizedQuery) return 1;
+  if (normalizedOption.startsWith(normalizedQuery)) return 2;
+  const substringIndex = normalizedOption.indexOf(normalizedQuery);
+  if (substringIndex >= 0) return 10 + substringIndex;
+
+  let optionIndex = 0;
+  let gapPenalty = 0;
+  for (const queryChar of normalizedQuery) {
+    const nextIndex = normalizedOption.indexOf(queryChar, optionIndex);
+    if (nextIndex < 0) return Number.POSITIVE_INFINITY;
+    gapPenalty += nextIndex - optionIndex;
+    optionIndex = nextIndex + 1;
+  }
+  return 100 + gapPenalty + normalizedOption.length;
+}
+
+function optionSearchText(option: { label: string; value: MetricParam }): string {
+  return `${option.label} ${variableParamValue(option.value)}`;
+}
+
+function VariableOptionCombobox({
+  variable,
+  value,
+  onChange,
+}: {
+  variable: MetricVariable;
+  value: MetricParam;
+  onChange: (value: MetricParam) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const options = variable.options ?? [];
+  const selectedOption = options.find((option) => variableParamEquals(option.value, value));
+  const selectedLabel = selectedOption?.label ?? variableParamValue(value);
+  const filteredOptions = useMemo(
+    () =>
+      options
+        .map((option, index) => ({
+          option,
+          index,
+          score: fuzzyScore(optionSearchText(option), search),
+        }))
+        .filter((item) => Number.isFinite(item.score))
+        .sort((a, b) => a.score - b.score || a.index - b.index),
+    [options, search],
+  );
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setSearch("");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-9 w-[220px] justify-between px-3 font-normal"
+        >
+          <span className={cn("truncate", !selectedLabel && "text-muted-foreground")}>
+            {selectedLabel || "Select option"}
+          </span>
+          <ChevronDown className="ml-2 size-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-[220px] p-0">
+        <Command shouldFilter={false}>
+          <CommandInput placeholder="Search options..." value={search} onValueChange={setSearch} />
+          <CommandList>
+            <CommandEmpty>No options found.</CommandEmpty>
+            <CommandGroup>
+              {filteredOptions.map(({ option, index }) => {
+                const selected = variableParamEquals(option.value, value);
+                const displayLabel = option.label || "(Blank)";
+                const displayValue = variableParamValue(option.value);
+                return (
+                  <CommandItem
+                    key={`${variable.key}-${index}-${displayValue}`}
+                    value={`${variable.key}-${index}`}
+                    onSelect={() => {
+                      onChange(option.value);
+                      setOpen(false);
+                      setSearch("");
+                    }}
+                  >
+                    <Check className={cn("size-4", selected ? "opacity-100" : "opacity-0")} />
+                    <span className="truncate">{displayLabel}</span>
+                    {displayValue && displayValue !== option.label && (
+                      <span className="ml-auto truncate font-mono text-[10px] text-muted-foreground">
+                        {displayValue}
+                      </span>
+                    )}
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function MetricTable({
@@ -440,30 +562,18 @@ function VariableControls({
   return (
     <div className="flex flex-wrap items-end gap-3">
       {variables.map((variable) => {
-        const value = values[variable.key] ?? getDefaultVariableValue(variable);
+        const value =
+          variable.key in values ? values[variable.key] : getDefaultVariableValue(variable);
         const label = variable.label ?? variable.key;
         if (variable.type === "select" && variable.options?.length) {
           return (
             <div key={variable.key} className="space-y-1.5">
               <Label className="text-xs">{label}</Label>
-              <Select
-                value={variableParamValue(value)}
-                onValueChange={(next) => onChange(variable.key, next)}
-              >
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {variable.options.map((option) => (
-                    <SelectItem
-                      key={variableParamValue(option.value)}
-                      value={variableParamValue(option.value)}
-                    >
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <VariableOptionCombobox
+                variable={variable}
+                value={value}
+                onChange={(next) => onChange(variable.key, next)}
+              />
             </div>
           );
         }
@@ -718,7 +828,16 @@ function MetricsDetailPage() {
   }
 
   function setVariable(key: string, value: MetricParam) {
-    updateSearch({ [`var_${key}`]: variableParamValue(value) });
+    const next = new URLSearchParams(searchParams);
+    const queryKey = `var_${key}`;
+    const queryValue = variableParamValue(value);
+    const variable = variables.find((item) => item.key === key);
+    if (queryValue === "" && variable?.type !== "select") {
+      next.delete(queryKey);
+    } else {
+      next.set(queryKey, queryValue);
+    }
+    setSearchParams(next, { replace: false });
   }
 
   if (isLoading) {
