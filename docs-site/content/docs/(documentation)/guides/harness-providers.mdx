@@ -479,11 +479,12 @@ Skills are the swarm's portable procedural knowledge — reusable markdown files
     See [`pi-mono-adapter.ts:541`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts). Skills live at `~/.pi/agent/skills/<name>/SKILL.md`.
   </Tab>
   <Tab value="Inline resolver">
-    **Codex.** The Codex SDK has no skill mechanism, so the adapter resolves the skill itself before calling the model:
+    **Codex and OpenCode.** These SDKs have no `SKILL.md` mechanism, so the adapter resolves the skill itself before calling the model:
 
     - [`src/providers/codex-skill-resolver.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-skill-resolver.ts) intercepts a leading `/<name>` in the user prompt.
-    - Reads `${CODEX_SKILLS_DIR ?? ~/.codex/skills}/<name>/SKILL.md`.
-    - **Inlines** the SKILL.md content into the prompt before calling `thread.runStreamed`.
+    - Codex reads `${CODEX_SKILLS_DIR ?? ~/.codex/skills}/<name>/SKILL.md`.
+    - OpenCode reads `${OPENCODE_SKILLS_DIR ?? ~/.opencode/skills}/<name>/SKILL.md`.
+    - **Inlines** the SKILL.md content into the prompt before calling the provider SDK.
     - `formatCommand(name)` simply returns `/${name}` so the swarm can still emit the canonical form; the resolver does the work.
 
     This is the template to follow if your provider lacks native skill support.
@@ -497,6 +498,8 @@ The swarm still seeds skills into each provider's skill dir at container boot in
 - `~/.claude/skills/<name>/SKILL.md`
 - `~/.pi/agent/skills/<name>/SKILL.md`
 - `~/.codex/skills/<name>/SKILL.md`
+- `~/.opencode/skills/<name>/SKILL.md`
+- `~/.agents/skills/<name>/SKILL.md`
 
 For DB-backed complex skills, sibling bundled files are mirrored alongside `SKILL.md` under the same skill directory. Legacy remote/sourceRepo-only complex skills still rely on the entrypoint fallback when the bundle is not present in the database yet.
 
@@ -668,10 +671,11 @@ Skills are the swarm's portable procedural knowledge (`/review-pr`, `/implement-
 - **Claude**: native slash-commands, so `formatCommand(name) => "/" + name` (`claude-adapter.ts` L601).
 - **Pi**: prefixed, `formatCommand(name) => "/skill:" + name` (`pi-mono-adapter.ts` L541); resolved from `~/.pi/agent/skills/<name>/SKILL.md`.
 - **Codex**: no native skills support → [`src/providers/codex-skill-resolver.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-skill-resolver.ts) intercepts a leading `/<name>` in the prompt, reads `${CODEX_SKILLS_DIR ?? ~/.codex/skills}/<name>/SKILL.md`, and inlines it before calling `thread.runStreamed`. The system prompt is delivered by writing `AGENTS.md` into `cwd` (see [`codex-agents-md.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-agents-md.ts)).
+- **OpenCode**: no native `SKILL.md` support → uses the same inline resolver, reads `${OPENCODE_SKILLS_DIR ?? ~/.opencode/skills}/<name>/SKILL.md`, and inlines it before calling `client.session.prompt`.
 
 Pick the model that matches your runtime; if your provider has no native skill mechanism, follow the Codex inline-resolver pattern.
 
-The swarm syncs skill files into each provider's skill dir at container boot in [`docker-entrypoint.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-entrypoint.sh) (copies `SKILL.md` into `~/.claude/skills/`, `~/.pi/agent/skills/`, and `~/.codex/skills/`). Add an entry for your provider there.
+The swarm syncs skill files into each provider's skill dir at container boot and during per-task refreshes (copies `SKILL.md` into `~/.claude/skills/`, `~/.pi/agent/skills/`, `~/.codex/skills/`, `~/.opencode/skills/`, and `~/.agents/skills/`). Add an entry for your provider there.
 
 ### Step 10 — Worker bootstrap (Docker entrypoint)
 

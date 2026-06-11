@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
 import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
@@ -614,16 +614,22 @@ describe("OpencodeSession — context_usage emission (phase 9 fix)", () => {
 // ── DES-300: per-task isolation ────────────────────────────────────────────────
 
 describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
+  let prevOpencodeSkillsDir: string | undefined;
+
   beforeEach(() => {
+    prevOpencodeSkillsDir = process.env.OPENCODE_SKILLS_DIR;
     lastPromptArgs = undefined;
     lastCreateOpencodeConfig = undefined;
     mock.restore();
   });
 
   afterEach(() => {
+    if (prevOpencodeSkillsDir === undefined) delete process.env.OPENCODE_SKILLS_DIR;
+    else process.env.OPENCODE_SKILLS_DIR = prevOpencodeSkillsDir;
     // Clean up any written files from tests
     Bun.$`rm -rf /tmp/opencode-task-1.json /tmp/opencode-data-task-1`.quiet().nothrow();
     Bun.$`rm -rf /tmp/test/.opencode`.quiet().nothrow();
+    rmSync("/tmp/opencode-skills-test", { recursive: true, force: true });
   });
 
   test("session.prompt receives agent=swarm-<taskId>", async () => {
@@ -636,6 +642,28 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
     expect(lastPromptArgs).toBeDefined();
     const args = lastPromptArgs as { body?: { agent?: string } };
     expect(args.body?.agent).toBe("swarm-task-1");
+  });
+
+  test("inlines a leading slash skill before sending prompt", async () => {
+    const skillDir = "/tmp/opencode-skills-test/work-on-task";
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "Use the task worker procedure.");
+    process.env.OPENCODE_SKILLS_DIR = "/tmp/opencode-skills-test";
+
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    const cfg = testConfig({
+      taskId: "task-1",
+      prompt: "/work-on-task task-123\n\nTask body.",
+    });
+    await driveSession(events, cfg);
+
+    const args = lastPromptArgs as { body?: { parts?: Array<{ type: string; text: string }> } };
+    const text = args.body?.parts?.[0]?.text ?? "";
+    expect(text).toStartWith("Use the task worker procedure.");
+    expect(text).toContain("User request: task-123\n\nTask body.");
+    expect(text).not.toContain("/work-on-task task-123");
   });
 
   test("createOpencode receives config with model, mcp.swarm, and permission", async () => {

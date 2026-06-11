@@ -41,6 +41,8 @@ describe("writeSkillsToFilesystem", () => {
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
     rmSync(join(FAKE_HOME, ".pi"), { recursive: true, force: true });
     rmSync(join(FAKE_HOME, ".codex"), { recursive: true, force: true });
+    rmSync(join(FAKE_HOME, ".opencode"), { recursive: true, force: true });
+    rmSync(join(FAKE_HOME, ".agents"), { recursive: true, force: true });
   });
 
   afterAll(() => {
@@ -71,12 +73,16 @@ describe("writeSkillsToFilesystem", () => {
     const entries = [skillEntry({ name: "multi-skill", content: "# Multi" })];
     const result = writeSkillsToFilesystem(entries, "all", FAKE_HOME);
 
-    expect(result.synced).toBe(3); // claude + pi + codex
+    expect(result.synced).toBe(5); // claude + pi + codex + opencode + .agents
     expect(existsSync(join(FAKE_HOME, ".claude", "skills", "multi-skill", "SKILL.md"))).toBe(true);
     expect(existsSync(join(FAKE_HOME, ".pi", "agent", "skills", "multi-skill", "SKILL.md"))).toBe(
       true,
     );
     expect(existsSync(join(FAKE_HOME, ".codex", "skills", "multi-skill", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(FAKE_HOME, ".opencode", "skills", "multi-skill", "SKILL.md"))).toBe(
+      true,
+    );
+    expect(existsSync(join(FAKE_HOME, ".agents", "skills", "multi-skill", "SKILL.md"))).toBe(true);
   });
 
   test("writes complex skill SKILL.md plus non-binary bundled files", () => {

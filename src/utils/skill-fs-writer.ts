@@ -8,8 +8,8 @@
  *     SkillFsEntry data from the DB then delegates here.
  *   - Worker-side: refreshSkillsIfChanged (src/utils/skills-refresh.ts) which
  *     fetches SkillFsEntry data over HTTP then calls writeSkillsToFilesystem
- *     with the worker's own homedir(), writing SKILL.md files to the correct
- *     machine instead of the API box.
+ *     with the worker's own homedir(), writing SKILL.md files to every local
+ *     harness tree instead of the API box.
  */
 
 import type { Dirent } from "node:fs";
@@ -31,6 +31,8 @@ export interface SkillFsEntry {
   isActive: boolean;
   files: { path: string; content: string; isBinary: boolean }[];
 }
+
+export type SkillHarnessTarget = "claude" | "pi" | "codex" | "opencode" | "agents" | "all";
 
 /**
  * Marker file written into every swarm-managed skill directory. Cleanup
@@ -109,7 +111,7 @@ function reconcileManagedSkillFiles(skillDir: string, currentRelativeFiles: Set<
  */
 export function writeSkillsToFilesystem(
   entries: SkillFsEntry[],
-  harnessType: "claude" | "pi" | "codex" | "all" = "all",
+  harnessType: SkillHarnessTarget = "all",
   home: string,
 ): SkillSyncResult {
   const errors: string[] = [];
@@ -126,6 +128,12 @@ export function writeSkillsToFilesystem(
   }
   if (harnessType === "codex" || harnessType === "all") {
     skillDirs.push(join(home, ".codex", "skills"));
+  }
+  if (harnessType === "opencode" || harnessType === "all") {
+    skillDirs.push(join(home, ".opencode", "skills"));
+  }
+  if (harnessType === "agents" || harnessType === "all") {
+    skillDirs.push(join(home, ".agents", "skills"));
   }
 
   // Ensure base dirs exist

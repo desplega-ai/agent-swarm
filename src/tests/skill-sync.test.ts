@@ -121,23 +121,29 @@ describe("syncSkillsToFilesystem", () => {
     expect(existsSync(piOnlyFile)).toBe(false);
   });
 
-  test("syncs to claude, pi, and codex when harnessType is 'all'", () => {
+  test("syncs to all local harness skill trees when harnessType is 'all'", () => {
     // Clean up first to get accurate count
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
     rmSync(join(FAKE_HOME, ".pi"), { recursive: true, force: true });
     rmSync(join(FAKE_HOME, ".codex"), { recursive: true, force: true });
+    rmSync(join(FAKE_HOME, ".opencode"), { recursive: true, force: true });
+    rmSync(join(FAKE_HOME, ".agents"), { recursive: true, force: true });
 
     const result = syncSkillsToFilesystem(agentId, "all", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
-    expect(result.synced).toBe(6); // 2 DB-backed skills × 3 dirs
+    expect(result.synced).toBe(10); // 2 DB-backed skills × 5 dirs
 
     const claudeFile = join(FAKE_HOME, ".claude", "skills", "test-skill", "SKILL.md");
     const piFile = join(FAKE_HOME, ".pi", "agent", "skills", "test-skill", "SKILL.md");
     const codexFile = join(FAKE_HOME, ".codex", "skills", "test-skill", "SKILL.md");
+    const opencodeFile = join(FAKE_HOME, ".opencode", "skills", "test-skill", "SKILL.md");
+    const agentsFile = join(FAKE_HOME, ".agents", "skills", "test-skill", "SKILL.md");
     expect(existsSync(claudeFile)).toBe(true);
     expect(existsSync(piFile)).toBe(true);
     expect(existsSync(codexFile)).toBe(true);
+    expect(existsSync(opencodeFile)).toBe(true);
+    expect(existsSync(agentsFile)).toBe(true);
   });
 
   test("syncs DB-backed complex skill files and skips binary placeholders", () => {
@@ -299,19 +305,25 @@ describe("syncSkillsToFilesystem", () => {
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
     rmSync(join(FAKE_HOME, ".pi"), { recursive: true, force: true });
     rmSync(join(FAKE_HOME, ".codex"), { recursive: true, force: true });
+    rmSync(join(FAKE_HOME, ".opencode"), { recursive: true, force: true });
+    rmSync(join(FAKE_HOME, ".agents"), { recursive: true, force: true });
 
     // Use 'all' explicitly with homeOverride (default harnessType would use real home)
     const result = syncSkillsToFilesystem(agentId, "all", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
-    expect(result.synced).toBeGreaterThanOrEqual(6);
+    expect(result.synced).toBeGreaterThanOrEqual(10);
 
     const claudeFile = join(FAKE_HOME, ".claude", "skills", "test-skill", "SKILL.md");
     const piFile = join(FAKE_HOME, ".pi", "agent", "skills", "test-skill", "SKILL.md");
     const codexFile = join(FAKE_HOME, ".codex", "skills", "test-skill", "SKILL.md");
+    const opencodeFile = join(FAKE_HOME, ".opencode", "skills", "test-skill", "SKILL.md");
+    const agentsFile = join(FAKE_HOME, ".agents", "skills", "test-skill", "SKILL.md");
     expect(existsSync(claudeFile)).toBe(true);
     expect(existsSync(piFile)).toBe(true);
     expect(existsSync(codexFile)).toBe(true);
+    expect(existsSync(opencodeFile)).toBe(true);
+    expect(existsSync(agentsFile)).toBe(true);
   });
 
   test("returns empty result for agent with no skills", () => {

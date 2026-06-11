@@ -105,6 +105,7 @@ Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAut
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
 | `OPENCODE_BINARY` | No | `opencode` | Path to the opencode CLI binary (if not in `$PATH`) |
+| `OPENCODE_SKILLS_DIR` | No | `~/.opencode/skills` | Directory used by the OpenCode inline resolver for `/<skill>` prompts |
 | `MODEL_OVERRIDE` | No | `openrouter/qwen/qwen3-coder-flash` | Model string passed to opencode. Use `provider/model-id` format (e.g. `anthropic/claude-sonnet-4-6`, `openai/gpt-4o`) |
 
 \* At least one of `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `~/.local/share/opencode/auth.json` is required.

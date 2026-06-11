@@ -1,9 +1,8 @@
 /**
  * Filesystem sync for skills.
  *
- * Writes installed skills to ~/.claude/skills/<name>/SKILL.md,
- * ~/.pi/agent/skills/<name>/SKILL.md, and ~/.codex/skills/<name>/SKILL.md
- * so Claude Code, Pi, and Codex discover them natively.
+ * Writes installed skills to every local harness skill tree so Claude Code,
+ * Pi, Codex, OpenCode, and AGENTS.md-compatible adapters can discover them.
  *
  * This runs on the API side — workers call it via POST /api/skills/sync-filesystem.
  * The actual FS write logic lives in the worker-safe src/utils/skill-fs-writer.ts
@@ -13,6 +12,7 @@
 import { homedir } from "node:os";
 import {
   type SkillFsEntry,
+  type SkillHarnessTarget,
   type SkillSyncResult,
   writeSkillsToFilesystem,
 } from "../utils/skill-fs-writer";
@@ -32,7 +32,7 @@ export type { SkillSyncResult };
  */
 export function syncSkillsToFilesystem(
   agentId: string,
-  harnessType: "claude" | "pi" | "codex" | "all" = "all",
+  harnessType: SkillHarnessTarget = "all",
   homeOverride?: string,
 ): SkillSyncResult {
   const skills = getAgentSkills(agentId);
