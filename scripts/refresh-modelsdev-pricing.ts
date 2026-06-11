@@ -14,6 +14,9 @@ import path from "node:path";
 
 const CACHE_PATH = path.join(process.cwd(), "src", "be", "modelsdev-cache.json");
 const MODELSDEV_URL = "https://models.dev/api.json";
+// Limited-availability models that are intentionally vendored even when models.dev
+// does not list them yet. Add future manual pins as "provider/model-id".
+const PINNED_ENTRIES = ["anthropic/claude-mythos-5"] as const;
 
 interface CostBlock {
   input?: number;
@@ -25,6 +28,7 @@ interface CostBlock {
 interface ModelEntry {
   id?: string;
   cost?: CostBlock;
+  [key: string]: unknown;
 }
 
 interface ProviderEntry {
@@ -86,10 +90,41 @@ function summarize(prev: Cache | null, next: Cache): void {
   console.log(`\nSummary: ${added} added, ${removed} removed, ${changed} changed.`);
 }
 
+function applyPinnedEntries(prev: Cache | null, next: Cache): void {
+  if (!prev) {
+    return;
+  }
+
+  for (const entryPath of PINNED_ENTRIES) {
+    const slashIndex = entryPath.indexOf("/");
+    if (slashIndex === -1) {
+      throw new Error(`Invalid pinned models.dev entry path: ${entryPath}`);
+    }
+
+    const provider = entryPath.slice(0, slashIndex);
+    const modelId = entryPath.slice(slashIndex + 1);
+    if (next[provider]?.models?.[modelId]) {
+      continue;
+    }
+
+    const pinnedEntry = prev[provider]?.models?.[modelId];
+    if (!pinnedEntry) {
+      throw new Error(
+        `Pinned models.dev entry ${entryPath} is missing from the current cache; restore it before refreshing.`,
+      );
+    }
+
+    next[provider] ??= {};
+    next[provider].models ??= {};
+    next[provider].models[modelId] = pinnedEntry;
+  }
+}
+
 async function main(): Promise<void> {
   console.log(`Fetching ${MODELSDEV_URL} ...`);
   const next = await fetchLatest();
   const prev = loadCurrent();
+  applyPinnedEntries(prev, next);
   summarize(prev, next);
   writeFileSync(CACHE_PATH, `${JSON.stringify(next, null, 2)}\n`);
   console.log(`Wrote ${CACHE_PATH}`);
