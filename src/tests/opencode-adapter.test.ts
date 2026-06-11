@@ -156,6 +156,15 @@ describe("OpencodeSession — SSE→ProviderEvent mapping", () => {
     ];
     const { emitted, result, serverCloseCalls } = await driveSession(events);
 
+    const sessionInit = emitted.find((e) => e.type === "session_init");
+    expect(sessionInit).toBeDefined();
+    if (sessionInit?.type === "session_init") {
+      expect(sessionInit.provider).toBe("opencode");
+      expect(sessionInit.harnessVariant).toBe("stock");
+      expect(typeof sessionInit.harnessVariantMeta?.version).toBe("string");
+      expect((sessionInit.harnessVariantMeta?.version as string).length).toBeGreaterThan(0);
+    }
+
     const resultEvent = emitted.find((e) => e.type === "result");
     expect(resultEvent).toBeDefined();
     if (resultEvent?.type === "result") {

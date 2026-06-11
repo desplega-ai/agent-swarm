@@ -36,6 +36,56 @@ const BASELINE_TABLES = [
   "context_versions",
 ];
 
+// 090 was renumbered after being applied in production (2026-06-10): PR #722
+// shipped the metrics seed as 090_seed_swarm_operations_metrics; PR #719 then
+// took 090 for model tiers and renumbered the seed to 091. Databases that
+// applied seed-as-090 recorded version 90 with the seed's checksum, so the
+// runner skipped 090_model_tiers forever and task inserts crashed on the
+// missing modelTier column. Detect that exact history and repair it in place:
+// apply the missing ALTERs and repoint row 90 at 090_model_tiers. No-op on
+// fresh databases and on histories where 090_model_tiers applied normally.
+const SEED_APPLIED_AS_090_CHECKSUM =
+  "8ca4a05263b42d115b419f468bf5113caa5b7ee4363177568897513549224b01";
+
+function repairRenumberedModelTiers(db: Database, migrations: Migration[]): void {
+  const modelTiers = migrations.find((m) => m.name === "090_model_tiers");
+  if (!modelTiers) return;
+
+  const row = db
+    .prepare<AppliedMigration, []>(
+      "SELECT version, name, checksum FROM _migrations WHERE version = 90",
+    )
+    .get();
+  if (
+    !row ||
+    row.name !== "090_seed_swarm_operations_metrics" ||
+    row.checksum !== SEED_APPLIED_AS_090_CHECKSUM
+  ) {
+    return;
+  }
+
+  console.warn(
+    "[migrations] Repairing renumbered migration 090: applying 090_model_tiers over seed-as-090 history",
+  );
+
+  db.transaction(() => {
+    for (const table of ["agent_tasks", "scheduled_tasks"]) {
+      const hasColumn = db
+        .prepare<{ n: number }, [string]>(
+          "SELECT COUNT(*) AS n FROM pragma_table_info(?) WHERE name = 'modelTier'",
+        )
+        .get(table);
+      if (!hasColumn?.n) {
+        db.run(`ALTER TABLE ${table} ADD COLUMN modelTier TEXT`);
+      }
+    }
+    db.run("UPDATE _migrations SET name = ?, checksum = ? WHERE version = 90", [
+      modelTiers.name,
+      modelTiers.checksum,
+    ]);
+  })();
+}
+
 function shouldBootstrapInitialMigration(db: Database): boolean {
   const rows = db
     .prepare<{ name: string }, []>(
@@ -106,6 +156,8 @@ export function runMigrations(db: Database): void {
   if (migrations.length === 0) {
     return;
   }
+
+  repairRenumberedModelTiers(db, migrations);
 
   // 3. Get applied migrations
   const applied = new Map<number, AppliedMigration>();

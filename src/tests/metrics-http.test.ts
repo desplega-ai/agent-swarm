@@ -89,6 +89,47 @@ describe("Metrics HTTP API", () => {
       "task-outcomes-by-day",
       "recent-task-outcomes",
     ]);
+    expect(
+      starter?.definition.variables?.find((variable) => variable.key === "userFilter"),
+    ).toMatchObject({
+      type: "select",
+      defaultValue: "all",
+      optionsQuery: { valueKey: "id", labelKey: "label" },
+    });
+    expect(
+      starter?.definition.variables?.find((variable) => variable.key === "agentFilter"),
+    ).toMatchObject({
+      type: "select",
+      defaultValue: "all",
+      optionsQuery: { valueKey: "id", labelKey: "label" },
+    });
+
+    const run = await fetch(`${BASE}/api/metrics/definitions/${starter!.id}/run`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ variables: {} }),
+    });
+    expect(run.status).toBe(200);
+    const runBody = (await run.json()) as MetricRunResponse & {
+      metric: Metric;
+      variables: Record<string, string>;
+    };
+    expect(runBody.variables.userFilter).toBe("all");
+    expect(runBody.variables.agentFilter).toBe("all");
+    expect(
+      runBody.metric.definition.variables?.find((variable) => variable.key === "userFilter")
+        ?.options?.[0],
+    ).toEqual({
+      label: "All requesters",
+      value: "all",
+    });
+    expect(
+      runBody.metric.definition.variables?.find((variable) => variable.key === "agentFilter")
+        ?.options?.[0],
+    ).toEqual({
+      label: "All agents",
+      value: "all",
+    });
   });
 
   test("create, run, update snapshots prior definition", async () => {
