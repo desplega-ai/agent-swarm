@@ -16,7 +16,7 @@ import {
 } from "../components/StatusBadge.tsx";
 import { InfoTip } from "../components/Tooltip.tsx";
 import { navigate, useModels, usePoll } from "../hooks.ts";
-import type { CellJson, RunListItem } from "../types.ts";
+import type { CellJson, RunListItem, RunVersions } from "../types.ts";
 import { NewRunDialog } from "./NewRunDialog.tsx";
 import "./runs.css";
 
@@ -36,66 +36,190 @@ function bestScoreOf(item: RunListItem): number | null {
   return scores.length > 0 ? Math.max(...scores) : null;
 }
 
-// Exactly five columns (item 11): Run (flexible), Status (+ best score), Scenarios, Cost, Created.
+// Shared column building blocks: the compact (split) set keeps exactly five columns
+// (item 11); the wide set reuses run/status/scenarios/cost/created and layers in the
+// v5 §4 deep columns.
+const COL_RUN: Column<RunListItem> = {
+  key: "run",
+  header: "Run",
+  searchText: (r) => `${r.run.id} ${r.run.name ?? ""}`,
+  // item 4: rich portal tooltip reveals the WHOLE (possibly truncated) name + id
+  tooltip: (r) => (r.run.name !== null ? `${r.run.name}\n${r.run.id}` : r.run.id),
+  sortValue: (r) => runLabel(r),
+  render: (r) => runLabel(r),
+};
+
+const COL_STATUS: Column<RunListItem> = {
+  key: "status",
+  header: "Status",
+  width: "80px",
+  sortValue: (r) => r.run.status,
+  render: (r) => (
+    <StatusScore
+      status={r.run.status}
+      score={bestScoreOf(r)}
+      tip={r.active ? "Executor active" : undefined}
+    />
+  ),
+};
+
+const COL_SCENARIOS: Column<RunListItem> = {
+  key: "scenarios",
+  header: "Scenarios",
+  align: "center",
+  width: "90px",
+  searchText: (r) => r.run.scenarioIds.join(" "),
+  // item 3: hover = per-scenario × config result-glyph breakdown from run.cells
+  tooltip: (r) => (
+    <Matrix
+      variant="mini"
+      scenarioIds={r.run.scenarioIds}
+      configIds={r.run.configIds}
+      cells={r.cells}
+    />
+  ),
+  sortValue: (r) => r.run.scenarioIds.length,
+  render: (r) => r.run.scenarioIds.length,
+};
+
+const COL_COST: Column<RunListItem> = {
+  key: "cost",
+  header: "Cost",
+  align: "right",
+  width: "72px",
+  sortValue: (r) => r.totals.totalCostUsd,
+  render: (r) => fmtCost(r.totals.totalCostUsd),
+};
+
+const COL_CREATED: Column<RunListItem> = {
+  key: "created",
+  header: "Created",
+  align: "right",
+  width: "90px",
+  titleText: (r) => r.run.createdAt,
+  sortValue: (r) => r.run.createdAt,
+  render: (r) => fmtAgo(r.run.createdAt),
+};
+
+// Exactly five columns in split mode (item 11): Run, Status (+ best score), Scenarios, Cost, Created.
 const RUN_COLUMNS: Column<RunListItem>[] = [
-  {
-    key: "run",
-    header: "Run",
-    searchText: (r) => `${r.run.id} ${r.run.name ?? ""}`,
-    // item 4: rich portal tooltip reveals the WHOLE (possibly truncated) name + id
-    tooltip: (r) => (r.run.name !== null ? `${r.run.name}\n${r.run.id}` : r.run.id),
-    sortValue: (r) => runLabel(r),
-    render: (r) => runLabel(r),
-  },
-  {
-    key: "status",
-    header: "Status",
-    width: "80px",
-    sortValue: (r) => r.run.status,
-    render: (r) => (
-      <StatusScore
-        status={r.run.status}
-        score={bestScoreOf(r)}
-        tip={r.active ? "Executor active" : undefined}
-      />
-    ),
-  },
-  {
-    key: "scenarios",
-    header: "Scenarios",
-    align: "center",
-    width: "90px",
-    searchText: (r) => r.run.scenarioIds.join(" "),
-    // item 3: hover = per-scenario × config result-glyph breakdown from run.cells
-    tooltip: (r) => (
-      <Matrix
-        variant="mini"
-        scenarioIds={r.run.scenarioIds}
-        configIds={r.run.configIds}
-        cells={r.cells}
-      />
-    ),
-    sortValue: (r) => r.run.scenarioIds.length,
-    render: (r) => r.run.scenarioIds.length,
-  },
-  {
-    key: "cost",
-    header: "Cost",
-    align: "right",
-    width: "72px",
-    sortValue: (r) => r.totals.totalCostUsd,
-    render: (r) => fmtCost(r.totals.totalCostUsd),
-  },
-  {
-    key: "created",
-    header: "Created",
-    align: "right",
-    width: "90px",
-    titleText: (r) => r.run.createdAt,
-    sortValue: (r) => r.run.createdAt,
-    render: (r) => fmtAgo(r.run.createdAt),
-  },
+  COL_RUN,
+  COL_STATUS,
+  COL_SCENARIOS,
+  COL_COST,
+  COL_CREATED,
 ];
+
+/** Wall time of a run: finished → fixed span; still executing → live; otherwise null. */
+function wallMsOf(item: RunListItem): number | null {
+  if (item.run.finishedAt !== null) {
+    return new Date(item.run.finishedAt).getTime() - new Date(item.run.createdAt).getTime();
+  }
+  return item.active ? Date.now() - new Date(item.run.createdAt).getTime() : null;
+}
+
+/** Worker-version summary (v5 §4 col 10): "1.85.0" | "1.85.0 +n"; null when not captured. */
+function workerVersionSummary(versions: RunVersions | undefined): string | null {
+  const worker = versions?.worker ?? [];
+  if (worker.length === 0) return null;
+  return worker.length === 1 ? worker[0] : `${worker[0]} +${worker.length - 1}`;
+}
+
+/** Full "API: …\nWorker: …" lists for the Versions tooltip; null when nothing was captured. */
+function versionsTip(versions: RunVersions | undefined): string | null {
+  if (!versions || (versions.api.length === 0 && versions.worker.length === 0)) return null;
+  const list = (values: string[]) => (values.length > 0 ? values.join(", ") : "—");
+  return `API: ${list(versions.api)}\nWorker: ${list(versions.worker)}`;
+}
+
+/** The wide-mode deep column set (v5 spec §4 — FROZEN order/content). */
+function deepRunColumns(defaultJudgeModel: string | null): Column<RunListItem>[] {
+  return [
+    COL_RUN,
+    COL_STATUS,
+    { ...COL_SCENARIOS, width: "80px" },
+    {
+      key: "configs",
+      header: "Configs",
+      align: "center",
+      width: "70px",
+      searchText: (r) => r.run.configIds.join(" "),
+      // hover = the run's configs as a stacked ConfigChip list
+      tooltip: (r) => (
+        <div className="runs-configs-tip">
+          {r.run.configIds.map((id) => (
+            <div key={id}>
+              <ConfigChip configId={id} />
+            </div>
+          ))}
+        </div>
+      ),
+      sortValue: (r) => r.run.configIds.length,
+      render: (r) => r.run.configIds.length,
+    },
+    {
+      key: "attempts",
+      header: "Attempts",
+      align: "center",
+      width: "90px",
+      tooltip: (r) => {
+        const failed = Math.max(
+          0,
+          r.totals.finished - r.totals.passedAttempts - r.totals.errorAttempts,
+        );
+        return `${r.totals.passedAttempts} Passed · ${failed} Failed · ${r.totals.errorAttempts} Errors`;
+      },
+      sortValue: (r) =>
+        r.totals.finished > 0 ? r.totals.passedAttempts / r.totals.finished : null,
+      render: (r) => (
+        <>
+          {r.totals.passedAttempts}/{r.totals.finished}
+          {r.totals.errorAttempts > 0 ? (
+            <span className="dim"> · {r.totals.errorAttempts}⚠</span>
+          ) : null}
+        </>
+      ),
+    },
+    { ...COL_COST, header: "Task Cost", width: "80px" },
+    {
+      key: "judgeCost",
+      header: "Judge Cost",
+      align: "right",
+      width: "80px",
+      sortValue: (r) => r.totals.judgeCostUsd,
+      render: (r) => fmtCost(r.totals.judgeCostUsd),
+    },
+    {
+      key: "duration",
+      header: "Duration",
+      align: "right",
+      width: "80px",
+      sortValue: (r) => wallMsOf(r),
+      render: (r) => {
+        if (r.run.finishedAt !== null) return fmtDuration(wallMsOf(r));
+        return r.active ? <Elapsed since={r.run.createdAt} /> : "—";
+      },
+    },
+    {
+      key: "judgeModel",
+      header: "Judge Model",
+      width: "140px",
+      sortValue: (r) => r.run.judgeModel ?? defaultJudgeModel,
+      render: (r) => <ModelChip model={r.run.judgeModel ?? defaultJudgeModel} />,
+    },
+    {
+      key: "versions",
+      header: "Versions",
+      align: "center",
+      width: "90px",
+      searchText: (r) => [...(r.versions?.api ?? []), ...(r.versions?.worker ?? [])].join(" "),
+      tooltip: (r) => versionsTip(r.versions),
+      sortValue: (r) => workerVersionSummary(r.versions),
+      render: (r) => workerVersionSummary(r.versions) ?? <span className="dim">—</span>,
+    },
+    COL_CREATED,
+  ];
+}
 
 /** Glyph + capitalized label for a status filter option (items 2, 8). */
 function statusOptionLabel(option: string): ReactNode {
@@ -398,14 +522,40 @@ function RunDetailPane(props: {
   );
 }
 
+type TableMode = "split" | "wide";
+
+const TABLE_MODE_KEY = "evals-runs-table-mode";
+
+/** Session-persisted table mode (v5 §4) — survives hash navigation within the tab. */
+function loadTableMode(): TableMode {
+  try {
+    return sessionStorage.getItem(TABLE_MODE_KEY) === "wide" ? "wide" : "split";
+  } catch {
+    return "split";
+  }
+}
+
 export default function RunsPage(): ReactNode {
   const runsPoll = usePoll(listRuns, 4000, []);
   const models = useModels();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [tableMode, setTableMode] = useState<TableMode>(loadTableMode);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [scenarioFilter, setScenarioFilter] = useState<string[]>([]);
   const [configFilter, setConfigFilter] = useState<string[]>([]);
+
+  const toggleTableMode = () => {
+    setTableMode((prev) => {
+      const next: TableMode = prev === "split" ? "wide" : "split";
+      try {
+        sessionStorage.setItem(TABLE_MODE_KEY, next);
+      } catch {
+        // sessionStorage unavailable — the toggle still works, it just won't persist
+      }
+      return next;
+    });
+  };
 
   const runs = useMemo(() => runsPoll.data ?? [], [runsPoll.data]);
 
@@ -446,6 +596,11 @@ export default function RunsPage(): ReactNode {
   const selected =
     (selectedId !== null ? runs.find((r) => r.run.id === selectedId) : undefined) ?? newest;
 
+  const deepColumns = useMemo(
+    () => deepRunColumns(models.defaultJudgeModel),
+    [models.defaultJudgeModel],
+  );
+
   let body: ReactNode;
   if (runsPoll.data === null) {
     body = runsPoll.error ? (
@@ -465,47 +620,69 @@ export default function RunsPage(): ReactNode {
       </div>
     );
   } else {
-    body = (
-      <div className="layout-30-70">
+    const head = (
+      <div className="runs-head">
+        <h2 className="runs-title">
+          Runs <span className="dim">({runs.length})</span>
+        </h2>
+        <div className="runs-head-actions">
+          {/* v5 §4: ⛶ expands to the full-width deep table; ⊟ restores the 30/70 split */}
+          <button
+            type="button"
+            className="btn"
+            title={
+              tableMode === "split"
+                ? "Full-width table with detailed columns"
+                : "Back to the split view with the detail pane"
+            }
+            onClick={toggleTableMode}
+          >
+            {tableMode === "split" ? "⛶ Expand" : "⊟ Collapse"}
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => setDialogOpen(true)}>
+            + New Run
+          </button>
+        </div>
+      </div>
+    );
+    // Row 1: multi-select filters; row 2: the DataTable's full-width search (item 9).
+    // Both table modes share the exact same filter + fuzzy-search toolbar.
+    const filters = (
+      <div className="runs-filters">
+        <MultiSelect
+          label="Status"
+          options={statusOptions}
+          selected={statusFilter}
+          onChange={setStatusFilter}
+          renderOption={statusOptionLabel}
+        />
+        <MultiSelect
+          label="Scenarios"
+          options={scenarioOptions}
+          selected={scenarioFilter}
+          onChange={setScenarioFilter}
+        />
+        <MultiSelect
+          label="Configs"
+          options={configOptions}
+          selected={configFilter}
+          onChange={setConfigFilter}
+          renderOption={(option) => <ConfigChip configId={option} />}
+        />
+      </div>
+    );
+    body =
+      tableMode === "wide" ? (
+        // Wide mode: single full-width section, deep columns, row click opens the details page.
         <section>
-          <div className="runs-head">
-            <h2 className="runs-title">
-              Runs <span className="dim">({runs.length})</span>
-            </h2>
-            <button type="button" className="btn btn-primary" onClick={() => setDialogOpen(true)}>
-              + New Run
-            </button>
-          </div>
+          {head}
           <div className="panel">
-            {/* Row 1: multi-select filters; row 2: the DataTable's full-width search (item 9). */}
-            <div className="runs-filters">
-              <MultiSelect
-                label="Status"
-                options={statusOptions}
-                selected={statusFilter}
-                onChange={setStatusFilter}
-                renderOption={statusOptionLabel}
-              />
-              <MultiSelect
-                label="Scenarios"
-                options={scenarioOptions}
-                selected={scenarioFilter}
-                onChange={setScenarioFilter}
-              />
-              <MultiSelect
-                label="Configs"
-                options={configOptions}
-                selected={configFilter}
-                onChange={setConfigFilter}
-                renderOption={(option) => <ConfigChip configId={option} />}
-              />
-            </div>
+            {filters}
             <DataTable
               rows={filteredRuns}
-              columns={RUN_COLUMNS}
+              columns={deepColumns}
               rowKey={(r) => r.run.id}
-              onRowClick={(r) => setSelectedId(r.run.id)}
-              selectedKey={selected?.run.id ?? null}
+              rowHref={(r) => `#/runs/${r.run.id}`}
               toolbarLayout="stacked"
               searchPlaceholder="Search runs…"
               defaultSort={{ key: "created", dir: "desc" }}
@@ -513,16 +690,35 @@ export default function RunsPage(): ReactNode {
             />
           </div>
         </section>
-        {selected ? (
-          <RunDetailPane
-            key={selected.run.id}
-            item={selected}
-            defaultJudgeModel={models.defaultJudgeModel}
-            onChanged={runsPoll.refresh}
-          />
-        ) : null}
-      </div>
-    );
+      ) : (
+        <div className="layout-30-70">
+          <section>
+            {head}
+            <div className="panel">
+              {filters}
+              <DataTable
+                rows={filteredRuns}
+                columns={RUN_COLUMNS}
+                rowKey={(r) => r.run.id}
+                onRowClick={(r) => setSelectedId(r.run.id)}
+                selectedKey={selected?.run.id ?? null}
+                toolbarLayout="stacked"
+                searchPlaceholder="Search runs…"
+                defaultSort={{ key: "created", dir: "desc" }}
+                maxHeight="calc(100vh - 260px)"
+              />
+            </div>
+          </section>
+          {selected ? (
+            <RunDetailPane
+              key={selected.run.id}
+              item={selected}
+              defaultJudgeModel={models.defaultJudgeModel}
+              onChanged={runsPoll.refresh}
+            />
+          ) : null}
+        </div>
+      );
   }
 
   return (

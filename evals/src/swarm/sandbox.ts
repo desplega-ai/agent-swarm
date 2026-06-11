@@ -18,6 +18,7 @@ import {
 } from "../../../src/e2b/dispatch";
 import { redactWithEnv } from "../../../src/e2b/env";
 import type { HarnessConfig } from "../types.ts";
+import { cleanVersion } from "./version.ts";
 
 const API_PORT = 3013;
 const API_TEMPLATE = process.env.EVALS_E2B_TEMPLATE_API ?? "agent-swarm-api-latest";
@@ -338,14 +339,14 @@ export async function bootStack(opts: {
     opts.signal?.throwIfAborted();
 
     // Worker build version via the compiled CLI (prints "agent-swarm vX.Y.Z";
-    // there is no -V flag — `version` is the subcommand). Non-fatal → null.
+    // there is no -V flag — `version` is the subcommand). The CLI restores the
+    // cursor on exit (ESC[?25h) — cleanVersion strips ANSI/control sequences
+    // before extracting, so we store a clean "1.85.0" (v5 spec §5).
+    // Non-fatal → null.
     let workerVersion: string | null = null;
     try {
       const res = await sandboxExec(workerSandbox.sandboxID, "agent-swarm version");
-      if (res.exitCode === 0) {
-        const out = res.stdout.trim();
-        workerVersion = out.match(/\bv(\d+\S*)$/)?.[1] ?? (out || null);
-      }
+      if (res.exitCode === 0) workerVersion = cleanVersion(res.stdout);
     } catch {
       // best-effort version capture
     }

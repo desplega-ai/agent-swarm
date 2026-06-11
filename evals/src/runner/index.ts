@@ -350,19 +350,55 @@ async function runAttemptOnce(opts: {
     recordAttemptTimings(attempt.id, timings);
     log(`[logs] captured ${logRows.length} session-log row(s) in ${logCapture.ms}ms`);
 
-    // 1. harness-reported session-cost rows (stability-polled).
+    // 1. harness-reported session-cost rows (stability-polled, per-task waits in
+    // parallel). claude on an OAuth subscription never posts a priced row (zero
+    // rows, or a single cost-0 "unpriced" one) — the stability wait can't change
+    // the outcome, so take a single snapshot for the session-costs.json artifact
+    // and let the recompute fallback below do its job. Mirrors
+    // credentialsForConfig's precedence: OAuth wins when both creds exist.
     signal?.throwIfAborted();
     setAttemptPhase(attempt.id, "cost");
-    log(`[cost] waiting for stable session-cost rows (${tasks.length} task(s))`);
-    const costT0 = Date.now();
-    const costRowsByTask: { taskId: string; rows: SessionCostRow[] }[] = [];
-    let allRows: SessionCostRow[] = [];
-    for (const task of tasks) {
-      const rows = await client.waitForSessionCostRows(task.id, undefined, signal);
-      costRowsByTask.push({ taskId: task.id, rows });
-      allRows = allRows.concat(rows);
-    }
-    let costMs = Date.now() - costT0;
+    const oauthSubscription = config.provider === "claude" && !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    if (oauthSubscription) log("[cost] claude subscription (OAuth) — skipping priced-row wait");
+    else log(`[cost] waiting for stable session-cost rows (${tasks.length} task(s))`);
+    const costWait = timed(() =>
+      Promise.all(
+        tasks.map(async (task) => ({
+          taskId: task.id,
+          rows: oauthSubscription
+            ? await client.getSessionCosts(task.id).catch(() => [] as SessionCostRow[])
+            : await client.waitForSessionCostRows(task.id, { signal }),
+        })),
+      ),
+    );
+
+    // Harness session files — captured before judging so cost recompute can reuse
+    // them. Runs concurrently with the cost wait: the collection execs the WORKER
+    // sandbox, cost rows come from the API sandbox, and sessionFiles is first
+    // consumed after the join below. Timing attribution stays per-phase (costMs =
+    // cost-wait wall, artifactsMs += collection wall), so phases may overlap.
+    let sessionFiles: Awaited<ReturnType<typeof collectHarnessSessionFiles>> = {
+      files: [],
+      listing: [],
+    };
+    const collectWait = timed(() =>
+      collectHarnessSessionFiles(stack.workerSandbox.sandboxID, config.provider),
+    ).then(
+      (collect) => {
+        sessionFiles = collect.result;
+        timings.artifactsMs = (timings.artifactsMs ?? 0) + collect.ms;
+      },
+      (err: unknown) => {
+        log(
+          `[artifacts] harness session capture failed: ${err instanceof Error ? err.message : err}`,
+        );
+      },
+    );
+    const [costCapture] = await Promise.all([costWait, collectWait]);
+    const costRowsByTask = costCapture.result;
+    const allRows = costRowsByTask.flatMap((t) => t.rows);
+    let costMs = costCapture.ms;
+    recordAttemptTimings(attempt.id, timings);
 
     // The cost wait gave late log batches time to flush — re-fetch once and keep
     // the larger set (fixes transcripts losing their tail to the 30s stability cap).
@@ -373,24 +409,6 @@ async function runAttemptOnce(opts: {
     recordAttemptTimings(attempt.id, timings);
     if (refetch.result.length > logRows.length) logRows = refetch.result;
     const transcript = flattenTranscript(logRows);
-
-    // Harness session files — captured before judging so cost recompute can reuse them.
-    let sessionFiles: Awaited<ReturnType<typeof collectHarnessSessionFiles>> = {
-      files: [],
-      listing: [],
-    };
-    try {
-      const collect = await timed(() =>
-        collectHarnessSessionFiles(stack.workerSandbox.sandboxID, config.provider),
-      );
-      sessionFiles = collect.result;
-      timings.artifactsMs = (timings.artifactsMs ?? 0) + collect.ms;
-      recordAttemptTimings(attempt.id, timings);
-    } catch (err) {
-      log(
-        `[artifacts] harness session capture failed: ${err instanceof Error ? err.message : err}`,
-      );
-    }
 
     // 2. recomputed from tokens × models.dev pricing; 3. tagged unpriced.
     const priced = allRows.some(

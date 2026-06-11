@@ -154,28 +154,47 @@ export class SwarmClient {
   }
 
   /**
-   * Poll until cost rows are stable (two consecutive non-empty equal-length
-   * polls) or budget elapses. Cost rows are written by adapters on CLI exit
-   * (one per iteration) and lag task completion by ~10-15s — returning on the
-   * first non-empty poll would undercount multi-iteration tasks.
+   * Poll until cost rows are stable (two consecutive successful non-empty
+   * equal-length polls — never the first non-empty poll, rows trickle in one
+   * per iteration on CLI exit), the empty budget elapses with no rows ever
+   * seen, or the hard budget elapses (last snapshot wins). By the time the
+   * cost phase runs the task is terminal AND the log capture already idled
+   * ≥10s, so rows are normally present on the first poll: the happy path is
+   * one stability interval (≈2s), and 12s of total silence means no adapter
+   * is going to post rows (e.g. claude on an OAuth subscription).
    */
   async waitForSessionCostRows(
     taskId: string,
-    timeoutMs = 60_000,
-    signal?: AbortSignal,
+    opts: {
+      /** Hard budget; elapsing returns the last snapshot (or `[]`). Default 25s. */
+      timeoutMs?: number;
+      /** Give up early when NO rows have ever appeared. Default 12s. */
+      emptyTimeoutMs?: number;
+      /** Poll interval. Default 2s. */
+      intervalMs?: number;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<SessionCostRow[]> {
-    const deadline = Date.now() + timeoutMs;
+    const timeoutMs = opts.timeoutMs ?? 25_000;
+    const emptyTimeoutMs = opts.emptyTimeoutMs ?? 12_000;
+    const intervalMs = opts.intervalMs ?? 2_000;
+    const t0 = Date.now();
+    /** Last successful snapshot — a failed poll keeps it (doesn't reset stability). */
     let prev: SessionCostRow[] | null = null;
-    while (Date.now() < deadline) {
-      if (signal?.aborted) throw new Error("aborted");
+    let sawRows = false;
+    while (true) {
+      if (opts.signal?.aborted) throw new Error("aborted");
       const rows = await this.getSessionCosts(taskId).catch(() => null);
       if (rows) {
         if (rows.length > 0 && prev !== null && prev.length === rows.length) return rows;
+        if (rows.length > 0) sawRows = true;
         prev = rows;
       }
-      await Bun.sleep(5_000);
+      const elapsed = Date.now() - t0;
+      if (!sawRows && elapsed >= emptyTimeoutMs) return [];
+      if (elapsed >= timeoutMs) return prev ?? [];
+      await Bun.sleep(intervalMs);
     }
-    return prev ?? [];
   }
 }
 

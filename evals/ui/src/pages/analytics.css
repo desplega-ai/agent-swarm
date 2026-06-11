@@ -1,0 +1,171 @@
+/* WP-AUI — analytics page (v5 spec §3). Shared tokens/classes live in styles.css;
+   chart styles live in components/charts/charts.css. */
+
+.an-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.an-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.an-meta {
+  font-size: 12px;
+}
+
+.an-head .btn {
+  margin-left: auto;
+}
+
+.an-error {
+  color: var(--red);
+  white-space: pre-wrap;
+}
+
+/* ---- section header: question title + right-aligned controls ---- */
+
+.an-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.an-panel-head .panel-title {
+  margin: 0;
+}
+
+.an-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.an-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.an-select select {
+  max-width: 220px;
+}
+
+/* ---- segmented metric control ---- */
+
+.an-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.an-seg button {
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  padding: 3px 10px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.an-seg button:first-child {
+  border-left: none;
+}
+
+.an-seg button:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.an-seg button.active {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent), transparent 88%);
+}
+
+.an-seg button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* ---- trends footer: runs plotted + version-change events ---- */
+
+.an-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+
+.an-event {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.an-event-kind {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.an-event-kind.api {
+  color: var(--blue);
+}
+
+.an-event-kind.worker {
+  color: var(--orange);
+}
+
+.an-event-change {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ---- cost matrix ---- */
+
+.an-heat-scroll {
+  overflow-x: auto;
+}
+
+.an-summary {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.an-strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+/* ---- models ---- */
+
+.an-models-chart {
+  margin-bottom: 12px;
+}
+
+.an-providers {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

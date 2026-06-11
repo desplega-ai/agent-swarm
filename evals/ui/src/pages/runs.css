@@ -14,6 +14,20 @@
   font-weight: 600;
 }
 
+/* right side of the head row: ⛶/⊟ table-mode toggle + "+ New Run" (v5 §4) */
+.runs-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* wide-mode Configs column hover: the run's configs as a stacked ConfigChip list */
+.runs-configs-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .runs-empty {
   display: flex;
   flex-direction: column;

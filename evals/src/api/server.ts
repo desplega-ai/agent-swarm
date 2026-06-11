@@ -21,7 +21,9 @@ import { loadRegistry, serializeConfig, serializeScenario } from "../registry.ts
 import { summarizeRun } from "../results.ts";
 import { executeRun, killAllActiveStacks, killRunStacks } from "../runner/index.ts";
 import { type SessionLogRow, SwarmClient } from "../swarm/client.ts";
-import type { SandboxInfo } from "../types.ts";
+import { cleanVersion } from "../swarm/version.ts";
+import type { AttemptRow, RunVersions, SandboxInfo } from "../types.ts";
+import { type AnalyticsSourceRow, buildAnalytics } from "./analytics.ts";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -90,6 +92,41 @@ async function fetchLiveTranscriptRows(
   return rows;
 }
 
+/**
+ * Distinct cleaned sandbox versions across a run's attempts (v5 spec §1.5),
+ * first-seen order. Historical rows store ANSI-dirty values — cleanVersion()
+ * re-cleans on read. Empty arrays when nothing was captured.
+ */
+function computeRunVersions(attempts: AttemptRow[]): RunVersions {
+  const api: string[] = [];
+  const worker: string[] = [];
+  for (const attempt of attempts) {
+    const apiVersion = cleanVersion(attempt.sandbox?.apiVersion);
+    if (apiVersion !== null && !api.includes(apiVersion)) api.push(apiVersion);
+    const workerVersion = cleanVersion(attempt.sandbox?.workerVersion);
+    if (workerVersion !== null && !worker.includes(workerVersion)) worker.push(workerVersion);
+  }
+  return { api, worker };
+}
+
+/**
+ * Analytics source query (v5 spec §1.1 — columns frozen). json_valid guards
+ * keep malformed/empty JSON columns from failing the whole aggregation —
+ * they degrade to NULL like every other missing field on old rows.
+ */
+const ANALYTICS_SQL = `
+  SELECT a.run_id, a.scenario_id, a.config_id, a.status, a.score, a.cost_usd, a.cost_source,
+         a.judge_cost_usd, a.duration_ms,
+         CASE WHEN json_valid(a.tokens_json)
+              THEN json_extract(a.tokens_json, '$.model') END        AS token_model,
+         CASE WHEN json_valid(a.sandbox_json)
+              THEN json_extract(a.sandbox_json, '$.apiVersion') END  AS api_version,
+         CASE WHEN json_valid(a.sandbox_json)
+              THEN json_extract(a.sandbox_json, '$.workerVersion') END AS worker_version,
+         r.name AS run_name, r.created_at AS run_created_at
+  FROM attempts a JOIN eval_runs r ON r.id = a.run_id
+  ORDER BY r.created_at ASC, a.attempt_index ASC`;
+
 /** Runs currently executing inside this server process (local-first trigger). */
 const activeRuns = new Map<string, AbortController>();
 
@@ -128,10 +165,14 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
         GET: async () => {
           const runs = await listRuns(db);
           const withSummaries = await Promise.all(
-            runs.map(async (run) => ({
-              ...summarizeRun(run, await listAttempts(db, run.id)),
-              active: activeRuns.has(run.id),
-            })),
+            runs.map(async (run) => {
+              const attempts = await listAttempts(db, run.id);
+              return {
+                ...summarizeRun(run, attempts),
+                versions: computeRunVersions(attempts),
+                active: activeRuns.has(run.id),
+              };
+            }),
           );
           return json(withSummaries);
         },
@@ -175,6 +216,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
         const attempts = await listAttempts(db, run.id);
         return json({
           ...summarizeRun(run, attempts),
+          versions: computeRunVersions(attempts),
           attempts,
           active: activeRuns.has(run.id),
         });
@@ -314,6 +356,31 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
       "/api/models": async () => {
         const models = await listOpenrouterModels();
         return json({ defaultJudgeModel: DEFAULT_JUDGE_MODEL, models });
+      },
+      /**
+       * Pre-aggregated analytics (v5 spec §1 — frozen contract). One SQL pass
+       * over attempts × eval_runs, shaped by the pure buildAnalytics(). No
+       * query params in v5 — the client filters from the embedded data.
+       */
+      "/api/analytics": async () => {
+        const res = await db.execute(ANALYTICS_SQL);
+        const rows: AnalyticsSourceRow[] = res.rows.map((r) => ({
+          runId: r.run_id as string,
+          scenarioId: r.scenario_id as string,
+          configId: r.config_id as string,
+          status: r.status as string,
+          score: r.score === null ? null : Number(r.score),
+          costUsd: r.cost_usd === null ? null : Number(r.cost_usd),
+          costSource: (r.cost_source as string) ?? null,
+          judgeCostUsd: r.judge_cost_usd === null ? null : Number(r.judge_cost_usd),
+          durationMs: r.duration_ms === null ? null : Number(r.duration_ms),
+          tokenModel: (r.token_model as string) ?? null,
+          apiVersion: (r.api_version as string) ?? null,
+          workerVersion: (r.worker_version as string) ?? null,
+          runName: (r.run_name as string) ?? null,
+          runCreatedAt: r.run_created_at as string,
+        }));
+        return json(buildAnalytics(rows, loadRegistry()));
       },
       "/api/artifacts/:id": async (req) => {
         const artifact = await getArtifact(db, req.params.id);

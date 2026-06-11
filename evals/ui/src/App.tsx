@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { navigate, useHashRoute } from "./hooks.ts";
+import AnalyticsPage from "./pages/AnalyticsPage.tsx";
 import ConfigsPage from "./pages/ConfigsPage.tsx";
 import RunDetailsPage from "./pages/RunDetailsPage.tsx";
 import RunsPage from "./pages/RunsPage.tsx";
@@ -47,6 +48,8 @@ export default function App(): ReactNode {
     page = <ScenariosPage scenarioId={parts[1] ?? null} />;
   } else if (parts[0] === "configs") {
     page = <ConfigsPage configId={parts[1] ?? null} />;
+  } else if (parts[0] === "analytics") {
+    page = <AnalyticsPage />;
   } else if (parts[0] === "runs" && parts[1] && !legacyCell) {
     const attemptId = parts[2] === "attempts" && parts[3] ? parts[3] : null;
     page = <RunDetailsPage runId={parts[1]} attemptId={attemptId} />;
@@ -55,7 +58,13 @@ export default function App(): ReactNode {
   }
 
   const section =
-    parts[0] === "scenarios" ? "scenarios" : parts[0] === "configs" ? "configs" : "runs";
+    parts[0] === "scenarios"
+      ? "scenarios"
+      : parts[0] === "configs"
+        ? "configs"
+        : parts[0] === "analytics"
+          ? "analytics"
+          : "runs";
 
   return (
     <>
@@ -69,6 +78,9 @@ export default function App(): ReactNode {
         <nav className="nav-pills">
           <a className={section === "runs" ? "pill active" : "pill"} href="#/runs">
             Runs
+          </a>
+          <a className={section === "analytics" ? "pill active" : "pill"} href="#/analytics">
+            Analytics
           </a>
           <a className={section === "scenarios" ? "pill active" : "pill"} href="#/scenarios">
             Scenarios

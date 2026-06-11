@@ -103,6 +103,11 @@ function isAssistantMessage(msg: unknown): msg is AssistantMessage {
 
 const DOCKER_PLUGIN_PATH = "/home/worker/.config/opencode/plugins/agent-swarm.ts";
 const MODEL_CACHE_REFRESH_TIMEOUT_MS = 15_000;
+// opencode cold-start on E2B disk regularly exceeds the SDK's 5s default
+// server-start timeout (@opencode-ai/sdk dist/server.js), failing the spawn with
+// "Timeout waiting for server to start after 5000ms". Override via
+// OPENCODE_SERVER_TIMEOUT_MS.
+const DEFAULT_SERVER_START_TIMEOUT_MS = 30_000;
 
 function isOpenRouterModel(model: string | undefined): boolean {
   return Boolean(model?.toLowerCase().startsWith("openrouter/"));
@@ -708,6 +713,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       ({ client, server } = await createOpencode({
         hostname: "127.0.0.1",
         port: 0,
+        timeout: Number(process.env.OPENCODE_SERVER_TIMEOUT_MS) || DEFAULT_SERVER_START_TIMEOUT_MS,
         config: opencodeConfig,
       }));
     } finally {

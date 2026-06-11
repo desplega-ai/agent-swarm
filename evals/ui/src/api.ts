@@ -1,4 +1,5 @@
 import type {
+  AnalyticsResponse,
   AttemptDetail,
   AttemptJson,
   AttemptProgressResponse,
@@ -103,6 +104,11 @@ export function listConfigs(): Promise<ConfigJson[]> {
 
 export function getModels(): Promise<ModelsResponse> {
   return request("/api/models");
+}
+
+/** Pre-aggregated analytics (v5 spec §1 — implemented server-side by WP-AAPI). */
+export function getAnalytics(): Promise<AnalyticsResponse> {
+  return request("/api/analytics");
 }
 
 export function artifactUrl(id: string, opts?: { download?: boolean }): string {

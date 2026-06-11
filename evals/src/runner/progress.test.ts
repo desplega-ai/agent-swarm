@@ -51,9 +51,9 @@ describe("SwarmClient polling fails fast on abort (RC-2)", () => {
 
   test("waitForSessionCostRows: pre-aborted signal throws before the first fetch", async () => {
     const t0 = Date.now();
-    await expect(client.waitForSessionCostRows("t1", 60_000, abortedSignal())).rejects.toThrow(
-      "aborted",
-    );
+    await expect(
+      client.waitForSessionCostRows("t1", { timeoutMs: 60_000, signal: abortedSignal() }),
+    ).rejects.toThrow("aborted");
     expect(Date.now() - t0).toBeLessThan(1_000);
   });
 
@@ -62,7 +62,7 @@ describe("SwarmClient polling fails fast on abort (RC-2)", () => {
     // returns [] at its deadline — the no-signal behavior is unchanged.
     const rows = await client.getStableSessionLogs("t1", 0);
     expect(rows).toEqual([]);
-    const costs = await client.waitForSessionCostRows("t1", 0);
+    const costs = await client.waitForSessionCostRows("t1", { timeoutMs: 0 });
     expect(costs).toEqual([]);
   });
 });

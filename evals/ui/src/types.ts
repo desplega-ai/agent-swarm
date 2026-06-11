@@ -221,11 +221,19 @@ export interface ArtifactMetaJson {
   size: number;
 }
 
+/** Distinct cleaned versions across one run's attempts (v5 spec §1.5). */
+export interface RunVersions {
+  api: string[];
+  worker: string[];
+}
+
 export interface RunListItem {
   run: RunJson;
   cells: CellJson[];
   totals: TotalsJson;
   active: boolean;
+  /** Optional until WP-AAPI lands — render "—" when absent (v5 spec §1.5). */
+  versions?: RunVersions;
 }
 
 export interface RunDetail extends RunListItem {
@@ -307,4 +315,97 @@ export interface CreateRunBody {
   attemptsPerCell?: number;
   concurrency?: number;
   judgeModel?: string;
+}
+
+// ---- analytics (round 5 — v5 spec §1, FROZEN; mirrors evals/src/types.ts) ----
+
+/** One scenario × config cell aggregated across ALL runs (analytics heat matrix). */
+export interface AnalyticsCell {
+  scenarioId: string;
+  configId: string;
+  attempts: number;
+  /** Status 'passed' | 'failed' — errors are infra, not graded. */
+  graded: number;
+  passed: number;
+  errors: number;
+  /** passed / graded; null when graded === 0. */
+  passRate: number | null;
+  /** Attempts with costUsd !== null. */
+  pricedAttempts: number;
+  totalCostUsd: number | null;
+  avgCostUsd: number | null;
+  /** Attempts with judgeCostUsd !== null. */
+  judgePricedAttempts: number;
+  /** Σ judgeCostUsd over judge-priced attempts; null when 0 judge-priced. */
+  totalJudgeCostUsd: number | null;
+  avgJudgeCostUsd: number | null;
+  avgDurationMs: number | null;
+  avgScore: number | null;
+  lastRunAt: string | null;
+}
+
+/** Per-model rollup (model key: tokens.model → registry config.model → "(configId)"). */
+export interface AnalyticsModel {
+  model: string;
+  providers: string[];
+  configIds: string[];
+  runs: number;
+  attempts: number;
+  graded: number;
+  passed: number;
+  errors: number;
+  passRate: number | null;
+  avgScore: number | null;
+  pricedAttempts: number;
+  totalCostUsd: number | null;
+  avgCostPerAttempt: number | null;
+  avgCostPerRun: number | null;
+  /** $ per minute of work: Σcost / (Σduration/60000) over attempts having BOTH fields. */
+  costPerMinute: number | null;
+  avgDurationMs: number | null;
+}
+
+/** One run's aggregate for a (scenario, config) cell — a time-series point. */
+export interface AnalyticsSeriesPoint {
+  runId: string;
+  runName: string | null;
+  /** Run createdAt — the series x value. */
+  createdAt: string;
+  attempts: number;
+  graded: number;
+  passRate: number | null;
+  avgScore: number | null;
+  totalCostUsd: number | null;
+  avgCostUsd: number | null;
+  avgJudgeCostUsd: number | null;
+  avgDurationMs: number | null;
+  apiVersion: string | null;
+  workerVersion: string | null;
+}
+
+/** A detected version change along a series (drawn as a vertical marker line). */
+export interface AnalyticsVersionEvent {
+  runId: string;
+  createdAt: string;
+  kind: "api" | "worker";
+  /** Null = first capture. */
+  from: string | null;
+  to: string;
+}
+
+export interface AnalyticsSeries {
+  scenarioId: string;
+  configId: string;
+  /** Ascending createdAt. */
+  points: AnalyticsSeriesPoint[];
+  versionEvents: AnalyticsVersionEvent[];
+}
+
+export interface AnalyticsResponse {
+  generatedAt: string;
+  scenarioIds: string[];
+  configIds: string[];
+  matrix: AnalyticsCell[];
+  models: AnalyticsModel[];
+  series: AnalyticsSeries[];
 }

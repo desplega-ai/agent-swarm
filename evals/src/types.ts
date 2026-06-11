@@ -339,3 +339,119 @@ export interface ArtifactRow {
   content: string;
   createdAt: string;
 }
+
+// ---- analytics (round 5, item 2 — v5 spec §1, FROZEN) ----
+
+/** One scenario × config cell aggregated across ALL runs (analytics heat matrix). */
+export interface AnalyticsCell {
+  scenarioId: string;
+  configId: string;
+  /** Every attempt row, any status. */
+  attempts: number;
+  /** Status 'passed' | 'failed' — errors are infra, not graded. */
+  graded: number;
+  passed: number;
+  errors: number;
+  /** passed / graded; null when graded === 0 (never NaN). */
+  passRate: number | null;
+  /** Attempts with costUsd !== null. */
+  pricedAttempts: number;
+  /** Σ costUsd over priced attempts; null when 0 priced. */
+  totalCostUsd: number | null;
+  /** totalCostUsd / pricedAttempts. */
+  avgCostUsd: number | null;
+  /** Attempts with judgeCostUsd !== null. */
+  judgePricedAttempts: number;
+  /** Σ judgeCostUsd over judge-priced attempts; null when 0 judge-priced. */
+  totalJudgeCostUsd: number | null;
+  /** Mean over attempts with judgeCostUsd !== null. */
+  avgJudgeCostUsd: number | null;
+  /** Mean over attempts with durationMs !== null. */
+  avgDurationMs: number | null;
+  /** Mean over attempts with score !== null. */
+  avgScore: number | null;
+  /** Newest run.createdAt touching this cell. */
+  lastRunAt: string | null;
+}
+
+/** Per-model rollup (model key: tokens.model → registry config.model → "(configId)"). */
+export interface AnalyticsModel {
+  model: string;
+  /** Distinct registry providers of contributing configs. */
+  providers: string[];
+  configIds: string[];
+  /** Distinct runs touched (any attempt). */
+  runs: number;
+  attempts: number;
+  graded: number;
+  passed: number;
+  errors: number;
+  passRate: number | null;
+  avgScore: number | null;
+  pricedAttempts: number;
+  totalCostUsd: number | null;
+  /** totalCostUsd / pricedAttempts. */
+  avgCostPerAttempt: number | null;
+  /** totalCostUsd / distinct runs with ≥1 priced attempt. */
+  avgCostPerRun: number | null;
+  /** $ per minute of work: Σcost / (Σduration/60000) over attempts having BOTH fields. */
+  costPerMinute: number | null;
+  avgDurationMs: number | null;
+}
+
+/** One run's aggregate for a (scenario, config) cell — a time-series point. */
+export interface AnalyticsSeriesPoint {
+  runId: string;
+  runName: string | null;
+  /** Run createdAt — the series x value. */
+  createdAt: string;
+  attempts: number;
+  graded: number;
+  passRate: number | null;
+  avgScore: number | null;
+  totalCostUsd: number | null;
+  avgCostUsd: number | null;
+  avgJudgeCostUsd: number | null;
+  avgDurationMs: number | null;
+  /** First non-null among the cell's attempts, cleanVersion()ed. */
+  apiVersion: string | null;
+  workerVersion: string | null;
+}
+
+/** A detected version change along a series (drawn as a vertical marker line). */
+export interface AnalyticsVersionEvent {
+  /** The point where the new version first appears. */
+  runId: string;
+  createdAt: string;
+  kind: "api" | "worker";
+  /** Null = first capture (older points had no version). */
+  from: string | null;
+  to: string;
+}
+
+export interface AnalyticsSeries {
+  scenarioId: string;
+  configId: string;
+  /** Ascending createdAt. */
+  points: AnalyticsSeriesPoint[];
+  versionEvents: AnalyticsVersionEvent[];
+}
+
+export interface AnalyticsResponse {
+  generatedAt: string;
+  /** Every scenario id seen in attempts, first-seen order. */
+  scenarioIds: string[];
+  configIds: string[];
+  /** Only cells with ≥1 attempt. */
+  matrix: AnalyticsCell[];
+  /** Sorted by attempts desc. */
+  models: AnalyticsModel[];
+  /** Every (scenario, config) pair with ≥1 attempt. */
+  series: AnalyticsSeries[];
+}
+
+/** Distinct cleaned versions across one run's attempts (runs list, v5 spec §1.5). */
+export interface RunVersions {
+  api: string[];
+  worker: string[];
+}

@@ -653,12 +653,15 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
 
     expect(lastCreateOpencodeConfig).toBeDefined();
     const opts = lastCreateOpencodeConfig as {
+      timeout?: number;
       config?: {
         model?: string;
         mcp?: Record<string, unknown>;
         permission?: Record<string, string>;
       };
     };
+    // Server-start timeout must override the SDK's 5s default (E2B cold-start flake)
+    expect(opts.timeout).toBe(30_000);
     expect(opts.config?.model).toBe("claude-sonnet-4-6");
     expect(opts.config?.mcp?.swarm).toBeDefined();
     const swarm = opts.config?.mcp?.swarm as {
