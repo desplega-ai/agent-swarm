@@ -171,6 +171,29 @@ describe("validateConfigValue", () => {
     );
     expect(validateConfigValue("SWARM_USE_CLAUDE_BRIDGE", true)).toMatch(/SWARM_USE_CLAUDE_BRIDGE/);
   });
+
+  test("accepts valid BEDROCK_AUTH_MODE values: sdk, bearer", () => {
+    expect(validateConfigValue("BEDROCK_AUTH_MODE", "sdk")).toBeNull();
+    expect(validateConfigValue("BEDROCK_AUTH_MODE", "bearer")).toBeNull();
+    // key lookup is case-insensitive
+    expect(validateConfigValue("bedrock_auth_mode", "sdk")).toBeNull();
+  });
+
+  test("rejects invalid BEDROCK_AUTH_MODE values with a helpful error", () => {
+    const badValues = ["Sdk", "SDK", "BEARER", "iam", "sso", "basic", "", " sdk"];
+    for (const bad of badValues) {
+      const err = validateConfigValue("BEDROCK_AUTH_MODE", bad);
+      expect(err).not.toBeNull();
+      expect(err).toMatch(/BEDROCK_AUTH_MODE/);
+      expect(err).toMatch(/sdk/);
+      expect(err).toMatch(/bearer/);
+    }
+  });
+
+  test("BEDROCK_AUTH_MODE is optional — absent key is not validated (returns null)", () => {
+    // Undefined / unset key → no validator → null (no error)
+    expect(validateConfigValue("OTHER_KEY", "sdk")).toBeNull();
+  });
 });
 
 // ─── getResolvedConfig — scope precedence for HARNESS_PROVIDER ───────────────

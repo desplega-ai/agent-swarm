@@ -136,63 +136,98 @@ describe("checkCodexCredentials", () => {
 
 // ─── pi-mono ─────────────────────────────────────────────────────────────────
 
+/**
+ * Stub probes for Bedrock tests. These replace the real @aws-sdk/client-bedrock
+ * ListFoundationModels call so unit tests never hit AWS.
+ */
+const bedrockProbeSuccess = async () => {};
+const bedrockProbeAuthFail = async () => {
+  throw new Error("ExpiredTokenException: The security token included in the request is expired");
+};
+const bedrockProbeAccessFail = async () => {
+  throw new Error("AccessDeniedException: not authorized to perform: bedrock:ListFoundationModels");
+};
+const bedrockProbeRegionFail = async () => {
+  throw new Error(
+    "ValidationException: Provided region us-west-99 is not supported by Amazon Bedrock",
+  );
+};
+
 describe("checkPiMonoCredentials", () => {
   const HOME = "/home/worker";
   const AUTH = `${HOME}/.pi/agent/auth.json`;
 
-  test("ready (file) when ~/.pi/agent/auth.json exists", () => {
-    const status = checkPiMonoCredentials({}, { homeDir: HOME, fs: fsWith(new Set([AUTH])) });
+  test("ready (file) when ~/.pi/agent/auth.json exists", async () => {
+    const status = await checkPiMonoCredentials({}, { homeDir: HOME, fs: fsWith(new Set([AUTH])) });
     expect(status.ready).toBe(true);
     expect(status.satisfiedBy).toBe("file");
   });
 
-  test("permissive: ready when MODEL_OVERRIDE unset and any one supported key is present", () => {
+  test("permissive: ready when MODEL_OVERRIDE unset and any one supported key is present", async () => {
     expect(
-      checkPiMonoCredentials({ ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles }).ready,
+      (await checkPiMonoCredentials({ ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles }))
+        .ready,
     ).toBe(true);
     expect(
-      checkPiMonoCredentials({ OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles }).ready,
+      (await checkPiMonoCredentials({ OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles }))
+        .ready,
     ).toBe(true);
     expect(
-      checkPiMonoCredentials({ OPENAI_API_KEY: "x" }, { homeDir: HOME, fs: noFiles }).ready,
+      (await checkPiMonoCredentials({ OPENAI_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })).ready,
     ).toBe(true);
   });
 
-  test("permissive: not ready when MODEL_OVERRIDE unset and no keys are set", () => {
-    const status = checkPiMonoCredentials({}, { homeDir: HOME, fs: noFiles });
+  test("permissive: not ready when MODEL_OVERRIDE unset and no keys are set", async () => {
+    const status = await checkPiMonoCredentials({}, { homeDir: HOME, fs: noFiles });
     expect(status.ready).toBe(false);
     expect(status.missing).toContain("ANTHROPIC_API_KEY");
     expect(status.missing).toContain("OPENROUTER_API_KEY");
     expect(status.missing).toContain("OPENAI_API_KEY");
   });
 
-  test("strict: MODEL_OVERRIDE=anthropic/... requires ANTHROPIC_API_KEY", () => {
+  test("strict: MODEL_OVERRIDE=anthropic/... requires ANTHROPIC_API_KEY", async () => {
     const env = { MODEL_OVERRIDE: "anthropic/claude-sonnet-4" };
-    expect(checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles }).ready).toBe(false);
+    expect((await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles })).ready).toBe(false);
     expect(
-      checkPiMonoCredentials({ ...env, ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
-        .ready,
+      (
+        await checkPiMonoCredentials(
+          { ...env, ANTHROPIC_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
     ).toBe(true);
     // OPENROUTER_API_KEY does NOT satisfy an anthropic-prefixed model
     expect(
-      checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
-        .ready,
+      (
+        await checkPiMonoCredentials(
+          { ...env, OPENROUTER_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
     ).toBe(false);
   });
 
-  test("strict: MODEL_OVERRIDE=openrouter/... requires OPENROUTER_API_KEY", () => {
+  test("strict: MODEL_OVERRIDE=openrouter/... requires OPENROUTER_API_KEY", async () => {
     const env = { MODEL_OVERRIDE: "openrouter/google/gemini-2.5-flash-lite" };
     expect(
-      checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
-        .ready,
+      (
+        await checkPiMonoCredentials(
+          { ...env, OPENROUTER_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
     ).toBe(true);
     expect(
-      checkPiMonoCredentials({ ...env, ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
-        .ready,
+      (
+        await checkPiMonoCredentials(
+          { ...env, ANTHROPIC_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
     ).toBe(false);
   });
 
-  test("shortname `sonnet` accepts ANTHROPIC_API_KEY *or* OPENROUTER_API_KEY", () => {
+  test("shortname `sonnet` accepts ANTHROPIC_API_KEY *or* OPENROUTER_API_KEY", async () => {
     // Anthropic-shortname models (sonnet/haiku/opus) prefer the native
     // ANTHROPIC_* credential, but pi-mono-adapter reroutes through the
     // OpenRouter mirror when only OPENROUTER_API_KEY is available — so the
@@ -201,75 +236,179 @@ describe("checkPiMonoCredentials", () => {
     // tracked in HEARTBEAT.md (2026-04-13 → 2026-05-11).
     const env = { MODEL_OVERRIDE: "sonnet" };
     expect(
-      checkPiMonoCredentials({ ...env, ANTHROPIC_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
-        .ready,
+      (
+        await checkPiMonoCredentials(
+          { ...env, ANTHROPIC_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
     ).toBe(true);
     expect(
-      checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
-        .ready,
+      (
+        await checkPiMonoCredentials(
+          { ...env, OPENROUTER_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
     ).toBe(true);
     // Neither key set → still not ready, and missing includes both options.
-    const empty = checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    const empty = await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
     expect(empty.ready).toBe(false);
     expect(empty.missing).toContain("ANTHROPIC_API_KEY");
     expect(empty.missing).toContain("OPENROUTER_API_KEY");
   });
 
-  test("haiku and opus shortnames also accept OPENROUTER_API_KEY", () => {
+  test("haiku and opus shortnames also accept OPENROUTER_API_KEY", async () => {
     for (const model of ["haiku", "opus"]) {
       const env = { MODEL_OVERRIDE: model };
       expect(
-        checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
-          .ready,
+        (
+          await checkPiMonoCredentials(
+            { ...env, OPENROUTER_API_KEY: "x" },
+            { homeDir: HOME, fs: noFiles },
+          )
+        ).ready,
       ).toBe(true);
     }
   });
 
-  // ─── amazon-bedrock: AWS SDK delegates credential resolution ───────────────
-  // When MODEL_OVERRIDE selects amazon-bedrock, pi-mono routes through the AWS
-  // SDK's default credential chain (env, ~/.aws/*, SSO, IMDS, assume-role,
-  // web-identity, …). agent-swarm does no presence check beyond detecting the
-  // `amazon-bedrock/` prefix — the SDK validates at first inference call.
-  // Mirrors the codex auth.json "presence-only" pattern.
+  // ─── amazon-bedrock prefix inference: probe triggered, result depends on creds ─
+  // When BEDROCK_AUTH_MODE is absent and MODEL_OVERRIDE starts with
+  // "amazon-bedrock/", the probe runs. Tests inject a stub to avoid hitting AWS.
 
-  test("amazon-bedrock: ready (sdk-delegated) with no env vars and no auth.json", () => {
+  test("amazon-bedrock: probe success → ready (sdk-delegated)", async () => {
     const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
-    const status = checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeSuccess,
+    });
     expect(status.ready).toBe(true);
     expect(status.satisfiedBy).toBe("sdk-delegated");
     expect(status.missing).toEqual([]);
   });
 
-  test("amazon-bedrock: stays sdk-delegated even when ANTHROPIC_API_KEY is also set", () => {
-    // The Anthropic-shape key is irrelevant here — the model is routed through
-    // AWS Bedrock, not Anthropic. Reporting satisfiedBy="env" would mislead.
+  test("amazon-bedrock: probe success even when ANTHROPIC_API_KEY also set (Bedrock wins)", async () => {
+    // The Anthropic-shape key is irrelevant — model is routed through AWS Bedrock.
     const env = {
       MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
       ANTHROPIC_API_KEY: "x",
     };
-    const status = checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
-    expect(status.ready).toBe(true);
-    expect(status.satisfiedBy).toBe("sdk-delegated");
-  });
-
-  test("amazon-bedrock: stays sdk-delegated even when auth.json exists", () => {
-    // auth.json holds Anthropic/OpenRouter/OpenAI creds — none used by Bedrock.
-    // Bedrock branch must win over the file probe.
-    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
-    const status = checkPiMonoCredentials(env, {
+    const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
-      fs: fsWith(new Set([AUTH])),
+      fs: noFiles,
+      bedrockProbe: bedrockProbeSuccess,
     });
     expect(status.ready).toBe(true);
     expect(status.satisfiedBy).toBe("sdk-delegated");
   });
 
-  test("amazon-bedrock: provider-prefix match is case-insensitive", () => {
-    // Mirrors modelToCredKeys' .toLowerCase() at line 54 of pi-mono-adapter.
-    const env = { MODEL_OVERRIDE: "Amazon-Bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
-    const status = checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+  test("amazon-bedrock: probe success even when auth.json exists (Bedrock wins over file)", async () => {
+    // auth.json holds Anthropic/OpenRouter/OpenAI creds — none used by Bedrock.
+    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: fsWith(new Set([AUTH])),
+      bedrockProbe: bedrockProbeSuccess,
+    });
     expect(status.ready).toBe(true);
     expect(status.satisfiedBy).toBe("sdk-delegated");
+  });
+
+  test("amazon-bedrock: provider-prefix match is case-insensitive", async () => {
+    const env = { MODEL_OVERRIDE: "Amazon-Bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeSuccess,
+    });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("sdk-delegated");
+  });
+
+  test("amazon-bedrock: probe auth failure → ready:false with aws-auth hint", async () => {
+    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeAuthFail,
+    });
+    expect(status.ready).toBe(false);
+    expect(status.hint).toContain("aws sso login");
+  });
+
+  test("amazon-bedrock: probe access failure → ready:false with aws-access hint", async () => {
+    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeAccessFail,
+    });
+    expect(status.ready).toBe(false);
+    expect(status.hint).toContain("bedrock:InvokeModel");
+  });
+
+  test("amazon-bedrock: probe region failure → ready:false (unclassified hint)", async () => {
+    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeRegionFail,
+    });
+    expect(status.ready).toBe(false);
+    // Not matching a known AWS category → raw probe error surfaced in hint
+    expect(status.hint).toBeDefined();
+  });
+
+  // ─── BEDROCK_AUTH_MODE=sdk: explicit mode, decoupled from MODEL_OVERRIDE ────
+
+  test("BEDROCK_AUTH_MODE=sdk: probe triggered even without amazon-bedrock/ prefix", async () => {
+    // Explicit mode — MODEL_OVERRIDE can be anything (or absent); the Bedrock
+    // path is taken because the operator explicitly declared BEDROCK_AUTH_MODE=sdk.
+    const env = { BEDROCK_AUTH_MODE: "sdk", MODEL_OVERRIDE: "some-other-model" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeSuccess,
+    });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("sdk-delegated");
+  });
+
+  test("BEDROCK_AUTH_MODE=sdk: probe failure → ready:false", async () => {
+    const env = { BEDROCK_AUTH_MODE: "sdk" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeAuthFail,
+    });
+    expect(status.ready).toBe(false);
+  });
+
+  test("BEDROCK_AUTH_MODE=bearer: does NOT trigger the sdk probe (falls through)", async () => {
+    // The bearer path is declared/validated but the full implementation is
+    // out of scope for PR1. With no other credentials set it should be not-ready
+    // via the standard permissive check, not via the sdk probe.
+    const env = { BEDROCK_AUTH_MODE: "bearer" };
+    // No other keys set, no auth.json → not-ready from the permissive path.
+    const status = await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(false);
+    // Satisfying via any standard key still works for the bearer mode (PR1 scope).
+    const withKey = await checkPiMonoCredentials(
+      { BEDROCK_AUTH_MODE: "bearer", ANTHROPIC_API_KEY: "x" },
+      { homeDir: HOME, fs: noFiles },
+    );
+    expect(withKey.ready).toBe(true);
+    expect(withKey.satisfiedBy).toBe("env");
+  });
+
+  test("BEDROCK_AUTH_MODE absent + no MODEL_OVERRIDE=amazon-bedrock: no probe", async () => {
+    // Fallback inference: neither BEDROCK_AUTH_MODE nor an amazon-bedrock MODEL_OVERRIDE
+    // → standard permissive path, no AWS call.
+    const env = { ANTHROPIC_API_KEY: "x" };
+    const status = await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("env");
   });
 });
 

@@ -58,6 +58,14 @@ const VALIDATED_KEYS: Record<string, (value: unknown) => string | null> = {
     if (["true", "false", "1", "0"].includes(normalized)) return null;
     return "Invalid SWARM_USE_CLAUDE_BRIDGE value (must be one of: true, false, 1, 0)";
   },
+  // AWS credential mode for the Bedrock path on the pi harness.
+  //   sdk    — AWS SDK default credential chain (env, ~/.aws/*, SSO, IMDS, …)
+  //   bearer — explicit bearer token via AWS_BEARER_TOKEN_BEDROCK (future/Mantle)
+  // When absent the worker infers the mode from MODEL_OVERRIDE (sdk semantics).
+  BEDROCK_AUTH_MODE: (value) => {
+    if (value === "sdk" || value === "bearer") return null;
+    return "Invalid BEDROCK_AUTH_MODE value (must be one of: sdk, bearer)";
+  },
 };
 
 export function validateConfigValue(key: string, value: unknown): string | null {

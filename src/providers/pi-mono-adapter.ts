@@ -75,39 +75,84 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
 }
 
 /**
+ * Run a single `ListFoundationModels` call against the AWS Bedrock management
+ * API to verify that the active credential chain is valid for Bedrock in the
+ * configured region. Returns the client directly (callers discard the model
+ * list — only the throw/no-throw distinction is the signal).
+ *
+ * Dynamically imported so the API binary never loads `@aws-sdk/client-bedrock`.
+ * Tests inject a stub via `CredCheckOptions.bedrockProbe` instead.
+ */
+async function runBedrockSdkProbe(region: string): Promise<void> {
+  const { BedrockClient, ListFoundationModelsCommand } = await import("@aws-sdk/client-bedrock");
+  const client = new BedrockClient({ region });
+  await client.send(new ListFoundationModelsCommand({}));
+}
+
+/**
  * Pi-mono is satisfied by ANY of:
- *   1. `MODEL_OVERRIDE` selects the `amazon-bedrock` provider — credential
- *      resolution is delegated to the AWS SDK's default chain at first
- *      inference call. agent-swarm does no presence check; if creds are
- *      missing the SDK error surfaces in the session log.
+ *   1. `BEDROCK_AUTH_MODE=sdk` — or `MODEL_OVERRIDE` selects the
+ *      `amazon-bedrock` provider (prefix-inference fallback when
+ *      `BEDROCK_AUTH_MODE` is absent). A real `ListFoundationModels` probe
+ *      is issued via the AWS SDK default credential chain. Success →
+ *      `ready:true, satisfiedBy:"sdk-delegated"`; failure → `ready:false`
+ *      with a classified hint. The probe is worker-only (the pi dynamic-import
+ *      arm in `checkProviderCredentials`); the API binary never imports the SDK.
  *   2. `~/.pi/agent/auth.json` exists.
- *   3. `MODEL_OVERRIDE` is set to a provider-prefixed model — only the
- *      matching provider's key is required.
+ *   3. `MODEL_OVERRIDE` is set to a non-Bedrock provider-prefixed model — only
+ *      the matching provider's key is required.
  *   4. `MODEL_OVERRIDE` is empty / unprefixed — any one of the supported
  *      keys (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY) is
  *      enough.
  *
- * Bedrock is checked first so a stale `auth.json` (Anthropic / OpenRouter
- * creds from a previous login) doesn't get falsely reported as the
- * satisfying source when the model is actually going to AWS.
+ * The Bedrock branch is checked first so a stale `auth.json` (Anthropic /
+ * OpenRouter creds from a previous login) doesn't get falsely reported as
+ * the satisfying source when the model is actually going to AWS.
  */
-export function checkPiMonoCredentials(
+export async function checkPiMonoCredentials(
   env: Record<string, string | undefined>,
   opts: CredCheckOptions = {},
-): CredStatus {
-  if (env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/")) {
-    return {
-      ready: true,
-      missing: [],
-      satisfiedBy: "sdk-delegated",
-      hint: "AWS SDK will resolve credentials at first Bedrock call (env, ~/.aws/*, SSO, IMDS, etc.).",
-    };
+): Promise<CredStatus> {
+  // Determine Bedrock SDK mode:
+  //   - Explicit:  BEDROCK_AUTH_MODE=sdk
+  //   - Fallback:  BEDROCK_AUTH_MODE absent AND MODEL_OVERRIDE starts with
+  //                "amazon-bedrock/" (preserves today's prefix-inference semantics)
+  // BEDROCK_AUTH_MODE=bearer is declared/validated but the full bearer-token
+  // path is out of scope for PR1 — it falls through to the standard auth check.
+  const bedrockAuthMode = env.BEDROCK_AUTH_MODE?.toLowerCase();
+  const isBedrockSdk =
+    bedrockAuthMode === "sdk" ||
+    (bedrockAuthMode === undefined &&
+      env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/"));
+
+  if (isBedrockSdk) {
+    const region = env.AWS_REGION ?? "us-east-1";
+    const probe = opts.bedrockProbe ?? (() => runBedrockSdkProbe(region));
+    try {
+      await probe();
+      return {
+        ready: true,
+        missing: [],
+        satisfiedBy: "sdk-delegated",
+        hint: `AWS SDK credentials verified via ListFoundationModels (region: ${region}).`,
+      };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const classification = classifyAwsSdkError(errorMessage);
+      return {
+        ready: false,
+        missing: [],
+        hint:
+          classification?.message ??
+          `AWS Bedrock credential probe failed (region: ${region}): ${errorMessage}`,
+      };
+    }
   }
 
   const homeDir = opts.homeDir ?? env.HOME ?? "/root";
-  const probe = opts.fs?.existsSync ?? existsSync;
+  const fsProbe = opts.fs?.existsSync ?? existsSync;
   const authFile = `${homeDir}/.pi/agent/auth.json`;
-  if (probe(authFile)) {
+  if (fsProbe(authFile)) {
     return { ready: true, missing: [], satisfiedBy: "file" };
   }
 

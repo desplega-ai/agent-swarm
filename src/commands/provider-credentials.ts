@@ -302,14 +302,20 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
       }
       case "pi":
       case "opencode": {
-        // pi-mono with MODEL_OVERRIDE=amazon-bedrock/* delegates credential
-        // resolution to the AWS SDK default chain (env, ~/.aws/*, SSO, IMDS,
-        // assume-role, …). pi-ai exposes no Bedrock-specific check we could
-        // call here, and the SDK chain may issue slow IMDS network calls on
-        // non-EC2 hosts — so the live test is a presence check, mirroring the
-        // codex-OAuth pattern above. Real validation happens at the first
-        // Bedrock inference call.
-        if (provider === "pi" && env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/")) {
+        // For the pi Bedrock path, the real credential check is the
+        // `ListFoundationModels` probe that `checkProviderCredentials` (the
+        // `pi` dynamic-import arm) already ran.  That probe result is already
+        // in `buildCredStatusReport` — the live-test is a pass-through / no-op
+        // so we never issue a second AWS SDK call here (which would drag the
+        // SDK into the wrong binary or make slow IMDS calls on non-EC2 hosts).
+        // Bedrock mode: explicit BEDROCK_AUTH_MODE=sdk OR
+        //               absent BEDROCK_AUTH_MODE + amazon-bedrock/ MODEL_OVERRIDE prefix.
+        if (
+          provider === "pi" &&
+          (env.BEDROCK_AUTH_MODE?.toLowerCase() === "sdk" ||
+            (env.BEDROCK_AUTH_MODE === undefined &&
+              env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/")))
+        ) {
           return presenceCheckOk();
         }
         // Both pi-mono and opencode resolve credentials in the same order:

@@ -53,14 +53,39 @@ When supported, validation happens in the `store-progress` MCP tool (see `src/to
 
 ## pi-mono + Amazon Bedrock auth
 
-When `MODEL_OVERRIDE=amazon-bedrock/<model-id>` (e.g. `amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0`), credential resolution is delegated to the AWS SDK's default chain — agent-swarm does no presence check beyond detecting the `amazon-bedrock/` prefix.
+### Mode selection
 
-- Any source the AWS SDK accepts works: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ optional `AWS_SESSION_TOKEN`), `AWS_PROFILE` + `~/.aws/credentials`, SSO sessions in `~/.aws/config`, EC2 IMDS / ECS task role, web-identity / OIDC, `credential_process`, assume-role chains.
-- `AWS_REGION` (or `AWS_DEFAULT_REGION`) is required by the SDK and must be a Bedrock-enabled region.
-- The boot credential gate (`checkPiMonoCredentials`) short-circuits to `satisfiedBy: "sdk-delegated"` without inspecting any AWS env var or file. The worker does **not** park in `credential-wait` for Bedrock — even with no creds visible to agent-swarm, it claims tasks.
-- Bedrock runtime failures surface as structured task failures. pi-mono captures the pi-coding-agent terminal event and emits a normalized `error` `ProviderEvent`; `waitForCompletion()` returns `exitCode: 1`, `isError: true`, and the same `errorCategory` / `failureReason`.
-- AWS SDK failures are categorized as `aws-auth` (missing/expired/invalid credentials), `aws-throttle` (rate limits or quota), `aws-access` (IAM denial), or `aws-model` (invalid/unavailable model, region mismatch, timeout, or model-not-ready). Treat these the same as a codex `auth.json` failure: the adapter/SDK is the source of truth, not the boot gate.
-- This is the closest precedent to codex's "presence-only" pattern (`codexAuthFileExists` → `presenceCheckOk`). If pi-ai later exposes a `validateBedrockCredentials` helper, the live-test branch in `validateProviderCredentials` can be upgraded without touching the boot gate.
+Bedrock mode is active when **either**:
+
+1. `BEDROCK_AUTH_MODE=sdk` is set in `swarm_config` (explicit), **or**
+2. `BEDROCK_AUTH_MODE` is absent and `MODEL_OVERRIDE` starts with `amazon-bedrock/` (prefix-inference fallback — preserves pre-PR1 behavior).
+
+`BEDROCK_AUTH_MODE=bearer` is recognised and validated but the full bearer-token / Mantle path is out of scope for PR1. Workers in `bearer` mode fall through to the standard credential check (key / auth.json).
+
+### Credential probe
+
+When Bedrock SDK mode is active, `checkPiMonoCredentials` issues a **real** `ListFoundationModels` call via `@aws-sdk/client-bedrock` (dynamically imported — the API binary never loads the SDK). This replaces the previous optimistic always-ready return.
+
+- **Success** → `ready: true, satisfiedBy: "sdk-delegated"`. The worker proceeds to claim tasks.
+- **Failure** → `ready: false` with a classified hint (auth / throttle / access / model) via `classifyAwsSdkError`. The worker parks in `credential-wait` until credentials are corrected.
+
+Any source the AWS SDK accepts works: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ optional `AWS_SESSION_TOKEN`), `AWS_PROFILE` + `~/.aws/credentials`, SSO sessions in `~/.aws/config`, EC2 IMDS / ECS task role, web-identity / OIDC, `credential_process`, assume-role chains.
+
+### Configuration keys
+
+| Key | Values | Default |
+|-----|--------|---------|
+| `BEDROCK_AUTH_MODE` | `sdk` \| `bearer` | inferred from `MODEL_OVERRIDE` prefix |
+| `AWS_REGION` | any Bedrock-enabled region | `us-east-1` (SDK fallback) |
+
+`BEDROCK_AUTH_MODE` is a validated optional `swarm_config` key (see `src/be/swarm-config-guard.ts`) and a reloadable env key (see `src/commands/runner.ts`).
+
+### Notes
+
+- `AWS_REGION` should be set explicitly to a Bedrock-enabled region. The probe uses `us-east-1` as a fallback but the region must match where your Bedrock model is accessible.
+- The probe runs at boot AND on the post-task reconcile cycle (`HARNESS_RECONCILE_INTERVAL_MS`). A transient throttle error won't permanently block the worker — the next reconcile tick will re-probe.
+- Credential errors during inference continue to surface via structured pi-coding-agent events (handled in `PiMonoSession`) and are classified by `classifyAwsSdkError`.
+- The `validateProviderCredentials` live-test arm for `pi` + Bedrock is a pass-through (`presenceCheckOk`) — the real check is the probe above, not a second SDK call.
 
 ## Native session resume is deprecated (2026-05-28)
 

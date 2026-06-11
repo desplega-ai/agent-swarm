@@ -188,8 +188,20 @@ export interface CredStatus {
  * pi/opencode predicates probe the filesystem for `~/.codex/auth.json`,
  * `~/.pi/agent/auth.json`, `~/.local/share/opencode/auth.json`. Tests inject
  * a fake `fs` + `homeDir` to exercise the file-vs-env branches deterministically.
+ *
+ * `bedrockProbe` is an injectable for the Bedrock SDK probe path in
+ * `checkPiMonoCredentials`. In production it is left undefined and the
+ * function dynamically imports `@aws-sdk/client-bedrock` to run a real
+ * `ListFoundationModels` call. Tests inject a stub to avoid hitting AWS.
  */
 export interface CredCheckOptions {
   homeDir?: string;
   fs?: { existsSync(p: string): boolean };
+  /**
+   * Injectable for Bedrock SDK credential probe. When provided, called instead
+   * of the real `@aws-sdk/client-bedrock` `ListFoundationModels` call.
+   * Should throw on auth/access failure (with an AWS SDK-shaped error message)
+   * or resolve on success.
+   */
+  bedrockProbe?: () => Promise<void>;
 }

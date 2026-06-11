@@ -436,6 +436,7 @@ const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "MODEL_OVERRIDE",
   "AGENT_FS_SHARED_ORG_ID",
   "SWARM_USE_CLAUDE_BRIDGE",
+  "BEDROCK_AUTH_MODE",
 ]);
 
 /**

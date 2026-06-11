@@ -100,15 +100,42 @@ The runner consumes these events (not the provider's native ones) to post progre
 | File | Transport | Auth |
 |---|---|---|
 | [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) | `Bun.spawn` of `claude` CLI with `--output-format stream-json`, JSONL stdout parsing | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
-| [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `MODEL_OVERRIDE=amazon-bedrock/*`, anything the AWS SDK default chain accepts (see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
+| [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*`, AWS SDK default chain (probed via `ListFoundationModels`; see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`, sends session config over stdin, and receives line-delimited events/results over stdout; the child hosts `@openai/codex-sdk` `Codex` / `Thread` and streams `ThreadEvent`s back | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
 
 ### pi-mono + Amazon Bedrock auth
 
-pi-mono routes to Amazon Bedrock when `MODEL_OVERRIDE=amazon-bedrock/<model-id>` (e.g. `amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0`). Bedrock authenticates through the AWS SDK's default credential chain — not a single API key — so agent-swarm **delegates credential resolution to the SDK**. The boot credential gate detects the `amazon-bedrock/` prefix and short-circuits to `satisfiedBy: "sdk-delegated"` without inspecting any AWS env var or file.
+#### Mode selection
 
-**Accepted credential sources** — anything the AWS SDK accepts:
+Bedrock SDK mode is active when **either**:
+
+1. `BEDROCK_AUTH_MODE=sdk` is set in `swarm_config` (explicit), **or**
+2. `BEDROCK_AUTH_MODE` is absent and `MODEL_OVERRIDE` starts with `amazon-bedrock/` (prefix-inference fallback — preserves pre-PR1 behavior).
+
+`BEDROCK_AUTH_MODE=bearer` is a declared/validated value for future Mantle support; for now, workers in `bearer` mode fall through to the standard credential check (key / auth.json).
+
+`BEDROCK_AUTH_MODE` is a validated optional `swarm_config` key (values: `sdk` | `bearer`; see `src/be/swarm-config-guard.ts`) and a reloadable env key (see `src/commands/runner.ts`).
+
+#### Credential probe
+
+When Bedrock SDK mode is active, the worker runs a **real** `ListFoundationModels` call via `@aws-sdk/client-bedrock` (dynamically imported — the API binary never loads the SDK):
+
+- **Success** → `ready: true, satisfiedBy: "sdk-delegated"`. The worker proceeds to claim tasks.
+- **Failure** → `ready: false` with a classified error hint. The worker parks in `credential-wait` until credentials are fixed.
+
+Error categories classified by `classifyAwsSdkError` (`src/utils/aws-error-classifier.ts`):
+
+| Category | Trigger example | Hint |
+|---|---|---|
+| `aws-auth` | `ExpiredTokenException`, `CredentialsProviderError` | Run `aws sso login` or refresh credentials |
+| `aws-throttle` | `ThrottlingException`, `ServiceQuotaExceededException` | Wait / request quota increase |
+| `aws-access` | `AccessDeniedException: not authorized` | Check IAM policy for `bedrock:*` |
+| `aws-model` | `ValidationException`, `ResourceNotFoundException` | Check `MODEL_OVERRIDE` and region |
+
+#### Accepted credential sources
+
+Anything the AWS SDK accepts:
 
 - `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ optional `AWS_SESSION_TOKEN`)
 - `AWS_PROFILE` resolved against `~/.aws/credentials` and `~/.aws/config`
@@ -117,20 +144,14 @@ pi-mono routes to Amazon Bedrock when `MODEL_OVERRIDE=amazon-bedrock/<model-id>`
 - Web-identity / OIDC (`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`)
 - `credential_process` and assume-role chains
 
-`AWS_REGION` (or `AWS_DEFAULT_REGION`) is required by the SDK and must be a Bedrock-enabled region.
+#### Configuration reference
 
-**Failure mode.** No `credential-wait` parking — the worker claims tasks immediately. If Bedrock fails at runtime, pi-mono captures the structured pi-coding-agent terminal event and emits a normalized `error` `ProviderEvent`; `waitForCompletion()` returns `exitCode: 1`, `isError: true`, and the same `errorCategory` / `failureReason`, so the task fails with the session-chat error box instead of only leaving an SDK exception in the session log. Raw stderr/log events are still scrubbed through `scrubSecrets` at egress.
+| Key | Values | Default |
+|---|---|---|
+| `BEDROCK_AUTH_MODE` | `sdk` \| `bearer` | inferred from `MODEL_OVERRIDE` prefix |
+| `AWS_REGION` | any Bedrock-enabled region | `us-east-1` (SDK default) |
 
-AWS SDK errors are classified before they reach the runner:
-
-- `aws-auth` — missing, expired, invalid, or unresolvable AWS credentials (for example `CredentialsProviderError`, `ExpiredToken`, invalid signatures, or unrecognized clients). Refresh credentials with `aws sso login` or `aws configure`, then retry.
-- `aws-throttle` — Bedrock rate limits, too many requests, or service quota exhaustion. Retry after backoff or request a quota increase.
-- `aws-access` — IAM authorization denied for Bedrock invocation. Verify the role/user can call `bedrock:InvokeModel` for the target model ARN and region.
-- `aws-model` — invalid model IDs, unavailable models, region mismatches, model timeout, or model-not-ready responses. Verify `MODEL_OVERRIDE` and the AWS region.
-
-Treat these the same way you treat a stale codex `auth.json`: the underlying SDK is the source of truth, but the adapter now turns known AWS SDK failures into structured task failures.
-
-This is intentionally the same pattern codex uses for OAuth credentials (`codexAuthFileExists` → `presenceCheckOk` in [`src/commands/provider-credentials.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/provider-credentials.ts)) — presence-only gate, runtime validation owned by the adapter/SDK, no upstream call from agent-swarm. pi-ai does not currently expose a Bedrock-specific credential check we could call; if it does in the future, the live-test branch can be upgraded without touching the boot gate.
+`AWS_REGION` should be set explicitly; the probe uses `us-east-1` as a fallback but may fail for models not available in that region.
 
 ### Cost & context tracking
 
