@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { refreshSecretScrubberCache, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import {
+  clearVolatileSecretsForTesting,
+  refreshSecretScrubberCache,
+  registerVolatileSecret,
+  scrubObject,
+  scrubSecrets,
+} from "../utils/secret-scrubber";
 
 // Snapshot/restore process.env between tests so env-derived cache entries
 // don't leak across cases.
@@ -221,6 +227,30 @@ describe("scrubSecrets — regex patterns", () => {
 
     expect(out).toBe("OTEL_EXPORTER_OTLP_HEADERS=[REDACTED:signoz_ingestion_key]");
   });
+
+  test("redacts Linear OAuth tokens", () => {
+    const out = scrubSecrets("Authorization: Bearer lin_oauth_test123abcdef end");
+    expect(out).toContain("[REDACTED:linear_oauth]");
+    expect(out).not.toContain("lin_oauth_test123");
+  });
+
+  test("redacts Linear API keys", () => {
+    const out = scrubSecrets("key=lin_api_test123abcdef tail");
+    expect(out).toContain("[REDACTED:linear_api]");
+    expect(out).not.toContain("lin_api_test123");
+  });
+
+  test("redacts npm tokens", () => {
+    const out = scrubSecrets("npm=npm_abcdefghijklmnopqrstuvwxyz01234");
+    expect(out).toContain("[REDACTED:npm_token]");
+    expect(out).not.toContain("npm_abcdefghijklmnopqr");
+  });
+
+  test("redacts Atlassian/Jira API tokens", () => {
+    const out = scrubSecrets("jira=ATATT3xFfGF0abcdefghijklmnopqrstuvwxyz");
+    expect(out).toContain("[REDACTED:atlassian_token]");
+    expect(out).not.toContain("ATATT3xFfGF0");
+  });
 });
 
 describe("scrubSecrets — does not over-scrub", () => {
@@ -298,5 +328,25 @@ describe("scrubObject", () => {
     value.self = value;
 
     expect(scrubObject(value)).toEqual({ a: "ok", self: "[Circular]" });
+  });
+});
+
+describe("registerVolatileSecret", () => {
+  afterEach(() => {
+    clearVolatileSecretsForTesting();
+  });
+
+  test("scrubs a runtime-registered volatile secret", () => {
+    const secret = "volatile_runtime_token_1234567890abcdef";
+    registerVolatileSecret(secret, "RUNTIME_TOKEN");
+    const out = scrubSecrets(`key=${secret}`);
+    expect(out).toBe("key=[REDACTED:RUNTIME_TOKEN]");
+    expect(out).not.toContain(secret);
+  });
+
+  test("ignores values shorter than the minimum length", () => {
+    registerVolatileSecret("short", "TOO_SHORT");
+    const out = scrubSecrets("contains short somewhere");
+    expect(out).toBe("contains short somewhere");
   });
 });

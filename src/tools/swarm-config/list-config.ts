@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getSwarmConfigs, maskSecrets } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
+import { registerVolatileSecret } from "@/utils/secret-scrubber";
 
 export const registerListConfigTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -53,6 +54,13 @@ export const registerListConfigTool = (server: McpServer) => {
         });
 
         const result = includeSecrets ? configs : maskSecrets(configs);
+        if (includeSecrets) {
+          for (const c of result) {
+            if (c.isSecret && c.value) {
+              registerVolatileSecret(c.value, `config:${c.key}`);
+            }
+          }
+        }
         const count = result.length;
 
         const configList =
