@@ -21,6 +21,12 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
         headers: z.string().optional().describe("New JSON object of non-secret headers"),
         envConfigKeys: z.string().optional().describe("New env config key mappings"),
         headerConfigKeys: z.string().optional().describe("New header config key mappings"),
+        extraAuthorizeParams: z
+          .string()
+          .optional()
+          .describe(
+            'JSON object string of extra OAuth authorize-request params, e.g. {"access_type":"offline","prompt":"consent"}',
+          ),
         isEnabled: z.boolean().optional().describe("Toggle enabled/disabled"),
       }),
       outputSchema: z.object({
@@ -76,6 +82,8 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
         if (args.headers !== undefined) updates.headers = args.headers;
         if (args.envConfigKeys !== undefined) updates.envConfigKeys = args.envConfigKeys;
         if (args.headerConfigKeys !== undefined) updates.headerConfigKeys = args.headerConfigKeys;
+        if (args.extraAuthorizeParams !== undefined)
+          updates.extraAuthorizeParams = args.extraAuthorizeParams;
         if (args.isEnabled !== undefined) updates.isEnabled = args.isEnabled;
 
         const updated = updateMcpServer(args.id, updates);
