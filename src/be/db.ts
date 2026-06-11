@@ -1001,6 +1001,8 @@ type AgentTaskRow = {
   slackThreadTs: string | null;
   slackUserId: string | null;
   slackReplySent: number;
+  slackProgressMessageTs: string | null;
+  slackTreeRootMessageTs: string | null;
   vcsProvider: string | null;
   vcsRepo: string | null;
   vcsEventType: string | null;
@@ -1090,6 +1092,8 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackThreadTs: row.slackThreadTs ?? undefined,
     slackUserId: row.slackUserId ?? undefined,
     slackReplySent: !!row.slackReplySent,
+    slackProgressMessageTs: row.slackProgressMessageTs ?? undefined,
+    slackTreeRootMessageTs: row.slackTreeRootMessageTs ?? undefined,
     vcsProvider: (row.vcsProvider as "github" | "gitlab" | null) ?? undefined,
     vcsRepo: row.vcsRepo ?? undefined,
     vcsEventType: row.vcsEventType ?? undefined,
@@ -1365,6 +1369,30 @@ export function getTaskById(id: string): AgentTask | null {
 
 export function markTaskSlackReplySent(taskId: string): void {
   getDb().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
+}
+
+export function setSlackMessageTracking(
+  taskId: string,
+  fields: {
+    slackProgressMessageTs?: string | null;
+    slackTreeRootMessageTs?: string | null;
+  },
+): void {
+  const sets: string[] = [];
+  const args: (string | null)[] = [];
+
+  if (Object.hasOwn(fields, "slackProgressMessageTs")) {
+    sets.push("slackProgressMessageTs = ?");
+    args.push(fields.slackProgressMessageTs ?? null);
+  }
+  if (Object.hasOwn(fields, "slackTreeRootMessageTs")) {
+    sets.push("slackTreeRootMessageTs = ?");
+    args.push(fields.slackTreeRootMessageTs ?? null);
+  }
+  if (sets.length === 0) return;
+
+  args.push(taskId);
+  getDb().run(`UPDATE agent_tasks SET ${sets.join(", ")} WHERE id = ?`, args);
 }
 
 export function getChildTasks(parentTaskId: string): AgentTask[] {

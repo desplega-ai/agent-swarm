@@ -9,12 +9,16 @@ import {
   getChildTasks,
   getCompletedSlackTasks,
   getInProgressSlackTasks,
+  getTaskById,
   initDb,
   insertTaskAttachment,
+  setSlackMessageTracking,
   startTask,
+  updateTaskProgress,
 } from "../be/db";
 import {
   _getLastRenderedTree,
+  _getTaskMessages,
   _getTaskToTree,
   _getTreeLastUpdateTime,
   _getTreeMessages,
@@ -113,6 +117,68 @@ describe("watcher DB queries", () => {
     // Starting the watcher with existing data should not crash
     startTaskWatcher(60000);
     stopTaskWatcher();
+  });
+
+  test("rehydrates tree message tracking from in-progress tasks after restart", () => {
+    const agent = createAgent({ name: "WatcherHydrateTreeAgent", isLead: false, status: "idle" });
+    const task = createTaskExtended("watcher hydrate tree test", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_HYDRATE_TREE",
+      slackThreadTs: "1919191919.000001",
+      slackUserId: "U_HYDRATE_TREE",
+    });
+    startTask(task.id);
+
+    const messageTs = "1919191919.000002";
+    registerTreeMessage(task.id, "C_HYDRATE_TREE", "1919191919.000001", messageTs);
+
+    expect(getTaskById(task.id)!.slackTreeRootMessageTs).toBe(messageTs);
+
+    _getTreeMessages().clear();
+    _getTaskToTree().clear();
+    _getTaskMessages().clear();
+
+    startTaskWatcher(60000);
+    stopTaskWatcher();
+
+    const tree = _getTreeMessages().get(messageTs);
+    expect(tree).toBeDefined();
+    expect(tree!.channelId).toBe("C_HYDRATE_TREE");
+    expect(tree!.threadTs).toBe("1919191919.000001");
+    expect(tree!.rootTaskIds.has(task.id)).toBe(true);
+    expect(_getTaskToTree().get(task.id)).toBe(messageTs);
+    expect(_getTaskMessages().get(task.id)?.messageTs).toBe(messageTs);
+  });
+
+  test("rehydrates flat progress message tracking from in-progress tasks after restart", () => {
+    const agent = createAgent({ name: "WatcherHydrateFlatAgent", isLead: false, status: "idle" });
+    const task = createTaskExtended("watcher hydrate flat test", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_HYDRATE_FLAT",
+      slackThreadTs: "2020202020.000001",
+      slackUserId: "U_HYDRATE_FLAT",
+    });
+    updateTaskProgress(task.id, "Halfway there");
+
+    const messageTs = "2020202020.000002";
+    setSlackMessageTracking(task.id, { slackProgressMessageTs: messageTs });
+
+    _getTreeMessages().clear();
+    _getTaskToTree().clear();
+    _getTaskMessages().clear();
+
+    startTaskWatcher(60000);
+    stopTaskWatcher();
+
+    expect(_getTreeMessages().has(messageTs)).toBe(false);
+    expect(_getTaskToTree().has(task.id)).toBe(false);
+    expect(_getTaskMessages().get(task.id)).toEqual({
+      channelId: "C_HYDRATE_FLAT",
+      threadTs: "2020202020.000001",
+      messageTs,
+    });
   });
 });
 

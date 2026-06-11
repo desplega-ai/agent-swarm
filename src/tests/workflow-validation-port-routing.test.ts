@@ -48,6 +48,29 @@ class ObjectOutputExecutor extends BaseExecutor<
 }
 
 /**
+ * Executor that mimics an agent-task review output shape.
+ * Used for regression coverage around aliased property-match fields.
+ */
+class ReviewOutputExecutor extends BaseExecutor<
+  typeof ReviewOutputExecutor.schema,
+  typeof ReviewOutputExecutor.outSchema
+> {
+  static readonly schema = z.object({ verdict: z.string() });
+  static readonly outSchema = z.object({ taskOutput: z.object({ verdict: z.string() }) });
+
+  readonly type = "review-output";
+  readonly mode = "instant" as const;
+  readonly configSchema = ReviewOutputExecutor.schema;
+  readonly outputSchema = ReviewOutputExecutor.outSchema;
+
+  protected async execute(
+    config: z.infer<typeof ReviewOutputExecutor.schema>,
+  ): Promise<ExecutorResult<z.infer<typeof ReviewOutputExecutor.outSchema>>> {
+    return { status: "success", output: { taskOutput: { verdict: config.verdict } } };
+  }
+}
+
+/**
  * Terminal executor that just succeeds. Used for leaf nodes.
  */
 class NoopExecutor extends BaseExecutor<typeof NoopExecutor.schema, typeof NoopExecutor.outSchema> {
@@ -77,6 +100,7 @@ const mockDeps: ExecutorDependencies = {
 function createTestRegistry(): ExecutorRegistry {
   const registry = new ExecutorRegistry();
   registry.register(new ObjectOutputExecutor(mockDeps));
+  registry.register(new ReviewOutputExecutor(mockDeps));
   registry.register(new NoopExecutor(mockDeps));
   registry.register(new PropertyMatchExecutor(mockDeps));
   return registry;
@@ -217,5 +241,162 @@ describe("Validation Port Routing", () => {
 
     const run = getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
+  });
+
+  test("property-match node resolves fields through node.inputs aliases", async () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        {
+          id: "review-step",
+          type: "object-output",
+          config: { approved: true },
+          next: "check",
+        },
+        {
+          id: "check",
+          type: "property-match",
+          inputs: { review: "review-step" },
+          config: {
+            conditions: [{ field: "review.approved", op: "eq", value: true }],
+          },
+          next: { true: "on-pass", false: "on-fail" },
+        },
+        {
+          id: "on-pass",
+          type: "noop",
+          config: {},
+        },
+        {
+          id: "on-fail",
+          type: "noop",
+          config: {},
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const nodeIds = steps.map((s) => s.nodeId);
+
+    expect(nodeIds).toContain("check");
+    expect(nodeIds).toContain("on-pass");
+    expect(nodeIds).not.toContain("on-fail");
+  });
+
+  test("property-match node keeps raw context path fallback with node.inputs present", async () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        {
+          id: "review-step",
+          type: "object-output",
+          config: { approved: true },
+          next: "check",
+        },
+        {
+          id: "check",
+          type: "property-match",
+          inputs: { review: "review-step" },
+          config: {
+            conditions: [{ field: "review-step.approved", op: "eq", value: true }],
+          },
+          next: { true: "on-pass", false: "on-fail" },
+        },
+        {
+          id: "on-pass",
+          type: "noop",
+          config: {},
+        },
+        {
+          id: "on-fail",
+          type: "noop",
+          config: {},
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const nodeIds = steps.map((s) => s.nodeId);
+
+    expect(nodeIds).toContain("on-pass");
+    expect(nodeIds).not.toContain("on-fail");
+  });
+
+  test("property-match handles DES-294 review.taskOutput.verdict alias shape", async () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        {
+          id: "review-step",
+          type: "review-output",
+          config: { verdict: "continue" },
+          next: "halt-check",
+        },
+        {
+          id: "halt-check",
+          type: "property-match",
+          inputs: { review: "review-step" },
+          config: {
+            conditions: [{ field: "review.taskOutput.verdict", op: "eq", value: "continue" }],
+          },
+          next: { true: "continue-flow", false: "false-halt" },
+        },
+        {
+          id: "continue-flow",
+          type: "noop",
+          config: {},
+        },
+        {
+          id: "false-halt",
+          type: "noop",
+          config: {},
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const nodeIds = steps.map((s) => s.nodeId);
+
+    expect(nodeIds).toContain("continue-flow");
+    expect(nodeIds).not.toContain("false-halt");
+  });
+
+  test("property-match validation resolves fields through node.inputs aliases", async () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        {
+          id: "check",
+          type: "object-output",
+          inputs: { review: "trigger.review" },
+          config: { approved: true },
+          next: "after-check",
+          validation: {
+            executor: "property-match",
+            config: {
+              conditions: [{ field: "review.taskOutput.verdict", op: "eq", value: "continue" }],
+            },
+            mustPass: true,
+          },
+        },
+        {
+          id: "after-check",
+          type: "noop",
+          config: {},
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(
+      workflow,
+      { review: { taskOutput: { verdict: "continue" } } },
+      registry,
+    );
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const nodeIds = steps.map((s) => s.nodeId);
+    const run = getWorkflowRun(runId);
+
+    expect(run!.status).toBe("completed");
+    expect(nodeIds).toContain("check");
+    expect(nodeIds).toContain("after-check");
   });
 });

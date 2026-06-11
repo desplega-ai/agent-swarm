@@ -496,6 +496,7 @@ async function executeStep(
   // 4. Deep-interpolate config using local context (not global ctx)
   const { value: interpolatedValue, unresolved } = deepInterpolate(node.config, interpolationCtx);
   const interpolatedConfig = interpolatedValue as Record<string, unknown>;
+  const executionCtx: Record<string, unknown> = { ...ctx, ...interpolationCtx };
 
   if (unresolved.length > 0) {
     console.warn(
@@ -524,7 +525,7 @@ async function executeStep(
     result = await Promise.race([
       executor.run({
         config: interpolatedConfig,
-        context: ctx,
+        context: executionCtx,
         meta,
       }),
       timeoutPromise(timeoutMs),
@@ -595,7 +596,7 @@ async function executeStep(
   // 7. Run validation if configured
   let validationResult: ValidationRunResult | undefined;
   if (node.validation) {
-    validationResult = await runStepValidation(registry, node, result.output, ctx, meta);
+    validationResult = await runStepValidation(registry, node, result.output, executionCtx, meta);
 
     if (validationResult.outcome === "halt") {
       const errorMsg = "Validation failed (mustPass)";

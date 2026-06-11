@@ -15,6 +15,20 @@ import {
 // Re-export for backward compatibility
 export { markdownToSlack } from "./blocks";
 
+export type SlackUpdateResult = "ok" | "not_found" | "failed";
+
+function classifySlackUpdateError(error: unknown): SlackUpdateResult {
+  const errorCode = (error as { data?: { error?: string } } | undefined)?.data?.error;
+  if (
+    errorCode === "message_not_found" ||
+    errorCode === "channel_not_found" ||
+    errorCode === "thread_not_found"
+  ) {
+    return "not_found";
+  }
+  return "failed";
+}
+
 const isDev = process.env.ENV === "development";
 
 /**
@@ -140,12 +154,12 @@ export async function updateProgressInPlace(
   task: AgentTask,
   progress: string,
   messageTs: string,
-): Promise<boolean> {
+): Promise<SlackUpdateResult> {
   const app = getSlackApp();
-  if (!app || !task.slackChannelId || !task.agentId) return false;
+  if (!app || !task.slackChannelId || !task.agentId) return "failed";
 
   const agent = getAgentById(task.agentId);
-  if (!agent) return false;
+  if (!agent) return "failed";
 
   const blocks = buildProgressBlocks({ agentName: agent.name, taskId: task.id, progress });
 
@@ -157,10 +171,17 @@ export async function updateProgressInPlace(
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });
-    return true;
+    return "ok";
   } catch (error) {
-    console.error(`[Slack] Failed to update progress in-place:`, error);
-    return false;
+    const result = classifySlackUpdateError(error);
+    if (result === "not_found") {
+      console.warn(
+        `[Slack] Progress message missing for task ${task.id} ts=${messageTs}; will repost`,
+      );
+    } else {
+      console.error(`[Slack] Failed to update progress in-place:`, error);
+    }
+    return result;
   }
 }
 
@@ -233,9 +254,9 @@ export async function updateTreeMessage(
   messageTs: string,
   blocks: unknown[],
   fallbackText: string,
-): Promise<boolean> {
+): Promise<SlackUpdateResult> {
   const app = getSlackApp();
-  if (!app) return false;
+  if (!app) return "failed";
 
   try {
     await app.client.chat.update({
@@ -245,10 +266,17 @@ export async function updateTreeMessage(
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });
-    return true;
+    return "ok";
   } catch (error) {
-    console.error(`[Slack] Failed to update tree message:`, error);
-    return false;
+    const result = classifySlackUpdateError(error);
+    if (result === "not_found") {
+      console.warn(
+        `[Slack] Tree message missing for channel=${channelId} ts=${messageTs}; will repost`,
+      );
+    } else {
+      console.error(`[Slack] Failed to update tree message:`, error);
+    }
+    return result;
   }
 }
 
