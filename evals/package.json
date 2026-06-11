@@ -1,0 +1,24 @@
+{
+  "name": "@agent-swarm/evals",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cli": "bun src/cli.ts",
+    "run": "bun src/cli.ts run",
+    "serve": "bun src/cli.ts serve",
+    "tsc:check": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.15.0",
+    "@openrouter/ai-sdk-provider": "^2.9.1",
+    "ai": "^6.0.116",
+    "e2b": "2.26.0",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.9.0"
+  }
+}

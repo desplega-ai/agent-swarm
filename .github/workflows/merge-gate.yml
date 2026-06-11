@@ -66,7 +66,7 @@ jobs:
           }
 
           # lint + tsc:check: biome runs on src/, tsc covers src/ (scripts excluded in tsconfig).
-          LINT=$(match '^(src/|package\.json$|bun\.lock|tsconfig\.json$|biome\.json$)')
+          LINT=$(match '^(src/|evals/|package\.json$|bun\.lock|tsconfig\.json$|biome\.json$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig.
           TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|tsconfig\.json$)')
@@ -116,6 +116,14 @@ jobs:
 
       - name: Run TypeScript type check
         run: bun run tsc:check
+
+      - name: Install evals dependencies
+        run: bun install --frozen-lockfile
+        working-directory: evals
+
+      - name: Type check evals
+        run: bun run tsc:check
+        working-directory: evals
 
       - name: Check worker/API DB boundary
         run: bash scripts/check-db-boundary.sh

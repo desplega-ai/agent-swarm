@@ -60,3 +60,6 @@ Dockerfile
 docker-compose.yml
 docker-compose.*.yml
 !docker-compose.worker.yml
+
+# Eval harness sub-project (own package, never part of images)
+evals/

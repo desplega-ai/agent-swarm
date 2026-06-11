@@ -25,6 +25,7 @@ templates-ui/          # Templates registry (Next.js)
 templates/             # Official + community template data
 docs-site/             # Fumadocs site (MDX)
 runbooks/              # Operational runbooks (local dev, etc.)
+evals/                 # Eval harness: scenario x harness-config matrix on E2B (own package; see evals/README.md)
 ```
 
 ## Architecture invariants
