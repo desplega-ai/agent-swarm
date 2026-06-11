@@ -51,6 +51,13 @@ export const AUTO_REPLY_DISCLAIMER =
   process.env.SLACK_AUTO_REPLY_DISCLAIMER ||
   ":robot_face: _Still in beta — double-check anything important._";
 
+// Instruction injected into STEP 2 of the classifier prompt.
+// When SLACK_AUTO_REPLY_BQ_SCOPE is not set the agent is instructed to refuse
+// query execution so the generic built-in never runs against an unconfigured dataset.
+export const AUTO_REPLY_BQ_SCOPE =
+  process.env.SLACK_AUTO_REPLY_BQ_SCOPE?.trim() ||
+  "No dataset scope is configured for this deployment — do NOT run any query. Instead post the reply: 'Data queries are not configured for this deployment.'";
+
 /**
  * Configuration for user filtering.
  */
@@ -623,6 +630,7 @@ export function registerMessageHandler(app: App): void {
           channel_id: msg.channel,
           message_text: effectiveText,
           disclaimer: AUTO_REPLY_DISCLAIMER,
+          bq_dataset_scope: AUTO_REPLY_BQ_SCOPE,
         });
         createTaskWithSiblingAwareness(ctxResult.text, {
           agentId: targetAgentId,

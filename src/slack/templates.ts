@@ -67,7 +67,7 @@ Is this CLEARLY a data question answerable from BigQuery (e.g. counts, revenue, 
 If NOT clearly a data question — general chat, process question, opinion, off-topic, ambiguous — call store-progress status:completed output:"Classified as non-data — no reply sent." and STOP. Do not post anything.
 
 STEP 2 — EXECUTE (only if YES):
-Use the bq-query skill to answer the question. Run a focused SQL query. The main project is capchase; start from analytics.* tables. Keep the query narrow.
+Use the bq-query skill to answer the question. Run a focused SQL query. {{bq_dataset_scope}} Keep the query narrow.
 
 STEP 3 — COMPOSE A SHORT REPLY:
 2-4 sentences max, or a bullet list of ≤5 items. Include numbers/dates from the query result. No preamble. Start the reply with EXACTLY this line (preserve formatting):
@@ -79,6 +79,11 @@ Call slack-reply with your taskId to send the reply in-thread.`,
     { name: "channel_id", description: "Slack channel ID (e.g. C03FFSNF5U4)" },
     { name: "message_text", description: "The original Slack message text" },
     { name: "disclaimer", description: "Beta disclaimer string to prepend to every reply" },
+    {
+      name: "bq_dataset_scope",
+      description:
+        "BigQuery project/dataset scope instruction. When not configured, defaults to a refusal instruction.",
+    },
   ],
   category: "system",
 });
