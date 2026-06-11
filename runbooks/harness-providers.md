@@ -58,7 +58,8 @@ When `MODEL_OVERRIDE=amazon-bedrock/<model-id>` (e.g. `amazon-bedrock/anthropic.
 - Any source the AWS SDK accepts works: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ optional `AWS_SESSION_TOKEN`), `AWS_PROFILE` + `~/.aws/credentials`, SSO sessions in `~/.aws/config`, EC2 IMDS / ECS task role, web-identity / OIDC, `credential_process`, assume-role chains.
 - `AWS_REGION` (or `AWS_DEFAULT_REGION`) is required by the SDK and must be a Bedrock-enabled region.
 - The boot credential gate (`checkPiMonoCredentials`) short-circuits to `satisfiedBy: "sdk-delegated"` without inspecting any AWS env var or file. The worker does **not** park in `credential-wait` for Bedrock — even with no creds visible to agent-swarm, it claims tasks.
-- Credential errors surface at the first Bedrock inference call as an AWS SDK error in the session log (scrubbed via `scrubSecrets` at egress). Treat this the same as a codex `auth.json` failure: the adapter/SDK is the source of truth, not the boot gate.
+- Bedrock runtime failures surface as structured task failures. pi-mono captures the pi-coding-agent terminal event and emits a normalized `error` `ProviderEvent`; `waitForCompletion()` returns `exitCode: 1`, `isError: true`, and the same `errorCategory` / `failureReason`.
+- AWS SDK failures are categorized as `aws-auth` (missing/expired/invalid credentials), `aws-throttle` (rate limits or quota), `aws-access` (IAM denial), or `aws-model` (invalid/unavailable model, region mismatch, timeout, or model-not-ready). Treat these the same as a codex `auth.json` failure: the adapter/SDK is the source of truth, not the boot gate.
 - This is the closest precedent to codex's "presence-only" pattern (`codexAuthFileExists` → `presenceCheckOk`). If pi-ai later exposes a `validateBedrockCredentials` helper, the live-test branch in `validateProviderCredentials` can be upgraded without touching the boot gate.
 
 ## Native session resume is deprecated (2026-05-28)

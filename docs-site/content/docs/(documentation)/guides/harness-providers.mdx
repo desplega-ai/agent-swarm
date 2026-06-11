@@ -119,7 +119,16 @@ pi-mono routes to Amazon Bedrock when `MODEL_OVERRIDE=amazon-bedrock/<model-id>`
 
 `AWS_REGION` (or `AWS_DEFAULT_REGION`) is required by the SDK and must be a Bedrock-enabled region.
 
-**Failure mode.** No `credential-wait` parking — the worker claims tasks immediately. If creds are missing, the first Bedrock inference call fails with the AWS SDK's own error (e.g. `CredentialsProviderError: Could not load credentials from any providers`), which surfaces in the session log via the existing error path (scrubbed through `scrubSecrets`). Treat this the same way you treat a stale codex `auth.json`: the underlying SDK is the source of truth.
+**Failure mode.** No `credential-wait` parking — the worker claims tasks immediately. If Bedrock fails at runtime, pi-mono captures the structured pi-coding-agent terminal event and emits a normalized `error` `ProviderEvent`; `waitForCompletion()` returns `exitCode: 1`, `isError: true`, and the same `errorCategory` / `failureReason`, so the task fails with the session-chat error box instead of only leaving an SDK exception in the session log. Raw stderr/log events are still scrubbed through `scrubSecrets` at egress.
+
+AWS SDK errors are classified before they reach the runner:
+
+- `aws-auth` — missing, expired, invalid, or unresolvable AWS credentials (for example `CredentialsProviderError`, `ExpiredToken`, invalid signatures, or unrecognized clients). Refresh credentials with `aws sso login` or `aws configure`, then retry.
+- `aws-throttle` — Bedrock rate limits, too many requests, or service quota exhaustion. Retry after backoff or request a quota increase.
+- `aws-access` — IAM authorization denied for Bedrock invocation. Verify the role/user can call `bedrock:InvokeModel` for the target model ARN and region.
+- `aws-model` — invalid model IDs, unavailable models, region mismatches, model timeout, or model-not-ready responses. Verify `MODEL_OVERRIDE` and the AWS region.
+
+Treat these the same way you treat a stale codex `auth.json`: the underlying SDK is the source of truth, but the adapter now turns known AWS SDK failures into structured task failures.
 
 This is intentionally the same pattern codex uses for OAuth credentials (`codexAuthFileExists` → `presenceCheckOk` in [`src/commands/provider-credentials.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/provider-credentials.ts)) — presence-only gate, runtime validation owned by the adapter/SDK, no upstream call from agent-swarm. pi-ai does not currently expose a Bedrock-specific credential check we could call; if it does in the future, the live-test branch can be upgraded without touching the boot gate.
 
