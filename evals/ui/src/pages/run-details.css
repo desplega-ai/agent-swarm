@@ -51,16 +51,39 @@
 }
 
 /* Left and right columns scroll independently below the fixed header (item 17). */
-.rd-body > .scroll-col {
+.rd-body > .scroll-col,
+.rd-body > .rd-right {
   --scroll-col-max: calc(100vh - 240px);
 }
 
-/* Tabs stay visible while the right pane scrolls. */
+/* Item 5 (v4 §8): the tab bar lives OUTSIDE the scroll container, pinned at the
+   very top of the right pane. The pane itself never scrolls (overflow hidden);
+   only .rd-tab-content does — scrolled content can never bleed above the tabs. */
+.rd-right {
+  display: flex;
+  flex-direction: column;
+  max-height: var(--scroll-col-max);
+  min-height: 0;
+  overflow: hidden;
+}
+
 .rd-right > .tabs {
-  position: sticky;
-  top: 0;
-  z-index: 6;
+  flex: none;
+  margin-bottom: 0;
   background: var(--panel);
+}
+
+.rd-tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 10px;
+}
+
+/* Checks-tab label (item 11): one ✶ per judge, colored by verdict. */
+.rd-tab-judges {
+  margin-left: 5px;
+  letter-spacing: 2px;
 }
 
 .rd-mono {
@@ -132,13 +155,6 @@
   font-size: 10.5px;
   font-weight: 400;
   overflow-wrap: anywhere;
-}
-
-.rd-config-ref {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
 }
 
 .rd-tasks {
@@ -267,6 +283,16 @@
   font-size: 11px;
 }
 
+/* live waterfall (item 6): the growing bar pulses — the SINGLE animated element;
+   the duration cell is ticking text (Elapsed), not an animation. */
+.wf-row.live .wf-label {
+  color: var(--accent);
+}
+
+.wf-row.live .wf-dur {
+  color: var(--accent);
+}
+
 /* ---- sandbox ---- */
 
 .rd-copy {
@@ -292,39 +318,18 @@
   font-size: inherit;
 }
 
-/* ---- checks & judgments tab ---- */
+/* ---- checks & judgments tab (item 9: expandable table) ---- */
 
 .rd-checks {
   display: flex;
   flex-direction: column;
 }
 
-.rd-judgment {
-  border-left: 3px solid var(--dim);
-  padding: 6px 10px;
-  margin-top: 8px;
-  background: var(--panel-2);
-  border-radius: 0 6px 6px 0;
-}
-
-.rd-judgment.pass {
-  border-left-color: var(--green);
-}
-
-.rd-judgment.fail {
-  border-left-color: var(--red);
-}
-
-.rd-judgment-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 12px;
-}
-
 .rd-judgment-name {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rd-judgment-kind {
@@ -334,8 +339,12 @@
   cursor: default;
 }
 
-.rd-judgment-spacer {
-  flex: 1;
+/* expanded judgment row: reasoning + full trace + raw toggle */
+.rd-judgment-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px 6px;
 }
 
 .rd-judgment-ms {
@@ -572,6 +581,104 @@
   padding: 4px 0;
 }
 
+/* ---- logs tab (items 10 + 14) ---- */
+
+.rd-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rd-log-sources {
+  display: flex;
+  gap: 6px;
+}
+
+.rd-log-src {
+  padding: 2px 10px;
+  font-size: 11.5px;
+}
+
+.rd-log-src.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rd-log-body {
+  overflow-y: auto;
+  max-height: calc(100vh - 430px);
+  min-height: 160px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.rd-log-row {
+  display: grid;
+  grid-template-columns: 58px 14px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 1px 0;
+  border-radius: 3px;
+}
+
+.rd-log-row:hover {
+  background: var(--panel-2);
+}
+
+.rd-log-ts {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.rd-log-glyph {
+  text-align: center;
+  color: var(--dim);
+  line-height: 1.5;
+  cursor: default;
+}
+
+.rd-log-glyph.level-warn {
+  color: var(--orange);
+}
+
+.rd-log-glyph.level-error {
+  color: var(--red);
+}
+
+/* one log line — single-line ellipsis, click to expand to pre-wrap */
+.rd-log-msg {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rd-log-msg.expanded {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rd-log-row.level-warn .rd-log-msg {
+  color: var(--orange);
+}
+
+.rd-log-row.level-error .rd-log-msg {
+  color: var(--red);
+}
+
 /* ---- assets tab ---- */
 
 .rd-kind-glyph {
@@ -591,7 +698,8 @@
     grid-template-columns: 1fr;
   }
 
-  .rd-body > .scroll-col {
+  .rd-body > .scroll-col,
+  .rd-right {
     max-height: none;
   }
 

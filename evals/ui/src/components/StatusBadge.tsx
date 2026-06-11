@@ -59,9 +59,32 @@ function GlyphSpan(props: { info: StatusGlyphInfo }): ReactNode {
   );
 }
 
-/** Status as a unicode glyph (✓ ✗ ⚠ ○ ⊘ ◔ / braille spinner) with hover info — no text chips. */
-export function StatusBadge(props: { status: string; tip?: string }): ReactNode {
+/**
+ * Status as a unicode glyph (✓ ✗ ⚠ ○ ⊘ ◔ / braille spinner) with hover info — no text chips.
+ *
+ * SINGLE-ANIMATION RULE (v4 item 7): a status indicator and a "live" affordance
+ * MUST be the same element. Pages must NEVER render a separate <Spinner> next to
+ * a StatusBadge — pass `activeLabel` instead and this renders exactly ONE
+ * animated spinner with the label as static text.
+ */
+export function StatusBadge(props: {
+  status: string;
+  tip?: string;
+  /** Executor-live label ("Live" / "Executing"). Renders ONE spinner + static text. */
+  activeLabel?: string;
+}): ReactNode {
   const info = statusGlyphInfo(props.status);
+  if (props.activeLabel !== undefined) {
+    const tipText = [props.tip ?? info.label, props.activeLabel].filter(Boolean).join(" · ");
+    return (
+      <Tooltip text={tipText}>
+        <span className="status-live" role="img" aria-label={tipText}>
+          <Spinner />
+          <span className="status-live-label">{props.activeLabel}</span>
+        </span>
+      </Tooltip>
+    );
+  }
   return (
     <Tooltip text={props.tip ?? info.label}>
       <GlyphSpan info={info} />

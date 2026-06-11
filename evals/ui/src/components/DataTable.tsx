@@ -1,4 +1,5 @@
 import {
+  Fragment,
   type ReactNode,
   useCallback,
   useEffect,
@@ -8,7 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { InfoTip } from "./Tooltip.tsx";
+import { InfoTip, Tooltip } from "./Tooltip.tsx";
 
 export interface Column<T> {
   key: string; // unique column id
@@ -23,6 +24,9 @@ export interface Column<T> {
   filterRender?: (option: string) => ReactNode; // custom option rendering (e.g. harness icon)
   searchText?: (row: T) => string; // contributes to the fuzzy haystack
   titleText?: (row: T) => string; // hover-reveal title; default searchText → string render
+  /** Rich portal hover (item 4: full names; item 3: matrix breakdowns). Non-null
+   *  return wraps the cell in a wide portal Tooltip and suppresses the native title. */
+  tooltip?: (row: T) => ReactNode | null;
   render: (row: T) => ReactNode;
 }
 
@@ -40,6 +44,10 @@ export interface DataTableProps<T> {
   defaultSort?: { key: string; dir: "asc" | "desc" };
   emptyText?: string; // default "Nothing here yet"
   maxHeight?: string; // scroll container, sticky header
+  /** Row expansion (item 9): adds a leading ▸/▾ chevron column; clicking a row
+   *  toggles a full-width detail row rendered by this callback. Takes precedence
+   *  over onRowClick/rowHref for the row click. */
+  renderExpanded?: (row: T) => ReactNode;
 }
 
 /** Case-insensitive subsequence match. */
@@ -190,14 +198,26 @@ function compareValues(a: string | number | null, b: string | number | null): nu
 }
 
 export function DataTable<T>(props: DataTableProps<T>): ReactNode {
-  const { rows, columns, rowKey, onRowClick, rowHref } = props;
+  const { rows, columns, rowKey, onRowClick, rowHref, renderExpanded } = props;
   const searchable = props.searchable ?? true;
   const stacked = props.toolbarLayout === "stacked";
+  const expandable = renderExpanded !== undefined;
+  const colCount = columns.length + (expandable ? 1 : 0);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(
     props.defaultSort ?? null,
   );
   const [filters, setFilters] = useState<Record<string, string[]>>({});
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+
+  const toggleExpanded = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const filterCols = columns.filter((c) => c.filterOptions);
 
@@ -284,12 +304,14 @@ export function DataTable<T>(props: DataTableProps<T>): ReactNode {
       >
         <table className="data">
           <colgroup>
+            {expandable ? <col style={{ width: "26px" }} /> : null}
             {columns.map((col) => (
               <col key={col.key} style={col.width ? { width: col.width } : undefined} />
             ))}
           </colgroup>
           <thead>
             <tr>
+              {expandable ? <th aria-label="Expand" /> : null}
               {columns.map((col) => {
                 const sortable = col.sortable ?? true;
                 const arrow = sort?.key === col.key ? (sort.dir === "asc" ? " ▲" : " ▼") : "";
@@ -312,23 +334,28 @@ export function DataTable<T>(props: DataTableProps<T>): ReactNode {
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td className="dt-empty" colSpan={columns.length}>
+                <td className="dt-empty" colSpan={colCount}>
                   {props.emptyText ?? "Nothing here yet"}
                 </td>
               </tr>
             ) : (
               visible.map((row) => {
                 const key = rowKey(row);
-                const href = rowHref?.(row) ?? null;
-                const clickable = href !== null || onRowClick !== undefined;
+                const href = expandable ? null : (rowHref?.(row) ?? null);
+                const isExpanded = expandable && expanded.has(key);
+                const clickable = expandable || href !== null || onRowClick !== undefined;
                 const cls = [
                   key === props.selectedKey ? "selected" : "",
                   clickable ? "clickable" : "",
                 ]
                   .filter(Boolean)
                   .join(" ");
-                const handleClick = href === null && onRowClick ? () => onRowClick(row) : undefined;
-                return (
+                const handleClick = expandable
+                  ? () => toggleExpanded(key)
+                  : href === null && onRowClick
+                    ? () => onRowClick(row)
+                    : undefined;
+                const mainRow = (
                   <tr
                     key={key}
                     className={cls || undefined}
@@ -344,26 +371,55 @@ export function DataTable<T>(props: DataTableProps<T>): ReactNode {
                         : undefined
                     }
                     tabIndex={handleClick ? 0 : undefined}
+                    aria-expanded={expandable ? isExpanded : undefined}
                   >
+                    {expandable ? (
+                      <td className="align-center">
+                        <span className="dt-chevron" aria-hidden>
+                          {isExpanded ? "▾" : "▸"}
+                        </span>
+                      </td>
+                    ) : null}
                     {columns.map((col) => {
+                      const tip = col.tooltip?.(row) ?? null;
                       const cell = (
-                        <div className="dt-cell" title={titleOf(col, row)}>
+                        <div
+                          className="dt-cell"
+                          title={tip === null ? titleOf(col, row) : undefined}
+                        >
                           {col.render(row)}
                         </div>
                       );
+                      const wrapped =
+                        tip !== null ? (
+                          <Tooltip block wide text={tip}>
+                            {cell}
+                          </Tooltip>
+                        ) : (
+                          cell
+                        );
                       return (
                         <td key={col.key} className={col.align ? `align-${col.align}` : undefined}>
                           {href !== null ? (
                             <a className="dt-row-link" href={href}>
-                              {cell}
+                              {wrapped}
                             </a>
                           ) : (
-                            cell
+                            wrapped
                           )}
                         </td>
                       );
                     })}
                   </tr>
+                );
+                if (!isExpanded || renderExpanded === undefined) return mainRow;
+                return (
+                  <Fragment key={key}>
+                    {mainRow}
+                    <tr className="dt-expand-row">
+                      <td colSpan={colCount}>{renderExpanded(row)}</td>
+                    </tr>
+                  </Fragment>
                 );
               })
             )}

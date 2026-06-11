@@ -137,6 +137,10 @@ export interface SandboxInfo {
   apiStartedAt: string | null;
   workerStartedAt: string | null;
   expiresAt: string | null; // worker sandbox endAt/expiresAt
+  /** Swarm API version from the sandbox /health response. Null/absent (older attempts) = not captured. */
+  apiVersion?: string | null;
+  /** Worker build version (`agent-swarm version` in the worker sandbox). Null/absent = not captured. */
+  workerVersion?: string | null;
 }
 
 /** Per-phase wall-clock timings in ms. All nullable (phase may not have run). */
@@ -151,6 +155,46 @@ export interface PhaseTimings {
   llmJudgeMs: number | null;
   agenticJudgeMs: number | null;
   artifactsMs: number | null;
+}
+
+// ---- live attempt progress (round 4, items 6 + 14) ----
+
+/** Runner phase identifiers, 1:1 with the PhaseTimings keys (perTask folds into "tasks"). */
+export type AttemptPhase =
+  | "boot"
+  | "seed"
+  | "tasks"
+  | "log-capture"
+  | "cost"
+  | "checks"
+  | "llm-judge"
+  | "agentic-judge"
+  | "artifacts";
+
+export type ProgressLogLevel = "info" | "warn" | "error";
+
+/** One captured runner-log line for an attempt (live ring buffer + runner.log artifact). */
+export interface ProgressLogLine {
+  ts: string; // ISO
+  level: ProgressLogLevel;
+  line: string;
+}
+
+/**
+ * Snapshot served by GET /api/attempts/:id/progress. Same philosophy as
+ * judge-live: registry-only, ALWAYS 200 — unknown/finished attempts return the
+ * empty shape ({ active: false, … }).
+ */
+export interface AttemptProgressSnapshot {
+  /** True while the attempt is executing in this server process. */
+  active: boolean;
+  startedAt: string | null;
+  currentPhase: AttemptPhase | null;
+  /** When the current phase started (drives the live waterfall's growing bar). */
+  currentPhaseStartedAt: string | null;
+  /** Filled as phases complete — partial while the attempt runs. */
+  phases: Partial<PhaseTimings>;
+  log: ProgressLogLine[];
 }
 
 export interface RecomputeInput {
@@ -289,6 +333,7 @@ export interface ArtifactRow {
     | "task"
     | "sandbox-log"
     | "workspace-file"
+    | "log"
     | "meta";
   name: string | null;
   content: string;

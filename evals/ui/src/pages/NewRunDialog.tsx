@@ -1,8 +1,8 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRun, listConfigs, listScenarios } from "../api.ts";
+import { ConfigChip } from "../components/ConfigChip.tsx";
 import { fuzzyMatch } from "../components/DataTable.tsx";
 import { fmtPerM, fmtTokens } from "../components/format.ts";
-import { HarnessIcon } from "../components/HarnessIcon.tsx";
 import { ModelChip } from "../components/ModelChip.tsx";
 import { Spinner } from "../components/Spinner.tsx";
 import { InfoTip, Tooltip } from "../components/Tooltip.tsx";
@@ -11,6 +11,14 @@ import type { CreateRunBody } from "../types.ts";
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+const EDGE = 8; // min distance from viewport edges (mirrors DataTable's MultiSelect)
+
+interface MenuPos {
+  left: number;
+  top: number;
+  width: number;
 }
 
 function NewRunForm(props: { onClose: () => void }): ReactNode {
@@ -26,6 +34,9 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
   const [attempts, setAttempts] = useState(1);
   const [concurrency, setConcurrency] = useState(2);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -56,6 +67,52 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
         : models.models;
     return filtered.slice(0, 12);
   }, [models.models, judge]);
+
+  // Item 1 — the judge-model menu must NEVER scroll the modal. It renders with
+  // position: fixed (viewport coords), so it contributes nothing to the dialog's
+  // scrollable overflow — structurally, not incidentally. It stays INSIDE the
+  // dialog subtree (not portaled to document.body): the open modal sits in the
+  // browser's top layer, which paints above — and makes inert — everything
+  // outside it, so a body-level menu would be invisible and unclickable.
+  // Positioning mechanics mirror DataTable's MultiSelect: anchor to the input
+  // rect, flip above when there is no room below, clamp x to the viewport.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reposition when the match list changes the menu height
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const input = inputRef.current;
+    const menu = menuRef.current;
+    if (!input || !menu) return;
+    const anchor = input.getBoundingClientRect();
+    menu.style.width = `${anchor.width}px`; // apply before measuring the height
+    const menuHeight = menu.getBoundingClientRect().height;
+    const left = Math.max(EDGE, Math.min(anchor.left, window.innerWidth - EDGE - anchor.width));
+    let top = anchor.bottom + 4;
+    if (top + menuHeight > window.innerHeight - EDGE) top = anchor.top - 4 - menuHeight;
+    setMenuPos({ left, top: Math.max(EDGE, top), width: anchor.width });
+  }, [menuOpen, matches.length]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || inputRef.current?.contains(t)) return;
+      setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault(); // close the menu only — keep the dialog open
+      setMenuOpen(false);
+    };
+    const onResize = () => setMenuOpen(false); // stale positions are worse than no menu
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [menuOpen]);
 
   const resolvedJudge = models.resolve(judge.trim().length > 0 ? judge.trim() : null);
 
@@ -114,7 +171,10 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
       <h3 className="dialog-title">New Run</h3>
 
       <div className="form-field">
-        <span className="form-label">Name (optional)</span>
+        <span className="form-label">
+          Name{" "}
+          <InfoTip text="Optional display name for the runs list — a run id is generated either way" />
+        </span>
         <input
           type="text"
           value={name}
@@ -124,7 +184,10 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
       </div>
 
       <div className="form-field">
-        <span className="form-label">Scenarios</span>
+        <span className="form-label">
+          Scenarios{" "}
+          <InfoTip text="What gets evaluated — every selected scenario becomes a matrix row" />
+        </span>
         <div className="check-list">
           {scenarios.data.map((s) => (
             <Tooltip key={s.id} text={s.name}>
@@ -142,7 +205,10 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
       </div>
 
       <div className="form-field">
-        <span className="form-label">Configs</span>
+        <span className="form-label">
+          Configs{" "}
+          <InfoTip text="Harness × model under test — every selected config becomes a matrix column" />
+        </span>
         <div className="check-list">
           {configs.data.map((c) => (
             <label key={c.id}>
@@ -151,10 +217,7 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
                 checked={selConfigs.has(c.id)}
                 onChange={() => toggleConfig(c.id)}
               />
-              <HarnessIcon harness={c.provider} />
-              <Tooltip text={`${c.label ?? c.id}${c.model ? ` · ${c.model}` : ""}`}>
-                <span>{c.id}</span>
-              </Tooltip>
+              <ConfigChip configId={c.id} />
             </label>
           ))}
         </div>
@@ -162,7 +225,10 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
 
       <div className="form-row-2">
         <div className="form-field">
-          <span className="form-label">Attempts Per Cell</span>
+          <span className="form-label">
+            Attempts Per Cell{" "}
+            <InfoTip text="Independent attempts per scenario × config cell — pass@n/best@n scoring" />
+          </span>
           <input
             type="number"
             min={1}
@@ -172,7 +238,10 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
           />
         </div>
         <div className="form-field">
-          <span className="form-label">Concurrency</span>
+          <span className="form-label">
+            Concurrency{" "}
+            <InfoTip text="Attempts executed in parallel — each boots its own E2B sandbox stack" />
+          </span>
           <input
             type="number"
             min={1}
@@ -189,6 +258,7 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
         </span>
         <div className="model-select">
           <input
+            ref={inputRef}
             type="text"
             value={judge}
             placeholder="deepseek/deepseek-v4-pro"
@@ -198,10 +268,19 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
               setMenuOpen(true);
             }}
             onFocus={() => setMenuOpen(true)}
+            onClick={() => setMenuOpen(true)} // reopen on click when already focused
             onBlur={() => setMenuOpen(false)}
           />
           {menuOpen && matches.length > 0 ? (
-            <div className="model-menu">
+            <div
+              ref={menuRef}
+              className="model-menu"
+              style={
+                menuPos
+                  ? { left: menuPos.left, top: menuPos.top, width: menuPos.width }
+                  : { left: -9999, top: -9999, visibility: "hidden" }
+              }
+            >
               {matches.map((m) => (
                 <button
                   key={m.id}

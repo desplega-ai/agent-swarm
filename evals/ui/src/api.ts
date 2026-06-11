@@ -1,6 +1,7 @@
 import type {
   AttemptDetail,
   AttemptJson,
+  AttemptProgressResponse,
   ConfigJson,
   CreateRunBody,
   JudgeLiveResponse,
@@ -75,6 +76,15 @@ export function getTranscript(
  */
 export function getJudgeLive(attemptId: string): Promise<JudgeLiveResponse> {
   return request(`/api/attempts/${encodeURIComponent(attemptId)}/judge-live`);
+}
+
+/**
+ * Live runner progress while an attempt executes (v4 spec §3). Always 200;
+ * unknown/finished attempts return { active: false, …empty } — use the
+ * persisted timings + runner.log artifact then.
+ */
+export function getAttemptProgress(attemptId: string): Promise<AttemptProgressResponse> {
+  return request(`/api/attempts/${encodeURIComponent(attemptId)}/progress`);
 }
 
 export function listScenarios(): Promise<ScenarioJson[]> {

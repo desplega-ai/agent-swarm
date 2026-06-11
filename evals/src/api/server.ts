@@ -16,6 +16,7 @@ import {
   resetErrorAttempts,
 } from "../db/queries.ts";
 import { getJudgeLive } from "../judge/live-registry.ts";
+import { getAttemptProgress } from "../live/attempt-progress.ts";
 import { loadRegistry, serializeConfig, serializeScenario } from "../registry.ts";
 import { summarizeRun } from "../results.ts";
 import { executeRun, killAllActiveStacks, killRunStacks } from "../runner/index.ts";
@@ -216,6 +217,14 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
        * use the persisted judgments instead.
        */
       "/api/attempts/:id/judge-live": (req) => json(getJudgeLive(req.params.id)),
+      /**
+       * Live runner progress (v4 spec §3 — frozen contract). Registry-only,
+       * in-process read: ALWAYS 200, no DB lookup — same philosophy as
+       * judge-live. Unknown attempt, finished attempt, restarted server →
+       * { active: false, startedAt: null, currentPhase: null,
+       *   currentPhaseStartedAt: null, phases: {}, log: [] }.
+       */
+      "/api/attempts/:id/progress": (req) => json(getAttemptProgress(req.params.id)),
       "/api/attempts/:id/transcript": async (req) => {
         const attempt = await getAttempt(db, req.params.id);
         if (!attempt) return json({ error: "attempt not found" }, 404);

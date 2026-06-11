@@ -68,6 +68,10 @@ export interface SandboxInfoJson {
   apiStartedAt: string | null;
   workerStartedAt: string | null;
   expiresAt: string | null;
+  /** Swarm API version from the sandbox /health response. Null/absent (older attempts) = not captured. */
+  apiVersion?: string | null;
+  /** Worker build version (`agent-swarm version` in the worker sandbox). Null/absent = not captured. */
+  workerVersion?: string | null;
 }
 
 export interface PhaseTimingsJson {
@@ -81,6 +85,42 @@ export interface PhaseTimingsJson {
   llmJudgeMs: number | null;
   agenticJudgeMs: number | null;
   artifactsMs: number | null;
+}
+
+// ---- live attempt progress (v4 spec §2–§3) ----
+
+export type AttemptPhaseJson =
+  | "boot"
+  | "seed"
+  | "tasks"
+  | "log-capture"
+  | "cost"
+  | "checks"
+  | "llm-judge"
+  | "agentic-judge"
+  | "artifacts";
+
+export type ProgressLogLevelJson = "info" | "warn" | "error";
+
+export interface ProgressLogLineJson {
+  ts: string;
+  level: ProgressLogLevelJson;
+  line: string;
+}
+
+/**
+ * GET /api/attempts/:id/progress — ALWAYS 200; unknown/finished attempts
+ * return { active: false, …empty }. Only meaningful while the attempt runs;
+ * finished attempts use persisted timings + the runner.log artifact instead.
+ */
+export interface AttemptProgressResponse {
+  active: boolean;
+  startedAt: string | null;
+  currentPhase: AttemptPhaseJson | null;
+  /** When the current phase started (drives the live waterfall's growing bar). */
+  currentPhaseStartedAt: string | null;
+  phases: Partial<PhaseTimingsJson>;
+  log: ProgressLogLineJson[];
 }
 
 export interface AttemptJson {

@@ -127,6 +127,8 @@ export function HarnessIcon(props: {
   size?: number;
   /** Render "icon + label" instead of "icon + tooltip". */
   showLabel?: boolean;
+  /** No own Tooltip — for nesting inside another tooltip trigger (e.g. ConfigChip). */
+  plain?: boolean;
 }): ReactNode {
   const { harness } = props;
   if (!harness) return null;
@@ -134,10 +136,18 @@ export function HarnessIcon(props: {
   const Icon = ICONS[harness];
   const label = HARNESS_LABELS[harness] ?? harness;
   if (!Icon) {
+    if (props.plain) return <span className="chip">{harness}</span>;
     return (
       <Tooltip text={label}>
         <span className="chip">{harness}</span>
       </Tooltip>
+    );
+  }
+  if (props.plain) {
+    return (
+      <span className="harness-icon" role="img" aria-label={label}>
+        <Icon width={size} height={size} />
+      </span>
     );
   }
   if (props.showLabel) {

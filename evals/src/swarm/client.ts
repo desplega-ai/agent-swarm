@@ -75,16 +75,24 @@ export class SwarmClient {
   /**
    * Poll until the task reaches a terminal status. Returns the final task with
    * `timedOut: true` set when the budget elapses (caller decides how to grade).
+   * Fails fast with "aborted" when the signal fires (cancel kills the sandboxes,
+   * so every subsequent poll would otherwise spin until the deadline).
    */
   async waitForTask(
     id: string,
-    opts: { timeoutMs: number; intervalMs?: number; onStatus?: (status: string) => void },
+    opts: {
+      timeoutMs: number;
+      intervalMs?: number;
+      onStatus?: (status: string) => void;
+      signal?: AbortSignal;
+    },
   ): Promise<SwarmTask & { timedOut?: boolean }> {
     const interval = opts.intervalMs ?? 5_000;
     const deadline = Date.now() + opts.timeoutMs;
     let lastStatus = "";
     let task: SwarmTask | null = null;
     while (Date.now() < deadline) {
+      if (opts.signal?.aborted) throw new Error("aborted");
       try {
         task = await this.getTask(id);
         if (task.status !== lastStatus) {
@@ -97,6 +105,7 @@ export class SwarmClient {
       }
       await Bun.sleep(interval);
     }
+    if (opts.signal?.aborted) throw new Error("aborted");
     try {
       await this.request("POST", `/api/tasks/${id}/cancel`, { reason: "eval attempt timeout" });
     } catch {
@@ -118,11 +127,17 @@ export class SwarmClient {
    * completion. Poll until the row count is stable across two polls (or the
    * budget elapses) so the judged transcript isn't cut off mid-stream.
    */
-  async getStableSessionLogs(taskId: string, timeoutMs = 30_000): Promise<SessionLogRow[]> {
+  async getStableSessionLogs(
+    taskId: string,
+    timeoutMs = 30_000,
+    signal?: AbortSignal,
+  ): Promise<SessionLogRow[]> {
     const deadline = Date.now() + timeoutMs;
+    if (signal?.aborted) throw new Error("aborted");
     let rows = await this.getSessionLogs(taskId).catch(() => [] as SessionLogRow[]);
     while (Date.now() < deadline) {
       await Bun.sleep(5_000);
+      if (signal?.aborted) throw new Error("aborted");
       const next = await this.getSessionLogs(taskId).catch(() => rows);
       if (next.length === rows.length && rows.length > 0) return next;
       rows = next;
@@ -144,10 +159,15 @@ export class SwarmClient {
    * (one per iteration) and lag task completion by ~10-15s — returning on the
    * first non-empty poll would undercount multi-iteration tasks.
    */
-  async waitForSessionCostRows(taskId: string, timeoutMs = 60_000): Promise<SessionCostRow[]> {
+  async waitForSessionCostRows(
+    taskId: string,
+    timeoutMs = 60_000,
+    signal?: AbortSignal,
+  ): Promise<SessionCostRow[]> {
     const deadline = Date.now() + timeoutMs;
     let prev: SessionCostRow[] | null = null;
     while (Date.now() < deadline) {
+      if (signal?.aborted) throw new Error("aborted");
       const rows = await this.getSessionCosts(taskId).catch(() => null);
       if (rows) {
         if (rows.length > 0 && prev !== null && prev.length === rows.length) return rows;

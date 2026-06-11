@@ -1,9 +1,10 @@
-import { type ReactNode, useMemo, useState } from "react";
-import { cancelRun, getRun, listConfigs, listRuns, resumeRun } from "../api.ts";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { cancelRun, getRun, listRuns, resumeRun } from "../api.ts";
+import { ConfigChip } from "../components/ConfigChip.tsx";
+import { useConfirm } from "../components/ConfirmDialog.tsx";
 import { type Column, DataTable, MultiSelect } from "../components/DataTable.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
 import { fmtAgo, fmtCost, fmtDate, fmtDuration } from "../components/format.ts";
-import { HarnessIcon } from "../components/HarnessIcon.tsx";
 import { Matrix } from "../components/Matrix.tsx";
 import { ModelChip } from "../components/ModelChip.tsx";
 import { Elapsed, Spinner } from "../components/Spinner.tsx";
@@ -15,7 +16,7 @@ import {
 } from "../components/StatusBadge.tsx";
 import { InfoTip } from "../components/Tooltip.tsx";
 import { navigate, useModels, usePoll } from "../hooks.ts";
-import type { CellJson, ConfigJson, RunListItem } from "../types.ts";
+import type { CellJson, RunListItem } from "../types.ts";
 import { NewRunDialog } from "./NewRunDialog.tsx";
 import "./runs.css";
 
@@ -41,7 +42,8 @@ const RUN_COLUMNS: Column<RunListItem>[] = [
     key: "run",
     header: "Run",
     searchText: (r) => `${r.run.id} ${r.run.name ?? ""}`,
-    titleText: (r) => (r.run.name !== null ? `${r.run.name} · ${r.run.id}` : r.run.id),
+    // item 4: rich portal tooltip reveals the WHOLE (possibly truncated) name + id
+    tooltip: (r) => (r.run.name !== null ? `${r.run.name}\n${r.run.id}` : r.run.id),
     sortValue: (r) => runLabel(r),
     render: (r) => runLabel(r),
   },
@@ -64,7 +66,15 @@ const RUN_COLUMNS: Column<RunListItem>[] = [
     align: "center",
     width: "90px",
     searchText: (r) => r.run.scenarioIds.join(" "),
-    titleText: (r) => r.run.scenarioIds.join(", "),
+    // item 3: hover = per-scenario × config result-glyph breakdown from run.cells
+    tooltip: (r) => (
+      <Matrix
+        variant="mini"
+        scenarioIds={r.run.scenarioIds}
+        configIds={r.run.configIds}
+        cells={r.cells}
+      />
+    ),
     sortValue: (r) => r.run.scenarioIds.length,
     render: (r) => r.run.scenarioIds.length,
   },
@@ -134,26 +144,25 @@ function aggregateBy(
   });
 }
 
-function breakdownColumns(
-  kind: "scenario" | "config",
-  providerOf?: (id: string) => string | null,
-): Column<BreakdownRow>[] {
+function breakdownColumns(kind: "scenario" | "config"): Column<BreakdownRow>[] {
+  // item 13: configs render as a ConfigChip (hover card carries id/label/provider/…).
+  const idColumn: Column<BreakdownRow> =
+    kind === "scenario"
+      ? {
+          key: "id",
+          header: "Scenario",
+          titleText: (r) => r.id,
+          sortValue: (r) => r.id,
+          render: (r) => <EntityLink kind="scenario" id={r.id} />,
+        }
+      : {
+          key: "id",
+          header: "Config",
+          sortValue: (r) => r.id,
+          render: (r) => <ConfigChip configId={r.id} link />,
+        };
   return [
-    {
-      key: "id",
-      header: kind === "scenario" ? "Scenario" : "Config",
-      titleText: (r) => r.id,
-      sortValue: (r) => r.id,
-      render: (r) =>
-        providerOf ? (
-          <span className="config-ref">
-            <HarnessIcon harness={providerOf(r.id)} />
-            <EntityLink kind={kind} id={r.id} />
-          </span>
-        ) : (
-          <EntityLink kind={kind} id={r.id} />
-        ),
-    },
+    idColumn,
     {
       key: "pass",
       header: "Pass",
@@ -182,6 +191,7 @@ function breakdownColumns(
 }
 
 const SCENARIO_COLUMNS = breakdownColumns("scenario");
+const CONFIG_COLUMNS = breakdownColumns("config");
 
 function Meta(props: { label: string; title?: string; children: ReactNode }): ReactNode {
   return (
@@ -195,19 +205,25 @@ function Meta(props: { label: string; title?: string; children: ReactNode }): Re
 function RunDetailPane(props: {
   item: RunListItem;
   defaultJudgeModel: string | null;
-  configs: ConfigJson[] | null;
   onChanged: () => void;
 }): ReactNode {
   const id = props.item.run.id;
   const detail = usePoll(() => getRun(id), 4000, [id]);
   const [busy, setBusy] = useState<"cancel" | "resume" | null>(null);
+  // item 12: POST /cancel resolved — keep "Cancelling…" until the polled active flips false.
+  const [cancelRequested, setCancelRequested] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const { confirm, confirmDialog } = useConfirm();
 
   const run = detail.data?.run ?? props.item.run;
   const cells = detail.data?.cells ?? props.item.cells;
   const totals = detail.data?.totals ?? props.item.totals;
   const active = detail.data?.active ?? props.item.active;
   const attempts = detail.data?.attempts;
+
+  useEffect(() => {
+    if (!active) setCancelRequested(false);
+  }, [active]);
 
   const canResume =
     !active &&
@@ -220,12 +236,34 @@ function RunDetailPane(props: {
     );
 
   const act = async (kind: "cancel" | "resume") => {
-    if (kind === "cancel" && !window.confirm("Cancel this run?")) return;
+    // item 12: in-app confirm modal, not the native browser confirm()
+    const confirmed = await confirm(
+      kind === "cancel"
+        ? {
+            title: "Cancel This Run?",
+            message:
+              "In-flight attempts are torn down and go back to Pending — Resume continues them later.",
+            confirmLabel: "Cancel Run",
+            cancelLabel: "Keep Running",
+            danger: true,
+          }
+        : {
+            title: "Resume This Run?",
+            message: "Pending and interrupted attempts are picked up and executed again.",
+            confirmLabel: "Resume Run",
+            cancelLabel: "Back",
+          },
+    );
+    if (!confirmed) return;
     setBusy(kind);
     setActionError(null);
     try {
-      if (kind === "cancel") await cancelRun(run.id);
-      else await resumeRun(run.id);
+      if (kind === "cancel") {
+        await cancelRun(run.id);
+        setCancelRequested(true);
+      } else {
+        await resumeRun(run.id);
+      }
       detail.refresh();
       props.onChanged();
     } catch (e) {
@@ -243,13 +281,6 @@ function RunDetailPane(props: {
     () => aggregateBy(run.configIds, cells, "configId"),
     [run.configIds, cells],
   );
-  const configColumns = useMemo(() => {
-    const configs = props.configs;
-    return breakdownColumns(
-      "config",
-      (cid) => configs?.find((c) => c.id === cid)?.provider ?? null,
-    );
-  }, [props.configs]);
 
   const wallTime = run.finishedAt ? (
     fmtDuration(new Date(run.finishedAt).getTime() - new Date(run.createdAt).getTime())
@@ -267,17 +298,17 @@ function RunDetailPane(props: {
           <code className="chip" title={run.id}>
             {run.id}
           </code>
-          <StatusBadge status={run.status} />
-          {active ? <Spinner label="Executing" /> : null}
+          {/* item 7: exactly ONE animated indicator — the badge's spinner doubles as "Executing" */}
+          <StatusBadge status={run.status} activeLabel={active ? "Executing" : undefined} />
           <div className="detail-actions">
             {active ? (
               <button
                 type="button"
                 className="btn btn-danger"
-                disabled={busy !== null}
+                disabled={busy !== null || cancelRequested}
                 onClick={() => void act("cancel")}
               >
-                {busy === "cancel" ? "Cancelling…" : "Cancel"}
+                {busy === "cancel" || cancelRequested ? "Cancelling…" : "Cancel"}
               </button>
             ) : null}
             {canResume ? (
@@ -356,19 +387,19 @@ function RunDetailPane(props: {
           <h3 className="panel-title">By Config</h3>
           <DataTable
             rows={configRows}
-            columns={configColumns}
+            columns={CONFIG_COLUMNS}
             rowKey={(r) => r.id}
             searchable={false}
           />
         </div>
       </div>
+      {confirmDialog}
     </section>
   );
 }
 
 export default function RunsPage(): ReactNode {
   const runsPoll = usePoll(listRuns, 4000, []);
-  const configsPoll = usePoll(listConfigs, null, []);
   const models = useModels();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -377,7 +408,6 @@ export default function RunsPage(): ReactNode {
   const [configFilter, setConfigFilter] = useState<string[]>([]);
 
   const runs = useMemo(() => runsPoll.data ?? [], [runsPoll.data]);
-  const configs = configsPoll.data;
 
   // Filter options (item 9): status (incl. the synthetic "active"), scenarios, configs.
   const statusOptions = useMemo(() => {
@@ -467,14 +497,7 @@ export default function RunsPage(): ReactNode {
                 options={configOptions}
                 selected={configFilter}
                 onChange={setConfigFilter}
-                renderOption={(option) => (
-                  <>
-                    <HarnessIcon
-                      harness={configs?.find((c) => c.id === option)?.provider ?? null}
-                    />
-                    {option}
-                  </>
-                )}
+                renderOption={(option) => <ConfigChip configId={option} />}
               />
             </div>
             <DataTable
@@ -495,7 +518,6 @@ export default function RunsPage(): ReactNode {
             key={selected.run.id}
             item={selected}
             defaultJudgeModel={models.defaultJudgeModel}
-            configs={configs}
             onChanged={runsPoll.refresh}
           />
         ) : null}

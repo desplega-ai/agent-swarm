@@ -1,9 +1,9 @@
-import { type ReactNode, useMemo } from "react";
-import { getScenario, listConfigs, listScenarios } from "../api.ts";
+import type { ReactNode } from "react";
+import { getScenario, listScenarios } from "../api.ts";
+import { ConfigChip } from "../components/ConfigChip.tsx";
 import { type Column, DataTable } from "../components/DataTable.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
 import { fmtAgo, fmtDuration } from "../components/format.ts";
-import { HarnessIcon } from "../components/HarnessIcon.tsx";
 import { ModelChip } from "../components/ModelChip.tsx";
 import { PrettyView } from "../components/PrettyView.tsx";
 import { Spinner } from "../components/Spinner.tsx";
@@ -141,89 +141,71 @@ function ScenarioList(): ReactNode {
   );
 }
 
+const attemptColumns: Column<AttemptJson>[] = [
+  {
+    key: "started",
+    header: "Started",
+    width: "86px",
+    sortValue: (a) => a.startedAt,
+    titleText: (a) => a.startedAt ?? "—",
+    render: (a) => fmtAgo(a.startedAt),
+  },
+  {
+    key: "run",
+    header: "Run",
+    width: "110px",
+    searchText: (a) => a.runId,
+    render: (a) => <EntityLink kind="run" id={a.runId} />,
+  },
+  {
+    key: "config",
+    header: "Config",
+    filterOptions: (rows) => [...new Set(rows.map((a) => a.configId))].sort(),
+    filterValue: (a) => a.configId,
+    // item 13 (v4): ConfigChip everywhere configs appear — hover card carries the id
+    filterRender: (option) => <ConfigChip configId={option} />,
+    searchText: (a) => a.configId,
+    render: (a) => <ConfigChip configId={a.configId} link />,
+  },
+  {
+    key: "result",
+    header: "Result",
+    width: "84px",
+    filterOptions: (rows) => [...new Set(rows.map((a) => a.status))].sort(),
+    filterValue: (a) => a.status,
+    filterRender: (option) => statusGlyphInfo(option).label,
+    sortValue: (a) => a.score,
+    render: (a) => <StatusScore status={a.status} score={a.score} />,
+  },
+  {
+    key: "cost",
+    header: "Cost",
+    width: "88px",
+    align: "right",
+    sortValue: (a) => a.costUsd,
+    render: (a) => <CostBadge costUsd={a.costUsd} source={a.costSource} />,
+  },
+  {
+    key: "duration",
+    header: "Duration",
+    width: "78px",
+    align: "right",
+    sortValue: (a) => a.durationMs,
+    render: (a) => fmtDuration(a.durationMs),
+  },
+  {
+    key: "attempt",
+    header: "Attempt",
+    width: "78px",
+    sortable: false,
+    render: (a) => <EntityLink kind="attempt" id={a.id} runId={a.runId} label="Open →" />,
+  },
+];
+
 function ScenarioDetail(props: { scenarioId: string }): ReactNode {
   const { data, error, loading } = usePoll(() => getScenario(props.scenarioId), null, [
     props.scenarioId,
   ]);
-  const configs = usePoll(listConfigs, null, []);
-  const providerByConfig = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const c of configs.data ?? []) map.set(c.id, c.provider);
-    return map;
-  }, [configs.data]);
-
-  const attemptColumns = useMemo<Column<AttemptJson>[]>(
-    () => [
-      {
-        key: "started",
-        header: "Started",
-        width: "86px",
-        sortValue: (a) => a.startedAt,
-        titleText: (a) => a.startedAt ?? "—",
-        render: (a) => fmtAgo(a.startedAt),
-      },
-      {
-        key: "run",
-        header: "Run",
-        width: "110px",
-        searchText: (a) => a.runId,
-        render: (a) => <EntityLink kind="run" id={a.runId} />,
-      },
-      {
-        key: "config",
-        header: "Config",
-        filterOptions: (rows) => [...new Set(rows.map((a) => a.configId))].sort(),
-        filterValue: (a) => a.configId,
-        filterRender: (option) => (
-          <>
-            <HarnessIcon harness={providerByConfig.get(option) ?? null} />
-            <span>{option}</span>
-          </>
-        ),
-        searchText: (a) => a.configId,
-        render: (a) => (
-          <span className="sc-config">
-            <HarnessIcon harness={providerByConfig.get(a.configId) ?? null} />
-            <EntityLink kind="config" id={a.configId} />
-          </span>
-        ),
-      },
-      {
-        key: "result",
-        header: "Result",
-        width: "84px",
-        filterOptions: (rows) => [...new Set(rows.map((a) => a.status))].sort(),
-        filterValue: (a) => a.status,
-        filterRender: (option) => statusGlyphInfo(option).label,
-        sortValue: (a) => a.score,
-        render: (a) => <StatusScore status={a.status} score={a.score} />,
-      },
-      {
-        key: "cost",
-        header: "Cost",
-        width: "88px",
-        align: "right",
-        sortValue: (a) => a.costUsd,
-        render: (a) => <CostBadge costUsd={a.costUsd} source={a.costSource} />,
-      },
-      {
-        key: "duration",
-        header: "Duration",
-        width: "78px",
-        align: "right",
-        sortValue: (a) => a.durationMs,
-        render: (a) => fmtDuration(a.durationMs),
-      },
-      {
-        key: "attempt",
-        header: "Attempt",
-        width: "78px",
-        sortable: false,
-        render: (a) => <EntityLink kind="attempt" id={a.id} runId={a.runId} label="Open →" />,
-      },
-    ],
-    [providerByConfig],
-  );
 
   if (!data) {
     return (

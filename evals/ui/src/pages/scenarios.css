@@ -27,14 +27,6 @@
   cursor: default;
 }
 
-/* harness icon + config link inside a single-line table cell */
-.sc-config {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-}
-
 .sc-error {
   color: var(--red);
   white-space: pre-wrap;

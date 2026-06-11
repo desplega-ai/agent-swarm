@@ -2,6 +2,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import { getTranscript } from "../api.ts";
 import { HarnessIcon } from "../components/HarnessIcon.tsx";
 import { JsonView } from "../components/JsonView.tsx";
+import { Markdown } from "../components/Markdown.tsx";
 import { Spinner } from "../components/Spinner.tsx";
 import { StatusBadge } from "../components/StatusBadge.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
@@ -18,7 +19,10 @@ import {
 import "./transcript.css";
 
 const THINKING_COLLAPSE = 400;
-const RESULT_CLIP = 2_000;
+/** Successful tool results clip earlier (item 8 — no walls of monospace). */
+const RESULT_CLIP = 700;
+const ERROR_RESULT_CLIP = 2_000;
+const RAW_CLIP = 2_000;
 
 interface MetaLine {
   key: string;
@@ -270,7 +274,20 @@ function Footer(): ReactNode {
   );
 }
 
-// ---- per-event-type components (item 15) ----
+// ---- per-event-type components (item 15; polish item 8) ----
+
+const ROLE_GLYPHS: Record<ParsedMessage["role"], string> = {
+  assistant: "✦",
+  user: "◆",
+  system: "○",
+};
+
+function fmtTime(iso: string): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString(undefined, { hour12: false });
+}
 
 function MessageCard(props: {
   msg: ParsedMessage;
@@ -286,7 +303,7 @@ function MessageCard(props: {
     switch (block.type) {
       case "text": {
         if (block.text) {
-          rendered.push(<TextView text={block.text} key={key} />);
+          rendered.push(<TextView text={block.text} role={msg.role} key={key} />);
         }
         break;
       }
@@ -324,16 +341,31 @@ function MessageCard(props: {
       </div>,
     );
   }
+  const time = fmtTime(msg.timestamp);
   return (
     <div className={`t-msg t-${msg.role}`}>
-      <div className="t-role">{msg.role}</div>
+      <div className="t-head">
+        <span className={`t-glyph t-glyph-${msg.role}`} aria-hidden="true">
+          {ROLE_GLYPHS[msg.role]}
+        </span>
+        <span className="t-role">{msg.role}</span>
+        {time ? <span className="t-time">{time}</span> : null}
+      </div>
       {rendered}
     </div>
   );
 }
 
-function TextView(props: { text: string }): ReactNode {
-  return <div className="t-text">{props.text}</div>;
+/** Assistant prose renders as markdown (item 8); other roles stay plain pre-wrap text. */
+function TextView(props: { text: string; role: ParsedMessage["role"] }): ReactNode {
+  if (props.role === "assistant") {
+    return (
+      <div className="t-text">
+        <Markdown text={props.text} />
+      </div>
+    );
+  }
+  return <div className="t-text t-text-plain">{props.text}</div>;
 }
 
 function Thinking(props: { text: string }): ReactNode {
@@ -366,17 +398,58 @@ function ToolStatus(props: { result: ToolResultBlock | null }): ReactNode {
   return <StatusBadge status="passed" tip="Tool succeeded" />;
 }
 
+/** Keys most likely to be the human-meaningful argument, in preference order. */
+const PREVIEW_KEYS = ["command", "file_path", "path", "url", "pattern"];
+
+function plainRecord(value: unknown): Record<string, unknown> | null {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function squash(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/** Single-line dim preview of the first meaningful string argument (item 8). */
+function argPreview(input: unknown): string | null {
+  if (typeof input === "string" && input.trim().length > 0) return squash(input);
+  const rec = plainRecord(input);
+  if (!rec) return null;
+  for (const key of PREVIEW_KEYS) {
+    const v = rec[key];
+    if (typeof v === "string" && v.trim().length > 0) return squash(v);
+  }
+  for (const v of Object.values(rec)) {
+    if (typeof v === "string" && v.trim().length > 0) return squash(v);
+  }
+  return null;
+}
+
 function ToolCard(props: { call: ToolUseBlock; result: ToolResultBlock | null }): ReactNode {
   const { call, result } = props;
+  const [argsOpen, setArgsOpen] = useState(false);
+  const preview = argPreview(call.input);
+  const keyCount = Object.keys(plainRecord(call.input) ?? {}).length;
+  const hasInput = call.input !== undefined && call.input !== null;
+  const collapseArgs = hasInput && keyCount > 1;
   return (
     <div className={`t-tool${result?.isError ? " t-tool-error" : ""}`}>
       <div className="t-tool-head">
         <span className="t-tool-name">⚙ {call.name}</span>
+        {preview ? <span className="t-tool-preview">{preview}</span> : null}
         <ToolStatus result={result} />
       </div>
-      {call.input !== undefined && call.input !== null ? (
-        <JsonView value={call.input} collapseDepth={1} />
+      {collapseArgs ? (
+        <div className="t-tool-args">
+          <button type="button" className="t-toggle" onClick={() => setArgsOpen(!argsOpen)}>
+            {argsOpen ? "▾" : "▸"} Args ({keyCount})
+          </button>
+          {argsOpen ? <JsonView value={call.input} collapseDepth={1} /> : null}
+        </div>
       ) : null}
+      {hasInput && !collapseArgs ? <JsonView value={call.input} collapseDepth={1} /> : null}
       {result ? <ResultBody result={result} /> : null}
     </div>
   );
@@ -396,15 +469,17 @@ function OrphanResult(props: { result: ToolResultBlock }): ReactNode {
   );
 }
 
-function ClippedText(props: { text: string }): ReactNode {
+function ClippedText(props: { text: string; clip?: number }): ReactNode {
+  const clip = props.clip ?? RESULT_CLIP;
   const [full, setFull] = useState(false);
-  const clipped = !full && props.text.length > RESULT_CLIP;
+  const clippable = props.text.length > clip;
+  const clipped = !full && clippable;
   return (
     <>
-      <pre>{clipped ? `${props.text.slice(0, RESULT_CLIP)}…` : props.text}</pre>
-      {clipped ? (
-        <button type="button" className="t-toggle" onClick={() => setFull(true)}>
-          Show All ({props.text.length.toLocaleString()} chars)
+      <pre>{clipped ? `${props.text.slice(0, clip)}…` : props.text}</pre>
+      {clippable ? (
+        <button type="button" className="t-toggle" onClick={() => setFull(!full)}>
+          {full ? "Show Less" : `Show All (${props.text.length.toLocaleString()} chars)`}
         </button>
       ) : null}
     </>
@@ -418,7 +493,8 @@ function ResultBody(props: { result: ToolResultBlock }): ReactNode {
   }
   return (
     <div className={`t-tool-result${result.isError ? " error" : ""}`}>
-      <ClippedText text={result.content} />
+      <div className="t-result-head">↳ {result.isError ? "Error" : "Result"}</div>
+      <ClippedText text={result.content} clip={result.isError ? ERROR_RESULT_CLIP : RESULT_CLIP} />
     </div>
   );
 }
@@ -468,7 +544,7 @@ function RawRow(props: { cli: string; content: string }): ReactNode {
   return (
     <div className="t-raw">
       <div className="t-raw-head">Unparsed · {props.cli}</div>
-      <ClippedText text={props.content} />
+      <ClippedText text={props.content} clip={RAW_CLIP} />
     </div>
   );
 }

@@ -1107,3 +1107,227 @@ table.matrix td.matrix-cell.selected {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
+
+/* ---- v4 shared additions ---- */
+
+/* block-level tooltip trigger (DataTable cells) — inner .dt-cell keeps the ellipsis */
+.tooltip.block {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* single-animation rule (item 7): StatusBadge activeLabel — ONE spinner + static text */
+.status-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.status-live-label {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+/* ---- config chip (item 13 — analogous to .model-chip) ---- */
+
+.config-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.config-chip-name,
+.config-chip-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px dotted var(--dim);
+  cursor: help;
+}
+
+.config-chip-id {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.config-chip-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.config-chip-link .config-chip-name {
+  border-bottom-color: var(--accent);
+}
+
+/* ---- mini matrix (item 3 — hover breakdown inside a tooltip) ---- */
+
+table.matrix.mini {
+  border-collapse: collapse;
+  font-size: 11px;
+  width: auto;
+}
+
+table.matrix.mini th {
+  padding: 2px 6px;
+  font-weight: 500;
+  color: var(--dim);
+  text-align: left;
+  border-bottom: none;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+table.matrix.mini thead th {
+  text-transform: none;
+  letter-spacing: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+table.matrix.mini td.mm-cell {
+  padding: 2px 6px;
+  text-align: center;
+  border: none;
+  min-width: 0;
+}
+
+.mm-glyph {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ---- data-table row expansion (item 9) ---- */
+
+.dt-chevron {
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1;
+}
+
+tr:hover .dt-chevron,
+tr[aria-expanded="true"] .dt-chevron {
+  color: var(--text);
+}
+
+tr.dt-expand-row > td {
+  padding: 8px 10px;
+  background: color-mix(in oklab, var(--panel-2), transparent 40%);
+  white-space: normal;
+}
+
+tr.dt-expand-row:hover {
+  background: none;
+}
+
+/* ---- confirm dialog (item 12) ---- */
+
+.confirm-dialog {
+  width: min(400px, calc(100vw - 32px));
+}
+
+.confirm-message {
+  font-size: 12.5px;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+/* ---- markdown (item 8 — assistant text in transcripts) ---- */
+
+.md {
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md-p {
+  margin: 6px 0;
+  white-space: pre-wrap;
+}
+
+.md-h {
+  font-weight: 600;
+  margin: 10px 0 4px;
+}
+
+.md-h1 {
+  font-size: 15px;
+}
+
+.md-h2 {
+  font-size: 14px;
+}
+
+.md-h3,
+.md-h4,
+.md-h5,
+.md-h6 {
+  font-size: 13px;
+}
+
+.md-list {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+
+.md-list li {
+  margin: 2px 0;
+}
+
+.md-code {
+  margin: 6px 0;
+  padding: 7px 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.md-inline-code {
+  background: color-mix(in oklab, var(--panel-2), transparent 20%);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 0.88em;
+}
+
+.md-quote {
+  margin: 6px 0;
+  padding: 2px 10px;
+  border-left: 3px solid var(--border);
+  color: var(--dim);
+}
+
+.md-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 8px 0;
+}
+
+.md-link {
+  color: var(--accent);
+}

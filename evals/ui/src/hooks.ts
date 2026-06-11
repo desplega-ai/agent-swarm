@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getModels } from "./api.ts";
-import type { ModelJson, ModelsResponse } from "./types.ts";
+import { getModels, listConfigs } from "./api.ts";
+import type { ConfigJson, ModelJson, ModelsResponse } from "./types.ts";
 
 export interface Route {
   /** "#/runs/a/attempts/b" → ["runs", "a", "attempts", "b"] */
@@ -155,6 +155,52 @@ export function useModels(): ModelLookup {
       models,
       defaultJudgeModel: data?.defaultJudgeModel ?? null,
       resolve,
+      loaded: data !== null,
+    };
+  }, [data]);
+}
+
+// ---- config catalog (one fetch per session, shared by every ConfigChip) ----
+
+let configsCache: ConfigJson[] | null = null;
+let configsPromise: Promise<ConfigJson[]> | null = null;
+
+export interface ConfigLookup {
+  configs: ConfigJson[];
+  /** Resolve a config id to its registry entry (null when unknown/removed). */
+  byId: (id: string | null) => ConfigJson | null;
+  /** False while the one-shot fetch is still in flight. */
+  loaded: boolean;
+}
+
+/** Cached config catalog. Fetches `/api/configs` once per session (like useModels). */
+export function useConfigs(): ConfigLookup {
+  const [data, setData] = useState<ConfigJson[] | null>(configsCache);
+  useEffect(() => {
+    if (configsCache !== null) return;
+    let cancelled = false;
+    configsPromise ??= listConfigs().then((res) => {
+      configsCache = res;
+      return res;
+    });
+    configsPromise
+      .then((res) => {
+        if (!cancelled) setData(res);
+      })
+      .catch(() => {
+        configsPromise = null; // allow a retry on next mount
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return useMemo<ConfigLookup>(() => {
+    const configs = data ?? [];
+    const map = new Map(configs.map((c) => [c.id, c]));
+    return {
+      configs,
+      byId: (id) => (id === null ? null : (map.get(id) ?? null)),
       loaded: data !== null,
     };
   }, [data]);

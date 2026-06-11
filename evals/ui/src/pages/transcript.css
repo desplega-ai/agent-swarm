@@ -91,6 +91,36 @@
   color: var(--dim);
 }
 
+.t-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.t-glyph {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.t-glyph-assistant {
+  color: var(--accent);
+}
+
+.t-glyph-user {
+  color: var(--blue);
+}
+
+.t-glyph-system {
+  color: var(--dim);
+}
+
+.t-time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+
 .t-role {
   font-size: 10px;
   text-transform: uppercase;
@@ -98,9 +128,18 @@
   color: var(--dim);
 }
 
+/* Sans body; pre-wrap only for plain (non-markdown) text — item 8. */
 .t-text {
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.t-text-plain {
+  white-space: pre-wrap;
+}
+
+.t-text .md {
   font-size: 12.5px;
 }
 
@@ -153,7 +192,11 @@
 .t-tool-name {
   font-weight: 700;
   color: var(--accent);
-  overflow-wrap: anywhere;
+  flex-shrink: 0;
+  max-width: 55%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   min-width: 0;
 }
 
@@ -161,10 +204,34 @@
   color: var(--red);
 }
 
+/* Single-line dim arg preview after the tool name (item 8). */
+.t-tool-preview {
+  flex: 1;
+  min-width: 0;
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.t-tool-args {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .t-tool-result {
   border-top: 1px dashed var(--border);
   padding-top: 4px;
   font-size: 11.5px;
+}
+
+.t-result-head {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  margin-bottom: 2px;
 }
 
 .t-tool-result pre {

@@ -29,6 +29,10 @@ export interface StackHandle {
   apiUrl: string;
   swarmKey: string;
   workerAgentId: string;
+  /** Swarm API version from the sandbox /health response. Null if capture failed. */
+  apiVersion: string | null;
+  /** Worker build version (`agent-swarm version` inside the worker sandbox). Null if capture failed. */
+  workerVersion: string | null;
   /** Redact sandbox/env secrets from text before persisting it. */
   redact: (text: string) => string;
   /** Idempotent teardown of both sandboxes. */
@@ -92,6 +96,7 @@ function apiRuntimeEnv(swarmKey: string): Record<string, string> {
     API_KEY: swarmKey,
     AGENT_SWARM_API_KEY: swarmKey,
     PORT: String(API_PORT),
+    NODE_ENV: "production",
     DATABASE_PATH: "/app/data/agent-swarm-db.sqlite",
     MIGRATIONS_DIR: "/app/migrations",
     SQLITE_VEC_EXTENSION_PATH: "/app/extensions/vec0.so",
@@ -104,6 +109,12 @@ function apiRuntimeEnv(swarmKey: string): Record<string, string> {
     JIRA_DISABLE: "true",
     LINEAR_DISABLE: "true",
     AGENTMAIL_DISABLE: "true",
+    // Server-side memory embeddings: without a key, POST /api/memory/search
+    // silently returns {results: []} (EMBEDDING_API_KEY falls back to
+    // OPENAI_API_KEY server-side). API sandbox ONLY — worker provider creds
+    // stay strictly gated by credentialsForConfig.
+    ...(process.env.EMBEDDING_API_KEY ? { EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY } : {}),
+    ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
   };
 }
 
@@ -156,10 +167,12 @@ async function waitForAgentReady(opts: {
   swarmKey: string;
   agentId: string;
   timeoutMs: number;
+  signal?: AbortSignal;
 }): Promise<void> {
   const deadline = Date.now() + opts.timeoutMs;
   let last = "";
   while (Date.now() < deadline) {
+    opts.signal?.throwIfAborted();
     try {
       const res = await fetch(`${opts.apiUrl}/api/agents/${opts.agentId}`, {
         headers: { Authorization: `Bearer ${opts.swarmKey}` },
@@ -197,6 +210,12 @@ export async function bootStack(opts: {
   timeoutSec?: number;
   /** Per-service readiness wait. Default 120s API / 180s worker. */
   waitMs?: number;
+  /**
+   * Cancel signal. Checked before/after each boot step; on abort the catch
+   * below kills every sandbox created so far, so a cancel during boot never
+   * leaks a stack (the runner only tracks stacks for kill AFTER boot returns).
+   */
+  signal?: AbortSignal;
   log?: (msg: string) => void;
 }): Promise<StackHandle> {
   const e2bKey = e2bControllerKey();
@@ -223,6 +242,7 @@ export async function bootStack(opts: {
   };
 
   try {
+    opts.signal?.throwIfAborted();
     log(`creating API sandbox (template ${API_TEMPLATE})`);
     const apiEnv = apiRuntimeEnv(swarmKey);
     const apiSandbox = await createSandbox({
@@ -242,6 +262,7 @@ export async function bootStack(opts: {
       },
     });
     created.push(apiSandbox);
+    opts.signal?.throwIfAborted();
     await startDetachedProcess({
       sandbox: apiSandbox,
       apiKey: e2bKey,
@@ -253,7 +274,18 @@ export async function bootStack(opts: {
     });
     const apiUrl = sandboxPortUrl(apiSandbox, API_PORT, process.env as Record<string, string>);
     log(`waiting for API health at ${apiUrl}`);
+    opts.signal?.throwIfAborted();
     await waitForHttpOk(`${apiUrl}/health`, opts.waitMs ?? 120_000);
+    // Captured during boot so it lands in the boot-time sandboxJson write.
+    // /health responds { status, version } (src/http/core.ts). Non-fatal → null.
+    let apiVersion: string | null = null;
+    try {
+      const health = (await (await fetch(`${apiUrl}/health`)).json()) as { version?: unknown };
+      if (typeof health.version === "string") apiVersion = health.version;
+    } catch {
+      // best-effort version capture
+    }
+    opts.signal?.throwIfAborted();
 
     log(
       `creating worker sandbox (template ${WORKER_TEMPLATE}, ${opts.config.provider}${opts.config.model ? ` / ${opts.config.model}` : ""})`,
@@ -281,6 +313,7 @@ export async function bootStack(opts: {
       },
     });
     created.push(workerSandbox);
+    opts.signal?.throwIfAborted();
     await startDetachedProcess({
       sandbox: workerSandbox,
       apiKey: e2bKey,
@@ -291,9 +324,32 @@ export async function bootStack(opts: {
       cwd: "/workspace",
     });
     log("waiting for worker agent registration");
+    opts.signal?.throwIfAborted();
     await waitForAgentRegistration(apiUrl, workerAgentId, swarmKey, opts.waitMs ?? 180_000);
     log("waiting for worker to be idle + credentials ready");
-    await waitForAgentReady({ apiUrl, swarmKey, agentId: workerAgentId, timeoutMs: 120_000 });
+    opts.signal?.throwIfAborted();
+    await waitForAgentReady({
+      apiUrl,
+      swarmKey,
+      agentId: workerAgentId,
+      timeoutMs: 120_000,
+      signal: opts.signal,
+    });
+    opts.signal?.throwIfAborted();
+
+    // Worker build version via the compiled CLI (prints "agent-swarm vX.Y.Z";
+    // there is no -V flag — `version` is the subcommand). Non-fatal → null.
+    let workerVersion: string | null = null;
+    try {
+      const res = await sandboxExec(workerSandbox.sandboxID, "agent-swarm version");
+      if (res.exitCode === 0) {
+        const out = res.stdout.trim();
+        workerVersion = out.match(/\bv(\d+\S*)$/)?.[1] ?? (out || null);
+      }
+    } catch {
+      // best-effort version capture
+    }
+    opts.signal?.throwIfAborted();
 
     const secretEnv = { ...workerEnv, ...apiEnv, E2B_API_KEY: e2bKey };
     return {
@@ -302,6 +358,8 @@ export async function bootStack(opts: {
       apiUrl,
       swarmKey,
       workerAgentId,
+      apiVersion,
+      workerVersion,
       redact: (text: string) => redactWithEnv(text, secretEnv),
       kill,
     };

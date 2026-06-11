@@ -77,15 +77,6 @@
   margin-top: 0;
 }
 
-/* harness icon + config link, single line (items 10, 19) */
-.config-ref {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  max-width: 100%;
-}
-
 /* ---- new-run dialog ---- */
 
 /*
@@ -161,20 +152,19 @@
 
 /* judge-model fuzzy dropdown */
 
-.model-select {
-  position: relative;
-}
-
 .model-select input {
   width: 100%;
   font-family: var(--font-mono);
 }
 
+/*
+ * Item 1 (v4) — the menu is position: fixed with inline viewport coords from JS,
+ * so it can never engage the dialog's scrollbars. It stays inside the dialog
+ * subtree (NOT portaled to document.body): the modal's top layer paints above —
+ * and inerts — everything outside it.
+ */
 .model-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  position: fixed;
   z-index: 40;
   background: var(--panel);
   border: 1px solid var(--border);

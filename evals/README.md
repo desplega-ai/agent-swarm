@@ -10,7 +10,7 @@ Each attempt (one cell of the matrix, possibly repeated for best@n):
 2. **Seed** (optional) — shell commands in the worker sandbox (`scenario.seed.exec`).
 3. **Run** — create the scenario's task(s) directly assigned to the worker agent, poll until terminal status or timeout.
 4. **Grade** — deterministic checks (implicit `tasks-completed` + scenario checks), an optional **LLM judge** over the flattened transcript, and an optional **agentic judge**: an AI SDK tool-loop with live sandbox/API access (`run_command` / `read_file` / `api_get` / `submit_verdict`) that verifies the rubric itself instead of trusting the transcript (falls back to the LLM judge if it never submits a verdict).
-5. **Persist artifacts** (secret-redacted): flattened transcript, **raw swarm session-log events** (`session-logs.jsonl`), the **harness's own raw session files** pulled from the worker filesystem (e.g. Claude Code's `~/.claude/projects/**/*.jsonl`, codex `~/.codex/sessions`, pi `~/.pi`, opencode `~/.local/share/opencode` — files touched during the attempt, capped 10 × 1.5 MB), task records, seed command outputs (`seed-output.json`), raw session-cost rows (`session-costs.json`), the full session-file listing with sizes/mtimes (`session-files.json`), and the worker + API entrypoint log tails. Per-attempt sandbox info (both sandbox ids, templates, apiUrl, swarm key, TTL) is stored at boot, and per-phase wall-clock timings on finish.
+5. **Persist artifacts** (secret-redacted): flattened transcript, **raw swarm session-log events** (`session-logs.jsonl`), the **harness's own raw session files** pulled from the worker filesystem (e.g. Claude Code's `~/.claude/projects/**/*.jsonl`, codex `~/.codex/sessions`, pi `~/.pi`, opencode `~/.local/share/opencode` — files touched during the attempt, capped 10 × 1.5 MB), task records, seed command outputs (`seed-output.json`), raw session-cost rows (`session-costs.json`), the full session-file listing with sizes/mtimes (`session-files.json`), and the worker + API entrypoint log tails. Per-attempt sandbox info (both sandbox ids, templates, apiUrl, swarm key, TTL, API + worker build versions) is stored at boot, and per-phase wall-clock timings on finish.
 6. **Teardown** — both sandboxes killed, even on failure.
 
 ### Fail-safety
@@ -64,7 +64,8 @@ Scoring per cell: **best@n** (any attempt passed), pass@1, best/avg judge score,
 | `E2B_API_KEY` | sandbox creation (required) |
 | `OPENROUTER_API_KEY` | judges + pi/opencode workers |
 | `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | claude workers |
-| `OPENAI_API_KEY` | codex workers |
+| `OPENAI_API_KEY` | codex workers; also forwarded into the API sandbox for memory embeddings |
+| `EMBEDDING_API_KEY` | optional override for API-sandbox memory embeddings (falls back to `OPENAI_API_KEY`) |
 | `EVAL_JUDGE_MODEL` | default judge model |
 | `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` | remote DB instead of local `evals.db` |
 | `EVALS_DB_PATH`, `EVALS_PORT` | local overrides |
@@ -75,5 +76,6 @@ Scoring per cell: **best@n** (any attempt passed), pass@1, best/avg judge score,
 - Deploying the dashboard+runner somewhere persistent is deliberately deferred — it is local-first; a small custom Docker image (bun + this dir + a volume for `evals.db`) is the likely shape.
 - Stray sandboxes carry `metadata.launcher=agent-swarm-e2b`; sweep everything with `bun run src/cli.tsx e2b kill --all` from the repo root (per-run sweeps happen automatically on resume).
 - Worker parked in `waiting_for_credentials` fails the attempt fast with the credential detail — usually a missing provider key for that config.
+- The API sandbox runs with `NODE_ENV=production` and gets `EMBEDDING_API_KEY` / `OPENAI_API_KEY` (when set in the evals env) so server-side memory embeddings work; workers still only receive the credentials their harness needs. Attempts recorded before version capture render the version fields as not captured.
 - Claude subscription (OAuth) sessions produce no priced cost rows — their cost is recomputed from token usage × models.dev pricing (`costSource: "recomputed"`); pi/codex report cost directly (`"harness"`).
 - Known harness finding: opencode workers on E2B intermittently fail with `Spawn failed: Timeout waiting for server to start after 5000ms` (opencode-internal server boot timeout, surfaced via runner.ts "Spawn failed").

@@ -15,6 +15,15 @@ import { AgenticJudgeError, judgeAgentic } from "../judge/agentic.ts";
 import { runChecks } from "../judge/deterministic.ts";
 import { beginJudging, clearJudging, endJudging } from "../judge/live-registry.ts";
 import { judgeWithLlm } from "../judge/llm.ts";
+import {
+  beginAttemptProgress,
+  finishAttemptProgress,
+  formatRunnerLog,
+  logLevelFor,
+  pushAttemptLog,
+  recordAttemptTimings,
+  setAttemptPhase,
+} from "../live/attempt-progress.ts";
 import { flattenTranscript, type SessionCostRow, SwarmClient } from "../swarm/client.ts";
 import {
   bootStack,
@@ -189,9 +198,19 @@ async function runAttemptOnce(opts: {
   scenario: Scenario;
   config: HarnessConfig;
   judgeModel: string | null;
+  /** Cancel signal — checked at every phase boundary and inside every polling await. */
+  signal?: AbortSignal;
   log: (msg: string) => void;
 }): Promise<void> {
-  const { db, attempt, scenario, config, log } = opts;
+  const { db, attempt, scenario, config, signal } = opts;
+  // Live progress registry (v4 §2.1): every runner log line + phase transition
+  // for this attempt flows through here while it executes; the full capture is
+  // persisted as the runner.log artifact in the finally below.
+  beginAttemptProgress(attempt.id);
+  const log = (msg: string): void => {
+    opts.log(msg);
+    pushAttemptLog(attempt.id, logLevelFor(msg), msg);
+  };
   const startedAt = Date.now();
   const taskTimeoutMs = scenario.timeoutMs ?? DEFAULT_TASK_TIMEOUT_MS;
   // Sandbox TTL covers boot + all tasks + judging, with slack for retries inside.
@@ -206,16 +225,19 @@ async function runAttemptOnce(opts: {
   await clearAttemptResults(db, attempt.id);
 
   const timings = newPhaseTimings();
+  setAttemptPhase(attempt.id, "boot");
   const boot = await timed(() =>
     bootStack({
       config,
       swarmSlug: `evals-${attempt.runId}`,
       timeoutSec,
+      signal,
       log: (msg) => log(`[boot] ${msg}`),
     }),
   );
   const stack = boot.result;
   timings.bootMs = boot.ms;
+  recordAttemptTimings(attempt.id, timings);
   const untrack = trackStack(attempt.runId, stack);
   // Written at boot so the live run-details page shows sandbox info while the
   // attempt runs. The swarmKey is deliberately stored/exposed — eval sandboxes
@@ -232,6 +254,8 @@ async function runAttemptOnce(opts: {
     apiStartedAt: stack.apiSandbox.startedAt ?? null,
     workerStartedAt: stack.workerSandbox.startedAt ?? null,
     expiresAt: stack.workerSandbox.endAt ?? stack.workerSandbox.expiresAt ?? null,
+    apiVersion: stack.apiVersion,
+    workerVersion: stack.workerVersion,
   };
   await updateAttempt(db, attempt.id, {
     sandboxId: stack.workerSandbox.sandboxID,
@@ -244,6 +268,8 @@ async function runAttemptOnce(opts: {
     await markAttemptStart(stack.workerSandbox.sandboxID);
 
     if (scenario.seed?.exec?.length) {
+      signal?.throwIfAborted();
+      setAttemptPhase(attempt.id, "seed");
       const seedT0 = Date.now();
       const seedOutputs: {
         cmd: string;
@@ -264,6 +290,7 @@ async function runAttemptOnce(opts: {
             stdout: res.stdout.slice(0, SEED_OUTPUT_CLIP),
             stderr: res.stderr.slice(0, SEED_OUTPUT_CLIP),
           });
+          log(`[seed] exit ${res.exitCode} in ${Date.now() - cmdT0}ms`);
           if (res.exitCode !== 0) {
             throw new Error(
               `seed command failed (${res.exitCode}): ${cmd}\n${res.stderr.slice(0, 500)}`,
@@ -273,6 +300,7 @@ async function runAttemptOnce(opts: {
       } finally {
         // Written on success AND before a seed-failure throw (retry clears it).
         timings.seedMs = Date.now() - seedT0;
+        recordAttemptTimings(attempt.id, timings);
         await insertArtifact(db, {
           id: crypto.randomUUID(),
           attemptId: attempt.id,
@@ -284,8 +312,11 @@ async function runAttemptOnce(opts: {
     }
 
     const tasks: SwarmTask[] = [];
+    setAttemptPhase(attempt.id, "tasks");
     const tasksT0 = Date.now();
     for (const spec of scenario.tasks) {
+      signal?.throwIfAborted();
+      log(`[task] creating "${spec.title}" → agent ${stack.workerAgentId}`);
       const created = await client.createTask({
         task: `${spec.title}\n\n${spec.description}`,
         agentId: stack.workerAgentId,
@@ -295,26 +326,39 @@ async function runAttemptOnce(opts: {
       const final = await client.waitForTask(created.id, {
         timeoutMs: taskTimeoutMs,
         onStatus: (s) => log(`[task] ${created.id} -> ${s}`),
+        signal,
       });
       timings.perTask.push({ taskId: created.id, ms: Date.now() - taskT0 });
+      recordAttemptTimings(attempt.id, timings);
       tasks.push(final);
     }
     timings.tasksMs = Date.now() - tasksT0;
+    recordAttemptTimings(attempt.id, timings);
     await updateAttempt(db, attempt.id, { taskIds: tasks.map((t) => t.id) });
 
     // Gather gradeable outputs (logs lag completion — wait for a stable count).
+    signal?.throwIfAborted();
+    setAttemptPhase(attempt.id, "log-capture");
+    log(`[logs] waiting for stable session logs (${tasks.length} task(s))`);
     const logCapture = await timed(async () =>
-      (await Promise.all(tasks.map((t) => client.getStableSessionLogs(t.id)))).flat(),
+      (
+        await Promise.all(tasks.map((t) => client.getStableSessionLogs(t.id, undefined, signal)))
+      ).flat(),
     );
     let logRows = logCapture.result;
     timings.logCaptureMs = logCapture.ms;
+    recordAttemptTimings(attempt.id, timings);
+    log(`[logs] captured ${logRows.length} session-log row(s) in ${logCapture.ms}ms`);
 
     // 1. harness-reported session-cost rows (stability-polled).
+    signal?.throwIfAborted();
+    setAttemptPhase(attempt.id, "cost");
+    log(`[cost] waiting for stable session-cost rows (${tasks.length} task(s))`);
     const costT0 = Date.now();
     const costRowsByTask: { taskId: string; rows: SessionCostRow[] }[] = [];
     let allRows: SessionCostRow[] = [];
     for (const task of tasks) {
-      const rows = await client.waitForSessionCostRows(task.id);
+      const rows = await client.waitForSessionCostRows(task.id, undefined, signal);
       costRowsByTask.push({ taskId: task.id, rows });
       allRows = allRows.concat(rows);
     }
@@ -326,6 +370,7 @@ async function runAttemptOnce(opts: {
       (await Promise.all(tasks.map((t) => client.getSessionLogs(t.id).catch(() => [])))).flat(),
     );
     timings.logCaptureMs += refetch.ms;
+    recordAttemptTimings(attempt.id, timings);
     if (refetch.result.length > logRows.length) logRows = refetch.result;
     const transcript = flattenTranscript(logRows);
 
@@ -340,6 +385,7 @@ async function runAttemptOnce(opts: {
       );
       sessionFiles = collect.result;
       timings.artifactsMs = (timings.artifactsMs ?? 0) + collect.ms;
+      recordAttemptTimings(attempt.id, timings);
     } catch (err) {
       log(
         `[artifacts] harness session capture failed: ${err instanceof Error ? err.message : err}`,
@@ -376,6 +422,7 @@ async function runAttemptOnce(opts: {
       }
     }
     timings.costMs = costMs;
+    recordAttemptTimings(attempt.id, timings);
     log(`[cost] source=${costSource}${costUsd !== null ? ` $${costUsd.toFixed(4)}` : ""}`);
     // Raw session-cost rows, always — even when empty.
     await insertArtifact(db, {
@@ -386,6 +433,8 @@ async function runAttemptOnce(opts: {
       content: stack.redact(JSON.stringify(costRowsByTask, null, 2)),
     });
 
+    // No judge calls (real LLM spend) may run after a cancel.
+    signal?.throwIfAborted();
     await updateAttempt(db, attempt.id, { status: "judging" });
     // Judges stream their (mutable) traces here; the API server reads them for
     // the polled /api/attempts/:id/judge-live endpoint. Cleared in `finally`.
@@ -405,9 +454,12 @@ async function runAttemptOnce(opts: {
     };
 
     const checks = [tasksCompletedCheck(tasks), ...(scenario.outcome.checks ?? [])];
+    setAttemptPhase(attempt.id, "checks");
+    log(`[check] running ${checks.length} deterministic check(s)`);
     const checksTimed = await timed(() => runChecks(checks, ctx, judgeLive));
     const checkResults = checksTimed.result;
     timings.checksMs = checksTimed.ms;
+    recordAttemptTimings(attempt.id, timings);
     for (const result of checkResults) {
       await insertJudgment(db, {
         id: crypto.randomUUID(),
@@ -430,6 +482,9 @@ async function runAttemptOnce(opts: {
 
     if (scenario.outcome.llmJudge) {
       const spec = scenario.outcome.llmJudge;
+      signal?.throwIfAborted();
+      setAttemptPhase(attempt.id, "llm-judge");
+      log(`[judge] llm judge starting (model ${spec.model ?? opts.judgeModel ?? "default"})`);
       const llmTimed = await timed(() =>
         judgeWithLlm({
           scenario,
@@ -442,6 +497,7 @@ async function runAttemptOnce(opts: {
       );
       const verdict = llmTimed.result;
       timings.llmJudgeMs = llmTimed.ms;
+      recordAttemptTimings(attempt.id, timings);
       score = verdict.score;
       llmPass = verdict.pass && verdict.score >= threshold;
       await insertJudgment(db, {
@@ -465,6 +521,12 @@ async function runAttemptOnce(opts: {
     let agenticPass = true;
     if (scenario.outcome.agenticJudge) {
       const spec = scenario.outcome.agenticJudge;
+      signal?.throwIfAborted();
+      setAttemptPhase(attempt.id, "agentic-judge");
+      log(
+        `[judge] agentic judge starting (model ${spec.model ?? opts.judgeModel ?? "default"}` +
+          `${spec.maxSteps ? `, maxSteps ${spec.maxSteps}` : ""})`,
+      );
       const agenticT0 = Date.now();
       let verdict: Awaited<ReturnType<typeof judgeAgentic>>;
       let judgeName = "agentic-judge";
@@ -482,6 +544,10 @@ async function runAttemptOnce(opts: {
           live: judgeLive,
         });
       } catch (err) {
+        // Cancel mid-agentic-judge kills the sandbox, which makes the judge's
+        // exec tools fail — don't start a fresh LLM judge call post-abort
+        // (frozen contract: no judge calls run after the abort).
+        signal?.throwIfAborted();
         // Agent never submitted a verdict (or judge-model flake) — fall back to
         // the plain LLM judge rather than burning the whole attempt.
         log(
@@ -499,6 +565,7 @@ async function runAttemptOnce(opts: {
         });
       }
       timings.agenticJudgeMs = Date.now() - agenticT0;
+      recordAttemptTimings(attempt.id, timings);
       agenticPass = verdict.pass && verdict.score >= threshold;
       // Agentic verdicts verify against the live sandbox, so they take score precedence.
       score = verdict.score;
@@ -540,6 +607,9 @@ async function runAttemptOnce(opts: {
     if (score === null) score = passed ? 1 : 0;
 
     // Persist artifacts (redacted) before the sandboxes die.
+    signal?.throwIfAborted();
+    setAttemptPhase(attempt.id, "artifacts");
+    log("[artifacts] persisting transcript, session files, tasks, and sandbox logs");
     const artifactsT0 = Date.now();
     await insertArtifact(db, {
       id: crypto.randomUUID(),
@@ -628,6 +698,8 @@ async function runAttemptOnce(opts: {
       });
     }
     timings.artifactsMs = (timings.artifactsMs ?? 0) + (Date.now() - artifactsT0);
+    recordAttemptTimings(attempt.id, timings);
+    setAttemptPhase(attempt.id, null);
 
     await updateAttempt(db, attempt.id, {
       status: passed ? "passed" : "failed",
@@ -648,6 +720,25 @@ async function runAttemptOnce(opts: {
     // After final persistence on success, and on every error path — the live
     // registry never leaks. Retries re-enter via beginJudging (resets entry).
     clearJudging(attempt.id);
+    // Persist the full captured runner log as an artifact (v4 §2.2). Best-effort:
+    // a DB hiccup here must not mask the attempt's own error or skip teardown.
+    // `clearAttemptResults` wipes it on retry — each try gets a fresh runner.log.
+    try {
+      const progressLog = finishAttemptProgress(attempt.id);
+      if (progressLog.length > 0) {
+        await insertArtifact(db, {
+          id: crypto.randomUUID(),
+          attemptId: attempt.id,
+          kind: "log",
+          name: "runner.log",
+          content: stack.redact(formatRunnerLog(progressLog)),
+        });
+      }
+    } catch (err) {
+      opts.log(
+        `[artifacts] runner.log persist failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
     untrack();
     await stack.kill();
   }
@@ -662,7 +753,13 @@ async function runAttemptWithRetry(opts: {
   signal?: AbortSignal;
   log: (msg: string) => void;
 }): Promise<void> {
-  const { db, attempt, registry, log } = opts;
+  const { db, attempt, registry } = opts;
+  // Own lines ([error]/[retry]) also flow into the live registry — pushAttemptLog
+  // no-ops once runAttemptOnce's finally has already cleared the entry.
+  const log = (msg: string): void => {
+    opts.log(msg);
+    pushAttemptLog(attempt.id, logLevelFor(msg), msg);
+  };
   const scenario = registry.scenarios.get(attempt.scenarioId);
   const config = registry.configs.get(attempt.configId);
   if (!scenario || !config) {
@@ -675,17 +772,44 @@ async function runAttemptWithRetry(opts: {
   }
   for (let retry = attempt.retries; ; retry++) {
     try {
-      await runAttemptOnce({ db, attempt, scenario, config, judgeModel: opts.judgeModel, log });
+      await runAttemptOnce({
+        db,
+        attempt,
+        scenario,
+        config,
+        judgeModel: opts.judgeModel,
+        signal: opts.signal,
+        // Raw log — runAttemptOnce wraps it once for the live registry itself.
+        log: opts.log,
+      });
       return;
     } catch (err) {
       const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
       log(`[error] ${message.split("\n")[0]}`);
+      // Leak guard: boot failures throw before runAttemptOnce's inner finally can
+      // run, so the progress entry may still be live. Idempotent — [] once cleared.
+      const orphanedLog = finishAttemptProgress(attempt.id);
       if (opts.signal?.aborted) {
         // Cancelled mid-attempt — leave it pending so resume re-runs it cleanly.
         await updateAttempt(db, attempt.id, { status: "pending", retries: retry });
         return;
       }
       if (retry >= opts.maxRetries) {
+        if (orphanedLog.length > 0) {
+          // Terminal error before the stack existed (no redact available — the
+          // boot log carries no secrets beyond throwaway sandbox ids). Best-effort.
+          try {
+            await insertArtifact(db, {
+              id: crypto.randomUUID(),
+              attemptId: attempt.id,
+              kind: "log",
+              name: "runner.log",
+              content: formatRunnerLog(orphanedLog),
+            });
+          } catch {
+            // never mask the terminal error below
+          }
+        }
         await updateAttempt(db, attempt.id, {
           status: "error",
           retries: retry,

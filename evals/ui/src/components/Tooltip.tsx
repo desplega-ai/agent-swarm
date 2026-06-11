@@ -15,6 +15,8 @@ export function Tooltip(props: {
   children: ReactNode;
   /** Wider box (420px) for rich hover cards. */
   wide?: boolean;
+  /** Block-level trigger — for wrapping full-width cells (ellipsis keeps working). */
+  block?: boolean;
 }): ReactNode {
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -59,7 +61,7 @@ export function Tooltip(props: {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: passive hover/focus wrapper — the tooltip content is announced via the child's aria-label/role, not by interacting with this span
     <span
-      className="tooltip"
+      className={props.block ? "tooltip block" : "tooltip"}
       ref={triggerRef}
       onMouseEnter={open}
       onMouseLeave={close}
@@ -81,7 +83,12 @@ export function Tooltip(props: {
             >
               {props.text}
             </div>,
-            document.body,
+            // A showModal() dialog paints in the top layer ABOVE (and inert to)
+            // anything portaled to document.body — so when the trigger lives
+            // inside an open modal, portal into the dialog itself. Positioning
+            // math is unchanged: the dialog has no transform, so position:fixed
+            // stays viewport-anchored either way.
+            triggerRef.current?.closest("dialog:modal") ?? document.body,
           )
         : null}
     </span>
