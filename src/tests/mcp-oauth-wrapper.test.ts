@@ -137,6 +137,115 @@ describe("buildAuthorizeUrl (PKCE S256, RFC 8707)", () => {
     });
     expect(new URL(result.url).searchParams.has("scope")).toBe(false);
   });
+
+  test("extraParams are appended to the authorize URL (e.g. BigQuery offline access)", async () => {
+    const result = await buildAuthorizeUrl({
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientId: "bq-client",
+      redirectUri: "https://swarm.example.com/callback",
+      scopes: ["https://www.googleapis.com/auth/bigquery"],
+      resource: "https://bigquery.googleapis.com/",
+      extraParams: { access_type: "offline", prompt: "consent" },
+    });
+
+    const u = new URL(result.url);
+    expect(u.searchParams.get("access_type")).toBe("offline");
+    expect(u.searchParams.get("prompt")).toBe("consent");
+  });
+
+  test("extraParams cannot override reserved OAuth params (redirect_uri, state, etc.)", async () => {
+    const result = await buildAuthorizeUrl({
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientId: "c",
+      redirectUri: "https://swarm.example.com/cb",
+      scopes: ["read"],
+      resource: "https://mcp.example.com/",
+      state: "safe-state",
+      extraParams: {
+        redirect_uri: "https://evil.com",
+        state: "injected",
+        code_challenge: "malicious",
+        code_challenge_method: "plain",
+        response_type: "token",
+        client_id: "attacker",
+        scope: "admin",
+        resource: "https://evil.com/",
+      },
+    });
+    const u = new URL(result.url);
+    expect(u.searchParams.get("redirect_uri")).toBe("https://swarm.example.com/cb");
+    expect(u.searchParams.get("state")).toBe("safe-state");
+    expect(u.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(u.searchParams.get("response_type")).toBe("code");
+    expect(u.searchParams.get("client_id")).toBe("c");
+    expect(u.searchParams.get("resource")).toBe("https://mcp.example.com/");
+    // Attacker values must not have landed
+    const challenge = u.searchParams.get("code_challenge");
+    expect(challenge).not.toBeNull();
+    expect(challenge).not.toBe("malicious");
+    expect(u.searchParams.get("scope")).toBe("read");
+  });
+
+  test("mixed-case reserved keys in extraParams are rejected (case-insensitive guard)", async () => {
+    const result = await buildAuthorizeUrl({
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientId: "c",
+      redirectUri: "https://swarm.example.com/cb",
+      scopes: ["read"],
+      resource: "https://mcp.example.com/",
+      state: "safe-state",
+      extraParams: {
+        Redirect_Uri: "https://evil.example",
+        STATE: "evil-state",
+        Code_Challenge: "malicious-challenge",
+        SCOPE: "admin",
+      },
+    });
+    const u = new URL(result.url);
+    // Attacker mixed-case keys must NOT appear in the URL
+    expect(u.searchParams.get("Redirect_Uri")).toBeNull();
+    expect(u.searchParams.get("STATE")).toBeNull();
+    expect(u.searchParams.get("Code_Challenge")).toBeNull();
+    expect(u.searchParams.get("SCOPE")).toBeNull();
+    // Core params must retain their original legitimate values
+    expect(u.searchParams.get("redirect_uri")).toBe("https://swarm.example.com/cb");
+    expect(u.searchParams.get("state")).toBe("safe-state");
+    expect(u.searchParams.get("scope")).toBe("read");
+  });
+
+  test("null/undefined extraParams leaves URL unchanged (no blast radius for existing servers)", async () => {
+    const withExtra = await buildAuthorizeUrl({
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientId: "c",
+      redirectUri: "https://swarm.example.com/cb",
+      scopes: ["read"],
+      resource: "https://mcp.example.com/",
+      extraParams: { access_type: "offline" },
+      state: "fixed-state",
+    });
+
+    const withoutExtra = await buildAuthorizeUrl({
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientId: "c",
+      redirectUri: "https://swarm.example.com/cb",
+      scopes: ["read"],
+      resource: "https://mcp.example.com/",
+      state: "fixed-state",
+    });
+
+    const uWith = new URL(withExtra.url);
+    const uWithout = new URL(withoutExtra.url);
+    expect(uWith.searchParams.has("access_type")).toBe(true);
+    expect(uWithout.searchParams.has("access_type")).toBe(false);
+    // Core params are identical
+    expect(uWith.searchParams.get("client_id")).toBe(uWithout.searchParams.get("client_id"));
+    expect(uWith.searchParams.get("state")).toBe(uWithout.searchParams.get("state"));
+  });
 });
 
 // ─── Discovery (PRMD + AS metadata) ──────────────────────────────────────────

@@ -362,6 +362,19 @@ async function prepareAuthorizeFlow(
 
   const scopes = q.scopes ? splitScopes(q.scopes) : client.scopes;
 
+  let extraParams: Record<string, string> | undefined;
+  if (server.extraAuthorizeParams) {
+    try {
+      const parsed = JSON.parse(server.extraAuthorizeParams);
+      if (parsed && typeof parsed === "object") {
+        extraParams = Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, String(v)]));
+      }
+    } catch {
+      // Malformed config must never break the authorize flow — log + ignore.
+      console.warn(`[mcp-oauth] Ignoring malformed extraAuthorizeParams for server ${mcpServerId}`);
+    }
+  }
+
   const built = await buildAuthorizeUrl({
     authorizeUrl: client.authorizeUrl,
     tokenUrl: client.tokenUrl,
@@ -369,6 +382,7 @@ async function prepareAuthorizeFlow(
     redirectUri: callbackRedirectUri(),
     scopes,
     resource: client.resourceUrl,
+    extraParams,
   });
 
   insertMcpOAuthPending({

@@ -35,6 +35,12 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
           .string()
           .optional()
           .describe("JSON object mapping header names to config key paths for secret headers"),
+        extraAuthorizeParams: z
+          .string()
+          .optional()
+          .describe(
+            'JSON object string of extra OAuth authorize-request params, e.g. {"access_type":"offline","prompt":"consent"}',
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -108,6 +114,7 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
           headers: args.headers,
           envConfigKeys: args.envConfigKeys,
           headerConfigKeys: args.headerConfigKeys,
+          extraAuthorizeParams: args.extraAuthorizeParams,
         });
 
         // Auto-install for the creating agent

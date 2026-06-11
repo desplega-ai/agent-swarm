@@ -287,7 +287,21 @@ export async function buildAuthorizeUrl(input: BuildAuthorizeInput): Promise<Bui
   url.searchParams.set("resource", input.resource);
 
   if (input.extraParams) {
+    const RESERVED = new Set([
+      "response_type",
+      "client_id",
+      "redirect_uri",
+      "scope",
+      "state",
+      "code_challenge",
+      "code_challenge_method",
+      "resource",
+    ]);
     for (const [k, v] of Object.entries(input.extraParams)) {
+      if (RESERVED.has(k.toLowerCase())) {
+        console.warn(`[mcp-oauth] extraParams key "${k}" is reserved and skipped`);
+        continue;
+      }
       url.searchParams.set(k, v);
     }
   }

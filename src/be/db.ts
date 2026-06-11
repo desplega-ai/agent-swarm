@@ -9437,6 +9437,7 @@ type McpServerRow = {
   headers: string | null;
   envConfigKeys: string | null;
   headerConfigKeys: string | null;
+  extraAuthorizeParams: string | null;
   authMethod: string | null;
   isEnabled: number;
   version: number;
@@ -9468,6 +9469,7 @@ function rowToMcpServer(row: McpServerRow): McpServer {
     headers: row.headers,
     envConfigKeys: row.envConfigKeys,
     headerConfigKeys: row.headerConfigKeys,
+    extraAuthorizeParams: row.extraAuthorizeParams,
     authMethod: (row.authMethod as McpServer["authMethod"]) ?? "static",
     isEnabled: row.isEnabled === 1,
     version: row.version,
@@ -9506,6 +9508,7 @@ export interface McpServerInsert {
   headers?: string;
   envConfigKeys?: string;
   headerConfigKeys?: string;
+  extraAuthorizeParams?: string;
 }
 
 export function createMcpServer(data: McpServerInsert): McpServer {
@@ -9517,9 +9520,9 @@ export function createMcpServer(data: McpServerInsert): McpServer {
       `INSERT INTO mcp_servers (
         id, name, description, scope, ownerAgentId, transport,
         command, args, url, headers,
-        envConfigKeys, headerConfigKeys,
+        envConfigKeys, headerConfigKeys, extraAuthorizeParams,
         isEnabled, version, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -9534,6 +9537,7 @@ export function createMcpServer(data: McpServerInsert): McpServer {
       data.headers ?? null,
       data.envConfigKeys ?? null,
       data.headerConfigKeys ?? null,
+      data.extraAuthorizeParams ?? null,
       now,
       now,
     );
@@ -9596,6 +9600,10 @@ export function updateMcpServer(
     sets.push("headerConfigKeys = ?");
     params.push(updates.headerConfigKeys ?? null);
   }
+  if (updates.extraAuthorizeParams !== undefined) {
+    sets.push("extraAuthorizeParams = ?");
+    params.push(updates.extraAuthorizeParams ?? null);
+  }
   if (updates.isEnabled !== undefined) {
     sets.push("isEnabled = ?");
     params.push(updates.isEnabled ? 1 : 0);
@@ -9617,6 +9625,7 @@ export function updateMcpServer(
     "headers",
     "envConfigKeys",
     "headerConfigKeys",
+    "extraAuthorizeParams",
     "transport",
   ];
   if (configFields.some((f) => (updates as Record<string, unknown>)[f] !== undefined)) {

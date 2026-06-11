@@ -1878,6 +1878,7 @@ export const McpServerSchema = z.object({
   headers: z.string().nullable(),
   envConfigKeys: z.string().nullable(),
   headerConfigKeys: z.string().nullable(),
+  extraAuthorizeParams: z.string().nullable(),
   authMethod: McpAuthMethodSchema.default("static"),
   isEnabled: z.boolean(),
   version: z.number(),
