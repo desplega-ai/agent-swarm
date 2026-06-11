@@ -69,7 +69,8 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `dependsOn` | array | No | Task IDs this depends on |
 | `parentTaskId` | uuid | No | Parent task for session continuity |
 | `dir` | string | No | Working directory (absolute path) for the agent to start in |
-| `model` | string | No | Model for this task: `haiku`, `sonnet`, `opus`, or `fable`. Falls back to agent/global `MODEL_OVERRIDE` config, then `opus` |
+| `model` | string | No | Concrete model override for this task. Interpreted by the assignee's harness/provider and wins over `modelTier` when both are present. |
+| `modelTier` | string | No | Portable model intent for this task: `smol`, `regular`, `smart`, or `ultra`. Resolved at claim/run time by the assignee's harness/provider. Legacy shortnames map as `haiku→smol`, `sonnet→regular`, `opus→smart`, `fable→ultra`. |
 | `slackChannelId` | string | No | Slack channel ID for progress updates (auto-inherited if omitted) |
 | `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
 | `slackUserId` | string | No | Slack user ID of the original requester (auto-inherited if omitted) |
@@ -328,7 +329,8 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `priority` | number | No | Priority 0-100 |
 | `tags` | array | No | Tags for filtering |
 | `dir` | string | No | Working directory (absolute path) for the agent to start in (only used with `create` action) |
-| `model` | string | No | Model for the created task: `haiku`, `sonnet`, `opus`, or `fable` (only used with `create` action) |
+| `model` | string | No | Concrete model override for the created task (only used with `create` action) |
+| `modelTier` | string | No | Portable model tier for the created task: `smol`, `regular`, `smart`, or `ultra` (only used with `create` action) |
 
 ## Messaging Tools
 
@@ -394,7 +396,7 @@ Manage HTTP service discovery. See [Service Discovery](/docs/concepts/services) 
 
 ### create-schedule / list-schedules / update-schedule / delete-schedule / run-schedule-now
 
-Manage recurring and one-time task automation. Schedules support a `model` parameter (`haiku`, `sonnet`, `opus`, or `fable`) that is passed to all tasks they create.
+Manage recurring and one-time task automation. Schedules support both a concrete `model` override and a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`) that is passed through to the tasks they create.
 
 **One-time schedules** (v1.36.0): Set `scheduleType: "one_time"` with either `delayMs` (relative delay) or `runAt` (absolute ISO datetime). One-time schedules auto-disable after execution. `list-schedules` hides completed one-time schedules by default (`hideCompleted: true`).
 
@@ -905,6 +907,8 @@ Search accumulated memories with natural language.
 | `source` | string | No | Filter by source type |
 | `limit` | number | No | Max results (default: 10) |
 
+When called inside a task, `memory-search` may also return response-side `rateHint` nudges for manual and file-index memories so agents can call `memory_rate(...)` without looking up the signature separately.
+
 ### memory-get
 
 Retrieve full details of a specific memory.
@@ -912,6 +916,8 @@ Retrieve full details of a specific memory.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `memoryId` | uuid | Yes | Memory ID |
+
+Like `memory-search`, `memory-get` may include a `rateHint` in task context for memories that are worth rating.
 
 ### memory-delete
 

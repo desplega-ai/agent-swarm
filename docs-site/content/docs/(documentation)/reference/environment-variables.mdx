@@ -161,6 +161,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `PM2_HOME` | No | `/workspace/.pm2` | PM2 state directory |
 | `TEMPLATE_ID` | No | — | Template for initial profile on first boot (e.g., `official/coder`) |
 | `TEMPLATE_REGISTRY_URL` | No | `https://templates.agent-swarm.dev` | URL of the templates registry |
+| `MODEL_TIER_MAP` | No | — | JSON object overriding portable tier-to-model resolution for the current worker, for example `{\"smol\":\"gpt-5.4-mini\",\"smart\":\"gpt-5.5\"}`. Applies when a task, schedule, or workflow uses `modelTier`. |
+| `MODEL_TIER_<TIER>` | No | — | Per-tier override for `smol`, `regular`, `smart`, or `ultra` (for example `MODEL_TIER_SMART=gpt-5.5`). Wins over `MODEL_TIER_MAP`. |
 | `SWARM_DEP_POSTGRES_ENABLED` | No | `false` | Set to `true` to start the optional bundled PostgreSQL 16 cluster on worker boot (entrypoint runs `scripts/init-local-postgres.sh`). Binaries ship dormant in the worker image since `v1.93.0` |
 | `LOCAL_POSTGRES_DATA_DIR` | No | `/tmp/postgres-data` | Data directory for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_PORT` | No | `5433` | Port for the optional local Postgres cluster |

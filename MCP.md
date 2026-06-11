@@ -765,21 +765,10 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `name` | `string` | Yes | - | Unique name for the schedule (e.g., 'daily-cleanup') |
-| `taskTemplate` | `string` | Yes | - | The task description that will be created each time |
-| `scheduleType` | `recurring \| one_time` | No | "recurring" | Schedule type: 'recurring' (default) or 'one_time' |
-| `cronExpression` | `string` | No | - | Cron expression for recurring schedules (e.g., '0 9 * * *') |
-| `intervalMs` | `number` | No | - | Interval in milliseconds for recurring schedules (e.g., 3600000 for hourly) |
-| `delayMs` | `number` | No | - | Delay in milliseconds for one-time schedules (e.g., 1800000 for 30 min) |
-| `runAt` | `string` | No | - | ISO datetime for one-time schedules (e.g., '2026-03-06T15:00:00Z') |
-| `description` | `string` | No | - | Human-readable description of the schedule |
-| `taskType` | `string` | No | - | Task type (e.g., 'maintenance', 'report') |
-| `tags` | `array` | No | - | Tags to apply to created tasks |
-| `priority` | `number` | No | 50 | Task priority 0-100 (default: 50) |
-| `targetAgentId` | `string` | No | - | Agent to assign tasks to (omit for task pool) |
-| `timezone` | `string` | No | "UTC" | Timezone for cron schedules |
-| `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
-| `model` | `haiku \| sonnet \| opus \| fable` | No | - | Model to use for tasks created by this schedule ('haiku', 'sonnet', 'opus', or 'fable'). If not set, uses agent/global config or defaults to 'opus'. |
+| `yourAgentId` | `string` | No | - | - |
+| `success` | `boolean` | Yes | - | - |
+| `message` | `string` | Yes | - | - |
+| `schedule` | `object` | No | - | - |
 
 ### update-schedule
 
@@ -789,20 +778,10 @@ Update an existing scheduled task. Only the creator or lead agent can update sch
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `scheduleId` | `string` | No | - | Schedule ID to update |
-| `name` | `string` | No | - | Schedule name to update (alternative to ID) |
-| `newName` | `string` | No | - | New name for the schedule |
-| `taskTemplate` | `string` | No | - | New task template |
-| `cronExpression` | `string` | No | - | New cron expression (null to clear) |
-| `intervalMs` | `number` | No | - | New interval in milliseconds (null to clear) |
-| `description` | `string` | No | - | New description |
-| `taskType` | `string` | No | - | New task type |
-| `tags` | `array` | No | - | New tags |
-| `priority` | `number` | No | - | New priority |
-| `targetAgentId` | `string` | No | - | New target agent ID |
-| `timezone` | `string` | No | - | New timezone |
-| `enabled` | `boolean` | No | - | Enable or disable the schedule |
-| `model` | `haiku \| sonnet \| opus \| fable` | No | - | Model to use for tasks created by this schedule. Set to null to clear. |
+| `yourAgentId` | `string` | No | - | - |
+| `success` | `boolean` | Yes | - | - |
+| `message` | `string` | Yes | - | - |
+| `schedule` | `object` | No | - | - |
 
 ### delete-schedule
 

@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.94.0] - 2026-06-11
+
+### Added
+- **Portable model tiers across tasks, schedules, workflows, and UI** (#719) — task authors can now express provider-agnostic intent with `modelTier` (`smol`, `regular`, `smart`, `ultra`), while each worker resolves that tier to a concrete model at claim time based on its harness/provider and local overrides.
+- **Memory rating nudges in retrieval responses** (#724) — `memory-search` and `memory-get` now return task-context-aware `rateHint` guidance so agents can immediately call `memory_rate(...)` on useful or misleading memories.
+- **Non-blocking embeddings on worker boot** (#716) — startup no longer stalls on embeddings-related work, reducing time-to-ready for worker sessions.
+
+### Changed
+- **Claude Bridge pin and worker-image defaults refreshed** (#730, #721, #718, #712) — `Dockerfile.worker` now pins `@desplega.ai/claude-bridge` `0.1.12` and ships Claude Code `2.1.170`, pi-mono `0.79.1`, Codex CLI `0.139.0`, and opencode / `@opencode-ai/sdk` `1.16.2`.
+- **Bundled pricing and model-selector metadata refreshed** (#713, #720, #717, #733) — the built-in pricing registries were resynced, pinned models.dev entries are preserved during refreshes, and the UI now exposes Claude Fable 5 alongside the updated model catalog.
+
+### Fixed
+- **Slack tools now auto-join public channels on `not_in_channel`** (#710) — `slack-read`, `slack-post`, `slack-reply`, and `slack-start-thread` join public channels and retry once instead of failing outright; private channels now return a clear `/invite` instruction.
+- **Slack watcher restart dedupe is durable** (#727) — Slack watcher message tracking now persists across process restarts so already-seen messages are not recreated as fresh tasks after a worker/API restart.
+- **Workflow property-match input aliases resolve correctly** (#734) — workflow validation now accepts the intended property-match input aliases instead of rejecting compatible route-porting shapes.
+- **Worker runtime failures are easier to diagnose and less noisy** (#723, #715, #731) — skill-sync permission issues are corrected at boot, credential selection is model-aware, session logs include better harness metadata, task failures now surface the Claude Bridge pane tail, and pi-mono/Bedrock AWS SDK failures emit structured categories instead of being laundered as empty success.
+
 ## [1.93.0] - 2026-06-10
 
 ### Added

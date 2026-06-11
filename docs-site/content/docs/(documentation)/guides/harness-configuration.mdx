@@ -94,6 +94,8 @@ The Claude adapter passes the model string directly to the `claude` CLI via `--m
 
 Models can be set per-task via the API or per-agent via the agent profile. The same `fable` shortname also propagates through MCP task-creation surfaces (`send-task`, `task-action`, and schedules). See the [Anthropic models overview](https://platform.claude.com/docs/en/about-claude/models/overview) for all available model IDs.
 
+If you want provider-agnostic intent instead of a concrete model string, use `modelTier` on tasks, schedules, or workflow `agent-task` nodes. The tier values are `smol`, `regular`, `smart`, and `ultra`; the claiming worker resolves them to concrete models for its own harness/provider, and local env overrides (`MODEL_TIER_MAP`, `MODEL_TIER_<TIER>`) can adjust the mapping without changing the task payload.
+
 ---
 
 ## Codex

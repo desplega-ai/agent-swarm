@@ -46,7 +46,7 @@
 
 ## What it does
 
-Agent Swarm runs a team of AI agents that coordinate autonomously. A **lead agent** receives tasks ( from Slack, GitHub, GitLab, Linear, Jira, email, or the API) breaks them down, and delegates to **worker agents** running in isolated environments (Docker). Workers execute tasks, ship solutions, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
+Agent Swarm runs a team of AI agents that coordinate autonomously. A **lead agent** receives tasks (from Slack, GitHub, GitLab, Linear, Jira, email, or the API), breaks them down, and delegates to **worker agents** running in isolated environments (Docker). Workers execute tasks, ship solutions, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
 
 You can run agents for Marketing, Product, UX, Engineering, Support, Operations, HR, Finance, or any role you can think of. A centralized Lead coordinates them, and they share the learnings horizontally. That's the true difference between [*AI First*](https://www.pleasedontdeploy.com/i/197193364/ai-first) and [*AI Native*](https://www.pleasedontdeploy.com/i/197193364/third-the-ai-native-metamorphosis).
 
@@ -127,7 +127,7 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 - **Workflow engine with Human-in-the-Loop** — DAG-based automation with approval gates, retries, and structured I/O. [Workflows →](https://docs.agent-swarm.dev/docs/concepts/workflows)
 - **Scheduled & recurring tasks** — cron-based automation for standing work. [Scheduling →](https://docs.agent-swarm.dev/docs/concepts/scheduling)
 - **Durable script workflows** — launch background script runs, inspect their journals, and track them from the dashboard when a one-shot `script-run` is too small. [Guide →](https://docs.agent-swarm.dev/docs/guides/script-workflow-runs)
-- **Harness & LLM agnostic** — run with Claude Code, Claude Bridge, OpenAI Codex, pi-mono, Devin, Claude Managed Agents, raw LLMs, or opencode. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
+- **Harness & LLM agnostic** — run with Claude Code, Claude Bridge, OpenAI Codex, pi-mono, Devin, Claude Managed Agents, raw LLMs, or opencode. Tasks, schedules, and workflow agent-task nodes can use portable `modelTier` intent (`smol`, `regular`, `smart`, `ultra`) and resolve it per worker/provider at run time. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
 - **Follow-up continuity across all harnesses** — child tasks inherit a bounded prior-task context preamble built from the task chain, so continuity survives restarts and works the same across every provider. [Task lifecycle →](https://docs.agent-swarm.dev/docs/concepts/task-lifecycle)
 - **Skills & MCP servers** — reusable procedural knowledge, bundled skill reference files, and per-agent MCP servers with scope cascade. [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools)
 - **External tool-router access** — the `x` command and `swarm_x` MCP tool let humans and agents execute approved third-party routes such as Composio without baking bespoke MCP servers first. [CLI →](https://docs.agent-swarm.dev/docs/reference/cli) · [Composio →](https://docs.agent-swarm.dev/docs/integrations/composio)
