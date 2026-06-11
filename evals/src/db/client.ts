@@ -85,5 +85,15 @@ export async function initDb(): Promise<Client> {
     .filter(Boolean)) {
     await db.execute(stmt);
   }
+  for (const stmt of COLUMN_MIGRATIONS) {
+    try {
+      await db.execute(stmt);
+    } catch {
+      // column already exists
+    }
+  }
   return db;
 }
+
+/** Additive columns for DBs created before the column existed. */
+const COLUMN_MIGRATIONS = ["ALTER TABLE eval_runs ADD COLUMN judge_model TEXT"];

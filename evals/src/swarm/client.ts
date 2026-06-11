@@ -194,52 +194,100 @@ function clip(text: string, max = MAX_LINE_CHARS): string {
   return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
 }
 
-function textFromContentBlocks(blocks: unknown): string[] {
-  if (!Array.isArray(blocks)) return typeof blocks === "string" ? [clip(blocks)] : [];
-  const out: string[] = [];
+/** One renderable transcript event, parsed from a raw harness JSONL line. */
+export interface TranscriptEvent {
+  role: "assistant" | "user" | "result" | "raw";
+  kind: "text" | "tool_use" | "tool_result" | "raw";
+  /** Tool name for tool_use events. */
+  name?: string;
+  text: string;
+  cli?: string;
+  iteration?: number;
+}
+
+function eventsFromContentBlocks(
+  blocks: unknown,
+  role: "assistant" | "user",
+  base: Pick<TranscriptEvent, "cli" | "iteration">,
+): TranscriptEvent[] {
+  if (!Array.isArray(blocks)) {
+    return typeof blocks === "string" && blocks.trim()
+      ? [{ role, kind: "text", text: blocks.trim(), ...base }]
+      : [];
+  }
+  const out: TranscriptEvent[] = [];
   for (const block of blocks) {
     const b = block as Record<string, unknown>;
-    if (b.type === "text" && typeof b.text === "string") out.push(clip(b.text, 2000));
-    else if (b.type === "tool_use") {
-      out.push(`[tool_use ${b.name}] ${clip(JSON.stringify(b.input ?? {}))}`);
+    if (b.type === "text" && typeof b.text === "string" && b.text.trim()) {
+      out.push({ role, kind: "text", text: b.text.trim(), ...base });
+    } else if (b.type === "tool_use") {
+      out.push({
+        role,
+        kind: "tool_use",
+        name: String(b.name ?? "tool"),
+        text: JSON.stringify(b.input ?? {}, null, 2),
+        ...base,
+      });
     } else if (b.type === "tool_result") {
-      out.push(`[tool_result] ${clip(JSON.stringify(b.content ?? ""))}`);
+      const content =
+        typeof b.content === "string" ? b.content : JSON.stringify(b.content ?? "", null, 2);
+      out.push({ role, kind: "tool_result", text: content, ...base });
     }
   }
   return out;
 }
 
 /**
- * Best-effort flattening of raw harness JSONL session logs into a readable
- * transcript for LLM judging. Understands Claude stream-json events; anything
- * unrecognized is included as a clipped raw line.
+ * Parse raw harness JSONL session-log rows into structured transcript events.
+ * Understands Claude stream-json; unrecognized lines become `raw` events so no
+ * provider's output is silently dropped.
  */
-export function flattenTranscript(rows: SessionLogRow[]): string {
-  const lines: string[] = [];
+export function parseTranscriptEvents(rows: SessionLogRow[]): TranscriptEvent[] {
+  const events: TranscriptEvent[] = [];
   for (const row of rows) {
+    const base = { cli: row.cli, iteration: row.iteration };
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(row.content) as Record<string, unknown>;
     } catch {
-      lines.push(clip(row.content));
+      if (row.content.trim()) events.push({ role: "raw", kind: "raw", text: row.content, ...base });
       continue;
     }
     const type = parsed.type as string | undefined;
     if (type === "assistant" || type === "user") {
       const message = parsed.message as Record<string, unknown> | undefined;
-      const role = type === "assistant" ? "ASSISTANT" : "USER";
-      for (const text of textFromContentBlocks(message?.content ?? parsed.content)) {
-        lines.push(`${role}: ${text}`);
-      }
+      events.push(...eventsFromContentBlocks(message?.content ?? parsed.content, type, base));
     } else if (type === "result") {
-      lines.push(
-        `RESULT: ${clip(JSON.stringify({ result: parsed.result, cost: parsed.total_cost_usd, turns: parsed.num_turns }))}`,
-      );
+      events.push({
+        role: "result",
+        kind: "text",
+        text: JSON.stringify(
+          { result: parsed.result, cost: parsed.total_cost_usd, turns: parsed.num_turns },
+          null,
+          2,
+        ),
+        ...base,
+      });
     } else if (type === "system") {
-      // boot/system events are noise for judging
+      // boot/system events are noise for judging and viewing
     } else {
-      lines.push(clip(row.content));
+      events.push({ role: "raw", kind: "raw", text: row.content, ...base });
     }
   }
-  return lines.join("\n");
+  return events;
+}
+
+/**
+ * Best-effort flattening of raw harness JSONL session logs into a readable
+ * transcript for LLM judging.
+ */
+export function flattenTranscript(rows: SessionLogRow[]): string {
+  return parseTranscriptEvents(rows)
+    .map((e) => {
+      const label = e.role === "raw" ? "RAW" : e.role.toUpperCase();
+      if (e.kind === "tool_use") return `${label}: [tool_use ${e.name}] ${clip(e.text)}`;
+      if (e.kind === "tool_result") return `${label}: [tool_result] ${clip(e.text)}`;
+      return `${label}: ${clip(e.text, 2000)}`;
+    })
+    .join("\n");
 }

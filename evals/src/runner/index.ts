@@ -1,5 +1,6 @@
 import type { Client } from "@libsql/client";
 import {
+  clearAttemptResults,
   getRun,
   insertArtifact,
   insertAttempt,
@@ -9,10 +10,19 @@ import {
   setRunStatus,
   updateAttempt,
 } from "../db/queries.ts";
+import { judgeAgentic } from "../judge/agentic.ts";
 import { runChecks } from "../judge/deterministic.ts";
 import { judgeWithLlm } from "../judge/llm.ts";
 import { flattenTranscript, SwarmClient } from "../swarm/client.ts";
-import { bootStack, sandboxExec, sandboxReadFile } from "../swarm/sandbox.ts";
+import {
+  bootStack,
+  collectHarnessSessionFiles,
+  markAttemptStart,
+  type StackHandle,
+  sandboxExec,
+  sandboxReadFile,
+  sweepRunSandboxes,
+} from "../swarm/sandbox.ts";
 import type {
   AttemptRow,
   DeterministicCheck,
@@ -28,6 +38,34 @@ const DEFAULT_MAX_RETRIES = 1; // infra retries per attempt (fresh sandboxes eac
 export interface Registry {
   scenarios: Map<string, Scenario>;
   configs: Map<string, HarnessConfig>;
+}
+
+/** Live stacks per run, so signal handlers / cancel endpoints can tear them down. */
+const activeStacksByRun = new Map<string, Set<StackHandle>>();
+
+function trackStack(runId: string, stack: StackHandle): () => void {
+  let set = activeStacksByRun.get(runId);
+  if (!set) {
+    set = new Set();
+    activeStacksByRun.set(runId, set);
+  }
+  set.add(stack);
+  return () => {
+    set?.delete(stack);
+    if (set && set.size === 0) activeStacksByRun.delete(runId);
+  };
+}
+
+/** Kill every live stack of one run (used by cancel). */
+export async function killRunStacks(runId: string): Promise<void> {
+  const stacks = [...(activeStacksByRun.get(runId) ?? [])];
+  await Promise.allSettled(stacks.map((s) => s.kill()));
+}
+
+/** Kill every live stack of every run (used by SIGINT/SIGTERM handlers). */
+export async function killAllActiveStacks(): Promise<void> {
+  const runIds = [...activeStacksByRun.keys()];
+  await Promise.allSettled(runIds.map((id) => killRunStacks(id)));
 }
 
 export function attemptId(
@@ -83,6 +121,7 @@ async function runAttemptOnce(opts: {
   attempt: AttemptRow;
   scenario: Scenario;
   config: HarnessConfig;
+  judgeModel: string | null;
   log: (msg: string) => void;
 }): Promise<void> {
   const { db, attempt, scenario, config, log } = opts;
@@ -96,6 +135,8 @@ async function runAttemptOnce(opts: {
     startedAt: new Date().toISOString(),
     error: null,
   });
+  // A re-run of an interrupted attempt must not keep half-written results.
+  await clearAttemptResults(db, attempt.id);
 
   const stack = await bootStack({
     config,
@@ -103,6 +144,7 @@ async function runAttemptOnce(opts: {
     timeoutSec,
     log: (msg) => log(`[boot] ${msg}`),
   });
+  const untrack = trackStack(attempt.runId, stack);
   await updateAttempt(db, attempt.id, {
     sandboxId: stack.workerSandbox.sandboxID,
     apiUrl: stack.apiUrl,
@@ -110,6 +152,7 @@ async function runAttemptOnce(opts: {
 
   try {
     const client = new SwarmClient(stack.apiUrl, stack.swarmKey);
+    await markAttemptStart(stack.workerSandbox.sandboxID);
 
     for (const cmd of scenario.seed?.exec ?? []) {
       log(`[seed] ${cmd}`);
@@ -176,16 +219,17 @@ async function runAttemptOnce(opts: {
     }
     const checksPass = checkResults.every((r) => r.pass);
 
+    const threshold = scenario.outcome.passThreshold ?? 0.7;
     let llmPass = true;
     let score: number | null = null;
+
     if (scenario.outcome.llmJudge) {
-      const threshold = scenario.outcome.passThreshold ?? 0.7;
       const verdict = await judgeWithLlm({
         scenario,
         rubric: scenario.outcome.llmJudge.rubric,
         tasks,
         transcript,
-        model: scenario.outcome.llmJudge.model,
+        model: scenario.outcome.llmJudge.model ?? opts.judgeModel ?? undefined,
       });
       score = verdict.score;
       llmPass = verdict.pass && verdict.score >= threshold;
@@ -202,7 +246,53 @@ async function runAttemptOnce(opts: {
       log(`[judge] llm score=${verdict.score.toFixed(2)} pass=${llmPass}`);
     }
 
-    const passed = checksPass && llmPass;
+    let agenticPass = true;
+    if (scenario.outcome.agenticJudge) {
+      const spec = scenario.outcome.agenticJudge;
+      let verdict: Awaited<ReturnType<typeof judgeAgentic>>;
+      let judgeName = "agentic-judge";
+      try {
+        verdict = await judgeAgentic({
+          scenario,
+          rubric: spec.rubric,
+          tasks,
+          transcript,
+          ctx,
+          model: spec.model ?? opts.judgeModel ?? undefined,
+          maxSteps: spec.maxSteps,
+        });
+      } catch (err) {
+        // Agent never submitted a verdict (or judge-model flake) — fall back to
+        // the plain LLM judge rather than burning the whole attempt.
+        log(
+          `[judge] agentic judge failed (${err instanceof Error ? err.message : err}); falling back to llm judge`,
+        );
+        judgeName = "agentic-judge (llm fallback)";
+        verdict = await judgeWithLlm({
+          scenario,
+          rubric: spec.rubric,
+          tasks,
+          transcript,
+          model: spec.model ?? opts.judgeModel ?? undefined,
+        });
+      }
+      agenticPass = verdict.pass && verdict.score >= threshold;
+      // Agentic verdicts verify against the live sandbox, so they take score precedence.
+      score = verdict.score;
+      await insertJudgment(db, {
+        id: crypto.randomUUID(),
+        attemptId: attempt.id,
+        kind: "llm",
+        name: judgeName,
+        pass: agenticPass,
+        score: verdict.score,
+        reasoning: verdict.reasoning,
+        raw: verdict.raw,
+      });
+      log(`[judge] agentic score=${verdict.score.toFixed(2)} pass=${agenticPass}`);
+    }
+
+    const passed = checksPass && llmPass && agenticPass;
     if (score === null) score = passed ? 1 : 0;
 
     // Persist artifacts (redacted) before the sandboxes die.
@@ -212,6 +302,53 @@ async function runAttemptOnce(opts: {
       kind: "transcript",
       content: stack.redact(transcript).slice(0, 400_000),
     });
+    // Raw swarm session-log events, one JSON object per line (cli/iteration kept
+    // so the transcript viewer can re-parse without hitting the dead stack).
+    if (logRows.length > 0) {
+      const jsonl = logRows
+        .map((r) =>
+          JSON.stringify({
+            taskId: r.taskId,
+            sessionId: r.sessionId,
+            iteration: r.iteration,
+            lineNumber: r.lineNumber,
+            cli: r.cli,
+            content: r.content,
+          }),
+        )
+        .join("\n");
+      await insertArtifact(db, {
+        id: crypto.randomUUID(),
+        attemptId: attempt.id,
+        kind: "raw-session-logs",
+        name: "session-logs.jsonl",
+        content: stack.redact(jsonl).slice(0, 2_000_000),
+      });
+    }
+    // The harness's own raw session files from the worker's filesystem
+    // (e.g. ~/.claude/projects/**/*.jsonl for Claude Code).
+    try {
+      const sessionFiles = await collectHarnessSessionFiles(
+        stack.workerSandbox.sandboxID,
+        config.provider,
+      );
+      for (const file of sessionFiles) {
+        await insertArtifact(db, {
+          id: crypto.randomUUID(),
+          attemptId: attempt.id,
+          kind: "harness-session",
+          name: file.path + (file.truncated ? " (truncated)" : ""),
+          content: stack.redact(file.content),
+        });
+      }
+      if (sessionFiles.length > 0) {
+        log(`[artifacts] captured ${sessionFiles.length} harness session file(s)`);
+      }
+    } catch (err) {
+      log(
+        `[artifacts] harness session capture failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
     await insertArtifact(db, {
       id: crypto.randomUUID(),
       attemptId: attempt.id,
@@ -245,6 +382,7 @@ async function runAttemptOnce(opts: {
       `[done] ${passed ? "PASSED" : "FAILED"} score=${score.toFixed(2)}${costUsd !== null ? ` cost=$${costUsd.toFixed(4)}` : ""}`,
     );
   } finally {
+    untrack();
     await stack.kill();
   }
 }
@@ -254,6 +392,8 @@ async function runAttemptWithRetry(opts: {
   attempt: AttemptRow;
   registry: Registry;
   maxRetries: number;
+  judgeModel: string | null;
+  signal?: AbortSignal;
   log: (msg: string) => void;
 }): Promise<void> {
   const { db, attempt, registry, log } = opts;
@@ -269,11 +409,16 @@ async function runAttemptWithRetry(opts: {
   }
   for (let retry = attempt.retries; ; retry++) {
     try {
-      await runAttemptOnce({ db, attempt, scenario, config, log });
+      await runAttemptOnce({ db, attempt, scenario, config, judgeModel: opts.judgeModel, log });
       return;
     } catch (err) {
       const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
       log(`[error] ${message.split("\n")[0]}`);
+      if (opts.signal?.aborted) {
+        // Cancelled mid-attempt — leave it pending so resume re-runs it cleanly.
+        await updateAttempt(db, attempt.id, { status: "pending", retries: retry });
+        return;
+      }
       if (retry >= opts.maxRetries) {
         await updateAttempt(db, attempt.id, {
           status: "error",
@@ -293,10 +438,12 @@ async function pool<T>(
   items: T[],
   concurrency: number,
   fn: (item: T) => Promise<void>,
+  shouldStop?: () => boolean,
 ): Promise<void> {
   const queue = [...items];
   const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
     while (true) {
+      if (shouldStop?.()) return;
       const item = queue.shift();
       if (item === undefined) return;
       await fn(item);
@@ -316,9 +463,11 @@ export async function executeRun(opts: {
   runId: string;
   registry: Registry;
   maxRetries?: number;
+  /** Abort starting new attempts (cancel / Ctrl-C). In-flight stacks are killed by the caller. */
+  signal?: AbortSignal;
   log?: (msg: string) => void;
 }): Promise<void> {
-  const { db, runId, registry } = opts;
+  const { db, runId, registry, signal } = opts;
   const baseLog = opts.log ?? ((msg: string) => console.log(msg));
   const run = await getRun(db, runId);
   if (!run) throw new Error(`run ${runId} not found`);
@@ -326,22 +475,37 @@ export async function executeRun(opts: {
   await ensureAttemptRows(db, runId);
   await setRunStatus(db, runId, "running");
 
+  // A previous execution may have died mid-attempt and leaked its sandboxes.
+  const swept = await sweepRunSandboxes(runId, baseLog);
+  if (swept > 0) baseLog(`swept ${swept} leaked sandbox(es) from a previous execution`);
+
   const unfinished = await listUnfinishedAttempts(db, runId);
   baseLog(
     `run ${runId}: ${unfinished.length} attempt(s) to execute (concurrency ${run.concurrency})`,
   );
 
-  await pool(unfinished, run.concurrency, (attempt) =>
-    runAttemptWithRetry({
-      db,
-      attempt,
-      registry,
-      maxRetries: opts.maxRetries ?? DEFAULT_MAX_RETRIES,
-      log: (msg) =>
-        baseLog(`[${attempt.scenarioId} × ${attempt.configId} #${attempt.attemptIndex}] ${msg}`),
-    }),
+  await pool(
+    unfinished,
+    run.concurrency,
+    (attempt) =>
+      runAttemptWithRetry({
+        db,
+        attempt,
+        registry,
+        maxRetries: opts.maxRetries ?? DEFAULT_MAX_RETRIES,
+        judgeModel: run.judgeModel,
+        signal,
+        log: (msg) =>
+          baseLog(`[${attempt.scenarioId} × ${attempt.configId} #${attempt.attemptIndex}] ${msg}`),
+      }),
+    () => signal?.aborted ?? false,
   );
 
+  if (signal?.aborted) {
+    await setRunStatus(db, runId, "cancelled");
+    baseLog(`run ${runId} cancelled — unfinished attempts stay pending; resume to continue`);
+    return;
+  }
   const attempts = await listAttempts(db, runId);
   const allErrored = attempts.length > 0 && attempts.every((a) => a.status === "error");
   await setRunStatus(db, runId, allErrored ? "failed" : "done");

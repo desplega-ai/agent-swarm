@@ -7,7 +7,12 @@ import type { Scenario } from "../src/types.ts";
 export const quickReasoning: Scenario = {
   id: "quick-reasoning",
   name: "Quick reasoning",
-  description: "Worker must compute a small arithmetic answer and report it as the task output.",
+  description: [
+    "Boots a fresh swarm stack and assigns one task: compute 17 × 23, explain it in a sentence,",
+    "and report the numeric answer via store-progress. Measures the minimal reason-and-report",
+    "loop with no filesystem side effects. Graded purely by the LLM judge against the",
+    "authoritative task output (expected answer: 391).",
+  ].join(" "),
   tasks: [
     {
       title: "Compute and report",

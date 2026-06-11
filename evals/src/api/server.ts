@@ -1,15 +1,22 @@
 import { join } from "node:path";
 import { getDb, initDb } from "../db/client.ts";
 import {
+  createRun,
   getArtifact,
   getAttempt,
   getRun,
   listArtifacts,
   listAttempts,
+  listAttemptsByScenario,
   listJudgments,
   listRuns,
+  newRunId,
+  resetErrorAttempts,
 } from "../db/queries.ts";
+import { loadRegistry, serializeConfig, serializeScenario } from "../registry.ts";
 import { summarizeRun } from "../results.ts";
+import { executeRun, killAllActiveStacks, killRunStacks } from "../runner/index.ts";
+import { parseTranscriptEvents, type SessionLogRow } from "../swarm/client.ts";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -20,6 +27,25 @@ function json(data: unknown, status = 200): Response {
 
 const UI_DIR = join(import.meta.dir, "../../ui");
 
+/** Runs currently executing inside this server process (local-first trigger). */
+const activeRuns = new Map<string, AbortController>();
+
+function startRunExecution(db: ReturnType<typeof getDb>, runId: string): boolean {
+  if (activeRuns.has(runId)) return false;
+  const controller = new AbortController();
+  activeRuns.set(runId, controller);
+  executeRun({
+    db,
+    runId,
+    registry: loadRegistry(),
+    signal: controller.signal,
+    log: (msg) => console.log(`[${runId}] ${msg}`),
+  })
+    .catch((err) => console.error(`[${runId}] execution crashed:`, err))
+    .finally(() => activeRuns.delete(runId));
+  return true;
+}
+
 export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801)) {
   await initDb();
   const db = getDb();
@@ -29,18 +55,81 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
     idleTimeout: 60,
     routes: {
       "/": () => new Response(Bun.file(join(UI_DIR, "index.html"))),
-      "/api/runs": async () => {
-        const runs = await listRuns(db);
-        const withSummaries = await Promise.all(
-          runs.map(async (run) => summarizeRun(run, await listAttempts(db, run.id))),
-        );
-        return json(withSummaries);
+      "/api/runs": {
+        GET: async () => {
+          const runs = await listRuns(db);
+          const withSummaries = await Promise.all(
+            runs.map(async (run) => ({
+              ...summarizeRun(run, await listAttempts(db, run.id)),
+              active: activeRuns.has(run.id),
+            })),
+          );
+          return json(withSummaries);
+        },
+        POST: async (req) => {
+          const body = (await req.json().catch(() => null)) as {
+            name?: string;
+            scenarioIds?: string[];
+            configIds?: string[];
+            attemptsPerCell?: number;
+            concurrency?: number;
+            judgeModel?: string;
+          } | null;
+          if (!body?.scenarioIds?.length || !body?.configIds?.length) {
+            return json({ error: "scenarioIds and configIds are required" }, 400);
+          }
+          const registry = loadRegistry();
+          for (const id of body.scenarioIds) {
+            if (!registry.scenarios.has(id))
+              return json({ error: `unknown scenario "${id}"` }, 400);
+          }
+          for (const id of body.configIds) {
+            if (!registry.configs.has(id)) return json({ error: `unknown config "${id}"` }, 400);
+          }
+          const runId = newRunId();
+          await createRun(db, {
+            id: runId,
+            name: body.name,
+            scenarioIds: body.scenarioIds,
+            configIds: body.configIds,
+            attemptsPerCell: Math.max(1, body.attemptsPerCell ?? 1),
+            concurrency: Math.max(1, body.concurrency ?? 2),
+            judgeModel: body.judgeModel || undefined,
+          });
+          startRunExecution(db, runId);
+          return json({ runId }, 201);
+        },
       },
       "/api/runs/:id": async (req) => {
         const run = await getRun(db, req.params.id);
         if (!run) return json({ error: "run not found" }, 404);
         const attempts = await listAttempts(db, run.id);
-        return json({ ...summarizeRun(run, attempts), attempts });
+        return json({
+          ...summarizeRun(run, attempts),
+          attempts,
+          active: activeRuns.has(run.id),
+        });
+      },
+      "/api/runs/:id/resume": {
+        POST: async (req) => {
+          const run = await getRun(db, req.params.id);
+          if (!run) return json({ error: "run not found" }, 404);
+          if (activeRuns.has(run.id)) return json({ error: "run is already executing" }, 409);
+          await resetErrorAttempts(db, run.id);
+          startRunExecution(db, run.id);
+          return json({ runId: run.id, resumed: true }, 202);
+        },
+      },
+      "/api/runs/:id/cancel": {
+        POST: async (req) => {
+          const run = await getRun(db, req.params.id);
+          if (!run) return json({ error: "run not found" }, 404);
+          const controller = activeRuns.get(run.id);
+          if (!controller) return json({ error: "run is not executing in this server" }, 409);
+          controller.abort();
+          await killRunStacks(run.id);
+          return json({ runId: run.id, cancelled: true }, 202);
+        },
       },
       "/api/attempts/:id": async (req) => {
         const attempt = await getAttempt(db, req.params.id);
@@ -50,6 +139,51 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
           listArtifacts(db, attempt.id),
         ]);
         return json({ attempt, judgments, artifacts });
+      },
+      "/api/attempts/:id/transcript": async (req) => {
+        const attempt = await getAttempt(db, req.params.id);
+        if (!attempt) return json({ error: "attempt not found" }, 404);
+        const artifacts = await listArtifacts(db, attempt.id, { withContent: true });
+        const raw = artifacts.find((a) => a.kind === "raw-session-logs");
+        if (raw?.content) {
+          const rows = raw.content
+            .split("\n")
+            .filter(Boolean)
+            .flatMap((line) => {
+              try {
+                return [JSON.parse(line) as SessionLogRow];
+              } catch {
+                return [];
+              }
+            });
+          return json({ source: "raw-session-logs", events: parseTranscriptEvents(rows) });
+        }
+        const flat = artifacts.find((a) => a.kind === "transcript");
+        if (flat?.content) {
+          return json({
+            source: "transcript",
+            events: flat.content
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => ({ role: "raw", kind: "raw", text: line })),
+          });
+        }
+        return json({ source: null, events: [] });
+      },
+      "/api/scenarios": () => {
+        const registry = loadRegistry();
+        return json([...registry.scenarios.values()].map(serializeScenario));
+      },
+      "/api/scenarios/:id": async (req) => {
+        const registry = loadRegistry();
+        const scenario = registry.scenarios.get(req.params.id);
+        if (!scenario) return json({ error: "scenario not found" }, 404);
+        const recent = await listAttemptsByScenario(db, scenario.id);
+        return json({ scenario: serializeScenario(scenario), recentAttempts: recent });
+      },
+      "/api/configs": () => {
+        const registry = loadRegistry();
+        return json([...registry.configs.values()].map(serializeConfig));
       },
       "/api/artifacts/:id": async (req) => {
         const artifact = await getArtifact(db, req.params.id);
@@ -63,6 +197,16 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
       return json({ error: "not found" }, 404);
     },
   });
+
+  const shutdown = () => {
+    console.log("\nshutting down — aborting active runs and tearing down live sandboxes…");
+    for (const controller of activeRuns.values()) controller.abort();
+    void killAllActiveStacks()
+      .then(() => Bun.sleep(500))
+      .finally(() => process.exit(130));
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 
   console.log(`evals UI on http://localhost:${server.port}`);
   return server;

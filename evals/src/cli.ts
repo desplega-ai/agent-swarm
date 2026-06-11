@@ -5,12 +5,33 @@ import { getDb, initDb } from "./db/client.ts";
 import { createRun, getRun, listAttempts, listRuns, resetErrorAttempts } from "./db/queries.ts";
 import { loadRegistry } from "./registry.ts";
 import { summarizeRun } from "./results.ts";
-import { executeRun } from "./runner/index.ts";
+import { executeRun, killAllActiveStacks } from "./runner/index.ts";
+
+/**
+ * Graceful Ctrl-C: stop starting new attempts, tear down live sandboxes, and
+ * leave interrupted attempts in a resumable state (`resume <runId>`).
+ */
+function installSignalHandlers(): AbortController {
+  const controller = new AbortController();
+  let interrupted = false;
+  const handler = (sig: string) => {
+    if (interrupted) process.exit(130);
+    interrupted = true;
+    console.log(`\n${sig}: aborting — tearing down live sandboxes (press again to force quit)…`);
+    controller.abort();
+    void killAllActiveStacks()
+      .then(() => Bun.sleep(500))
+      .finally(() => process.exit(130));
+  };
+  process.on("SIGINT", () => handler("SIGINT"));
+  process.on("SIGTERM", () => handler("SIGTERM"));
+  return controller;
+}
 
 const HELP = `swarm evals — scenario x harness-config evaluation matrix on E2B
 
 Usage:
-  bun src/cli.ts run [--name <n>] [--scenarios a,b] [--configs x,y] [--attempts 1] [--concurrency 2] [--max-retries 1]
+  bun src/cli.ts run [--name <n>] [--scenarios a,b] [--configs x,y] [--attempts 1] [--concurrency 2] [--max-retries 1] [--judge-model <openrouter-id>]
   bun src/cli.ts resume <runId>      # continue an interrupted/failed run (safe retry)
   bun src/cli.ts list                # list runs
   bun src/cli.ts show <runId>        # print result matrix
@@ -41,6 +62,7 @@ async function cmdRun(argv: string[]): Promise<void> {
       attempts: { type: "string", default: "1" },
       concurrency: { type: "string", default: "2" },
       "max-retries": { type: "string", default: "1" },
+      "judge-model": { type: "string" },
     },
   });
   const registry = loadRegistry();
@@ -64,11 +86,19 @@ async function cmdRun(argv: string[]): Promise<void> {
     configIds,
     attemptsPerCell: Math.max(1, Number(values.attempts)),
     concurrency: Math.max(1, Number(values.concurrency)),
+    judgeModel: values["judge-model"],
   });
   console.log(
     `created ${runId}: ${scenarioIds.length} scenario(s) x ${configIds.length} config(s) x ${values.attempts} attempt(s)`,
   );
-  await executeRun({ db, runId, registry, maxRetries: Number(values["max-retries"]) });
+  const controller = installSignalHandlers();
+  await executeRun({
+    db,
+    runId,
+    registry,
+    maxRetries: Number(values["max-retries"]),
+    signal: controller.signal,
+  });
   await cmdShow([runId]);
 }
 
@@ -82,11 +112,13 @@ async function cmdResume(argv: string[]): Promise<void> {
   const db = await initDb();
   const reset = await resetErrorAttempts(db, runId);
   if (reset > 0) console.log(`reset ${reset} errored attempt(s) to pending`);
+  const controller = installSignalHandlers();
   await executeRun({
     db,
     runId,
     registry: loadRegistry(),
     maxRetries: Number(values["max-retries"]),
+    signal: controller.signal,
   });
   await cmdShow([runId]);
 }

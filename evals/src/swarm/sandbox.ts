@@ -10,6 +10,7 @@ import {
   createSandbox,
   type E2BSandboxInfo,
   killSandbox,
+  listSandboxes,
   sandboxPortUrl,
   startDetachedProcess,
   waitForAgentRegistration,
@@ -340,4 +341,90 @@ export async function sandboxExec(
 export async function sandboxReadFile(sandboxId: string, path: string): Promise<string | null> {
   const res = await sandboxExec(sandboxId, `cat ${JSON.stringify(path)}`);
   return res.exitCode === 0 ? res.stdout : null;
+}
+
+/**
+ * Kill sandboxes leaked by an interrupted execution of this run (the process
+ * died before `kill()` ran). Matches on the metadata.swarm slug every eval
+ * sandbox is stamped with, so it never touches non-eval sandboxes.
+ */
+export async function sweepRunSandboxes(
+  runId: string,
+  log: (msg: string) => void = () => {},
+): Promise<number> {
+  const e2bKey = e2bControllerKey();
+  const apiBase = e2bApiBase();
+  const slug = `evals-${runId}`;
+  let sandboxes: E2BSandboxInfo[];
+  try {
+    sandboxes = await listSandboxes(e2bKey, apiBase);
+  } catch (err) {
+    log(`warn: could not list sandboxes for sweep: ${err instanceof Error ? err.message : err}`);
+    return 0;
+  }
+  const leaked = sandboxes.filter((s) => s.metadata?.swarm === slug);
+  for (const sandbox of leaked) {
+    try {
+      await killSandbox(sandbox.sandboxID, e2bKey, apiBase);
+      log(`swept leaked sandbox ${sandbox.sandboxID} (${sandbox.metadata?.swarmRole ?? "?"})`);
+    } catch (err) {
+      log(
+        `warn: failed to sweep ${sandbox.sandboxID}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+  return leaked.length;
+}
+
+/** Where each harness writes its raw session files inside the worker sandbox. */
+const HARNESS_SESSION_DIRS: Record<HarnessConfig["provider"], string[]> = {
+  claude: ["/home/worker/.claude/projects"],
+  codex: ["/home/worker/.codex/sessions"],
+  pi: ["/home/worker/.pi"],
+  opencode: ["/home/worker/.local/share/opencode"],
+};
+
+export const ATTEMPT_START_MARKER = "/tmp/eval-attempt-start";
+
+/** Touch the marker right after boot so session-file capture only picks up this attempt's files. */
+export async function markAttemptStart(sandboxId: string): Promise<void> {
+  await sandboxExec(sandboxId, `touch ${ATTEMPT_START_MARKER}`);
+}
+
+const MAX_SESSION_FILES = 10;
+const MAX_SESSION_FILE_BYTES = 1_500_000;
+
+/**
+ * Collect the harness's own raw session files (e.g. Claude Code's
+ * ~/.claude/projects/**\/*.jsonl) written since {@link markAttemptStart}.
+ * Returns newest-first, capped in count and per-file size.
+ */
+export async function collectHarnessSessionFiles(
+  sandboxId: string,
+  provider: HarnessConfig["provider"],
+): Promise<{ path: string; content: string; truncated: boolean }[]> {
+  const dirs = HARNESS_SESSION_DIRS[provider] ?? [];
+  if (dirs.length === 0) return [];
+  const find = await sandboxExec(
+    sandboxId,
+    `find ${dirs.map((d) => JSON.stringify(d)).join(" ")} -type f ` +
+      `\\( -name '*.jsonl' -o -name '*.json' \\) -newer ${ATTEMPT_START_MARKER} ` +
+      `-printf '%T@ %s %p\\n' 2>/dev/null | sort -rn | head -${MAX_SESSION_FILES}`,
+  );
+  if (find.exitCode !== 0 || !find.stdout.trim()) return [];
+
+  const files: { path: string; content: string; truncated: boolean }[] = [];
+  for (const line of find.stdout.trim().split("\n")) {
+    const match = line.match(/^\S+ (\d+) (.+)$/);
+    if (!match) continue;
+    const size = Number(match[1]);
+    const path = match[2] as string;
+    const read = await sandboxExec(
+      sandboxId,
+      `head -c ${MAX_SESSION_FILE_BYTES} ${JSON.stringify(path)}`,
+    );
+    if (read.exitCode !== 0) continue;
+    files.push({ path, content: read.stdout, truncated: size > MAX_SESSION_FILE_BYTES });
+  }
+  return files;
 }

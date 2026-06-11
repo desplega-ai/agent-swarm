@@ -17,6 +17,7 @@ function rowToRun(r: Row): EvalRunRow {
     configIds: JSON.parse(r.config_ids as string),
     attemptsPerCell: Number(r.attempts_per_cell),
     concurrency: Number(r.concurrency),
+    judgeModel: (r.judge_model as string) ?? null,
     createdAt: r.created_at as string,
     finishedAt: (r.finished_at as string) ?? null,
   };
@@ -58,6 +59,11 @@ function rowToJudgment(r: Row): JudgmentRow {
   };
 }
 
+export function newRunId(): string {
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+  return `run-${stamp}-${crypto.randomUUID().slice(0, 6)}`;
+}
+
 export async function createRun(
   db: Client,
   run: {
@@ -67,11 +73,12 @@ export async function createRun(
     configIds: string[];
     attemptsPerCell: number;
     concurrency: number;
+    judgeModel?: string;
   },
 ): Promise<void> {
   await db.execute({
-    sql: `INSERT INTO eval_runs (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency)
-          VALUES (?, ?, ?, ?, ?, ?)`,
+    sql: `INSERT INTO eval_runs (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
     args: [
       run.id,
       run.name ?? null,
@@ -79,6 +86,7 @@ export async function createRun(
       JSON.stringify(run.configIds),
       run.attemptsPerCell,
       run.concurrency,
+      run.judgeModel ?? null,
     ],
   });
 }
@@ -180,6 +188,26 @@ export async function listUnfinishedAttempts(db: Client, runId: string): Promise
     sql: `SELECT * FROM attempts WHERE run_id = ? AND status IN ('pending','running','judging')
           ORDER BY scenario_id, config_id, attempt_index`,
     args: [runId],
+  });
+  return res.rows.map(rowToAttempt);
+}
+
+/** Drop a prior (interrupted) execution's judgments/artifacts before re-running an attempt. */
+export async function clearAttemptResults(db: Client, attemptId: string): Promise<void> {
+  await db.execute({ sql: "DELETE FROM judgments WHERE attempt_id = ?", args: [attemptId] });
+  await db.execute({ sql: "DELETE FROM artifacts WHERE attempt_id = ?", args: [attemptId] });
+}
+
+/** Recent attempts for one scenario across all runs (scenario detail page). */
+export async function listAttemptsByScenario(
+  db: Client,
+  scenarioId: string,
+  limit = 50,
+): Promise<AttemptRow[]> {
+  const res = await db.execute({
+    sql: `SELECT * FROM attempts WHERE scenario_id = ? AND started_at IS NOT NULL
+          ORDER BY started_at DESC LIMIT ?`,
+    args: [scenarioId, limit],
   });
   return res.rows.map(rowToAttempt);
 }

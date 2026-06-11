@@ -40,8 +40,21 @@ export interface ScenarioSeed {
 export interface LlmJudgeSpec {
   /** Rubric describing what a successful outcome looks like. */
   rubric: string;
-  /** OpenRouter model id; defaults to EVAL_JUDGE_MODEL or a sane default. */
+  /** OpenRouter model id; defaults to the run's judgeModel, then EVAL_JUDGE_MODEL. */
   model?: string;
+}
+
+/**
+ * Agentic judge: an AI SDK tool-loop agent that actively verifies the outcome
+ * using the deterministic context tools (run_command / read_file / api_get)
+ * before submitting a verdict.
+ */
+export interface AgenticJudgeSpec {
+  rubric: string;
+  /** OpenRouter model id; same default chain as LlmJudgeSpec. */
+  model?: string;
+  /** Max agent steps before forcing a verdict. Default 10. */
+  maxSteps?: number;
 }
 
 export interface CheckResult {
@@ -57,6 +70,7 @@ export interface DeterministicCheck {
 
 export interface OutcomeSpec {
   llmJudge?: LlmJudgeSpec;
+  agenticJudge?: AgenticJudgeSpec;
   checks?: DeterministicCheck[];
   /** Minimum LLM judge score in [0,1] to count as pass. Default 0.7. */
   passThreshold?: number;
@@ -112,6 +126,8 @@ export interface EvalRunRow {
   configIds: string[];
   attemptsPerCell: number;
   concurrency: number;
+  /** Run-level judge model override (scenario-level model still wins). */
+  judgeModel: string | null;
   createdAt: string;
   finishedAt: string | null;
 }
@@ -151,7 +167,14 @@ export interface JudgmentRow {
 export interface ArtifactRow {
   id: string;
   attemptId: string;
-  kind: "transcript" | "task" | "sandbox-log" | "workspace-file" | "meta";
+  kind:
+    | "transcript"
+    | "raw-session-logs"
+    | "harness-session"
+    | "task"
+    | "sandbox-log"
+    | "workspace-file"
+    | "meta";
   name: string | null;
   content: string;
   createdAt: string;

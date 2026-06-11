@@ -5,12 +5,20 @@ import type { Scenario } from "../src/types.ts";
  * Smoke scenario: can the swarm execute a trivial concrete instruction
  * end-to-end (claim task -> run harness -> touch the workspace -> report
  * completion via store-progress)?
+ *
+ * Graded by the agentic judge: it gets live sandbox access and verifies the
+ * file itself (cat the file, check the workspace) before submitting a verdict.
  */
 export const helloFile: Scenario = {
   id: "hello-file",
   name: "Hello file",
-  description:
-    "Worker must create a file with exact content in the shared workspace and complete the task cleanly.",
+  description: [
+    "Boots a fresh swarm stack, assigns the worker one task: create /workspace/eval-hello.txt",
+    "containing exactly 'swarm-evals-ok', then report completion via store-progress.",
+    "Measures the harness's ability to follow a precise, verifiable instruction with a",
+    "filesystem side effect. Graded by a deterministic file check plus an agentic judge",
+    "that inspects the sandbox itself.",
+  ].join(" "),
   tasks: [
     {
       title: "Create eval marker file",
@@ -25,11 +33,13 @@ export const helloFile: Scenario = {
   ],
   outcome: {
     checks: [fileContains("/workspace/eval-hello.txt", /swarm-evals-ok/)],
-    llmJudge: {
+    agenticJudge: {
       rubric: [
         "The agent created /workspace/eval-hello.txt containing the line 'swarm-evals-ok' and reported completion.",
+        "Verify the file's existence and exact content yourself with the sandbox tools — do not trust the transcript alone.",
         "Deduct only for concrete problems: wrong file path/content, unrelated destructive changes, or errors the agent never recovered from.",
       ].join("\n"),
+      maxSteps: 8,
     },
     passThreshold: 0.7,
   },
