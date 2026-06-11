@@ -137,6 +137,53 @@ describe("buildAuthorizeUrl (PKCE S256, RFC 8707)", () => {
     });
     expect(new URL(result.url).searchParams.has("scope")).toBe(false);
   });
+
+  test("extraParams are appended to the authorize URL (e.g. BigQuery offline access)", async () => {
+    const result = await buildAuthorizeUrl({
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientId: "bq-client",
+      redirectUri: "https://swarm.example.com/callback",
+      scopes: ["https://www.googleapis.com/auth/bigquery"],
+      resource: "https://bigquery.googleapis.com/",
+      extraParams: { access_type: "offline", prompt: "consent" },
+    });
+
+    const u = new URL(result.url);
+    expect(u.searchParams.get("access_type")).toBe("offline");
+    expect(u.searchParams.get("prompt")).toBe("consent");
+  });
+
+  test("null/undefined extraParams leaves URL unchanged (no blast radius for existing servers)", async () => {
+    const withExtra = await buildAuthorizeUrl({
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientId: "c",
+      redirectUri: "https://swarm.example.com/cb",
+      scopes: ["read"],
+      resource: "https://mcp.example.com/",
+      extraParams: { access_type: "offline" },
+      state: "fixed-state",
+    });
+
+    const withoutExtra = await buildAuthorizeUrl({
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientId: "c",
+      redirectUri: "https://swarm.example.com/cb",
+      scopes: ["read"],
+      resource: "https://mcp.example.com/",
+      state: "fixed-state",
+    });
+
+    const uWith = new URL(withExtra.url);
+    const uWithout = new URL(withoutExtra.url);
+    expect(uWith.searchParams.has("access_type")).toBe(true);
+    expect(uWithout.searchParams.has("access_type")).toBe(false);
+    // Core params are identical
+    expect(uWith.searchParams.get("client_id")).toBe(uWithout.searchParams.get("client_id"));
+    expect(uWith.searchParams.get("state")).toBe(uWithout.searchParams.get("state"));
+  });
 });
 
 // ─── Discovery (PRMD + AS metadata) ──────────────────────────────────────────
