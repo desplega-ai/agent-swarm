@@ -114,6 +114,57 @@ export interface SwarmTask {
   [key: string]: unknown;
 }
 
+export type CostSource = "harness" | "recomputed" | "unpriced";
+
+export interface TokenTotals {
+  model: string | null; // dominant concrete model id observed (e.g. "claude-opus-4-7")
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+/** Everything known about the attempt's E2B stack. Taras explicitly OK'd storing the swarm API key. */
+export interface SandboxInfo {
+  apiSandboxId: string;
+  workerSandboxId: string;
+  apiTemplate: string;
+  workerTemplate: string;
+  apiUrl: string;
+  swarmKey: string;
+  workerAgentId: string;
+  domain: string | null;
+  apiStartedAt: string | null;
+  workerStartedAt: string | null;
+  expiresAt: string | null; // worker sandbox endAt/expiresAt
+}
+
+/** Per-phase wall-clock timings in ms. All nullable (phase may not have run). */
+export interface PhaseTimings {
+  bootMs: number | null;
+  seedMs: number | null;
+  tasksMs: number | null; // total across tasks
+  perTask: { taskId: string; ms: number }[];
+  logCaptureMs: number | null;
+  costMs: number | null;
+  checksMs: number | null;
+  llmJudgeMs: number | null;
+  agenticJudgeMs: number | null;
+  artifactsMs: number | null;
+}
+
+export interface RecomputeInput {
+  provider: HarnessProvider;
+  configModel: string | null; // HarnessConfig.model (may be shortname/prefixed)
+  logRows: { cli: string; content: string }[]; // raw swarm session-log rows
+  sessionFiles: { path: string; content: string }[]; // harness-session file heads
+}
+
+export interface RecomputeResult {
+  costUsd: number | null;
+  tokens: TokenTotals | null;
+}
+
 export type AttemptStatus = "pending" | "running" | "judging" | "passed" | "failed" | "error";
 
 export type RunStatus = "pending" | "running" | "done" | "failed" | "cancelled";
@@ -147,6 +198,10 @@ export interface AttemptRow {
   passed: boolean | null;
   error: string | null;
   costUsd: number | null;
+  costSource: CostSource | null;
+  tokens: TokenTotals | null;
+  sandbox: SandboxInfo | null;
+  timings: PhaseTimings | null;
   durationMs: number | null;
   startedAt: string | null;
   finishedAt: string | null;

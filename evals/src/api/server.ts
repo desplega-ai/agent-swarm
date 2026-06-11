@@ -1,4 +1,6 @@
-import { join } from "node:path";
+import { join, normalize, sep } from "node:path";
+import { DEFAULT_CONFIG_IDS } from "../../configs/index.ts";
+import { listOpenrouterModels } from "../cost/pricing.ts";
 import { getDb, initDb } from "../db/client.ts";
 import {
   createRun,
@@ -16,7 +18,6 @@ import {
 import { loadRegistry, serializeConfig, serializeScenario } from "../registry.ts";
 import { summarizeRun } from "../results.ts";
 import { executeRun, killAllActiveStacks, killRunStacks } from "../runner/index.ts";
-import { parseTranscriptEvents, type SessionLogRow } from "../swarm/client.ts";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -25,7 +26,21 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-const UI_DIR = join(import.meta.dir, "../../ui");
+const UI_DIST = join(import.meta.dir, "../../ui/dist");
+
+const DEFAULT_JUDGE_MODEL = "deepseek/deepseek-v4-pro";
+
+/** One JSONL line of a raw-session-logs artifact. Old artifacts lack id/createdAt. */
+interface RawSessionLogLine {
+  id?: string;
+  taskId?: string;
+  sessionId?: string;
+  iteration?: number;
+  cli?: string;
+  content?: string;
+  lineNumber?: number;
+  createdAt?: string;
+}
 
 /** Runs currently executing inside this server process (local-first trigger). */
 const activeRuns = new Map<string, AbortController>();
@@ -54,7 +69,13 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
     port,
     idleTimeout: 60,
     routes: {
-      "/": () => new Response(Bun.file(join(UI_DIR, "index.html"))),
+      "/": async () => {
+        const index = Bun.file(join(UI_DIST, "index.html"));
+        if (!(await index.exists())) {
+          return json({ error: "UI not built — run `bun run ui:build` in evals/" }, 500);
+        }
+        return new Response(index);
+      },
       "/api/runs": {
         GET: async () => {
           const runs = await listRuns(db);
@@ -143,6 +164,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
       "/api/attempts/:id/transcript": async (req) => {
         const attempt = await getAttempt(db, req.params.id);
         if (!attempt) return json({ error: "attempt not found" }, 404);
+        const harness = loadRegistry().configs.get(attempt.configId)?.provider ?? null;
         const artifacts = await listArtifacts(db, attempt.id, { withContent: true });
         const raw = artifacts.find((a) => a.kind === "raw-session-logs");
         if (raw?.content) {
@@ -151,24 +173,33 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
             .filter(Boolean)
             .flatMap((line) => {
               try {
-                return [JSON.parse(line) as SessionLogRow];
+                const r = JSON.parse(line) as RawSessionLogLine;
+                const iteration = r.iteration ?? 0;
+                const lineNumber = r.lineNumber ?? 0;
+                return [
+                  {
+                    // old artifacts lack id/createdAt — synthesize id, leave createdAt empty
+                    id: r.id ?? `${iteration}:${lineNumber}`,
+                    taskId: r.taskId ?? "",
+                    sessionId: r.sessionId ?? "",
+                    iteration,
+                    cli: r.cli ?? "",
+                    content: r.content ?? "",
+                    lineNumber,
+                    createdAt: r.createdAt ?? "",
+                  },
+                ];
               } catch {
                 return [];
               }
             });
-          return json({ source: "raw-session-logs", events: parseTranscriptEvents(rows) });
+          return json({ source: "raw-session-logs", harness, rows, text: null });
         }
         const flat = artifacts.find((a) => a.kind === "transcript");
         if (flat?.content) {
-          return json({
-            source: "transcript",
-            events: flat.content
-              .split("\n")
-              .filter(Boolean)
-              .map((line) => ({ role: "raw", kind: "raw", text: line })),
-          });
+          return json({ source: "transcript", harness, rows: null, text: flat.content });
         }
-        return json({ source: null, events: [] });
+        return json({ source: null, harness, rows: null, text: null });
       },
       "/api/scenarios": () => {
         const registry = loadRegistry();
@@ -183,17 +214,48 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
       },
       "/api/configs": () => {
         const registry = loadRegistry();
-        return json([...registry.configs.values()].map(serializeConfig));
+        return json(
+          [...registry.configs.values()].map((c) => ({
+            ...serializeConfig(c),
+            isDefault: DEFAULT_CONFIG_IDS.includes(c.id),
+          })),
+        );
+      },
+      "/api/models": async () => {
+        const models = await listOpenrouterModels();
+        return json({ defaultJudgeModel: DEFAULT_JUDGE_MODEL, models });
       },
       "/api/artifacts/:id": async (req) => {
         const artifact = await getArtifact(db, req.params.id);
         if (!artifact) return json({ error: "artifact not found" }, 404);
-        return new Response(artifact.content, {
-          headers: { "content-type": "text/plain; charset=utf-8" },
-        });
+        const name = artifact.name ?? artifact.id;
+        const headers: Record<string, string> = {
+          "content-type": name.endsWith(".json")
+            ? "application/json; charset=utf-8"
+            : "text/plain; charset=utf-8",
+        };
+        if (new URL(req.url).searchParams.get("download") === "1") {
+          headers["content-disposition"] = `attachment; filename="${name.replace(/"/g, "")}"`;
+        }
+        return new Response(artifact.content, { headers });
       },
     },
-    fetch() {
+    async fetch(req) {
+      const url = new URL(req.url);
+      if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
+        let pathname: string;
+        try {
+          pathname = decodeURIComponent(url.pathname);
+        } catch {
+          return json({ error: "not found" }, 404);
+        }
+        const resolved = normalize(join(UI_DIST, pathname));
+        // traversal guard: only serve paths inside the built UI dist
+        if (resolved === UI_DIST || resolved.startsWith(UI_DIST + sep)) {
+          const file = Bun.file(resolved);
+          if (await file.exists()) return new Response(file);
+        }
+      }
       return json({ error: "not found" }, 404);
     },
   });

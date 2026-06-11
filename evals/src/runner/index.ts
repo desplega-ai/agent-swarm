@@ -1,4 +1,5 @@
 import type { Client } from "@libsql/client";
+import { recomputeCost } from "../cost/recompute.ts";
 import {
   clearAttemptResults,
   getRun,
@@ -13,7 +14,7 @@ import {
 import { judgeAgentic } from "../judge/agentic.ts";
 import { runChecks } from "../judge/deterministic.ts";
 import { judgeWithLlm } from "../judge/llm.ts";
-import { flattenTranscript, SwarmClient } from "../swarm/client.ts";
+import { flattenTranscript, type SessionCostRow, SwarmClient } from "../swarm/client.ts";
 import {
   bootStack,
   collectHarnessSessionFiles,
@@ -25,11 +26,15 @@ import {
 } from "../swarm/sandbox.ts";
 import type {
   AttemptRow,
+  CostSource,
   DeterministicCheck,
   HarnessConfig,
   JudgeContext,
+  PhaseTimings,
+  SandboxInfo,
   Scenario,
   SwarmTask,
+  TokenTotals,
 } from "../types.ts";
 
 const DEFAULT_TASK_TIMEOUT_MS = 10 * 60 * 1000;
@@ -95,6 +100,41 @@ export async function ensureAttemptRows(db: Client, runId: string): Promise<void
   }
 }
 
+function newPhaseTimings(): PhaseTimings {
+  return {
+    bootMs: null,
+    seedMs: null,
+    tasksMs: null,
+    perTask: [],
+    logCaptureMs: null,
+    costMs: null,
+    checksMs: null,
+    llmJudgeMs: null,
+    agenticJudgeMs: null,
+    artifactsMs: null,
+  };
+}
+
+/** Stopwatch for one phase: returns elapsed ms alongside the result. */
+async function timed<T>(fn: () => Promise<T>): Promise<{ result: T; ms: number }> {
+  const t0 = Date.now();
+  const result = await fn();
+  return { result, ms: Date.now() - t0 };
+}
+
+/** Aggregate swarm session-cost rows into TokenTotals (model = first non-null). */
+function sumRowTokens(rows: SessionCostRow[]): TokenTotals {
+  return {
+    model: rows.find((r) => r.model)?.model ?? null,
+    inputTokens: rows.reduce((s, r) => s + (r.inputTokens ?? 0), 0),
+    outputTokens: rows.reduce((s, r) => s + (r.outputTokens ?? 0), 0),
+    cacheReadTokens: rows.reduce((s, r) => s + (r.cacheReadTokens ?? 0), 0),
+    cacheWriteTokens: rows.reduce((s, r) => s + (r.cacheWriteTokens ?? 0), 0),
+  };
+}
+
+const SEED_OUTPUT_CLIP = 20_000;
+
 /** Implicit deterministic check: every scenario task ended `completed`. */
 function tasksCompletedCheck(tasks: SwarmTask[]): DeterministicCheck {
   return {
@@ -138,59 +178,186 @@ async function runAttemptOnce(opts: {
   // A re-run of an interrupted attempt must not keep half-written results.
   await clearAttemptResults(db, attempt.id);
 
-  const stack = await bootStack({
-    config,
-    swarmSlug: `evals-${attempt.runId}`,
-    timeoutSec,
-    log: (msg) => log(`[boot] ${msg}`),
-  });
+  const timings = newPhaseTimings();
+  const boot = await timed(() =>
+    bootStack({
+      config,
+      swarmSlug: `evals-${attempt.runId}`,
+      timeoutSec,
+      log: (msg) => log(`[boot] ${msg}`),
+    }),
+  );
+  const stack = boot.result;
+  timings.bootMs = boot.ms;
   const untrack = trackStack(attempt.runId, stack);
+  // Written at boot so the live run-details page shows sandbox info while the
+  // attempt runs. The swarmKey is deliberately stored/exposed — eval sandboxes
+  // are throwaway.
+  const sandboxInfo: SandboxInfo = {
+    apiSandboxId: stack.apiSandbox.sandboxID,
+    workerSandboxId: stack.workerSandbox.sandboxID,
+    apiTemplate: stack.apiSandbox.templateID,
+    workerTemplate: stack.workerSandbox.templateID,
+    apiUrl: stack.apiUrl,
+    swarmKey: stack.swarmKey,
+    workerAgentId: stack.workerAgentId,
+    domain: stack.workerSandbox.domain ?? null,
+    apiStartedAt: stack.apiSandbox.startedAt ?? null,
+    workerStartedAt: stack.workerSandbox.startedAt ?? null,
+    expiresAt: stack.workerSandbox.endAt ?? stack.workerSandbox.expiresAt ?? null,
+  };
   await updateAttempt(db, attempt.id, {
     sandboxId: stack.workerSandbox.sandboxID,
     apiUrl: stack.apiUrl,
+    sandboxJson: JSON.stringify(sandboxInfo),
   });
 
   try {
     const client = new SwarmClient(stack.apiUrl, stack.swarmKey);
     await markAttemptStart(stack.workerSandbox.sandboxID);
 
-    for (const cmd of scenario.seed?.exec ?? []) {
-      log(`[seed] ${cmd}`);
-      const res = await sandboxExec(stack.workerSandbox.sandboxID, cmd);
-      if (res.exitCode !== 0) {
-        throw new Error(
-          `seed command failed (${res.exitCode}): ${cmd}\n${res.stderr.slice(0, 500)}`,
-        );
+    if (scenario.seed?.exec?.length) {
+      const seedT0 = Date.now();
+      const seedOutputs: {
+        cmd: string;
+        exitCode: number;
+        durationMs: number;
+        stdout: string;
+        stderr: string;
+      }[] = [];
+      try {
+        for (const cmd of scenario.seed.exec) {
+          log(`[seed] ${cmd}`);
+          const cmdT0 = Date.now();
+          const res = await sandboxExec(stack.workerSandbox.sandboxID, cmd);
+          seedOutputs.push({
+            cmd,
+            exitCode: res.exitCode,
+            durationMs: Date.now() - cmdT0,
+            stdout: res.stdout.slice(0, SEED_OUTPUT_CLIP),
+            stderr: res.stderr.slice(0, SEED_OUTPUT_CLIP),
+          });
+          if (res.exitCode !== 0) {
+            throw new Error(
+              `seed command failed (${res.exitCode}): ${cmd}\n${res.stderr.slice(0, 500)}`,
+            );
+          }
+        }
+      } finally {
+        // Written on success AND before a seed-failure throw (retry clears it).
+        timings.seedMs = Date.now() - seedT0;
+        await insertArtifact(db, {
+          id: crypto.randomUUID(),
+          attemptId: attempt.id,
+          kind: "meta",
+          name: "seed-output.json",
+          content: stack.redact(JSON.stringify(seedOutputs, null, 2)),
+        });
       }
     }
 
     const tasks: SwarmTask[] = [];
+    const tasksT0 = Date.now();
     for (const spec of scenario.tasks) {
       const created = await client.createTask({
         task: `${spec.title}\n\n${spec.description}`,
         agentId: stack.workerAgentId,
       });
       log(`[task] created ${created.id} — waiting (timeout ${Math.round(taskTimeoutMs / 1000)}s)`);
+      const taskT0 = Date.now();
       const final = await client.waitForTask(created.id, {
         timeoutMs: taskTimeoutMs,
         onStatus: (s) => log(`[task] ${created.id} -> ${s}`),
       });
+      timings.perTask.push({ taskId: created.id, ms: Date.now() - taskT0 });
       tasks.push(final);
     }
+    timings.tasksMs = Date.now() - tasksT0;
     await updateAttempt(db, attempt.id, { taskIds: tasks.map((t) => t.id) });
 
     // Gather gradeable outputs (logs lag completion — wait for a stable count).
-    const logRows = (await Promise.all(tasks.map((t) => client.getStableSessionLogs(t.id)))).flat();
+    const logCapture = await timed(async () =>
+      (await Promise.all(tasks.map((t) => client.getStableSessionLogs(t.id)))).flat(),
+    );
+    let logRows = logCapture.result;
+    timings.logCaptureMs = logCapture.ms;
+
+    // 1. harness-reported session-cost rows (stability-polled).
+    const costT0 = Date.now();
+    const costRowsByTask: { taskId: string; rows: SessionCostRow[] }[] = [];
+    let allRows: SessionCostRow[] = [];
+    for (const task of tasks) {
+      const rows = await client.waitForSessionCostRows(task.id);
+      costRowsByTask.push({ taskId: task.id, rows });
+      allRows = allRows.concat(rows);
+    }
+    let costMs = Date.now() - costT0;
+
+    // The cost wait gave late log batches time to flush — re-fetch once and keep
+    // the larger set (fixes transcripts losing their tail to the 30s stability cap).
+    const refetch = await timed(async () =>
+      (await Promise.all(tasks.map((t) => client.getSessionLogs(t.id).catch(() => [])))).flat(),
+    );
+    timings.logCaptureMs += refetch.ms;
+    if (refetch.result.length > logRows.length) logRows = refetch.result;
     const transcript = flattenTranscript(logRows);
 
-    let costUsd: number | null = null;
-    for (const task of tasks) {
-      const c = await client.waitForTaskCost(
-        task.id,
-        typeof task.totalCostUsd === "number" ? task.totalCostUsd : null,
+    // Harness session files — captured before judging so cost recompute can reuse them.
+    let sessionFiles: Awaited<ReturnType<typeof collectHarnessSessionFiles>> = {
+      files: [],
+      listing: [],
+    };
+    try {
+      const collect = await timed(() =>
+        collectHarnessSessionFiles(stack.workerSandbox.sandboxID, config.provider),
       );
-      if (c !== null) costUsd = (costUsd ?? 0) + c;
+      sessionFiles = collect.result;
+      timings.artifactsMs = (timings.artifactsMs ?? 0) + collect.ms;
+    } catch (err) {
+      log(
+        `[artifacts] harness session capture failed: ${err instanceof Error ? err.message : err}`,
+      );
     }
+
+    // 2. recomputed from tokens × models.dev pricing; 3. tagged unpriced.
+    const priced = allRows.some(
+      (r) => (r.totalCostUsd ?? 0) > 0 || (r.costSource && r.costSource !== "unpriced"),
+    );
+    let costUsd: number | null = null;
+    let costSource: CostSource | null = null;
+    let tokens: TokenTotals | null = null;
+    if (allRows.length > 0 && priced) {
+      costUsd = allRows.reduce((s, r) => s + (r.totalCostUsd ?? 0), 0);
+      costSource = "harness";
+      tokens = sumRowTokens(allRows);
+    } else {
+      const recompute = await timed(() =>
+        recomputeCost({
+          provider: config.provider,
+          configModel: config.model ?? null,
+          logRows,
+          sessionFiles: sessionFiles.files,
+        }),
+      );
+      costMs += recompute.ms;
+      tokens = recompute.result.tokens;
+      if (recompute.result.costUsd !== null) {
+        costUsd = recompute.result.costUsd;
+        costSource = "recomputed";
+      } else {
+        costSource = "unpriced"; // tokens (if any) still stored
+      }
+    }
+    timings.costMs = costMs;
+    log(`[cost] source=${costSource}${costUsd !== null ? ` $${costUsd.toFixed(4)}` : ""}`);
+    // Raw session-cost rows, always — even when empty.
+    await insertArtifact(db, {
+      id: crypto.randomUUID(),
+      attemptId: attempt.id,
+      kind: "meta",
+      name: "session-costs.json",
+      content: stack.redact(JSON.stringify(costRowsByTask, null, 2)),
+    });
 
     await updateAttempt(db, attempt.id, { status: "judging" });
 
@@ -203,7 +370,9 @@ async function runAttemptOnce(opts: {
     };
 
     const checks = [tasksCompletedCheck(tasks), ...(scenario.outcome.checks ?? [])];
-    const checkResults = await runChecks(checks, ctx);
+    const checksTimed = await timed(() => runChecks(checks, ctx));
+    const checkResults = checksTimed.result;
+    timings.checksMs = checksTimed.ms;
     for (const result of checkResults) {
       await insertJudgment(db, {
         id: crypto.randomUUID(),
@@ -224,13 +393,18 @@ async function runAttemptOnce(opts: {
     let score: number | null = null;
 
     if (scenario.outcome.llmJudge) {
-      const verdict = await judgeWithLlm({
-        scenario,
-        rubric: scenario.outcome.llmJudge.rubric,
-        tasks,
-        transcript,
-        model: scenario.outcome.llmJudge.model ?? opts.judgeModel ?? undefined,
-      });
+      const spec = scenario.outcome.llmJudge;
+      const llmTimed = await timed(() =>
+        judgeWithLlm({
+          scenario,
+          rubric: spec.rubric,
+          tasks,
+          transcript,
+          model: spec.model ?? opts.judgeModel ?? undefined,
+        }),
+      );
+      const verdict = llmTimed.result;
+      timings.llmJudgeMs = llmTimed.ms;
       score = verdict.score;
       llmPass = verdict.pass && verdict.score >= threshold;
       await insertJudgment(db, {
@@ -249,6 +423,7 @@ async function runAttemptOnce(opts: {
     let agenticPass = true;
     if (scenario.outcome.agenticJudge) {
       const spec = scenario.outcome.agenticJudge;
+      const agenticT0 = Date.now();
       let verdict: Awaited<ReturnType<typeof judgeAgentic>>;
       let judgeName = "agentic-judge";
       try {
@@ -276,6 +451,7 @@ async function runAttemptOnce(opts: {
           model: spec.model ?? opts.judgeModel ?? undefined,
         });
       }
+      timings.agenticJudgeMs = Date.now() - agenticT0;
       agenticPass = verdict.pass && verdict.score >= threshold;
       // Agentic verdicts verify against the live sandbox, so they take score precedence.
       score = verdict.score;
@@ -296,24 +472,27 @@ async function runAttemptOnce(opts: {
     if (score === null) score = passed ? 1 : 0;
 
     // Persist artifacts (redacted) before the sandboxes die.
+    const artifactsT0 = Date.now();
     await insertArtifact(db, {
       id: crypto.randomUUID(),
       attemptId: attempt.id,
       kind: "transcript",
       content: stack.redact(transcript).slice(0, 400_000),
     });
-    // Raw swarm session-log events, one JSON object per line (cli/iteration kept
-    // so the transcript viewer can re-parse without hitting the dead stack).
+    // Raw swarm session-log events, one JSON object per line (id/createdAt kept
+    // so the transcript viewer can order + coalesce without hitting the dead stack).
     if (logRows.length > 0) {
       const jsonl = logRows
         .map((r) =>
           JSON.stringify({
+            id: r.id,
             taskId: r.taskId,
             sessionId: r.sessionId,
             iteration: r.iteration,
             lineNumber: r.lineNumber,
             cli: r.cli,
             content: r.content,
+            createdAt: r.createdAt,
           }),
         )
         .join("\n");
@@ -325,29 +504,27 @@ async function runAttemptOnce(opts: {
         content: stack.redact(jsonl).slice(0, 2_000_000),
       });
     }
-    // The harness's own raw session files from the worker's filesystem
-    // (e.g. ~/.claude/projects/**/*.jsonl for Claude Code).
-    try {
-      const sessionFiles = await collectHarnessSessionFiles(
-        stack.workerSandbox.sandboxID,
-        config.provider,
-      );
-      for (const file of sessionFiles) {
-        await insertArtifact(db, {
-          id: crypto.randomUUID(),
-          attemptId: attempt.id,
-          kind: "harness-session",
-          name: file.path + (file.truncated ? " (truncated)" : ""),
-          content: stack.redact(file.content),
-        });
-      }
-      if (sessionFiles.length > 0) {
-        log(`[artifacts] captured ${sessionFiles.length} harness session file(s)`);
-      }
-    } catch (err) {
-      log(
-        `[artifacts] harness session capture failed: ${err instanceof Error ? err.message : err}`,
-      );
+    // The harness's own raw session files (collected pre-judging above).
+    for (const file of sessionFiles.files) {
+      await insertArtifact(db, {
+        id: crypto.randomUUID(),
+        attemptId: attempt.id,
+        kind: "harness-session",
+        name: file.path + (file.truncated ? " (truncated)" : ""),
+        content: stack.redact(file.content),
+      });
+    }
+    if (sessionFiles.files.length > 0) {
+      log(`[artifacts] captured ${sessionFiles.files.length} harness session file(s)`);
+    }
+    if (sessionFiles.listing.length > 0) {
+      await insertArtifact(db, {
+        id: crypto.randomUUID(),
+        attemptId: attempt.id,
+        kind: "meta",
+        name: "session-files.json",
+        content: stack.redact(JSON.stringify(sessionFiles.listing, null, 2)),
+      });
     }
     await insertArtifact(db, {
       id: crypto.randomUUID(),
@@ -358,7 +535,7 @@ async function runAttemptOnce(opts: {
     });
     const workerLog = await sandboxExec(
       stack.workerSandbox.sandboxID,
-      "tail -n 300 /tmp/agent-swarm-e2b-worker.log",
+      "tail -n 2000 /tmp/agent-swarm-e2b-worker.log",
     ).catch(() => null);
     if (workerLog?.stdout) {
       await insertArtifact(db, {
@@ -369,12 +546,29 @@ async function runAttemptOnce(opts: {
         content: stack.redact(workerLog.stdout),
       });
     }
+    const apiLog = await sandboxExec(
+      stack.apiSandbox.sandboxID,
+      "tail -n 500 /tmp/agent-swarm-e2b-api.log",
+    ).catch(() => null);
+    if (apiLog?.stdout) {
+      await insertArtifact(db, {
+        id: crypto.randomUUID(),
+        attemptId: attempt.id,
+        kind: "sandbox-log",
+        name: "api.log",
+        content: stack.redact(apiLog.stdout),
+      });
+    }
+    timings.artifactsMs = (timings.artifactsMs ?? 0) + (Date.now() - artifactsT0);
 
     await updateAttempt(db, attempt.id, {
       status: passed ? "passed" : "failed",
       passed,
       score,
       costUsd,
+      costSource,
+      tokensJson: tokens ? JSON.stringify(tokens) : null,
+      timingsJson: JSON.stringify(timings),
       durationMs: Date.now() - startedAt,
       finishedAt: new Date().toISOString(),
     });

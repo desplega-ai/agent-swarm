@@ -96,4 +96,10 @@ export async function initDb(): Promise<Client> {
 }
 
 /** Additive columns for DBs created before the column existed. */
-const COLUMN_MIGRATIONS = ["ALTER TABLE eval_runs ADD COLUMN judge_model TEXT"];
+const COLUMN_MIGRATIONS = [
+  "ALTER TABLE eval_runs ADD COLUMN judge_model TEXT",
+  "ALTER TABLE attempts ADD COLUMN cost_source TEXT",
+  "ALTER TABLE attempts ADD COLUMN tokens_json TEXT",
+  "ALTER TABLE attempts ADD COLUMN sandbox_json TEXT",
+  "ALTER TABLE attempts ADD COLUMN timings_json TEXT",
+];

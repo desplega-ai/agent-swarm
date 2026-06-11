@@ -1,0 +1,264 @@
+/* Run details page (spec §7.1) — page-specific classes only; shared ones live in styles.css. */
+
+.rd-top .meta-grid {
+  margin-top: 10px;
+}
+
+.rd-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rd-back {
+  color: var(--dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.rd-back:hover {
+  color: var(--text);
+}
+
+.rd-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.rd-spacer {
+  flex: 1;
+}
+
+.rd-load-error {
+  color: var(--red);
+  font-size: 12.5px;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.rd-body {
+  margin-top: 16px;
+}
+
+.rd-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.rd-matrix-wrap {
+  overflow-x: auto;
+}
+
+.rd-stage {
+  padding: 6px 0;
+  color: var(--dim);
+}
+
+/* ---- attempt picker ---- */
+
+.rd-attempt-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.rd-att-btn {
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rd-att-btn.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rd-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--dim);
+}
+
+.rd-dot.green {
+  background: var(--green);
+}
+
+.rd-dot.red {
+  background: var(--red);
+}
+
+.rd-dot.accent {
+  background: var(--accent);
+}
+
+/* ---- attempt summary ---- */
+
+.rd-attempt-id {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.rd-tasks {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.rd-attempt-error {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border-radius: 6px;
+  color: var(--red);
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* ---- phase timings ---- */
+
+.rd-timings {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.rd-timings td {
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rd-timings tr:last-child td {
+  border-bottom: none;
+}
+
+.rd-timings td:last-child {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.rd-timings tr.sub td:first-child {
+  padding-left: 18px;
+  color: var(--dim);
+}
+
+.rd-not-captured {
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* ---- sandbox ---- */
+
+.rd-copy {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.rd-copy:hover {
+  border-color: var(--accent);
+}
+
+.rd-copy code {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* ---- checks & judgments ---- */
+
+.rd-judgment {
+  border-left: 3px solid var(--dim);
+  padding: 6px 10px;
+  margin-top: 8px;
+  background: var(--panel-2);
+  border-radius: 0 6px 6px 0;
+}
+
+.rd-judgment.pass {
+  border-left-color: var(--green);
+}
+
+.rd-judgment.fail {
+  border-left-color: var(--red);
+}
+
+.rd-judgment-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.rd-judgment-name {
+  font-weight: 600;
+}
+
+.rd-pf.pass {
+  color: var(--green);
+}
+
+.rd-pf.fail {
+  color: var(--red);
+}
+
+.rd-judgment-reason {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.rd-judgment-raw {
+  margin-top: 6px;
+}
+
+.rd-raw {
+  margin-top: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* ---- right pane (tabs content) ---- */
+
+.rd-asset-actions {
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .rd-body {
+    grid-template-columns: 1fr;
+  }
+}

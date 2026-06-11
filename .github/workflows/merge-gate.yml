@@ -125,6 +125,10 @@ jobs:
         run: bun run tsc:check
         working-directory: evals
 
+      - name: Build evals UI
+        run: bun run ui:build
+        working-directory: evals
+
       - name: Check worker/API DB boundary
         run: bash scripts/check-db-boundary.sh
 

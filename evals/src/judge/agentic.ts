@@ -4,8 +4,17 @@ import { z } from "zod";
 import type { JudgeContext, Scenario, SwarmTask } from "../types.ts";
 import type { LlmVerdict } from "./llm.ts";
 
-const DEFAULT_AGENTIC_MODEL = "google/gemini-3-flash-preview";
+const DEFAULT_AGENTIC_MODEL = "deepseek/deepseek-v4-pro";
 const DEFAULT_MAX_STEPS = 10;
+
+/** Clone for the tool log with string fields clipped, so `raw` stays bounded. */
+function clipForLog(value: Record<string, unknown>, max = 2_000): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value)) {
+    out[key] = typeof v === "string" && v.length > max ? `${v.slice(0, max)}…` : v;
+  }
+  return out;
+}
 
 const VerdictInput = z.object({
   score: z
@@ -48,7 +57,7 @@ export async function judgeAgentic(
   const maxSteps = input.maxSteps ?? DEFAULT_MAX_STEPS;
 
   let verdict: LlmVerdict | null = null;
-  const toolLog: string[] = [];
+  const toolLog: { tool: string; args: unknown; output: unknown }[] = [];
 
   const taskSummaries = input.tasks
     .map(
@@ -65,22 +74,24 @@ export async function judgeAgentic(
           "Run a shell command inside the worker sandbox the agent worked in (e.g. inspect /workspace). Returns exit code, stdout, stderr.",
         inputSchema: z.object({ command: z.string().describe("Shell command to run") }),
         execute: async ({ command }) => {
-          toolLog.push(`run_command: ${command}`);
           const res = await input.ctx.exec(command);
-          return {
+          const output = {
             exitCode: res.exitCode,
             stdout: res.stdout.slice(0, 8_000),
             stderr: res.stderr.slice(0, 4_000),
           };
+          toolLog.push({ tool: "run_command", args: { command }, output: clipForLog(output) });
+          return output;
         },
       }),
       read_file: tool({
         description: "Read a file from the worker sandbox. Returns null when the file is missing.",
         inputSchema: z.object({ path: z.string().describe("Absolute file path") }),
         execute: async ({ path }) => {
-          toolLog.push(`read_file: ${path}`);
           const content = await input.ctx.readFile(path);
-          return { exists: content !== null, content: content?.slice(0, 16_000) ?? null };
+          const output = { exists: content !== null, content: content?.slice(0, 16_000) ?? null };
+          toolLog.push({ tool: "read_file", args: { path }, output: clipForLog(output) });
+          return output;
         },
       }),
       api_get: tool({
@@ -88,16 +99,19 @@ export async function judgeAgentic(
           "Authenticated GET against the attempt's swarm API (paths under /api/, e.g. /api/tasks/<id>/session-logs).",
         inputSchema: z.object({ path: z.string().describe("Path starting with /api/") }),
         execute: async ({ path }) => {
-          toolLog.push(`api_get: ${path}`);
+          let output: Record<string, unknown>;
           if (!path.startsWith("/api/") && path !== "/health") {
-            return { error: "path must start with /api/" };
+            output = { error: "path must start with /api/" };
+          } else {
+            try {
+              const result = await input.ctx.apiGet(path);
+              output = { result: JSON.stringify(result).slice(0, 16_000) };
+            } catch (err) {
+              output = { error: err instanceof Error ? err.message : String(err) };
+            }
           }
-          try {
-            const result = await input.ctx.apiGet(path);
-            return { result: JSON.stringify(result).slice(0, 16_000) };
-          } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
-          }
+          toolLog.push({ tool: "api_get", args: { path }, output: clipForLog(output) });
+          return output;
         },
       }),
       submit_verdict: tool({
@@ -106,7 +120,9 @@ export async function judgeAgentic(
         inputSchema: VerdictInput,
         execute: async (v) => {
           verdict = v;
-          return { recorded: true };
+          const output = { recorded: true };
+          toolLog.push({ tool: "submit_verdict", args: v, output });
+          return output;
         },
       }),
     },
@@ -130,7 +146,7 @@ Verify the rubric's claims with the tools (inspect files, run commands, query th
 
   if (!verdict) {
     throw new Error(
-      `agentic judge finished ${steps.length} step(s) without submitting a verdict (tools used: ${toolLog.join("; ") || "none"})`,
+      `agentic judge finished ${steps.length} step(s) without submitting a verdict (tools used: ${toolLog.map((t) => t.tool).join("; ") || "none"})`,
     );
   }
   const v = verdict as LlmVerdict;

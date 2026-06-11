@@ -3,9 +3,13 @@ import type {
   ArtifactRow,
   AttemptRow,
   AttemptStatus,
+  CostSource,
   EvalRunRow,
   JudgmentRow,
+  PhaseTimings,
   RunStatus,
+  SandboxInfo,
+  TokenTotals,
 } from "../types.ts";
 
 function rowToRun(r: Row): EvalRunRow {
@@ -21,6 +25,15 @@ function rowToRun(r: Row): EvalRunRow {
     createdAt: r.created_at as string,
     finishedAt: (r.finished_at as string) ?? null,
   };
+}
+
+function parseJsonColumn<T>(value: unknown): T | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
 }
 
 function rowToAttempt(r: Row): AttemptRow {
@@ -39,6 +52,10 @@ function rowToAttempt(r: Row): AttemptRow {
     passed: r.passed === null ? null : Boolean(r.passed),
     error: (r.error as string) ?? null,
     costUsd: r.cost_usd === null ? null : Number(r.cost_usd),
+    costSource: (r.cost_source as CostSource) ?? null,
+    tokens: parseJsonColumn<TokenTotals>(r.tokens_json),
+    sandbox: parseJsonColumn<SandboxInfo>(r.sandbox_json),
+    timings: parseJsonColumn<PhaseTimings>(r.timings_json),
     durationMs: r.duration_ms === null ? null : Number(r.duration_ms),
     startedAt: (r.started_at as string) ?? null,
     finishedAt: (r.finished_at as string) ?? null,
@@ -134,6 +151,11 @@ export async function updateAttempt(
     passed: boolean | null;
     error: string | null;
     costUsd: number | null;
+    costSource: CostSource | null;
+    /** Pre-serialized JSON strings — callers JSON.stringify, stored as-is. */
+    tokensJson: string | null;
+    sandboxJson: string | null;
+    timingsJson: string | null;
     durationMs: number | null;
     startedAt: string;
     finishedAt: string;
@@ -151,6 +173,10 @@ export async function updateAttempt(
     passed: "passed",
     error: "error",
     costUsd: "cost_usd",
+    costSource: "cost_source",
+    tokensJson: "tokens_json",
+    sandboxJson: "sandbox_json",
+    timingsJson: "timings_json",
     durationMs: "duration_ms",
     startedAt: "started_at",
     finishedAt: "finished_at",

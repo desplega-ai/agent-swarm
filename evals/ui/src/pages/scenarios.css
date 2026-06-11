@@ -1,0 +1,38 @@
+/* WP-SCENARIOS — scenarios list + detail (spec §8). Shared tokens/classes live in styles.css. */
+
+.sc-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sc-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sc-judges {
+  display: inline-flex;
+  gap: 4px;
+}
+
+/* JS clips at 120 chars; ellipsis guards narrow viewports. */
+.sc-desc {
+  display: inline-block;
+  max-width: 480px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.sc-error {
+  color: var(--red);
+  white-space: pre-wrap;
+}
+
+.sc-loading {
+  margin-top: 8px;
+}

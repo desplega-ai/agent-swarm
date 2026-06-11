@@ -397,34 +397,54 @@ const MAX_SESSION_FILE_BYTES = 1_500_000;
 /**
  * Collect the harness's own raw session files (e.g. Claude Code's
  * ~/.claude/projects/**\/*.jsonl) written since {@link markAttemptStart}.
- * Returns newest-first, capped in count and per-file size.
+ * `files` holds the newest {@link MAX_SESSION_FILES} heads (per-file size
+ * capped); `listing` records EVERY found file (size + mtime), flagging which
+ * ones were captured.
  */
 export async function collectHarnessSessionFiles(
   sandboxId: string,
   provider: HarnessConfig["provider"],
-): Promise<{ path: string; content: string; truncated: boolean }[]> {
+): Promise<{
+  files: { path: string; content: string; truncated: boolean }[];
+  listing: { path: string; sizeBytes: number; mtime: string; captured: boolean }[];
+}> {
   const dirs = HARNESS_SESSION_DIRS[provider] ?? [];
-  if (dirs.length === 0) return [];
+  if (dirs.length === 0) return { files: [], listing: [] };
   const find = await sandboxExec(
     sandboxId,
     `find ${dirs.map((d) => JSON.stringify(d)).join(" ")} -type f ` +
       `\\( -name '*.jsonl' -o -name '*.json' \\) -newer ${ATTEMPT_START_MARKER} ` +
-      `-printf '%T@ %s %p\\n' 2>/dev/null | sort -rn | head -${MAX_SESSION_FILES}`,
+      `-printf '%T@ %s %p\\n' 2>/dev/null | sort -rn`,
   );
-  if (find.exitCode !== 0 || !find.stdout.trim()) return [];
+  if (find.exitCode !== 0 || !find.stdout.trim()) return { files: [], listing: [] };
+
+  const entries: { path: string; sizeBytes: number; mtime: string }[] = [];
+  for (const line of find.stdout.trim().split("\n")) {
+    const match = line.match(/^(\S+) (\d+) (.+)$/);
+    if (!match) continue;
+    entries.push({
+      path: match[3] as string,
+      sizeBytes: Number(match[2]),
+      // find's %T@ is epoch seconds (fractional) — normalize to ISO.
+      mtime: new Date(Number(match[1]) * 1000).toISOString(),
+    });
+  }
 
   const files: { path: string; content: string; truncated: boolean }[] = [];
-  for (const line of find.stdout.trim().split("\n")) {
-    const match = line.match(/^\S+ (\d+) (.+)$/);
-    if (!match) continue;
-    const size = Number(match[1]);
-    const path = match[2] as string;
+  const captured = new Set<string>();
+  for (const entry of entries.slice(0, MAX_SESSION_FILES)) {
     const read = await sandboxExec(
       sandboxId,
-      `head -c ${MAX_SESSION_FILE_BYTES} ${JSON.stringify(path)}`,
+      `head -c ${MAX_SESSION_FILE_BYTES} ${JSON.stringify(entry.path)}`,
     );
     if (read.exitCode !== 0) continue;
-    files.push({ path, content: read.stdout, truncated: size > MAX_SESSION_FILE_BYTES });
+    captured.add(entry.path);
+    files.push({
+      path: entry.path,
+      content: read.stdout,
+      truncated: entry.sizeBytes > MAX_SESSION_FILE_BYTES,
+    });
   }
-  return files;
+  const listing = entries.map((e) => ({ ...e, captured: captured.has(e.path) }));
+  return { files, listing };
 }

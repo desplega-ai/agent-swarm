@@ -10,12 +10,15 @@ export interface SessionLogRow {
   cli: string;
   content: string;
   lineNumber: number;
+  createdAt: string;
 }
 
 export interface SessionCostRow {
   totalCostUsd: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
   model: string | null;
   costSource: string;
 }
@@ -136,35 +139,23 @@ export class SwarmClient {
   }
 
   /**
-   * Total USD for a task. Cost rows are written by adapters on CLI exit and lag
-   * task completion by ~10-15s, so poll briefly before giving up.
+   * Poll until cost rows are stable (two consecutive non-empty equal-length
+   * polls) or budget elapses. Cost rows are written by adapters on CLI exit
+   * (one per iteration) and lag task completion by ~10-15s — returning on the
+   * first non-empty poll would undercount multi-iteration tasks.
    */
-  async waitForTaskCost(
-    taskId: string,
-    fallback: number | null,
-    timeoutMs = 45_000,
-  ): Promise<number | null> {
+  async waitForSessionCostRows(taskId: string, timeoutMs = 60_000): Promise<SessionCostRow[]> {
     const deadline = Date.now() + timeoutMs;
+    let prev: SessionCostRow[] | null = null;
     while (Date.now() < deadline) {
-      try {
-        const costs = await this.getSessionCosts(taskId);
-        if (costs.length > 0) {
-          return costs.reduce((sum, c) => sum + (c.totalCostUsd ?? 0), 0);
-        }
-      } catch {
-        // keep polling
+      const rows = await this.getSessionCosts(taskId).catch(() => null);
+      if (rows) {
+        if (rows.length > 0 && prev !== null && prev.length === rows.length) return rows;
+        prev = rows;
       }
       await Bun.sleep(5_000);
     }
-    // No session-cost rows in time — the task row's aggregate may have caught up.
-    try {
-      const task = await this.getTask(taskId);
-      const aggregate = (task as Record<string, unknown>).totalCostUsd;
-      if (typeof aggregate === "number") return aggregate;
-    } catch {
-      // fall through
-    }
-    return fallback;
+    return prev ?? [];
   }
 }
 

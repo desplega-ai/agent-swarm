@@ -25,6 +25,12 @@ export interface RunSummary {
     passedCells: number;
     totalCells: number;
     totalCostUsd: number | null;
+    /** Sum of non-null attempt durationMs. */
+    totalDurationMs: number | null;
+    passedAttempts: number;
+    errorAttempts: number;
+    /** Finished attempts with costUsd === null or costSource === "unpriced". */
+    unpricedAttempts: number;
   };
 }
 
@@ -63,15 +69,23 @@ export function summarizeRun(run: EvalRunRow, attempts: AttemptRow[]): RunSummar
     }
   }
   const costsAll = cells.map((c) => c.totalCostUsd).filter((c): c is number => c !== null);
+  const durationsAll = attempts.map((a) => a.durationMs).filter((d): d is number => d !== null);
+  const finishedAttempts = attempts.filter((a) => ["passed", "failed", "error"].includes(a.status));
   return {
     run,
     cells,
     totals: {
       attempts: attempts.length,
-      finished: attempts.filter((a) => ["passed", "failed", "error"].includes(a.status)).length,
+      finished: finishedAttempts.length,
       passedCells: cells.filter((c) => c.passedAny).length,
       totalCells: cells.length,
       totalCostUsd: costsAll.length ? costsAll.reduce((a, b) => a + b, 0) : null,
+      totalDurationMs: durationsAll.length ? durationsAll.reduce((a, b) => a + b, 0) : null,
+      passedAttempts: attempts.filter((a) => a.status === "passed").length,
+      errorAttempts: attempts.filter((a) => a.status === "error").length,
+      unpricedAttempts: finishedAttempts.filter(
+        (a) => a.costUsd === null || a.costSource === "unpriced",
+      ).length,
     },
   };
 }

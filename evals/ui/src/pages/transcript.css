@@ -1,0 +1,194 @@
+/* Transcript renderer (WP-TRANSCRIPT) — message bubbles, tool cards, meta lines. */
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.t-caption {
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.t-empty {
+  color: var(--dim);
+  padding: 16px 8px;
+  text-align: center;
+}
+
+.t-footer {
+  padding: 6px 2px;
+}
+
+.t-flat {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.t-divider {
+  color: var(--dim);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-align: center;
+  padding: 4px 0;
+}
+
+/* ---- message bubbles ---- */
+
+.t-msg {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.t-assistant {
+  background: var(--panel-2);
+  border-left: 2px solid var(--accent);
+}
+
+.t-user {
+  background: color-mix(in oklab, var(--blue), transparent 93%);
+  border-left: 2px solid color-mix(in oklab, var(--blue), transparent 40%);
+}
+
+.t-system {
+  background: transparent;
+  border-style: dashed;
+  color: var(--dim);
+}
+
+.t-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.t-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+}
+
+/* ---- thinking ---- */
+
+.t-thinking-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+}
+
+.t-thinking {
+  color: var(--dim);
+  font-style: italic;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}
+
+/* ---- tool cards ---- */
+
+.t-tool {
+  font-family: var(--font-mono);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.t-tool-error {
+  border-color: color-mix(in oklab, var(--red), transparent 50%);
+  background: color-mix(in oklab, var(--red), transparent 94%);
+}
+
+.t-tool-head {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.t-tool-error .t-tool-head {
+  color: var(--red);
+}
+
+.t-tool-result {
+  border-top: 1px dashed var(--border);
+  padding-top: 4px;
+  font-size: 11.5px;
+}
+
+.t-tool-result pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.t-tool-result.error {
+  color: var(--red);
+}
+
+/* ---- provider meta ---- */
+
+.t-meta,
+.t-meta-group {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+  padding-left: 2px;
+}
+
+.t-meta-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.t-meta .jv,
+.t-meta-group .jv {
+  margin: 2px 0 2px 16px;
+}
+
+/* ---- shared small toggle ---- */
+
+.t-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--dim);
+  cursor: pointer;
+  text-align: left;
+  width: fit-content;
+}
+
+.t-toggle:hover {
+  color: var(--text);
+}
+
+.t-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

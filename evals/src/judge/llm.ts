@@ -3,7 +3,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import type { Scenario, SwarmTask } from "../types.ts";
 
-const DEFAULT_JUDGE_MODEL = "google/gemini-3-flash-preview";
+const DEFAULT_JUDGE_MODEL = "deepseek/deepseek-v4-pro";
 
 const VerdictSchema = z.object({
   score: z
