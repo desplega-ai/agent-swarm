@@ -25,6 +25,7 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
+import { classifyAwsSdkError } from "../utils/aws-error-classifier";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
@@ -361,6 +362,18 @@ export class PiMonoSession implements ProviderSession {
    * surface it directly.
    */
   private prevOutputTokens = 0;
+  /**
+   * Terminal error message captured from structured pi-coding-agent events.
+   *
+   * Set by `message_end` (assistant turn with `stopReason==='error'` — covers
+   * NON-retryable failures, including AWS auth which never enters pi's retry
+   * loop) and by `auto_retry_end` with `success:false` (the definitive terminal
+   * failure after the retryable class — throttle / 5xx / timeout — exhausts).
+   * Cleared on recovery: a successful `message_end` or an `auto_retry_end` with
+   * `success:true` resets it to null, so a recovered error never surfaces as a
+   * false failure. Evaluated once at session end in `runSession()`.
+   */
+  private terminalError: string | null = null;
 
   constructor(agentSession: AgentSession, config: ProviderSessionConfig, createdSymlink: boolean) {
     this.agentSession = agentSession;
@@ -425,6 +438,25 @@ export class PiMonoSession implements ProviderSession {
     switch (event.type) {
       case "message_end": {
         // Pi emits message_end for user, assistant, and tool-result messages.
+        // An assistant turn that ended in `stopReason==='error'` is a failed
+        // turn — track it as the (so far) terminal error. This is the ONLY
+        // structured signal for NON-retryable failures (AWS auth: ExpiredToken
+        // / CredentialsProviderError), which never enter pi's retry loop.
+        const endMsg = event.message as {
+          role?: string;
+          stopReason?: string;
+          errorMessage?: string;
+        };
+        if (endMsg.role === "assistant") {
+          if (endMsg.stopReason === "error") {
+            // Candidate terminal failure. May still be cleared by a successful
+            // retry (auto_retry_end success / a later good message_end).
+            this.terminalError = endMsg.errorMessage ?? this.terminalError ?? "Unknown error";
+            break;
+          }
+          // A successful assistant turn means any prior error has recovered.
+          this.terminalError = null;
+        }
         // Only assistant text should be printed or used as fallback output.
         const text = extractPiAssistantText(event.message);
         if (text) {
@@ -518,12 +550,18 @@ export class PiMonoSession implements ProviderSession {
           result: event.result,
         });
         break;
-      case "auto_retry_start":
-        this.emit({
-          type: "raw_stderr",
-          content: `[pi-mono] Auto-retry attempt ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}\n`,
-        });
+      case "auto_retry_end": {
+        // Definitive terminal signal for the RETRYABLE error class
+        // (throttle / 5xx / timeout). pi-coding-agent emits success:false with
+        // `finalError` only after every retry attempt is exhausted; success:true
+        // means the turn recovered, so clear any tracked error.
+        if (event.success) {
+          this.terminalError = null;
+        } else {
+          this.terminalError = event.finalError ?? this.terminalError ?? "Unknown error";
+        }
         break;
+      }
     }
   }
 
@@ -541,6 +579,26 @@ export class PiMonoSession implements ProviderSession {
       const stats = this.agentSession.getSessionStats();
       const cost = this.buildCostData(stats);
 
+      // A structured terminal error from pi-coding-agent events is failure by
+      // definition (the agent already exhausted retries or hit a non-retryable
+      // error). Surface it so the session-chat red box fires and the task fails,
+      // exactly like sibling adapters. AWS errors get a categorized, actionable
+      // message; anything else surfaces its raw error text.
+      if (this.terminalError) {
+        const classification = classifyAwsSdkError(this.terminalError);
+        const message = classification?.message ?? this.terminalError;
+        const category = classification?.category;
+        this.emit({ type: "error", message, category });
+        return {
+          exitCode: 1,
+          sessionId: this._sessionId,
+          cost,
+          isError: true,
+          errorCategory: category,
+          failureReason: message,
+        };
+      }
+
       this.emit({
         type: "result",
         cost,
@@ -556,13 +614,26 @@ export class PiMonoSession implements ProviderSession {
       };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
+      // Defense-in-depth: AWS SDK failures surface as structured events (handled
+      // above in runSession), not thrown exceptions, so this catch is for genuine
+      // unexpected throws (MCP / transport / etc). Still classify in case an AWS
+      // signature ever reaches here, so the red box fires like sibling adapters.
+      const awsCatchError = classifyAwsSdkError(errorMessage);
+      if (awsCatchError) {
+        this.emit({
+          type: "error",
+          message: awsCatchError.message,
+          category: awsCatchError.category,
+        });
+      }
       this.emit({ type: "raw_stderr", content: `[pi-mono] Error: ${errorMessage}\n` });
 
       return {
         exitCode: 1,
         sessionId: this._sessionId,
         isError: true,
-        failureReason: errorMessage,
+        errorCategory: awsCatchError?.category,
+        failureReason: awsCatchError?.message ?? errorMessage,
       };
     } finally {
       await this.logFileHandle.end();
