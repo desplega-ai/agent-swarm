@@ -58,13 +58,13 @@ When supported, validation happens in the `store-progress` MCP tool (see `src/to
 Bedrock mode is active when **either**:
 
 1. `BEDROCK_AUTH_MODE=sdk` is set in `swarm_config` (explicit), **or**
-2. `BEDROCK_AUTH_MODE` is absent and `MODEL_OVERRIDE` starts with `amazon-bedrock/` (prefix-inference fallback — preserves pre-PR1 behavior).
+2. `BEDROCK_AUTH_MODE` is absent and `MODEL_OVERRIDE` starts with `amazon-bedrock/` (prefix-inference fallback — preserves the earlier prefix-inference behavior).
 
-`BEDROCK_AUTH_MODE=bearer` is recognised and validated but the full bearer-token / Mantle path is out of scope for PR1. Workers in `bearer` mode fall through to the standard credential check (key / auth.json).
+`BEDROCK_AUTH_MODE=bearer` is recognised and validated but the full bearer-token path is not implemented yet. Workers in `bearer` mode fall through to the standard credential check (key / auth.json).
 
 ### Credential probe
 
-When Bedrock SDK mode is active, `checkPiMonoCredentials` issues a **real** `ListFoundationModels` call via `@aws-sdk/client-bedrock` (dynamically imported — the API binary never loads the SDK). This replaces the previous optimistic always-ready return.
+When Bedrock SDK mode is active, `checkPiMonoCredentials` runs a **real** enumeration pass — `ListFoundationModels` + `ListInferenceProfiles` via `@aws-sdk/client-bedrock` (dynamically imported — the API binary never loads the SDK). The same call both verifies the credential chain and lists the usable models. This replaces the previous optimistic always-ready return.
 
 - **Success** → `ready: true, satisfiedBy: "sdk-delegated"`. The worker proceeds to claim tasks.
 - **Failure** → `ready: false` with a classified hint (auth / throttle / access / model) via `classifyAwsSdkError`. The worker parks in `credential-wait` until credentials are corrected.
@@ -76,16 +76,34 @@ Any source the AWS SDK accepts works: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_K
 | Key | Values | Default |
 |-----|--------|---------|
 | `BEDROCK_AUTH_MODE` | `sdk` \| `bearer` | inferred from `MODEL_OVERRIDE` prefix |
-| `AWS_REGION` | any Bedrock-enabled region | `us-east-1` (SDK fallback) |
+| `AWS_REGION` | any Bedrock-enabled region | **required** — unset reports a not-ready Bedrock state (no region is fabricated) |
 
 `BEDROCK_AUTH_MODE` is a validated optional `swarm_config` key (see `src/be/swarm-config-guard.ts`) and a reloadable env key (see `src/commands/runner.ts`).
 
+### Live model enumeration
+
+The credential enumeration also produces the usable model set. **Usable = harness-drivable ∩ AWS-invocable**, region-scoped to `AWS_REGION`:
+
+1. **AWS-invocable** — the union of:
+   - `ListFoundationModels` filtered to on-demand TEXT foundation models whose `modelLifecycle.status` is `ACTIVE` (the base model ids), **and**
+   - `ListInferenceProfiles` ids — the cross-region inference-profile ids (`us.` / `eu.` / `apac.` / `au.` / `global.`). The newest Claude models on Bedrock are invocable **only** through an inference profile and never appear in `ListFoundationModels`, so this union is what keeps the current Claude models in the list.
+2. **Harness-drivable** — the catalog from `getModels("amazon-bedrock")` (pi-ai's Converse harness). Each entry is a valid pi-ai id (base or profile), so the matched id round-trips through `MODEL_OVERRIDE=amazon-bedrock/<id>` unchanged.
+
+Ids are matched exactly and the **pi-ai id is stored/displayed** (it is the id the harness can actually drive). Entries AWS lists but the harness can't drive — and harness models the account can't invoke — are both excluded, so the picker never surfaces a model that would fail with `invalid model identifier` at inference time.
+
+`ListFoundationModels` lists models that *exist* in the region, not strictly ones the account has *enabled access* to; the on-demand/ACTIVE filtering narrows it, but base on-demand access-grant is not fully enumerable from the catalog. The inference-profile union is what makes the **current** models accurate.
+
+The worker reports the intersected list up the `PUT /api/agents/:id/credential-status` channel as an optional `bedrock` block inside `cred_status` JSON (migration 055 column — no new column). The `bedrock` block carries `{ region, probedAt, ready, models: [{id, name}], error? }`. When Bedrock mode is not active, the block is `null`.
+
+The dashboard's pi harness model picker prefers the worker-reported live list when present and falls back to the `modelsdev-cache.json` static snapshot until a worker reports. The picker is NEVER blank, and a failed probe (`ready:false`) surfaces its reason as picker subtext rather than a silently disabled group.
+
 ### Notes
 
-- `AWS_REGION` should be set explicitly to a Bedrock-enabled region. The probe uses `us-east-1` as a fallback but the region must match where your Bedrock model is accessible.
-- The probe runs at boot AND on the post-task reconcile cycle (`HARNESS_RECONCILE_INTERVAL_MS`). A transient throttle error won't permanently block the worker — the next reconcile tick will re-probe.
+- `AWS_REGION` must be set explicitly to the region where your Bedrock models are accessible; the enumeration region must match where inference runs. When `AWS_REGION` is unset the worker reports a not-ready Bedrock state with a "set AWS_REGION" hint and **does not** guess a region.
+- The enumeration runs at boot AND on a throttled periodic refresh inside the reconcile loop (`BEDROCK_REFRESH_INTERVAL_MS`, default 5 minutes), decoupled from the harness-change gate — so enabling Bedrock access after boot surfaces within a few minutes without a worker restart. Each refresh is one bounded AWS round-trip; a transient throttle error won't permanently block the worker — the next tick re-enumerates.
 - Credential errors during inference continue to surface via structured pi-coding-agent events (handled in `PiMonoSession`) and are classified by `classifyAwsSdkError`.
 - The `validateProviderCredentials` live-test arm for `pi` + Bedrock is a pass-through (`presenceCheckOk`) — the real check is the probe above, not a second SDK call.
+- The API binary never imports `@aws-sdk/client-bedrock`; all SDK work is worker-side.
 
 ## Native session resume is deprecated (2026-05-28)
 

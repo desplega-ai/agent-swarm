@@ -13,16 +13,23 @@ export interface ModelOption {
   contextWindow?: number;
 }
 
-export type ProviderIconKey = "anthropic" | "openai" | "openrouter";
+export type ProviderIconKey = "anthropic" | "openai" | "openrouter" | "amazon-bedrock";
 
 export interface ModelGroup {
   provider: string;
   models: ModelOption[];
   requiredKey: string;
   enabled: boolean;
+  /**
+   * Optional reason this group is disabled, surfaced as picker subtext. Used by
+   * the Bedrock group when a worker has reported but its probe failed
+   * (ready:false) — e.g. an expired token or a missing AWS_REGION — so the
+   * operator sees WHY instead of a silently disabled group.
+   */
+  disabledReason?: string;
 }
 
-type SnapshotProviderId = "openrouter" | "anthropic" | "openai";
+type SnapshotProviderId = "openrouter" | "anthropic" | "openai" | "amazon-bedrock";
 
 interface CachedModel {
   id: string;
@@ -37,7 +44,7 @@ interface CachedProvider {
   models: Record<string, CachedModel>;
 }
 
-const CACHE = modelsCache as Record<SnapshotProviderId, CachedProvider>;
+const CACHE = modelsCache as Record<SnapshotProviderId, CachedProvider | undefined>;
 
 export const LOCAL_HARNESSES: LocalHarnessProvider[] = ["claude", "codex", "pi", "opencode"];
 
@@ -90,6 +97,10 @@ const DIRECT_HARNESS_ACCEPTED_KEYS: Record<"claude" | "codex", string[]> = {
 
 const SNAPSHOT_ORDER: SnapshotProviderId[] = ["openrouter", "anthropic", "openai"];
 
+/** Bedrock-specific snapshot ID — kept separate from SNAPSHOT_ORDER since it is
+ *  only shown for the pi harness, not for opencode. */
+const BEDROCK_SNAPSHOT_ID: SnapshotProviderId = "amazon-bedrock";
+
 const SNAPSHOT_META: Record<
   SnapshotProviderId,
   { label: string; requiredKey: string; iconKey: ProviderIconKey }
@@ -101,6 +112,17 @@ const SNAPSHOT_META: Record<
   },
   anthropic: { label: "Anthropic", requiredKey: "ANTHROPIC_API_KEY", iconKey: "anthropic" },
   openai: { label: "OpenAI", requiredKey: "OPENAI_API_KEY", iconKey: "openai" },
+  /**
+   * Amazon Bedrock — credentials come from the AWS SDK default chain, not a
+   * single env var. `requiredKey` is a human label (not an env key); the group's
+   * enabled state is driven by the worker's live `ready` flag, not by presence
+   * of any one variable. `AWS_REGION` only selects which region is enumerated.
+   */
+  "amazon-bedrock": {
+    label: "Amazon Bedrock",
+    requiredKey: "AWS credential chain",
+    iconKey: "amazon-bedrock",
+  },
 };
 
 const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
@@ -135,10 +157,24 @@ export function hasRuntimeCredential(
   return false;
 }
 
+/**
+ * Live Bedrock status reported by the pi worker (from `agent.credStatus.bedrock`).
+ * When present, the live model list is preferred over the static snapshot.
+ * When absent (worker hasn't reported yet), the static `modelsdev-cache.json`
+ * snapshot is used as a fallback — the picker is NEVER blank.
+ */
+export interface LiveBedrockStatus {
+  ready: boolean;
+  models: Array<{ id: string; name: string }>;
+  /** Probe failure reason (e.g. expired token, unset AWS_REGION) when ready:false. */
+  error?: string;
+}
+
 export function modelGroupsForHarness(
   harness: LocalHarnessProvider,
   configs: SwarmConfig[] | undefined,
   envPresence: Record<string, boolean> | undefined,
+  liveBedrockStatus?: LiveBedrockStatus | null,
 ): ModelGroup[] {
   if (harness === "claude" || harness === "codex") {
     const models = DIRECT_MODELS[harness];
@@ -154,10 +190,10 @@ export function modelGroupsForHarness(
     ];
   }
 
-  return SNAPSHOT_ORDER.map((providerId) => {
+  const snapshotGroups = SNAPSHOT_ORDER.map((providerId) => {
     const meta = SNAPSHOT_META[providerId];
     const cache = CACHE[providerId];
-    const models: ModelOption[] = Object.values(cache.models)
+    const models: ModelOption[] = Object.values(cache?.models ?? {})
       .map((m) => ({
         id: `${providerId}/${m.id}`,
         label: m.name ?? m.id,
@@ -175,6 +211,61 @@ export function modelGroupsForHarness(
       enabled: hasRuntimeCredential(meta.requiredKey, configs, envPresence),
     };
   });
+
+  // For the pi harness, also expose Amazon Bedrock models.
+  if (harness === "pi") {
+    const bedrockMeta = SNAPSHOT_META[BEDROCK_SNAPSHOT_ID];
+    const bedrockCache = CACHE[BEDROCK_SNAPSHOT_ID];
+
+    let bedrockModels: ModelOption[];
+    let bedrockEnabled: boolean;
+    let bedrockDisabledReason: string | undefined;
+
+    if (liveBedrockStatus != null) {
+      // Worker has reported live models — prefer this list.
+      bedrockModels = liveBedrockStatus.models.map((m) => ({
+        id: `amazon-bedrock/${m.id}`,
+        label: m.name,
+        provider: bedrockMeta.label,
+        providerId: bedrockMeta.iconKey,
+        requiredKey: bedrockMeta.requiredKey,
+      }));
+      bedrockEnabled = liveBedrockStatus.ready;
+      // Probe ran but failed — surface the reason instead of a silent disable.
+      if (!liveBedrockStatus.ready) {
+        bedrockDisabledReason =
+          liveBedrockStatus.error ?? "Bedrock probe failed — check AWS credentials and AWS_REGION.";
+      }
+    } else {
+      // No worker report yet — fall back to static snapshot (NEVER blank).
+      bedrockModels = Object.values(bedrockCache?.models ?? {})
+        .map((m) => ({
+          id: `amazon-bedrock/${m.id}`,
+          label: m.name ?? m.id,
+          provider: bedrockMeta.label,
+          providerId: bedrockMeta.iconKey,
+          requiredKey: bedrockMeta.requiredKey,
+          cost: m.cost,
+          contextWindow: m.limit?.context,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+      // Unknown auth state before first worker report — treat as not enabled.
+      bedrockEnabled = false;
+      bedrockDisabledReason = "Awaiting worker probe — showing the catalog snapshot.";
+    }
+
+    const bedrockGroup: ModelGroup = {
+      provider: bedrockMeta.label,
+      models: bedrockModels,
+      requiredKey: bedrockMeta.requiredKey,
+      enabled: bedrockEnabled,
+      disabledReason: bedrockEnabled ? undefined : bedrockDisabledReason,
+    };
+
+    return [...snapshotGroups, bedrockGroup];
+  }
+
+  return snapshotGroups;
 }
 
 export function findModelOption(
@@ -218,7 +309,7 @@ export function findKnownModel(model: string | null | undefined): ModelOption | 
     const prefix = `${providerId}/`;
     if (!model.startsWith(prefix)) continue;
     const tail = model.slice(prefix.length);
-    const cached = cache.models[tail];
+    const cached = cache?.models[tail];
     if (cached) {
       return {
         id: model,
@@ -259,7 +350,7 @@ function findByLabel(raw: string): ModelOption | null {
   for (const providerId of SNAPSHOT_ORDER) {
     const meta = SNAPSHOT_META[providerId];
     const cache = CACHE[providerId];
-    for (const cached of Object.values(cache.models)) {
+    for (const cached of Object.values(cache?.models ?? {})) {
       const name = (cached.name ?? "").toLowerCase().trim();
       if (!name) continue;
       if (!lowered.includes(name)) continue;
