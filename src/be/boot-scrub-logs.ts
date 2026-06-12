@@ -10,7 +10,7 @@
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDb } from "./db";
 
-const SCRUB_KEY = "boot-scrub-logs-v1";
+const SCRUB_KEY = "boot-scrub-logs-v2";
 const BATCH_SIZE = 500;
 
 export async function runBootScrubLogs(): Promise<void> {
@@ -24,14 +24,17 @@ export async function runBootScrubLogs(): Promise<void> {
 
   if (done) return;
 
+  // ESCAPE '!' makes ! the escape character so !_ matches a literal underscore
+  // instead of the LIKE single-char wildcard. Without this, '%npm_%' matches
+  // any row containing "npm" + any char (e.g. "npm install"), drowning real
+  // token rows when a LIMIT is applied.
   const rows = db
     .prepare<{ id: string; content: string }, []>(
       `SELECT id, content FROM session_logs
-       WHERE content LIKE '%lin_oauth_%'
-          OR content LIKE '%lin_api_%'
-          OR content LIKE '%npm_%'
-          OR content LIKE '%ATATT%'
-       LIMIT 50000`,
+       WHERE content LIKE '%lin!_oauth!_%' ESCAPE '!'
+          OR content LIKE '%lin!_api!_%' ESCAPE '!'
+          OR content LIKE '%npm!_%' ESCAPE '!'
+          OR content LIKE '%ATATT%'`,
     )
     .all();
 
