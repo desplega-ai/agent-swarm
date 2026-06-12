@@ -361,11 +361,11 @@
 .t-tasktab {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 5px;
-  padding: 2px 9px;
+  padding: 2px 7px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--dim);
@@ -394,10 +394,17 @@
   white-space: nowrap;
 }
 
-/* v7.7 item 7: inline pill economics (cost · duration · tokens). */
+/* v7.7 item 7: inline pill economics (cost · duration · tokens) — compact and
+   always dim so the metrics read as a footnote next to the label, even on the
+   selected (accent) pill. */
 .t-tasktab-meta {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  letter-spacing: -0.2px;
+  color: var(--dim);
+  opacity: 0.9;
+  margin-left: 1px;
 }
 
 /* Dim footnote inside the chip hover cards (DAG-lifetime / totals caveats). */

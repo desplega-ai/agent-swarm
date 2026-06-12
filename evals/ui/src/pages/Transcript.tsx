@@ -771,7 +771,7 @@ function TaskTabs(props: {
         </span>
       ) : null}
       All
-      {allSegs !== null ? <span className="t-tasktab-meta"> · {allSegs.join(" · ")}</span> : null}
+      {allSegs !== null ? <span className="t-tasktab-meta">{allSegs.join(" · ")}</span> : null}
     </button>
   );
   return (
@@ -836,7 +836,7 @@ function TaskTabPill(props: {
       Task {props.taskNo}
       {segs !== null ? (
         // metrics REPLACE the inline title (it moves into the hover card)
-        <span className="t-tasktab-meta"> · {segs.join(" · ")}</span>
+        <span className="t-tasktab-meta">{segs.join(" · ")}</span>
       ) : title !== undefined ? (
         <span className="t-tasktab-title"> · {clipTitle(title)}</span>
       ) : null}
@@ -863,7 +863,7 @@ function TaskTabPill(props: {
  */
 function TaskTabHeader(props: { rec: AttemptTaskJson }): ReactNode {
   const rec = props.rec;
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const info = taskTabGlyph({ status: rec.status, skipped: rec.skipped });
   const statusTip = [rec.id, info.label, rec.agentId !== null ? `Agent ${rec.agentId}` : null]
     .filter((line): line is string => line !== null)
