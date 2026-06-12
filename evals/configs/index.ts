@@ -117,6 +117,41 @@ export const configs: HarnessConfig[] = [
     provider: "pi",
     model: "openrouter/openai/gpt-oss-120b",
   },
+  // Round-8 OSS refresh (AA snapshot 2026-06-12). Every slug verified against
+  // src/be/modelsdev-cache.json openrouter section with open_weights: true.
+  // Skipped from the same AA cut: MiniMax-M3, Qwen3.7 Max/Plus (slugs exist
+  // but open_weights: false — API-only, not OSS).
+  {
+    id: "pi-kimi-k2.6",
+    label: "pi-mono / Kimi K2.6 (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/moonshotai/kimi-k2.6",
+  },
+  {
+    id: "pi-glm-5.1",
+    label: "pi-mono / GLM 5.1 (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/z-ai/glm-5.1",
+  },
+  {
+    id: "pi-mimo-v2.5-pro",
+    label: "pi-mono / MiMo V2.5 Pro (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/xiaomi/mimo-v2.5-pro",
+  },
+  {
+    id: "pi-mimo-v2.5",
+    label: "pi-mono / MiMo V2.5 (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/xiaomi/mimo-v2.5",
+  },
+  {
+    // Paid slug, not the ":free" twin — free-tier rate limits would starve runs.
+    id: "pi-nemotron-3-ultra",
+    label: "pi-mono / Nemotron 3 Ultra (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
+  },
   {
     id: "opencode-gemini-flash",
     label: "opencode / Gemini 3 flash (OpenRouter)",
@@ -164,6 +199,38 @@ export const configs: HarnessConfig[] = [
     label: "opencode / Gemini 3.1 flash lite (OpenRouter)",
     provider: "opencode",
     model: "openrouter/google/gemini-3.1-flash-lite",
+  },
+  // Round-8 OSS refresh — opencode twins of the pi- entries above.
+  {
+    id: "opencode-kimi-k2.6",
+    label: "opencode / Kimi K2.6 (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/moonshotai/kimi-k2.6",
+  },
+  {
+    id: "opencode-glm-5.1",
+    label: "opencode / GLM 5.1 (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/z-ai/glm-5.1",
+  },
+  {
+    id: "opencode-mimo-v2.5-pro",
+    label: "opencode / MiMo V2.5 Pro (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/xiaomi/mimo-v2.5-pro",
+  },
+  {
+    id: "opencode-mimo-v2.5",
+    label: "opencode / MiMo V2.5 (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/xiaomi/mimo-v2.5",
+  },
+  {
+    // Paid slug, not the ":free" twin — free-tier rate limits would starve runs.
+    id: "opencode-nemotron-3-ultra",
+    label: "opencode / Nemotron 3 Ultra (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
   },
   {
     id: "codex-5.4-mini",

@@ -33,14 +33,16 @@ describe("AA mapping completeness (v7.6 item D, frozen)", () => {
     expect(mapped.size + unmatched.size).toBe(configs.length);
   });
 
-  test("frozen counts: 19 matched, 8 unmatched, 14 distinct AA rows", () => {
-    expect(Object.keys(CONFIG_AA_ROWS).length).toBe(19);
+  test("frozen counts: 29 matched, 8 unmatched, 19 distinct AA rows", () => {
+    expect(Object.keys(CONFIG_AA_ROWS).length).toBe(29);
     expect(Object.keys(AA_UNMATCHED_CONFIG_IDS).length).toBe(8);
-    // 14: Haiku, Sonnet 4.6 (max), Opus 4.8 (max), Opus 4.7 (max), Fable 5,
+    // 19: Haiku, Sonnet 4.6 (max), Opus 4.8 (max), Opus 4.7 (max), Fable 5,
     // DS Flash (High), DS Pro (High), Gemini 3.5 Flash, Gemini 3.1 Pro Preview
     // (v7.7 item 1), Qwen3 Coder Next, gpt-oss-120b (high),
-    // Gemini 3.1 Flash-Lite, GPT-5.4 mini (medium), GPT-5.5 (medium).
-    expect(new Set(Object.values(CONFIG_AA_ROWS).map((m) => m.sourceRow)).size).toBe(14);
+    // Gemini 3.1 Flash-Lite, GPT-5.4 mini (medium), GPT-5.5 (medium), plus the
+    // round-8 OSS refresh: Kimi K2.6, GLM-5.1, MiMo-V2.5-Pro, MiMo-V2.5,
+    // Nemotron 3 Ultra (each shared by a pi/opencode twin pair).
+    expect(new Set(Object.values(CONFIG_AA_ROWS).map((m) => m.sourceRow)).size).toBe(19);
   });
 
   test("every sourceRow exists in the TSV", () => {
@@ -72,9 +74,19 @@ describe("AA mapping completeness (v7.6 item D, frozen)", () => {
     // v7.7 item 1: "Preview" is the model identity (the catalog model IS the
     // preview slug), not a serving variant — the snapshot's only 3.1 Pro row.
     expect(getAaForConfig("pi-gemini-pro")?.matchedVariant).toBeNull();
+    // Round-8 OSS refresh: MiMo-V2.5 and Nemotron 3 Ultra are unique rows.
+    for (const short of ["mimo-v2.5", "nemotron-3-ultra"]) {
+      expect(getAaForConfig(`pi-${short}`)?.matchedVariant).toBeNull();
+      expect(getAaForConfig(`opencode-${short}`)?.matchedVariant).toBeNull();
+    }
     // Variant/effort picks document their justification.
     for (const id of ["claude-haiku", "claude-sonnet", "pi-deepseek-flash", "codex-5.5"]) {
       expect(getAaForConfig(id)?.matchedVariant).toBeTruthy();
+    }
+    // Round-8 picks with a "(variant 2)" sibling justify rejecting it.
+    for (const short of ["kimi-k2.6", "glm-5.1", "mimo-v2.5-pro"]) {
+      expect(getAaForConfig(`pi-${short}`)?.matchedVariant).toContain("(variant 2)");
+      expect(getAaForConfig(`opencode-${short}`)?.matchedVariant).toContain("(variant 2)");
     }
   });
 
@@ -82,7 +94,17 @@ describe("AA mapping completeness (v7.6 item D, frozen)", () => {
     expect(getAaForConfig("claude-opus")?.sourceRow).toBe(
       getAaForConfig("claude-opus-4.8")?.sourceRow ?? "",
     );
-    for (const short of ["deepseek-flash", "deepseek-pro", "gemini-flash", "qwen-coder"]) {
+    for (const short of [
+      "deepseek-flash",
+      "deepseek-pro",
+      "gemini-flash",
+      "qwen-coder",
+      "kimi-k2.6",
+      "glm-5.1",
+      "mimo-v2.5-pro",
+      "mimo-v2.5",
+      "nemotron-3-ultra",
+    ]) {
       expect(getAaForConfig(`pi-${short}`)?.sourceRow).toBe(
         getAaForConfig(`opencode-${short}`)?.sourceRow ?? "",
       );

@@ -258,6 +258,24 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
   test("frontier carries the new pi-gemini-pro config", () => {
     expect(CONFIG_PRESETS.find((p) => p.id === "frontier")?.configIds).toContain("pi-gemini-pro");
   });
+
+  test("oss carries the round-8 OSS refresh pi/opencode twins", () => {
+    const oss = CONFIG_PRESETS.find((p) => p.id === "oss")?.configIds ?? [];
+    for (const short of [
+      "kimi-k2.6",
+      "glm-5.1",
+      "mimo-v2.5-pro",
+      "mimo-v2.5",
+      "nemotron-3-ultra",
+    ]) {
+      expect(oss).toContain(`pi-${short}`);
+      expect(oss).toContain(`opencode-${short}`);
+    }
+    // Pre-refresh members stay (historical runs reference them).
+    for (const id of ["pi-kimi-k2.5", "pi-minimax-m2.5", "opencode-kimi-k2.5"]) {
+      expect(oss).toContain(id);
+    }
+  });
 });
 
 describe("expandPresetSelection — CLI --preset expansion (v7.7 item 1)", () => {

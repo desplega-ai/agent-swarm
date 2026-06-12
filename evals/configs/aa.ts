@@ -190,6 +190,32 @@ export const CONFIG_AA_ROWS: Record<string, { sourceRow: string; matchedVariant:
       sourceRow: "gpt-oss-120b (high)",
       matchedVariant: '(high) — spec-pinned; "(low)" rejected.',
     },
+    // Round-8 OSS refresh rows below (AA snapshot 2026-06-12).
+    // [II 54] — "(variant 2)" [43, 16.3s total vs 115.5s] is the non-reasoning twin, rejected.
+    "pi-kimi-k2.6": {
+      sourceRow: "Kimi K2.6",
+      matchedVariant:
+        "Reasoning row — plain OpenRouter API usage with no effort param gets the default " +
+        '(reasoning) serving config; "(variant 2)" [II 43] is the lower-II non-reasoning twin.',
+    },
+    // [II 51] — "(variant 2)" [44, 9.8s total vs 63.9s] is the non-reasoning twin, rejected.
+    "pi-glm-5.1": {
+      sourceRow: "GLM-5.1",
+      matchedVariant:
+        "Reasoning row — plain OpenRouter API usage with no effort param gets the default " +
+        '(reasoning) serving config; "(variant 2)" [II 44] is the lower-II non-reasoning twin.',
+    },
+    // [II 54] — "(variant 2)" [36, 14.4s total vs 65.0s] is the non-reasoning twin, rejected.
+    "pi-mimo-v2.5-pro": {
+      sourceRow: "MiMo-V2.5-Pro",
+      matchedVariant:
+        "Reasoning row — plain OpenRouter API usage with no effort param gets the default " +
+        '(reasoning) serving config; "(variant 2)" [II 36] is the lower-II non-reasoning twin.',
+    },
+    // [II 49] — exact name match, no variant siblings.
+    "pi-mimo-v2.5": { sourceRow: "MiMo-V2.5", matchedVariant: null },
+    // [II 48] — unique row ("NVIDIA Nemotron 3 Super"/"Nano" are different models, not variants).
+    "pi-nemotron-3-ultra": { sourceRow: "Nemotron 3 Ultra", matchedVariant: null },
     // Same rows as the pi- twins: identical OpenRouter model ids.
     "opencode-gemini-flash": {
       sourceRow: "Gemini 3.5 Flash",
@@ -215,6 +241,27 @@ export const CONFIG_AA_ROWS: Record<string, { sourceRow: string; matchedVariant:
     // opencode-minimax-m2.5 / opencode-kimi-k2.5 → UNMATCHED (see the pi- twins).
     // [II 34] — exact name match, no variants.
     "opencode-gemini-flash-lite": { sourceRow: "Gemini 3.1 Flash-Lite", matchedVariant: null },
+    // Round-8 OSS refresh — same rows/justifications as the pi- twins above.
+    "opencode-kimi-k2.6": {
+      sourceRow: "Kimi K2.6",
+      matchedVariant:
+        "Reasoning row — plain OpenRouter API usage with no effort param gets the default " +
+        '(reasoning) serving config; "(variant 2)" [II 43] is the lower-II non-reasoning twin.',
+    },
+    "opencode-glm-5.1": {
+      sourceRow: "GLM-5.1",
+      matchedVariant:
+        "Reasoning row — plain OpenRouter API usage with no effort param gets the default " +
+        '(reasoning) serving config; "(variant 2)" [II 44] is the lower-II non-reasoning twin.',
+    },
+    "opencode-mimo-v2.5-pro": {
+      sourceRow: "MiMo-V2.5-Pro",
+      matchedVariant:
+        "Reasoning row — plain OpenRouter API usage with no effort param gets the default " +
+        '(reasoning) serving config; "(variant 2)" [II 36] is the lower-II non-reasoning twin.',
+    },
+    "opencode-mimo-v2.5": { sourceRow: "MiMo-V2.5", matchedVariant: null },
+    "opencode-nemotron-3-ultra": { sourceRow: "Nemotron 3 Ultra", matchedVariant: null },
     // [II 38] — effort matching; "(xhigh)" [49] and bare "GPT-5.4 mini" [23] rejected.
     "codex-5.4-mini": {
       sourceRow: "GPT-5.4 mini (medium)",

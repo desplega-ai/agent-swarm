@@ -5,8 +5,8 @@ import { configs, DEFAULT_CONFIG_IDS } from "./index.ts";
 const NAMING_RE = /^(claude|pi|opencode|codex)-[a-z0-9][a-z0-9.-]*$/;
 
 describe("config catalog invariants (v6 §0.14 / §10)", () => {
-  test("catalog has exactly 27 entries (12 legacy + 14 round-6 + pi-gemini-pro, v7.7 item 1)", () => {
-    expect(configs.length).toBe(27);
+  test("catalog has exactly 37 entries (12 legacy + 14 round-6 + pi-gemini-pro + 10 round-8 OSS refresh)", () => {
+    expect(configs.length).toBe(37);
   });
 
   test("ids are unique", () => {
