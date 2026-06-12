@@ -42,7 +42,7 @@ export type ScriptSearchResult = {
 
 let providerOverride: EmbeddingProvider | null = null;
 
-function embeddingProvider(): EmbeddingProvider {
+export function embeddingProvider(): EmbeddingProvider {
   return providerOverride ?? getEmbeddingProvider();
 }
 
@@ -81,6 +81,13 @@ export async function embedScript(script: ScriptRecord): Promise<void> {
   const provider = embeddingProvider();
   const embedding = await provider.embed(text);
   if (!embedding) return;
+
+  if (embedding.length !== provider.dimensions) {
+    console.error(
+      `[script-embed] dimension mismatch for "${script.name}": expected=${provider.dimensions} got=${embedding.length}, skipping`,
+    );
+    return;
+  }
 
   getDb()
     .prepare(
@@ -204,20 +211,24 @@ export async function searchScripts(args: {
   const candidates = candidateRows(args.scope, args.scopeId);
   if (candidates.length === 0) return lexicalFallback(args);
 
-  return candidates
-    .map((row) => {
-      const script = rowToScript(row);
-      const semanticScore = cosineSimilarity(queryEmbedding, deserializeEmbedding(row.embedding));
-      const bonus = nameMatchBonus(script, args.query);
-      return {
-        script,
-        score: 0.7 * semanticScore + 0.3 * bonus,
-        semanticScore,
-        nameMatchBonus: bonus,
-      };
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, args.limit ?? 10);
+  const results: ScriptSearchResult[] = [];
+  for (const row of candidates) {
+    const stored = deserializeEmbedding(row.embedding);
+    if (stored.length !== queryEmbedding.length) continue;
+    const script = rowToScript(row);
+    const semanticScore = cosineSimilarity(queryEmbedding, stored);
+    const bonus = nameMatchBonus(script, args.query);
+    results.push({
+      script,
+      score: 0.7 * semanticScore + 0.3 * bonus,
+      semanticScore,
+      nameMatchBonus: bonus,
+    });
+  }
+
+  if (results.length === 0) return lexicalFallback(args);
+
+  return results.sort((a, b) => b.score - a.score).slice(0, args.limit ?? 10);
 }
 
 export async function reembedAllScripts(): Promise<void> {
