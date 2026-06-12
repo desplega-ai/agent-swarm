@@ -6,6 +6,7 @@ import {
   getKeyCostSummary,
   getKeyStatuses,
   markKeyRateLimited,
+  recordKeyRateLimitWindows,
   recordKeyUsage,
   setApiKeyName,
 } from "../be/db";
@@ -52,6 +53,37 @@ const reportRateLimit = route({
   }),
   responses: {
     200: { description: "Key marked as rate-limited" },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+});
+
+const rateLimitWindowSchema = z.object({
+  status: z.string(),
+  utilization: z.number().optional(),
+  resetsAt: z.number().optional(),
+  isUsingOverage: z.boolean().optional(),
+  surpassedThreshold: z.number().optional(),
+  lastSeenAt: z.string().datetime(),
+});
+
+const reportRateLimitWindows = route({
+  method: "post",
+  path: "/api/keys/report-rate-limit-windows",
+  pattern: ["api", "keys", "report-rate-limit-windows"],
+  summary: "Record provider-emitted rate-limit window telemetry for an API key",
+  tags: ["API Keys"],
+  body: z.object({
+    keyType: z.string(),
+    keySuffix: z.string().min(1).max(10),
+    keyIndex: z.number().int().min(0),
+    windows: z.record(z.string(), rateLimitWindowSchema),
+    scope: z.string().optional(),
+    scopeId: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Rate-limit window telemetry recorded" },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
   },
@@ -192,6 +224,25 @@ export async function handleApiKeys(
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to mark rate limit", 500);
+    }
+    return true;
+  }
+
+  // POST /api/keys/report-rate-limit-windows
+  if (reportRateLimitWindows.match(req.method, pathSegments)) {
+    const parsed = await reportRateLimitWindows.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { keyType, keySuffix, keyIndex, windows, scope, scopeId } = parsed.body;
+    try {
+      recordKeyRateLimitWindows(keyType, keySuffix, keyIndex, windows, scope, scopeId ?? null);
+      json(res, { success: true, message: `Rate-limit windows recorded for ...${keySuffix}` });
+    } catch (err) {
+      jsonError(
+        res,
+        err instanceof Error ? err.message : "Failed to record rate-limit windows",
+        500,
+      );
     }
     return true;
   }

@@ -116,6 +116,46 @@ function formatExpiry(until: string | null): string {
   return `${secs}s`;
 }
 
+function formatResetAt(resetsAt: number | undefined): string {
+  if (!resetsAt) return "";
+  return new Date(resetsAt * 1000).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function RateLimitWindowsCell({
+  windows,
+}: {
+  windows: ApiKeyStatus["rateLimitWindows"] | undefined;
+}) {
+  const entries = Object.entries(windows ?? {});
+  if (entries.length === 0) return <span className="text-muted-foreground">-</span>;
+
+  return (
+    <div className="flex flex-col gap-1 py-1">
+      {entries.map(([type, info]) => (
+        <div key={type} className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight">
+          <span className="font-mono text-muted-foreground">{type}</span>
+          <span className={cn("font-medium", info.status === "rejected" && "text-status-error")}>
+            {info.status}
+          </span>
+          {typeof info.utilization === "number" && (
+            <span className="font-mono">{Math.round(info.utilization * 100)}%</span>
+          )}
+          {info.resetsAt && (
+            <span className="truncate text-muted-foreground">
+              resets {formatResetAt(info.resetsAt)}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ApiKeysPage() {
   const { data: keys, isLoading } = useApiKeyStatuses();
   const { data: costs } = useApiKeyCosts();
@@ -308,6 +348,15 @@ export default function ApiKeysPage() {
             </span>
           );
         },
+      },
+      {
+        field: "rateLimitWindows",
+        headerName: "Provider Windows",
+        minWidth: 260,
+        flex: 1,
+        cellRenderer: (params: { value: ApiKeyStatus["rateLimitWindows"] | undefined }) => (
+          <RateLimitWindowsCell windows={params.value} />
+        ),
       },
       {
         field: "totalUsageCount",

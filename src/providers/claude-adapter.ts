@@ -674,6 +674,7 @@ class ClaudeSession implements ProviderSession {
       isError: (exitCode ?? 1) !== 0,
       failureReason,
       rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
+      rateLimitWindows: this.errorTracker.getRateLimitWindows(),
     };
   }
 

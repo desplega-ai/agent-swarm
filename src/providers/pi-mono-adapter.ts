@@ -8,7 +8,7 @@
 
 import { existsSync, lstatSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { getModel } from "@earendil-works/pi-ai";
+import { getModel, getModels } from "@earendil-works/pi-ai";
 import type {
   AgentSessionEvent,
   CreateAgentSessionOptions,
@@ -75,39 +75,178 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
 }
 
 /**
+ * Return the pi-ai Bedrock models the harness can actually drive via the
+ * Converse API (the catalog from `getModels("amazon-bedrock")`). Each id is a
+ * valid pi-ai id — base foundation-model id OR inference-profile id (`us.` /
+ * `eu.` / `apac.` / `au.` / `global.` prefixes) — so the matched id round-trips
+ * through `MODEL_OVERRIDE=amazon-bedrock/<id>` unchanged. Used as the
+ * harness-drivable half of the (drivable ∩ invocable) intersection.
+ */
+function getHarnessDrivableBedrockModels(): Array<{ id: string; name: string }> {
+  try {
+    return getModels("amazon-bedrock").map((m) => ({ id: m.id, name: m.name }));
+  } catch {
+    // getModels may throw if the pi-ai catalog is empty or corrupted.
+    // Return an empty list — the intersection will be empty too, which is safe.
+    return [];
+  }
+}
+
+/**
+ * Enumerate the Bedrock models that are both invocable by this AWS account and
+ * drivable by the pi-ai Converse harness, and verify the credential chain in
+ * one pass:
+ *   1. VERIFY the active credential chain is valid for Bedrock in `region`
+ *      (the AWS list calls throw on auth/access failure).
+ *   2. ENUMERATE usable models = harness-drivable ∩ AWS-invocable, where the
+ *      AWS-invocable set is:
+ *        - `ListFoundationModels` filtered to on-demand TEXT models that are
+ *          `ACTIVE` (base foundation-model ids), UNION
+ *        - `ListInferenceProfiles` ids (the `us.`/`eu.`/… cross-region profile
+ *          ids). The newest Claude models on Bedrock are invocable ONLY via an
+ *          inference profile and never appear in `ListFoundationModels`, so this
+ *          union is what keeps the current models in the usable list.
+ *
+ * `ListFoundationModels` reports models that EXIST in the region, not strictly
+ * ones the account has enabled access to, so the on-demand/ACTIVE filtering
+ * narrows it; base on-demand access-grant is not fully enumerable from the
+ * catalog. The inference-profile union is what makes the *current* models
+ * accurate. The matched id is stored/displayed as the pi-ai id (the id the
+ * harness can drive); ids are matched exactly.
+ *
+ * Two list calls per refresh, no pagination loops or per-model lookups.
+ * Dynamically imported so the API binary never loads `@aws-sdk/client-bedrock`.
+ * Tests inject a stub via `CredCheckOptions.bedrockProbe` instead.
+ *
+ * Returns `Array<{id, name}>` on success; throws on auth/access failure.
+ */
+export async function runBedrockSdkProbeAndEnumerate(
+  region: string,
+): Promise<Array<{ id: string; name: string }>> {
+  const { BedrockClient, ListFoundationModelsCommand, ListInferenceProfilesCommand } = await import(
+    "@aws-sdk/client-bedrock"
+  );
+  const client = new BedrockClient({ region });
+
+  // AWS-invocable set, region-scoped to `region`.
+  const invocable = new Set<string>();
+
+  // Base on-demand TEXT foundation models that are ACTIVE.
+  const fmResponse = await client.send(
+    new ListFoundationModelsCommand({ byInferenceType: "ON_DEMAND", byOutputModality: "TEXT" }),
+  );
+  for (const m of fmResponse.modelSummaries ?? []) {
+    if (m.modelId && m.modelLifecycle?.status === "ACTIVE") {
+      invocable.add(m.modelId);
+    }
+  }
+
+  // Inference-profile / cross-region ids (`us.`/`eu.`/`apac.`/…). These are the
+  // only invocation path for the newest Claude models and are absent from
+  // `ListFoundationModels`.
+  const profileResponse = await client.send(new ListInferenceProfilesCommand({}));
+  for (const p of profileResponse.inferenceProfileSummaries ?? []) {
+    if (p.inferenceProfileId) {
+      invocable.add(p.inferenceProfileId);
+    }
+  }
+
+  // Usable = harness-drivable ∩ AWS-invocable, exact-id match. The stored id is
+  // the pi-ai id so it round-trips through `getModel("amazon-bedrock", id)`.
+  return getHarnessDrivableBedrockModels().filter((m) => invocable.has(m.id));
+}
+
+/**
  * Pi-mono is satisfied by ANY of:
- *   1. `MODEL_OVERRIDE` selects the `amazon-bedrock` provider — credential
- *      resolution is delegated to the AWS SDK's default chain at first
- *      inference call. agent-swarm does no presence check; if creds are
- *      missing the SDK error surfaces in the session log.
+ *   1. `BEDROCK_AUTH_MODE=sdk` — or `MODEL_OVERRIDE` selects the
+ *      `amazon-bedrock` provider (prefix-inference fallback when
+ *      `BEDROCK_AUTH_MODE` is absent). The AWS SDK default credential chain is
+ *      exercised by a real enumeration pass (`ListFoundationModels` +
+ *      `ListInferenceProfiles`) that both verifies access and lists the usable
+ *      models. Success → `ready:true, satisfiedBy:"sdk-delegated"` with the
+ *      enumerated models; failure → `ready:false` with a classified hint;
+ *      `AWS_REGION` unset → `ready:false` with a set-region hint. The
+ *      enumeration is worker-only (the pi dynamic-import arm in
+ *      `checkProviderCredentials`); the API binary never imports the SDK.
  *   2. `~/.pi/agent/auth.json` exists.
- *   3. `MODEL_OVERRIDE` is set to a provider-prefixed model — only the
- *      matching provider's key is required.
+ *   3. `MODEL_OVERRIDE` is set to a non-Bedrock provider-prefixed model — only
+ *      the matching provider's key is required.
  *   4. `MODEL_OVERRIDE` is empty / unprefixed — any one of the supported
  *      keys (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY) is
  *      enough.
  *
- * Bedrock is checked first so a stale `auth.json` (Anthropic / OpenRouter
- * creds from a previous login) doesn't get falsely reported as the
- * satisfying source when the model is actually going to AWS.
+ * The Bedrock branch is checked first so a stale `auth.json` (Anthropic /
+ * OpenRouter creds from a previous login) doesn't get falsely reported as
+ * the satisfying source when the model is actually going to AWS.
  */
-export function checkPiMonoCredentials(
+export async function checkPiMonoCredentials(
   env: Record<string, string | undefined>,
   opts: CredCheckOptions = {},
-): CredStatus {
-  if (env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/")) {
-    return {
-      ready: true,
-      missing: [],
-      satisfiedBy: "sdk-delegated",
-      hint: "AWS SDK will resolve credentials at first Bedrock call (env, ~/.aws/*, SSO, IMDS, etc.).",
-    };
+): Promise<CredStatus> {
+  // Determine Bedrock SDK mode:
+  //   - Explicit:  BEDROCK_AUTH_MODE=sdk
+  //   - Fallback:  BEDROCK_AUTH_MODE absent AND MODEL_OVERRIDE starts with
+  //                "amazon-bedrock/" (preserves today's prefix-inference semantics)
+  // BEDROCK_AUTH_MODE=bearer is declared/validated but the full bearer-token
+  // path is not implemented yet — it falls through to the standard auth check.
+  const bedrockAuthMode = env.BEDROCK_AUTH_MODE?.toLowerCase();
+  const isBedrockSdk =
+    bedrockAuthMode === "sdk" ||
+    (bedrockAuthMode === undefined &&
+      env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/"));
+
+  if (isBedrockSdk) {
+    const region = env.AWS_REGION;
+    if (!region) {
+      // Do NOT fabricate a region. A guessed `us-east-1` can differ from where
+      // inference actually runs, which would enumerate the wrong region's
+      // models. Report a not-ready Bedrock state with a hint instead, so the
+      // enumeration region always matches the inference region. `bedrockRegion`
+      // is an empty string (not undefined) so the report still carries a
+      // Bedrock block and the picker can surface the reason.
+      return {
+        ready: false,
+        missing: [],
+        hint: "AWS_REGION is not set — set it to the region where your Bedrock models are accessible so model enumeration matches the inference region.",
+        bedrockModels: [],
+        bedrockRegion: "",
+      };
+    }
+    const probe = opts.bedrockProbe ?? (() => runBedrockSdkProbeAndEnumerate(region));
+    try {
+      const probeResult = await probe();
+      // `probeResult` is `Array<{id,name}> | void` — void comes from auth-only
+      // stubs that don't exercise enumeration. Treat void as [].
+      const bedrockModels: Array<{ id: string; name: string }> = Array.isArray(probeResult)
+        ? probeResult
+        : [];
+      return {
+        ready: true,
+        missing: [],
+        satisfiedBy: "sdk-delegated",
+        hint: `Bedrock models invocable in ${region} enumerated (${bedrockModels.length} usable; ListFoundationModels + ListInferenceProfiles).`,
+        bedrockModels,
+        bedrockRegion: region,
+      };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const classification = classifyAwsSdkError(errorMessage);
+      return {
+        ready: false,
+        missing: [],
+        hint:
+          classification?.message ??
+          `AWS Bedrock enumeration failed (region: ${region}): ${errorMessage}`,
+        bedrockModels: [],
+        bedrockRegion: region,
+      };
+    }
   }
 
   const homeDir = opts.homeDir ?? env.HOME ?? "/root";
-  const probe = opts.fs?.existsSync ?? existsSync;
+  const fsProbe = opts.fs?.existsSync ?? existsSync;
   const authFile = `${homeDir}/.pi/agent/auth.json`;
-  if (probe(authFile)) {
+  if (fsProbe(authFile)) {
     return { ready: true, missing: [], satisfiedBy: "file" };
   }
 

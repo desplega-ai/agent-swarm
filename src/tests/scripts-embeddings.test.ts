@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
+import { serializeEmbedding } from "../be/embedding";
 import type { EmbeddingProvider } from "../be/memory/types";
 import { getScript, upsertScriptByName } from "../be/scripts/db";
 import {
@@ -377,5 +378,31 @@ describe("script embeddings", () => {
     getDb().run("DELETE FROM scripts WHERE id = ?", [created.script.id]);
     expect(getScript({ name: "delete-embedding", scope: "agent", scopeId: "agent-1" })).toBeNull();
     expect(embeddingCount(created.script.id)).toBe(0);
+  });
+
+  test("search skips wrong-dimension embeddings instead of throwing", async () => {
+    const good = await upsertFixture({
+      name: "good-dim",
+      description: "Linear issue triage helper",
+    });
+    const bad = await upsertFixture({
+      name: "bad-dim",
+      description: "Linear ticket router",
+    });
+    expect(embeddingCount(good.script.id)).toBe(1);
+    expect(embeddingCount(bad.script.id)).toBe(1);
+
+    // Overwrite bad-dim's embedding with a wrong-dimension vector (1536d)
+    const wrongDimVector = new Float32Array(1536).fill(0.1);
+    getDb().run("UPDATE script_embeddings SET embedding = ? WHERE scriptId = ?", [
+      serializeEmbedding(wrongDimVector),
+      bad.script.id,
+    ]);
+
+    provider.reset();
+    const results = await searchScripts({ query: "issue triage", scopeId: "agent-1", limit: 10 });
+    // Should not throw, and should only return the good-dim script
+    expect(results.map((r) => r.script.name)).toContain("good-dim");
+    expect(results.map((r) => r.script.name)).not.toContain("bad-dim");
   });
 });

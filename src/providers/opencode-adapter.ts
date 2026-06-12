@@ -20,6 +20,7 @@ import {
 import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { readPkgVersion } from "./harness-version";
 import type {
@@ -102,6 +103,13 @@ function isAssistantMessage(msg: unknown): msg is AssistantMessage {
 }
 
 const DOCKER_PLUGIN_PATH = "/home/worker/.config/opencode/plugins/agent-swarm.ts";
+
+function defaultOpencodeSkillsDir(): string {
+  if (process.env.OPENCODE_SKILLS_DIR) {
+    return process.env.OPENCODE_SKILLS_DIR;
+  }
+  return join(process.env.HOME ?? "/home/worker", ".opencode", "skills");
+}
 const MODEL_CACHE_REFRESH_TIMEOUT_MS = 15_000;
 // opencode cold-start on E2B disk regularly exceeds the SDK's 5s default
 // server-start timeout (@opencode-ai/sdk dist/server.js), failing the spawn with
@@ -294,6 +302,10 @@ export class OpencodeSession implements ProviderSession {
       harnessVariant: "stock",
       ...(harnessVariantMeta ? { harnessVariantMeta } : {}),
     });
+  }
+
+  emitProviderEvent(event: ProviderEvent): void {
+    this.emit(event);
   }
 
   onEvent(listener: (event: ProviderEvent) => void): void {
@@ -744,13 +756,19 @@ export class OpencodeAdapter implements ProviderAdapter {
 
     let promptRefreshAttempted = false;
     let promptRefreshPromise: Promise<boolean> | undefined;
+    let session: OpencodeSession | undefined;
     const sendPrompt = async () => {
+      const resolvedPrompt = await resolveSlashSkillPrompt(config.prompt, {
+        providerLabel: "opencode",
+        skillsDir: defaultOpencodeSkillsDir(),
+        emit: (event) => session?.emitProviderEvent(event),
+      });
       await client.session.prompt({
         path: { id: sessionId },
         query: { directory: config.cwd },
         body: {
           agent: agentName,
-          parts: [{ type: "text", text: config.prompt }],
+          parts: [{ type: "text", text: resolvedPrompt }],
         },
       });
     };
@@ -766,7 +784,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       return await promptRefreshPromise;
     };
 
-    const session = new OpencodeSession(
+    session = new OpencodeSession(
       sessionId,
       server,
       config.model,

@@ -102,6 +102,7 @@ import type {
 } from "../types";
 import { FollowUpConfigSchema, isTerminalTaskStatus } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
+import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
@@ -2100,7 +2101,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   if (!row) return null;
 
   if (output) {
-    row = taskQueries.setOutput().get(output, id);
+    row = taskQueries.setOutput().get(scrubSecrets(output), id);
   }
 
   if (row && oldTask) {
@@ -2141,7 +2142,8 @@ export function failTask(id: string, reason: string): AgentTask | null {
   }
 
   const finishedAt = new Date().toISOString();
-  const row = taskQueries.setFailure().get(reason, finishedAt, id);
+  const scrubbedReason = scrubSecrets(reason);
+  const row = taskQueries.setFailure().get(scrubbedReason, finishedAt, id);
   if (row && oldTask) {
     try {
       createLogEntry({
@@ -2150,7 +2152,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
         agentId: row.agentId ?? undefined,
         oldValue: oldTask.status,
         newValue: "failed",
-        metadata: { reason },
+        metadata: { reason: scrubbedReason },
       });
     } catch {}
     try {
@@ -2496,21 +2498,22 @@ export function deleteTask(id: string): boolean {
 }
 
 export function updateTaskProgress(id: string, progress: string): AgentTask | null {
-  const row = taskQueries.setProgress().get(progress, id);
+  const scrubbedProgress = scrubSecrets(progress);
+  const row = taskQueries.setProgress().get(scrubbedProgress, id);
   if (row) {
     try {
       createLogEntry({
         eventType: "task_progress",
         taskId: id,
         agentId: row.agentId ?? undefined,
-        newValue: progress,
+        newValue: scrubbedProgress,
       });
     } catch {}
     try {
       import("../workflows/event-bus").then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.progress", {
           taskId: id,
-          progress,
+          progress: scrubbedProgress,
           agentId: row.agentId,
         });
       });
@@ -2791,6 +2794,7 @@ export function createLogEntry(entry: {
   metadata?: Record<string, unknown>;
 }): AgentLog {
   const id = crypto.randomUUID();
+  const metaJson = entry.metadata ? JSON.stringify(entry.metadata) : null;
   const row = logQueries
     .insert()
     .get(
@@ -2799,8 +2803,8 @@ export function createLogEntry(entry: {
       entry.agentId ?? null,
       entry.taskId ?? null,
       entry.oldValue ?? null,
-      entry.newValue ?? null,
-      entry.metadata ? JSON.stringify(entry.metadata) : null,
+      entry.newValue ? scrubSecrets(entry.newValue) : null,
+      metaJson ? scrubSecrets(metaJson) : null,
     );
   if (!row) throw new Error("Failed to create log entry");
   return rowToAgentLog(row);
@@ -9437,6 +9441,7 @@ type McpServerRow = {
   headers: string | null;
   envConfigKeys: string | null;
   headerConfigKeys: string | null;
+  extraAuthorizeParams: string | null;
   authMethod: string | null;
   isEnabled: number;
   version: number;
@@ -9468,6 +9473,7 @@ function rowToMcpServer(row: McpServerRow): McpServer {
     headers: row.headers,
     envConfigKeys: row.envConfigKeys,
     headerConfigKeys: row.headerConfigKeys,
+    extraAuthorizeParams: row.extraAuthorizeParams,
     authMethod: (row.authMethod as McpServer["authMethod"]) ?? "static",
     isEnabled: row.isEnabled === 1,
     version: row.version,
@@ -9506,6 +9512,7 @@ export interface McpServerInsert {
   headers?: string;
   envConfigKeys?: string;
   headerConfigKeys?: string;
+  extraAuthorizeParams?: string;
 }
 
 export function createMcpServer(data: McpServerInsert): McpServer {
@@ -9517,9 +9524,9 @@ export function createMcpServer(data: McpServerInsert): McpServer {
       `INSERT INTO mcp_servers (
         id, name, description, scope, ownerAgentId, transport,
         command, args, url, headers,
-        envConfigKeys, headerConfigKeys,
+        envConfigKeys, headerConfigKeys, extraAuthorizeParams,
         isEnabled, version, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -9534,6 +9541,7 @@ export function createMcpServer(data: McpServerInsert): McpServer {
       data.headers ?? null,
       data.envConfigKeys ?? null,
       data.headerConfigKeys ?? null,
+      data.extraAuthorizeParams ?? null,
       now,
       now,
     );
@@ -9596,6 +9604,10 @@ export function updateMcpServer(
     sets.push("headerConfigKeys = ?");
     params.push(updates.headerConfigKeys ?? null);
   }
+  if (updates.extraAuthorizeParams !== undefined) {
+    sets.push("extraAuthorizeParams = ?");
+    params.push(updates.extraAuthorizeParams ?? null);
+  }
   if (updates.isEnabled !== undefined) {
     sets.push("isEnabled = ?");
     params.push(updates.isEnabled ? 1 : 0);
@@ -9617,6 +9629,7 @@ export function updateMcpServer(
     "headers",
     "envConfigKeys",
     "headerConfigKeys",
+    "extraAuthorizeParams",
     "transport",
   ];
   if (configFields.some((f) => (updates as Record<string, unknown>)[f] !== undefined)) {
@@ -9972,8 +9985,29 @@ export interface ApiKeyStatus {
   name: string | null;
   /** Auto-derived harness provider (claude/pi/codex) — see deriveProviderFromKeyType. */
   provider: string;
+  /** Latest provider-emitted rate-limit window snapshots, keyed by window type. */
+  rateLimitWindows: RateLimitWindowTelemetry;
   createdAt: string;
   updatedAt: string;
+}
+
+type ApiKeyStatusRow = Omit<ApiKeyStatus, "rateLimitWindows"> & { rateLimitWindows: string | null };
+
+function parseRateLimitWindowsJson(value: string | null | undefined): RateLimitWindowTelemetry {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as RateLimitWindowTelemetry;
+    }
+  } catch {
+    // Ignore malformed historical values; telemetry is best-effort.
+  }
+  return {};
+}
+
+function rowToApiKeyStatus(row: ApiKeyStatusRow): ApiKeyStatus {
+  return { ...row, rateLimitWindows: parseRateLimitWindowsJson(row.rateLimitWindows) };
 }
 
 /**
@@ -10094,6 +10128,43 @@ export function markKeyRateLimited(
     );
 }
 
+export function recordKeyRateLimitWindows(
+  keyType: string,
+  keySuffix: string,
+  keyIndex: number,
+  windows: RateLimitWindowTelemetry,
+  scope = "global",
+  scopeId: string | null = null,
+): void {
+  if (Object.keys(windows).length === 0) return;
+
+  const now = new Date().toISOString();
+  const effectiveScopeId = scopeId ?? "";
+  const provider = deriveProviderFromKeyType(keyType);
+  const db = getDb();
+  const existing = db
+    .prepare<{ rateLimitWindows: string | null }, [string, string, string, string]>(
+      `SELECT rateLimitWindows FROM api_key_status
+       WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
+    )
+    .get(keyType, keySuffix, scope, effectiveScopeId);
+  const serialized = JSON.stringify({
+    ...parseRateLimitWindowsJson(existing?.rateLimitWindows),
+    ...windows,
+  });
+
+  db.prepare(
+    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, rateLimitWindows, provider, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(keyType, keySuffix, scope, scopeId)
+       DO UPDATE SET
+         rateLimitWindows = excluded.rateLimitWindows,
+         keyIndex = excluded.keyIndex,
+         provider = excluded.provider,
+         updatedAt = excluded.updatedAt`,
+  ).run(keyType, keySuffix, keyIndex, scope, effectiveScopeId, serialized, provider, now);
+}
+
 /**
  * Set or clear the human-friendly `name` label on a pooled credential.
  * Identified by the natural key (keyType + keySuffix + scope + scopeId).
@@ -10165,8 +10236,9 @@ export function getKeyStatuses(
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   return db
-    .prepare<ApiKeyStatus, string[]>(`SELECT * FROM api_key_status ${where} ORDER BY keyIndex`)
-    .all(...params);
+    .prepare<ApiKeyStatusRow, string[]>(`SELECT * FROM api_key_status ${where} ORDER BY keyIndex`)
+    .all(...params)
+    .map(rowToApiKeyStatus);
 }
 
 export interface KeyCostSummary {

@@ -233,7 +233,7 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/qa-use": "2.19.0",
     "@desplega.ai/claude-bridge": "0.1.12",
-    "@desplega.ai/agent-fs": "0.7.2"
+    "@desplega.ai/agent-fs": "0.9.0"
   },
   "overrides": {
     "@huggingface/hub": "2.11.0",
@@ -302,6 +302,16 @@ RUN mkdir -p /home/worker/.codex/skills && \
     done && \
     rm -rf /tmp/codex-skills-src && \
     chown -R worker:worker /home/worker/.codex/skills
+
+# Mirror Claude-installed skills into every local harness skill tree. This
+# includes marketplace/plugin skills installed under ~/.claude/skills during the
+# build, not just the repository's plugin/commands conversion above.
+RUN mkdir -p /home/worker/.pi/agent/skills /home/worker/.codex/skills /home/worker/.opencode/skills /home/worker/.agents/skills && \
+    cp -a /home/worker/.claude/skills/. /home/worker/.pi/agent/skills/ || true && \
+    cp -a /home/worker/.claude/skills/. /home/worker/.codex/skills/ || true && \
+    cp -a /home/worker/.claude/skills/. /home/worker/.opencode/skills/ || true && \
+    cp -a /home/worker/.claude/skills/. /home/worker/.agents/skills/ || true && \
+    chown -R worker:worker /home/worker/.pi /home/worker/.codex /home/worker/.opencode /home/worker/.agents
 
 # Copy opencode plugin (used when HARNESS_PROVIDER=opencode).
 # OPENCODE_SWARM_PLUGIN_PATH tells OpencodeAdapter exactly where to find the

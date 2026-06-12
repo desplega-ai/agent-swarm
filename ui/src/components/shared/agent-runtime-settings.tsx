@@ -32,6 +32,7 @@ import {
   findModelOption,
   HARNESS_LABEL,
   isLocalHarness,
+  type LiveBedrockStatus,
   LOCAL_HARNESSES,
   type LocalHarnessProvider,
   type ModelGroup,
@@ -67,22 +68,43 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const [model, setModel] = useState("");
   const [customMode, setCustomMode] = useState(false);
 
+  const liveBedrockStatus = useMemo<LiveBedrockStatus | null>(
+    () =>
+      agent.credStatus?.bedrock != null
+        ? {
+            ready: agent.credStatus.bedrock.ready,
+            models: agent.credStatus.bedrock.models,
+            error: agent.credStatus.bedrock.error,
+          }
+        : null,
+    [agent.credStatus?.bedrock],
+  );
   const groups = useMemo(
-    () => modelGroupsForHarness(harness, configs, envPresenceQuery.data),
-    [harness, configs, envPresenceQuery.data],
+    () => modelGroupsForHarness(harness, configs, envPresenceQuery.data, liveBedrockStatus),
+    [harness, configs, envPresenceQuery.data, liveBedrockStatus],
   );
   const modelOption = findModelOption(model, groups);
   const latestModel = agent.credStatus?.latestModel ?? null;
 
   useEffect(() => {
     const nextModel = configuredModel(configs);
-    const nextGroups = modelGroupsForHarness(initialHarness, configs, envPresenceQuery.data);
+    const nextGroups = modelGroupsForHarness(
+      initialHarness,
+      configs,
+      envPresenceQuery.data,
+      liveBedrockStatus,
+    );
     setHarness(initialHarness);
     setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups));
-  }, [configs, initialHarness, envPresenceQuery.data]);
+  }, [configs, initialHarness, envPresenceQuery.data, liveBedrockStatus]);
 
   function changeHarness(nextHarness: LocalHarnessProvider) {
-    const nextGroups = modelGroupsForHarness(nextHarness, configs, envPresenceQuery.data);
+    const nextGroups = modelGroupsForHarness(
+      nextHarness,
+      configs,
+      envPresenceQuery.data,
+      liveBedrockStatus,
+    );
     setHarness(nextHarness);
     if (!findModelOption(model, nextGroups)) {
       setModel(pickDefaultModelForHarness(nextHarness, nextGroups));
@@ -340,9 +362,16 @@ function ModelCombobox({ value, onChange, groups, selected }: ModelComboboxProps
               <CommandGroup
                 key={group.provider}
                 heading={
-                  <span className="flex items-center gap-1.5">
-                    {!group.enabled && <Lock className="h-3 w-3" />}
-                    {group.provider}
+                  <span className="flex flex-col gap-0.5">
+                    <span className="flex items-center gap-1.5">
+                      {!group.enabled && <Lock className="h-3 w-3" />}
+                      {group.provider}
+                    </span>
+                    {!group.enabled && group.disabledReason ? (
+                      <span className="font-normal text-[10px] text-muted-foreground normal-case">
+                        {group.disabledReason}
+                      </span>
+                    ) : null}
                   </span>
                 }
               >

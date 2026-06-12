@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
+import { serializeEmbedding } from "../be/embedding";
 import type { EmbeddingProvider } from "../be/memory/types";
 import { runBootReembedScripts } from "../be/scripts/boot-reembed";
 import { upsertScriptByName } from "../be/scripts/db";
@@ -98,7 +99,8 @@ describe("boot-reembed-scripts", () => {
     provider.reset();
     await runBootReembedScripts();
     expect(embeddingCount(result.script.id)).toBe(1);
-    expect(provider.calls).toHaveLength(1);
+    // +1 for the provider probe call ("test") that verifies the provider works
+    expect(provider.calls).toHaveLength(2);
   });
 
   test("no-ops when all scripts already have embeddings", async () => {
@@ -157,7 +159,64 @@ describe("boot-reembed-scripts", () => {
 
     provider.reset();
     await runBootReembedScripts();
-    expect(provider.calls).toHaveLength(1);
+    // +1 for the provider probe call
+    expect(provider.calls).toHaveLength(2);
     expect(embeddingCount(withoutEmbed.script.id)).toBe(1);
+  });
+
+  test("re-embeds scripts with wrong-dimension embeddings", async () => {
+    const result = await upsertScriptByName({
+      name: "wrong-dim",
+      scope: "global",
+      source: source("wrong-dim"),
+      description: "Script with legacy 1536d embedding",
+      intent: "Dimension fix test",
+      signatureJson,
+    });
+    expect(embeddingCount(result.script.id)).toBe(1);
+
+    // Overwrite with a wrong-dimension (1536d) embedding to simulate legacy data
+    const wrongDimVector = new Float32Array(1536).fill(0.1);
+    getDb().run("UPDATE script_embeddings SET embedding = ? WHERE scriptId = ?", [
+      serializeEmbedding(wrongDimVector),
+      result.script.id,
+    ]);
+
+    // Verify the wrong dim is stored
+    const stored = getDb()
+      .prepare<{ len: number }, [string]>(
+        "SELECT length(embedding) as len FROM script_embeddings WHERE scriptId = ?",
+      )
+      .get(result.script.id);
+    expect(stored?.len).toBe(1536 * 4);
+
+    provider.reset();
+    await runBootReembedScripts();
+    // +1 for the provider probe call
+    expect(provider.calls).toHaveLength(2);
+
+    // Should now have correct-dimension embedding
+    const fixed = getDb()
+      .prepare<{ len: number }, [string]>(
+        "SELECT length(embedding) as len FROM script_embeddings WHERE scriptId = ?",
+      )
+      .get(result.script.id);
+    expect(fixed?.len).toBe(5 * 4); // provider.dimensions = 5
+  });
+
+  test("no-ops when all scripts have correct-dimension embeddings", async () => {
+    await upsertScriptByName({
+      name: "correct-dim",
+      scope: "global",
+      source: source("correct"),
+      description: "Already correct",
+      intent: "No-op test",
+      signatureJson,
+    });
+    expect(totalEmbeddingCount()).toBe(1);
+
+    provider.reset();
+    await runBootReembedScripts();
+    expect(provider.calls).toHaveLength(0);
   });
 });

@@ -40,10 +40,21 @@ function OpenRouterIcon(props: IconProps) {
   );
 }
 
+function AmazonBedrockIcon(props: IconProps) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, provider label provides accessible name
+    <svg aria-hidden {...ICON_BASE} {...props}>
+      {/* Three stacked strata — evokes a bedrock/foundation layer stack. */}
+      <path d="M4 4.5h16a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1zm0 6h16a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1zm0 6h16a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1z" />
+    </svg>
+  );
+}
+
 const ICON_BY_PROVIDER: Record<ProviderIconKey, (p: IconProps) => ReactElement> = {
   anthropic: AnthropicIcon,
   openai: OpenAIIcon,
   openrouter: OpenRouterIcon,
+  "amazon-bedrock": AmazonBedrockIcon,
 };
 
 export interface ProviderIconProps extends IconProps {

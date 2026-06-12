@@ -34,6 +34,7 @@ export interface CostData {
 }
 
 import type { ProviderName } from "../types";
+import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 
 /** Normalized event emitted by any provider adapter. */
 export type ProviderEvent =
@@ -137,6 +138,12 @@ export interface ProviderResult {
    * three-tier cooldown resolver.
    */
   rateLimitResetAt?: string;
+  /**
+   * Latest provider-emitted rate-limit window snapshots observed during the
+   * session, keyed by provider window type (for Claude: five_hour, seven_day).
+   * Best-effort and informational; consumers must tolerate it being absent.
+   */
+  rateLimitWindows?: RateLimitWindowTelemetry;
 }
 
 /** Behavioral traits that govern prompt assembly and feature gating. */
@@ -181,6 +188,19 @@ export interface CredStatus {
   missing: string[];
   satisfiedBy?: "env" | "file" | "side-effect-pending" | "sdk-delegated";
   hint?: string;
+  /**
+   * Pi-mono Bedrock mode only: usable model list = harness-drivable ∩
+   * AWS-invocable (on-demand/ACTIVE foundation models ∪ inference profiles),
+   * region-scoped. Empty when enumeration failed (ready===false), when
+   * `AWS_REGION` is unset, or when the intersection is empty. Undefined when not
+   * in Bedrock mode.
+   */
+  bedrockModels?: Array<{ id: string; name: string }>;
+  /**
+   * Pi-mono Bedrock mode only: AWS region the enumeration ran against. An empty
+   * string signals Bedrock mode with `AWS_REGION` unset (no region fabricated).
+   */
+  bedrockRegion?: string;
 }
 
 /**
@@ -188,8 +208,28 @@ export interface CredStatus {
  * pi/opencode predicates probe the filesystem for `~/.codex/auth.json`,
  * `~/.pi/agent/auth.json`, `~/.local/share/opencode/auth.json`. Tests inject
  * a fake `fs` + `homeDir` to exercise the file-vs-env branches deterministically.
+ *
+ * `bedrockProbe` is an injectable for the Bedrock SDK enumeration path in
+ * `checkPiMonoCredentials`. In production it is left undefined and the function
+ * dynamically imports `@aws-sdk/client-bedrock` to run real
+ * `ListFoundationModels` + `ListInferenceProfiles` calls. Tests inject a stub
+ * to avoid hitting AWS.
  */
 export interface CredCheckOptions {
   homeDir?: string;
   fs?: { existsSync(p: string): boolean };
+  /**
+   * Injectable for the Bedrock SDK enumeration. When provided, called instead
+   * of the real `@aws-sdk/client-bedrock` `ListFoundationModels` +
+   * `ListInferenceProfiles` calls. Should throw on auth/access failure (with an
+   * AWS SDK-shaped error message) or resolve with the intersected
+   * (harness-drivable ∩ AWS-invocable) model list on success.
+   *
+   * Return type is `Array<{id,name}> | undefined` for backward compatibility:
+   * existing test stubs that return void (`async () => {}`) are still valid
+   * (void is assignable to undefined in TypeScript's structural typing);
+   * new tests that need to exercise the model list inject stubs that return
+   * an array. Production code always returns the model list.
+   */
+  bedrockProbe?: () => Promise<Array<{ id: string; name: string }> | undefined>;
 }
