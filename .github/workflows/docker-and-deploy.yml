@@ -21,10 +21,6 @@ on:
       - ".github/workflows/docker-and-deploy.yml"
   workflow_dispatch:
 
-concurrency:
-  group: docker-and-deploy
-  cancel-in-progress: true
-
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -315,6 +311,9 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
+    concurrency:
+      group: agent-swarm-deploy
+      cancel-in-progress: false
 
     needs:
       - merge-server
@@ -325,7 +324,28 @@ jobs:
         id: checkout
         uses: actions/checkout@v5
 
+      - name: Check running commit is main tip
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          main_tip="$(git rev-parse origin/main)"
+
+          echo "Running commit: ${GITHUB_SHA}"
+          echo "Current origin/main: ${main_tip}"
+
+          if [ "${GITHUB_SHA}" = "${main_tip}" ]; then
+            echo "is_tip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Running commit is still the main tip; proceeding with deploy"
+          else
+            echo "is_tip=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping deploy because a newer main commit is available: ${main_tip}"
+          fi
+
       - name: Deploy Agent Swarm
+        if: steps.guard.outputs.is_tip == 'true'
         uses: tarasyarema/dokploy-deploy-action@main
         with:
           deployment_type: compose
