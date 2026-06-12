@@ -1,4 +1,4 @@
-import type { Agent, AgentCredStatus } from "@/api/types";
+import type { Agent, AgentBedrockStatus, AgentCredStatus } from "@/api/types";
 import { HarnessCell } from "@/components/shared/harness-cell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -61,10 +61,100 @@ function formatRelative(ms: number): string {
   return `${d}d ago`;
 }
 
+// ---------------------------------------------------------------------------
+// BedrockProbeCard — renders pi-harness Bedrock probe status with parity to
+// the overall CredentialsPanel tone/dot pattern.
+// ---------------------------------------------------------------------------
+
+function BedrockProbeCard({ bedrock }: { bedrock: AgentBedrockStatus | null | undefined }) {
+  const dot =
+    bedrock == null ? "bg-status-neutral" : bedrock.ready ? "bg-status-success" : "bg-status-error";
+  const ring =
+    bedrock == null
+      ? "border-status-neutral/30"
+      : bedrock.ready
+        ? "border-status-success/30"
+        : "border-status-error/30";
+  const label =
+    bedrock == null
+      ? "AWS probe pending"
+      : bedrock.ready
+        ? "AWS Bedrock ready"
+        : "AWS Bedrock blocked";
+  const help =
+    bedrock == null
+      ? "Worker hasn't reported Bedrock status yet — still booting, not in Bedrock mode, or CRED_CHECK_DISABLE is set."
+      : bedrock.ready
+        ? "Probe succeeded — the SDK credential chain is valid for this region."
+        : "Probe failed. Worker is parked at credential-wait. Check AWS credentials and AWS_REGION.";
+
+  return (
+    <Card className={cn("border", ring)}>
+      <CardContent className="p-4 space-y-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className={cn("h-2 w-2 rounded-full", dot)} />
+            <span className="font-semibold text-sm">{label}</span>
+          </div>
+          <p className="text-xs text-muted-foreground max-w-prose">{help}</p>
+        </div>
+
+        {bedrock != null ? (
+          <DefinitionList>
+            <InfoRow label="Probe status">
+              {bedrock.ready ? (
+                <Badge
+                  variant="outline"
+                  size="tag"
+                  className="border-status-success/30 text-status-success-strong"
+                >
+                  ready
+                </Badge>
+              ) : (
+                <Badge
+                  variant="outline"
+                  size="tag"
+                  className="border-status-error/30 text-status-error-strong"
+                >
+                  blocked
+                </Badge>
+              )}
+            </InfoRow>
+            <InfoRow label="Region">
+              <code className="text-xs">{bedrock.region}</code>
+            </InfoRow>
+            {bedrock.error ? (
+              <InfoRow label="Probe error">
+                <pre className="bg-muted/50 p-2 rounded text-xs font-mono whitespace-pre-wrap break-words">
+                  {bedrock.error}
+                </pre>
+              </InfoRow>
+            ) : null}
+            <InfoRow label="Usable models">
+              {bedrock.models.length > 0 ? (
+                <span>
+                  {bedrock.models.length} model{bedrock.models.length === 1 ? "" : "s"}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">none reported</span>
+              )}
+            </InfoRow>
+            <InfoRow label="Probed">{formatRelative(bedrock.probedAt)}</InfoRow>
+          </DefinitionList>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function CredentialsPanel({ agent }: { agent: Agent }) {
   const cred = agent.credStatus ?? null;
   const health = classify(cred);
   const tone = TONE[health];
+
+  // Show Bedrock probe card for pi-harness agents — whether or not a probe
+  // has run yet (the "pending" state is also informative).
+  const showBedrockPanel = agent.harnessProvider === "pi";
 
   return (
     <div className="space-y-4">
@@ -168,6 +258,9 @@ export function CredentialsPanel({ agent }: { agent: Agent }) {
           </DefinitionList>
         </CardContent>
       </Card>
+
+      {/* Bedrock probe status — pi harness only, parity with the main cred panel */}
+      {showBedrockPanel ? <BedrockProbeCard bedrock={agent.credStatus?.bedrock} /> : null}
 
       {/* Legacy waiting-for-credentials column is preserved below for older
           workers that haven't started reporting cred_status JSON yet. */}

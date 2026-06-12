@@ -105,6 +105,16 @@ The dashboard's pi harness model picker prefers the worker-reported live list wh
 - The `validateProviderCredentials` live-test arm for `pi` + Bedrock is a pass-through (`presenceCheckOk`) — the real check is the probe above, not a second SDK call.
 - The API binary never imports `@aws-sdk/client-bedrock`; all SDK work is worker-side.
 
+### Bedrock probe card (Credentials tab)
+
+A dedicated **AWS Bedrock** card appears in the Credentials tab for all `pi`-harness agents. It renders a read-only ready/blocked/pending classification at parity with the main credentials card, plus region, probe timestamp, usable model count, and error text when blocked. Implemented in `ui/src/pages/agents/[id]/credentials-panel.tsx` (`BedrockProbeCard`).
+
+| Dot color | State | Meaning |
+|-----------|-------|---------|
+| Green | `ready` | SDK credential chain is valid; models enumerated. |
+| Red | `blocked` | Probe failed; error text shown. Worker is parked at `credential-wait`. |
+| Grey | `pending` | Worker hasn't reported yet (booting, or Bedrock mode not active). |
+
 ## Native session resume is deprecated (2026-05-28)
 
 The runner no longer asks any harness to resume a prior session. Follow-up continuity flows entirely through the bounded context preamble (`src/commands/context-preamble.ts`), which is rebuilt deterministically from the parent-task chain held in the API DB and survives worker-container restarts. The earlier path — `claude --resume <UUID>` / `codex.resumeThread(id)` / managed-cloud `events.list` replay — depended on an on-disk transcript that disappears on deploy/OOM/autoscaler reschedule; when it died, users perceived the agent as having forgotten the conversation.

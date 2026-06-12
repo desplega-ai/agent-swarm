@@ -168,6 +168,14 @@ Ids are matched exactly and the pi-ai id is stored/displayed (the id the harness
 
 The worker reports the intersected list to the API via the existing `PUT /api/agents/:id/credential-status` channel as an optional `bedrock` block inside `cred_status` (no new DB column — rides the migration 055 JSON column). The block carries: `{ region, probedAt, ready, models: [{id, name}], error? }`. It refreshes at boot and on a throttled ~5-minute interval, so access enabled after boot appears without a worker restart.
 
+#### Bedrock probe card (Credentials tab)
+
+A dedicated `AWS Bedrock` card appears in the Credentials tab for all pi-harness agents. It renders a read-only ready/blocked/pending classification with parity to the main credentials card, plus region, probe timestamp, usable model count, and error text when blocked.
+
+- 🟢 **Ready** — SDK credential chain valid; models enumerated.
+- 🔴 **Blocked** — probe failed; error text shown; worker is parked at `credential-wait`.
+- ⚫ **Pending** — worker hasn't reported yet (booting, or Bedrock mode not active).
+
 The dashboard model picker for the `pi` harness:
 - **Prefers the live list** when the worker has reported it.
 - **Falls back to the static `modelsdev-cache.json` snapshot** until the first worker report arrives.
