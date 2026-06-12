@@ -60,6 +60,7 @@ import { resolveClaudeMdPath, syncProfileFilesToServer } from "./profile-sync.ts
 import {
   buildCredStatusReport,
   buildLatestModelReport,
+  isBedrockSdkMode,
   isCredCheckDisabled,
   reportCredStatus,
   reportLatestModel,
@@ -3848,6 +3849,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let lastHarnessReconcileAt = 0;
   const HARNESS_RECONCILE_INTERVAL_MS = 10_000;
 
+  // Throttle for the periodic Bedrock model-enumeration refresh. The credential
+  // report below only re-runs on a harness_provider change (boot + provider
+  // swap), so enabling Bedrock access after boot would otherwise never reach the
+  // picker. This timer re-runs the enumeration on a fixed interval, decoupled
+  // from the harness-change gate, so the UI stays accurate. 5 minutes keeps it
+  // cheap (one bounded AWS enumeration per tick) while still surfacing newly
+  // granted access within a few minutes.
+  let lastBedrockRefreshAt = 0;
+  const BEDROCK_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
   // Create API config for ping/close
   const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
 
@@ -4571,6 +4582,22 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
           .catch((err) =>
             console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
+          );
+      } else if (
+        currentHarness === "pi" &&
+        isBedrockSdkMode(process.env) &&
+        Date.now() - lastBedrockRefreshAt > BEDROCK_REFRESH_INTERVAL_MS
+      ) {
+        // Bedrock enumeration drifts independently of the harness_provider:
+        // access granted (or revoked) in the AWS console after boot won't flip
+        // the provider, so the harness-change gate above never fires. Re-run the
+        // enumeration on the throttled interval so the picker reflects the live
+        // account state. One bounded AWS round-trip per tick.
+        lastBedrockRefreshAt = Date.now();
+        buildCredStatusReport(currentHarness, process.env, {}, "post_task")
+          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
+          .catch((err) =>
+            console.warn(`[${role}] bedrock enumeration refresh failed (non-fatal): ${err}`),
           );
       }
     }

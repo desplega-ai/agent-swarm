@@ -615,6 +615,7 @@ export async function handleAgentsRest(
         latestModel: null,
         reportedAt: parsed.body.latest_model.reportedAt,
         reportKind: "post_task" as const,
+        bedrock: null,
       };
       finalAgent =
         updateAgentCredStatus(parsed.params.id, {

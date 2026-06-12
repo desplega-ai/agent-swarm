@@ -111,9 +111,9 @@ The runner consumes these events (not the provider's native ones) to post progre
 Bedrock SDK mode is active when **either**:
 
 1. `BEDROCK_AUTH_MODE=sdk` is set in `swarm_config` (explicit), **or**
-2. `BEDROCK_AUTH_MODE` is absent and `MODEL_OVERRIDE` starts with `amazon-bedrock/` (prefix-inference fallback — preserves pre-PR1 behavior).
+2. `BEDROCK_AUTH_MODE` is absent and `MODEL_OVERRIDE` starts with `amazon-bedrock/` (prefix-inference fallback — preserves the earlier prefix-inference behavior).
 
-`BEDROCK_AUTH_MODE=bearer` is a declared/validated value for future Mantle support; for now, workers in `bearer` mode fall through to the standard credential check (key / auth.json).
+`BEDROCK_AUTH_MODE=bearer` is a declared/validated value reserved for future bearer-token support; for now, workers in `bearer` mode fall through to the standard credential check (key / auth.json).
 
 `BEDROCK_AUTH_MODE` is a validated optional `swarm_config` key (values: `sdk` | `bearer`; see `src/be/swarm-config-guard.ts`) and a reloadable env key (see `src/commands/runner.ts`).
 
@@ -149,9 +149,30 @@ Anything the AWS SDK accepts:
 | Key | Values | Default |
 |---|---|---|
 | `BEDROCK_AUTH_MODE` | `sdk` \| `bearer` | inferred from `MODEL_OVERRIDE` prefix |
-| `AWS_REGION` | any Bedrock-enabled region | `us-east-1` (SDK default) |
+| `AWS_REGION` | any Bedrock-enabled region | **required** — unset reports a not-ready Bedrock state (no region is fabricated) |
 
-`AWS_REGION` should be set explicitly; the probe uses `us-east-1` as a fallback but may fail for models not available in that region.
+`AWS_REGION` must be set explicitly so enumeration runs against the same region as inference. When it is unset, the worker reports a not-ready Bedrock state with a "set AWS_REGION" hint and does **not** guess a region.
+
+#### Live model enumeration
+
+The credential enumeration also produces the usable model set, region-scoped to `AWS_REGION`. **Usable = harness-drivable ∩ AWS-invocable**:
+
+1. **AWS-invocable** — the union of:
+   - `ListFoundationModels` filtered to on-demand TEXT models that are `ACTIVE` (base foundation-model ids), and
+   - `ListInferenceProfiles` ids — the cross-region inference-profile ids (`us.` / `eu.` / `apac.` / `au.` / `global.`). The newest Claude models on Bedrock are invocable **only** through an inference profile and never appear in `ListFoundationModels`, so this union is what keeps the current Claude models available.
+2. **Harness-drivable** — the subset pi-ai's Converse harness can drive, from `getModels("amazon-bedrock")`. Each id is a valid pi-ai id (base or profile) and round-trips through `MODEL_OVERRIDE=amazon-bedrock/<id>`.
+
+Ids are matched exactly and the pi-ai id is stored/displayed (the id the harness can drive). Models the harness can't drive — and harness models the account can't invoke — are both excluded, so the picker never surfaces an id that would fail with `invalid model identifier` at inference time.
+
+`ListFoundationModels` returns models that *exist* in the region, not strictly those the account has *enabled access* to; the on-demand/ACTIVE filter narrows it, but base access-grant is not fully enumerable from the catalog. The inference-profile union is what makes the **current** models accurate.
+
+The worker reports the intersected list to the API via the existing `PUT /api/agents/:id/credential-status` channel as an optional `bedrock` block inside `cred_status` (no new DB column — rides the migration 055 JSON column). The block carries: `{ region, probedAt, ready, models: [{id, name}], error? }`. It refreshes at boot and on a throttled ~5-minute interval, so access enabled after boot appears without a worker restart.
+
+The dashboard model picker for the `pi` harness:
+- **Prefers the live list** when the worker has reported it.
+- **Falls back to the static `modelsdev-cache.json` snapshot** until the first worker report arrives.
+- Is **never blank** — there is always at least the snapshot list to choose from.
+- Surfaces the probe **failure reason** as subtext when a worker reported but its probe failed (`ready:false`), instead of a silently disabled group.
 
 ### Cost & context tracking
 

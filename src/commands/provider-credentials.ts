@@ -30,6 +30,21 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 export type SupportedProvider = "claude" | "claude-managed" | "codex" | "devin" | "opencode" | "pi";
 
 /**
+ * True when the pi harness should use the AWS SDK Bedrock path: either an
+ * explicit `BEDROCK_AUTH_MODE=sdk`, or — preserving prefix-inference semantics —
+ * `BEDROCK_AUTH_MODE` absent with a `MODEL_OVERRIDE=amazon-bedrock/*` selection.
+ * Single source of truth for the gate so the live-test arm and the worker
+ * reconcile loop agree with `checkPiMonoCredentials`.
+ */
+export function isBedrockSdkMode(env: Record<string, string | undefined>): boolean {
+  const mode = env.BEDROCK_AUTH_MODE?.toLowerCase();
+  return (
+    mode === "sdk" ||
+    (mode === undefined && Boolean(env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/")))
+  );
+}
+
+/**
  * Static documentation of which env vars each provider considers when running
  * `checkCredentials`. Used by the dashboard to render hints before any worker
  * has reported its dynamic state. The arrays are illustrative — the real
@@ -243,7 +258,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
  * | `opencode`       | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` (pi-style) | matching provider's `/v1/models` |
  * | `pi`             | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY`           | matching provider's `/v1/models` |
- * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (validated at first inference call) |
+ * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (real check is the worker-side Bedrock enumeration) |
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v1/sessions?limit=1` |
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
@@ -302,20 +317,14 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
       }
       case "pi":
       case "opencode": {
-        // For the pi Bedrock path, the real credential check is the
-        // `ListFoundationModels` probe that `checkProviderCredentials` (the
-        // `pi` dynamic-import arm) already ran.  That probe result is already
-        // in `buildCredStatusReport` — the live-test is a pass-through / no-op
-        // so we never issue a second AWS SDK call here (which would drag the
-        // SDK into the wrong binary or make slow IMDS calls on non-EC2 hosts).
-        // Bedrock mode: explicit BEDROCK_AUTH_MODE=sdk OR
-        //               absent BEDROCK_AUTH_MODE + amazon-bedrock/ MODEL_OVERRIDE prefix.
-        if (
-          provider === "pi" &&
-          (env.BEDROCK_AUTH_MODE?.toLowerCase() === "sdk" ||
-            (env.BEDROCK_AUTH_MODE === undefined &&
-              env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/")))
-        ) {
+        // For the pi Bedrock path, the real credential check is the AWS SDK
+        // enumeration (`ListFoundationModels` + `ListInferenceProfiles`) that
+        // `checkProviderCredentials` (the `pi` dynamic-import arm) already ran.
+        // That result is already in `buildCredStatusReport` — the live-test is a
+        // pass-through / no-op so we never issue a second AWS SDK call here
+        // (which would drag the SDK into the wrong binary or make slow IMDS
+        // calls on non-EC2 hosts).
+        if (provider === "pi" && isBedrockSdkMode(env)) {
           return presenceCheckOk();
         }
         // Both pi-mono and opencode resolve credentials in the same order:
@@ -408,6 +417,18 @@ export async function buildCredStatusReport(
       testedAt: Date.now(),
     };
   }
+  // Include the Bedrock enumeration block when the pi probe ran in Bedrock SDK
+  // mode (bedrockRegion is only set by checkPiMonoCredentials in that branch).
+  const bedrock: AgentCredStatus["bedrock"] =
+    presence.bedrockRegion !== undefined
+      ? {
+          region: presence.bedrockRegion,
+          probedAt: Date.now(),
+          ready: presence.ready,
+          models: presence.bedrockModels ?? [],
+          error: presence.ready ? undefined : (presence.hint ?? undefined),
+        }
+      : null;
   return {
     ready: presence.ready,
     missing: presence.missing ?? [],
@@ -417,6 +438,7 @@ export async function buildCredStatusReport(
     latestModel: null,
     reportedAt: Date.now(),
     reportKind: kind,
+    bedrock,
   };
 }
 

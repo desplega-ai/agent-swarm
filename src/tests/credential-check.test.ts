@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import {
   buildCredStatusReport,
   checkProviderCredentials,
@@ -11,6 +11,7 @@ import { checkCodexCredentials } from "../providers/codex-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import { checkPiMonoCredentials } from "../providers/pi-mono-adapter";
+import { AgentCredStatusSchema } from "../types";
 
 /** Build a stub `fs` whose `existsSync` returns true only for paths in the set. */
 function fsWith(present: Set<string>): { existsSync(p: string): boolean } {
@@ -138,7 +139,8 @@ describe("checkCodexCredentials", () => {
 
 /**
  * Stub probes for Bedrock tests. These replace the real @aws-sdk/client-bedrock
- * ListFoundationModels call so unit tests never hit AWS.
+ * `ListFoundationModels` + `ListInferenceProfiles` enumeration so unit tests
+ * never hit AWS.
  */
 const bedrockProbeSuccess = async () => {};
 const bedrockProbeAuthFail = async () => {
@@ -277,7 +279,10 @@ describe("checkPiMonoCredentials", () => {
   // "amazon-bedrock/", the probe runs. Tests inject a stub to avoid hitting AWS.
 
   test("amazon-bedrock: probe success → ready (sdk-delegated)", async () => {
-    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
     const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
       fs: noFiles,
@@ -293,6 +298,7 @@ describe("checkPiMonoCredentials", () => {
     const env = {
       MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
       ANTHROPIC_API_KEY: "x",
+      AWS_REGION: "us-east-1",
     };
     const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
@@ -305,7 +311,10 @@ describe("checkPiMonoCredentials", () => {
 
   test("amazon-bedrock: probe success even when auth.json exists (Bedrock wins over file)", async () => {
     // auth.json holds Anthropic/OpenRouter/OpenAI creds — none used by Bedrock.
-    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
     const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
       fs: fsWith(new Set([AUTH])),
@@ -316,7 +325,10 @@ describe("checkPiMonoCredentials", () => {
   });
 
   test("amazon-bedrock: provider-prefix match is case-insensitive", async () => {
-    const env = { MODEL_OVERRIDE: "Amazon-Bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const env = {
+      MODEL_OVERRIDE: "Amazon-Bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
     const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
       fs: noFiles,
@@ -327,7 +339,10 @@ describe("checkPiMonoCredentials", () => {
   });
 
   test("amazon-bedrock: probe auth failure → ready:false with aws-auth hint", async () => {
-    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
     const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
       fs: noFiles,
@@ -338,7 +353,10 @@ describe("checkPiMonoCredentials", () => {
   });
 
   test("amazon-bedrock: probe access failure → ready:false with aws-access hint", async () => {
-    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
     const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
       fs: noFiles,
@@ -349,7 +367,10 @@ describe("checkPiMonoCredentials", () => {
   });
 
   test("amazon-bedrock: probe region failure → ready:false (unclassified hint)", async () => {
-    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
     const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
       fs: noFiles,
@@ -365,7 +386,11 @@ describe("checkPiMonoCredentials", () => {
   test("BEDROCK_AUTH_MODE=sdk: probe triggered even without amazon-bedrock/ prefix", async () => {
     // Explicit mode — MODEL_OVERRIDE can be anything (or absent); the Bedrock
     // path is taken because the operator explicitly declared BEDROCK_AUTH_MODE=sdk.
-    const env = { BEDROCK_AUTH_MODE: "sdk", MODEL_OVERRIDE: "some-other-model" };
+    const env = {
+      BEDROCK_AUTH_MODE: "sdk",
+      MODEL_OVERRIDE: "some-other-model",
+      AWS_REGION: "us-east-1",
+    };
     const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
       fs: noFiles,
@@ -376,7 +401,7 @@ describe("checkPiMonoCredentials", () => {
   });
 
   test("BEDROCK_AUTH_MODE=sdk: probe failure → ready:false", async () => {
-    const env = { BEDROCK_AUTH_MODE: "sdk" };
+    const env = { BEDROCK_AUTH_MODE: "sdk", AWS_REGION: "us-east-1" };
     const status = await checkPiMonoCredentials(env, {
       homeDir: HOME,
       fs: noFiles,
@@ -387,13 +412,13 @@ describe("checkPiMonoCredentials", () => {
 
   test("BEDROCK_AUTH_MODE=bearer: does NOT trigger the sdk probe (falls through)", async () => {
     // The bearer path is declared/validated but the full implementation is
-    // out of scope for PR1. With no other credentials set it should be not-ready
+    // not implemented yet. With no other credentials set it should be not-ready
     // via the standard permissive check, not via the sdk probe.
     const env = { BEDROCK_AUTH_MODE: "bearer" };
     // No other keys set, no auth.json → not-ready from the permissive path.
     const status = await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
     expect(status.ready).toBe(false);
-    // Satisfying via any standard key still works for the bearer mode (PR1 scope).
+    // Satisfying via any standard key still works for the bearer mode today.
     const withKey = await checkPiMonoCredentials(
       { BEDROCK_AUTH_MODE: "bearer", ANTHROPIC_API_KEY: "x" },
       { homeDir: HOME, fs: noFiles },
@@ -409,6 +434,110 @@ describe("checkPiMonoCredentials", () => {
     const status = await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
     expect(status.ready).toBe(true);
     expect(status.satisfiedBy).toBe("env");
+  });
+
+  // ─── model enumeration (bedrockModels) ───────────────────────────────────
+
+  test("probe success with model list → bedrockModels populated", async () => {
+    const fakeModels = [
+      { id: "anthropic.claude-sonnet-4-20250514-v1:0", name: "Claude Sonnet 4" },
+      { id: "anthropic.claude-haiku-4-5-20251001-v1:0", name: "Claude Haiku 4.5" },
+    ];
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: async () => fakeModels,
+    });
+    expect(status.ready).toBe(true);
+    expect(status.bedrockModels).toEqual(fakeModels);
+    expect(status.bedrockRegion).toBe("us-east-1");
+  });
+
+  test("probe success with void return → bedrockModels is empty array (backward compat)", async () => {
+    // Auth-only stubs return void — should not break enumeration callers.
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeSuccess, // returns void
+    });
+    expect(status.ready).toBe(true);
+    expect(status.bedrockModels).toEqual([]);
+  });
+
+  test("probe failure → bedrockModels is empty array and bedrockRegion is set", async () => {
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeAuthFail,
+    });
+    expect(status.ready).toBe(false);
+    expect(status.bedrockModels).toEqual([]);
+    expect(status.bedrockRegion).toBe("us-east-1");
+  });
+
+  test("probe uses AWS_REGION from env for bedrockRegion", async () => {
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "eu-west-1",
+    };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeSuccess,
+    });
+    expect(status.bedrockRegion).toBe("eu-west-1");
+  });
+
+  // ─── region not fabricated when AWS_REGION is unset ───────────────────────
+
+  test("AWS_REGION unset (sdk mode) → not-ready with set-region hint, no probe, no fabricated region", async () => {
+    // No us-east-1 fallback: enumerating a guessed region can differ from where
+    // inference runs. The probe must NOT run; report a not-ready Bedrock state.
+    let probeCalled = false;
+    const env = { BEDROCK_AUTH_MODE: "sdk" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: async () => {
+        probeCalled = true;
+        return [];
+      },
+    });
+    expect(probeCalled).toBe(false);
+    expect(status.ready).toBe(false);
+    expect(status.hint).toContain("AWS_REGION");
+    expect(status.bedrockModels).toEqual([]);
+    // Empty string sentinel, NOT a fabricated "us-east-1".
+    expect(status.bedrockRegion).toBe("");
+  });
+
+  test("AWS_REGION unset (prefix inference) → not-ready, bedrock block still reported", async () => {
+    const env = { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0" };
+    const status = await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(false);
+    expect(status.bedrockRegion).toBe("");
+    expect(status.bedrockRegion).not.toBe("us-east-1");
+  });
+
+  test("non-Bedrock path → bedrockModels and bedrockRegion are undefined", async () => {
+    // Standard anthropic key path — no Bedrock probe runs.
+    const env = { ANTHROPIC_API_KEY: "x" };
+    const status = await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(status.ready).toBe(true);
+    expect(status.bedrockModels).toBeUndefined();
+    expect(status.bedrockRegion).toBeUndefined();
   });
 });
 
@@ -589,5 +718,225 @@ describe("buildCredStatusReport", () => {
   test("post_task kind is preserved on the snapshot", async () => {
     const snap = await buildCredStatusReport("claude", {}, {}, "post_task");
     expect(snap.reportKind).toBe("post_task");
+  });
+
+  // bedrock block in AgentCredStatus
+  test("Bedrock SDK mode: bedrock block included with live model list", async () => {
+    const fakeModels = [{ id: "anthropic.claude-sonnet-4-20250514-v1:0", name: "Claude Sonnet 4" }];
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
+    const snap = await buildCredStatusReport(
+      "pi",
+      env,
+      { bedrockProbe: async () => fakeModels },
+      "boot",
+    );
+    expect(snap.ready).toBe(true);
+    expect(snap.bedrock).not.toBeNull();
+    expect(snap.bedrock?.ready).toBe(true);
+    expect(snap.bedrock?.models).toEqual(fakeModels);
+    expect(snap.bedrock?.region).toBe("us-east-1");
+    expect(typeof snap.bedrock?.probedAt).toBe("number");
+  });
+
+  test("Bedrock SDK mode: probe failure → bedrock block has ready:false and empty models", async () => {
+    const env = {
+      MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      AWS_REGION: "us-east-1",
+    };
+    const snap = await buildCredStatusReport(
+      "pi",
+      env,
+      { bedrockProbe: bedrockProbeAuthFail },
+      "boot",
+    );
+    expect(snap.ready).toBe(false);
+    expect(snap.bedrock).not.toBeNull();
+    expect(snap.bedrock?.ready).toBe(false);
+    expect(snap.bedrock?.models).toEqual([]);
+    expect(snap.bedrock?.error).toBeTruthy();
+  });
+
+  test("non-Bedrock pi mode → bedrock block is null", async () => {
+    const HOME = "/home/worker";
+    const snap = await buildCredStatusReport(
+      "pi",
+      { ANTHROPIC_API_KEY: "x" },
+      { homeDir: HOME, fs: noFiles },
+      "boot",
+    );
+    expect(snap.bedrock).toBeNull();
+  });
+
+  test("non-pi provider → bedrock block is null", async () => {
+    const snap = await buildCredStatusReport(
+      "claude",
+      { CLAUDE_CODE_OAUTH_TOKEN: "tok" },
+      {},
+      "boot",
+    );
+    expect(snap.bedrock).toBeNull();
+  });
+});
+
+// ─── schema round-trip ───────────────────────────────────────────────────────
+
+describe("AgentCredStatusSchema round-trip with bedrock block", () => {
+  test("full bedrock block parses and serializes cleanly", () => {
+    const raw = {
+      ready: true,
+      missing: [],
+      satisfiedBy: "sdk-delegated",
+      hint: "AWS SDK credentials verified via ListFoundationModels (region: us-east-1).",
+      liveTest: null,
+      latestModel: null,
+      reportedAt: Date.now(),
+      reportKind: "boot",
+      bedrock: {
+        region: "us-east-1",
+        probedAt: Date.now(),
+        ready: true,
+        models: [
+          { id: "anthropic.claude-sonnet-4-20250514-v1:0", name: "Claude Sonnet 4" },
+          { id: "anthropic.claude-haiku-4-5-20251001-v1:0", name: "Claude Haiku 4.5" },
+        ],
+      },
+    };
+    const parsed = AgentCredStatusSchema.safeParse(raw);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.bedrock?.models).toHaveLength(2);
+      expect(parsed.data.bedrock?.ready).toBe(true);
+      expect(parsed.data.bedrock?.region).toBe("us-east-1");
+    }
+  });
+
+  test("bedrock block absent → defaults to null (backward compat)", () => {
+    const raw = {
+      ready: true,
+      missing: [],
+      satisfiedBy: "env",
+      hint: null,
+      liveTest: null,
+      latestModel: null,
+      reportedAt: Date.now(),
+      reportKind: "boot",
+      // No bedrock field
+    };
+    const parsed = AgentCredStatusSchema.safeParse(raw);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.bedrock).toBeNull();
+    }
+  });
+
+  test("bedrock block with error field parses correctly", () => {
+    const raw = {
+      ready: false,
+      missing: [],
+      satisfiedBy: null,
+      hint: "ExpiredToken",
+      liveTest: null,
+      latestModel: null,
+      reportedAt: Date.now(),
+      reportKind: "boot",
+      bedrock: {
+        region: "us-east-1",
+        probedAt: Date.now(),
+        ready: false,
+        models: [],
+        error: "Token expired — run aws sso login",
+      },
+    };
+    const parsed = AgentCredStatusSchema.safeParse(raw);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.bedrock?.ready).toBe(false);
+      expect(parsed.data.bedrock?.error).toBeDefined();
+      expect(parsed.data.bedrock?.models).toEqual([]);
+    }
+  });
+});
+
+// ─── usable set = harness-drivable ∩ (ON_DEMAND/ACTIVE FMs ∪ inference profiles) ─
+// The real intersection lives in `runBedrockSdkProbeAndEnumerate`, which the
+// injectable `bedrockProbe` stub bypasses. To exercise the union + filtering +
+// intersection without real AWS credentials, stub `@aws-sdk/client-bedrock` and
+// feed it canned list responses built from REAL pi-ai catalog ids.
+
+describe("runBedrockSdkProbeAndEnumerate — intersection logic", () => {
+  test("includes inference-profile ids; drops non-ACTIVE and non-drivable ids", async () => {
+    const { getModels } = await import("@earendil-works/pi-ai");
+    const drivable = getModels("amazon-bedrock");
+    const isProfile = (id: string) => /^(us|eu|apac|au|global)\./.test(id);
+    const baseModel = drivable.find((m) => !isProfile(m.id));
+    const profileModel = drivable.find((m) => isProfile(m.id));
+    const legacyDrivable = drivable.find(
+      (m) => m.id !== baseModel?.id && m.id !== profileModel?.id,
+    );
+    if (!baseModel || !profileModel || !legacyDrivable) {
+      throw new Error("pi-ai amazon-bedrock catalog missing expected shapes");
+    }
+
+    // Capture which command kinds the client was asked to send.
+    const sentKinds: string[] = [];
+    mock.module("@aws-sdk/client-bedrock", () => ({
+      BedrockClient: class {
+        async send(cmd: { __kind: string }) {
+          sentKinds.push(cmd.__kind);
+          if (cmd.__kind === "fm") {
+            return {
+              modelSummaries: [
+                // ON_DEMAND/TEXT (request-filtered) + ACTIVE → kept.
+                { modelId: baseModel.id, modelLifecycle: { status: "ACTIVE" } },
+                // Drivable but NOT ACTIVE → dropped by lifecycle filter.
+                { modelId: legacyDrivable.id, modelLifecycle: { status: "LEGACY" } },
+                // ACTIVE but NOT in the pi-ai catalog → dropped by intersection.
+                { modelId: "amazon.not-a-real-pi-id-v9:0", modelLifecycle: { status: "ACTIVE" } },
+              ],
+            };
+          }
+          return {
+            inferenceProfileSummaries: [
+              // Cross-region profile id present in the pi-ai catalog → kept.
+              // This is exactly the class the old base-only intersection dropped.
+              { inferenceProfileId: profileModel.id },
+              // Profile id NOT in the pi-ai catalog → dropped by intersection.
+              { inferenceProfileId: "us.vendor.unknown-profile-v1:0" },
+            ],
+          };
+        }
+      },
+      ListFoundationModelsCommand: class {
+        __kind = "fm";
+        constructor(public input: unknown) {}
+      },
+      ListInferenceProfilesCommand: class {
+        __kind = "ip";
+        constructor(public input: unknown) {}
+      },
+    }));
+
+    const { runBedrockSdkProbeAndEnumerate } = await import("../providers/pi-mono-adapter");
+    const usable = await runBedrockSdkProbeAndEnumerate("us-east-1");
+    const ids = usable.map((m) => m.id);
+
+    // Both list calls were made (single bounded round-trip each).
+    expect(sentKinds).toContain("fm");
+    expect(sentKinds).toContain("ip");
+    // Base ACTIVE model kept.
+    expect(ids).toContain(baseModel.id);
+    // Inference-profile model kept — the regression this fix targets.
+    expect(ids).toContain(profileModel.id);
+    // Non-ACTIVE drivable dropped; non-catalog ids dropped.
+    expect(ids).not.toContain(legacyDrivable.id);
+    expect(ids).not.toContain("amazon.not-a-real-pi-id-v9:0");
+    expect(ids).not.toContain("us.vendor.unknown-profile-v1:0");
+    // Stored ids are pi-ai ids carrying the catalog name.
+    expect(usable.find((m) => m.id === profileModel.id)?.name).toBe(profileModel.name);
+
+    mock.restore();
   });
 });
