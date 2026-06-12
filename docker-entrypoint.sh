@@ -993,9 +993,18 @@ echo ""
 chown -R worker:worker /home/worker/.local 2>/dev/null || true
 
 # Optional: initialize a local PostgreSQL 16 cluster before dropping privileges.
-# Requires the image was built with SWARM_DEP_POSTGRES_BUILD=true.
 if [ "${SWARM_DEP_POSTGRES_ENABLED:-false}" = "true" ]; then
   /usr/local/bin/init-local-postgres.sh
+fi
+
+# Optional: start a local Redis server before dropping privileges.
+if [ "${SWARM_DEP_REDIS_ENABLED:-false}" = "true" ]; then
+  /usr/local/bin/init-local-redis.sh
+fi
+
+# Optional: start a local NATS server (JetStream) before dropping privileges.
+if [ "${SWARM_DEP_NATS_ENABLED:-false}" = "true" ]; then
+  /usr/local/bin/init-local-nats.sh
 fi
 
 # Run the agent using compiled binary.
