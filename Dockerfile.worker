@@ -51,6 +51,12 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     tmux \
     && rm -rf /var/lib/apt/lists/*
 
+# Redis server for tasks that need a local queue/cache backend (always bundled).
+# Runtime start is controlled by SWARM_DEP_REDIS_ENABLED (default: false).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends redis-server redis-tools \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install GitLab CLI (glab) for GitLab integration
 ARG GLAB_VERSION=1.89.0
 ARG TARGETARCH
@@ -281,6 +287,10 @@ RUN chmod +x /usr/local/bin/agent-swarm
 # Optional helper to start a local PostgreSQL 16 cluster (not invoked automatically)
 COPY scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 RUN chmod +x /usr/local/bin/init-local-postgres.sh
+
+# Optional helper to start local Redis (not invoked automatically)
+COPY scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
+RUN chmod +x /usr/local/bin/init-local-redis.sh
 
 # Copy commands (changes on code change — keep late)
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
