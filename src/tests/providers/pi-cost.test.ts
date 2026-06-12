@@ -108,13 +108,14 @@ describe("PiMonoSession — provider tag on CostData", () => {
       session.onEvent((e) => events.push(e));
 
       const sessionInit = events.find((e) => e.type === "session_init");
-      expect(sessionInit).toBeDefined();
-      if (sessionInit?.type === "session_init") {
-        expect(sessionInit.provider).toBe("pi");
-        expect(sessionInit.harnessVariant).toBe("stock");
-        expect(typeof sessionInit.harnessVariantMeta?.version).toBe("string");
-        expect((sessionInit.harnessVariantMeta?.version as string).length).toBeGreaterThan(0);
+      expect(sessionInit?.type).toBe("session_init");
+      if (sessionInit?.type !== "session_init") {
+        throw new Error("Expected pi session_init event");
       }
+      expect(sessionInit.provider).toBe("pi");
+      expect(sessionInit.harnessVariant).toBe("stock");
+      expect(typeof sessionInit.harnessVariantMeta?.version).toBe("string");
+      expect((sessionInit.harnessVariantMeta?.version as string).length).toBeGreaterThan(0);
 
       const result = await session.waitForCompletion();
 
