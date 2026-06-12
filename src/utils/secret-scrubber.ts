@@ -124,6 +124,13 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
     name: "signoz_ingestion_key",
     re: /\bsignoz-ingestion-key=[A-Za-z0-9._~+/-]{20,}={0,2}\b/g,
   },
+  // Linear OAuth tokens and API keys
+  { name: "linear_oauth", re: /\blin_oauth_[A-Za-z0-9_-]{10,}\b/g },
+  { name: "linear_api", re: /\blin_api_[A-Za-z0-9_-]{10,}\b/g },
+  // npm tokens
+  { name: "npm_token", re: /\bnpm_[A-Za-z0-9_-]{20,}\b/g },
+  // Jira API tokens (Atlassian cloud)
+  { name: "atlassian_token", re: /\bATATT[A-Za-z0-9_-]{20,}\b/g },
   // Agent-swarm MCP user tokens (`aswt_<base62-20+>`). Schema lands in
   // migration 064; mint/revoke endpoints ship with the MCP-token plan.
   // Rule lives here now so plaintexts never leak into logs once endpoints

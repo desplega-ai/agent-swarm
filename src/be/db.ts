@@ -2100,7 +2100,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   if (!row) return null;
 
   if (output) {
-    row = taskQueries.setOutput().get(output, id);
+    row = taskQueries.setOutput().get(scrubSecrets(output), id);
   }
 
   if (row && oldTask) {
@@ -2141,7 +2141,8 @@ export function failTask(id: string, reason: string): AgentTask | null {
   }
 
   const finishedAt = new Date().toISOString();
-  const row = taskQueries.setFailure().get(reason, finishedAt, id);
+  const scrubbedReason = scrubSecrets(reason);
+  const row = taskQueries.setFailure().get(scrubbedReason, finishedAt, id);
   if (row && oldTask) {
     try {
       createLogEntry({
@@ -2150,7 +2151,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
         agentId: row.agentId ?? undefined,
         oldValue: oldTask.status,
         newValue: "failed",
-        metadata: { reason },
+        metadata: { reason: scrubbedReason },
       });
     } catch {}
     try {
@@ -2496,21 +2497,22 @@ export function deleteTask(id: string): boolean {
 }
 
 export function updateTaskProgress(id: string, progress: string): AgentTask | null {
-  const row = taskQueries.setProgress().get(progress, id);
+  const scrubbedProgress = scrubSecrets(progress);
+  const row = taskQueries.setProgress().get(scrubbedProgress, id);
   if (row) {
     try {
       createLogEntry({
         eventType: "task_progress",
         taskId: id,
         agentId: row.agentId ?? undefined,
-        newValue: progress,
+        newValue: scrubbedProgress,
       });
     } catch {}
     try {
       import("../workflows/event-bus").then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.progress", {
           taskId: id,
-          progress,
+          progress: scrubbedProgress,
           agentId: row.agentId,
         });
       });
@@ -2791,6 +2793,7 @@ export function createLogEntry(entry: {
   metadata?: Record<string, unknown>;
 }): AgentLog {
   const id = crypto.randomUUID();
+  const metaJson = entry.metadata ? JSON.stringify(entry.metadata) : null;
   const row = logQueries
     .insert()
     .get(
@@ -2799,8 +2802,8 @@ export function createLogEntry(entry: {
       entry.agentId ?? null,
       entry.taskId ?? null,
       entry.oldValue ?? null,
-      entry.newValue ?? null,
-      entry.metadata ? JSON.stringify(entry.metadata) : null,
+      entry.newValue ? scrubSecrets(entry.newValue) : null,
+      metaJson ? scrubSecrets(metaJson) : null,
     );
   if (!row) throw new Error("Failed to create log entry");
   return rowToAgentLog(row);

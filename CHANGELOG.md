@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.95.0] - 2026-06-11
+
+### Added
+- **First-class Bedrock auth mode for pi-mono** (#738) — pi-mono can now use Bedrock credentials directly and probe credential availability so AWS runtime/auth failures are surfaced before a task gets deep into execution.
+- **Generic extra MCP OAuth authorize parameters** (#739) — MCP OAuth connections can now pass provider-specific `extraAuthorizeParams` through the authorize flow without one-off server code for each provider.
+- **Skill sync across harnesses with agent-fs 0.7.5** (#740) — runtime skill bundles now sync across harness environments, and the bundled agent-fs version is refreshed for the latest shared-filesystem behavior.
+
 ## [1.94.0] - 2026-06-11
 
 ### Added

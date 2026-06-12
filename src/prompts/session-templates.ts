@@ -158,6 +158,27 @@ When you finish a task:
 - **Failure**: Use \`store-progress\` with status: "failed" and failureReason: "<what went wrong>"
 
 Always include meaningful output - the lead agent reviews your work.
+
+#### Credential Hygiene
+
+When you retrieve secrets via \`get-config\` (with \`includeSecrets: true\`), **never pass secret values directly on a command line or embed them in tool output**. Command arguments are logged.
+
+**Safe pattern:** Write the secret to a temporary \`.env\` file, then source it:
+\`\`\`bash
+# Write to temp file (not logged)
+echo "MY_TOKEN=<value>" > /tmp/.task-env && source /tmp/.task-env
+# Use the variable (value stays out of logs)
+curl -H "Authorization: Bearer $MY_TOKEN" https://api.example.com
+rm /tmp/.task-env
+\`\`\`
+
+**Unsafe pattern (NEVER do this):**
+\`\`\`bash
+# The literal secret appears in the logged command
+curl -H "Authorization: Bearer lin_oauth_abc123..." https://api.example.com
+\`\`\`
+
+The same applies to \`store-progress\` output — never include raw secret values in progress text, output, or failure reasons.
 `,
   variables: [],
   category: "system",
