@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.96.0] - 2026-06-12
+
+### Added
+- **pi-mono Bedrock mode now does real AWS probing with account-accurate model enumeration** (#738, #744) — workers can activate Bedrock SDK mode explicitly or from an `amazon-bedrock/*` model, classify AWS credential failures before task execution, and surface the exact Bedrock models the account can invoke in-region, including inference-profile-only Claude models.
+- **Generic MCP OAuth authorize-request extras** (#739) — MCP server definitions can now attach provider-specific `extraAuthorizeParams` such as `access_type=offline` and `prompt=consent` without bespoke server code, while reserved OAuth parameters remain protected from override.
+
+### Changed
+- **Skill bundles now sync across local harness filesystems** (#740) — the worker mirrors the installed skill set into Claude, pi-mono, Codex, opencode, and shared `.agents` directories, and refreshes the bundled `agent-fs` CLI to `0.7.5`.
+- **Docker release notifications now carry the resolved package version end-to-end** (#742, #746) — the image publish workflow notifies Swarm Cloud with the release version instead of only commit-derived context, keeping downstream release records aligned with package tags.
+- **Persisted logs and task text get broader secret scrubbing coverage** (#743) — runtime-fetched config secrets are now registered for redaction, and more token patterns are scrubbed before session logs, task progress, outputs, and failures hit the database.
+
+### Fixed
+- **Slack watcher restart state is durable** (#727) — tracked Slack thread messages survive restarts, preventing duplicate task creation or duplicate completion chatter after a reboot.
+- **pi-mono Bedrock runtime errors surface as structured failure categories** (#731) — AWS SDK failures now preserve actionable auth/access/throttle/model diagnostics instead of collapsing into vague runtime errors.
+- **Workflow property-match aliases resolve correctly again** (#734) — compatible alias forms for property-match inputs no longer fail validation during workflow execution.
+- **Boot-time historical log scrubbing avoids false candidate matches** (#745) — the one-time scrubber now chooses rows and token boundaries more precisely, reducing accidental misses and over-matches.
+
 ## [1.95.0] - 2026-06-11
 
 ### Added

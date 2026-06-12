@@ -84,8 +84,10 @@ Which credentials you need depends on your selected harness provider:
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models via pi-mono |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
+| `BEDROCK_AUTH_MODE` | No | inferred from `MODEL_OVERRIDE` | Optional Bedrock mode override. Set `sdk` to force AWS SDK credential probing / live model enumeration; `bearer` is reserved for future support |
+| `AWS_REGION` | In Bedrock SDK mode | — | Required region for Bedrock credential probing and account-accurate model enumeration when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*` |
 
-\* At least one credential source is required (API key or `~/.pi/agent/auth.json`). **Do not** pass `CLAUDE_CODE_OAUTH_TOKEN` when using pi-mono — it will override the configured provider. See [Harness Configuration](/docs/guides/harness-configuration) for details.
+\* At least one credential source is required (API key, `~/.pi/agent/auth.json`, or the AWS SDK default chain in Bedrock SDK mode). **Do not** pass `CLAUDE_CODE_OAUTH_TOKEN` when using pi-mono — it will override the configured provider. See [Harness Configuration](/docs/guides/harness-configuration) and [Harness Providers](/docs/guides/harness-providers#pi-mono--amazon-bedrock-auth) for details.
 
 **Codex** (`HARNESS_PROVIDER=codex`):
 
