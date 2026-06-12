@@ -339,6 +339,7 @@ jobs:
     name: Notify Swarm Cloud image release
     runs-on: ubuntu-latest
     needs:
+      - detect-version-change
       - merge-server
       - merge-worker
     if: github.repository == 'desplega-ai/agent-swarm' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -365,7 +366,7 @@ jobs:
           WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
           GIT_SHA: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ needs.detect-version-change.outputs.version_changed == 'true' && needs.detect-version-change.outputs.version || github.ref_name }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
           WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -425,6 +426,7 @@ jobs:
           signature="$(openssl dgst -sha256 -hmac "$IMAGE_RELEASE_INTAKE_SECRET" payload.json | awk '{print $NF}')"
 
           echo "::notice::Posting image release for ${REPOSITORY}@${GIT_SHA}"
+          echo "::notice::Image release version: ${VERSION}"
           echo "::notice::API image: ${api_ref}"
           echo "::notice::Worker image: ${worker_ref}"
           echo "::notice::Workflow run: ${WORKFLOW_RUN_URL}"
