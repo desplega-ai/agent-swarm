@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createMcpServer, createUser, initDb } from "../be/db";
+import {
+  closeDb,
+  createMcpServer,
+  createUser,
+  getMcpServerById,
+  initDb,
+  updateMcpServer,
+} from "../be/db";
 import {
   consumeMcpOAuthPending,
   deleteMcpOAuthToken,
@@ -218,6 +225,69 @@ describe("mcp_oauth_pending (state PK)", () => {
     const deleted = gcMcpOAuthPending(10 * 60_000);
     expect(deleted).toBeGreaterThanOrEqual(1);
     expect(consumeMcpOAuthPending("state-gc-old")).toBeNull();
+  });
+});
+
+describe("mcp_servers.extraAuthorizeParams round-trip", () => {
+  test("createMcpServer persists extraAuthorizeParams", () => {
+    const server = createMcpServer({
+      name: "bigquery-mcp",
+      transport: "http",
+      url: "https://bigquery.googleapis.com/",
+      scope: "swarm",
+      extraAuthorizeParams: '{"access_type":"offline","prompt":"consent"}',
+    });
+    expect(server.extraAuthorizeParams).toBe('{"access_type":"offline","prompt":"consent"}');
+
+    const fetched = getMcpServerById(server.id);
+    expect(fetched).not.toBeNull();
+    expect(fetched!.extraAuthorizeParams).toBe('{"access_type":"offline","prompt":"consent"}');
+  });
+
+  test("createMcpServer with no extraAuthorizeParams defaults to null", () => {
+    const server = createMcpServer({
+      name: "hubspot-mcp",
+      transport: "http",
+      url: "https://api.hubspot.com/",
+      scope: "swarm",
+    });
+    expect(server.extraAuthorizeParams).toBeNull();
+  });
+
+  test("updateMcpServer persists extraAuthorizeParams and bumps version", () => {
+    const server = createMcpServer({
+      name: "gdrive-mcp",
+      transport: "http",
+      url: "https://www.googleapis.com/drive/v3/",
+      scope: "swarm",
+    });
+    const versionBefore = server.version;
+
+    const updated = updateMcpServer(server.id, {
+      extraAuthorizeParams: '{"access_type":"offline","prompt":"consent"}',
+    });
+    expect(updated).not.toBeNull();
+    expect(updated!.extraAuthorizeParams).toBe('{"access_type":"offline","prompt":"consent"}');
+    expect(updated!.version).toBe(versionBefore + 1);
+  });
+
+  test("updateMcpServer can clear extraAuthorizeParams to null without bumping version twice", () => {
+    const server = createMcpServer({
+      name: "sheets-mcp",
+      transport: "http",
+      url: "https://sheets.googleapis.com/",
+      scope: "swarm",
+      extraAuthorizeParams: '{"access_type":"offline"}',
+    });
+
+    const cleared = updateMcpServer(server.id, { extraAuthorizeParams: undefined });
+    // No extraAuthorizeParams key → no version bump, field untouched
+    expect(cleared!.extraAuthorizeParams).toBe('{"access_type":"offline"}');
+    expect(cleared!.version).toBe(server.version);
+
+    const nulled = updateMcpServer(server.id, { extraAuthorizeParams: null as unknown as string });
+    expect(nulled!.extraAuthorizeParams).toBeNull();
+    expect(nulled!.version).toBe(server.version + 1);
   });
 });
 

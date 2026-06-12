@@ -576,6 +576,15 @@ httpServer
       .catch((err) => {
         console.error("[boot-reembed-scripts] startup backfill failed (non-fatal):", err);
       });
+
+    // One-time scrub: retroactively redact any session_logs rows containing
+    // sensitive patterns that pre-date the defense-in-depth scrub layer.
+    // Idempotent, tracked via seed_state.
+    import("../be/boot-scrub-logs")
+      .then(({ runBootScrubLogs }) => runBootScrubLogs())
+      .catch((err) => {
+        console.error("[boot-scrub-logs] startup scrub failed (non-fatal):", err);
+      });
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);

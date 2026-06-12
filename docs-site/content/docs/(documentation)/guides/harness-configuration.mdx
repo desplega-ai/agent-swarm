@@ -253,7 +253,7 @@ The prefix before the first `/` selects the provider and the matching credential
 - **AGENTS.md symlink**: pi-mono reads `AGENTS.md` for project instructions (equivalent to Claude's `CLAUDE.md`). The adapter automatically creates a symlink `AGENTS.md → CLAUDE.md` during sessions so your existing project instructions work with both providers.
 - **Lazy provider import**: the worker only imports `@earendil-works/pi-coding-agent` when `HARNESS_PROVIDER=pi`, so non-pi workers are no longer exposed to pi-mono's module-level side effects at boot.
 - **MCP tool discovery**: pi-mono discovers swarm MCP tools at session creation via HTTP and registers them as custom tools. This is handled automatically — no `.mcp.json` needed for the swarm connection (though installed MCP servers are also discovered).
-- **Skills sync**: The Docker entrypoint syncs skills to both `~/.claude/skills/` and `~/.pi/agent/skills/` so skills work regardless of provider.
+- **Skills sync**: The worker mirrors skills into `~/.claude/skills/`, `~/.pi/agent/skills/`, `~/.codex/skills/`, `~/.opencode/skills/`, and `~/.agents/skills/` so local harnesses share the same skill inventory.
 - **Per-task hot-reload**: between tasks the worker polls a cheap `GET /api/agents/:id/skills/signature` (hash) endpoint and only re-syncs the filesystem when the installed-skill set actually changes. Newly installed / uninstalled skills appear on the next task without restarting the worker, while unchanged sessions skip the work. Foreign skills (`~/.claude/skills/<name>/SKILL.md` files not owned by the swarm) are preserved across re-syncs. See `src/utils/skills-refresh.ts`.
 
 ---

@@ -11,6 +11,7 @@ import {
   getKeyStatuses,
   initDb,
   markKeyRateLimited,
+  recordKeyRateLimitWindows,
   recordKeyUsage,
 } from "../be/db";
 import type { CredentialSelection } from "../utils/credentials";
@@ -239,6 +240,67 @@ describe("API key tracking DB queries", () => {
     recordKeyUsage("OPENAI_API_KEY", "oai02", 1, null);
     const cleared = clearKeyRateLimit("OPENAI_API_KEY", "oai02");
     expect(cleared).toBe(false);
+  });
+
+  test("recordKeyRateLimitWindows persists latest provider windows", () => {
+    recordKeyRateLimitWindows("ANTHROPIC_API_KEY", "aaa11", 0, {
+      seven_day: {
+        status: "allowed_warning",
+        utilization: 0.82,
+        resetsAt: 1781334000,
+        isUsingOverage: false,
+        surpassedThreshold: 0.75,
+        lastSeenAt: "2026-06-12T00:00:00.000Z",
+      },
+    });
+
+    const key = getKeyStatuses("ANTHROPIC_API_KEY").find((s) => s.keySuffix === "aaa11");
+    expect(key?.rateLimitWindows).toEqual({
+      seven_day: {
+        status: "allowed_warning",
+        utilization: 0.82,
+        resetsAt: 1781334000,
+        isUsingOverage: false,
+        surpassedThreshold: 0.75,
+        lastSeenAt: "2026-06-12T00:00:00.000Z",
+      },
+    });
+  });
+
+  test("recordKeyRateLimitWindows merges with existing provider windows", () => {
+    recordKeyRateLimitWindows("ANTHROPIC_API_KEY", "aaa11", 0, {
+      seven_day: {
+        status: "allowed_warning",
+        utilization: 0.82,
+        resetsAt: 1781334000,
+        lastSeenAt: "2026-06-12T00:00:00.000Z",
+      },
+    });
+
+    recordKeyRateLimitWindows("ANTHROPIC_API_KEY", "aaa11", 0, {
+      five_hour: {
+        status: "allowed",
+        utilization: 0.2,
+        resetsAt: 1781270000,
+        lastSeenAt: "2026-06-12T01:00:00.000Z",
+      },
+    });
+
+    const key = getKeyStatuses("ANTHROPIC_API_KEY").find((s) => s.keySuffix === "aaa11");
+    expect(key?.rateLimitWindows).toEqual({
+      seven_day: {
+        status: "allowed_warning",
+        utilization: 0.82,
+        resetsAt: 1781334000,
+        lastSeenAt: "2026-06-12T00:00:00.000Z",
+      },
+      five_hour: {
+        status: "allowed",
+        utilization: 0.2,
+        resetsAt: 1781270000,
+        lastSeenAt: "2026-06-12T01:00:00.000Z",
+      },
+    });
   });
 });
 

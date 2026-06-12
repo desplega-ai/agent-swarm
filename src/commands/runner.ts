@@ -45,6 +45,7 @@ import {
   isRateLimitMessage,
   MAX_RATE_LIMIT_RESET_MS,
   parseRateLimitResetTime,
+  type RateLimitWindowTelemetry,
   resolveCodexCreditsExhaustedCooldownMs,
 } from "../utils/error-tracker.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
@@ -60,6 +61,7 @@ import { resolveClaudeMdPath, syncProfileFilesToServer } from "./profile-sync.ts
 import {
   buildCredStatusReport,
   buildLatestModelReport,
+  isBedrockSdkMode,
   isCredCheckDisabled,
   reportCredStatus,
   reportLatestModel,
@@ -436,6 +438,7 @@ const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "MODEL_OVERRIDE",
   "AGENT_FS_SHARED_ORG_ID",
   "SWARM_USE_CLAUDE_BRIDGE",
+  "BEDROCK_AUTH_MODE",
 ]);
 
 /**
@@ -1118,6 +1121,35 @@ async function reportKeyRateLimit(
     console.log(
       `[credentials] Reported key ...${keySuffix} as rate-limited until ${rateLimitedUntil}`,
     );
+  } catch {
+    // Non-blocking
+  }
+}
+
+async function reportKeyRateLimitWindows(
+  apiUrl: string,
+  apiKey: string,
+  keyType: string,
+  keySuffix: string,
+  keyIndex: number,
+  windows: RateLimitWindowTelemetry,
+): Promise<void> {
+  if (Object.keys(windows).length === 0) return;
+  try {
+    await fetch(`${apiUrl}/api/keys/report-rate-limit-windows`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        keyType,
+        keySuffix,
+        keyIndex,
+        windows,
+      }),
+    });
+    console.log(`[credentials] Reported rate-limit windows for key ...${keySuffix}`);
   } catch {
     // Non-blocking
   }
@@ -3404,6 +3436,17 @@ async function checkCompletedProcesses(
           rateLimitedUntil,
         ).catch(() => {});
       }
+
+      if (credentialInfo && result.rateLimitWindows) {
+        reportKeyRateLimitWindows(
+          apiConfig.apiUrl,
+          apiConfig.apiKey,
+          credentialInfo.keyType,
+          credentialInfo.keySuffix,
+          credentialInfo.keyIndex,
+          result.rateLimitWindows,
+        ).catch(() => {});
+      }
       let bridgeDiagnostics: Awaited<ReturnType<typeof getBridgeFailureDiagnostics>> | undefined;
       if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir) {
         bridgeDiagnostics = await getBridgeFailureDiagnostics(workingDir);
@@ -3846,6 +3889,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // immediate effect from a UX perspective without hammering the API.
   let lastHarnessReconcileAt = 0;
   const HARNESS_RECONCILE_INTERVAL_MS = 10_000;
+
+  // Throttle for the periodic Bedrock model-enumeration refresh. The credential
+  // report below only re-runs on a harness_provider change (boot + provider
+  // swap), so enabling Bedrock access after boot would otherwise never reach the
+  // picker. This timer re-runs the enumeration on a fixed interval, decoupled
+  // from the harness-change gate, so the UI stays accurate. 5 minutes keeps it
+  // cheap (one bounded AWS enumeration per tick) while still surfacing newly
+  // granted access within a few minutes.
+  let lastBedrockRefreshAt = 0;
+  const BEDROCK_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
   // Create API config for ping/close
   const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
@@ -4570,6 +4623,22 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
           .catch((err) =>
             console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
+          );
+      } else if (
+        currentHarness === "pi" &&
+        isBedrockSdkMode(process.env) &&
+        Date.now() - lastBedrockRefreshAt > BEDROCK_REFRESH_INTERVAL_MS
+      ) {
+        // Bedrock enumeration drifts independently of the harness_provider:
+        // access granted (or revoked) in the AWS console after boot won't flip
+        // the provider, so the harness-change gate above never fires. Re-run the
+        // enumeration on the throttled interval so the picker reflects the live
+        // account state. One bounded AWS round-trip per tick.
+        lastBedrockRefreshAt = Date.now();
+        buildCredStatusReport(currentHarness, process.env, {}, "post_task")
+          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
+          .catch((err) =>
+            console.warn(`[${role}] bedrock enumeration refresh failed (non-fatal): ${err}`),
           );
       }
     }

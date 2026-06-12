@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.94.0",
+    "version": "1.97.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -981,6 +981,51 @@
                           "post_task"
                         ],
                         "default": "boot"
+                      },
+                      "bedrock": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "properties": {
+                          "region": {
+                            "type": "string"
+                          },
+                          "probedAt": {
+                            "type": "number"
+                          },
+                          "ready": {
+                            "type": "boolean"
+                          },
+                          "models": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name"
+                              ]
+                            },
+                            "default": []
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "default": null,
+                        "required": [
+                          "region",
+                          "probedAt",
+                          "ready"
+                        ]
                       }
                     },
                     "required": [
@@ -2528,6 +2573,96 @@
         "responses": {
           "200": {
             "description": "Key marked as rate-limited"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/keys/report-rate-limit-windows": {
+      "post": {
+        "summary": "Record provider-emitted rate-limit window telemetry for an API key",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "windows": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string"
+                        },
+                        "utilization": {
+                          "type": "number"
+                        },
+                        "resetsAt": {
+                          "type": "number"
+                        },
+                        "isUsingOverage": {
+                          "type": "boolean"
+                        },
+                        "surpassedThreshold": {
+                          "type": "number"
+                        },
+                        "lastSeenAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "lastSeenAt"
+                      ]
+                    }
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "keyIndex",
+                  "windows"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rate-limit window telemetry recorded"
           },
           "400": {
             "description": "Validation error"

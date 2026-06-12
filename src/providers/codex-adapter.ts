@@ -1024,6 +1024,7 @@ export class CodexSession implements ProviderSession {
             isError: true,
             failureReason: terminalError.message,
             rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
+            rateLimitWindows: this.errorTracker.getRateLimitWindows(),
           });
           return;
         }
@@ -1045,6 +1046,7 @@ export class CodexSession implements ProviderSession {
         isError,
         failureReason: terminalError?.message,
         rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
+        rateLimitWindows: this.errorTracker.getRateLimitWindows(),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1059,6 +1061,7 @@ export class CodexSession implements ProviderSession {
         isError: true,
         failureReason: message,
         rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
+        rateLimitWindows: this.errorTracker.getRateLimitWindows(),
       });
     } finally {
       // Session-end summarization. Pure addition for codex — no behavior to

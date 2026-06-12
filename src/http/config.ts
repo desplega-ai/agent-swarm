@@ -14,6 +14,7 @@ import {
   reservedKeyError,
   validateConfigValue,
 } from "../be/swarm-config-guard";
+import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -152,7 +153,15 @@ export async function handleConfig(
       parsed.query.agentId || undefined,
       parsed.query.repoId || undefined,
     );
-    json(res, { configs: includeSecrets ? configs : maskSecrets(configs) });
+    const result = includeSecrets ? configs : maskSecrets(configs);
+    if (includeSecrets) {
+      for (const c of result) {
+        if (c.isSecret && c.value) {
+          registerVolatileSecret(c.value, `config:${c.key}`);
+        }
+      }
+    }
+    json(res, { configs: result });
     return true;
   }
 
@@ -199,8 +208,11 @@ export async function handleConfig(
       jsonError(res, "Config not found", 404);
       return true;
     }
-    const result = includeSecrets ? config : maskSecrets([config])[0];
-    json(res, result);
+    const singleResult = includeSecrets ? config : maskSecrets([config])[0]!;
+    if (includeSecrets && singleResult.isSecret && singleResult.value) {
+      registerVolatileSecret(singleResult.value, `config:${singleResult.key}`);
+    }
+    json(res, singleResult);
     return true;
   }
 
@@ -212,7 +224,15 @@ export async function handleConfig(
       scope: parsed.query.scope || undefined,
       scopeId: parsed.query.scopeId || undefined,
     });
-    json(res, { configs: includeSecrets ? configs : maskSecrets(configs) });
+    const listResult = includeSecrets ? configs : maskSecrets(configs);
+    if (includeSecrets) {
+      for (const c of listResult) {
+        if (c.isSecret && c.value) {
+          registerVolatileSecret(c.value, `config:${c.key}`);
+        }
+      }
+    }
+    json(res, { configs: listResult });
     return true;
   }
 

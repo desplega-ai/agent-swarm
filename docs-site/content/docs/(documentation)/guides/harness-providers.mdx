@@ -100,15 +100,42 @@ The runner consumes these events (not the provider's native ones) to post progre
 | File | Transport | Auth |
 |---|---|---|
 | [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) | `Bun.spawn` of `claude` CLI with `--output-format stream-json`, JSONL stdout parsing | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
-| [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `MODEL_OVERRIDE=amazon-bedrock/*`, anything the AWS SDK default chain accepts (see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
+| [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*`, AWS SDK default chain (probed via `ListFoundationModels`; see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`, sends session config over stdin, and receives line-delimited events/results over stdout; the child hosts `@openai/codex-sdk` `Codex` / `Thread` and streams `ThreadEvent`s back | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
 
 ### pi-mono + Amazon Bedrock auth
 
-pi-mono routes to Amazon Bedrock when `MODEL_OVERRIDE=amazon-bedrock/<model-id>` (e.g. `amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0`). Bedrock authenticates through the AWS SDK's default credential chain — not a single API key — so agent-swarm **delegates credential resolution to the SDK**. The boot credential gate detects the `amazon-bedrock/` prefix and short-circuits to `satisfiedBy: "sdk-delegated"` without inspecting any AWS env var or file.
+#### Mode selection
 
-**Accepted credential sources** — anything the AWS SDK accepts:
+Bedrock SDK mode is active when **either**:
+
+1. `BEDROCK_AUTH_MODE=sdk` is set in `swarm_config` (explicit), **or**
+2. `BEDROCK_AUTH_MODE` is absent and `MODEL_OVERRIDE` starts with `amazon-bedrock/` (prefix-inference fallback — preserves the earlier prefix-inference behavior).
+
+`BEDROCK_AUTH_MODE=bearer` is a declared/validated value reserved for future bearer-token support; for now, workers in `bearer` mode fall through to the standard credential check (key / auth.json).
+
+`BEDROCK_AUTH_MODE` is a validated optional `swarm_config` key (values: `sdk` | `bearer`; see `src/be/swarm-config-guard.ts`) and a reloadable env key (see `src/commands/runner.ts`).
+
+#### Credential probe
+
+When Bedrock SDK mode is active, the worker runs a **real** `ListFoundationModels` call via `@aws-sdk/client-bedrock` (dynamically imported — the API binary never loads the SDK):
+
+- **Success** → `ready: true, satisfiedBy: "sdk-delegated"`. The worker proceeds to claim tasks.
+- **Failure** → `ready: false` with a classified error hint. The worker parks in `credential-wait` until credentials are fixed.
+
+Error categories classified by `classifyAwsSdkError` (`src/utils/aws-error-classifier.ts`):
+
+| Category | Trigger example | Hint |
+|---|---|---|
+| `aws-auth` | `ExpiredTokenException`, `CredentialsProviderError` | Run `aws sso login` or refresh credentials |
+| `aws-throttle` | `ThrottlingException`, `ServiceQuotaExceededException` | Wait / request quota increase |
+| `aws-access` | `AccessDeniedException: not authorized` | Check IAM policy for `bedrock:*` |
+| `aws-model` | `ValidationException`, `ResourceNotFoundException` | Check `MODEL_OVERRIDE` and region |
+
+#### Accepted credential sources
+
+Anything the AWS SDK accepts:
 
 - `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ optional `AWS_SESSION_TOKEN`)
 - `AWS_PROFILE` resolved against `~/.aws/credentials` and `~/.aws/config`
@@ -117,20 +144,35 @@ pi-mono routes to Amazon Bedrock when `MODEL_OVERRIDE=amazon-bedrock/<model-id>`
 - Web-identity / OIDC (`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`)
 - `credential_process` and assume-role chains
 
-`AWS_REGION` (or `AWS_DEFAULT_REGION`) is required by the SDK and must be a Bedrock-enabled region.
+#### Configuration reference
 
-**Failure mode.** No `credential-wait` parking — the worker claims tasks immediately. If Bedrock fails at runtime, pi-mono captures the structured pi-coding-agent terminal event and emits a normalized `error` `ProviderEvent`; `waitForCompletion()` returns `exitCode: 1`, `isError: true`, and the same `errorCategory` / `failureReason`, so the task fails with the session-chat error box instead of only leaving an SDK exception in the session log. Raw stderr/log events are still scrubbed through `scrubSecrets` at egress.
+| Key | Values | Default |
+|---|---|---|
+| `BEDROCK_AUTH_MODE` | `sdk` \| `bearer` | inferred from `MODEL_OVERRIDE` prefix |
+| `AWS_REGION` | any Bedrock-enabled region | **required** — unset reports a not-ready Bedrock state (no region is fabricated) |
 
-AWS SDK errors are classified before they reach the runner:
+`AWS_REGION` must be set explicitly so enumeration runs against the same region as inference. When it is unset, the worker reports a not-ready Bedrock state with a "set AWS_REGION" hint and does **not** guess a region.
 
-- `aws-auth` — missing, expired, invalid, or unresolvable AWS credentials (for example `CredentialsProviderError`, `ExpiredToken`, invalid signatures, or unrecognized clients). Refresh credentials with `aws sso login` or `aws configure`, then retry.
-- `aws-throttle` — Bedrock rate limits, too many requests, or service quota exhaustion. Retry after backoff or request a quota increase.
-- `aws-access` — IAM authorization denied for Bedrock invocation. Verify the role/user can call `bedrock:InvokeModel` for the target model ARN and region.
-- `aws-model` — invalid model IDs, unavailable models, region mismatches, model timeout, or model-not-ready responses. Verify `MODEL_OVERRIDE` and the AWS region.
+#### Live model enumeration
 
-Treat these the same way you treat a stale codex `auth.json`: the underlying SDK is the source of truth, but the adapter now turns known AWS SDK failures into structured task failures.
+The credential enumeration also produces the usable model set, region-scoped to `AWS_REGION`. **Usable = harness-drivable ∩ AWS-invocable**:
 
-This is intentionally the same pattern codex uses for OAuth credentials (`codexAuthFileExists` → `presenceCheckOk` in [`src/commands/provider-credentials.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/provider-credentials.ts)) — presence-only gate, runtime validation owned by the adapter/SDK, no upstream call from agent-swarm. pi-ai does not currently expose a Bedrock-specific credential check we could call; if it does in the future, the live-test branch can be upgraded without touching the boot gate.
+1. **AWS-invocable** — the union of:
+   - `ListFoundationModels` filtered to on-demand TEXT models that are `ACTIVE` (base foundation-model ids), and
+   - `ListInferenceProfiles` ids — the cross-region inference-profile ids (`us.` / `eu.` / `apac.` / `au.` / `global.`). The newest Claude models on Bedrock are invocable **only** through an inference profile and never appear in `ListFoundationModels`, so this union is what keeps the current Claude models available.
+2. **Harness-drivable** — the subset pi-ai's Converse harness can drive, from `getModels("amazon-bedrock")`. Each id is a valid pi-ai id (base or profile) and round-trips through `MODEL_OVERRIDE=amazon-bedrock/<id>`.
+
+Ids are matched exactly and the pi-ai id is stored/displayed (the id the harness can drive). Models the harness can't drive — and harness models the account can't invoke — are both excluded, so the picker never surfaces an id that would fail with `invalid model identifier` at inference time.
+
+`ListFoundationModels` returns models that *exist* in the region, not strictly those the account has *enabled access* to; the on-demand/ACTIVE filter narrows it, but base access-grant is not fully enumerable from the catalog. The inference-profile union is what makes the **current** models accurate.
+
+The worker reports the intersected list to the API via the existing `PUT /api/agents/:id/credential-status` channel as an optional `bedrock` block inside `cred_status` (no new DB column — rides the migration 055 JSON column). The block carries: `{ region, probedAt, ready, models: [{id, name}], error? }`. It refreshes at boot and on a throttled ~5-minute interval, so access enabled after boot appears without a worker restart.
+
+The dashboard model picker for the `pi` harness:
+- **Prefers the live list** when the worker has reported it.
+- **Falls back to the static `modelsdev-cache.json` snapshot** until the first worker report arrives.
+- Is **never blank** — there is always at least the snapshot list to choose from.
+- Surfaces the probe **failure reason** as subtext when a worker reported but its probe failed (`ready:false`), instead of a silently disabled group.
 
 ### Cost & context tracking
 
@@ -479,11 +521,12 @@ Skills are the swarm's portable procedural knowledge — reusable markdown files
     See [`pi-mono-adapter.ts:541`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts). Skills live at `~/.pi/agent/skills/<name>/SKILL.md`.
   </Tab>
   <Tab value="Inline resolver">
-    **Codex.** The Codex SDK has no skill mechanism, so the adapter resolves the skill itself before calling the model:
+    **Codex and OpenCode.** These SDKs have no `SKILL.md` mechanism, so the adapter resolves the skill itself before calling the model:
 
     - [`src/providers/codex-skill-resolver.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-skill-resolver.ts) intercepts a leading `/<name>` in the user prompt.
-    - Reads `${CODEX_SKILLS_DIR ?? ~/.codex/skills}/<name>/SKILL.md`.
-    - **Inlines** the SKILL.md content into the prompt before calling `thread.runStreamed`.
+    - Codex reads `${CODEX_SKILLS_DIR ?? ~/.codex/skills}/<name>/SKILL.md`.
+    - OpenCode reads `${OPENCODE_SKILLS_DIR ?? ~/.opencode/skills}/<name>/SKILL.md`.
+    - **Inlines** the SKILL.md content into the prompt before calling the provider SDK.
     - `formatCommand(name)` simply returns `/${name}` so the swarm can still emit the canonical form; the resolver does the work.
 
     This is the template to follow if your provider lacks native skill support.
@@ -497,6 +540,8 @@ The swarm still seeds skills into each provider's skill dir at container boot in
 - `~/.claude/skills/<name>/SKILL.md`
 - `~/.pi/agent/skills/<name>/SKILL.md`
 - `~/.codex/skills/<name>/SKILL.md`
+- `~/.opencode/skills/<name>/SKILL.md`
+- `~/.agents/skills/<name>/SKILL.md`
 
 For DB-backed complex skills, sibling bundled files are mirrored alongside `SKILL.md` under the same skill directory. Legacy remote/sourceRepo-only complex skills still rely on the entrypoint fallback when the bundle is not present in the database yet.
 
@@ -668,10 +713,11 @@ Skills are the swarm's portable procedural knowledge (`/review-pr`, `/implement-
 - **Claude**: native slash-commands, so `formatCommand(name) => "/" + name` (`claude-adapter.ts` L601).
 - **Pi**: prefixed, `formatCommand(name) => "/skill:" + name` (`pi-mono-adapter.ts` L541); resolved from `~/.pi/agent/skills/<name>/SKILL.md`.
 - **Codex**: no native skills support → [`src/providers/codex-skill-resolver.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-skill-resolver.ts) intercepts a leading `/<name>` in the prompt, reads `${CODEX_SKILLS_DIR ?? ~/.codex/skills}/<name>/SKILL.md`, and inlines it before calling `thread.runStreamed`. The system prompt is delivered by writing `AGENTS.md` into `cwd` (see [`codex-agents-md.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-agents-md.ts)).
+- **OpenCode**: no native `SKILL.md` support → uses the same inline resolver, reads `${OPENCODE_SKILLS_DIR ?? ~/.opencode/skills}/<name>/SKILL.md`, and inlines it before calling `client.session.prompt`.
 
 Pick the model that matches your runtime; if your provider has no native skill mechanism, follow the Codex inline-resolver pattern.
 
-The swarm syncs skill files into each provider's skill dir at container boot in [`docker-entrypoint.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-entrypoint.sh) (copies `SKILL.md` into `~/.claude/skills/`, `~/.pi/agent/skills/`, and `~/.codex/skills/`). Add an entry for your provider there.
+The swarm syncs skill files into each provider's skill dir at container boot and during per-task refreshes (copies `SKILL.md` into `~/.claude/skills/`, `~/.pi/agent/skills/`, `~/.codex/skills/`, `~/.opencode/skills/`, and `~/.agents/skills/`). Add an entry for your provider there.
 
 ### Step 10 — Worker bootstrap (Docker entrypoint)
 

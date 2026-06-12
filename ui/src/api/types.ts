@@ -72,6 +72,19 @@ export interface AgentCredStatusLiveTest {
   testedAt: number;
 }
 
+export interface AgentBedrockStatusModel {
+  id: string;
+  name: string;
+}
+
+export interface AgentBedrockStatus {
+  region: string;
+  probedAt: number;
+  ready: boolean;
+  models: AgentBedrockStatusModel[];
+  error?: string;
+}
+
 export interface AgentCredStatus {
   ready: boolean;
   missing: string[];
@@ -81,6 +94,8 @@ export interface AgentCredStatus {
   latestModel?: AgentLatestModel | null;
   reportedAt: number;
   reportKind?: "boot" | "post_task";
+  /** Pi-mono Bedrock enumeration block. Null when not in Bedrock mode. */
+  bedrock?: AgentBedrockStatus | null;
 }
 
 export interface AgentLatestModel {
@@ -1369,6 +1384,17 @@ export interface ApiKeyStatus {
   provider: string;
   /** Optional human-friendly label set from the dashboard. */
   name: string | null;
+  rateLimitWindows: Record<
+    string,
+    {
+      status: string;
+      utilization?: number;
+      resetsAt?: number;
+      isUsingOverage?: boolean;
+      surpassedThreshold?: number;
+      lastSeenAt: string;
+    }
+  >;
   createdAt: string;
   updatedAt: string;
 }

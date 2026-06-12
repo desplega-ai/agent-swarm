@@ -10,6 +10,54 @@ export interface ErrorSignal {
   timestamp: string;
 }
 
+export interface RateLimitWindowInfo {
+  status: string;
+  utilization?: number;
+  resetsAt?: number;
+  isUsingOverage?: boolean;
+  surpassedThreshold?: number;
+  lastSeenAt: string;
+}
+
+export type RateLimitWindowTelemetry = Record<string, RateLimitWindowInfo>;
+
+export function parseRateLimitWindowTelemetry(
+  json: Record<string, unknown>,
+  lastSeenAt = new Date().toISOString(),
+): { rateLimitType: string; info: RateLimitWindowInfo } | null {
+  try {
+    if (json.type !== "rate_limit_event") return null;
+    const rawInfo = json.rate_limit_info;
+    if (!rawInfo || typeof rawInfo !== "object") return null;
+
+    const info = rawInfo as Record<string, unknown>;
+    if (typeof info.status !== "string" || info.status.length === 0) return null;
+    if (typeof info.rateLimitType !== "string" || info.rateLimitType.length === 0) return null;
+
+    const window: RateLimitWindowInfo = {
+      status: info.status,
+      lastSeenAt,
+    };
+
+    if (typeof info.utilization === "number" && Number.isFinite(info.utilization)) {
+      window.utilization = info.utilization;
+    }
+    if (typeof info.resetsAt === "number" && Number.isFinite(info.resetsAt) && info.resetsAt > 0) {
+      window.resetsAt = info.resetsAt;
+    }
+    if (typeof info.isUsingOverage === "boolean") {
+      window.isUsingOverage = info.isUsingOverage;
+    }
+    if (typeof info.surpassedThreshold === "number" && Number.isFinite(info.surpassedThreshold)) {
+      window.surpassedThreshold = info.surpassedThreshold;
+    }
+
+    return { rateLimitType: info.rateLimitType, info: window };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Maximum cooldown horizon for a rate-limit reset. A weekly OAuth limit resets
  * up to ~7 days out, so the cap must be at least that or a weekly-limited key
@@ -85,6 +133,7 @@ export class SessionErrorTracker {
   private errors: ErrorSignal[] = [];
   /** Stashed reset time (ms) from the last rejected rate_limit_event in this session. */
   private rateLimitResetAtMs: number | undefined;
+  private rateLimitWindows: RateLimitWindowTelemetry = {};
 
   /** Record an error from an assistant message with message.error field */
   addApiError(errorCategory: string, message: string): void {
@@ -139,6 +188,11 @@ export class SessionErrorTracker {
       const info = json.rate_limit_info as Record<string, unknown> | undefined;
       if (!info) return;
 
+      const telemetry = parseRateLimitWindowTelemetry(json);
+      if (telemetry) {
+        this.rateLimitWindows[telemetry.rateLimitType] = telemetry.info;
+      }
+
       if (info.status !== "rejected") return;
 
       const resetsAtSec = info.resetsAt;
@@ -183,6 +237,11 @@ export class SessionErrorTracker {
   getRateLimitResetAt(): string | undefined {
     if (this.rateLimitResetAtMs === undefined) return undefined;
     return new Date(this.rateLimitResetAtMs).toISOString();
+  }
+
+  getRateLimitWindows(): RateLimitWindowTelemetry | undefined {
+    if (Object.keys(this.rateLimitWindows).length === 0) return undefined;
+    return { ...this.rateLimitWindows };
   }
 
   hasErrors(): boolean {

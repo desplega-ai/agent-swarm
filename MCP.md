@@ -265,7 +265,7 @@ Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use
 
 **Get Config**
 
-Get resolved configuration values with scope resolution (repo > agent > global). Returns one entry per unique key with the most-specific scope winning. Use includeSecrets=true to see secret values.
+Get resolved configuration values with scope resolution (repo > agent > global). Returns one entry per unique key with the most-specific scope winning. Use includeSecrets=true to see secret values. IMPORTANT: never pass returned secret values directly on a command line — write them to a temp .env file and source it instead, so the literal value stays out of logged commands.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1391,6 +1391,7 @@ Create a new MCP server definition. Agent-scope servers are auto-installed for t
 | `headers` | `string` | No | - | JSON object of non-secret headers (http/sse only) |
 | `envConfigKeys` | `string` | No | - | JSON object mapping env var names to config key paths |
 | `headerConfigKeys` | `string` | No | - | JSON object mapping header names to config key paths for secret headers |
+| `extraAuthorizeParams` | `string` | No | - | JSON object string of extra OAuth authorize-request params, e.g. {"access_type":"offline","prompt":"consent"} |
 
 ### mcp-server-install
 
@@ -1445,6 +1446,7 @@ Update an MCP server's configuration. Only the owner or lead can update.
 | `headers` | `string` | No | - | New JSON object of non-secret headers |
 | `envConfigKeys` | `string` | No | - | New env config key mappings |
 | `headerConfigKeys` | `string` | No | - | New header config key mappings |
+| `extraAuthorizeParams` | `string` | No | - | JSON object string of extra OAuth authorize-request params, e.g. {"access_type":"offline","prompt":"consent"} |
 | `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
 
 ### mcp-server-delete

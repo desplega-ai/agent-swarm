@@ -106,6 +106,8 @@ Status icons cover the full task lifecycle: 🗂️ `backlog`, 📭 `unassigned`
 
 When an agent posts its results directly to a Slack thread via the `slack-reply` tool, the task's completion message automatically switches to a minimal one-liner instead of repeating the full output. This prevents duplicate content in threads — the agent's detailed reply appears once, and the status message simply confirms completion.
 
+The watcher also persists its tracked task-message map across restarts, so an API or worker reboot does not recreate already-seen Slack thread updates as fresh tasks.
+
 ### Single Evolving Message
 
 Each task gets a single Slack message that evolves through its lifecycle — from assignment to progress to completion. Instead of posting multiple messages, the bot uses `chat.update` to update one message in place:

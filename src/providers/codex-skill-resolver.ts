@@ -64,6 +64,21 @@ export async function resolveCodexPrompt(
   skillsDir?: string,
   emit?: (event: ProviderEvent) => void,
 ): Promise<string> {
+  return resolveSlashSkillPrompt(prompt, {
+    providerLabel: "codex",
+    skillsDir: skillsDir ?? defaultSkillsDir(),
+    emit,
+  });
+}
+
+export async function resolveSlashSkillPrompt(
+  prompt: string,
+  opts: {
+    providerLabel: string;
+    skillsDir: string;
+    emit?: (event: ProviderEvent) => void;
+  },
+): Promise<string> {
   if (!prompt) {
     return prompt;
   }
@@ -81,15 +96,14 @@ export async function resolveCodexPrompt(
 
   const commandName: string = match[1];
   const trailingArgs: string = match[2] ?? "";
-  const dir = skillsDir ?? defaultSkillsDir();
-  const skillPath = join(dir, commandName, "SKILL.md");
+  const skillPath = join(opts.skillsDir, commandName, "SKILL.md");
 
   const file = Bun.file(skillPath);
   const exists = await file.exists();
   if (!exists) {
-    emit?.({
+    opts.emit?.({
       type: "raw_stderr",
-      content: `[codex] skill resolver: SKILL.md not found for /${commandName} (looked in ${skillPath})\n`,
+      content: `[${opts.providerLabel}] skill resolver: SKILL.md not found for /${commandName} (looked in ${skillPath})\n`,
     });
     return prompt;
   }
@@ -99,17 +113,17 @@ export async function resolveCodexPrompt(
     skillContent = await file.text();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    emit?.({
+    opts.emit?.({
       type: "raw_stderr",
-      content: `[codex] skill resolver: failed to read SKILL.md for /${commandName}: ${message}\n`,
+      content: `[${opts.providerLabel}] skill resolver: failed to read SKILL.md for /${commandName}: ${message}\n`,
     });
     return prompt;
   }
 
   if (skillContent.length > MAX_SKILL_CHARS) {
-    emit?.({
+    opts.emit?.({
       type: "raw_stderr",
-      content: `[codex] skill resolver: SKILL.md for /${commandName} exceeds ${MAX_SKILL_CHARS} chars (${skillContent.length}), truncating\n`,
+      content: `[${opts.providerLabel}] skill resolver: SKILL.md for /${commandName} exceeds ${MAX_SKILL_CHARS} chars (${skillContent.length}), truncating\n`,
     });
     skillContent = skillContent.slice(0, MAX_SKILL_CHARS);
   }

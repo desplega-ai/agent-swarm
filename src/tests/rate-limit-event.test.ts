@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   isRateLimitMessage,
   MAX_RATE_LIMIT_RESET_MS,
+  parseRateLimitWindowTelemetry,
   parseStderrForErrors,
   SessionErrorTracker,
   trackErrorFromJson,
@@ -23,6 +24,42 @@ const FIXTURE_REJECTED = {
 };
 
 describe("SessionErrorTracker — rate_limit_event processing", () => {
+  test("captures allowed_warning telemetry without marking a cooldown", () => {
+    const tracker = new SessionErrorTracker();
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed_warning",
+        resetsAt: 1781334000,
+        rateLimitType: "seven_day",
+        utilization: 0.82,
+        isUsingOverage: false,
+        surpassedThreshold: 0.75,
+      },
+    });
+
+    expect(tracker.getRateLimitResetAt()).toBeUndefined();
+    expect(tracker.getRateLimitWindows()).toEqual({
+      seven_day: expect.objectContaining({
+        status: "allowed_warning",
+        resetsAt: 1781334000,
+        utilization: 0.82,
+        isUsingOverage: false,
+        surpassedThreshold: 0.75,
+      }),
+    });
+  });
+
+  test("parseRateLimitWindowTelemetry is best-effort for malformed events", () => {
+    expect(parseRateLimitWindowTelemetry({ type: "rate_limit_event" })).toBeNull();
+    expect(
+      parseRateLimitWindowTelemetry({
+        type: "rate_limit_event",
+        rate_limit_info: { status: "allowed_warning", resetsAt: "bad" },
+      }),
+    ).toBeNull();
+  });
+
   test("stashes resetsAt (seconds) correctly as ms — verbatim CAI-1279 fixture", () => {
     const tracker = new SessionErrorTracker();
     tracker.processRateLimitEvent(FIXTURE_REJECTED);

@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getResolvedConfig, maskSecrets } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { SwarmConfigSchema } from "@/types";
+import { registerVolatileSecret } from "@/utils/secret-scrubber";
 
 export const registerGetConfigTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -10,7 +11,7 @@ export const registerGetConfigTool = (server: McpServer) => {
     {
       title: "Get Config",
       description:
-        "Get resolved configuration values with scope resolution (repo > agent > global). Returns one entry per unique key with the most-specific scope winning. Use includeSecrets=true to see secret values.",
+        "Get resolved configuration values with scope resolution (repo > agent > global). Returns one entry per unique key with the most-specific scope winning. Use includeSecrets=true to see secret values. IMPORTANT: never pass returned secret values directly on a command line — write them to a temp .env file and source it instead, so the literal value stays out of logged commands.",
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({
@@ -62,6 +63,13 @@ export const registerGetConfigTool = (server: McpServer) => {
         }
 
         const result = includeSecrets ? configs : maskSecrets(configs);
+        if (includeSecrets) {
+          for (const c of result) {
+            if (c.isSecret && c.value) {
+              registerVolatileSecret(c.value, `config:${c.key}`);
+            }
+          }
+        }
         const count = result.length;
 
         const configList =

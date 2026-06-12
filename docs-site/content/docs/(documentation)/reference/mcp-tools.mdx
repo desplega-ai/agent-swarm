@@ -729,9 +729,14 @@ Create a new MCP server definition. Agent-scope servers are auto-installed for t
 | `name` | string | Yes | Server name |
 | `description` | string | No | Server description |
 | `transport` | string | Yes | `stdio`, `http`, or `sse` |
+| `scope` | string | No | Scope: `agent`, `swarm`, or `global` (defaults to `agent`) |
 | `command` | string | No | Command to run (required for stdio) |
 | `args` | string | No | JSON array of arguments (stdio only) |
 | `url` | string | No | Server URL (required for http/sse) |
+| `headers` | string | No | JSON object of non-secret headers (http/sse only) |
+| `envConfigKeys` | string | No | JSON object mapping env var names to config key paths |
+| `headerConfigKeys` | string | No | JSON object mapping header names to secret config key paths |
+| `extraAuthorizeParams` | string | No | JSON object string of extra OAuth authorize-request params, for example `{\"access_type\":\"offline\",\"prompt\":\"consent\"}` |
 
 ### mcp-server-get
 
@@ -751,6 +756,7 @@ List MCP servers with optional filters.
 | `scope` | string | No | Filter by scope: `global`, `swarm`, or `agent` |
 | `transport` | string | No | Filter by transport: `stdio`, `http`, or `sse` |
 | `search` | string | No | Search by name or description |
+| `installedOnly` | boolean | No | Only show servers installed for the calling agent |
 
 ### mcp-server-update
 
@@ -768,6 +774,7 @@ Update an MCP server's configuration. Only the owner or lead can update.
 | `headers` | string | No | New JSON object of non-secret headers |
 | `envConfigKeys` | string | No | New env config key mappings |
 | `headerConfigKeys` | string | No | New header config key mappings |
+| `extraAuthorizeParams` | string | No | JSON object string of extra OAuth authorize-request params, for example `{\"access_type\":\"offline\",\"prompt\":\"consent\"}` |
 | `isEnabled` | boolean | No | Toggle enabled/disabled |
 
 ### mcp-server-install
