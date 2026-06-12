@@ -981,6 +981,51 @@
                           "post_task"
                         ],
                         "default": "boot"
+                      },
+                      "bedrock": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "properties": {
+                          "region": {
+                            "type": "string"
+                          },
+                          "probedAt": {
+                            "type": "number"
+                          },
+                          "ready": {
+                            "type": "boolean"
+                          },
+                          "models": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name"
+                              ]
+                            },
+                            "default": []
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "default": null,
+                        "required": [
+                          "region",
+                          "probedAt",
+                          "ready"
+                        ]
                       }
                     },
                     "required": [
