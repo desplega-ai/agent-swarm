@@ -21,10 +21,6 @@ on:
       - ".github/workflows/docker-and-deploy.yml"
   workflow_dispatch:
 
-concurrency:
-  group: docker-and-deploy
-  cancel-in-progress: true
-
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -315,6 +311,9 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
+    concurrency:
+      group: agent-swarm-deploy
+      cancel-in-progress: true
 
     needs:
       - merge-server
