@@ -36,16 +36,21 @@ Cached-input and cache-write classes are billed at their own rates when present;
 
 The task-detail and task-detail-sheet views render the `costSource` next to every cost via `<CostSourceBadge>`. Mixed sources within a task aggregate render as `HARNESS` (the weakest claim).
 
-## How the pricing table is seeded
+## How the pricing table is populated
 
-The `pricing` table is seeded at server boot from the vendored models.dev snapshot at `src/be/modelsdev-cache.json` plus a small set of manual overrides for items models.dev doesn't carry. The UI path `ui/src/lib/modelsdev-cache.json` is a symlink to that backend source of truth, so the model picker and backend seed read the same snapshot.
+The `pricing` table starts with a boot seed from the vendored models.dev snapshot at `src/be/modelsdev-cache.json` plus a small set of manual overrides for items models.dev doesn't carry. The committed snapshot is now fallback-only for pricing freshness: it gives a cold-start DB usable rows when models.dev is unavailable, while `src/be/pricing-refresh.ts` owns live price updates.
+
+After boot, the API server runs an in-process models.dev refresher once immediately and then every 12 hours. It fetches `https://models.dev/api.json` with `If-None-Match`, projects the response through the same `buildModelsDevSeedRows()` logic, inserts a new effective row only for new models or changed prices, and prunes history to the latest two rows per `(provider, model, token_class)`.
+
+The UI path `ui/src/lib/modelsdev-cache.json` is still a symlink to the backend snapshot. The model picker keeps using that committed file for names, labels, and context windows until a separate runtime catalog endpoint exists.
 
 - **Projection rules** live in `src/be/seed-pricing.ts`:
   - Anthropic models → rows under both `provider='claude'` AND `provider='claude-managed'`. Shortnames (`opus`/`sonnet`/`haiku`) also land under the current default full id.
   - OpenAI models → `provider='codex'`.
   - OpenRouter models → `provider='opencode'`; `google/*` models also land under `provider='gemini'`.
 - **Manual overrides** (claude-managed `runtime_hour` at $0.08/hr, devin `acu` at $2.25): `MANUAL_PRICING_OVERRIDES` in the same file. Each entry carries its source URL and a `verified` date.
-- **Refresh procedure**: run `bun run scripts/refresh-modelsdev-pricing.ts` to fetch the latest snapshot, see a diff summary, and write the new file. Commit it alongside the PR.
+- **Runtime refresh**: `src/be/pricing-refresh.ts` updates pricing rows in-place after boot and every 12 hours. It only adds newer effective rows and never deletes pinned entries from the committed snapshot.
+- **Snapshot refresh procedure**: run `bun run scripts/refresh-modelsdev-pricing.ts` when the committed fallback/UI catalog needs a source update. Commit it alongside the PR.
 
 Operator reference: [`src/providers/pricing-sources.md`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pricing-sources.md).
 

@@ -725,6 +725,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "budget.deleted",
   "pricing.inserted",
   "pricing.deleted",
+  "pricing.refresh",
+  "pricing.refresh.failed",
   // Graceful pause/resume via follow-up
   "task_superseded",
 ]);
