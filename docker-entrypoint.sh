@@ -1002,11 +1002,6 @@ if [ "${SWARM_DEP_REDIS_ENABLED:-false}" = "true" ]; then
   /usr/local/bin/init-local-redis.sh
 fi
 
-# Optional: start a local NATS server (JetStream) before dropping privileges.
-if [ "${SWARM_DEP_NATS_ENABLED:-false}" = "true" ]; then
-  /usr/local/bin/init-local-nats.sh
-fi
-
 # Run the agent using compiled binary.
 #
 # `tini` is prepended so PID 1 is a real init. The agent-swarm process spawns

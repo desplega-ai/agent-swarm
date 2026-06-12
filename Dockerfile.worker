@@ -51,36 +51,11 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     tmux \
     && rm -rf /var/lib/apt/lists/*
 
-# Optional: Redis server for tasks that need a local queue/cache backend.
-# Build with --build-arg SWARM_DEP_REDIS_BUILD=true to include (~6.5 MB).
-ARG SWARM_DEP_REDIS_BUILD=false
-RUN if [ "${SWARM_DEP_REDIS_BUILD}" = "true" ]; then \
-      apt-get update \
-      && apt-get install -y --no-install-recommends redis-server redis-tools \
-      && rm -rf /var/lib/apt/lists/*; \
-    fi
-
-# Optional: NATS server (single static binary, JetStream-capable) for tasks
-# that need a local message broker.
-# Build with --build-arg SWARM_DEP_NATS_BUILD=true to include (~17 MB).
-ARG SWARM_DEP_NATS_BUILD=false
-ARG NATS_SERVER_VERSION=2.12.4
-ARG NATS_SERVER_SHA256_AMD64=92388f2e4aa1e6dea402eb173cbdb1fcb1df9a9c899cb807b91ddbb45c131b65
-ARG NATS_SERVER_SHA256_ARM64=44a6ff34eff7e8d0e1409dbac0b733cff7ecbb4f19388a4d0d3d6085d899f017
-ARG TARGETARCH
-RUN if [ "${SWARM_DEP_NATS_BUILD}" = "true" ]; then \
-      case "${TARGETARCH}" in \
-        amd64) NATS_SHA256="${NATS_SERVER_SHA256_AMD64}" ;; \
-        arm64) NATS_SHA256="${NATS_SERVER_SHA256_ARM64}" ;; \
-        *) echo "unsupported arch: ${TARGETARCH}" && exit 1 ;; \
-      esac \
-      && curl -fsSL "https://github.com/nats-io/nats-server/releases/download/v${NATS_SERVER_VERSION}/nats-server-v${NATS_SERVER_VERSION}-linux-${TARGETARCH}.tar.gz" -o /tmp/nats-server.tgz \
-      && echo "${NATS_SHA256}  /tmp/nats-server.tgz" | sha256sum -c - \
-      && tar -xzf /tmp/nats-server.tgz -C /tmp \
-      && mv "/tmp/nats-server-v${NATS_SERVER_VERSION}-linux-${TARGETARCH}/nats-server" /usr/local/bin/nats-server \
-      && chmod +x /usr/local/bin/nats-server \
-      && rm -rf /tmp/nats-server.tgz "/tmp/nats-server-v${NATS_SERVER_VERSION}-linux-${TARGETARCH}"; \
-    fi
+# Redis server for tasks that need a local queue/cache backend (always bundled).
+# Runtime start is controlled by SWARM_DEP_REDIS_ENABLED (default: false).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends redis-server redis-tools \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install GitLab CLI (glab) for GitLab integration
 ARG GLAB_VERSION=1.89.0
@@ -313,10 +288,9 @@ RUN chmod +x /usr/local/bin/agent-swarm
 COPY scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 RUN chmod +x /usr/local/bin/init-local-postgres.sh
 
-# Optional helpers to start local Redis / NATS (not invoked automatically)
+# Optional helper to start local Redis (not invoked automatically)
 COPY scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
-COPY scripts/init-local-nats.sh /usr/local/bin/init-local-nats.sh
-RUN chmod +x /usr/local/bin/init-local-redis.sh /usr/local/bin/init-local-nats.sh
+RUN chmod +x /usr/local/bin/init-local-redis.sh
 
 # Copy commands (changes on code change — keep late)
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
