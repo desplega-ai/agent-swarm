@@ -93,49 +93,63 @@ const MIN_VALUE_LENGTH = 12;
  * Order matters when one pattern is a prefix of another (e.g. `sk-ant-` must
  * match before the more general `sk-`).
  */
+
+// Leading word boundary that also matches after JSON escape sequences (\n, \t,
+// \r, etc.) where the trailing char is alphanumeric and defeats standard \b.
+const TB = String.raw`(?:(?<=\\[nrtbfu0])|(?<!\w))`;
+
 const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
   // GitHub fine-grained PATs
   { name: "github_pat", re: /github_pat_[A-Za-z0-9_]{20,}/g },
   // GitHub classic/OAuth tokens (ghp_, gho_, ghu_, ghs_, ghr_)
-  { name: "github_token", re: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g },
+  { name: "github_token", re: new RegExp(String.raw`${TB}gh[pousr]_[A-Za-z0-9]{20,}\b`, "g") },
   // GitLab personal access tokens
-  { name: "gitlab_pat", re: /\bglpat-[A-Za-z0-9_-]{20,}\b/g },
+  { name: "gitlab_pat", re: new RegExp(String.raw`${TB}glpat-[A-Za-z0-9_-]{20,}\b`, "g") },
   // Anthropic API keys (must match before the generic sk- rule below)
-  { name: "anthropic_key", re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/g },
+  { name: "anthropic_key", re: new RegExp(String.raw`${TB}sk-ant-[A-Za-z0-9_-]{20,}\b`, "g") },
   // OpenAI project keys
-  { name: "openai_proj_key", re: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g },
+  { name: "openai_proj_key", re: new RegExp(String.raw`${TB}sk-proj-[A-Za-z0-9_-]{20,}\b`, "g") },
   // OpenRouter keys
-  { name: "openrouter_key", re: /\bsk-or-(?:v1-)?[A-Za-z0-9_-]{20,}\b/g },
+  {
+    name: "openrouter_key",
+    re: new RegExp(String.raw`${TB}sk-or-(?:v1-)?[A-Za-z0-9_-]{20,}\b`, "g"),
+  },
   // Generic sk- legacy OpenAI keys (must come AFTER the ant/proj/or variants)
-  { name: "sk_key", re: /\bsk-[A-Za-z0-9]{20,}\b/g },
+  { name: "sk_key", re: new RegExp(String.raw`${TB}sk-[A-Za-z0-9]{20,}\b`, "g") },
   // Slack tokens
-  { name: "slack_token", re: /\bxox[baprseo]-[A-Za-z0-9-]{10,}\b/g },
+  { name: "slack_token", re: new RegExp(String.raw`${TB}xox[baprseo]-[A-Za-z0-9-]{10,}\b`, "g") },
   // AWS access key IDs
-  { name: "aws_access_key", re: /\bAKIA[0-9A-Z]{16}\b/g },
+  { name: "aws_access_key", re: new RegExp(String.raw`${TB}AKIA[0-9A-Z]{16}\b`, "g") },
   // Google API keys
-  { name: "google_api_key", re: /\bAIza[A-Za-z0-9_-]{35}\b/g },
+  { name: "google_api_key", re: new RegExp(String.raw`${TB}AIza[A-Za-z0-9_-]{35}\b`, "g") },
   // JWTs (3 dot-separated base64url segments)
   {
     name: "jwt",
-    re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+    re: new RegExp(
+      String.raw`${TB}eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`,
+      "g",
+    ),
   },
   // SigNoz Cloud OTLP auth header values.
   {
     name: "signoz_ingestion_key",
-    re: /\bsignoz-ingestion-key=[A-Za-z0-9._~+/-]{20,}={0,2}\b/g,
+    re: new RegExp(String.raw`${TB}signoz-ingestion-key=[A-Za-z0-9._~+/-]{20,}={0,2}\b`, "g"),
   },
   // Linear OAuth tokens and API keys
-  { name: "linear_oauth", re: /\blin_oauth_[A-Za-z0-9_-]{10,}\b/g },
-  { name: "linear_api", re: /\blin_api_[A-Za-z0-9_-]{10,}\b/g },
+  { name: "linear_oauth", re: new RegExp(String.raw`${TB}lin_oauth_[A-Za-z0-9_-]{10,}\b`, "g") },
+  { name: "linear_api", re: new RegExp(String.raw`${TB}lin_api_[A-Za-z0-9_-]{10,}\b`, "g") },
   // npm tokens
-  { name: "npm_token", re: /\bnpm_[A-Za-z0-9_-]{20,}\b/g },
+  { name: "npm_token", re: new RegExp(String.raw`${TB}npm_[A-Za-z0-9_-]{20,}\b`, "g") },
   // Jira API tokens (Atlassian cloud)
-  { name: "atlassian_token", re: /\bATATT[A-Za-z0-9_-]{20,}\b/g },
+  {
+    name: "atlassian_token",
+    re: new RegExp(String.raw`${TB}ATATT[A-Za-z0-9_-]{20,}\b`, "g"),
+  },
   // Agent-swarm MCP user tokens (`aswt_<base62-20+>`). Schema lands in
   // migration 064; mint/revoke endpoints ship with the MCP-token plan.
   // Rule lives here now so plaintexts never leak into logs once endpoints
   // come online.
-  { name: "mcp_token", re: /\baswt_[A-Za-z0-9]{20,}\b/g },
+  { name: "mcp_token", re: new RegExp(String.raw`${TB}aswt_[A-Za-z0-9]{20,}\b`, "g") },
 ];
 
 interface EnvValueEntry {

@@ -251,6 +251,28 @@ describe("scrubSecrets — regex patterns", () => {
     expect(out).toContain("[REDACTED:atlassian_token]");
     expect(out).not.toContain("ATATT3xFfGF0");
   });
+
+  test("redacts tokens adjacent to JSON escape sequences (\\n)", () => {
+    const content = "data\\nlin_oauth_test123abcdef\\nmore";
+    const out = scrubSecrets(content);
+    expect(out).toContain("[REDACTED:linear_oauth]");
+    expect(out).not.toContain("lin_oauth_test123");
+  });
+
+  test("redacts tokens adjacent to JSON escape sequences (\\t, \\r)", () => {
+    const outT = scrubSecrets("field\\tlin_oauth_test123abcdef");
+    expect(outT).toContain("[REDACTED:linear_oauth]");
+    const outR = scrubSecrets("line\\rlin_oauth_test123abcdef");
+    expect(outR).toContain("[REDACTED:linear_oauth]");
+  });
+
+  test("redacts tokens in double-encoded JSON with escape sequences", () => {
+    const inner = JSON.stringify({ access_token: "lin_oauth_test123abcdef", scope: "read" });
+    const content = `{"output":${JSON.stringify(inner)}}`;
+    const out = scrubSecrets(content);
+    expect(out).toContain("[REDACTED:linear_oauth]");
+    expect(out).not.toContain("lin_oauth_test123");
+  });
 });
 
 describe("scrubSecrets — does not over-scrub", () => {
