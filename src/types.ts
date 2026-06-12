@@ -553,6 +553,25 @@ export const AgentLatestModelSchema = z.object({
 });
 export type AgentLatestModel = z.infer<typeof AgentLatestModelSchema>;
 
+/**
+ * Worker-reported Bedrock enumeration block. Only present when the pi harness
+ * is in Bedrock SDK mode (`BEDROCK_AUTH_MODE=sdk` or
+ * `MODEL_OVERRIDE=amazon-bedrock/*`). Rides inside `cred_status` JSON (no new
+ * DB column). `models` is the intersection of the models invocable by this
+ * account/region (on-demand/ACTIVE foundation models ∪ inference profiles) with
+ * the set the pi-ai Converse harness can actually drive — Converse-incompatible
+ * entries (e.g. OpenAI models listed in the account) are excluded. An empty
+ * `region` means Bedrock mode with `AWS_REGION` unset (no region fabricated).
+ */
+export const AgentBedrockStatusSchema = z.object({
+  region: z.string(),
+  probedAt: z.number(), // unix ms
+  ready: z.boolean(),
+  models: z.array(z.object({ id: z.string(), name: z.string() })).default([]),
+  error: z.string().optional(),
+});
+export type AgentBedrockStatus = z.infer<typeof AgentBedrockStatusSchema>;
+
 export const AgentCredStatusSchema = z.object({
   ready: z.boolean(),
   missing: z.array(z.string()).default([]),
@@ -565,6 +584,8 @@ export const AgentCredStatusSchema = z.object({
   latestModel: AgentLatestModelSchema.nullable().default(null),
   reportedAt: z.number(), // unix ms
   reportKind: z.enum(["boot", "post_task"]).default("boot"),
+  /** Pi-mono Bedrock enumeration block — null when not in Bedrock mode. */
+  bedrock: AgentBedrockStatusSchema.nullable().default(null),
 });
 export type AgentCredStatus = z.infer<typeof AgentCredStatusSchema>;
 
