@@ -172,6 +172,9 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `LOCAL_POSTGRES_USER` | No | `postgres` | Superuser name for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_PASSWORD` | No | `postgres` | Superuser password for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_DB` | No | `app` | Database created in the optional local Postgres cluster |
+| `SWARM_DEP_REDIS_ENABLED` | No | `false` | Set to `true` to start the optional bundled Redis helper on worker boot (entrypoint runs `scripts/init-local-redis.sh`). Redis binaries ship dormant in the worker image since `v1.99.0` |
+| `LOCAL_REDIS_DATA_DIR` | No | `/tmp/redis-data` | Data directory for the optional local Redis instance |
+| `LOCAL_REDIS_PORT` | No | `6379` | Port for the optional local Redis instance |
 
 ## Git Configuration
 

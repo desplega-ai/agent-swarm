@@ -198,6 +198,8 @@ The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned v
 
 The worker image now also ships PostgreSQL 16 server binaries (`initdb`, `pg_ctl`, `psql`, `pg_stat_statements`) for local backend or integration-style test setups. They stay dormant unless you opt in with `SWARM_DEP_POSTGRES_ENABLED=true`, which runs [`scripts/init-local-postgres.sh`](./scripts/init-local-postgres.sh) from the entrypoint. The helper defaults to `localhost:5433` and can be tuned with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB`.
 
+The same worker image now also bundles Redis server/client binaries for queue or cache-backed integration tests. Redis stays dormant unless you opt in with `SWARM_DEP_REDIS_ENABLED=true`, which runs [`scripts/init-local-redis.sh`](./scripts/init-local-redis.sh) from the entrypoint. The helper defaults to `localhost:6379` and can be tuned with `LOCAL_REDIS_DATA_DIR` and `LOCAL_REDIS_PORT`.
+
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
 ### Run

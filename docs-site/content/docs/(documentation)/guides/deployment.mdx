@@ -411,6 +411,8 @@ The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned v
 
 The worker image also includes PostgreSQL 16 server binaries for local test setups. Nothing auto-starts unless you set `SWARM_DEP_POSTGRES_ENABLED=true`; in that case the entrypoint runs [`scripts/init-local-postgres.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-postgres.sh), which initializes a local cluster on `localhost:5433` by default. Override with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB` as needed.
 
+The worker image now also bundles Redis server/client binaries for queue or cache-backed integration tests. Nothing auto-starts unless you set `SWARM_DEP_REDIS_ENABLED=true`; in that case the entrypoint runs [`scripts/init-local-redis.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-redis.sh), which starts Redis on `localhost:6379` by default. Override with `LOCAL_REDIS_DATA_DIR` and `LOCAL_REDIS_PORT` as needed.
+
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
 ### Run

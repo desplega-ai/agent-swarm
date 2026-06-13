@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.99.0] - 2026-06-13
+
+### Added
+- **Bedrock probe status now surfaces directly in the agent credentials UI** (#760) — pi-mono workers expose ready/blocked/pending AWS Bedrock probe state in the dashboard so operators can verify region-scoped model access before dispatching work.
+- **Worker images now ship an opt-in local Redis helper** (#755) — `Dockerfile.worker` bundles Redis binaries plus `scripts/init-local-redis.sh`, letting integration-style tasks start a queue/cache backend on demand with `SWARM_DEP_REDIS_ENABLED=true`.
+- **Provider rate-limit windows now persist with API key records** (#747) — credential state survives restarts so workers and operators can see recent exhaustion windows instead of relearning them every boot.
+
+### Changed
+- **Pricing data now refreshes from models.dev at runtime** (#758) — the committed snapshot is fallback-only, while the API refreshes pricing on boot and every 12 hours to keep cost recomputation current without waiting for a repo refresh.
+
+### Fixed
+- **Slack completion updates render more cleanly in watcher threads** (#759) — task tree, response, and completion blocks avoid malformed or duplicated completion output.
+- **opencode startup timeout is now longer and env-overridable** (#756) — slow local boots have more room before the harness is treated as failed.
+- **Release/deploy and metadata edge cases are handled more reliably** (#754, #752, #751, #750) — E2B `latest` builds now point at immutable version images, release runs survive stale-deploy cancellation, pi/opencode version metadata stays attached to tasks, and `script-search` guards against mixed-dimension embedding rows.
+
 ## [1.96.0] - 2026-06-12
 
 ### Added

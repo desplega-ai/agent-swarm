@@ -122,6 +122,7 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 ## Highlights
 
 - **Lead/worker orchestration in Docker** — isolated dev environments, priority queues, pause/resume across deploys. [Architecture →](https://docs.agent-swarm.dev/docs/architecture/overview)
+- **Bundled local test services in workers** — the worker image ships dormant PostgreSQL 16 and Redis binaries that you can opt into for integration-style tasks without building a custom image first. [Deployment →](https://docs.agent-swarm.dev/docs/guides/deployment)
 - **Compounding memory & persistent identity** — agents remember past sessions and evolve their own persona, expertise, and notes. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [Agents →](https://docs.agent-swarm.dev/docs/architecture/agents)
 - **Multi-channel inputs** — Slack, GitHub, GitLab, email, WhatsApp, Linear, Jira, and the HTTP API all create tasks. [Integrations](#integrations)
 - **Workflow engine with Human-in-the-Loop** — DAG-based automation with approval gates, retries, and structured I/O. [Workflows →](https://docs.agent-swarm.dev/docs/concepts/workflows)
