@@ -19,6 +19,7 @@ import {
 } from "../api.ts";
 import { ConfigChip } from "../components/ConfigChip.tsx";
 import { useConfirm } from "../components/ConfirmDialog.tsx";
+import { CrownIcon } from "../components/CrownIcon.tsx";
 import { type Column, DataTable } from "../components/DataTable.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
 import {
@@ -44,7 +45,7 @@ import {
   statusGlyphInfo,
 } from "../components/StatusBadge.tsx";
 import { InfoTip, Tooltip } from "../components/Tooltip.tsx";
-import { navigate, useConfigs, usePoll } from "../hooks.ts";
+import { type ConfigLookup, navigate, useConfigs, usePoll } from "../hooks.ts";
 import {
   memberLabel,
   type NormalizedSandboxInfo,
@@ -72,7 +73,11 @@ import type {
   WorkerRosterEntryJson,
 } from "../types.ts";
 import JudgeTrace from "./JudgeTrace.tsx";
-import Transcript, { type TranscriptTaskStatus } from "./Transcript.tsx";
+import Transcript, {
+  TaskMemberChip,
+  type TaskMemberInfo,
+  type TranscriptTaskStatus,
+} from "./Transcript.tsx";
 import Waterfall from "./Waterfall.tsx";
 import "./run-details.css";
 
@@ -363,6 +368,13 @@ export default function RunDetailsPage(props: {
     return out;
   }, [taskRes, taskFlags]);
 
+  // Round-10 item 2: agentId → executing-member attribution for the left-bar
+  // task rows + the transcript's sub-tab headers/hovers. Null ⇒ absent.
+  const memberLookup = useMemo<Record<string, TaskMemberInfo> | null>(
+    () => buildMemberLookup(attempt, configs),
+    [attempt, configs],
+  );
+
   // v7 §10.3: Workers-panel task chips jump into the transcript's sub-tab.
   // Requests carry the attempt id so a stale one never crosses attempts.
   const [focusTask, setFocusTask] = useState<{
@@ -599,6 +611,7 @@ export default function RunDetailsPage(props: {
             config={attempt ? configs.byId(attempt.configId) : null}
             taskFlags={taskFlags}
             tasks={taskRes !== null && taskRes.tasks.length > 0 ? taskRes.tasks : null}
+            members={memberLookup}
             onOpenTask={openTaskInTranscript}
           />
           <WorkersPanel attempt={attempt} onOpenTask={openTaskInTranscript} />
@@ -658,6 +671,7 @@ export default function RunDetailsPage(props: {
                   taskTitles={taskTitles}
                   taskStatuses={taskStatuses}
                   taskRecords={taskRecords}
+                  members={memberLookup}
                   totals={
                     attempt
                       ? {
@@ -836,6 +850,74 @@ function parseTaskFlags(text: string | null): Map<string, TaskFlag> {
   return map;
 }
 
+// ---- task → member attribution (round-10 item 2) ----
+
+/**
+ * agentId → resolved executing member — the FROZEN pure client-side join:
+ * AttemptTaskJson.agentId ↔ WorkerRosterEntryJson.agentId (attempt.workers,
+ * v7 §10), falling back to normalizeSandboxInfo(attempt.sandbox) workers
+ * (LIVE attempts — workersJson is only written at attempt end — and
+ * roster-fetch-failed attempts). The roster wins per agentId once captured.
+ * Null (no joinable member at all) ⇒ attribution UI entirely absent, so
+ * v1-era attempts render bit-for-bit unchanged.
+ */
+function buildMemberLookup(
+  attempt: AttemptJson | null,
+  configs: ConfigLookup,
+): Record<string, TaskMemberInfo> | null {
+  if (attempt === null) return null;
+  const out: Record<string, TaskMemberInfo> = {};
+
+  // (2) sandbox fallback first — roster entries overwrite per agentId below.
+  const info = normalizeSandboxInfo(attempt.sandbox);
+  if (info !== null) {
+    const cfg = configs.byId(attempt.configId);
+    const workerCount = info.workers.filter((w) => w.role !== "lead").length;
+    for (const w of info.workers) {
+      if (w.agentId === null) continue;
+      out[w.agentId] = {
+        agentId: w.agentId,
+        name: memberLabel(w, workerCount),
+        isLead: w.role === "lead",
+        memberRole: w.role === "lead" ? "lead" : "worker",
+        index: w.index,
+        provider: cfg?.provider ?? null,
+        configId: attempt.configId,
+        model: cfg?.model ?? null,
+        overridden: false,
+        status: null,
+      };
+    }
+  }
+
+  // (1) the roster — same display rules as MemberSection (name fallback,
+  // §12.3 cell-config-with-override resolution, lead by memberRole).
+  const roster = attempt.workers ?? null;
+  if (roster !== null && roster.length > 0) {
+    const workerCount = roster.filter((m) => m.memberRole === "worker").length;
+    for (const e of roster) {
+      if (e.agentId === "") continue;
+      const isLead = e.memberRole === "lead" || e.isLead;
+      const effConfigId = e.configId ?? attempt.configId;
+      const cfg = configs.byId(effConfigId);
+      out[e.agentId] = {
+        agentId: e.agentId,
+        name: e.name ?? (isLead ? "Lead" : workerLabel(e.index, workerCount)),
+        isLead,
+        memberRole: e.memberRole,
+        index: e.index,
+        provider: e.provider ?? cfg?.provider ?? null,
+        configId: effConfigId,
+        model: e.model ?? cfg?.model ?? null,
+        overridden: e.configId !== null || e.model !== null,
+        status: e.status ?? null,
+      };
+    }
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 function AttemptSummary(props: {
   attempt: AttemptJson | null;
   selId: string | null;
@@ -848,6 +930,8 @@ function AttemptSummary(props: {
    * Null (endpoint missing / fetch error / nothing known) → the legacy chips.
    */
   tasks: AttemptTaskJson[] | null;
+  /** Round-10 item 2: agentId → executing member; null ⇒ attribution absent. */
+  members: Record<string, TaskMemberInfo> | null;
   onOpenTask: (taskId: string) => void;
 }): ReactNode {
   const { attempt, config, taskFlags } = props;
@@ -917,7 +1001,7 @@ function AttemptSummary(props: {
         </Meta>
       </div>
       {props.tasks !== null ? (
-        <TaskRows tasks={props.tasks} onOpenTask={props.onOpenTask} />
+        <TaskRows tasks={props.tasks} members={props.members} onOpenTask={props.onOpenTask} />
       ) : attempt.taskIds.length > 0 ? (
         <div className="rd-tasks">
           <span className="meta-label">Tasks</span>
@@ -1016,13 +1100,21 @@ function taskRefLabel(depId: string, tasks: AttemptTaskJson[]): string {
  */
 function TaskRows(props: {
   tasks: AttemptTaskJson[];
+  members: Record<string, TaskMemberInfo> | null;
   onOpenTask: (taskId: string) => void;
 }): ReactNode {
   return (
     <div className="rd-taskrows">
       <span className="rd-taskrows-label">Tasks</span>
       {props.tasks.map((t, i) => (
-        <TaskRow key={t.id} task={t} index={i} tasks={props.tasks} onOpenTask={props.onOpenTask} />
+        <TaskRow
+          key={t.id}
+          task={t}
+          index={i}
+          tasks={props.tasks}
+          members={props.members}
+          onOpenTask={props.onOpenTask}
+        />
       ))}
     </div>
   );
@@ -1032,12 +1124,15 @@ function TaskRow(props: {
   task: AttemptTaskJson;
   index: number;
   tasks: AttemptTaskJson[];
+  members: Record<string, TaskMemberInfo> | null;
   onOpenTask: (taskId: string) => void;
 }): ReactNode {
   const t = props.task;
   const [open, setOpen] = useState(false);
   const info = taskRowGlyph(t.status, t.skipped);
   const hasDetail = t.outcome !== null || t.error !== null;
+  // Round-10 item 2: null agentId / no roster ⇒ no attribution chip (sacred).
+  const member = t.agentId !== null ? (props.members?.[t.agentId] ?? null) : null;
 
   const labelTip = [
     t.id,
@@ -1091,6 +1186,11 @@ function TaskRow(props: {
             {t.title !== null ? <span className="rd-taskrow-title"> · {t.title}</span> : null}
           </button>
         </Tooltip>
+        {member !== null ? (
+          <span className="rd-taskrow-member">
+            <TaskMemberChip member={member} />
+          </span>
+        ) : null}
         {t.dependsOn.length > 0 ? (
           <Tooltip text={depTip}>
             <span className="rd-taskrow-dep" role="img" aria-label={depTip}>
@@ -1376,7 +1476,12 @@ function MemberSection(props: {
         <span className="rd-member-name">{name}</span>
         {isLead ? (
           <Tooltip text="Lead agent — tasks created without a member route here">
-            <span className="rd-member-lead">LEAD</span>
+            {/* Round-10 item 2: crown AUGMENTS the LEAD badge (dashboard
+                convention — lucide Crown next to the lead's name). */}
+            <span className="rd-member-lead">
+              <CrownIcon size={10} className="tm-crown" />
+              LEAD
+            </span>
           </Tooltip>
         ) : null}
         {e.agentTemplate !== null ? (

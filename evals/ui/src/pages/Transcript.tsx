@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { getTranscript } from "../api.ts";
+import { CrownIcon } from "../components/CrownIcon.tsx";
 import { fmtCost, fmtDate, fmtDuration, fmtTokens } from "../components/format.ts";
 import { HarnessIcon } from "../components/HarnessIcon.tsx";
 import { JsonView } from "../components/JsonView.tsx";
@@ -195,6 +196,83 @@ export interface TranscriptTotals {
   tokens: TokenTotalsJson | null;
 }
 
+/**
+ * Round-10 item 2: one resolved executing member, keyed by agentId — the
+ * client-side join of AttemptTaskJson.agentId ↔ the roster (attempt.workers),
+ * with the v2 sandbox blob as fallback. UI-local by frozen contract (NOT an
+ * API payload mirror — ui/src/types.ts stays untouched); RunDetailsPage
+ * computes the lookup and threads it here.
+ */
+export interface TaskMemberInfo {
+  agentId: string;
+  /** Roster name ?? "Lead" / workerLabel(index, workerCount). */
+  name: string;
+  isLead: boolean;
+  memberRole: "lead" | "worker";
+  index: number;
+  /** Harness-icon provider — roster provider ?? catalog provider of the effective config. */
+  provider: string | null;
+  /** Effective config id (member override ?? cell config). */
+  configId: string | null;
+  model: string | null;
+  /** True when the member overrode the cell config (v7 §12.3 marker). */
+  overridden: boolean;
+  /** Agent status at roster capture; null on the sandbox fallback. */
+  status: string | null;
+}
+
+/** agentId → member resolution; null agentId / no lookup / no match ⇒ null (render nothing). */
+function memberOf(
+  rec: AttemptTaskJson | null | undefined,
+  members: Record<string, TaskMemberInfo> | null | undefined,
+): TaskMemberInfo | null {
+  if (rec === null || rec === undefined || rec.agentId === null) return null;
+  return members?.[rec.agentId] ?? null;
+}
+
+/** Member detail hover card (round-10 item 2): name, role, config/model, provider, status. */
+function TaskMemberCard(props: { member: TaskMemberInfo }): ReactNode {
+  const m = props.member;
+  return (
+    <div className="tip-card">
+      <div className="tip-card-title tm-card-title">
+        {m.isLead ? <CrownIcon size={12} className="tm-crown" /> : null}
+        <HarnessIcon harness={m.provider} size={12} plain />
+        {m.name}
+      </div>
+      <ChipCardRow label="Role">{m.memberRole}</ChipCardRow>
+      <ChipCardRow label="Config">
+        {m.configId !== null ? <code>{m.configId}</code> : "—"}
+        {m.overridden ? <span className="tm-override"> · override</span> : null}
+      </ChipCardRow>
+      <ChipCardRow label="Model">{m.model ?? "—"}</ChipCardRow>
+      <ChipCardRow label="Provider">{m.provider ?? "—"}</ChipCardRow>
+      <ChipCardRow label="Status">{m.status ?? "—"}</ChipCardRow>
+      <ChipCardRow label="Agent">
+        <code>{m.agentId}</code>
+      </ChipCardRow>
+    </div>
+  );
+}
+
+/**
+ * Round-10 item 2: compact "who ran this task" chip — crown (lead only) +
+ * harness icon + member name; hover = the member detail card. Shared by the
+ * left-bar task rows (RunDetailsPage) and the sub-tab outcome header.
+ */
+export function TaskMemberChip(props: { member: TaskMemberInfo }): ReactNode {
+  const m = props.member;
+  return (
+    <Tooltip wide text={<TaskMemberCard member={m} />}>
+      <span className="tm-chip">
+        {m.isLead ? <CrownIcon size={12} className="tm-crown" /> : null}
+        <HarnessIcon harness={m.provider} size={11} plain />
+        <span className="tm-name">{m.name}</span>
+      </span>
+    </Tooltip>
+  );
+}
+
 export default function Transcript(props: {
   attemptId: string;
   live?: boolean;
@@ -215,6 +293,12 @@ export default function Transcript(props: {
    * Null/absent (older callers) ⇒ the All pill renders exactly as before.
    */
   totals?: TranscriptTotals | null;
+  /**
+   * Round-10 item 2: agentId → executing-member attribution (computed by
+   * RunDetailsPage from the roster / sandbox blob). Optional/additive:
+   * absent, or no agentId match ⇒ no attribution UI (v1-era unchanged).
+   */
+  members?: Record<string, TaskMemberInfo> | null;
   /** v7 §10.3: Workers-panel task chips focus a sub-tab (nonce re-triggers). */
   focusTask?: { taskId: string; nonce: number } | null;
 }): ReactNode {
@@ -429,6 +513,7 @@ export default function Transcript(props: {
             statuses={props.taskStatuses}
             records={props.taskRecords}
             totals={props.totals}
+            members={props.members}
             onSelect={setSelectedTask}
           />
         ) : null}
@@ -453,7 +538,13 @@ export default function Transcript(props: {
         ) : null}
       </div>
       {/* keyed by task so the item-8 collapse state resets per sub-tab */}
-      {activeRecord !== null ? <TaskTabHeader rec={activeRecord} key={activeTask} /> : null}
+      {activeRecord !== null ? (
+        <TaskTabHeader
+          rec={activeRecord}
+          member={memberOf(activeRecord, props.members)}
+          key={activeTask}
+        />
+      ) : null}
       {rowCount === 0 ? (
         <div className="t-empty dim">
           {activeTask === null
@@ -679,8 +770,14 @@ function ChipCardRow(props: { label: string; children: ReactNode }): ReactNode {
 }
 
 /** Item 7 hover breakdown for one task pill — "—" for every null field. */
-function TaskChipCard(props: { rec: AttemptTaskJson; taskNo: number }): ReactNode {
+function TaskChipCard(props: {
+  rec: AttemptTaskJson;
+  taskNo: number;
+  /** Round-10 item 2: executing member (crown for the lead); null ⇒ row absent. */
+  member?: TaskMemberInfo | null;
+}): ReactNode {
   const rec = props.rec;
+  const member = props.member ?? null;
   const info = taskTabGlyph({ status: rec.status, skipped: rec.skipped });
   return (
     <div className="tip-card">
@@ -700,6 +797,15 @@ function TaskChipCard(props: { rec: AttemptTaskJson; taskNo: number }): ReactNod
       <ChipCardRow label="Duration">{fmtDuration(rec.durationMs ?? null)}</ChipCardRow>
       <ChipCardRow label="Tokens">{tokensBreakdown(rec.tokens)}</ChipCardRow>
       <ChipCardRow label="Model">{rec.tokens?.model ?? "—"}</ChipCardRow>
+      {member !== null ? (
+        <ChipCardRow label="Member">
+          <span className="tm-member-val">
+            {member.isLead ? <CrownIcon size={11} className="tm-crown" /> : null}
+            <HarnessIcon harness={member.provider} size={11} plain />
+            {member.name}
+          </span>
+        </ChipCardRow>
+      ) : null}
       <ChipCardRow label="Agent">{rec.agentId ?? "—"}</ChipCardRow>
       <ChipCardRow label="Created">{fmtDate(rec.createdAt ?? null)}</ChipCardRow>
       <ChipCardRow label="Finished">{fmtDate(rec.finishedAt ?? null)}</ChipCardRow>
@@ -741,6 +847,8 @@ function TaskTabs(props: {
   records?: Record<string, AttemptTaskJson> | null;
   /** v7.7 item 7: attempt totals behind the All pill; null/absent = plain pill. */
   totals?: TranscriptTotals | null;
+  /** Round-10 item 2: agentId → member attribution for the pill hover cards. */
+  members?: Record<string, TaskMemberInfo> | null;
   onSelect: (taskId: string | null) => void;
 }): ReactNode {
   const resolve = (taskId: string): TranscriptTaskStatus | undefined =>
@@ -792,6 +900,7 @@ function TaskTabs(props: {
           glyph={glyphFor(taskId)}
           title={props.titles?.[taskId]}
           rec={props.records?.[taskId]}
+          member={memberOf(props.records?.[taskId], props.members)}
           onSelect={props.onSelect}
         />
       ))}
@@ -807,6 +916,8 @@ function TaskTabPill(props: {
   glyph: TrTabGlyph | null;
   title: string | undefined;
   rec: AttemptTaskJson | undefined;
+  /** Round-10 item 2: executing member for the hover card; null ⇒ row absent. */
+  member: TaskMemberInfo | null;
   onSelect: (taskId: string | null) => void;
 }): ReactNode {
   const { taskId, glyph, title, rec } = props;
@@ -846,7 +957,7 @@ function TaskTabPill(props: {
   // pre-v7.7 pill incl. its native title tooltip.
   if (rec === undefined) return button;
   return (
-    <Tooltip wide text={<TaskChipCard rec={rec} taskNo={props.taskNo} />}>
+    <Tooltip wide text={<TaskChipCard rec={rec} taskNo={props.taskNo} member={props.member} />}>
       {button}
     </Tooltip>
   );
@@ -861,8 +972,13 @@ function TaskTabPill(props: {
  * reads distinctly from a real error (v6 §9 semantics); every field degrades
  * to absent/"—" on all-null records ("task-ids" source, v1-era rows).
  */
-function TaskTabHeader(props: { rec: AttemptTaskJson }): ReactNode {
+function TaskTabHeader(props: {
+  rec: AttemptTaskJson;
+  /** Round-10 item 2: executing member (name + harness icon, crown for the lead). */
+  member?: TaskMemberInfo | null;
+}): ReactNode {
   const rec = props.rec;
+  const member = props.member ?? null;
   const [open, setOpen] = useState(false);
   const info = taskTabGlyph({ status: rec.status, skipped: rec.skipped });
   const statusTip = [rec.id, info.label, rec.agentId !== null ? `Agent ${rec.agentId}` : null]
@@ -898,6 +1014,12 @@ function TaskTabHeader(props: { rec: AttemptTaskJson }): ReactNode {
               <CostBadge costUsd={rec.costUsd} source={null} />
             </span>
           </Tooltip>
+          {/* Round-10 item 2: who ran this task — absent when unattributed. */}
+          {member !== null ? (
+            <span className="t-taskhead-member">
+              <TaskMemberChip member={member} />
+            </span>
+          ) : null}
         </div>
         {open && rec.error !== null ? (
           <div className={rec.skipped ? "t-taskhead-detail skip" : "t-taskhead-detail error"}>

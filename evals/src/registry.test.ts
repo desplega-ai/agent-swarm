@@ -79,7 +79,7 @@ describe("validateScenario (v6 §0.11 frozen rules)", () => {
     expect(validateScenario(scenario({ seed: { memories: ["ok", "   "] } }))).not.toEqual([]);
   });
 
-  describe("dependsOn rules (strictly-earlier-index = the cycle check)", () => {
+  describe("dependsOn rules (round 10: range + self + whole-graph cycle check)", () => {
     const tasks3 = (deps: { [i: number]: number[] }) =>
       scenario({
         tasks: [
@@ -98,8 +98,8 @@ describe("validateScenario (v6 §0.11 frozen rules)", () => {
       expect(validateScenario(tasks3({ 1: [5] }))).not.toEqual([]);
     });
 
-    test("forward reference rejected", () => {
-      expect(validateScenario(tasks3({ 1: [2] }))).not.toEqual([]);
+    test("acyclic forward reference accepted (round 10 relaxation)", () => {
+      expect(validateScenario(tasks3({ 1: [2] }))).toEqual([]);
     });
 
     test("self-reference rejected", () => {
@@ -231,8 +231,14 @@ describe("serializeScenario — workerSpecs + lead (v7 §9/§12)", () => {
 });
 
 describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
-  test("display order is frozen: frontier, oss, claude-family, budget", () => {
-    expect(CONFIG_PRESETS.map((p) => p.id)).toEqual(["frontier", "oss", "claude-family", "budget"]);
+  test("display order is frozen: frontier, challengers, oss, claude-family, budget", () => {
+    expect(CONFIG_PRESETS.map((p) => p.id)).toEqual([
+      "frontier",
+      "challengers",
+      "oss",
+      "claude-family",
+      "budget",
+    ]);
   });
 
   test("preset ids are unique; configIds non-empty with no internal duplicates", () => {
@@ -259,6 +265,12 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
     expect(CONFIG_PRESETS.find((p) => p.id === "frontier")?.configIds).toContain("pi-gemini-pro");
   });
 
+  test("frontier carries the round-9 proprietary additions", () => {
+    const frontier = CONFIG_PRESETS.find((p) => p.id === "frontier")?.configIds ?? [];
+    expect(frontier).toContain("pi-qwen3.7-max");
+    expect(frontier).toContain("pi-minimax-m3");
+  });
+
   test("oss carries the round-8 OSS refresh pi/opencode twins", () => {
     const oss = CONFIG_PRESETS.find((p) => p.id === "oss")?.configIds ?? [];
     for (const short of [
@@ -267,6 +279,9 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
       "mimo-v2.5-pro",
       "mimo-v2.5",
       "nemotron-3-ultra",
+      // Round-9 open-weight additions.
+      "hy3-preview",
+      "step-3.7-flash",
     ]) {
       expect(oss).toContain(`pi-${short}`);
       expect(oss).toContain(`opencode-${short}`);
@@ -275,6 +290,20 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
     for (const id of ["pi-kimi-k2.5", "pi-minimax-m2.5", "opencode-kimi-k2.5"]) {
       expect(oss).toContain(id);
     }
+    // open_weights: false additions stay out of oss (round-9 proprietary lift).
+    for (const short of ["minimax-m3", "qwen3.7-max", "qwen3.7-plus", "grok-4.3", "mercury-2"]) {
+      expect(oss).not.toContain(`pi-${short}`);
+    }
+  });
+
+  test("challengers (round 9) holds the pi variants of the strongest proprietary additions", () => {
+    expect(CONFIG_PRESETS.find((p) => p.id === "challengers")?.configIds).toEqual([
+      "pi-qwen3.7-max",
+      "pi-minimax-m3",
+      "pi-qwen3.7-plus",
+      "pi-grok-4.3",
+      "pi-mistral-medium-3.5",
+    ]);
   });
 });
 
@@ -302,6 +331,8 @@ describe("expandPresetSelection — CLI --preset expansion (v7.7 item 1)", () =>
       "claude-sonnet",
       "pi-deepseek-pro",
       "pi-gemini-pro",
+      "pi-qwen3.7-max",
+      "pi-minimax-m3",
       "codex-5.5",
       // …then explicit --configs extras; the duplicate claude-haiku is dropped.
       "codex-5.4",
@@ -316,7 +347,7 @@ describe("expandPresetSelection — CLI --preset expansion (v7.7 item 1)", () =>
 
   test("unknown preset throws the frozen error before anything else", () => {
     expect(() => expandPresetSelection(["nope"], [])).toThrow(
-      'unknown preset "nope" (available: frontier, oss, claude-family, budget)',
+      'unknown preset "nope" (available: frontier, challengers, oss, claude-family, budget)',
     );
   });
 });
@@ -340,5 +371,73 @@ describe("serializeConfig — AA benchmark block (v7.6 item D)", () => {
     const s = serializeConfig({ id: "pi-deepseek-flash", provider: "pi", model: "x" });
     expect(JSON.parse(JSON.stringify(s))).toEqual(s);
     expect(s.aa?.medianTokensPerS).toBeNull(); // "--" cells stay null through the join
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 10 (RUNNER-TOPO) — appended block. validateScenario dependsOn rules:
+// forward refs legal, range/self/duplicate per-entry errors, whole-graph
+// cycle detection naming the offending chain with indices + titles.
+// ---------------------------------------------------------------------------
+describe("validateScenario dependsOn (round 10 — relaxed range + cycle chain errors)", () => {
+  const withDeps = (titles: string[], deps: { [i: number]: number[] }) =>
+    scenario({
+      tasks: titles.map((title, i) => ({ title, description: "d", dependsOn: deps[i] })),
+    });
+
+  test("chain, diamond, and independent roots are all valid", () => {
+    expect(validateScenario(withDeps(["A", "B", "C"], { 1: [0], 2: [1] }))).toEqual([]);
+    expect(validateScenario(withDeps(["A", "B", "C", "D"], { 1: [0], 2: [0], 3: [1, 2] }))).toEqual(
+      [],
+    );
+    expect(validateScenario(withDeps(["A", "B", "C", "D"], { 2: [0], 3: [1] }))).toEqual([]);
+  });
+
+  test("acyclic forward reference is legal", () => {
+    expect(validateScenario(withDeps(["A", "B", "C"], { 0: [2] }))).toEqual([]);
+  });
+
+  test("unknown ref keeps the frozen per-task error shape", () => {
+    expect(validateScenario(withDeps(["A", "B", "C"], { 1: [5] }))).toEqual([
+      'task 1 ("B"): dependsOn entry 5 must reference an existing task index [0, 2]',
+    ]);
+    expect(validateScenario(withDeps(["A", "B", "C"], { 2: [-1] }))).toEqual([
+      'task 2 ("C"): dependsOn entry -1 must reference an existing task index [0, 2]',
+    ]);
+  });
+
+  test("self-dependency gets its own explicit error (not the range error)", () => {
+    expect(validateScenario(withDeps(["A", "B"], { 1: [1] }))).toEqual([
+      'task 1 ("B"): dependsOn entry 1 is a self-dependency',
+    ]);
+  });
+
+  test("dependency cycle names the chain with indices + titles (spec example)", () => {
+    // 1 ("B") depends on 3 ("D") which depends back on 1 ("B").
+    expect(validateScenario(withDeps(["A", "B", "C", "D"], { 1: [3], 3: [1] }))).toEqual([
+      'dependency cycle: 1 ("B") → 3 ("D") → 1 ("B")',
+    ]);
+  });
+
+  test("three-node cycle is named in DFS encounter order", () => {
+    expect(validateScenario(withDeps(["A", "B", "C"], { 0: [1], 1: [2], 2: [0] }))).toEqual([
+      'dependency cycle: 0 ("A") → 1 ("B") → 2 ("C") → 0 ("A")',
+    ]);
+  });
+
+  test("duplicates and non-integers are still rejected alongside the relaxation", () => {
+    const errors = validateScenario(withDeps(["A", "B", "C"], { 2: [0, 0] }));
+    expect(errors).toEqual(['task 2 ("C"): duplicate dependsOn entry 0']);
+    expect(validateScenario(withDeps(["A", "B"], { 1: [0.5] }))).toEqual([
+      'task 1 ("B"): dependsOn entry 0.5 is not an integer',
+    ]);
+  });
+
+  test("per-entry errors and cycle errors aggregate in one pass", () => {
+    const errors = validateScenario(withDeps(["A", "B", "C"], { 0: [1, 9], 1: [0] }));
+    expect(errors).toContain(
+      'task 0 ("A"): dependsOn entry 9 must reference an existing task index [0, 2]',
+    );
+    expect(errors).toContain('dependency cycle: 0 ("A") → 1 ("B") → 0 ("A")');
   });
 });

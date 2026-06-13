@@ -63,6 +63,7 @@ import {
   type WorkerRosterEntry,
   type WorkerSpec,
 } from "../types.ts";
+import { topoOrder } from "./topo.ts";
 
 const DEFAULT_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_RETRIES = 1; // infra retries per attempt (fresh sandboxes each try)
@@ -771,7 +772,9 @@ async function runAttemptOnce(opts: {
     const tasks: SwarmTask[] = [];
     setAttemptPhase(attempt.id, "tasks");
     const tasksT0 = Date.now();
-    const createdTaskIds: string[] = [];
+    // Scenario-local spec index → swarm task UUID. Index-keyed (NOT push-order)
+    // so dependsOn resolution survives topo reordering (round 10).
+    const swarmIdByIndex: string[] = [];
     // taskId → member index, recorded at creation (v7 §10.1 per-member cost
     // attribution; `worker: "lead"` tasks map to the lead member).
     const taskMemberIndex = new Map<string, number>();
@@ -795,10 +798,12 @@ async function runAttemptOnce(opts: {
       }
       return w;
     };
-    const createTaskFor = async (spec: TaskSpec): Promise<SwarmTask> => {
+    const createTaskFor = async (specIndex: number): Promise<SwarmTask> => {
+      const spec = scenario.tasks[specIndex] as TaskSpec;
       const w = resolveWorker(spec);
       const toLead = spec.worker === "lead";
-      const deps = (spec.dependsOn ?? []).map((d) => createdTaskIds[d] as string);
+      // Topo creation order guarantees every dep is already created here.
+      const deps = (spec.dependsOn ?? []).map((d) => swarmIdByIndex[d] as string);
       log(
         `[task] creating "${spec.title}" → ${toLead ? "lead" : `worker ${w.index}`} (${w.agentId})` +
           (deps.length > 0 ? ` deps=[${deps.map((d) => d.slice(0, 8)).join(", ")}]` : ""),
@@ -812,7 +817,7 @@ async function runAttemptOnce(opts: {
         ...(toLead ? {} : { agentId: w.agentId }),
         ...(deps.length > 0 ? { dependsOn: deps } : {}),
       });
-      createdTaskIds.push(created.id);
+      swarmIdByIndex[specIndex] = created.id;
       taskMemberIndex.set(created.id, w.index);
       return created;
     };
@@ -829,35 +834,31 @@ async function runAttemptOnce(opts: {
       return processTerminalTask(final, log);
     };
 
-    if (scenario.tasks.some((t) => t.dependsOn?.length)) {
-      // DAG mode (v6 §9.3): create ALL tasks upfront with native dependsOn —
-      // the server holds dependents `pending` until their deps complete, and
-      // cascade-fails them when a dep fails/cancels/times out. Await in index
-      // order; deps point at earlier indices, so an awaited task's deps are
-      // already terminal.
-      log(`[task] dependency mode: creating ${scenario.tasks.length} task(s) upfront`);
-      const createdTasks: SwarmTask[] = [];
-      for (const spec of scenario.tasks) {
-        signal?.throwIfAborted();
-        createdTasks.push(await createTaskFor(spec));
-      }
-      // Ids are all known upfront — persist them before the long awaits.
-      await updateAttempt(db, attempt.id, { taskIds: createdTaskIds });
-      for (const created of createdTasks) {
-        signal?.throwIfAborted();
-        log(`[task] waiting for ${created.id} (timeout ${Math.round(taskTimeoutMs / 1000)}s)`);
-        tasks.push(await awaitTask(created.id));
-      }
-    } else {
-      // Sequential mode — today's loop: create task i → wait → create i+1.
-      for (const spec of scenario.tasks) {
-        signal?.throwIfAborted();
-        const created = await createTaskFor(spec);
-        log(
-          `[task] created ${created.id} — waiting (timeout ${Math.round(taskTimeoutMs / 1000)}s)`,
-        );
-        tasks.push(await awaitTask(created.id));
-      }
+    // Unified creation path (round 10): create ALL tasks upfront in topo
+    // order (Kahn; lowest scenario index first among ready nodes — identical
+    // to authoring order whenever authoring order is already topological,
+    // i.e. every registered scenario today). Upfront creation is what lets
+    // independent roots land on different members concurrently: the server
+    // holds dependents `pending` until their deps complete (checkDependencies)
+    // and cascade-fails them when a dep fails/cancels/times out. Await in
+    // SCENARIO index order — waitForTask only polls to terminal, so await
+    // order never affects execution; forward-ref dependents simply wait
+    // (documented v7.7 DAG caveat).
+    log(`[task] creating ${scenario.tasks.length} task(s) upfront`);
+    const createdByIndex: SwarmTask[] = [];
+    for (const specIndex of topoOrder(scenario.tasks)) {
+      signal?.throwIfAborted();
+      createdByIndex[specIndex] = await createTaskFor(specIndex);
+    }
+    // Ids are all known upfront — persist them before the long awaits, in
+    // SCENARIO AUTHORING order (keeps left-bar rows / sub-tab pills stable).
+    await updateAttempt(db, attempt.id, {
+      taskIds: createdByIndex.map((created) => created.id),
+    });
+    for (const created of createdByIndex) {
+      signal?.throwIfAborted();
+      log(`[task] waiting for ${created.id} (timeout ${Math.round(taskTimeoutMs / 1000)}s)`);
+      tasks.push(await awaitTask(created.id));
     }
     timings.tasksMs = Date.now() - tasksT0;
     recordAttemptTimings(attempt.id, timings);

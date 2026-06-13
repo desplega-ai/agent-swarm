@@ -415,6 +415,67 @@
   color: var(--dim);
 }
 
+/* ---- round-10 item 2: executing-member attribution (crown + harness + name).
+   Shared by the left-bar task rows (RunDetailsPage) and the sub-tab outcome
+   header — renders ONLY when the agentId ↔ roster join resolved. ---- */
+
+.tm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--dim);
+  cursor: default;
+}
+
+.tm-chip:hover {
+  color: var(--text);
+}
+
+.tm-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The lead's crown — accent, matching the dashboard's h-3 w-3 text-primary
+   lucide Crown (agent-node.tsx convention). */
+.tm-crown {
+  flex: none;
+  display: block;
+  color: var(--accent);
+}
+
+/* Hover-card title with inline crown/harness icons. */
+.tm-card-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* §12.3 override marker inside the member hover card. */
+.tm-override {
+  color: var(--orange);
+}
+
+/* Member value row inside a task pill's hover card. */
+.tm-member-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* Outcome-header placement: after the cost (which owns margin-left: auto),
+   clamped so a long member name never crowds the status. */
+.t-taskhead-member {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 40%;
+}
+
 /* ---- selected sub-tab outcome block (v7.5 items 2/6 + v7.7 item 8) ----
    Sticky wrapper pins the card flush under the single-row sticky bar
    (--tr-bar-h is measured by Transcript via ResizeObserver — the bar's height

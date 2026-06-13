@@ -2,6 +2,7 @@ import { getAaForConfig } from "../configs/aa.ts";
 import { configs } from "../configs/index.ts";
 import { scenarios } from "../scenarios/index.ts";
 import type { Registry } from "./runner/index.ts";
+import { findDependencyCycles } from "./runner/topo.ts";
 import {
   type HarnessConfig,
   type Scenario,
@@ -75,10 +76,12 @@ function validateWorkerSpec(
 }
 
 /**
- * Scenario shape validation (v6 §0.11 + v7 §9/§12 — rules FROZEN). Returns
- * human-readable violations; empty array = valid. File existence/content of
- * `seed.sqlDump` is validated later, host-side in the runner, so a missing
- * fixture breaks one attempt — not the whole registry.
+ * Scenario shape validation (v6 §0.11 + v7 §9/§12; dependsOn relaxed in
+ * round 10 — forward refs legal, whole-graph cycle check instead of the
+ * strictly-earlier-index rule). Returns human-readable violations; empty
+ * array = valid. File existence/content of `seed.sqlDump` is validated later,
+ * host-side in the runner, so a missing fixture breaks one attempt — not the
+ * whole registry.
  */
 export function validateScenario(s: Scenario): string[] {
   const errors: string[] = [];
@@ -120,11 +123,13 @@ export function validateScenario(s: Scenario): string[] {
           errors.push(`task ${i} ("${task.title}"): dependsOn entry ${dep} is not an integer`);
           continue;
         }
-        // Strictly-earlier-index rule: self/forward references — and therefore
-        // cycles — are impossible by construction. This rule IS the cycle check.
-        if (dep < 0 || dep >= i) {
+        // Round 10: forward references are LEGAL — any existing index works.
+        // Acyclicity moves to the whole-graph check below.
+        if (dep === i) {
+          errors.push(`task ${i} ("${task.title}"): dependsOn entry ${dep} is a self-dependency`);
+        } else if (dep < 0 || dep >= s.tasks.length) {
           errors.push(
-            `task ${i} ("${task.title}"): dependsOn entry ${dep} must reference a strictly earlier task (0 <= d < ${i})`,
+            `task ${i} ("${task.title}"): dependsOn entry ${dep} must reference an existing task index [0, ${s.tasks.length - 1}]`,
           );
         }
         if (seen.has(dep)) {
@@ -134,6 +139,14 @@ export function validateScenario(s: Scenario): string[] {
       }
     }
   });
+  // Whole-graph cycle detection (round 10): with forward refs legal, cycles
+  // are possible — name each offending chain with indices + titles so the
+  // load-time failure points straight at the bad scenario edges.
+  for (const chain of findDependencyCycles(s.tasks)) {
+    errors.push(
+      `dependency cycle: ${chain.map((j) => `${j} ("${s.tasks[j]?.title}")`).join(" → ")}`,
+    );
+  }
   if (s.seed?.sqlDump !== undefined && !SQL_DUMP_NAME_RE.test(s.seed.sqlDump)) {
     errors.push(
       `seed.sqlDump "${s.seed.sqlDump}" must be a bare filename ending in .sql (no path separators)`,

@@ -401,6 +401,16 @@ a.rd-cellsum-row:hover {
   color: var(--text);
 }
 
+/* Round-10 item 2: executing-member chip on a task row (crown for the lead,
+   harness icon, name) — the name ellipsizes via .tm-name (transcript.css);
+   clamped so it never starves the clickable task label. */
+.rd-taskrow-member {
+  flex: none;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 34%;
+}
+
 /* Item 2: expanded outcome/error detail under a task row. */
 .rd-task-detail {
   margin: 2px 0 6px 24px;
@@ -686,7 +696,12 @@ a.rd-cellsum-row:hover {
   overflow-wrap: anywhere;
 }
 
+/* Round-10 item 2: the badge is AUGMENTED with the crown glyph (inline-flex
+   aligns crown + text); class, text, and Tooltip are all preserved. */
 .rd-member-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;

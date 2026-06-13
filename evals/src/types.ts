@@ -90,7 +90,10 @@ export interface TaskSpec {
   worker?: number | "lead";
   /**
    * Indices of tasks this task depends on (native swarm-API dependsOn, v6 §9).
-   * Every entry must be < this task's own index (validateScenario, v6 §0.11).
+   * Round 10: any existing task index works — forward references included.
+   * validateScenario rejects self-references, out-of-range/duplicate entries,
+   * and dependency cycles (whole-graph check) at load time; the runner
+   * topo-sorts creation order (evals/src/runner/topo.ts).
    * Absent/empty = no dependencies.
    */
   dependsOn?: number[];
