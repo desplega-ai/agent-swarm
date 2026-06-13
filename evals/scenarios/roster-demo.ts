@@ -34,7 +34,7 @@ export const rosterDemo: Scenario = {
     { name: "scribe-a", template: "coder" },
     { name: "scribe-b", configId: "pi-deepseek-flash" },
   ],
-  lead: { name: "coordinator", template: "lead", configId: "claude-sonnet" },
+  lead: { name: "Lead", template: "lead", configId: "claude-sonnet" },
   tasks: [
     {
       title: "Worker A marker",

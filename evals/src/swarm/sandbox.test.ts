@@ -113,11 +113,11 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
       agentId: "agent-lead",
       config: { id: "claude-sonnet", provider: "claude", model: "sonnet" },
       role: "lead",
-      spec: { name: "coordinator" },
+      spec: { name: "custom-lead" },
     });
     expect(env.AGENT_ROLE).toBe("lead");
     expect(env.MAX_CONCURRENT_TASKS).toBe("2");
-    expect(env.AGENT_NAME).toBe("coordinator");
+    expect(env.AGENT_NAME).toBe("custom-lead");
     // Lead-only template default (v7.5 item 7): production leads run
     // official/lead; its agentDefaults are no-ops vs the pinned boot env.
     expect(env.TEMPLATE_ID).toBe("official/lead");

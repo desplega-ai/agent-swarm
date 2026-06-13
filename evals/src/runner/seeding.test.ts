@@ -109,7 +109,7 @@ describe("buildSandboxInfo — sandboxJson v2 (v6 §0.3 frozen shape + v7 §9.3 
           member: {
             index: 2,
             role: "lead",
-            spec: { name: "coordinator", configId: "claude-sonnet" },
+            spec: { name: "custom-lead", configId: "claude-sonnet" },
             config: { id: "claude-sonnet", provider: "claude", model: "sonnet" },
             overridden: true,
           },
@@ -181,7 +181,7 @@ describe("buildSandboxInfo — sandboxJson v2 (v6 §0.3 frozen shape + v7 §9.3 
           startedAt: "2026-06-11T10:01:10Z",
           expiresAt: "2026-06-11T10:31:10Z",
           version: "1.94.0",
-          name: "coordinator",
+          name: "custom-lead",
           agentTemplate: null,
           role: "lead",
           configId: "claude-sonnet",

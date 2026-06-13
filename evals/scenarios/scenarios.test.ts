@@ -125,7 +125,7 @@ describe("spec'd scenario shapes (v6)", () => {
     // worker 1: catalog config override
     expect(workers[1]).toEqual({ name: "scribe-b", configId: "pi-deepseek-flash" });
     // lead: stronger-model override + the official lead template
-    expect(s?.lead).toEqual({ name: "coordinator", template: "lead", configId: "claude-sonnet" });
+    expect(s?.lead).toEqual({ name: "Lead", template: "lead", configId: "claude-sonnet" });
     // one task per worker by index + the lead task via worker: "lead"
     expect(s?.tasks.map((t) => t.worker)).toEqual([0, 1, "lead"]);
     // deterministic-only — zero judge LLM spend
