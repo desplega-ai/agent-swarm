@@ -95,7 +95,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",
     "@faker-js/faker": "^10.4.0",
-    "@opencode-ai/plugin": "1.14.30",
+    "@opencode-ai/plugin": "1.17.4",
     "@types/bun": "latest"
   },
   "peerDependencies": {
@@ -118,7 +118,7 @@
     "@linear/sdk": "^77.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@openai/codex-sdk": "^0.139.0",
-    "@opencode-ai/sdk": "^1.16.2",
+    "@opencode-ai/sdk": "^1.17.4",
     "@openfort/openfort-node": "^0.9.1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
