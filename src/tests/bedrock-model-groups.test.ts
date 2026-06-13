@@ -133,4 +133,3 @@ describe("modelGroupsForHarness — Bedrock group for pi harness", () => {
     expect(providerNames).toContain("Amazon Bedrock");
   });
 });
-
