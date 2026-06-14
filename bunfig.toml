@@ -3,3 +3,9 @@ coverage = false
 maxConcurrency = 1
 retry = 3
 preload = ["./src/tests/preload.ts"]
+# evals/ is a SEPARATE bun package with its own deps (@libsql/client, etc.) and its
+# own CI test step (working-directory: evals). Exclude it from the ROOT test run so
+# bare `bun test` at the repo root doesn't glob evals/**/*.test.ts and fail to resolve
+# evals-only deps. (Positional filters like `bun test src` are substring matches and
+# would also match `evals/src`, so this ignore is the correct mechanism.)
+pathIgnorePatterns = ["evals/**"]
