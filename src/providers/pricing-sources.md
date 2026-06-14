@@ -1,16 +1,32 @@
 # Pricing sources
 
-This page lists the sources that feed the `pricing` table at server boot.
-Operators bumping a rate by hand should also update this file.
+This page lists the sources that feed the `pricing` table. Operators bumping a
+rate by hand should also update this file.
 
-## Primary: vendored models.dev snapshot
+## Primary pricing freshness: runtime models.dev refresh
 
-- **Source-of-truth path**: `src/be/modelsdev-cache.json`
+- **Runtime module**: `src/be/pricing-refresh.ts`
+- **Upstream**: `https://models.dev/api.json`, fetched with `If-None-Match`.
+- **Boot wiring**: after `seedPricingFromModelsDev()`, the API server starts one
+  non-blocking refresh and then repeats every 12 hours with `setInterval`.
+- **Update rule**: project upstream through `buildModelsDevSeedRows()` and insert
+  a new `effective_from=Date.now()` row only when the model/token class is new
+  or the active price changed. Identical prices are no-ops.
+- **Growth bound**: after each refresh, keep only the latest two rows per
+  `(provider, model, token_class)` triple.
+- **Pinned local entries**: safe by construction. The runtime refresh only adds
+  pricing rows; it does not rewrite or delete the committed snapshot.
+
+## Fallback/UI catalog: vendored models.dev snapshot
+
+- **Fallback path**: `src/be/modelsdev-cache.json`
 - **UI compatibility path**: `ui/src/lib/modelsdev-cache.json` symlinks to the
   backend snapshot so existing UI imports keep working.
 - **Loaded by**: `src/be/modelsdev-cache.ts` → `src/be/seed-pricing.ts` →
   `seedPricingFromModelsDev()`,
   called from `src/server.ts` after `initDb`.
+- **Role**: cold-start fallback seed for pricing when models.dev is unavailable,
+  plus the UI model-picker source for names, labels, and context windows.
 - **Projection rules** (see the same module for code-level detail):
   - Anthropic models → rows under `provider='claude'` AND `provider='claude-managed'`.
     Shortnames (`opus`, `sonnet`, `haiku`) ALSO get rows keyed by the current
@@ -22,12 +38,13 @@ Operators bumping a rate by hand should also update this file.
     stripped name and the full `google/...` id) so internal-ai callers find
     a hit either way.
 
-- **Refresh procedure** (the only place to update the snapshot):
+- **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the
     script). It fetches the latest snapshot from models.dev, diffs against
     the vendored copy, prints a summary, and writes the new file.
   - Commit the regenerated `src/be/modelsdev-cache.json` together with a bump
-    note in the PR description.
+    note in the PR description. This is no longer the pricing freshness path;
+    use it when the fallback/UI catalog needs new labels or context-window data.
 
 ## Manual overrides
 
@@ -50,6 +67,7 @@ no input/output pricing rows at the lookup time, the row is persisted with
 `costSource='unpriced'` (rather than 'harness'). The UI surfaces this as a
 yellow badge.
 
-To fix: either add the model to `src/be/modelsdev-cache.json` (preferred — the
-upstream snapshot probably needs refreshing) or add a manual override row via
-the existing admin route `POST /api/pricing`.
+To fix: first check whether the runtime refresh is failing. If the model must
+also appear in the UI picker or cold-start fallback, add it to
+`src/be/modelsdev-cache.json`; otherwise add a manual override row via the
+existing admin route `POST /api/pricing`.

@@ -57,7 +57,12 @@ import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { interpolate } from "../workflows/template.ts";
 import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
-import { resolveClaudeMdPath, syncProfileFilesToServer } from "./profile-sync.ts";
+import {
+  contentSha256,
+  resolveClaudeMdPath,
+  syncProfileFilesToServer,
+  writeIdentityBaselines,
+} from "./profile-sync.ts";
 import {
   buildCredStatusReport,
   buildLatestModelReport,
@@ -4305,6 +4310,23 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     } catch (err) {
       console.warn(`[${role}] Could not write CLAUDE.md: ${(err as Error).message}`);
     }
+  }
+
+  // Record baseline hashes of identity files as written from DB. Session-end
+  // sync compares current file content against these baselines: unchanged files
+  // are skipped, which prevents clobbering DB-side edits made by Lead via
+  // update-profile during the running session.
+  try {
+    const baselines: Record<string, string> = {};
+    if (agentSoulMd) baselines.soulMd = contentSha256(agentSoulMd);
+    if (agentIdentityMd) baselines.identityMd = contentSha256(agentIdentityMd);
+    if (agentToolsMd) baselines.toolsMd = contentSha256(agentToolsMd);
+    if (agentHeartbeatMd) baselines.heartbeatMd = contentSha256(agentHeartbeatMd);
+    if (agentClaudeMd) baselines.claudeMd = contentSha256(agentClaudeMd);
+    await writeIdentityBaselines(baselines);
+    console.log(`[${role}] Recorded identity file baselines for session-end sync`);
+  } catch {
+    // Non-fatal — worst case, session-end sync proceeds as before (blind overwrite)
   }
 
   // ========== Boot-time skill load (signature-gated, replaces the standalone

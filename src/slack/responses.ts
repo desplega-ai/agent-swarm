@@ -4,6 +4,7 @@ import type { Agent, AgentTask } from "../types";
 import { getSlackApp } from "./app";
 import {
   buildCancelledBlocks,
+  buildCompletedBlockBatches,
   buildCompletedBlocks,
   buildFailedBlocks,
   buildProgressBlocks,
@@ -74,7 +75,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
       console.log(
         `[Slack] sendTaskResponse: task=${task.id} slackReplySent=${!!task.slackReplySent} minimal=${!!task.slackReplySent}`,
       );
-      const blocks = buildCompletedBlocks({
+      const completionOpts = {
         agentName,
         taskId: task.id,
         body,
@@ -84,15 +85,21 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
         // trailing addendum so links are visible without expanding the card.
         minimal: !!task.slackReplySent,
         trailer: task.slackReplySent ? attachmentsBlock : undefined,
-      });
-      await sendWithPersona(client, {
-        channel: task.slackChannelId,
-        thread_ts: task.slackThreadTs,
-        text: task.slackReplySent ? `✅ ${agentName} completed` : body,
-        username: getAgentDisplayName(agent),
-        icon_emoji: getAgentEmoji(agent),
-        blocks,
-      });
+      };
+      const blockBatches = buildCompletedBlockBatches(completionOpts);
+      for (let i = 0; i < blockBatches.length; i++) {
+        await sendWithPersona(client, {
+          channel: task.slackChannelId,
+          thread_ts: task.slackThreadTs,
+          text:
+            task.slackReplySent || i > 0
+              ? `✅ ${agentName} completed${i > 0 ? ` (continued ${i + 1}/${blockBatches.length})` : ""}`
+              : body,
+          username: getAgentDisplayName(agent),
+          icon_emoji: getAgentEmoji(agent),
+          blocks: blockBatches[i],
+        });
+      }
     } else if (task.status === "failed") {
       const reason = task.failureReason || "Unknown error";
       const blocks = buildFailedBlocks({ agentName, taskId: task.id, reason });
@@ -199,6 +206,7 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
   const agentName = agent.name;
   let blocks: unknown[];
   let text: string;
+  let completionBlockBatches: unknown[][] | undefined;
 
   if (task.status === "completed") {
     const output = task.output || "Task completed.";
@@ -212,14 +220,16 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
     console.log(
       `[Slack] updateToFinal: task=${task.id} slackReplySent=${!!task.slackReplySent} minimal=${!!task.slackReplySent}`,
     );
-    blocks = buildCompletedBlocks({
+    const completionOpts = {
       agentName,
       taskId: task.id,
       body,
       duration,
       minimal: !!task.slackReplySent,
       trailer: task.slackReplySent ? attachmentsBlock : undefined,
-    });
+    };
+    completionBlockBatches = buildCompletedBlockBatches(completionOpts);
+    blocks = completionBlockBatches[0] ?? buildCompletedBlocks(completionOpts);
     text = task.slackReplySent ? `✅ ${agentName} completed` : body;
   } else if (task.status === "cancelled") {
     blocks = buildCancelledBlocks({ agentName, taskId: task.id });
@@ -238,6 +248,19 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });
+
+    if (completionBlockBatches) {
+      for (let i = 1; i < completionBlockBatches.length; i++) {
+        await sendWithPersona(app.client, {
+          channel: task.slackChannelId,
+          thread_ts: task.slackThreadTs ?? messageTs,
+          text: `✅ ${agentName} completed (continued ${i + 1}/${completionBlockBatches.length})`,
+          username: getAgentDisplayName(agent),
+          icon_emoji: getAgentEmoji(agent),
+          blocks: completionBlockBatches[i],
+        });
+      }
+    }
     return true;
   } catch (error) {
     console.error(`[Slack] Failed to update task message to final state:`, error);

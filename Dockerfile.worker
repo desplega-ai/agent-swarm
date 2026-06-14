@@ -51,6 +51,12 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     tmux \
     && rm -rf /var/lib/apt/lists/*
 
+# Redis server for tasks that need a local queue/cache backend (always bundled).
+# Runtime start is controlled by SWARM_DEP_REDIS_ENABLED (default: false).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends redis-server redis-tools \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install GitLab CLI (glab) for GitLab integration
 ARG GLAB_VERSION=1.89.0
 ARG TARGETARCH
@@ -149,10 +155,10 @@ RUN codex plugin marketplace add mksglu/context-mode || true \
 # The installer drops the binary at ~/.opencode/bin/opencode and only modifies
 # ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
 # update, so we extend ENV PATH explicitly.
-ARG OPENCODE_VERSION=1.16.2
+ARG OPENCODE_VERSION=1.17.4
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
 ENV PATH="/home/worker/.opencode/bin:$PATH"
-ARG OPENCODE_SDK_VERSION=1.16.2
+ARG OPENCODE_SDK_VERSION=1.17.4
 RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
 
 # Install context-mode CLI globally (context-window compression tools for all
@@ -281,6 +287,10 @@ RUN chmod +x /usr/local/bin/agent-swarm
 # Optional helper to start a local PostgreSQL 16 cluster (not invoked automatically)
 COPY scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 RUN chmod +x /usr/local/bin/init-local-postgres.sh
+
+# Optional helper to start local Redis (not invoked automatically)
+COPY scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
+RUN chmod +x /usr/local/bin/init-local-redis.sh
 
 # Copy commands (changes on code change — keep late)
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/

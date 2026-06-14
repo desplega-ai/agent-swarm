@@ -696,19 +696,40 @@ export function startTaskWatcher(intervalMs = 3000): void {
           }
         }
 
-        // Skip tasks tracked in a tree — they're rendered by processTreeMessages()
-        // But mark as notified to prevent re-processing if tree is cleaned up
-        if (taskToTree.has(task.id)) {
-          notifiedCompletions.set(task.id, now);
-          continue;
-        }
-
         const completionKey = `completion:${task.id}`;
 
         // Skip if already notified or currently sending or sent recently
         if (notifiedCompletions.has(task.id) || pendingSends.has(completionKey)) continue;
         const lastSent = lastSendTime.get(completionKey);
         if (lastSent && now - lastSent < MIN_SEND_INTERVAL) continue;
+
+        // Tasks tracked in a tree are still rendered by processTreeMessages().
+        // Successful tasks without their own slack-reply also get a full
+        // threaded completion message so the tree's compact preview is not the
+        // only place their output appears.
+        if (taskToTree.has(task.id)) {
+          if (task.status !== "completed" || task.slackReplySent) {
+            notifiedCompletions.set(task.id, now);
+            continue;
+          }
+
+          pendingSends.add(completionKey);
+          notifiedCompletions.set(task.id, now);
+          lastSendTime.set(completionKey, now);
+          try {
+            await sendTaskResponse(task);
+            console.log(
+              `[Slack] Sent full tree-tracked completion for task ${task.id.slice(0, 8)}`,
+            );
+          } catch (error) {
+            notifiedCompletions.delete(task.id);
+            lastSendTime.delete(completionKey);
+            console.error(`[Slack] Failed to send tree-tracked completion:`, error);
+          } finally {
+            pendingSends.delete(completionKey);
+          }
+          continue;
+        }
 
         // Mark as pending and notified BEFORE sending
         pendingSends.add(completionKey);

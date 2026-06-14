@@ -451,6 +451,8 @@ try {
 try {
   const { seedPricingFromModelsDev } = await import("../be/seed-pricing");
   seedPricingFromModelsDev();
+  const { startPricingRefreshLoop } = await import("../be/pricing-refresh");
+  startPricingRefreshLoop();
 } catch (err) {
   console.error("[startup] Failed to seed pricing rows:", err);
 }

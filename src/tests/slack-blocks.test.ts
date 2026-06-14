@@ -3,6 +3,7 @@ import {
   buildAssignmentSummaryBlocks,
   buildBufferFlushBlocks,
   buildCancelledBlocks,
+  buildCompletedBlockBatches,
   buildCompletedBlocks,
   buildFailedBlocks,
   buildProgressBlocks,
@@ -20,6 +21,7 @@ describe("markdownToSlack", () => {
     // **hello** → *hello* (Slack bold)
     expect(markdownToSlack("**hello**")).toBe("*hello*");
     expect(markdownToSlack("**hello world**")).toBe("*hello world*");
+    expect(markdownToSlack("__hello world__")).toBe("*hello world*");
   });
 
   test("converts italic", () => {
@@ -31,7 +33,11 @@ describe("markdownToSlack", () => {
   });
 
   test("converts links", () => {
-    expect(markdownToSlack("[click](https://example.com)")).toBe("<https://example.com|click>");
+    expect(markdownToSlack("[click](https://example.com)")).toBe("click (https://example.com)");
+    expect(markdownToSlack("![diagram](https://example.com/a.png)")).toBe(
+      "diagram (https://example.com/a.png)",
+    );
+    expect(markdownToSlack("[click](https://example.com)")).not.toContain("<https://");
   });
 
   test("converts headers to bold", () => {
@@ -162,6 +168,27 @@ describe("buildCompletedBlocks", () => {
     expect(bodySections.length).toBeGreaterThanOrEqual(2);
     const totalText = bodySections.map((s) => s.text.text).join("");
     expect(totalText).toBe(longBody);
+  });
+
+  test("batches very long body across multiple Slack messages without losing text", () => {
+    const longBody = "x".repeat(140_000);
+    const batches = buildCompletedBlockBatches({
+      agentName: "Alpha",
+      taskId: "abcdef12-3456-7890-abcd-ef1234567890",
+      body: longBody,
+    });
+
+    expect(batches.length).toBeGreaterThan(1);
+    for (const batch of batches) {
+      expect(batch.length).toBeLessThanOrEqual(45);
+    }
+
+    const bodyText = batches
+      .flatMap((batch) => batch.slice(1))
+      .map((block) => block.text.text)
+      .join("");
+    expect(bodyText).toBe(longBody);
+    expect(batches[1][0].text.text).toContain("continued · part 2");
   });
 });
 
@@ -906,6 +933,26 @@ describe("buildTreeBlocks", () => {
     expect(text).toContain("✅ *Solo*");
     expect(text).toContain("10s");
     expect(text).toContain("Result: 42");
+  });
+
+  test("completed root preview converts markdown and marks truncation explicitly", () => {
+    const root: TreeNode = {
+      taskId: makeTaskId("oooo0002"),
+      agentName: "Solo",
+      status: "completed",
+      slackReplySent: false,
+      output: `### Summary\n\n**Not broken** — ${"Automatic review on plain PR creation ".repeat(8)}`,
+      children: [],
+    };
+
+    const blocks = buildTreeBlocks([root]);
+    const text = blocks[0].text.text;
+
+    expect(text).toContain("*Summary*");
+    expect(text).toContain("*Not broken*");
+    expect(text).not.toContain("###");
+    expect(text).not.toContain("**Not broken**");
+    expect(text).toContain("more chars; full output in thread");
   });
 
   test("completed root with slackReplySent suppresses output", () => {

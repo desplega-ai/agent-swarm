@@ -9,6 +9,7 @@ import {
   postRatings,
   type RetrievalRow,
 } from "../be/memory/raters/llm";
+import { contentSha256, readIdentityBaselines } from "../commands/profile-sync";
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
@@ -581,7 +582,12 @@ export async function handleHook(): Promise<void> {
   const IDENTITY_FILE_MIN_LENGTH = 500;
 
   /**
-   * Sync SOUL.md and IDENTITY.md content back to the server
+   * Sync SOUL.md and IDENTITY.md content back to the server.
+   *
+   * When `changeSource` is `"session_sync"` (the Stop-hook default), loads
+   * baseline hashes written at session start and skips any file whose content
+   * hasn't changed. This prevents the session-end sync from clobbering DB-side
+   * edits that Lead made via `update-profile` during the running session.
    */
   const syncIdentityFilesToServer = async (
     agentId: string,
@@ -589,12 +595,16 @@ export async function handleHook(): Promise<void> {
   ): Promise<void> => {
     if (!mcpConfig) return;
 
+    const baselines = changeSource === "session_sync" ? await readIdentityBaselines() : null;
+
     const updates: Record<string, string> = {};
 
     const soulFile = Bun.file(SOUL_MD_PATH);
     if (await soulFile.exists()) {
       const content = await soulFile.text();
-      if (content.trim() && content.length <= 65536) {
+      if (baselines?.soulMd && contentSha256(content) === baselines.soulMd) {
+        // Unchanged during session — skip to preserve Lead's DB edits
+      } else if (content.trim() && content.length <= 65536) {
         if (content.length < IDENTITY_FILE_MIN_LENGTH) {
           console.error(
             `[hook] Skipping SOUL.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
@@ -608,7 +618,9 @@ export async function handleHook(): Promise<void> {
     const identityFile = Bun.file(IDENTITY_MD_PATH);
     if (await identityFile.exists()) {
       const content = await identityFile.text();
-      if (content.trim() && content.length <= 65536) {
+      if (baselines?.identityMd && contentSha256(content) === baselines.identityMd) {
+        // Unchanged during session — skip
+      } else if (content.trim() && content.length <= 65536) {
         if (content.length < IDENTITY_FILE_MIN_LENGTH) {
           console.error(
             `[hook] Skipping IDENTITY.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
@@ -622,7 +634,9 @@ export async function handleHook(): Promise<void> {
     const toolsMdFile = Bun.file(TOOLS_MD_PATH);
     if (await toolsMdFile.exists()) {
       const content = await toolsMdFile.text();
-      if (content.trim() && content.length <= 65536) {
+      if (baselines?.toolsMd && contentSha256(content) === baselines.toolsMd) {
+        // Unchanged during session — skip
+      } else if (content.trim() && content.length <= 65536) {
         updates.toolsMd = content;
       }
     }
@@ -630,7 +644,9 @@ export async function handleHook(): Promise<void> {
     const heartbeatFile = Bun.file(HEARTBEAT_MD_PATH);
     if (await heartbeatFile.exists()) {
       const content = await heartbeatFile.text();
-      if (content.length <= 65536) {
+      if (baselines?.heartbeatMd && contentSha256(content) === baselines.heartbeatMd) {
+        // Unchanged during session — skip
+      } else if (content.length <= 65536) {
         updates.heartbeatMd = content;
       }
     }

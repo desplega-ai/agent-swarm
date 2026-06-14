@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
 import { initDb } from "./be/db";
+import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { seedPricingFromModelsDev } from "./be/seed-pricing";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
@@ -172,6 +173,7 @@ export function createServer() {
   // call on every boot. See src/be/seed-pricing.ts for the projection logic
   // and the manual-override constants for runtime-fee / ACU pricing.
   seedPricingFromModelsDev();
+  startPricingRefreshLoop();
 
   const server = new McpServer(
     {

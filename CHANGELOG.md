@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.98.1] - 2026-06-14
+
+### Changed
+- **Worker image now pins opencode CLI and SDK `1.17.4`** (#761) — the default worker build picks up the upstream opencode fixes for tool-result passthrough, better session recovery after context overflow, MCP abort handling, and clearer surfacing of content-filtered responses.
+
+### Fixed
+- **Session-end profile sync no longer overwrites lead-side profile edits** (#763) — local-harness sessions now record baseline hashes for `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `HEARTBEAT.md`, and `CLAUDE.md` at start-up, then skip unchanged files during the final FS → DB sync so `update-profile` changes made by the lead survive until the agent actually edits those files.
+
 ## [1.96.0] - 2026-06-12
 
 ### Added

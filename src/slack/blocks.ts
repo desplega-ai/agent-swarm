@@ -8,8 +8,9 @@
 import type { AgentTaskStatus, TaskAttachment } from "../types";
 import { buildAgentFsLiveUrl, getAppUrl } from "../utils/constants";
 
-// Slack limits section text to 3000 chars; we use 2900 for safety
-const MAX_SECTION_LENGTH = 2900;
+// Slack limits section text to 3000 chars; we use 2900 for safety.
+export const MAX_SECTION_LENGTH = 2900;
+export const MAX_BLOCKS_PER_COMPLETION_MESSAGE = 45;
 
 // biome-ignore lint/suspicious/noExplicitAny: Slack block types are complex unions; we build plain objects
 type SlackBlock = any;
@@ -38,24 +39,33 @@ export function getTaskUrl(taskId: string): string {
  * Convert GitHub-flavored markdown to Slack mrkdwn format.
  *
  * Key differences:
- * - GitHub: **bold**, *italic*, ~~strike~~, [text](url)
- * - Slack:  *bold*,  _italic_, ~strike~,   <url|text>
+ * - GitHub: **bold**, __bold__, *italic*, ~~strike~~, ### Header, [text](url)
+ * - Slack:  *bold*,  *bold*,   _italic_, ~strike~,   *Header*, text (url)
  */
 export function markdownToSlack(text: string): string {
   return (
     text
+      // Images: keep alt text and expose the URL plainly.
+      .replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_match, alt, url) =>
+        alt ? `${alt} (${url})` : url,
+      )
+      // Links: keep a plain URL fallback instead of Slack's <url|text> shortcut.
+      // Slack block auto-promotion has historically rejected that shortcut with
+      // invalid_blocks, while plain URLs remain copyable and auto-unfurlable.
+      .replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, "$1 ($2)")
       // Headers to bold placeholder (# Header -> bold, protected from italic)
       .replace(/^#{1,6}\s+(.+)$/gm, "\uE000$1\uE001")
       // Bold **text** -> placeholder (to avoid italic chain converting *bold* to _italic_)
       .replace(/\*\*(.+?)\*\*/g, "\uE000$1\uE001")
+      // Bold __text__ -> placeholder
+      .replace(/__(.+?)__/g, "\uE000$1\uE001")
       // Italic *text* -> _text_ (single asterisks, now safe from bold placeholders)
       .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "_$1_")
+      // Italic _text_ already matches Slack mrkdwn; leave it alone.
       // Restore bold from placeholder -> *text*
       .replace(/\uE000(.+?)\uE001/g, "*$1*")
       // Strikethrough ~~text~~ -> ~text~
       .replace(/~~(.+?)~~/g, "~$1~")
-      // Links [text](url) -> <url|text>
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>")
       // Inline code already works the same
       // Bullet points already work the same
       // Remove excessive blank lines
@@ -66,7 +76,7 @@ export function markdownToSlack(text: string): string {
 /**
  * Split text into chunks that fit within Slack's section text limit.
  */
-function splitText(text: string): string[] {
+export function splitSlackSectionText(text: string): string[] {
   if (text.length <= MAX_SECTION_LENGTH) return [text];
 
   const chunks: string[] = [];
@@ -248,15 +258,48 @@ export function buildCompletedBlocks(opts: {
 
   // Only include body if not minimal (agent didn't reply via slack-reply)
   if (!opts.minimal) {
-    for (const chunk of splitText(opts.body)) {
+    for (const chunk of splitSlackSectionText(opts.body)) {
       blocks.push(sectionBlock(chunk));
     }
   } else if (opts.trailer && opts.trailer.length > 0) {
-    for (const chunk of splitText(opts.trailer)) {
+    for (const chunk of splitSlackSectionText(opts.trailer)) {
       blocks.push(sectionBlock(chunk));
     }
   }
   return blocks;
+}
+
+/**
+ * Build one or more completed-task block payloads. The first payload carries
+ * the normal completion header; continuation payloads carry a compact part
+ * header. This keeps long completion summaries inside Slack's block limits
+ * without dropping body text.
+ */
+export function buildCompletedBlockBatches(opts: Parameters<typeof buildCompletedBlocks>[0]) {
+  const allBlocks = buildCompletedBlocks(opts);
+  if (allBlocks.length <= MAX_BLOCKS_PER_COMPLETION_MESSAGE) return [allBlocks];
+
+  const header = allBlocks[0];
+  const bodyBlocks = allBlocks.slice(1);
+  const bodyLimit = MAX_BLOCKS_PER_COMPLETION_MESSAGE - 1;
+  const batches: SlackBlock[][] = [];
+
+  for (let start = 0; start < bodyBlocks.length; start += bodyLimit) {
+    const partBlocks = bodyBlocks.slice(start, start + bodyLimit);
+    if (start === 0) {
+      batches.push([header, ...partBlocks]);
+    } else {
+      const part = batches.length + 1;
+      batches.push([
+        sectionBlock(
+          `↳ *${opts.agentName}* (${getTaskLink(opts.taskId)}) continued · part ${part}`,
+        ),
+        ...partBlocks,
+      ]);
+    }
+  }
+
+  return batches;
 }
 
 /**
@@ -369,7 +412,10 @@ function truncateOutput(text: string): string {
   const sentenceEnd = text.search(/\.\s/);
   const firstSentence = sentenceEnd !== -1 ? text.slice(0, sentenceEnd + 1) : text;
   if (firstSentence.length <= MAX_OUTPUT_LENGTH) return firstSentence;
-  return `${text.slice(0, MAX_OUTPUT_LENGTH)}…`;
+  const boundary = text.lastIndexOf(" ", MAX_OUTPUT_LENGTH);
+  const cut = boundary >= MAX_OUTPUT_LENGTH / 2 ? boundary : MAX_OUTPUT_LENGTH;
+  const omitted = text.length - cut;
+  return `${text.slice(0, cut).trimEnd()}… (${omitted} more chars; full output in thread)`;
 }
 
 /**
@@ -399,7 +445,7 @@ function renderChildDetail(node: TreeNode, indent: string): string[] {
   }
 
   if (node.status === "completed" && !node.slackReplySent && node.output) {
-    lines.push(`${indent}${truncateOutput(node.output)}`);
+    lines.push(`${indent}${truncateOutput(markdownToSlack(node.output))}`);
   }
 
   return lines;
@@ -423,7 +469,7 @@ function renderTree(root: TreeNode): string {
       lines.push(`    Error: ${root.failureReason}`);
     }
     if (root.status === "completed" && !root.slackReplySent && root.output) {
-      lines.push(`    ${truncateOutput(root.output)}`);
+      lines.push(`    ${truncateOutput(markdownToSlack(root.output))}`);
     }
     return lines.join("\n");
   }

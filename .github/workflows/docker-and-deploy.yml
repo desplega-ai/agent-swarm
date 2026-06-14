@@ -516,11 +516,17 @@ jobs:
             --image "${API_IMAGE}:${VERSION}"
           bun run src/cli.tsx e2b publish-template "$API_VERSION_TEMPLATE"
 
+          # The -latest templates MUST build from the immutable :${VERSION} ref,
+          # not :latest. E2B's builder caches the fromImage base layer by image
+          # reference string; a mutable :latest ref never changes, so rebuilds
+          # hit the cache forever and the template stays frozen at whatever
+          # image was pulled on the FIRST build (this pinned the -latest
+          # templates to v1.85 from 2026-05-27 until v1.97).
           bun run src/cli.tsx e2b build-template \
             --role api \
             --source image \
             --template "$API_LATEST_TEMPLATE" \
-            --image "${API_IMAGE}:latest"
+            --image "${API_IMAGE}:${VERSION}"
           bun run src/cli.tsx e2b publish-template "$API_LATEST_TEMPLATE"
 
           bun run src/cli.tsx e2b build-template \
@@ -534,7 +540,7 @@ jobs:
             --role worker \
             --source image \
             --template "$WORKER_LATEST_TEMPLATE" \
-            --image "${WORKER_IMAGE}:latest"
+            --image "${WORKER_IMAGE}:${VERSION}"
           bun run src/cli.tsx e2b publish-template "$WORKER_LATEST_TEMPLATE"
 
   create-git-tag:

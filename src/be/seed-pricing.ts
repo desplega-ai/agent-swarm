@@ -2,7 +2,9 @@
  * Phase 2 of the cost-tracking plan — seed the `pricing` table at server boot.
  *
  * The vendored models.dev snapshot at `src/be/modelsdev-cache.json` is the
- * single source of truth for per-token rates. We project it into rows keyed by
+ * cold-start fallback for per-token rates. Runtime freshness is owned by
+ * `src/be/pricing-refresh.ts`, which fetches models.dev after boot and inserts
+ * newer effective rows when prices change. We project both sources into rows keyed by
  * `(provider, model, token_class)` so the recompute path in
  * `src/http/session-data.ts` can rebuild USD from tokens regardless of which
  * adapter wrote the row.
@@ -74,7 +76,7 @@ const ANTHROPIC_SHORTNAME_TO_MODELSDEV: Record<string, string> = {
   haiku: "claude-haiku-4-5",
 };
 
-interface PricingSeedRow {
+export interface PricingSeedRow {
   provider: PricingProvider;
   model: string;
   tokenClass: PricingTokenClass;
@@ -127,7 +129,7 @@ function projectCostBlock(
  * "what the adapter writes for `model`" and "what models.dev keys by" is
  * explicit and auditable.
  */
-function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] {
+export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] {
   const rows: PricingSeedRow[] = [];
 
   // ---- Anthropic / claude family ----------------------------------------
