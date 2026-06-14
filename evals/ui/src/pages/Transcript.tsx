@@ -586,8 +586,14 @@ export default function Transcript(props: {
       {live ? <Footer /> : null}
       {live && !follow ? (
         <div className="t-follow-wrap">
-          <button type="button" className="t-follow" onClick={engageFollow}>
-            ↓ Follow{newRows > 0 ? ` · ${newRows.toLocaleString()} new` : ""}
+          <button
+            type="button"
+            className="t-follow"
+            onClick={engageFollow}
+            title={newRows > 0 ? `Resume auto-scroll · ${newRows.toLocaleString()} new` : "Resume auto-scroll"}
+            aria-label="Resume auto-scroll"
+          >
+            ↓
           </button>
         </div>
       ) : null}

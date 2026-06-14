@@ -619,16 +619,19 @@
 
 .t-follow {
   transform: translateY(-100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   background: var(--panel-2);
   color: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  border-radius: 50%;
+  font-size: 15px;
+  line-height: 1;
   cursor: pointer;
   box-shadow: 0 4px 14px rgb(0 0 0 / 30%);
-  white-space: nowrap;
 }
 
 .t-follow:hover {
