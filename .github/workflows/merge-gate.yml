@@ -166,7 +166,11 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run tests
-        run: bun test
+        # Scope to the root package's tests. evals/ is a SEPARATE bun package with
+        # its own deps (not installed here) and its own test step in the
+        # lint-and-typecheck job — bare `bun test` would glob evals/**/*.test.ts and
+        # fail on its uninstalled deps (@libsql/client, @openrouter/ai-sdk-provider).
+        run: bun test src plugin
 
   pi-skills-freshness:
     name: Pi-Skills Freshness Check
