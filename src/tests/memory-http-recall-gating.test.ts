@@ -1,12 +1,15 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
+import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import type { AgentMemory } from "../types";
 
 const memoryId = randomUUID();
 const agentId = randomUUID();
 const sourceTaskId = randomUUID();
+const TEST_DB_PATH = "./test-memory-http-recall-gating.sqlite";
 
 const memory: AgentMemory = {
   id: memoryId,
@@ -24,8 +27,6 @@ const memory: AgentMemory = {
   createdAt: new Date("2026-06-14T00:00:00.000Z").toISOString(),
   updatedAt: new Date("2026-06-14T00:00:00.000Z").toISOString(),
 };
-
-const recordRetrievals = mock(() => {});
 
 mock.module("../be/memory", () => ({
   getEmbeddingProvider: () => ({
@@ -50,10 +51,6 @@ mock.module("../be/memory", () => ({
       },
     ],
   }),
-}));
-
-mock.module("../be/memory/raters/retrieval", () => ({
-  recordRetrievals,
 }));
 
 const { handleMemory } = await import("../http/memory");
@@ -108,10 +105,43 @@ async function callMemoryRoute(
   return capture;
 }
 
+function countRetrievals(): number {
+  return getDb().prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM memory_retrieval").get()!.n;
+}
+
+beforeAll(async () => {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      await unlink(TEST_DB_PATH + suffix);
+    } catch {}
+  }
+
+  initDb(TEST_DB_PATH);
+  createAgent({ id: agentId, name: "HTTP Memory Gating Agent", isLead: false, status: "idle" });
+  const nowIso = new Date().toISOString();
+  getDb()
+    .prepare(
+      `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
+    )
+    .run(sourceTaskId, agentId, "HTTP memory recall gating task", nowIso, nowIso);
+});
+
+beforeEach(() => {
+  getDb().run("DELETE FROM memory_retrieval");
+});
+
+afterAll(async () => {
+  closeDb();
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      await unlink(TEST_DB_PATH + suffix);
+    } catch {}
+  }
+});
+
 describe("memory HTTP recall capture gating", () => {
   test("POST /api/memory/search accepts UI calls without intent and does not record retrievals", async () => {
-    recordRetrievals.mockClear();
-
     const response = await callMemoryRoute(
       "POST",
       "/api/memory/search",
@@ -123,12 +153,10 @@ describe("memory HTTP recall capture gating", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body.results).toHaveLength(1);
     expect(response.body.results[0].id).toBe(memoryId);
-    expect(recordRetrievals).not.toHaveBeenCalled();
+    expect(countRetrievals()).toBe(0);
   });
 
   test("GET /api/memory/:id accepts UI calls without intent and does not record retrievals", async () => {
-    recordRetrievals.mockClear();
-
     const response = await callMemoryRoute(
       "GET",
       `/api/memory/${memoryId}`,
@@ -139,6 +167,6 @@ describe("memory HTTP recall capture gating", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body.memory.id).toBe(memoryId);
-    expect(recordRetrievals).not.toHaveBeenCalled();
+    expect(countRetrievals()).toBe(0);
   });
 });
