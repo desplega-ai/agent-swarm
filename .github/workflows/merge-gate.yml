@@ -125,6 +125,12 @@ jobs:
         run: bun run tsc:check
         working-directory: evals
 
+      - name: Test evals
+        # evals is its own bun package; these are pure unit tests (scoring,
+        # registry, normalize, scenario structure) — no E2B/network, ~0.5s.
+        run: bun test
+        working-directory: evals
+
       - name: Build evals UI
         run: bun run ui:build
         working-directory: evals
