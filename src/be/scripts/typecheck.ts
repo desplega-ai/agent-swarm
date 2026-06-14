@@ -176,6 +176,7 @@ export interface SwarmSdk {
   // --- skills ---
   skill_list(args?: { scope?: string; scopeId?: string; includeBuiltin?: boolean }): Promise<unknown>;
   skill_get(args: { id: string }): Promise<unknown>;
+  skill_getFile(args: { skillId: string; path: string }): Promise<unknown>;
   skill_search(args: { query: string; limit?: number }): Promise<unknown>;
   skill_create(args: Record<string, unknown>): Promise<unknown>;
   skill_update(args: Record<string, unknown>): Promise<unknown>;

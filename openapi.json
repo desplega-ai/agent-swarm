@@ -4297,7 +4297,7 @@
                   "intent": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Why you are searching. Required for recall-edge tracking."
+                    "description": "Why you are searching. Required for agent recall-edge tracking; omit for UI browse/search calls."
                   },
                   "limit": {
                     "type": "integer",
@@ -4325,8 +4325,7 @@
                   }
                 },
                 "required": [
-                  "query",
-                  "intent"
+                  "query"
                 ]
               }
             }
@@ -4530,10 +4529,10 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "description": "Why you are retrieving this memory."
+              "description": "Why you are retrieving this memory. Required for agent recall-edge tracking; omit for UI browse calls."
             },
-            "required": true,
-            "description": "Why you are retrieving this memory.",
+            "required": false,
+            "description": "Why you are retrieving this memory. Required for agent recall-edge tracking; omit for UI browse calls.",
             "name": "intent",
             "in": "query"
           }

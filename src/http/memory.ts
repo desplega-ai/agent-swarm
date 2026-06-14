@@ -55,7 +55,13 @@ const searchMemory = route({
   auth: { apiKey: true, agentId: true },
   body: z.object({
     query: z.string().min(1),
-    intent: z.string().min(1).describe("Why you are searching. Required for recall-edge tracking."),
+    intent: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Why you are searching. Required for agent recall-edge tracking; omit for UI browse/search calls.",
+      ),
     limit: z.number().int().min(1).max(20).default(5),
     scope: z.enum(["agent", "swarm", "all"]).default("all"),
     source: z.enum(["manual", "file_index", "session_summary", "task_completion"]).optional(),
@@ -153,7 +159,13 @@ const getMemoryById = route({
   auth: { apiKey: true, agentId: true },
   params: z.object({ id: z.string().uuid() }),
   query: z.object({
-    intent: z.string().min(1).describe("Why you are retrieving this memory."),
+    intent: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Why you are retrieving this memory. Required for agent recall-edge tracking; omit for UI browse calls.",
+      ),
   }),
   responses: {
     200: { description: "Memory details" },
@@ -409,7 +421,7 @@ export async function handleMemory(
         : sourceTaskIdHeader;
       const contextKeyHeader = req.headers["x-context-key"];
       const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
-      if (sourceTaskId) {
+      if (sourceTaskId && intent) {
         try {
           recordRetrievals(
             sourceTaskId,
@@ -734,7 +746,7 @@ export async function handleMemory(
       : sourceTaskIdHeader;
     const contextKeyHeader = req.headers["x-context-key"];
     const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
-    if (sourceTaskId && myAgentId) {
+    if (sourceTaskId && myAgentId && intent) {
       try {
         recordRetrievals(
           sourceTaskId,

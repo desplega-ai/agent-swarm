@@ -453,7 +453,7 @@ describe("collectProfilePayloads (baseline integration)", () => {
       [SOUL_MD_PATH]: LONG,
       [IDENTITY_MD_PATH]: LONG,
       [TOOLS_MD_PATH]: "tools",
-      ["/workspace/HEARTBEAT.md"]: "heartbeat",
+      "/workspace/HEARTBEAT.md": "heartbeat",
       [IDENTITY_BASELINES_PATH]: JSON.stringify(baselines),
     });
 
