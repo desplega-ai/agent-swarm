@@ -5,13 +5,24 @@
  *
  * Idempotent: already-scrubbed rows are no-ops (scrubSecrets is idempotent).
  * Uses seed_state to avoid re-scanning on subsequent boots.
+ *
+ * Restart-safe: progress is persisted as a cursor in seed_state after each
+ * batch, so a restart (e.g. K8s probe SIGKILL) resumes from the last
+ * committed batch instead of re-scanning from zero.
+ *
+ * Non-blocking: yields to the event loop between batches so /health and
+ * startup/liveness probes stay responsive.
  */
 
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDb } from "./db";
 
 const SCRUB_KEY = "boot-scrub-logs-v2";
-const BATCH_SIZE = 500;
+const CURSOR_KEY = "boot-scrub-logs-v2-cursor";
+const BATCH_SIZE = 200;
+
+/** Yield to the event loop so probes can respond. */
+const yieldTick = () => new Promise<void>((r) => setTimeout(r, 5));
 
 export async function runBootScrubLogs(): Promise<void> {
   const db = getDb();
@@ -24,46 +35,94 @@ export async function runBootScrubLogs(): Promise<void> {
 
   if (done) return;
 
-  // ESCAPE '!' makes ! the escape character so !_ matches a literal underscore
-  // instead of the LIKE single-char wildcard. Without this, '%npm_%' matches
-  // any row containing "npm" + any char (e.g. "npm install"), drowning real
-  // token rows when a LIMIT is applied.
-  const rows = db
-    .prepare<{ id: string; content: string }, []>(
-      `SELECT id, content FROM session_logs
-       WHERE content LIKE '%lin!_oauth!_%' ESCAPE '!'
-          OR content LIKE '%lin!_api!_%' ESCAPE '!'
-          OR content LIKE '%npm!_%' ESCAPE '!'
-          OR content LIKE '%ATATT%'`,
-    )
-    .all();
+  // Resume from last cursor if a previous run was interrupted
+  const savedCursor =
+    db
+      .prepare<{ seededHash: string }, [string, string]>(
+        "SELECT seededHash FROM seed_state WHERE kind = ? AND key = ?",
+      )
+      .get("maintenance", CURSOR_KEY)?.seededHash ?? "";
 
-  if (rows.length === 0) {
+  const lastProcessedId = savedCursor || "";
+
+  // Count total work remaining (for logging only)
+  const totalRemaining =
+    db
+      .prepare<{ count: number }, [string]>(
+        `SELECT COUNT(*) as count FROM session_logs
+         WHERE id > ?
+           AND (content LIKE '%lin!_oauth!_%' ESCAPE '!'
+             OR content LIKE '%lin!_api!_%' ESCAPE '!'
+             OR content LIKE '%npm!_%' ESCAPE '!'
+             OR content LIKE '%ATATT%')`,
+      )
+      .get(lastProcessedId)?.count ?? 0;
+
+  if (totalRemaining === 0) {
     markDone(db);
     return;
   }
 
-  console.log(`[boot-scrub-logs] starting: ${rows.length} candidate rows`);
+  console.log(
+    `[boot-scrub-logs] starting: ${totalRemaining} candidate rows remaining` +
+      (lastProcessedId ? ` (resuming from cursor ${lastProcessedId.slice(0, 8)}…)` : ""),
+  );
 
+  const selectBatch = db.prepare<{ id: string; content: string }, [string]>(
+    `SELECT id, content FROM session_logs
+     WHERE id > ?
+       AND (content LIKE '%lin!_oauth!_%' ESCAPE '!'
+         OR content LIKE '%lin!_api!_%' ESCAPE '!'
+         OR content LIKE '%npm!_%' ESCAPE '!'
+         OR content LIKE '%ATATT%')
+     ORDER BY id ASC
+     LIMIT ${BATCH_SIZE}`,
+  );
   const update = db.prepare("UPDATE session_logs SET content = ? WHERE id = ?");
-  let scrubbed = 0;
+  const saveCursor = db.prepare(
+    `INSERT INTO seed_state (kind, key, seededHash, seededAt)
+     VALUES ('maintenance', '${CURSOR_KEY}', ?, datetime('now'))
+     ON CONFLICT (kind, key) DO UPDATE SET seededHash = ?, seededAt = datetime('now')`,
+  );
 
-  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const batch = rows.slice(i, i + BATCH_SIZE);
+  let scrubbed = 0;
+  let scanned = 0;
+  let cursor = lastProcessedId;
+
+  // Paginated cursor loop — each iteration fetches the next BATCH_SIZE rows
+  // ordered by id, processes them in a transaction, saves the cursor, and
+  // yields to the event loop.
+  for (;;) {
+    const rows = selectBatch.all(cursor);
+    if (rows.length === 0) break;
+
+    const batchLastId = rows[rows.length - 1]!.id;
+
     const tx = db.transaction(() => {
-      for (const row of batch) {
+      for (const row of rows) {
         const cleaned = scrubSecrets(row.content);
         if (cleaned !== row.content) {
           update.run(cleaned, row.id);
           scrubbed++;
         }
       }
+      // Persist cursor inside the same transaction so it's atomic with the scrub
+      saveCursor.run(batchLastId, batchLastId);
     });
     tx();
+
+    scanned += rows.length;
+    cursor = batchLastId;
+
+    // Yield to the event loop between batches
+    await yieldTick();
   }
 
   markDone(db);
-  console.log(`[boot-scrub-logs] complete: scanned=${rows.length} scrubbed=${scrubbed}`);
+  // Clean up the cursor key now that we're fully done
+  db.run("DELETE FROM seed_state WHERE kind = 'maintenance' AND key = ?", [CURSOR_KEY]);
+
+  console.log(`[boot-scrub-logs] complete: scanned=${scanned} scrubbed=${scrubbed}`);
 }
 
 function markDone(db: ReturnType<typeof getDb>) {
