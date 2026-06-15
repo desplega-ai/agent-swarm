@@ -818,6 +818,7 @@ Search your accumulated memories using natural language. Returns summaries with 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | `string` | Yes | - | Natural language search query. |
+| `intent` | `string` | Yes | - | Why you are searching for this memory. Required. E.g. 'looking for auth pattern to fix login bug'. |
 | `scope` | `all \| agent \| swarm` | No | "all" | Search scope: 'all' (own + swarm), 'agent' (own only), 'swarm' (shared only). |
 | `limit` | `number` | No | 10 | Max results to return. |
 
@@ -830,6 +831,7 @@ Retrieve the full content of a specific memory by its ID. Use memory-search to f
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `memoryId` | `uuid` | Yes | - | The ID of the memory to retrieve. |
+| `intent` | `string` | Yes | - | Why you are retrieving this memory. Required. E.g. 'need full details of the auth fix pattern'. |
 
 ### memory-delete
 

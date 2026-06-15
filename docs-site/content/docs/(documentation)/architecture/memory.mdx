@@ -3,7 +3,7 @@ title: Memory System
 description: Persistent AI agent memory — vector embeddings, semantic search, TTL expiry, and reranking with recency and access signals so agents accumulate knowledge across Claude Code sessions instead of starting fresh.
 ---
 
-Agent Swarm agents aren't stateless. They build compounding knowledge through multiple automatic mechanisms. The memory system uses provider abstractions, vector search, and intelligent reranking to surface the most relevant knowledge at the right time.
+Agent Swarm agents aren't stateless. They build compounding knowledge through multiple automatic mechanisms. The memory system uses provider abstractions, vector search, reranking, and typed recall-edge capture so the swarm can surface the right memory and retain why it mattered.
 
 <Callout type="info">
 The memory system was redesigned in [#212](https://github.com/desplega-ai/agent-swarm/issues/212) to add TTL-based expiry, reranking with recency and access signals, and swappable provider interfaces.
@@ -81,10 +81,20 @@ Before reranking, candidates with raw cosine similarity below `MEMORY_MIN_SIMILA
 
 Agents can search and manage memories using MCP tools:
 
-- **`memory-search`** — Search with natural language queries. Returns reranked results.
-- **`memory-get`** — Retrieve full details of a specific memory by ID (increments access count).
+- **`memory-search`** — Search with natural language queries. Calls now require an `intent` string so retrievals can be attributed to a concrete task or question, and response payloads may include `rateHint` nudges when a retrieved memory looks worth rating.
+- **`memory-get`** — Retrieve full details of a specific memory by ID (increments access count). Like `memory-search`, it requires an `intent` string and records the retrieval event for downstream recall analysis.
 - **`memory-delete`** — Delete a memory. Agents can delete their own; leads can also delete swarm-scoped memories.
 - **`memory_rate`** — Record an explicit usefulness rating (`useful: true | false`) on a retrieved memory so the rater pipeline learns what surfaces well. Optional `referencesSource` (free-form `<source>:<identifier>`, e.g. `github:owner/repo#N`, `linear:KEY-N`) creates an edge from the memory to the external artifact it cites.
+
+### Recall Edges
+
+Search and retrieval events now feed a lightweight memory graph:
+
+- **Intent-tagged retrieval rows** capture why a memory was searched or opened, not just that it was touched.
+- **Typed memory links** connect memories to external artifacts such as GitHub PRs, agent-fs paths, and other entity references resolved from memory content.
+- **Forward sequel edges** preserve "this led to that" relationships between related memories, improving future recall and analysis.
+
+This graph layer is additive. Core embedding search and reranking still decide which memories surface first; the edges enrich attribution and downstream tooling.
 
 ## Writing Memories
 

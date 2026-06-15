@@ -909,6 +909,7 @@ Search accumulated memories with natural language.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `intent` | string | Yes | Why you are searching for this memory |
 | `query` | string | Yes | Natural language search query |
 | `scope` | string | No | `all`, `agent`, or `swarm` |
 | `source` | string | No | Filter by source type |
@@ -922,6 +923,7 @@ Retrieve full details of a specific memory.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `intent` | string | Yes | Why you are retrieving this memory |
 | `memoryId` | uuid | Yes | Memory ID |
 
 Like `memory-search`, `memory-get` may include a `rateHint` in task context for memories that are worth rating.

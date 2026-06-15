@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.99.0] - 2026-06-15
+
+### Added
+- **Memory recall-edge capture layer (Phase 1)** (#767) — `memory-search` and `memory-get` now require an explicit `intent`, retrieval events are recorded for both search and get flows, and the memory subsystem can resolve typed links to external artifacts such as GitHub PRs and agent-fs paths.
+- **E2B-backed eval harness sub-project** (#737) — the new `evals/` package runs scenario × harness-config matrices against real swarm stacks, stores results in a Turso-backed libsql replica, captures transcripts and artifacts, and grades attempts with deterministic checks plus optional LLM or agentic judges.
+
 ## [1.98.1] - 2026-06-14
 
 ### Changed

@@ -1,0 +1,103 @@
+---
+title: Evals Harness
+description: Run scenario × harness-config evaluation matrices against real Agent Swarm stacks in E2B, with deterministic checks, judge models, and persisted artifacts.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The `evals/` sub-project is Agent Swarm's evaluation harness. It runs a **scenario × harness-config matrix** against fresh swarm stacks in **E2B sandboxes**, captures the resulting transcripts and artifacts, and grades each attempt with deterministic checks plus optional LLM or agentic judges.
+
+Use it when you need a repeatable answer to questions like:
+
+- Which harness/provider/model combination actually passes this workflow?
+- Did a runtime change improve quality, cost, or speed over the last version?
+- Can a multi-worker scenario still complete after a change to memory, routing, or provider boot logic?
+
+## What It Runs
+
+Each matrix cell is one **scenario** paired with one **harness config**:
+
+- **Scenario** defines the tasks, optional seeding, checks, and judging rubric.
+- **Harness config** defines the worker provider/model setup for that attempt.
+- **Best@n** retries are supported per cell so you can compare pass rate, not just one lucky run.
+
+The harness boots a fresh stack for every attempt:
+
+1. Start one API sandbox and one or more worker sandboxes in E2B.
+2. Optionally seed SQL fixtures, memories, or workspace files.
+3. Create the scenario's tasks and wait for terminal outcomes.
+4. Grade the result with deterministic checks and optional judges.
+5. Persist artifacts, transcripts, task records, costs, and sandbox metadata.
+6. Tear the sandboxes down, even on failure.
+
+## What It Stores
+
+The harness is designed for post-run inspection, not just a pass/fail bit. Each attempt can persist:
+
+- Flattened transcript output
+- Raw swarm session-log events
+- Harness session files from the worker filesystem
+- Task records and dependency outcomes
+- Seed command outputs
+- Session cost and token snapshots
+- Roster snapshots for multi-worker runs
+- Worker/API log tails
+- Captured API and worker version metadata
+
+Results are stored in a Turso-backed libsql replica, so local runs can be resumed and compared over time.
+
+## Quick Start
+
+```bash
+cd evals
+bun install
+bun src/cli.ts registry
+bun src/cli.ts run --scenarios memory-seeded-recall --configs claude-haiku
+bun src/cli.ts serve
+```
+
+The designated smoke scenario is `memory-seeded-recall`. It is the cheapest meaningful end-to-end check because it proves real server-side memory embedding and retrieval without paying for judge-model work.
+
+<Callout type="info">
+`memory-seeded-recall` requires `EMBEDDING_API_KEY` in `evals/.env`. The old `OPENAI_API_KEY` fallback is intentionally no longer injected for seeded-memory runs.
+</Callout>
+
+## Core Concepts
+
+### Scenarios
+
+Scenarios live under `evals/scenarios/`. They define:
+
+- The worker roster (`workers` or `lead` + workers)
+- Optional seeding (`sqlDump`, `memories`, `exec`)
+- One or more tasks, including native `dependsOn` relationships
+- Outcome checks and pass thresholds
+- Optional LLM or agentic-judge rubric
+
+### Harness Configs
+
+Harness configs live under `evals/configs/`. They map a scenario onto a concrete provider/model environment such as Claude, pi, Codex, or opencode. Heterogeneous rosters are supported through per-member overrides.
+
+### Judges
+
+Three grading modes can cooperate:
+
+- **Deterministic checks** for concrete invariants
+- **LLM judge** for rubric-style scoring over transcripts
+- **Agentic judge** for live verification via tools like `run_command`, `read_file`, and `api_get`
+
+The agentic judge is the strongest option when transcript-only grading is too trusting.
+
+## Common Uses
+
+- Regression testing memory behavior, task routing, or dependency semantics
+- Comparing providers or model tiers on the same scenario
+- Verifying multi-worker handoffs and lead/worker orchestration
+- Measuring cost, duration, and pass-rate trends across runtime versions
+
+## Where To Look Next
+
+- Repo source of truth: [`evals/README.md`](https://github.com/desplega-ai/agent-swarm/blob/main/evals/README.md)
+- E2B runtime model: [E2B Provider Smoke Tests](/docs/guides/e2b-provider-smoke-tests)
+- Worker/provider setup: [Harness Configuration](/docs/guides/harness-configuration)
+- Provider implementation details: [Adding a Harness Provider](/docs/guides/harness-providers)
