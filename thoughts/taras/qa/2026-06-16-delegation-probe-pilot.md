@@ -3,7 +3,7 @@ date: 2026-06-16
 author: Claude (orchestrator)
 topic: "Phase 4 de-risk pilot — delegation-probe 2-tier E2B sweep"
 run_id: run-202606161340-0b26da
-status: complete — NO-GO on Plan B (delegation rubric does not discriminate; root cause under investigation)
+status: complete — GO after fix. Pilot-1 (run-…0b26da) NO-GO (delegation 0.50 constant); N2/N4 fixed; Pilot-2 (run-…da82ac) GO — delegation gap 0.60, significant at n=5
 related:
   - thoughts/taras/plans/2026-06-16-evals-swarm-redesign-plan-a.md
   - thoughts/taras/research/2026-06-16-delegation-probe-050-rootcause.md
@@ -11,6 +11,31 @@ tags: [evals, delegation, pilot, de-risk, discrimination, no-go]
 ---
 
 # Phase 4 de-risk pilot — `delegation-probe` (HARD GATE result)
+
+> ## UPDATE 2026-06-16 — Re-pilot after N2/N4 fix → **GO**
+>
+> The N2/N4 penalty bug (below) was fixed (`fix(evals): delegation-probe N2/N4 penalties no longer crush to 0.50`, PR #775). Re-pilot `run-202606161445-da82ac`, same 2-tier n=5, **$3.89**, 10/10 finished, no harness errors:
+>
+> ```
+> delegation-probe   ✓ 1.00 ±0.00 · 100%      ✗ 0.57 ±0.11 · 0%
+> 5/10 passed · 1/2 cells passed
+> ```
+>
+> | config | delegation (mean) | correctness | total | pass |
+> |---|---|---|---|---|
+> | claude-opus-4.8 | **1.00** (1,1,1,1,1) | 1.00 | 1.00 ×5 | **5/5** |
+> | pi-deepseek-flash | **0.40** (0, .5, .5, .5, .5) | 1.00 | .29/.64×4 | 0/5 |
+>
+> - **Delegation-dimension gap = 1.00 − 0.40 = 0.60** (was 0.00). claude uniformly 1.0; pi ranges 0.0–0.5 → the diff CI excludes 0 with wide margin → **significant at n=5**. Total-score gap 0.43, well over the 0.2 ship gate, and now driven by the *delegation* axis, not correctness.
+> - **correctness saturated** (both tiers 1.00) — the intended outcome: both models *can* audit, so discrimination correctly falls to *delegation behavior*. This is exactly the reframe the redesign set out to achieve.
+> - pi shows the designed dynamic range: 0.00 (worst — solo/zeroed by N1, or no clean children), 0.50 (delegated but also self-audited → N2/N4). claude delegates cleanly → 1.0.
+> - Phase-3 metric validated on real data: ✓ for claude (CI ≥ 0.75), ✗ for pi (CI < 0.75).
+>
+> **Verdict: GO for Plan B.** Caveat: claude sits at the 1.0 ceiling — with only 2 tiers we can't see gradation *above* a clean delegator. The deployed-swarm "delegation-quality" design task (finer positive grading) is the right follow-up to add headroom for mid-tier configs; it is a refinement, not a blocker.
+>
+> ---
+> Original Pilot-1 finding (NO-GO, pre-fix) preserved below.
+
 
 ## What ran
 
