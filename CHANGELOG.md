@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.99.2] - 2026-06-16
+
+### Changed
+- **Worker image now pins `@desplega.ai/claude-bridge` `0.1.13`** (#770) — the default worker build refreshes the bundled Claude Bridge binary to pick up the latest bridge fixes while keeping the installed-path flow documented for operators.
+
+### Fixed
+- **Boot-time historical log scrubbing is now restart-safe and non-blocking** (#769) — the one-time `boot-scrub-logs` maintenance task now paginates work in bounded batches, yields between batches to keep `/health` responsive, and persists cursor progress so single-replica deployments can resume after a restart instead of looping in crash recovery.
+
 ## [1.99.0] - 2026-06-15
 
 ### Added
