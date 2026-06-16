@@ -286,6 +286,12 @@ Same-PR doc-update rule: update [docs-site/.../guides/cost-and-context-computati
 
 </important>
 
+<important if="you are creating or modifying eval scenarios, rubrics, or fixtures (evals/scenarios/*, evals/scenarios/fixtures/*)">
+
+Full rulebook: [evals/SCENARIO-AUTHORING.md](./evals/SCENARIO-AUTHORING.md). Non-negotiables: **deterministic-first** (a judge is the last resort and never the tier discriminator); **never penalize MANDATORY behavior** (audit every negative check — can a correct run trip it?); **grade artifacts the MODEL controls** (child tasks, merged report — NOT config/timing-dependent system emissions); **de-risk pilot before building an axis** (prove discrimination on ONE dimension × TWO tiers, ~$4, read the dimension gap + whether its CI excludes 0). Validate with `cd evals && bun src/cli.ts registry` + a rubric unit test against a synthetic JudgeContext; the deployed swarm proposes (never runs E2B itself — it costs money).
+
+</important>
+
 ## Related
 
 - [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts
