@@ -6,7 +6,7 @@ status: in-progress
 autonomy: critical
 commit_per_phase: true
 last_updated: 2026-06-16
-last_updated_by: Claude (phase-running, Phase 2)
+last_updated_by: Claude (orchestrator, Phase 3)
 related:
   - thoughts/taras/plans/2026-06-15-evals-swarm-redesign-scope.md
   - thoughts/taras/research/2026-06-15-evals-swarm-mechanics-redesign.md
@@ -189,14 +189,14 @@ Replace the "best@n" headline with a convergent cell estimator: **mean dimension
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `cd evals && bun run tsc:check` (incl. `-p ui`)
-- [ ] Stats unit tests: `cd evals && bun test src/stats.test.ts` — `wilsonInterval`/`bootstrapCI` against known fixtures (e.g. 3/5 passes → Wilson ≈ [0.23,0.88]; CI narrows as n grows; deterministic seed → stable bounds).
-- [ ] `summarizeRun` test: `cd evals && bun test src/results.test.ts` — multi-attempt cell yields `meanScore`/`scoreCI`/`passRate`/`passRateCI`; CI width shrinks for n=10 vs n=3 on the same score distribution.
-- [ ] UI builds: `cd evals && bun run ui:build`
-- [ ] Lint clean (root): `bun run lint`
+- [x] Type check: `cd evals && bun run tsc:check` (incl. `-p ui`)
+- [x] Stats unit tests: `cd evals && bun test src/stats.test.ts` — `wilsonInterval`/`bootstrapCI` against known fixtures (e.g. 3/5 passes → Wilson ≈ [0.23,0.88]; CI narrows as n grows; deterministic seed → stable bounds). _(22 pass; also covers the new `bootstrapDiffCI` diff-of-means CI + significance flag used by the calibration gap.)_
+- [x] `summarizeRun` test: `cd evals && bun test src/results.test.ts` — multi-attempt cell yields `meanScore`/`scoreCI`/`passRate`/`passRateCI`; CI width shrinks for n=10 vs n=3 on the same score distribution. _(9 pass.)_
+- [x] UI builds: `cd evals && bun run ui:build`
+- [x] Lint clean (root): `bun run lint`
 
 #### Automated QA:
-- [ ] Agent runs `bun src/cli.ts show <existingRunId>` against a prior local run DB and confirms the matrix now prints mean±CI + pass-rate and the ✓/~/✗ threshold-vs-CI indicator.
+- [x] Agent runs `bun src/cli.ts show <existingRunId>` against a prior local run DB and confirms the matrix now prints mean±CI + pass-rate and the ✓/~/✗ threshold-vs-CI indicator. _(No prior eval run DB present locally → used the synthetic-render path: `evals/src/cli-show.test.ts` (6 pass) drives the cell renderer with a multi-attempt `CellSummary` and asserts the `mean ±halfCI` headline + pass-rate + ✓/~/✗ threshold-vs-CI indicator. Live `show` against a real run DB happens in the Phase 4 pilot.)_
 
 #### Manual Verification:
 - [ ] Eyeball the serve UI (`bun src/cli.ts serve`, http://localhost:4801) — the CI/`n` affordance reads as "higher n = tighter = more trustworthy."

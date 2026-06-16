@@ -138,3 +138,35 @@ describe("computeScenarioGaps — round-11 ship gate", () => {
     expect(out).toContain("1/1 scenarios clear");
   });
 });
+
+describe("computeScenarioGaps — gap significance (bootstrap diff CI)", () => {
+  // Frontier ~0.9 vs budget ~0.4, tight within-cohort spread → significant gap.
+  const clearGap = (): AttemptRow[] => [
+    ...cohort("sql-audit", "claude-opus-4.8", [0.88, 0.9, 0.92]),
+    ...cohort("sql-audit", "codex-5.5", [0.89, 0.91, 0.9]),
+    ...cohort("sql-audit", "pi-deepseek-flash", [0.38, 0.4, 0.42]),
+    ...cohort("sql-audit", "claude-haiku", [0.41, 0.4, 0.39]),
+  ];
+
+  test("attempts supplied → gapCI populated and significant for a clear gap", () => {
+    const attempts = clearGap();
+    const g = computeScenarioGaps(summarizeRun(run(), attempts), { attempts })[0]!;
+    expect(g.gapCI).not.toBeNull();
+    expect(g.gapCI?.significant).toBe(true);
+    expect(g.gapCI?.lo).toBeGreaterThan(0);
+    // 2 frontier + 2 budget anchors × 3 attempts each.
+    expect(g.gapCI?.n).toBe(12);
+  });
+
+  test("attempts omitted → gapCI null (summary-only path)", () => {
+    const g = computeScenarioGaps(summarizeRun(run(), clearGap()))[0]!;
+    expect(g.gapCI).toBeNull();
+  });
+
+  test("formatGapReport surfaces the significance flag when gapCI present", () => {
+    const attempts = clearGap();
+    const out = formatGapReport(computeScenarioGaps(summarizeRun(run(), attempts), { attempts }));
+    expect(out).toContain("gap CI");
+    expect(out).toContain("significant at n=12");
+  });
+});

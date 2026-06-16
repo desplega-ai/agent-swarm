@@ -21,6 +21,8 @@
 import { initDb } from "../src/db/client.ts";
 import { getRun, listAttempts } from "../src/db/queries.ts";
 import { type RunSummary, summarizeRun } from "../src/results.ts";
+import { bootstrapDiffCI } from "../src/stats.ts";
+import type { AttemptRow } from "../src/types.ts";
 
 /** Frontier calibration anchors (resolved — opus pinned to the 4.8 build). */
 export const FRONTIER_ANCHORS = ["claude-opus-4.8", "codex-5.5"] as const;
@@ -39,6 +41,16 @@ export interface AnchorScore {
   avgScore: number | null;
 }
 
+/** Bootstrap CI for the frontier−budget gap + whether it excludes 0. */
+export interface GapCI {
+  lo: number;
+  hi: number;
+  /** CI excludes 0 → the gap is significant at this run's n. */
+  significant: boolean;
+  /** Total scored attempts behind the gap (frontier + budget cohorts). */
+  n: number;
+}
+
 export interface ScenarioGap {
   scenarioId: string;
   frontier: AnchorScore[];
@@ -53,6 +65,12 @@ export interface ScenarioGap {
   pass: boolean;
   /** Borderline when gap is in [BORDERLINE_LOW, BORDERLINE_HIGH]. */
   borderline: boolean;
+  /**
+   * Bootstrap CI of the gap (difference of cohort means) + significance flag.
+   * null when the caller did not supply per-attempt scores (summary-only path)
+   * or either cohort had no scored attempt.
+   */
+  gapCI: GapCI | null;
 }
 
 /** Mean of the non-null entries; null when every entry is null. */
@@ -73,15 +91,31 @@ export function computeScenarioGaps(
     frontier?: readonly string[];
     budget?: readonly string[];
     gateGap?: number;
+    /**
+     * Per-attempt rows for the run. When supplied, the gap also gets a bootstrap
+     * CI + significance flag (over the per-cohort score distributions). Omit for
+     * the summary-only path (gapCI stays null).
+     */
+    attempts?: AttemptRow[];
   } = {},
 ): ScenarioGap[] {
   const frontierIds = opts.frontier ?? FRONTIER_ANCHORS;
   const budgetIds = opts.budget ?? BUDGET_ANCHORS;
   const gateGap = opts.gateGap ?? SHIP_GATE_GAP;
+  const attempts = opts.attempts;
 
   const cellScore = (scenarioId: string, configId: string): number | null =>
     summary.cells.find((c) => c.scenarioId === scenarioId && c.configId === configId)?.avgScore ??
     null;
+
+  /** All scored per-attempt values for the given anchors within one scenario. */
+  const cohortScores = (scenarioId: string, configIds: readonly string[]): number[] => {
+    if (!attempts) return [];
+    const ids = new Set(configIds);
+    return attempts
+      .filter((a) => a.scenarioId === scenarioId && ids.has(a.configId) && a.score !== null)
+      .map((a) => a.score as number);
+  };
 
   return summary.run.scenarioIds.map((scenarioId) => {
     const frontier: AnchorScore[] = frontierIds.map((configId) => ({
@@ -95,6 +129,22 @@ export function computeScenarioGaps(
     const frontierAvg = meanScored(frontier);
     const budgetAvg = meanScored(budget);
     const gap = frontierAvg !== null && budgetAvg !== null ? frontierAvg - budgetAvg : null;
+
+    let gapCI: GapCI | null = null;
+    if (attempts) {
+      const fScores = cohortScores(scenarioId, frontierIds);
+      const bScores = cohortScores(scenarioId, budgetIds);
+      if (fScores.length > 0 && bScores.length > 0) {
+        const ci = bootstrapDiffCI(fScores, bScores, { seed: 0xc0ffee });
+        gapCI = {
+          lo: ci.lo,
+          hi: ci.hi,
+          significant: ci.significant,
+          n: fScores.length + bScores.length,
+        };
+      }
+    }
+
     return {
       scenarioId,
       frontier,
@@ -104,6 +154,7 @@ export function computeScenarioGaps(
       gap,
       pass: gap !== null && gap >= gateGap,
       borderline: gap !== null && gap >= BORDERLINE_LOW && gap <= BORDERLINE_HIGH,
+      gapCI,
     };
   });
 }
@@ -126,6 +177,12 @@ export function formatGapReport(gaps: ScenarioGap[]): string {
     else if (g.pass) verdict = "PASS";
     else if (g.borderline) verdict = "BORDERLINE (+2 attempts/anchor)";
     else verdict = "FAIL";
+    if (g.gapCI) {
+      const sig = g.gapCI.significant
+        ? `significant at n=${g.gapCI.n}`
+        : `NOT significant at n=${g.gapCI.n}`;
+      verdict += `  [gap CI ${fmt(g.gapCI.lo)}..${fmt(g.gapCI.hi)}, ${sig}]`;
+    }
     lines.push(
       `${g.scenarioId.padEnd(scenW)}${fmt(g.frontierAvg).padEnd(10)}${fmt(g.budgetAvg).padEnd(10)}${fmt(g.gap).padEnd(10)}${verdict}`,
     );
@@ -152,7 +209,7 @@ async function main(): Promise<void> {
   }
   const attempts = await listAttempts(db, runId);
   const summary = summarizeRun(run, attempts);
-  const gaps = computeScenarioGaps(summary);
+  const gaps = computeScenarioGaps(summary, { attempts });
   console.log(`\n${run.id} [${run.status}] — round-11 calibration ship gate\n`);
   console.log(formatGapReport(gaps));
 }

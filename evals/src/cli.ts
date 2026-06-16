@@ -5,8 +5,9 @@ import { DEFAULT_SCENARIO_IDS } from "../scenarios/index.ts";
 import { getDb, initDb } from "./db/client.ts";
 import { createRun, getRun, listAttempts, listRuns, resetErrorAttempts } from "./db/queries.ts";
 import { loadRegistry } from "./registry.ts";
-import { summarizeRun } from "./results.ts";
+import { type CellSummary, summarizeRun } from "./results.ts";
 import { executeRun, killAllActiveStacks } from "./runner/index.ts";
+import { DEFAULT_PASS_THRESHOLD } from "./scoring.ts";
 
 /**
  * Graceful Ctrl-C: stop starting new attempts, tear down live sandboxes, and
@@ -35,7 +36,7 @@ Usage:
   bun src/cli.ts run [--name <n>] [--scenarios a,b] [--configs x,y] [--preset <id>]… [--attempts 1] [--concurrency 2] [--max-retries 1] [--judge-model <openrouter-id>]
   bun src/cli.ts resume <runId>      # continue an interrupted/failed run (safe retry)
   bun src/cli.ts list                # list runs
-  bun src/cli.ts show <runId>        # print result matrix
+  bun src/cli.ts show <runId> [--detail]  # print result matrix (mean±CI; --detail adds best@n/pass@1)
   bun src/cli.ts serve [--port 4801] # API + UI
   bun src/cli.ts registry            # list available scenarios + configs
 
@@ -169,7 +170,7 @@ async function cmdList(): Promise<void> {
   for (const run of runs) {
     const summary = summarizeRun(run, await listAttempts(getDb(), run.id));
     console.log(
-      `${run.id}  ${run.status.padEnd(9)}  ${summary.totals.passedCells}/${summary.totals.totalCells} cells passed  best@${run.attemptsPerCell}  ${run.createdAt}${run.name ? `  (${run.name})` : ""}`,
+      `${run.id}  ${run.status.padEnd(9)}  ${summary.totals.passedCells}/${summary.totals.totalCells} cells passed  @n=${run.attemptsPerCell}  ${run.createdAt}${run.name ? `  (${run.name})` : ""}`,
     );
   }
 }
@@ -177,14 +178,19 @@ async function cmdList(): Promise<void> {
 async function cmdShow(argv: string[]): Promise<void> {
   const runId = argv[0];
   if (!runId) throw new Error("usage: show <runId>");
+  const { values } = parseArgs({
+    args: argv.slice(1),
+    options: { detail: { type: "boolean", default: false } },
+  });
+  const detail = Boolean(values.detail);
   const db = await initDb();
   const run = await getRun(db, runId);
   if (!run) throw new Error(`run ${runId} not found`);
   const attempts = await listAttempts(db, runId);
   const summary = summarizeRun(run, attempts);
 
-  console.log(`\n${run.id} [${run.status}] best@${run.attemptsPerCell}`);
-  const colWidth = Math.max(...run.configIds.map((c) => c.length), 10) + 2;
+  console.log(`\n${run.id} [${run.status}] mean±CI @n=${run.attemptsPerCell}`);
+  const colWidth = Math.max(...run.configIds.map((c) => c.length), 16) + 2;
   const rowHeader = Math.max(...run.scenarioIds.map((s) => s.length), 8) + 2;
   console.log(" ".repeat(rowHeader) + run.configIds.map((c) => c.padEnd(colWidth)).join(""));
   for (const scenarioId of run.scenarioIds) {
@@ -193,22 +199,47 @@ async function cmdShow(argv: string[]): Promise<void> {
         (c) => c.scenarioId === scenarioId && c.configId === configId,
       );
       if (!cell || cell.finished === 0) return "…".padEnd(colWidth);
-      const mark = cell.passedAny ? "✓" : "✗";
-      const score = cell.bestScore !== null ? cell.bestScore.toFixed(2) : "0.00";
-      const err = cell.errors ? ` E${cell.errors}` : "";
-      return `${mark} ${score}${err}`.padEnd(colWidth);
+      return formatShowCell(cell, DEFAULT_PASS_THRESHOLD, detail).padEnd(colWidth);
     });
     console.log(scenarioId.padEnd(rowHeader) + cells.join(""));
   }
+  console.log(
+    `\nlegend: «mean ±halfCI · pass-rate» · ✓ CI≥${DEFAULT_PASS_THRESHOLD} · ~ CI straddles · ✗ CI<${DEFAULT_PASS_THRESHOLD}${detail ? " · (detail: best@n / pass@1)" : " · pass --detail for best@n/pass@1"}`,
+  );
   const cost = summary.totals.totalCostUsd;
   console.log(
-    `\n${summary.totals.passedCells}/${summary.totals.totalCells} cells passed · ${summary.totals.finished}/${summary.totals.attempts} attempts finished${cost !== null ? ` · $${cost.toFixed(4)} total` : ""}`,
+    `${summary.totals.passedCells}/${summary.totals.totalCells} cells passed · ${summary.totals.finished}/${summary.totals.attempts} attempts finished${cost !== null ? ` · $${cost.toFixed(4)} total` : ""}`,
   );
   for (const attempt of attempts.filter((a) => a.status === "error")) {
     console.log(
       `  error ${attempt.scenarioId}×${attempt.configId}#${attempt.attemptIndex}: ${attempt.error?.split("\n")[0]}`,
     );
   }
+}
+
+/**
+ * Render one matrix cell for `show`: the convergent headline `mean ±halfCI` with
+ * a threshold-vs-CI indicator and the pass-rate companion.
+ *   ✓  scoreCI.lo ≥ passThreshold  (confidently clears the bar)
+ *   ~  CI straddles passThreshold  (more attempts needed to call it)
+ *   ✗  scoreCI.hi < passThreshold  (confidently below the bar)
+ * best@n / pass@1 stay available behind `--detail`.
+ */
+export function formatShowCell(cell: CellSummary, passThreshold: number, detail: boolean): string {
+  if (cell.meanScore === null || cell.scoreCI === null) {
+    const err = cell.errors ? ` E${cell.errors}` : "";
+    return `· n/a${err}`;
+  }
+  const { lo, hi } = cell.scoreCI;
+  const mark = lo >= passThreshold ? "✓" : hi < passThreshold ? "✗" : "~";
+  const halfCI = (hi - lo) / 2;
+  const passRate = cell.passRate !== null ? `${Math.round(cell.passRate * 100)}%` : "—";
+  const err = cell.errors ? ` E${cell.errors}` : "";
+  const head = `${mark} ${cell.meanScore.toFixed(2)} ±${halfCI.toFixed(2)} · ${passRate}${err}`;
+  if (!detail) return head;
+  const best = cell.bestScore !== null ? cell.bestScore.toFixed(2) : "—";
+  const at1 = cell.passedFirst === null ? "—" : cell.passedFirst ? "✓" : "✗";
+  return `${head} [best ${best} · @1 ${at1}]`;
 }
 
 function cmdRegistry(): void {
@@ -220,35 +251,39 @@ function cmdRegistry(): void {
     console.log(`  ${c.id.padEnd(24)} ${c.provider}${c.model ? ` / ${c.model}` : ""}`);
 }
 
-const [command, ...rest] = process.argv.slice(2);
-try {
-  switch (command) {
-    case "run":
-      await cmdRun(rest);
-      break;
-    case "resume":
-      await cmdResume(rest);
-      break;
-    case "list":
-      await cmdList();
-      break;
-    case "show":
-      await cmdShow(rest);
-      break;
-    case "serve": {
-      const { values } = parseArgs({ args: rest, options: { port: { type: "string" } } });
-      const { startServer } = await import("./api/server.ts");
-      await startServer(values.port ? Number(values.port) : undefined);
-      break;
+// Only run the CLI dispatch when invoked directly (`bun src/cli.ts …`); importing
+// this module (e.g. from a unit test for formatShowCell) must NOT execute it.
+if (import.meta.main) {
+  const [command, ...rest] = process.argv.slice(2);
+  try {
+    switch (command) {
+      case "run":
+        await cmdRun(rest);
+        break;
+      case "resume":
+        await cmdResume(rest);
+        break;
+      case "list":
+        await cmdList();
+        break;
+      case "show":
+        await cmdShow(rest);
+        break;
+      case "serve": {
+        const { values } = parseArgs({ args: rest, options: { port: { type: "string" } } });
+        const { startServer } = await import("./api/server.ts");
+        await startServer(values.port ? Number(values.port) : undefined);
+        break;
+      }
+      case "registry":
+        cmdRegistry();
+        break;
+      default:
+        console.log(HELP);
+        if (command && command !== "help") process.exitCode = 1;
     }
-    case "registry":
-      cmdRegistry();
-      break;
-    default:
-      console.log(HELP);
-      if (command && command !== "help") process.exitCode = 1;
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    process.exitCode = 1;
   }
-} catch (err) {
-  console.error(err instanceof Error ? err.message : err);
-  process.exitCode = 1;
 }
