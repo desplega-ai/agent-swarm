@@ -10,7 +10,8 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
  * first refresh round-trip (Atlassian returns the authoritative expiry).
  */
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-const SLACK_ALERTS_CHANNEL = process.env.SLACK_ALERTS_CHANNEL || "C08JCRURPBV";
+const DEFAULT_SLACK_ALERTS_CHANNEL = "C0A4J7GB0UD";
+const SLACK_ALERTS_CHANNEL = process.env.SLACK_ALERTS_CHANNEL || DEFAULT_SLACK_ALERTS_CHANNEL;
 
 const WEBHOOK_EVENTS = [
   "jira:issue_updated",
@@ -51,10 +52,18 @@ async function notifySlack(text: string): Promise<void> {
       channel: SLACK_ALERTS_CHANNEL,
       text,
     });
-    console.log("[Jira webhook keepalive] Slack notification sent");
+    console.log(`[Jira webhook keepalive] Slack notification sent to ${SLACK_ALERTS_CHANNEL}`);
   } catch (slackErr) {
+    const code =
+      typeof slackErr === "object" && slackErr !== null && "code" in slackErr
+        ? ` code=${String(slackErr.code)}`
+        : "";
+    const data =
+      typeof slackErr === "object" && slackErr !== null && "data" in slackErr
+        ? ` data=${JSON.stringify(slackErr.data)}`
+        : "";
     console.error(
-      "[Jira webhook keepalive] Failed to send Slack notification:",
+      `[Jira webhook keepalive] Failed to send Slack notification to ${SLACK_ALERTS_CHANNEL}${code}${data}:`,
       slackErr instanceof Error ? slackErr.message : slackErr,
     );
   }

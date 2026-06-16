@@ -382,7 +382,7 @@ async function shutdown() {
   // Stop OAuth keepalive
   if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
     const { stopOAuthKeepalive } = await import("../oauth/keepalive");
-    stopOAuthKeepalive();
+    await stopOAuthKeepalive();
   }
 
   // Stop MCP OAuth pending-session garbage collector
