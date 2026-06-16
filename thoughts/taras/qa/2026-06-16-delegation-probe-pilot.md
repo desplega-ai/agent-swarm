@@ -34,6 +34,32 @@ tags: [evals, delegation, pilot, de-risk, discrimination, no-go]
 > **Verdict: GO for Plan B.** Caveat: claude sits at the 1.0 ceiling — with only 2 tiers we can't see gradation *above* a clean delegator. The deployed-swarm "delegation-quality" design task (finer positive grading) is the right follow-up to add headroom for mid-tier configs; it is a refinement, not a blocker.
 >
 > ---
+>
+> ## UPDATE 2026-06-16 — Pilot-3 (+Q1+Q4 quality checks)
+>
+> Added two deterministic quality positives (swarm proposal, PR #775): **Q1** task-count discipline (w1), **Q4** facts-flow-through-workers (w2), folded into the composite check (positiveTotal P1-P4=8 + Q1,Q4=3 = 11), guarded on P1. Pilot-3 `run-202606162038-a48639`, n=5, **$3.93**.
+>
+> ```
+> delegation-probe   ~ 0.84 ±0.22 · 80%      ✗ 0.63 ±0.02 · 0%
+> 4/10 passed · 1/2 cells passed
+> ```
+>
+> | config | delegation per-attempt | notes |
+> |---|---|---|
+> | claude-opus-4.8 | 1.00, 1.00, 1.00, **0.82**, **0.45** | spread appeared — quality layer grades |
+> | pi-deepseek-flash | 0.50 ×5 | full positives, −N2−N4 (db-query self-audit) |
+>
+> **Artifact investigation verdict — the gradation is REAL, not a Q4 artifact:**
+> - **Q4 has NO false-negatives** on this dataset — it scored 1.0 wherever a report existed; the answer-key regexes matched every worker-reported fact. Do NOT loosen Q4. Q1/Q4 need NOT be split into a separate dimension; they behaved correctly.
+> - **claude #3 (0.82):** perfect delegation (2 children completed, Q1=1, Q4=1, no penalties) but **P3=0 — no follow-up task was emitted** (`9/11=0.82`). The other 3 perfect runs each got 2 follow-ups; #3 got 0. Likely a **swarm follow-up-dispatcher flake** (3 fast attempts scored within ~4s) — i.e. P3 may be measuring the dispatcher, not the model.
+> - **claude #4 (0.45):** genuinely botched — workers stuck `in_progress`, no report written (correctness 0.00). Real failure, correctly scored (`5/11`).
+> - **pi 0.50 ×5:** delegates faithfully (11/11 positives) but the lead also runs `db-query` to audit the seeded history itself → **N2 −0.25 + N4 −0.25**. Exactly the anti-gaming behavior the penalties target. Legit.
+>
+> **The one open item: P3 (follow-up-received) validity.** The follow-up is a SYSTEM emission (created when a worker completes), not a lead behavior the model controls. If emission is timing/load-dependent, P3 penalizes infra, not delegation quality. Harden / reconsider P3 before trusting it as a tier discriminator. (Root-cause of the #3 non-emission under investigation.)
+>
+> **Net:** delegation-probe discriminates and the quality layer is sound. Q1/Q4 confirmed as real signal. Total spend across 3 pilots ~$12.
+>
+> ---
 > Original Pilot-1 finding (NO-GO, pre-fix) preserved below.
 
 
