@@ -224,9 +224,12 @@ export function ScatterChart(props: {
    * Y-axis domain (round-8 spec §C4): "zero" (default) anchors the domain at
    * 0 — bit-for-bit the legacy behavior; "fit" spans [min,max] of the plotted
    * ys with 8% padding so tightly clustered values (e.g. scores near 1.0)
-   * spread over the full plot height.
+   * spread over the full plot height. An explicit `[lo, hi]` tuple pins the
+   * domain to a constant range regardless of the data — used to lock 0–1
+   * metrics (score / pass rate) so the quadrant bands stay anchored to the
+   * true scale instead of the plotted range.
    */
-  yDomain?: "zero" | "fit";
+  yDomain?: "zero" | "fit" | [number, number];
   emptyText?: string;
 }): ReactNode {
   const [ref, width] = useContainerWidth();
@@ -249,7 +252,11 @@ export function ScatterChart(props: {
     const [x0, x1] = pad(Math.min(...xs), Math.max(...xs));
     let y0: number;
     let y1: number;
-    if (yDomain === "fit") {
+    if (Array.isArray(yDomain)) {
+      // Constant domain: pin to the given [lo, hi] regardless of the data so
+      // the quadrant bands anchor to the true scale (e.g. 0–1 score/pass-rate).
+      [y0, y1] = yDomain;
+    } else if (yDomain === "fit") {
       [y0, y1] = pad(Math.min(...ys), Math.max(...ys));
     } else {
       const [y0raw, y1pad] = pad(Math.min(0, ...ys), Math.max(...ys));
