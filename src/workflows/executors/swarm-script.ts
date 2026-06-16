@@ -10,6 +10,7 @@ export const SwarmScriptConfigSchema = z.object({
   pinHash: z.string().min(1).optional(),
   args: z.record(z.string(), z.unknown()).default({}),
   fsMode: z.enum(["none", "workspace-rw"]).default("none"),
+  timeoutMs: z.number().int().positive().optional(),
 });
 
 export const SwarmScriptOutputSchema = z.object({
@@ -61,6 +62,7 @@ export class SwarmScriptExecutor extends BaseExecutor<
       args: config.args,
       fsMode: "none",
       agentId: agentId ?? "workflow",
+      timeoutMs: config.timeoutMs,
     });
 
     const workflowOutput = {

@@ -250,6 +250,49 @@ describe("SwarmScriptExecutor", () => {
     expect(success.status).toBe("success");
   });
 
+  test("timeoutMs not set — script completes with the default 30s window", async () => {
+    await saveScript("quick", `export default async () => ({ done: true });`);
+    const executor = new SwarmScriptExecutor(deps);
+    const wf = makeWorkflow({ nodes: [] });
+    const result = await executor.run({
+      config: { scriptName: "quick" },
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "script",
+        workflowId: wf.id,
+        dryRun: false,
+      },
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.output?.result).toEqual({ done: true });
+  });
+
+  test("timeoutMs set — a long-running script is killed before it finishes", async () => {
+    await saveScript(
+      "sleeper",
+      `export default async () => { await new Promise(r => setTimeout(r, 3000)); return { done: true }; };`,
+    );
+    const executor = new SwarmScriptExecutor(deps);
+    const wf = makeWorkflow({ nodes: [] });
+    const result = await executor.run({
+      config: { scriptName: "sleeper", timeoutMs: 300 },
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "script",
+        workflowId: wf.id,
+        dryRun: false,
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.output?.exitCode).not.toBe(0);
+  });
+
   test("Failure in the script surfaces as a workflow-node failure", async () => {
     await saveScript("throws", `export default async () => { throw new Error("boom"); };`);
     const executor = new SwarmScriptExecutor(deps);
