@@ -5,8 +5,6 @@ import { ensureTokenOrThrow } from "./ensure-token";
 const KEEPALIVE_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const KEEPALIVE_BUFFER_MS = 10 * 60 * 1000;
 const STARTUP_KEEPALIVE_DELAY_MS = 10_000;
-const DEFAULT_SLACK_ALERTS_CHANNEL = "C0A4J7GB0UD";
-const SLACK_ALERTS_CHANNEL = process.env.SLACK_ALERTS_CHANNEL || DEFAULT_SLACK_ALERTS_CHANNEL;
 
 const KEEPALIVE_PROVIDERS = ["linear", "jira"] as const;
 
@@ -59,6 +57,12 @@ async function runKeepalive(trigger: "startup" | "interval" | "manual" = "manual
 }
 
 async function notifySlack(text: string): Promise<void> {
+  const channel = process.env.SLACK_ALERTS_CHANNEL;
+  if (!channel) {
+    console.warn("[OAuth Keepalive] SLACK_ALERTS_CHANNEL not set; skipping alert");
+    return;
+  }
+
   try {
     const { getSlackApp } = await import("../slack/app");
     const app = getSlackApp();
@@ -67,10 +71,10 @@ async function notifySlack(text: string): Promise<void> {
       return;
     }
     await app.client.chat.postMessage({
-      channel: SLACK_ALERTS_CHANNEL,
+      channel,
       text,
     });
-    console.log(`[OAuth Keepalive] Slack notification sent to ${SLACK_ALERTS_CHANNEL}`);
+    console.log(`[OAuth Keepalive] Slack notification sent to ${channel}`);
   } catch (slackErr) {
     const code =
       typeof slackErr === "object" && slackErr !== null && "code" in slackErr
@@ -81,7 +85,7 @@ async function notifySlack(text: string): Promise<void> {
         ? ` data=${JSON.stringify(slackErr.data)}`
         : "";
     console.error(
-      `[OAuth Keepalive] Failed to send Slack notification to ${SLACK_ALERTS_CHANNEL}${code}${data}:`,
+      `[OAuth Keepalive] Failed to send Slack notification to ${channel}${code}${data}:`,
       slackErr instanceof Error ? slackErr.message : slackErr,
     );
   }
@@ -139,7 +143,7 @@ export const _test = {
   KEEPALIVE_INTERVAL_MS,
   KEEPALIVE_BUFFER_MS,
   STARTUP_KEEPALIVE_DELAY_MS,
-  DEFAULT_SLACK_ALERTS_CHANNEL,
+  notifySlack,
   runKeepalive: scheduleKeepaliveRun,
   getInflightKeepalive: () => inflightKeepalive,
 };

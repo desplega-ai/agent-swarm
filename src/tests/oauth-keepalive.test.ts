@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "../be/db";
 import {
@@ -10,6 +10,15 @@ import {
 import { _test, stopOAuthKeepalive } from "../oauth/keepalive";
 
 const TEST_DB_PATH = "./test-oauth-keepalive.sqlite";
+
+const originalSlackAlertsChannel = process.env.SLACK_ALERTS_CHANNEL;
+function restoreSlackAlertsChannel(): void {
+  if (originalSlackAlertsChannel === undefined) {
+    delete process.env.SLACK_ALERTS_CHANNEL;
+    return;
+  }
+  process.env.SLACK_ALERTS_CHANNEL = originalSlackAlertsChannel;
+}
 
 const testApp = {
   clientId: "test-client-id",
@@ -36,11 +45,14 @@ beforeEach(async () => {
   deleteOAuthTokens("linear");
   deleteOAuthTokens("jira");
   globalThis.fetch = originalFetch;
+  restoreSlackAlertsChannel();
+  mock.restore();
 });
 
 afterAll(async () => {
   await stopOAuthKeepalive();
   globalThis.fetch = originalFetch;
+  restoreSlackAlertsChannel();
   closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
@@ -51,7 +63,17 @@ describe("OAuth keepalive", () => {
   test("uses a 12h cadence with a 10m refresh buffer", () => {
     expect(_test.KEEPALIVE_INTERVAL_MS).toBe(12 * 60 * 60 * 1000);
     expect(_test.KEEPALIVE_BUFFER_MS).toBe(10 * 60 * 1000);
-    expect(_test.DEFAULT_SLACK_ALERTS_CHANNEL).toBe("C0A4J7GB0UD");
+  });
+
+  test("skips Slack notification when alerts channel env is unset", async () => {
+    delete process.env.SLACK_ALERTS_CHANNEL;
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(_test.notifySlack("test alert")).resolves.toBeUndefined();
+
+    expect(warn).toHaveBeenCalledWith(
+      "[OAuth Keepalive] SLACK_ALERTS_CHANNEL not set; skipping alert",
+    );
   });
 
   test("stopOAuthKeepalive waits for in-flight Jira refresh persistence", async () => {
