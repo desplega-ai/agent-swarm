@@ -20,6 +20,13 @@ import { __test__, delegationProbe } from "./delegation-probe.ts";
  *   (b) solo-but-correct lead   → `delegation` === 0 (N1 fires) though
  *                                 `correctness` is high; FAILS the threshold
  *   (c) delegation loop (N3)    → `delegation` penalized below clean
+ *
+ * Regression coverage for the 0.50-plateau bug (research
+ * `2026-06-16-delegation-probe-050-rootcause.md`): a clean delegator that ALSO
+ * writes the mandatory merged report must NOT be penalized for the Write (the old
+ * N2/N4 flagged it and pinned the dimension at 0.50). And a lead that audits the
+ * seeded history itself via the `db-query` MCP tool MUST trip N2 (closing the
+ * anti-gaming hole where N2 only watched Bash).
  */
 
 const { delegationDimensionCheck, mergedCorrectness, reportExistsGate, REPORT_FILE } = __test__;
@@ -237,9 +244,15 @@ describe("delegation-probe rubric — three cases", () => {
         followUpTask("task-fu-a", "task-child-a"),
         followUpTask("task-fu-b", "task-child-b"),
       ],
-      // Lead only delegated (a send-task / create-task tool) — no solo tasks query.
+      // The lead delegated (send-task ×2) and then Wrote the MANDATORY merged
+      // report. The Write is the `report-exists` gate's deliverable — it must NOT
+      // be penalized. (This is the regression that catches the old 0.50-plateau
+      // bug: the previous N2/N4 flagged any Write/Edit and double-penalized it,
+      // pinning a perfect delegator at exactly 0.50.)
       leadTools: [
         toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", { task: "audit completed" }),
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", { task: "audit failures" }),
+        toolUseRow(LEAD_TASK_ID, "Write", { file_path: REPORT_FILE, content: "# merged" }),
       ],
       // Both children have non-empty sessions (the workers ran).
       sessionLogsByTask: {
@@ -251,11 +264,112 @@ describe("delegation-probe rubric — three cases", () => {
 
     const r = await scoreScenario(ctx);
     expect(r.gatePass).toBe(true);
-    // P1+P2+P3+P4 all pass, no penalties → delegation 1.0.
+    // P1+P2+P3+P4 all pass; the Write is NOT a penalty → delegation 1.0.
     expect(r.delegation).toBeCloseTo(1, 10);
+    // The key regression assertion: a clean delegator scores HIGH, not 0.50.
+    expect(r.delegation).toBeGreaterThan(0.75);
     expect(r.correctness).toBeCloseTo(1, 10);
     expect(r.aggregate).toBeCloseTo(1, 10);
     expect(r.passed).toBe(true);
+  });
+
+  it("(a2) writing the report is NOT penalized: a delegator that Wrote/Edited but never audited solo scores 1.0", async () => {
+    // Same clean delegation tree, but the lead also ran Edit/MultiEdit in addition
+    // to Write — none of which is a data-research signal. N2/N4 must stay silent.
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        childTask("task-child-a", WORKER_A, "completed=11"),
+        childTask("task-child-b", WORKER_B, "failed=5; cancelled=4"),
+        followUpTask("task-fu-a", "task-child-a"),
+        followUpTask("task-fu-b", "task-child-b"),
+      ],
+      leadTools: [
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        // After the follow-ups landed, the lead merged by Writing + Editing the
+        // report file. These are deliverable edits, NOT history audits.
+        toolUseRow(LEAD_TASK_ID, "Write", { file_path: REPORT_FILE }),
+        toolUseRow(LEAD_TASK_ID, "Edit", { file_path: REPORT_FILE }),
+        toolUseRow(LEAD_TASK_ID, "MultiEdit", { file_path: REPORT_FILE }),
+      ],
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "x", {})],
+        "task-child-b": [toolUseRow("task-child-b", "x", {})],
+      },
+      report: CORRECT_REPORT,
+    });
+    const r = await scoreScenario(ctx);
+    // No N2 (no db-query / data-scrape Bash) and no N4 (no data-research after
+    // delegating) → the Writes/Edits cost nothing. delegation stays 1.0.
+    expect(r.delegation).toBeCloseTo(1, 10);
+  });
+
+  it("(a3) anti-gaming: a lead that audits the seeded history via the db-query MCP tool trips N2", async () => {
+    // The lead delegated AND wrote the report (so it'd look clean) but ALSO ran the
+    // db-query MCP tool to audit `agent_tasks` itself — the anti-gaming hole the old
+    // N2 (Bash-only) missed. db-query after delegating also trips N4 (re-research).
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        childTask("task-child-a", WORKER_A, "completed=11"),
+        childTask("task-child-b", WORKER_B, "failed=5; cancelled=4"),
+        followUpTask("task-fu-a", "task-child-a"),
+        followUpTask("task-fu-b", "task-child-b"),
+      ],
+      leadTools: [
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        // The lead audits the history ITSELF via the db-query MCP tool.
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__db-query", {
+          sql: "SELECT status, COUNT(*) FROM agent_tasks GROUP BY status",
+        }),
+        toolUseRow(LEAD_TASK_ID, "Write", { file_path: REPORT_FILE }),
+      ],
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "x", {})],
+        "task-child-b": [toolUseRow("task-child-b", "x", {})],
+      },
+      report: CORRECT_REPORT,
+    });
+    const r = await scoreScenario(ctx);
+    // P1–P4 all pass (1.0) then N2 (−0.25) for the solo db-query AND N4 (−0.25)
+    // because the db-query came AFTER the lead began delegating.
+    expect(r.delegation).toBeCloseTo(1 - __test__.N2_PENALTY - __test__.N4_PENALTY, 10);
+    // Clearly LOWER than the clean delegator (1.0) — the hole is closed.
+    expect(r.delegation).toBeLessThan(0.75);
+  });
+
+  it("(a4) N4 only: data-research AFTER delegating is penalized; the SAME signal is N2 too", async () => {
+    // A lead that delegated, got follow-ups, but then re-scraped the history via a
+    // Bash /api/tasks call AFTER delegating. N2 fires (solo audit) and N4 fires
+    // (re-research after delegating). N4 is based on the data-research signal, never
+    // a Write, and is ordered after the first delegation.
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        childTask("task-child-a", WORKER_A, "completed=11"),
+        childTask("task-child-b", WORKER_B, "failed=5; cancelled=4"),
+        followUpTask("task-fu-a", "task-child-a"),
+        followUpTask("task-fu-b", "task-child-b"),
+      ],
+      leadTools: [
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        // Re-research AFTER delegating: a Bash curl against /api/tasks.
+        toolUseRow(LEAD_TASK_ID, "Bash", {
+          command: "curl -s http://localhost:3013/api/tasks",
+        }),
+        toolUseRow(LEAD_TASK_ID, "Write", { file_path: REPORT_FILE }),
+      ],
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "x", {})],
+        "task-child-b": [toolUseRow("task-child-b", "x", {})],
+      },
+      report: CORRECT_REPORT,
+    });
+    const r = await scoreScenario(ctx);
+    expect(r.delegation).toBeCloseTo(1 - __test__.N2_PENALTY - __test__.N4_PENALTY, 10);
   });
 
   it("(b) solo-but-correct lead (N1 fires) → delegation 0 though correctness high; fails", async () => {

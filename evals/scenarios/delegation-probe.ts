@@ -33,9 +33,9 @@ import type {
  *       P3 follow-up-received     (≥1 system follow-up whose parent is a child task)    w2
  *       P4 workers-have-sessions  (each child task has non-empty session_logs)          w1
  *       N1 no-solo-research       (lead session has NO get-tasks-with-status tool_use)  ZEROES the dimension
- *       N2 no-implementation-tools(lead session has no Edit/Write/data-Bash)            penalty
+ *       N2 no-solo-audit          (lead session has no db-query / data-scrape Bash)      penalty
  *       N3 no-delegation-loops    (no task created BY a worker with a parent)           penalty
- *       N4 no-re-doing-work       (after the first follow-up, lead does no data research) penalty
+ *       N4 no-re-doing-work       (lead does data-research AFTER it began delegating)    penalty
  *     The four P-checks are a weighted mean (the positive delegation score); the
  *     N2/N3/N4 negatives each subtract a fixed penalty; N1 is a HARD ZERO (see
  *     `delegationDimensionCheck` — the short-circuit returns score 0 before any
@@ -156,19 +156,44 @@ function leadQueriedTasksApi(toolUses: ToolUse[]): ToolUse | undefined {
   });
 }
 
-/** Implementation tools the lead should not be running (it orchestrates, it does
- * not implement): Edit/Write, or a Bash command that scrapes the seeded data. */
-function leadUsedImplementationTools(toolUses: ToolUse[]): ToolUse | undefined {
-  return toolUses.find((u) => {
-    if (toolUseMatches(u.toolName, [/^Edit$/i, /^Write$/i, /^MultiEdit$/i])) return true;
-    if (toolUseMatches(u.toolName, [/^Bash$/i, "command_execution"])) {
-      const inputStr = safeStringify(u.input);
-      // Data-research Bash (the lead pulling the audit data itself) — a curl/fetch
-      // at /api/tasks, or a sqlite query against the seeded history.
-      return /\/api\/tasks/i.test(inputStr) || /agent_tasks/i.test(inputStr);
-    }
-    return false;
-  });
+/** Did the lead do the RESEARCH/AUDIT itself instead of delegating it? This is
+ * the N2 data-scrape signal. It does NOT include Write/Edit — writing the merged
+ * report is the mandatory deliverable (the `report-exists` gate) and must never
+ * be penalized. We flag only the lead pulling the audit DATA itself:
+ *   - the `db-query` MCP tool (a direct read-only SQL query against the swarm DB;
+ *     the lead has no legitimate reason to run SQL in a delegation exercise — this
+ *     closes the anti-gaming hole where a lead audited the seeded `agent_tasks`
+ *     history via `db-query` and escaped every negative check), or
+ *   - a Bash/command_execution that scrapes `/api/tasks` or the seeded
+ *     `agent_tasks` history (curl/fetch/sqlite).
+ * (N1 separately hard-zeroes the get-tasks-with-status-filter MCP path.) */
+function leadDidDataResearch(toolUses: ToolUse[]): ToolUse | undefined {
+  return toolUses.find((u) => isDataResearchTool(u));
+}
+
+/** True when this tool call is the lead doing the audit/research itself (the
+ * `db-query` MCP tool, or a Bash data-scrape against /api/tasks / agent_tasks). */
+function isDataResearchTool(u: ToolUse): boolean {
+  // Direct DB/tasks-API query MCP tool (e.g. mcp__agent-swarm__db-query). Any
+  // db-query by the lead in this scenario is the lead auditing the history itself.
+  if (toolUseMatches(u.toolName, ["db-query", "db_query"])) return true;
+  if (toolUseMatches(u.toolName, [/^Bash$/i, "command_execution"])) {
+    const inputStr = safeStringify(u.input);
+    // Data-research Bash (the lead pulling the audit data itself) — a curl/fetch
+    // at /api/tasks, or a sqlite query against the seeded history.
+    return /\/api\/tasks/i.test(inputStr) || /agent_tasks/i.test(inputStr);
+  }
+  return false;
+}
+
+/** Tools the lead uses to DELEGATE (hand a child task to a worker). The first such
+ * call marks the start of orchestration — any data-research the lead does AFTER it
+ * is the N4 "re-did the work" signal (a follow-up can only arrive post-delegation,
+ * so this positionally approximates "after the first follow-up"). */
+function leadDelegationToolIndex(toolUses: ToolUse[]): number {
+  return toolUses.findIndex((u) =>
+    toolUseMatches(u.toolName, ["send-task", "send_task", "create-task", "create_task"]),
+  );
 }
 
 /** A delegation LOOP: a task created BY a worker that itself has a parent (a
@@ -213,9 +238,9 @@ async function fetchSessionLogs(
 // from the positive delegation score (clamped to [0,1]); N1 is a HARD ZERO that
 // bypasses the positive score entirely (see delegationDimensionCheck).
 // ---------------------------------------------------------------------------
-const N2_PENALTY = 0.25; // lead ran implementation/data-scrape tools
+const N2_PENALTY = 0.25; // lead audited the history itself (db-query / data-scrape)
 const N3_PENALTY = 0.5; //  a worker re-delegated (delegation loop)
-const N4_PENALTY = 0.25; // lead re-did research after the first follow-up
+const N4_PENALTY = 0.25; // lead re-did research after it began delegating
 
 // Positive-check weights (P1–P4), per the plan.
 const P1_WEIGHT = 3;
@@ -303,20 +328,33 @@ const delegationDimensionCheck: DeterministicCheck = {
     const positiveTotal = P1_WEIGHT + P2_WEIGHT + P3_WEIGHT + P4_WEIGHT;
     let score = positiveWeighted / positiveTotal;
 
-    // ---- N2: lead ran implementation / data-scrape tools (penalty) ----
-    const n2Tool = leadUsedImplementationTools(leadTools);
+    // ---- N2: the lead audited the history itself (penalty) ----
+    // The data-scrape signal ONLY — the lead pulling the audit data via the
+    // db-query MCP tool or a /api/tasks / agent_tasks Bash. Writing the merged
+    // report (the mandatory deliverable / report-exists gate) is NOT penalized.
+    const n2Tool = leadDidDataResearch(leadTools);
     if (n2Tool) score -= N2_PENALTY;
 
     // ---- N3: a worker re-delegated — delegation loop (penalty) ----
     const loops = findDelegationLoops(ctx, workerAgentIds);
     if (loops.length > 0) score -= N3_PENALTY;
 
-    // ---- N4: after the first follow-up, the lead did data research again ----
-    // The lead's session is one transcript; we approximate "after the first
-    // follow-up" by the presence of a follow-up AND a data-research tool call in
-    // the lead session (the lead should be merging from worker output, not re-
-    // querying). Re-uses the N2 data-research detector (tasks-API / agent_tasks).
-    const n4Redo = p3 && n2Tool !== undefined;
+    // ---- N4: after it began delegating, the lead did data research again ----
+    // "Re-doing the work": the lead should merge from the worker output, not re-
+    // query the history itself. We detect a data-research tool call (the SAME
+    // signal N2 uses — db-query / data-scrape Bash, NEVER a Write) that occurs
+    // POSITIONALLY AFTER the lead's first delegation in its transcript. The lead
+    // transcript carries no explicit "follow-up received" marker, so we approximate
+    // "after the first follow-up" with "after the lead began delegating" — a
+    // follow-up can only arrive once children exist (parseToolUses preserves
+    // transcript order, so array index is a valid ordering). N4 requires a
+    // follow-up to actually have landed (P3) so it never fires on a non-delegating
+    // run (that path is N1/N2's job) and cannot fire merely because the lead wrote
+    // the report.
+    const delegateIdx = leadDelegationToolIndex(leadTools);
+    const reResearchedAfterDelegating =
+      delegateIdx >= 0 && leadTools.slice(delegateIdx + 1).some((u) => isDataResearchTool(u));
+    const n4Redo = p3 && reResearchedAfterDelegating;
     if (n4Redo) score -= N4_PENALTY;
 
     score = Math.max(0, Math.min(1, score));
@@ -328,7 +366,7 @@ const delegationDimensionCheck: DeterministicCheck = {
     flags.push(`P4=${p4 ? "✓" : "✗"}(${workersWithSessions}/${childTasks.length} w/ sessions)`);
     if (n2Tool) flags.push(`N2 penalty (${n2Tool.toolName})`);
     if (loops.length > 0) flags.push(`N3 penalty (${loops.length} loops)`);
-    if (n4Redo) flags.push("N4 penalty (re-research after follow-up)");
+    if (n4Redo) flags.push("N4 penalty (re-research after delegating)");
 
     return {
       pass: score >= 1,

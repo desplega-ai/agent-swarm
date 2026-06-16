@@ -1691,7 +1691,10 @@ async function runAttemptOnce(opts: {
       attemptId: attempt.id,
       kind: "task",
       name: "tasks.json",
-      content: stack.redact(JSON.stringify(tasks, null, 2)),
+      // Serialize ctxTasks (the upfront set MERGED with runtime-spawned child +
+      // follow-up tasks — the exact set the checks scored), not the upfront `tasks`
+      // alone, so the delegation paper-trail is inspectable post-hoc.
+      content: stack.redact(JSON.stringify(ctxTasks, null, 2)),
     });
     // Entrypoint logs: one artifact per worker — ALWAYS indexed naming, even
     // for a single worker (v6 §0.5; legacy rows keep `worker.log` → worker 0).
