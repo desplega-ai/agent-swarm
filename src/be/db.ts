@@ -4,6 +4,7 @@ import pkg from "../../package.json";
 import { addEyesReactionOnTaskStart } from "../github/task-reactions";
 import { type ModelTier, parseModelTier } from "../model-tiers";
 import { configureDbResolver } from "../prompts/resolver";
+import { telemetry } from "../telemetry";
 import type {
   ActiveSession,
   Agent,
@@ -113,6 +114,19 @@ import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 
 let db: Database | null = null;
 let sqliteVecAvailable = false;
+
+type TaskTelemetryProps = Parameters<typeof telemetry.taskEvent>[1];
+
+function emitTaskLifecycleTelemetryAfterCommit(
+  event: string,
+  props: TaskTelemetryProps,
+  verify?: (task: AgentTask | null) => boolean,
+): void {
+  queueMicrotask(() => {
+    if (verify && !verify(getTaskById(props.taskId))) return;
+    telemetry.taskEvent(event, props);
+  });
+}
 
 export function isSqliteVecAvailable(): boolean {
   return sqliteVecAvailable;
@@ -2105,6 +2119,16 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   }
 
   if (row && oldTask) {
+    emitTaskLifecycleTelemetryAfterCommit(
+      "completed",
+      {
+        taskId: id,
+        agentId: row.agentId ?? undefined,
+        durationMs: row.createdAt ? Date.now() - new Date(row.createdAt).getTime() : undefined,
+      },
+      (task) => task?.status === "completed",
+    );
+
     try {
       createLogEntry({
         eventType: "task_status_change",
@@ -2145,6 +2169,16 @@ export function failTask(id: string, reason: string): AgentTask | null {
   const scrubbedReason = scrubSecrets(reason);
   const row = taskQueries.setFailure().get(scrubbedReason, finishedAt, id);
   if (row && oldTask) {
+    emitTaskLifecycleTelemetryAfterCommit(
+      "failed",
+      {
+        taskId: id,
+        agentId: row.agentId ?? undefined,
+        durationMs: row.createdAt ? Date.now() - new Date(row.createdAt).getTime() : undefined,
+      },
+      (task) => task?.status === "failed",
+    );
+
     try {
       createLogEntry({
         eventType: "task_status_change",
@@ -2192,6 +2226,20 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
   const row = taskQueries.setCancelled().get(cancelReason, finishedAt, id);
 
   if (row && oldTask) {
+    emitTaskLifecycleTelemetryAfterCommit(
+      "cancelled",
+      {
+        taskId: id,
+        source: oldTask.source,
+        agentId: oldTask.agentId ?? undefined,
+        previousStatus: oldTask.status,
+        durationMs: oldTask.createdAt
+          ? Date.now() - new Date(oldTask.createdAt).getTime()
+          : undefined,
+      },
+      (task) => task?.status === "cancelled",
+    );
+
     try {
       createLogEntry({
         eventType: "task_status_change",
@@ -3156,6 +3204,18 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       metadata: { source: options?.source ?? "mcp" },
     });
   } catch {}
+
+  emitTaskLifecycleTelemetryAfterCommit(
+    "created",
+    {
+      taskId: row.id,
+      source: row.source,
+      tags: options?.tags ?? [],
+      hasParent: !!row.parentTaskId,
+      priority: row.priority,
+    },
+    (task) => task !== null,
+  );
 
   try {
     import("../workflows/event-bus").then(({ workflowEventBus }) => {
