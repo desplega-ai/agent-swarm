@@ -248,6 +248,18 @@ const P2_WEIGHT = 2;
 const P3_WEIGHT = 2;
 const P4_WEIGHT = 1;
 
+// Quality-graded positive-check weights (Q1, Q4) — folded into the SAME composite
+// (PR #775 design proposal §1; only the robust, hard-to-game Q1+Q4 are implemented,
+// Q2/Q3 are deliberately skipped as keyword-brittle). Both are GUARDED on P1 so a
+// non-delegator earns no phantom quality credit. Q1 grades task-count discipline
+// (1 per worker = 2 children is ideal); Q4 grades delegation FIDELITY — whether the
+// merged report's answer-key facts trace back to WORKER output rather than the lead
+// re-deriving them. With these added, the positive total is
+//   P1(3)+P2(2)+P3(2)+P4(1)+Q1(1)+Q4(2) = 11, and a clean delegator (all P pass,
+//   Q1=1, Q4=1) scores 11/11 = 1.0 — clearing the 0.75 dimension threshold.
+const Q1_WEIGHT = 1;
+const Q4_WEIGHT = 2;
+
 /**
  * The `delegation` dimension as a SINGLE composite check. Modeling it as one
  * check (rather than one DeterministicCheck per P/N) is what lets N1 ZERO the
@@ -319,13 +331,46 @@ const delegationDimensionCheck: DeterministicCheck = {
     }
     const p4 = childTasks.length > 0 && workersWithSessions === childTasks.length;
 
-    // Positive weighted mean (P1–P4).
+    // ---- Q1 (quality, weight 1): task-count discipline. A well-delegating lead
+    // creates exactly 2 children (one per worker). 3 is over-delegation (half
+    // credit); 1 or 4+ is undisciplined (zero). GUARDED on P1 — no quality credit
+    // for a lead that didn't delegate (≥2 children). ----
+    const q1 = p1 ? (childTasks.length === 2 ? 1 : childTasks.length === 3 ? 0.5 : 0) : 0;
+
+    // ---- Q4 (quality, weight 2): facts-flow-through-workers — the delegation-
+    // FIDELITY check. Of the answer-key facts present in the merged report, what
+    // fraction also appears in the WORKERS' completed output? A faithful lead
+    // merges worker results (q4≈1); a lead that re-derived the data itself produces
+    // a report whose facts don't trace back to any worker (q4 low). Reads the lead's
+    // sandbox report (same file as mergedCorrectness) and the completed children's
+    // `result` (the worker `output` column, normalized to `result`). GUARDED on P1. ----
+    let q4 = 0;
+    if (p1) {
+      const lead = ctx.workers[LEAD_WORKER];
+      const report = lead ? await lead.readFile(REPORT_FILE) : null;
+      if (report) {
+        const factsInReport = MERGED_FACTS.filter((f) => f.pattern.test(report));
+        if (factsInReport.length > 0) {
+          const workerResults = completedChildren
+            .map((t) => t.result ?? "")
+            .filter((r) => r.length > 0);
+          const factsAlsoInWorkers = factsInReport.filter((fact) =>
+            workerResults.some((wr) => fact.pattern.test(wr)),
+          );
+          q4 = factsAlsoInWorkers.length / factsInReport.length;
+        }
+      }
+    }
+
+    // Positive weighted mean (P1–P4 existence + Q1/Q4 quality).
     const positiveWeighted =
       P1_WEIGHT * (p1 ? 1 : 0) +
       P2_WEIGHT * (p2 ? 1 : 0) +
       P3_WEIGHT * (p3 ? 1 : 0) +
-      P4_WEIGHT * (p4 ? 1 : 0);
-    const positiveTotal = P1_WEIGHT + P2_WEIGHT + P3_WEIGHT + P4_WEIGHT;
+      P4_WEIGHT * (p4 ? 1 : 0) +
+      Q1_WEIGHT * q1 +
+      Q4_WEIGHT * q4;
+    const positiveTotal = P1_WEIGHT + P2_WEIGHT + P3_WEIGHT + P4_WEIGHT + Q1_WEIGHT + Q4_WEIGHT;
     let score = positiveWeighted / positiveTotal;
 
     // ---- N2: the lead audited the history itself (penalty) ----
@@ -364,6 +409,8 @@ const delegationDimensionCheck: DeterministicCheck = {
     flags.push(`P2=${p2 ? "✓" : "✗"}(${completedChildren.length} done w/ output)`);
     flags.push(`P3=${p3 ? "✓" : "✗"}(${followUps.length} follow-ups)`);
     flags.push(`P4=${p4 ? "✓" : "✗"}(${workersWithSessions}/${childTasks.length} w/ sessions)`);
+    flags.push(`Q1=${q1.toFixed(2)}(${childTasks.length} children)`);
+    flags.push(`Q4=${q4.toFixed(2)}(facts→workers)`);
     if (n2Tool) flags.push(`N2 penalty (${n2Tool.toolName})`);
     if (loops.length > 0) flags.push(`N3 penalty (${loops.length} loops)`);
     if (n4Redo) flags.push("N4 penalty (re-research after delegating)");
@@ -501,4 +548,6 @@ export const __test__ = {
   N2_PENALTY,
   N3_PENALTY,
   N4_PENALTY,
+  Q1_WEIGHT,
+  Q4_WEIGHT,
 };

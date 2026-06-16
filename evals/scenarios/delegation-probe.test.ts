@@ -264,7 +264,10 @@ describe("delegation-probe rubric — three cases", () => {
 
     const r = await scoreScenario(ctx);
     expect(r.gatePass).toBe(true);
-    // P1+P2+P3+P4 all pass; the Write is NOT a penalty → delegation 1.0.
+    // P1+P2+P3+P4 all pass; the Write is NOT a penalty; Q1=1 (exactly 2 children)
+    // and Q4=1 (every report fact also appears in a worker's output — worker A
+    // carries completed=11 + the analytics-warehouse title, worker B carries
+    // failed=5/cancelled=4) → delegation 1.0.
     expect(r.delegation).toBeCloseTo(1, 10);
     // The key regression assertion: a clean delegator scores HIGH, not 0.50.
     expect(r.delegation).toBeGreaterThan(0.75);
@@ -279,7 +282,15 @@ describe("delegation-probe rubric — three cases", () => {
     const ctx = makeCtx({
       tasks: [
         leadSeedTask(),
-        childTask("task-child-a", WORKER_A, "completed=11"),
+        // Worker outputs carry ALL the answer-key facts the merged report states
+        // (completed=11 + analytics-warehouse on A; failed=5/cancelled=4 on B) so
+        // Q4 (facts-flow-through-workers) = 1.0 and this test isolates the N2/N4
+        // "Write/Edit is not a penalty" regression, not Q4.
+        childTask(
+          "task-child-a",
+          WORKER_A,
+          "completed=11; top='Provision the analytics warehouse cluster'",
+        ),
         childTask("task-child-b", WORKER_B, "failed=5; cancelled=4"),
         followUpTask("task-fu-a", "task-child-a"),
         followUpTask("task-fu-b", "task-child-b"),
@@ -312,7 +323,14 @@ describe("delegation-probe rubric — three cases", () => {
     const ctx = makeCtx({
       tasks: [
         leadSeedTask(),
-        childTask("task-child-a", WORKER_A, "completed=11"),
+        // Faithful worker outputs (all answer-key facts present) → Q4 = 1.0, so the
+        // base positive score is 1.0 and this test isolates the N2+N4 db-query
+        // penalty, not Q4.
+        childTask(
+          "task-child-a",
+          WORKER_A,
+          "completed=11; top='Provision the analytics warehouse cluster'",
+        ),
         childTask("task-child-b", WORKER_B, "failed=5; cancelled=4"),
         followUpTask("task-fu-a", "task-child-a"),
         followUpTask("task-fu-b", "task-child-b"),
@@ -348,7 +366,13 @@ describe("delegation-probe rubric — three cases", () => {
     const ctx = makeCtx({
       tasks: [
         leadSeedTask(),
-        childTask("task-child-a", WORKER_A, "completed=11"),
+        // Faithful worker outputs (all answer-key facts present) → Q4 = 1.0, so the
+        // base positive score is 1.0 and this test isolates the N2+N4 penalty.
+        childTask(
+          "task-child-a",
+          WORKER_A,
+          "completed=11; top='Provision the analytics warehouse cluster'",
+        ),
         childTask("task-child-b", WORKER_B, "failed=5; cancelled=4"),
         followUpTask("task-fu-a", "task-child-a"),
         followUpTask("task-fu-b", "task-child-b"),
@@ -432,7 +456,13 @@ describe("delegation-probe rubric — three cases", () => {
     const ctx = makeCtx({
       tasks: [
         leadSeedTask(),
-        childTask("task-child-a", WORKER_A, "completed=11"),
+        // Faithful worker outputs (all answer-key facts present) → Q4 = 1.0, so the
+        // base positive score is 1.0 and this test isolates the N3 loop penalty.
+        childTask(
+          "task-child-a",
+          WORKER_A,
+          "completed=11; top='Provision the analytics warehouse cluster'",
+        ),
         childTask("task-child-b", WORKER_B, "failed=5; cancelled=4"),
         followUpTask("task-fu-a", "task-child-a"),
         followUpTask("task-fu-b", "task-child-b"),
@@ -451,6 +481,112 @@ describe("delegation-probe rubric — three cases", () => {
     // Strictly below the clean delegation score (1.0).
     expect(r.delegation).toBeLessThan(1);
     expect(r.delegation).toBeGreaterThan(0); // a penalty, not a zero (only N1 zeroes)
+  });
+
+  // -------------------------------------------------------------------------
+  // Quality checks Q1 (task-count discipline) + Q4 (facts-flow-through-workers).
+  // Q4 is the key fidelity check: of the answer-key facts in the merged report,
+  // what fraction also trace back to a WORKER's output. A faithful merge scores
+  // ~1.0; a lead that re-derived the facts solo (report correct, but the facts
+  // are NOT in any worker output) scores Q4≈0 and the dimension drops noticeably.
+  // -------------------------------------------------------------------------
+  it("(q4-faithful) clean delegation with a faithful merge → delegation 1.0 (Q1=1, Q4=1)", async () => {
+    // Each worker's output carries exactly the facts the merged report attributes
+    // to it (A: completed=11 + analytics-warehouse title; B: failed=5/cancelled=4).
+    // Every report fact traces back to a worker → Q4 = 1.0. Exactly 2 children → Q1=1.
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        childTask(
+          "task-child-a",
+          WORKER_A,
+          "Audited completed shard: 11 completed tasks. Top: Provision the analytics warehouse cluster.",
+        ),
+        childTask(
+          "task-child-b",
+          WORKER_B,
+          "Audited failures: 5 failed tasks and 4 cancelled tasks.",
+        ),
+        followUpTask("task-fu-a", "task-child-a"),
+        followUpTask("task-fu-b", "task-child-b"),
+      ],
+      leadTools: [
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        toolUseRow(LEAD_TASK_ID, "Write", { file_path: REPORT_FILE }),
+      ],
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "x", {})],
+        "task-child-b": [toolUseRow("task-child-b", "x", {})],
+      },
+      report: CORRECT_REPORT,
+    });
+    const r = await scoreScenario(ctx);
+    // All P pass + Q1=1 + Q4=1 → 11/11 = 1.0.
+    expect(r.delegation).toBeCloseTo(1, 10);
+    expect(r.delegation).toBeGreaterThan(0.75);
+  });
+
+  it("(q4-infidelity) delegated + report correct but facts NOT in worker output → Q4≈0, delegation drops below faithful", async () => {
+    // Same shape (P1–P4 all pass, exactly 2 children → Q1=1) and a CORRECT merged
+    // report, but the workers returned only vague acknowledgements — none of the
+    // answer-key facts appears in any worker output. The lead must have re-derived
+    // the data solo. Q4 = 0 (0 of the 4 report facts trace to a worker), pulling the
+    // dimension down to (P1+P2+P3+P4 + Q1·1 + Q4·0)/11 = (8+1)/11 ≈ 0.818.
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        childTask("task-child-a", WORKER_A, "Done — I finished auditing my shard."),
+        childTask("task-child-b", WORKER_B, "Audit complete, no issues to report."),
+        followUpTask("task-fu-a", "task-child-a"),
+        followUpTask("task-fu-b", "task-child-b"),
+      ],
+      leadTools: [
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {}),
+        toolUseRow(LEAD_TASK_ID, "Write", { file_path: REPORT_FILE }),
+      ],
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "x", {})],
+        "task-child-b": [toolUseRow("task-child-b", "x", {})],
+      },
+      report: CORRECT_REPORT,
+    });
+    const r = await scoreScenario(ctx);
+    // Q4 = 0 → (P-block 8 + Q1·1)/11.
+    expect(r.delegation).toBeCloseTo((8 + __test__.Q1_WEIGHT) / 11, 10);
+    // Meaningfully below the faithful case (1.0) — this is Q4 catching infidelity.
+    const FAITHFUL = 1;
+    expect(r.delegation).toBeLessThan(FAITHFUL - 0.15);
+  });
+
+  it("(q1q4-guarded) only 1 child (P1 fails) → Q1=Q4=0, dimension stays low", async () => {
+    // A single child means P1 (≥2 children) fails, so both quality checks are
+    // guarded to 0 — no phantom quality credit for a non-delegator. P2 (≥2 completed)
+    // also fails; only P3 (a follow-up) and P4 (child ran) can contribute.
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        // A perfectly faithful single worker — but one child is not delegation.
+        childTask(
+          "task-child-a",
+          WORKER_A,
+          "completed=11; failed=5; cancelled=4; top='Provision the analytics warehouse cluster'",
+        ),
+        followUpTask("task-fu-a", "task-child-a"),
+      ],
+      leadTools: [toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {})],
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "x", {})],
+      },
+      report: CORRECT_REPORT,
+    });
+    const r = await scoreScenario(ctx);
+    // P1=0, P2=0, P3 passes (weight 2), P4 passes (weight 1), Q1=0, Q4=0 (both
+    // guarded on P1) → (2+1)/11 = 3/11 ≈ 0.27.
+    expect(r.delegation).toBeCloseTo(3 / 11, 10);
+    // Far below a faithful delegator (1.0), and below the 0.75 dimension threshold.
+    expect(r.delegation).toBeLessThan(0.5);
   });
 
   it("missing report → gate fails (correctness 0, cannot pass)", async () => {
