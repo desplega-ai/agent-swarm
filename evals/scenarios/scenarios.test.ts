@@ -48,6 +48,7 @@ const EXPECTED_IDS = [
   "memory-coordination",
   "failure-recovery",
   "failure-recovery-mixed",
+  "delegation-probe",
 ];
 
 describe("scenario registry", () => {

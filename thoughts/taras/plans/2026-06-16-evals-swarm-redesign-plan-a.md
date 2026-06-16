@@ -6,7 +6,7 @@ status: in-progress
 autonomy: critical
 commit_per_phase: true
 last_updated: 2026-06-16
-last_updated_by: Claude (phase-running, Phase 1)
+last_updated_by: Claude (phase-running, Phase 2)
 related:
   - thoughts/taras/plans/2026-06-15-evals-swarm-redesign-scope.md
   - thoughts/taras/research/2026-06-15-evals-swarm-mechanics-redesign.md
@@ -141,13 +141,13 @@ Add the `delegation-probe` scenario (a two-shard research task the lead MUST del
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `cd evals && bun run tsc:check`
-- [ ] Scenario validates: `cd evals && bun src/cli.ts registry` lists `delegation-probe` with no validation error (fixture name, dimensions, checks-XOR-judge).
-- [ ] Rubric unit test: `cd evals && bun test scenarios/delegation-probe.test.ts` — constructs a synthetic `JudgeContext` (stubbed `apiGet` returning fixture task list + per-task session-logs) for three cases: (a) clean delegation → high `delegation`; (b) solo-but-correct lead (N1 fires) → `delegation` 0 though `correctness` high; (c) delegation loop (N3) → penalized. Asserts the aggregate and `passed`.
-- [ ] Lint clean (root): `bun run lint`
+- [x] Type check: `cd evals && bun run tsc:check`
+- [x] Scenario validates: `cd evals && bun src/cli.ts registry` lists `delegation-probe` with no validation error (fixture name, dimensions, checks-XOR-judge).
+- [x] Rubric unit test: `cd evals && bun test scenarios/delegation-probe.test.ts` — constructs a synthetic `JudgeContext` (stubbed `apiGet` returning fixture task list + per-task session-logs) for three cases: (a) clean delegation → high `delegation`; (b) solo-but-correct lead (N1 fires) → `delegation` 0 though `correctness` high; (c) delegation loop (N3) → penalized. Asserts the aggregate and `passed`. _(7 tests; case (b') additionally proves N1 dominates P1–P4 partial credit.)_
+- [x] Lint clean (root): `bun run lint` _(after `lint:fix` reformatted the two new evals files; re-ran read-only `lint` clean.)_
 
 #### Automated QA:
-- [ ] Agent runs `bun src/cli.ts registry` and confirms `delegation-probe` is registered, gates/dimensions parse, and the seed fixture loads (`validateSqlDumpText` passes on the new `.sql`).
+- [x] Agent runs `bun src/cli.ts registry` and confirms `delegation-probe` is registered, gates/dimensions parse, and the seed fixture loads (`validateSqlDumpText` passes on the new `.sql`).
 
 #### Manual Verification:
 - [ ] Read the scenario task description — confirm it unambiguously mandates delegation and the answer key lives only in the seeded DB (not in the prompt).

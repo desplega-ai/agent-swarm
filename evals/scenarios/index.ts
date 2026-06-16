@@ -1,6 +1,7 @@
 import type { Scenario } from "../src/types.ts";
 import { bugLadder } from "./bug-ladder.ts";
 import { crossWorkerInvent } from "./cross-worker-invent.ts";
+import { delegationProbe } from "./delegation-probe.ts";
 import { distributedAudit } from "./distributed-audit.ts";
 import { failureRecovery, failureRecoveryMixed } from "./failure-recovery.ts";
 import { memoryCoordination } from "./memory-coordination.ts";
@@ -30,6 +31,7 @@ export const scenarios: Scenario[] = [
   memoryCoordination,
   failureRecovery,
   failureRecoveryMixed,
+  delegationProbe,
 ];
 
 // Cheap smoke default for `--scenarios` when none are passed. sql-audit is the

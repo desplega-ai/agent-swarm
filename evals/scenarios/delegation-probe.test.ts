@@ -1,0 +1,361 @@
+import { describe, expect, it } from "bun:test";
+import {
+  aggregateScore,
+  DEFAULT_PASS_THRESHOLD,
+  dimensionScoreFromChecks,
+  finalizeScore,
+} from "../src/scoring.ts";
+import type { JudgeContext, JudgeWorkerContext, SwarmTask } from "../src/types.ts";
+import { __test__, delegationProbe } from "./delegation-probe.ts";
+
+/**
+ * Rubric unit test for the `delegation-probe` deterministic scoring (Plan A
+ * §Phase 2). We construct a SYNTHETIC JudgeContext — a stubbed task list + a
+ * stubbed `apiGet` that returns per-task session-logs (the first check-side
+ * apiGet usage in the codebase) + a lead `readFile` that returns the merged
+ * report — and run the rubric checks directly, asserting both the per-dimension
+ * sub-scores AND the aggregate `passed` for three cases:
+ *
+ *   (a) clean delegation        → high `delegation`, high `correctness`, passes
+ *   (b) solo-but-correct lead   → `delegation` === 0 (N1 fires) though
+ *                                 `correctness` is high; FAILS the threshold
+ *   (c) delegation loop (N3)    → `delegation` penalized below clean
+ */
+
+const { delegationDimensionCheck, mergedCorrectness, reportExistsGate, REPORT_FILE } = __test__;
+
+const LEAD_AGENT = "agent-lead";
+const WORKER_A = "agent-alpha";
+const WORKER_B = "agent-beta";
+const LEAD_TASK_ID = "task-lead-seed";
+
+// The four merged answer-key facts, stated correctly + attributed (correctness=1).
+const CORRECT_REPORT = [
+  "# Merged Audit Report",
+  "",
+  "## researcher-alpha (completed shard)",
+  "- completed tasks: 11",
+  '- highest-priority completed task: "Provision the analytics warehouse cluster"',
+  "",
+  "## researcher-beta (failures shard)",
+  "- failed tasks: 5",
+  "- cancelled tasks: 4",
+  "",
+  "## Merged grand total",
+  "- 20 audited tasks across all statuses.",
+].join("\n");
+
+/** One Claude-style assistant session-log row carrying a tool_use block. */
+function toolUseRow(
+  taskId: string,
+  toolName: string,
+  input: unknown,
+): { content: string } & Record<string, unknown> {
+  return {
+    id: `${taskId}-${toolName}`,
+    taskId,
+    sessionId: "s",
+    iteration: 0,
+    cli: "claude",
+    lineNumber: 0,
+    createdAt: "2026-06-16T00:00:00.000Z",
+    content: JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: `toolu_${toolName}`, name: toolName, input }],
+      },
+    }),
+  };
+}
+
+/**
+ * Build a JudgeContext. `leadTools` are tool_use rows attributed to the lead's
+ * session; `sessionLogsByTask` maps a taskId → its session-log rows (any non-
+ * empty array means "the worker ran"). `report` is what the lead's readFile
+ * returns for REPORT_FILE (null = no report).
+ */
+function makeCtx(opts: {
+  tasks: SwarmTask[];
+  leadTools?: { content: string }[];
+  sessionLogsByTask?: Record<string, { content: string }[]>;
+  report?: string | null;
+}): JudgeContext {
+  const sessionLogsByTask = opts.sessionLogsByTask ?? {};
+  // The lead's seed-task session-logs are the lead's tool stream (N1/N2/N4 read it).
+  sessionLogsByTask[LEAD_TASK_ID] = opts.leadTools ?? [];
+
+  const apiGet = async (path: string): Promise<unknown> => {
+    const m = path.match(/^\/api\/tasks\/([^/]+)\/session-logs/);
+    if (m) {
+      const taskId = m[1] as string;
+      return { logs: sessionLogsByTask[taskId] ?? [] };
+    }
+    return {};
+  };
+
+  const mkWorker = (index: number, agentId: string, isLead: boolean): JudgeWorkerContext => ({
+    index,
+    agentId,
+    isLead,
+    role: isLead ? "lead" : "worker",
+    exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    readFile: async (path: string) =>
+      isLead && path === REPORT_FILE ? (opts.report ?? null) : null,
+  });
+
+  // Worker indices: 0 = alpha, 1 = beta, 2 = lead (member index 2, v7 §12.4).
+  const workers: JudgeWorkerContext[] = [
+    mkWorker(0, WORKER_A, false),
+    mkWorker(1, WORKER_B, false),
+    mkWorker(2, LEAD_AGENT, true),
+  ];
+
+  return {
+    tasks: opts.tasks,
+    transcript: "",
+    exec: workers[0]!.exec,
+    readFile: workers[0]!.readFile,
+    apiGet,
+    workers,
+  };
+}
+
+/** The lead's upfront seed task (assigned to the lead, no parent, not a follow-up). */
+function leadSeedTask(): SwarmTask {
+  return {
+    id: LEAD_TASK_ID,
+    title: "Audit by delegating",
+    description: "Delegate to your two researchers and merge.",
+    status: "completed",
+    agentId: LEAD_AGENT,
+  };
+}
+
+/** A child task delegated by the lead to a worker. */
+function childTask(id: string, workerAgentId: string, output: string | null): SwarmTask {
+  return {
+    id,
+    title: `Shard for ${workerAgentId}`,
+    description: "Audit your shard and report.",
+    status: "completed",
+    agentId: workerAgentId,
+    creatorAgentId: LEAD_AGENT,
+    parentTaskId: LEAD_TASK_ID,
+    result: output,
+  };
+}
+
+/** A system follow-up parented to a child task, assigned back to the lead. */
+function followUpTask(id: string, parentChildId: string): SwarmTask {
+  return {
+    id,
+    title: "Follow-up",
+    description: "Worker completed — review.",
+    status: "completed",
+    agentId: LEAD_AGENT,
+    source: "system",
+    taskType: "follow-up",
+    parentTaskId: parentChildId,
+  };
+}
+
+/** Run delegation + correctness as the runner would and return the aggregate. */
+async function scoreScenario(ctx: JudgeContext): Promise<{
+  delegation: number;
+  correctness: number;
+  gatePass: boolean;
+  aggregate: number;
+  passed: boolean;
+}> {
+  const delegationRes = await delegationDimensionCheck.fn(ctx);
+  const delegation = dimensionScoreFromChecks([
+    { value: delegationRes.score ?? (delegationRes.pass ? 1 : 0), weight: 1 },
+  ]);
+  const correctnessRes = await mergedCorrectness.fn(ctx);
+  const correctness = dimensionScoreFromChecks([
+    { value: correctnessRes.score ?? (correctnessRes.pass ? 1 : 0), weight: 1 },
+  ]);
+  const gateRes = await reportExistsGate.fn(ctx);
+  const dimensions = [
+    { weight: 5, subScore: delegation },
+    { weight: 2, subScore: correctness },
+  ];
+  // The pure Σwᵢ·dimᵢ/Σwᵢ aggregate (exercises aggregateScore directly)…
+  const aggregate = aggregateScore(dimensions) ?? 0;
+  // …and the full verdict (gate-aware passed + threshold-gated score).
+  const { score, passed } = finalizeScore({
+    allGatesPass: gateRes.pass,
+    dimensions,
+    passThreshold: DEFAULT_PASS_THRESHOLD,
+  });
+  // finalizeScore's score equals the aggregate when all gates pass; assert that
+  // invariant so both helpers stay in agreement.
+  if (gateRes.pass) expect(score).toBeCloseTo(aggregate, 10);
+  return { delegation, correctness, gatePass: gateRes.pass, aggregate, passed };
+}
+
+describe("delegation-probe scenario shape", () => {
+  it("registers a delegation (w5) + correctness (w2) dimension set, one lead task, the fixture", () => {
+    expect(delegationProbe.id).toBe("delegation-probe");
+    expect(delegationProbe.seed?.sqlDump).toBe("delegation-probe-history.sql");
+    expect(delegationProbe.tasks).toHaveLength(1);
+    expect(delegationProbe.tasks[0]?.worker).toBe("lead");
+    const dims = delegationProbe.outcome.dimensions ?? [];
+    const delegation = dims.find((d) => d.name === "delegation");
+    const correctness = dims.find((d) => d.name === "correctness");
+    expect(delegation?.weight).toBe(5);
+    expect(correctness?.weight).toBe(2);
+    // checks-XOR-judge: both dimensions are check-fed, no judge.
+    expect(delegation?.checks?.length).toBeGreaterThan(0);
+    expect(delegation?.judge).toBeUndefined();
+    expect(correctness?.checks?.length).toBeGreaterThan(0);
+    expect(correctness?.judge).toBeUndefined();
+  });
+
+  it("the lead task prompt does NOT leak the answer-key facts", () => {
+    const prompt = delegationProbe.tasks[0]?.description ?? "";
+    expect(prompt).not.toMatch(/\b11\b/); // completed count
+    expect(prompt).not.toMatch(/analytics warehouse/i); // top-priority title
+    // (5 and 4 appear only as status counts in the SEEDED DB, never in the prompt.)
+    expect(prompt).not.toMatch(/\bcompleted tasks?:?\s*11\b/i);
+  });
+});
+
+describe("delegation-probe rubric — three cases", () => {
+  it("(a) clean delegation → high delegation + correctness, passes", async () => {
+    const childA = childTask(
+      "task-child-a",
+      WORKER_A,
+      "completed=11; top='Provision the analytics warehouse cluster'",
+    );
+    const childB = childTask("task-child-b", WORKER_B, "failed=5; cancelled=4");
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        childA,
+        childB,
+        followUpTask("task-fu-a", "task-child-a"),
+        followUpTask("task-fu-b", "task-child-b"),
+      ],
+      // Lead only delegated (a send-task / create-task tool) — no solo tasks query.
+      leadTools: [
+        toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", { task: "audit completed" }),
+      ],
+      // Both children have non-empty sessions (the workers ran).
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "get-tasks", { status: "completed" })],
+        "task-child-b": [toolUseRow("task-child-b", "get-tasks", { status: "failed" })],
+      },
+      report: CORRECT_REPORT,
+    });
+
+    const r = await scoreScenario(ctx);
+    expect(r.gatePass).toBe(true);
+    // P1+P2+P3+P4 all pass, no penalties → delegation 1.0.
+    expect(r.delegation).toBeCloseTo(1, 10);
+    expect(r.correctness).toBeCloseTo(1, 10);
+    expect(r.aggregate).toBeCloseTo(1, 10);
+    expect(r.passed).toBe(true);
+  });
+
+  it("(b) solo-but-correct lead (N1 fires) → delegation 0 though correctness high; fails", async () => {
+    // The lead queried the tasks API itself WITH a status filter — the forbidden
+    // solo-research signal. It still wrote a perfect merged report. N1 must ZERO
+    // the delegation dimension so a solo lead cannot pass on correctness alone.
+    const ctx = makeCtx({
+      // No child tasks delegated — the lead did it all itself.
+      tasks: [leadSeedTask()],
+      leadTools: [
+        toolUseRow(LEAD_TASK_ID, "get-tasks", { status: "completed" }),
+        toolUseRow(LEAD_TASK_ID, "get-tasks", { status: "failed" }),
+      ],
+      report: CORRECT_REPORT,
+    });
+
+    const r = await scoreScenario(ctx);
+    expect(r.gatePass).toBe(true); // the report exists…
+    expect(r.delegation).toBe(0); // …but N1 zeroed delegation
+    expect(r.correctness).toBeCloseTo(1, 10);
+    // aggregate = (5·0 + 2·1)/7 ≈ 0.286 < 0.75 → fails.
+    expect(r.aggregate).toBeCloseTo(2 / 7, 5);
+    expect(r.passed).toBe(false);
+  });
+
+  it("(b') N1 dominates: a solo lead that ALSO delegated still scores delegation 0", async () => {
+    // Even with two real child tasks + follow-ups (P1–P4 would be 1.0), a single
+    // N1 violation short-circuits the whole dimension to 0 — proving the zeroing
+    // can't be diluted by partial positive credit.
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        childTask("task-child-a", WORKER_A, "completed=11"),
+        childTask("task-child-b", WORKER_B, "failed=5; cancelled=4"),
+        followUpTask("task-fu-a", "task-child-a"),
+      ],
+      leadTools: [toolUseRow(LEAD_TASK_ID, "get-tasks", { status: "completed" })],
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "x", {})],
+        "task-child-b": [toolUseRow("task-child-b", "x", {})],
+      },
+      report: CORRECT_REPORT,
+    });
+    const r = await scoreScenario(ctx);
+    expect(r.delegation).toBe(0);
+  });
+
+  it("(c) delegation loop (N3) → delegation penalized below the clean score", async () => {
+    // Clean baseline minus an N3 penalty: a worker re-delegated (created a task
+    // with a parent). P1–P4 still pass, so the score is 1.0 − N3_PENALTY.
+    const loopTask: SwarmTask = {
+      id: "task-loop",
+      title: "Re-delegated by a worker",
+      description: "worker pushed work onward",
+      status: "completed",
+      agentId: WORKER_B,
+      creatorAgentId: WORKER_A, // a WORKER created it…
+      parentTaskId: "task-child-a", // …and it has a parent → a loop
+    };
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        childTask("task-child-a", WORKER_A, "completed=11"),
+        childTask("task-child-b", WORKER_B, "failed=5; cancelled=4"),
+        followUpTask("task-fu-a", "task-child-a"),
+        followUpTask("task-fu-b", "task-child-b"),
+        loopTask,
+      ],
+      leadTools: [toolUseRow(LEAD_TASK_ID, "mcp__agent-swarm__send-task", {})],
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "x", {})],
+        "task-child-b": [toolUseRow("task-child-b", "x", {})],
+      },
+      report: CORRECT_REPORT,
+    });
+
+    const r = await scoreScenario(ctx);
+    expect(r.delegation).toBeCloseTo(1 - __test__.N3_PENALTY, 10);
+    // Strictly below the clean delegation score (1.0).
+    expect(r.delegation).toBeLessThan(1);
+    expect(r.delegation).toBeGreaterThan(0); // a penalty, not a zero (only N1 zeroes)
+  });
+
+  it("missing report → gate fails (correctness 0, cannot pass)", async () => {
+    const ctx = makeCtx({
+      tasks: [
+        leadSeedTask(),
+        childTask("task-child-a", WORKER_A, "x"),
+        childTask("task-child-b", WORKER_B, "x"),
+      ],
+      leadTools: [toolUseRow(LEAD_TASK_ID, "send-task", {})],
+      sessionLogsByTask: {
+        "task-child-a": [toolUseRow("task-child-a", "x", {})],
+        "task-child-b": [toolUseRow("task-child-b", "x", {})],
+      },
+      report: null, // no merged report written
+    });
+    const r = await scoreScenario(ctx);
+    expect(r.gatePass).toBe(false);
+    expect(r.correctness).toBe(0);
+    expect(r.passed).toBe(false);
+  });
+});
