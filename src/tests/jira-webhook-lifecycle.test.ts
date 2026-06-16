@@ -1,10 +1,19 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
 import { upsertOAuthApp } from "../be/db-queries/oauth";
 import { getJiraMetadata, updateJiraMetadata } from "../jira/metadata";
 
 const TEST_DB_PATH = "./test-jira-webhook-lifecycle.sqlite";
+const originalSlackAlertsChannel = process.env.SLACK_ALERTS_CHANNEL;
+
+function restoreSlackAlertsChannel(): void {
+  if (originalSlackAlertsChannel === undefined) {
+    delete process.env.SLACK_ALERTS_CHANNEL;
+    return;
+  }
+  process.env.SLACK_ALERTS_CHANNEL = originalSlackAlertsChannel;
+}
 
 // Mock the Jira fetch client. Each test installs its own per-call response.
 const jiraFetchMock = mock(
@@ -38,20 +47,38 @@ beforeAll(() => {
 afterAll(async () => {
   delete process.env.JIRA_WEBHOOK_TOKEN;
   delete process.env.MCP_BASE_URL;
+  restoreSlackAlertsChannel();
   closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
-const { refreshJiraWebhooks, registerJiraWebhook } = await import("../jira/webhook-lifecycle");
+const { _test, refreshJiraWebhooks, registerJiraWebhook } = await import(
+  "../jira/webhook-lifecycle"
+);
 
 beforeEach(() => {
   jiraFetchMock.mockClear();
+  restoreSlackAlertsChannel();
   // Reset the webhookIds list each test (and clear metadata writebacks).
   getDb()
     .query("UPDATE oauth_apps SET metadata = ? WHERE provider = 'jira'")
     .run(JSON.stringify({ cloudId: "cloud-1", siteUrl: "https://example.atlassian.net" }));
+});
+
+describe("Jira webhook Slack alerts", () => {
+  test("skips Slack notification when alerts channel env is unset", async () => {
+    delete process.env.SLACK_ALERTS_CHANNEL;
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(_test.notifySlack("test alert")).resolves.toBeUndefined();
+
+    expect(warn).toHaveBeenCalledWith(
+      "[Jira webhook keepalive] SLACK_ALERTS_CHANNEL not set; skipping alert",
+    );
+    warn.mockRestore();
+  });
 });
 
 describe("registerJiraWebhook", () => {

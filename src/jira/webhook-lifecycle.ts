@@ -10,7 +10,6 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
  * first refresh round-trip (Atlassian returns the authoritative expiry).
  */
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-const SLACK_ALERTS_CHANNEL = process.env.SLACK_ALERTS_CHANNEL || "C08JCRURPBV";
 
 const WEBHOOK_EVENTS = [
   "jira:issue_updated",
@@ -40,6 +39,12 @@ function getRegisteredWebhookUrl(): string {
 // ─── Slack alert (best-effort) ───────────────────────────────────────────────
 
 async function notifySlack(text: string): Promise<void> {
+  const channel = process.env.SLACK_ALERTS_CHANNEL;
+  if (!channel) {
+    console.warn("[Jira webhook keepalive] SLACK_ALERTS_CHANNEL not set; skipping alert");
+    return;
+  }
+
   try {
     const { getSlackApp } = await import("../slack/app");
     const app = getSlackApp();
@@ -48,13 +53,21 @@ async function notifySlack(text: string): Promise<void> {
       return;
     }
     await app.client.chat.postMessage({
-      channel: SLACK_ALERTS_CHANNEL,
+      channel,
       text,
     });
-    console.log("[Jira webhook keepalive] Slack notification sent");
+    console.log(`[Jira webhook keepalive] Slack notification sent to ${channel}`);
   } catch (slackErr) {
+    const code =
+      typeof slackErr === "object" && slackErr !== null && "code" in slackErr
+        ? ` code=${String(slackErr.code)}`
+        : "";
+    const data =
+      typeof slackErr === "object" && slackErr !== null && "data" in slackErr
+        ? ` data=${JSON.stringify(slackErr.data)}`
+        : "";
     console.error(
-      "[Jira webhook keepalive] Failed to send Slack notification:",
+      `[Jira webhook keepalive] Failed to send Slack notification to ${channel}${code}${data}:`,
       slackErr instanceof Error ? slackErr.message : slackErr,
     );
   }
@@ -362,3 +375,9 @@ export function stopJiraWebhookKeepalive(): void {
     console.log("[Jira webhook keepalive] Stopped");
   }
 }
+
+// ─── Test helpers (exported for unit tests only) ─────────────────────────────
+
+export const _test = {
+  notifySlack,
+};

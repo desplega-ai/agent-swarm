@@ -68,6 +68,13 @@ function fakeReqRes(rawBody: string, headers: Record<string, string>) {
   return { req, res, captured };
 }
 
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 const KAPSO_PATH = ["api", "integrations", "kapso", "webhook"];
 
 beforeAll(() => {
@@ -226,9 +233,8 @@ describe("handleWebhooks — Kapso HMAC gate", () => {
       return new Response(JSON.stringify({ success: true }), { status: 200 });
     }) as typeof fetch;
 
-    const rawBody = JSON.stringify(
-      makePayload({ phoneNumberId: "pn-http", messageId: "wamid.HTTP_OK" }),
-    );
+    const messageId = `wamid.HTTP_OK_${crypto.randomUUID()}`;
+    const rawBody = JSON.stringify(makePayload({ phoneNumberId: "pn-http", messageId }));
     const { req, res, captured } = fakeReqRes(rawBody, {
       "x-webhook-signature": sign(HMAC_SECRET, rawBody),
     });
@@ -236,22 +242,37 @@ describe("handleWebhooks — Kapso HMAC gate", () => {
     expect(handled).toBe(true);
     expect(captured.status).toBe(200);
     expect(JSON.parse(captured.body)).toMatchObject({ received: true, routing: "task" });
-    expect(calls).toHaveLength(2);
+    await waitFor(
+      () =>
+        calls.some((call) => call.body.message_id === messageId) &&
+        calls.some(
+          (call) =>
+            (call.body.reaction as { message_id?: string } | undefined)?.message_id === messageId,
+        ),
+    );
+    const messageCalls = calls.filter(
+      (call) =>
+        call.body.message_id === messageId ||
+        (call.body.reaction as { message_id?: string } | undefined)?.message_id === messageId,
+    );
+    expect(messageCalls).toHaveLength(2);
     expect(
-      calls.every((call) => call.url === "https://kapso.test/meta/whatsapp/v24.0/pn-http/messages"),
+      messageCalls.every(
+        (call) => call.url === "https://kapso.test/meta/whatsapp/v24.0/pn-http/messages",
+      ),
     ).toBe(true);
-    expect(calls.map((call) => call.body)).toContainEqual({
+    expect(messageCalls.map((call) => call.body)).toContainEqual({
       messaging_product: "whatsapp",
       status: "read",
-      message_id: "wamid.HTTP_OK",
+      message_id: messageId,
       typing_indicator: { type: "text" },
     });
-    expect(calls.map((call) => call.body)).toContainEqual({
+    expect(messageCalls.map((call) => call.body)).toContainEqual({
       messaging_product: "whatsapp",
       recipient_type: "individual",
       to: "34679077777",
       type: "reaction",
-      reaction: { message_id: "wamid.HTTP_OK", emoji: "👀" },
+      reaction: { message_id: messageId, emoji: "👀" },
     });
   });
 
