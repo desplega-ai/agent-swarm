@@ -33,21 +33,17 @@ function stubJudgeContext(workerCount: number): JudgeContext {
  * they hold for whatever subset of the round-11 catalog is currently registered.
  */
 
-// Currently-registered round-11 scenario ids. The seven core discriminating
-// scenarios are joined by the swarm-mechanics spike (memory-coordination,
-// failure-recovery, failure-recovery-mixed) where the bottleneck is the SWARM,
-// not single-model capability.
+// Currently-registered round-11 scenario ids. The swarm-redesign prune (Plan A)
+// removed the four clearly-measured non-discriminators (memory-coordination,
+// failure-recovery, failure-recovery-mixed, cross-worker-invent); what remains
+// still discriminates harness+model or swarm mechanics.
 const EXPECTED_IDS = [
   "sql-audit",
   "memory-distractor",
   "bug-ladder",
-  "cross-worker-invent",
   "relay-pipeline",
   "plan-implement-review",
   "distributed-audit",
-  "memory-coordination",
-  "failure-recovery",
-  "failure-recovery-mixed",
   "delegation-probe",
 ];
 
@@ -73,6 +69,11 @@ describe("scenario registry", () => {
       "roster-demo",
       "hello-file",
       "quick-reasoning",
+      // Plan A swarm-redesign prune: clearly-measured non-discriminators.
+      "memory-coordination",
+      "failure-recovery",
+      "failure-recovery-mixed",
+      "cross-worker-invent",
     ]) {
       expect(registry.scenarios.has(dead)).toBe(false);
     }
@@ -295,62 +296,6 @@ describe("spec'd scenario shapes (v8.0 round-11)", () => {
     expect(promptText).not.toMatch(/code point/i); // the subtle-bug fix hint
   });
 
-  test("cross-worker-invent runs a 3-worker relay and grades propagation + provenance", () => {
-    const s = byId.get("cross-worker-invent");
-    expect(s).toBeDefined();
-    // Three workers (the cap), no lead, three dependency-chained tasks.
-    expect(s?.workers).toBe(3);
-    expect(s?.lead).toBeUndefined();
-    expect(s?.tasks.length).toBe(3);
-    expect(s?.timeoutMs).toBe(12 * 60_000);
-
-    // Tasks fan out across the three workers: A=0 origin, B=1 + C=2 consumers,
-    // both depending on A (relay-handoff machinery generalized to a fan-out).
-    expect(s?.tasks[0]?.worker).toBe(0);
-    expect(s?.tasks[1]?.worker).toBe(1);
-    expect(s?.tasks[2]?.worker).toBe(2);
-    expect(s?.tasks[1]?.dependsOn).toEqual([0]);
-    expect(s?.tasks[2]?.dependsOn).toEqual([0]);
-
-    // seed.exec only prepares worker 0's relay dir (seed runs on worker 0 only).
-    const execSeed = (s?.seed?.exec ?? []).join("\n");
-    expect(execSeed).toMatch(/\/workspace\/relay/);
-
-    // Two weighted dimensions: graded per-hop correctness + a custom agentic
-    // provenance judge.
-    const dims = s?.outcome.dimensions ?? [];
-    const correctness = dims.find((d) => d.name === "correctness");
-    const provenance = dims.find((d) => d.name === "provenance");
-    expect(correctness?.weight).toBe(3);
-    expect(provenance?.weight).toBe(1);
-    // provenance is an agentic judge (Phase 4: cross-checks all three sandboxes).
-    expect(provenance?.judge?.agentic).toBe(true);
-    expect(provenance?.checks ?? []).toHaveLength(0);
-
-    // Correctness is fed by the single graded uuid-propagation check (partial
-    // credit over the two downstream hops).
-    expect((correctness?.checks ?? []).length).toBe(1);
-    expect((correctness?.checks ?? [])[0]?.name).toMatch(/^uuid-propagated:/);
-
-    // Gates: origin uuid exists + isolation proofs that A's origin file did NOT
-    // leak onto B/C (the handoff was through memory, not a shared disk).
-    const gateNames = (s?.outcome.gates ?? []).map((g) => g.name);
-    expect(gateNames).toContain("origin-uuid-exists");
-    expect(gateNames).toContain("file-absent[w1]:/workspace/relay/origin-uuid.txt");
-    expect(gateNames).toContain("file-absent[w2]:/workspace/relay/origin-uuid.txt");
-
-    // Anti-gaming: the invented UUID is per-attempt random, so no concrete uuid
-    // value appears in the prompt — there is nothing to echo or guess. The prompt
-    // only shows a throwaway EXAMPLE uuid the worker is told NOT to reuse.
-    const promptText = `${s?.description ?? ""}\n${s?.tasks.map((t) => `${t.title}\n${t.description}`).join("\n")}`;
-    const uuids = promptText.match(
-      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
-    );
-    // At most the single illustrative example, and it is explicitly fenced off.
-    expect((uuids ?? []).length).toBeLessThanOrEqual(1);
-    expect(promptText).toMatch(/do\s+NOT reuse any example/i);
-  });
-
   test("relay-pipeline runs a 3-stage transform chain and grades correctness + completeness", () => {
     const s = byId.get("relay-pipeline");
     expect(s).toBeDefined();
@@ -546,161 +491,6 @@ describe("spec'd scenario shapes (v8.0 round-11)", () => {
     // The numeric shard counts (failed=5, cancelled=4) are not stated either.
     expect(promptText).not.toMatch(/\b5\s+(failed|tasks? failed)/i);
     expect(promptText).not.toMatch(/\b4\s+(cancell?ed|tasks? cancell?ed)/i);
-  });
-
-  test("memory-coordination fans 3 workers off worker 0 and grades correctness + memory-coordination", () => {
-    const s = byId.get("memory-coordination");
-    expect(s).toBeDefined();
-    // Three workers (the cap), no lead, three tasks.
-    expect(scenarioWorkerCount(s?.workers)).toBe(3);
-    expect(s?.workers).toBe(3);
-    expect(s?.lead).toBeUndefined();
-    expect(s?.tasks.length).toBe(3);
-    expect(s?.timeoutMs).toBe(14 * 60_000);
-
-    // Task fan: worker 0 is the investigator; workers 1 + 2 are synthesizers, each
-    // depending on worker 0 (fan-out, both consume worker 0's published memory).
-    expect(s?.tasks[0]?.worker).toBe(0);
-    expect(s?.tasks[1]?.worker).toBe(1);
-    expect(s?.tasks[2]?.worker).toBe(2);
-    expect(s?.tasks[1]?.dependsOn).toEqual([0]);
-    expect(s?.tasks[2]?.dependsOn).toEqual([0]);
-
-    // The source dossier is seeded via seed.exec (heredoc/base64), worker 0 only —
-    // NOT a SQL dump and NOT a shared-disk file (workers 1/2 never see it).
-    expect(s?.seed?.sqlDump).toBeUndefined();
-    const execSeed = (s?.seed?.exec ?? []).join("\n");
-    expect(execSeed).toMatch(/\/workspace\/dossier/);
-
-    // Two weighted dimensions: graded combined-downstream correctness (3×) + a
-    // custom agentic memory-coordination judge (1×).
-    const dims = s?.outcome.dimensions ?? [];
-    const correctness = dims.find((d) => d.name === "correctness");
-    const memoryCoord = dims.find((d) => d.name === "memory-coordination");
-    expect(correctness?.weight).toBe(3);
-    expect(memoryCoord?.weight).toBe(1);
-    // memory-coordination is the custom agentic judge (cross-checks all 3 sandboxes).
-    expect(memoryCoord?.judge?.agentic).toBe(true);
-    expect(memoryCoord?.checks ?? []).toHaveLength(0);
-
-    // Correctness is fed by the single inline graded combined-downstream check
-    // (partial credit over the eight value-bearing facts across both deliverables).
-    expect((correctness?.checks ?? []).map((c) => c.name)).toEqual(["downstream-facts-combined"]);
-
-    // Gates: BOTH downstream deliverables must EXIST on their workers' sandboxes.
-    const gateNames = (s?.outcome.gates ?? []).map((g) => g.name);
-    expect(gateNames).toContain("file-contains[w1]:/workspace/coord/remediation-ticket.md");
-    expect(gateNames).toContain("file-contains[w2]:/workspace/coord/status-postmortem.md");
-
-    // Anti-gaming: the dossier-derived fact VALUES appear in NO prompt — only the
-    // shared channel tag (the protocol) and the FIELDS to combine do.
-    const promptText = `${s?.description ?? ""}\n${s?.tasks.map((t) => `${t.title}\n${t.description}`).join("\n")}`;
-    expect(promptText).not.toMatch(/9f3c1a7e2b4d6f8a0c2e1d3b5a7c9e1f0a2b4c6d/i); // root-cause SHA
-    expect(promptText).not.toMatch(/\bv?2\.19\.4\b/i); // rollback tag
-    expect(promptText).not.toMatch(/priya/i); // on-call engineer
-    expect(promptText).not.toMatch(/checkout-orchestrator/i); // failed service
-    expect(promptText).not.toMatch(/\b73\b/); // impact minutes
-    // The fact values DO live in the seeded dossier (the only source).
-    const dossierSeed = execSeed;
-    expect(dossierSeed.length).toBeGreaterThan(0);
-  });
-
-  test("failure-recovery poisons a worker at seed time and grades recovery", () => {
-    const s = byId.get("failure-recovery");
-    expect(s).toBeDefined();
-    // Three homogeneous workers (the cap), no lead, three tasks.
-    expect(scenarioWorkerCount(s?.workers)).toBe(3);
-    expect(s?.workers).toBe(3);
-    expect(s?.lead).toBeUndefined();
-    expect(s?.tasks.length).toBe(3);
-    expect(s?.timeoutMs).toBe(15 * 60_000);
-
-    // Task fan: worker 0 = source, worker 1 = reconciler (dependsOn [0]),
-    // worker 2 = verifier (dependsOn [0, 1]).
-    expect(s?.tasks[0]?.worker).toBe(0);
-    expect(s?.tasks[1]?.worker).toBe(1);
-    expect(s?.tasks[2]?.worker).toBe(2);
-    expect(s?.tasks[1]?.dependsOn).toEqual([0]);
-    expect(s?.tasks[2]?.dependsOn).toEqual([0, 1]);
-
-    // Source ledger seeded via seed.exec heredoc (worker 0 only); worker 1 is
-    // POISONED at seed time via the seed.workerFailures primitive.
-    const execSeed = (s?.seed?.exec ?? []).join("\n");
-    expect(execSeed).toMatch(/\/workspace\/recovery/);
-    expect(execSeed).toMatch(/ledger\.csv/);
-    const workerFailures = s?.seed?.workerFailures ?? [];
-    expect(workerFailures.length).toBe(1);
-    expect(workerFailures[0]?.worker).toBe(1);
-    expect(workerFailures[0]?.label).toBe("poison-reconciler-total");
-    expect((workerFailures[0]?.commands ?? []).length).toBeGreaterThan(0);
-
-    // Graded recovery correctness (3×) + an agentic failure-recovery judge (1×).
-    // (Round-4 finding: the recovery judge does NOT discriminate tiers — the earlier
-    // 3× reweight on it was reverted; see the scenario docblock + QA report.)
-    const dims = s?.outcome.dimensions ?? [];
-    const correctness = dims.find((d) => d.name === "correctness");
-    const recovery = dims.find((d) => d.name === "failure-recovery");
-    expect(correctness?.weight).toBe(3);
-    expect(recovery?.weight).toBe(1);
-    expect(recovery?.judge?.agentic).toBe(true);
-    expect(recovery?.checks ?? []).toHaveLength(0);
-
-    // Correctness is fed by the single inline graded recovery check (partial credit
-    // over the three recovery sub-facts).
-    expect((correctness?.checks ?? []).map((c) => c.name)).toEqual(["recovered-net-total"]);
-
-    // Gate: the verifier's report must EXIST on worker 2 (final deliverable surface).
-    const gateNames = (s?.outcome.gates ?? []).map((g) => g.name);
-    expect(gateNames).toContain("file-contains[w2]:/workspace/recovery/verified-total.md");
-
-    // Anti-gaming: neither the ground-truth total (553) nor the poison (488) appears
-    // in any prompt — they live only in the seeded ledger / the seed-time poison.
-    const promptText = `${s?.description ?? ""}\n${s?.tasks.map((t) => `${t.title}\n${t.description}`).join("\n")}`;
-    expect(promptText).not.toMatch(/\b553\b/); // ground-truth net total
-    expect(promptText).not.toMatch(/\b488\b/); // poisoned total
-    // The poison VALUE lives in the seed.workerFailures commands, not the prompt.
-    const poisonCmds = (workerFailures[0]?.commands ?? []).join("\n");
-    expect(poisonCmds).toMatch(/\b488\b/);
-  });
-
-  test("failure-recovery-mixed mirrors failure-recovery with a strong verifier", () => {
-    const s = byId.get("failure-recovery-mixed");
-    expect(s).toBeDefined();
-    // Three workers (the cap) via per-member WorkerSpec configs, no lead.
-    expect(scenarioWorkerCount(s?.workers)).toBe(3);
-    expect(s?.lead).toBeUndefined();
-    expect(s?.tasks.length).toBe(3);
-    expect(s?.timeoutMs).toBe(15 * 60_000);
-
-    // The mixed swarm is expressed at the SCENARIO level via WorkerSpec.configId:
-    // cheap source + cheap (poisoned) reconciler + STRONG verifier.
-    const workers = s?.workers;
-    expect(Array.isArray(workers)).toBe(true);
-    const specs = (workers as { name?: string; configId?: string }[]) ?? [];
-    expect(specs.map((w) => w.configId)).toEqual([
-      "claude-haiku",
-      "claude-haiku",
-      "claude-opus-4.8",
-    ]);
-
-    // Same task fan, seed (incl. the seed-time poison on worker 1), and grading as
-    // the base scenario — only the per-worker configs differ.
-    expect(s?.tasks[1]?.dependsOn).toEqual([0]);
-    expect(s?.tasks[2]?.dependsOn).toEqual([0, 1]);
-    const workerFailures = s?.seed?.workerFailures ?? [];
-    expect(workerFailures.length).toBe(1);
-    expect(workerFailures[0]?.worker).toBe(1);
-
-    const dims = s?.outcome.dimensions ?? [];
-    const correctness = dims.find((d) => d.name === "correctness");
-    const recovery = dims.find((d) => d.name === "failure-recovery");
-    expect(correctness?.weight).toBe(3);
-    expect(recovery?.weight).toBe(1);
-    expect((correctness?.checks ?? []).map((c) => c.name)).toEqual(["recovered-net-total"]);
-    expect(recovery?.judge?.agentic).toBe(true);
-
-    const gateNames = (s?.outcome.gates ?? []).map((g) => g.name);
-    expect(gateNames).toContain("file-contains[w2]:/workspace/recovery/verified-total.md");
   });
 });
 
