@@ -235,9 +235,12 @@ Hard rules:
 
 </important>
 
-<important if="you are testing Slack integration manually or via E2E">
+<important if="you are sending a task to the swarm, or testing Slack integration manually or via E2E">
 
-Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send `slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")` via the Slack MCP tool to trigger the bot handler → task-assignment flow.
+**Reaching the swarm depends on the target:**
+
+- **LOCAL / dev agent-swarm (Slack):** Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send `slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")` via the Slack MCP tool to trigger the bot handler → task-assignment flow.
+- **PRODUCTION / deployed swarm (MCP):** use the swarm-user MCP `mcp__agent-swarm-user__send-task` (creates an unassigned task in the production pool; read results with `mcp__agent-swarm-user__get-tasks`). Do **NOT** use the dev Slack channel for production swarm work. The MCP may not be enabled in every session — check for `mcp__agent-swarm-user__*` first.
 
 </important>
 
