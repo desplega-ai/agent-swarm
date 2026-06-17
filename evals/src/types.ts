@@ -105,9 +105,11 @@ export interface ScenarioSeed {
   /** Memories indexed into the swarm API (scope "swarm") before tasks start. */
   memories?: string[];
   /**
-   * Filename of a SQLite text dump under evals/scenarios/fixtures/, imported into
-   * the API sandbox DB BEFORE the API server first boots. Bare filename only
-   * (no path separators), must end in ".sql". Example: "seeded-history.sql".
+   * Filename of an INSERT-only SQL seed under evals/scenarios/fixtures/, applied
+   * to the API sandbox DB BEFORE the API server first boots — after the schema is
+   * built pre-boot from the real migrations (see bootStack in swarm/sandbox.ts).
+   * Bare filename only (no path separators), must end in ".sql".
+   * Example: "delegation-probe-history.sql".
    */
   sqlDump?: string;
   /**

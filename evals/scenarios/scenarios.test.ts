@@ -495,14 +495,15 @@ describe("spec'd scenario shapes (v8.0 round-11)", () => {
 });
 
 describe("sql-audit-history.sql fixture", () => {
-  test("exists where the runner resolves it and passes the frozen content rules", async () => {
+  test("exists where the runner resolves it and passes the INSERT-only seed rules", async () => {
     const file = Bun.file(new URL("./fixtures/sql-audit-history.sql", import.meta.url));
     expect(await file.exists()).toBe(true);
     const text = await file.text();
     expect(validateSqlDumpText(text)).toBeNull();
-    // The audit dataset is seeded; the base flux-capacitor row is removed.
-    expect(text).toMatch(/sql-audit dataset/);
-    expect(text).not.toMatch(/Calibrate the flux capacitor/);
+    // INSERT-only seed: no schema, no `_migrations` (built pre-boot from the real migrations).
+    expect(text).toMatch(/sql-audit seed/);
+    expect(text).not.toMatch(/CREATE\s+TABLE/i);
+    expect(text).not.toMatch(/_migrations/i);
     // Answer-key rows are present in the seed data.
     expect(text).toMatch(/Rotate the payments service API keys/);
     expect(text).toMatch(/Deploy the checkout redesign to production/);

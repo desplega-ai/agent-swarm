@@ -76,26 +76,57 @@ import { topoOrder } from "./topo.ts";
 const DEFAULT_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_RETRIES = 1; // infra retries per attempt (fresh sandboxes each try)
 
-// ---- sql-dump fixture validation (v6 §1.3 — rules FROZEN) ----
+// ---- sql-seed fixture validation (INSERT-only convention) ----
+//
+// Fixtures are INSERT-only seeds: just the reference rows, NO schema and NO
+// `_migrations`. The schema is built PRE-BOOT from the REAL migrations in the
+// API image (see bootStack in swarm/sandbox.ts), so a fixture must NOT carry
+// `CREATE TABLE`/`_migrations` (that would be a stale full-dump — exactly the
+// drift this convention removes). The seed lands AFTER migrations build the
+// schema, so it must contain at least one INSERT, and it must not seed live
+// operational state (see scenarios/fixtures/README.md).
 
 const SQL_DUMP_MAX_BYTES = 5 * 1024 * 1024;
-// A full `sqlite3 <db> .dump` always carries the _migrations table WITH applied
-// rows. A dump missing them would make the migration bootstrapper re-apply 002+
-// onto already-migrated tables at first boot → breakage.
-const SQL_DUMP_MIGRATIONS_DDL_RE = /CREATE TABLE\s+(IF NOT EXISTS\s+)?["'`]?_migrations/i;
-const SQL_DUMP_MIGRATIONS_ROWS_RE = /INSERT INTO\s+["'`]?_migrations/i;
+/** Any INSERT — an INSERT-only seed must carry at least one row. */
+const SQL_SEED_INSERT_RE = /INSERT\s+INTO/i;
+/** A full `.dump` carries DDL; an INSERT-only seed must not. */
+const SQL_SEED_CREATE_TABLE_RE = /CREATE\s+TABLE/i;
+/** The `_migrations` bookkeeping is owned by the pre-boot migrate step, never the seed. */
+const SQL_SEED_MIGRATIONS_RE = /\b_migrations\b/i;
+/**
+ * Forbidden live-operational tables/state (README rules):
+ *  - `agents` — workers self-register at boot; a seeded row would be reused;
+ *  - in-flight (`pending`/`running`) tasks — the booting worker would claim them;
+ *  - `agent_memory` — embeddings live in a sqlite-vec virtual table; use
+ *    `scenario.seed.memories` instead.
+ */
+const SQL_SEED_AGENTS_RE = /INSERT\s+INTO\s+["'`]?agents\b/i;
+const SQL_SEED_AGENT_MEMORY_RE = /INSERT\s+INTO\s+["'`]?agent_memory\b/i;
+const SQL_SEED_INFLIGHT_STATUS_RE = /['"](pending|running)['"]/i;
 
-/** Returns the violation reason, or null when the dump text is acceptable. */
+/** Returns the violation reason, or null when the seed text is acceptable. */
 export function validateSqlDumpText(text: string): string | null {
   const bytes = Buffer.byteLength(text, "utf8");
   if (bytes > SQL_DUMP_MAX_BYTES) {
     return `fixture exceeds the 5 MB cap (${bytes} bytes) — fixtures are reference data, not prod DBs`;
   }
-  if (!SQL_DUMP_MIGRATIONS_DDL_RE.test(text)) {
-    return "dump does not create the _migrations table (use a full `sqlite3 <db> .dump`)";
+  if (SQL_SEED_CREATE_TABLE_RE.test(text)) {
+    return "fixture contains CREATE TABLE — seeds are INSERT-only; the schema is built from the real migrations pre-boot (do not ship a full `.dump`)";
   }
-  if (!SQL_DUMP_MIGRATIONS_ROWS_RE.test(text)) {
-    return "dump carries no applied _migrations rows (use a full `sqlite3 <db> .dump`)";
+  if (SQL_SEED_MIGRATIONS_RE.test(text)) {
+    return "fixture references `_migrations` — seeds are INSERT-only; the `_migrations` bookkeeping is written by the pre-boot migrate step (do not ship a full `.dump`)";
+  }
+  if (!SQL_SEED_INSERT_RE.test(text)) {
+    return "fixture carries no INSERT rows — an INSERT-only seed must seed at least one reference row";
+  }
+  if (SQL_SEED_AGENTS_RE.test(text)) {
+    return "fixture seeds `agents` rows — forbidden (workers self-register at boot; a colliding id would be silently reused)";
+  }
+  if (SQL_SEED_AGENT_MEMORY_RE.test(text)) {
+    return "fixture seeds `agent_memory` rows — forbidden (embeddings are not portable; use `scenario.seed.memories` instead)";
+  }
+  if (SQL_SEED_INFLIGHT_STATUS_RE.test(text)) {
+    return "fixture seeds an in-flight ('pending'/'running') status — forbidden (the booting worker would claim the row); seed only terminal rows";
   }
   return null;
 }

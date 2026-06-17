@@ -88,19 +88,21 @@ Every scenario is **shape-validated at registry load** (`validateScenario`, `src
 
 ## 3. Seed fixtures
 
-When a scenario needs pre-existing DB state (historical tasks to audit, seeded scripts, pricing), reference a SQL dump via `seed.sqlDump` (bare filename, e.g. `"delegation-probe-history.sql"`). Files live in `scenarios/fixtures/`. Full conventions: `scenarios/fixtures/README.md`.
+When a scenario needs pre-existing DB state (historical tasks to audit, seeded scripts), reference an INSERT-only SQL seed via `seed.sqlDump` (bare filename, e.g. `"delegation-probe-history.sql"`). Files live in `scenarios/fixtures/`. Full conventions: `scenarios/fixtures/README.md`.
+
+The seed is **INSERT-only** — just the reference rows. The schema is **not** in the fixture: it is built **pre-boot** from the **real migrations** in the API image. Before the API boots, `bootStack` (`src/swarm/sandbox.ts`) applies the migration `.sql` files in `MIGRATIONS_DIR` (`/app/migrations`) exactly the way `src/be/migrations/runner.ts` does — same filename sort, same `_migrations` bookkeeping (`version`, `name`, `applied_at`, `checksum`) — then applies the INSERT-only seed on top. The booting API then finds `_migrations` fully populated and applies zero further migrations. This eliminates the schema-drift footgun of the old full-dump fixtures.
 
 ### Format & hard rules
 
-- **Full `sqlite3 <db> .dump` text only.** The dump MUST create the `_migrations` table **and** carry its INSERT rows. `validateSqlDumpText` (`src/runner/index.ts:89`) rejects, pre-sandbox, any dump missing the `_migrations` DDL or rows (otherwise the migration bootstrapper would re-apply migrations onto already-migrated tables). 5 MB hard cap.
-- **Reference data only.** NO `agents` rows (workers self-register; a colliding id is silently reused), NO in-flight (`pending`/`running`) tasks (the booting worker would claim them), NO sessions/locks, NO hand-seeded `agent_memory` rows (sqlite-vec dumps aren't portable — use `seed.memories` instead). Every seeded task must be **terminal** (`completed`/`failed`/`cancelled`).
+- **INSERT-only text.** Just `INSERT INTO …` rows (comments are fine). NO `CREATE TABLE`, NO `_migrations`, NO PRAGMAs/`BEGIN`/`COMMIT`. `validateSqlDumpText` (`src/runner/index.ts`) rejects, pre-sandbox, any fixture that contains `CREATE TABLE` or references `_migrations` (a stale full dump) or that carries no INSERT rows. 5 MB hard cap.
+- **Reference data only — enforced by the validator.** NO `agents` rows (workers self-register; a colliding id is silently reused), NO in-flight (`'pending'`/`'running'`) tasks (the booting worker would claim them), NO sessions/locks, NO `agent_memory` rows (sqlite-vec embeddings aren't portable — use `seed.memories` instead). Every seeded task must be **terminal** (`completed`/`failed`/`cancelled`).
 - **Filename**: bare, ending `.sql`, no path separators — enforced by `SQL_DUMP_NAME_RE = /^[A-Za-z0-9._-]+\.sql$/` (`src/registry.ts:56`) at load.
-- Dumps older than the worker image are safe (forward migrations apply the rest). Dumps newer than the image are NOT — regenerate against `main`'s migration set.
+- The schema is always the image's migration set, so a seed is never "too old/new". The only constraint: the rows must match the columns the migrations create (a column a future migration removes would make the INSERT fail loudly at seed time).
 
 ### Generators — fixtures are generated, not hand-edited
 
 Each non-trivial fixture has a `scenarios/fixtures/generate-*.ts` companion (e.g. `generate-delegation-probe-history.ts`). The generator:
-- Starts from the base dump (`seeded-history.sql`), removes placeholder rows, appends a deterministic dataset (no randomness → reproducible).
+- Holds the answer-key rows in a deterministic `TASKS` array (no randomness → reproducible) and emits an INSERT-only seed (no base dump, no schema).
 - Calls `validateSqlDumpText` on its own output before writing.
 - **Prints the answer key** at the end. Regenerate with `bun scenarios/fixtures/generate-<name>.ts`, then **mirror the printed answer-key constants into the scenario module**. Commit the regenerated `.sql` alongside the scenario change.
 

@@ -2,51 +2,69 @@ import { describe, expect, test } from "bun:test";
 import type { StackHandle } from "../swarm/sandbox.ts";
 import { buildSandboxInfo, validateSqlDumpText } from "./index.ts";
 
-/** Shape of a minimal-but-real `sqlite3 <db> .dump` output (v6 §1.3). */
-const VALID_DUMP = `PRAGMA foreign_keys=OFF;
-BEGIN TRANSACTION;
-CREATE TABLE _migrations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,
-  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-INSERT INTO _migrations VALUES(1,'001_initial_schema.sql','2026-06-11 10:00:00');
-INSERT INTO _migrations VALUES(2,'002_add_tasks.sql','2026-06-11 10:00:00');
-CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT, status TEXT);
-INSERT INTO tasks VALUES('t-1','Calibrate the flux capacitor','completed');
-COMMIT;
+/**
+ * Shape of a valid INSERT-only seed: just the reference rows. The schema +
+ * `_migrations` are built PRE-BOOT from the real migrations (see bootStack in
+ * swarm/sandbox.ts), so the fixture itself carries NO DDL and NO `_migrations`.
+ */
+const VALID_SEED = `-- delegation-probe seed (reference history only)
+INSERT INTO agent_tasks (id, task, status, source, priority) VALUES ('t-1','Provision the analytics warehouse cluster','completed','api',94);
+INSERT INTO agent_tasks (id, task, status, source, priority) VALUES ('t-2','Roll the JWT signing keys','failed','api',81);
 `;
 
-describe("validateSqlDumpText (v6 §1.3 frozen rules)", () => {
-  test("accepts a minimal real .dump carrying _migrations DDL + rows", () => {
-    expect(validateSqlDumpText(VALID_DUMP)).toBeNull();
+describe("validateSqlDumpText (INSERT-only seed rules)", () => {
+  test("accepts a minimal INSERT-only seed", () => {
+    expect(validateSqlDumpText(VALID_SEED)).toBeNull();
   });
 
-  test("accepts quoted/IF NOT EXISTS _migrations variants", () => {
-    const quoted = VALID_DUMP.replace(
-      "CREATE TABLE _migrations",
-      'CREATE TABLE IF NOT EXISTS "_migrations"',
-    ).replace(/INSERT INTO _migrations/g, 'INSERT INTO "_migrations"');
-    expect(validateSqlDumpText(quoted)).toBeNull();
-  });
-
-  test("rejects a dump without the _migrations table", () => {
+  test("rejects a full `.dump` carrying CREATE TABLE", () => {
     const reason = validateSqlDumpText(
       "CREATE TABLE tasks (id TEXT);\nINSERT INTO tasks VALUES('t-1');\n",
+    );
+    expect(reason).not.toBeNull();
+    expect(reason).toContain("CREATE TABLE");
+  });
+
+  test("rejects a fixture that references `_migrations` (stale full dump)", () => {
+    const reason = validateSqlDumpText(
+      `${VALID_SEED}INSERT INTO _migrations VALUES(1,'001_initial','2026-06-11 10:00:00','abc');\n`,
     );
     expect(reason).not.toBeNull();
     expect(reason).toContain("_migrations");
   });
 
-  test("rejects a dump with the _migrations table but no applied rows", () => {
-    const noRows = VALID_DUMP.replace(/INSERT INTO _migrations.*\n/g, "");
-    const reason = validateSqlDumpText(noRows);
+  test("rejects a seed with no INSERT rows", () => {
+    const reason = validateSqlDumpText("-- just a comment, no rows\n");
     expect(reason).not.toBeNull();
-    expect(reason).toContain("_migrations");
+    expect(reason).toContain("INSERT");
   });
 
-  test("rejects dumps above the 5 MB cap", () => {
-    const padded = `${VALID_DUMP}-- ${"x".repeat(5 * 1024 * 1024)}\n`;
+  test("rejects a seed that inserts `agents` rows", () => {
+    const reason = validateSqlDumpText(
+      `${VALID_SEED}INSERT INTO agents (id, name) VALUES ('a-1','rogue');\n`,
+    );
+    expect(reason).not.toBeNull();
+    expect(reason).toContain("agents");
+  });
+
+  test("rejects a seed that inserts `agent_memory` rows", () => {
+    const reason = validateSqlDumpText(
+      `${VALID_SEED}INSERT INTO agent_memory (id, content) VALUES ('m-1','x');\n`,
+    );
+    expect(reason).not.toBeNull();
+    expect(reason).toContain("agent_memory");
+  });
+
+  test("rejects a seed with an in-flight (pending/running) status", () => {
+    const reason = validateSqlDumpText(
+      `INSERT INTO agent_tasks (id, task, status) VALUES ('t-1','Do thing','pending');\n`,
+    );
+    expect(reason).not.toBeNull();
+    expect(reason).toMatch(/in-flight|pending|running/i);
+  });
+
+  test("rejects seeds above the 5 MB cap", () => {
+    const padded = `${VALID_SEED}-- ${"x".repeat(5 * 1024 * 1024)}\n`;
     const reason = validateSqlDumpText(padded);
     expect(reason).not.toBeNull();
     expect(reason).toContain("5 MB");
