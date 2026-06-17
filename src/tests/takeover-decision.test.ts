@@ -23,6 +23,11 @@ import {
   startTask,
 } from "../be/db";
 import {
+  createTrackerSync,
+  getTrackerSync,
+  getTrackerSyncByExternalId,
+} from "../be/db-queries/tracker";
+import {
   codeLevelTriage,
   LEAD_ESCALATION_TIMEOUT_MIN,
   MAX_RESUME_GENERATIONS,
@@ -33,6 +38,7 @@ import {
 } from "../heartbeat/heartbeat";
 import { resolveTemplate } from "../prompts/resolver";
 import { RESUME_GENERATION_TAG_PREFIX } from "../tasks/worker-follow-up";
+import { sendTaskHandler } from "../tools/send-task";
 import "../tools/templates"; // registers all templates including task.takeover.decision
 
 const TEST_DB_PATH = "./test-takeover-decision.sqlite";
@@ -62,6 +68,7 @@ describe("Heartbeat — Lead-routed takeover-decision (DES-523)", () => {
   beforeEach(() => {
     setBeforeHeartbeatSupersedeForTests(null);
     setTakeoverViaLeadForTests(null); // restore env default (false)
+    getDb().run("DELETE FROM tracker_sync");
     getDb().run("DELETE FROM agent_tasks");
     getDb().run("DELETE FROM agents");
     getDb().run("DELETE FROM active_sessions");
@@ -285,6 +292,56 @@ describe("Heartbeat — Lead-routed takeover-decision (DES-523)", () => {
     const resumeChildren = getChildTasks(parent.id).filter((c) => c.taskType === "resume");
     expect(resumeChildren.length).toBe(1);
     expect(findings.autoResumedTasks.find((r) => r.taskId === parent.id)).toBeUndefined();
+  });
+
+  test("T3d: Lead-dispatched resume via send-task repoints tracker_sync to the resume child", async () => {
+    setTakeoverViaLeadForTests(true);
+
+    const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+    const worker = createAgent({ name: "coder-4d", isLead: false, status: "busy" });
+    const replacement = createAgent({ name: "coder-replacement", isLead: false, status: "idle" });
+    const parent = createTaskExtended("Tracked crash-recovery work", { agentId: worker.id });
+    startTask(parent.id);
+
+    getDb().run("UPDATE agent_tasks SET status = 'superseded' WHERE id = ?", [parent.id]);
+
+    createTrackerSync({
+      provider: "linear",
+      entityType: "task",
+      swarmId: parent.id,
+      externalId: "linear-lead-routed-resume",
+      externalIdentifier: "ENG-783",
+      externalUrl: "https://linear.app/test/issue/ENG-783",
+    });
+
+    expect(getTrackerSync("linear", "task", parent.id)).not.toBeNull();
+
+    const result = await sendTaskHandler(
+      { kind: "owner", agentId: lead.id },
+      {
+        task: "Resume tracked crash-recovery work",
+        agentId: replacement.id,
+        taskType: "resume",
+        tags: ["auto-resume", "reason:crash_recovery", `${RESUME_GENERATION_TAG_PREFIX}1`],
+        parentTaskId: parent.id,
+        offerMode: false,
+        allowDuplicate: true,
+      },
+    );
+
+    const structured = result.structuredContent as {
+      success: boolean;
+      task?: { id: string; parentTaskId?: string };
+    };
+    expect(structured.success).toBe(true);
+    expect(structured.task?.parentTaskId).toBe(parent.id);
+
+    expect(getTrackerSync("linear", "task", parent.id)).toBeNull();
+    const childLookup = getTrackerSync("linear", "task", structured.task!.id);
+    expect(childLookup).not.toBeNull();
+    const byExternal = getTrackerSyncByExternalId("linear", "task", "linear-lead-routed-resume");
+    expect(byExternal?.swarmId).toBe(structured.task!.id);
+    expect(byExternal?.externalIdentifier).toBe("ENG-783");
   });
 
   test("T3c: runRebootSweep — completed Lead-routed resume child → decision failed but no second pool resume", async () => {

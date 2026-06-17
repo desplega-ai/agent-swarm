@@ -11,10 +11,11 @@ import {
   getTaskById,
   hasCapacity,
 } from "@/be/db";
+import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema, FollowUpConfigSchema } from "@/types";
+import { type AgentTask, AgentTaskSchema, FollowUpConfigSchema } from "@/types";
 import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
 
 export const sendTaskInputSchema = z.object({
@@ -102,6 +103,31 @@ export const sendTaskOutputSchema = z.object({
 });
 
 type SendTaskArgs = z.infer<typeof sendTaskInputSchema>;
+
+const TRACKER_OWNERSHIP_TRANSFER_PARENT_STATUSES = new Set([
+  "superseded",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+function transferTrackerSyncToResumeChild(args: {
+  parentTaskId?: string;
+  taskType?: string;
+  child: AgentTask;
+}): void {
+  if (args.taskType !== "resume" || !args.parentTaskId) return;
+
+  const parent = getTaskById(args.parentTaskId);
+  if (!parent || !TRACKER_OWNERSHIP_TRANSFER_PARENT_STATUSES.has(parent.status)) return;
+
+  const repointed = repointTrackerSyncBySwarmId(parent.id, args.child.id);
+  if (repointed > 0) {
+    console.log(
+      `[send-task] Repointed ${repointed} tracker_sync row(s) from terminal parent ${parent.id.slice(0, 8)} to resume child ${args.child.id.slice(0, 8)}`,
+    );
+  }
+}
 
 export async function sendTaskHandler(
   ctx: ToolCtx,
@@ -278,6 +304,11 @@ export async function sendTaskHandler(
         slackUserId,
         followUpConfig,
       });
+      transferTrackerSyncToResumeChild({
+        parentTaskId: effectiveParentTaskId,
+        taskType,
+        child: newTask,
+      });
 
       return {
         success: true,
@@ -332,6 +363,11 @@ export async function sendTaskHandler(
         slackUserId,
         followUpConfig,
       });
+      transferTrackerSyncToResumeChild({
+        parentTaskId: effectiveParentTaskId,
+        taskType,
+        child: newTask,
+      });
 
       return {
         success: true,
@@ -359,6 +395,11 @@ export async function sendTaskHandler(
       slackThreadTs,
       slackUserId,
       followUpConfig,
+    });
+    transferTrackerSyncToResumeChild({
+      parentTaskId: effectiveParentTaskId,
+      taskType,
+      child: newTask,
     });
 
     return {
