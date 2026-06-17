@@ -1,8 +1,13 @@
 import { z } from "zod";
 import { getScript, getScriptVersion } from "../../be/scripts/db";
+import { DEFAULT_SCRIPT_RESOURCES } from "../../scripts-runtime/executors/types";
 import { runScript } from "../../scripts-runtime/loader";
 import type { ExecutorMeta } from "../../types";
 import { BaseExecutor, type ExecutorResult } from "./base";
+
+export const SWARM_SCRIPT_DEFAULT_TIMEOUT_MS = DEFAULT_SCRIPT_RESOURCES.wallClockMs;
+export const SWARM_SCRIPT_MIN_TIMEOUT_MS = 1_000;
+export const SWARM_SCRIPT_MAX_TIMEOUT_MS = DEFAULT_SCRIPT_RESOURCES.cpuTimeSec * 1_000;
 
 export const SwarmScriptConfigSchema = z.object({
   scriptName: z.string().min(1),
@@ -10,6 +15,12 @@ export const SwarmScriptConfigSchema = z.object({
   pinHash: z.string().min(1).optional(),
   args: z.record(z.string(), z.unknown()).default({}),
   fsMode: z.enum(["none", "workspace-rw"]).default("none"),
+  timeoutMs: z
+    .number()
+    .int()
+    .min(SWARM_SCRIPT_MIN_TIMEOUT_MS)
+    .max(SWARM_SCRIPT_MAX_TIMEOUT_MS)
+    .default(SWARM_SCRIPT_DEFAULT_TIMEOUT_MS),
 });
 
 export const SwarmScriptOutputSchema = z.object({
@@ -61,6 +72,7 @@ export class SwarmScriptExecutor extends BaseExecutor<
       args: config.args,
       fsMode: "none",
       agentId: agentId ?? "workflow",
+      timeoutMs: config.timeoutMs,
     });
 
     const workflowOutput = {

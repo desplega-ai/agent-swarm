@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.100.0] - 2026-06-17
+
+### Added
+- **Configurable wall-clock timeout for `swarm-script` workflow nodes** (#776) — workflow authors can now set `config.timeoutMs` between 1s and 60s, with schema validation plus runtime enforcement aligned to the scripts-runtime wall-clock budget and CPU-time ceiling.
+
+### Changed
+- **Worker-image harness pins refreshed** (#772) — `Dockerfile.worker` now ships Claude Code `2.1.178`, pi-mono `0.79.4`, Codex CLI / SDK `0.140.0`, and opencode / `@opencode-ai/sdk` `1.17.7`.
+
+### Fixed
+- **OAuth keepalive refresh is awaited during shutdown** (#774) — shutdown now waits for the keepalive refresh path to finish so Jira webhook lifecycle cleanup and related finalization work do not race process exit, and the Slack alert path now requires an explicitly configured channel.
+- **Task lifecycle telemetry emits the missing transition events again** (#773) — lifecycle updates now record the missing telemetry edge so downstream observability and reporting stay aligned with real task state changes.
+
 ## [1.99.0] - 2026-06-15
 
 ### Added

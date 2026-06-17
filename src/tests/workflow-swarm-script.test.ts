@@ -21,7 +21,13 @@ import {
   type ExecutorResult,
 } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
-import { SwarmScriptExecutor } from "../workflows/executors/swarm-script";
+import {
+  SWARM_SCRIPT_DEFAULT_TIMEOUT_MS,
+  SWARM_SCRIPT_MAX_TIMEOUT_MS,
+  SWARM_SCRIPT_MIN_TIMEOUT_MS,
+  SwarmScriptConfigSchema,
+  SwarmScriptExecutor,
+} from "../workflows/executors/swarm-script";
 import { interpolate } from "../workflows/template";
 
 const TEST_DB_PATH = "./test-workflow-swarm-script.sqlite";
@@ -141,6 +147,38 @@ beforeEach(() => {
 });
 
 describe("SwarmScriptExecutor", () => {
+  test("config schema validates timeoutMs bounds and applies the runtime default", () => {
+    expect(SwarmScriptConfigSchema.parse({ scriptName: "quick" }).timeoutMs).toBe(
+      SWARM_SCRIPT_DEFAULT_TIMEOUT_MS,
+    );
+
+    expect(
+      SwarmScriptConfigSchema.safeParse({
+        scriptName: "quick",
+        timeoutMs: SWARM_SCRIPT_MIN_TIMEOUT_MS - 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      SwarmScriptConfigSchema.safeParse({
+        scriptName: "quick",
+        timeoutMs: SWARM_SCRIPT_MAX_TIMEOUT_MS + 1,
+      }).success,
+    ).toBe(false);
+
+    expect(
+      SwarmScriptConfigSchema.parse({
+        scriptName: "quick",
+        timeoutMs: SWARM_SCRIPT_MIN_TIMEOUT_MS,
+      }).timeoutMs,
+    ).toBe(SWARM_SCRIPT_MIN_TIMEOUT_MS);
+    expect(
+      SwarmScriptConfigSchema.parse({
+        scriptName: "quick",
+        timeoutMs: SWARM_SCRIPT_MAX_TIMEOUT_MS,
+      }).timeoutMs,
+    ).toBe(SWARM_SCRIPT_MAX_TIMEOUT_MS);
+  });
+
   test("A workflow with one swarm-script node resolves by name + runs + returns result", async () => {
     await saveScript(
       "add-one",
@@ -248,6 +286,49 @@ describe("SwarmScriptExecutor", () => {
       },
     });
     expect(success.status).toBe("success");
+  });
+
+  test("timeoutMs not set — script completes with the default 30s window", async () => {
+    await saveScript("quick", `export default async () => ({ done: true });`);
+    const executor = new SwarmScriptExecutor(deps);
+    const wf = makeWorkflow({ nodes: [] });
+    const result = await executor.run({
+      config: { scriptName: "quick" },
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "script",
+        workflowId: wf.id,
+        dryRun: false,
+      },
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.output?.result).toEqual({ done: true });
+  });
+
+  test("timeoutMs set — a long-running script is killed before it finishes", async () => {
+    await saveScript(
+      "sleeper",
+      `export default async () => { await new Promise(r => setTimeout(r, 3000)); return { done: true }; };`,
+    );
+    const executor = new SwarmScriptExecutor(deps);
+    const wf = makeWorkflow({ nodes: [] });
+    const result = await executor.run({
+      config: { scriptName: "sleeper", timeoutMs: 300 },
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "script",
+        workflowId: wf.id,
+        dryRun: false,
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.output?.exitCode).not.toBe(0);
   });
 
   test("Failure in the script surfaces as a workflow-node failure", async () => {

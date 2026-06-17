@@ -17,11 +17,12 @@ A workflow consists of:
 
 ### Executor Types
 
-The engine includes 10 built-in executor types:
+The engine includes 11 built-in executor types:
 
 | Executor | Description |
 |----------|-------------|
 | `script` | Run a shell script or JavaScript expression |
+| `swarm-script` | Run a reusable TypeScript script from the swarm catalog with optional `args`, `scope`, `pinHash`, and a configurable `timeoutMs` wall-clock budget |
 | `agent-task` | Create and delegate a task to a swarm agent |
 | `raw-llm` | Call an LLM directly with a prompt template |
 | `vcs` | Version control operations (create PR, merge, etc.) |
@@ -33,6 +34,8 @@ The engine includes 10 built-in executor types:
 | `wait` | Pause for a fixed duration (`mode: "time"`) or until a workflow event matching an optional filter (`mode: "event"`); event mode supports `run` / `global` scope and an optional `timeoutMs` that routes to the `timeout` port |
 
 Each executor has typed config and output schemas available via `GET /api/executor-types` (returns JSON Schemas via Zod v4 `z.toJSONSchema()`).
+
+`swarm-script` is the durable, reusable counterpart to inline `script` nodes. In workflow definitions it accepts `scriptName`, optional `scope` (`agent` or `global`), optional `pinHash`, JSON `args`, and `timeoutMs`. The timeout defaults to `30000` ms, accepts integers from `1000` through `60000`, and raises the script runtime's wall-clock budget for I/O-bound work while still respecting the separate 60-second CPU-time ceiling.
 
 ## Defining a Workflow
 
@@ -198,6 +201,8 @@ Each node can set a custom `timeoutMs` to override the default step timeout:
 ```
 
 If the step exceeds its timeout, it is marked as failed and the retry/failure policy applies.
+
+For `swarm-script` nodes there is a second timeout surface inside `config.timeoutMs`. Use the node-level `timeoutMs` for general step orchestration limits and the config-level `timeoutMs` to raise or lower the spawned script's own wall-clock budget within the allowed `1000`-`60000` ms range.
 
 ### Cancelling a Workflow Run
 
