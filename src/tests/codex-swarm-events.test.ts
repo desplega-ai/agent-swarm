@@ -97,6 +97,30 @@ describe("createCodexSwarmEventHandler", () => {
       expect(controller.signal.aborted).toBe(true);
     });
 
+    test("sets abort signal reason to 'cancelled' on cancel-poll abort", async () => {
+      installFetchStub((url) => {
+        if (url.includes("/cancelled-tasks")) {
+          return new Response(
+            JSON.stringify({ cancelled: [{ id: "task-1", failureReason: "user request" }] }),
+            { status: 200 },
+          );
+        }
+        return new Response("{}", { status: 200 });
+      });
+      const controller = new AbortController();
+      const opts = buildOpts({ abortRef: { current: controller } });
+      const handler = createCodexSwarmEventHandler(opts);
+      handler({
+        type: "tool_start",
+        toolCallId: "call-1",
+        toolName: "bash",
+        args: { command: "sleep 9999" },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(controller.signal.aborted).toBe(true);
+      expect(controller.signal.reason).toBe("cancelled");
+    });
+
     test("logs the abort reason when /cancelled-tasks reports the task", async () => {
       installFetchStub((url) => {
         if (url.includes("/cancelled-tasks")) {

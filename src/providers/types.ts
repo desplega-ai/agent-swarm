@@ -118,7 +118,7 @@ export interface ProviderSession {
   readonly sessionId: string | undefined;
   onEvent(listener: (event: ProviderEvent) => void): void;
   waitForCompletion(): Promise<ProviderResult>;
-  abort(): Promise<void>;
+  abort(reason?: string): Promise<void>;
 }
 
 /** Result returned when a provider session completes. */

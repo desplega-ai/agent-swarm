@@ -1451,7 +1451,7 @@ function setupShutdownHandlers(
         );
         for (const [taskId, task] of state.activeTasks) {
           console.log(`[${role}] Superseding task ${taskId.slice(0, 8)}`);
-          task.session.abort().catch(() => {});
+          task.session.abort("graceful_shutdown").catch(() => {});
           if (apiConfig) {
             const supersede = await supersedeTaskViaAPI(
               apiConfig,
@@ -4706,7 +4706,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               console.log(
                 `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
               );
-              task.session.abort().catch(() => {});
+              task.session.abort("cancelled").catch(() => {});
               cancelledSignaled.add(taskId);
             }
           }
