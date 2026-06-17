@@ -12,83 +12,107 @@
  * Complements slack-assistant-comention.test.ts (pure helper-function unit tests).
  * Regression for task 4ae1f3b5 — "<@U0831BS93V1> Are you here?" spawned an unwanted task.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import * as dbModule from "../be/db";
+import * as slackEnrichModule from "../slack/enrich";
+import * as slackEventDedupModule from "../slack/event-dedup";
+import * as siblingAwarenessModule from "../tasks/sibling-awareness";
 
 // ---------------------------------------------------------------------------
-// Snapshot real modules BEFORE mocking.
+// Production-handler spies.
 //
-// Bun mutates live module-namespace bindings when mock.module() runs, so a
-// plain `await import()` captured before the call still returns the mock after
-// mock.module() executes.  Spreading the namespace into a plain object copies
-// the function references at snapshot-time, freezing the real exports.
-//
-// These snapshots are used in afterAll() to restore the global module registry
-// so that subsequent test files in the same bun process get the real modules.
-// ---------------------------------------------------------------------------
-const _realSiblingAwareness = { ...(await import("../tasks/sibling-awareness")) };
-const _realDb = { ...(await import("../be/db")) };
-const _realEnrich = { ...(await import("../slack/enrich")) };
-const _realEventDedup = { ...(await import("../slack/event-dedup")) };
-const _realThreadBuffer = { ...(await import("../slack/thread-buffer")) };
-const _realResolver = { ...(await import("../prompts/resolver")) };
-const _realContextKey = { ...(await import("../tasks/context-key")) };
-const _realWatcher = { ...(await import("../slack/watcher")) };
-
-// ---------------------------------------------------------------------------
-// Module mocks — Bun hoists these before all imports.
-// Stub every side-effectful dependency so the real production handlers
-// can run in isolation without a database or live Slack connection.
+// Avoid mock.module here: Bun's module overrides are process-global and can be
+// observed by other test files during module loading. Restorable spies keep the
+// regression test on the real production handlers without leaking fake modules.
 // ---------------------------------------------------------------------------
 
-const createTaskMock = mock(() => ({ id: "mock-task-id-prod-path" }));
+let createAssistantFn: typeof import("../slack/assistant").createAssistant;
+let registerMessageHandlerFn: typeof import("../slack/handlers").registerMessageHandler;
 
-mock.module("../tasks/sibling-awareness", () => ({
-  createTaskWithSiblingAwareness: createTaskMock,
-}));
+let createTaskWithSiblingAwarenessSpy: any;
+let getAgentWorkingOnThreadSpy: any;
+let getLeadAgentSpy: any;
+let getMostRecentTaskInThreadSpy: any;
+let getAgentByIdSpy: any;
+let getTasksByAgentIdSpy: any;
+let resolveSlackUserIdSpy: any;
+let enrichSlackUserEmailSpy: any;
+let wasEventSeenSpy: any;
 
-mock.module("../be/db", () => ({
-  getAgentWorkingOnThread: mock(() => null),
-  getLeadAgent: mock(() => ({ id: "lead-prod-test-1", name: "TestLead", isLead: true })),
-  getMostRecentTaskInThread: mock(() => null),
-  getAgentById: mock(() => null),
-  getAllAgents: mock(() => []),
-  getTasksByAgentId: mock(() => []),
-}));
+const originalEnv = {
+  ADDITIVE_SLACK: process.env.ADDITIVE_SLACK,
+  SLACK_ALLOWED_EMAIL_DOMAINS: process.env.SLACK_ALLOWED_EMAIL_DOMAINS,
+  SLACK_ALLOWED_USER_IDS: process.env.SLACK_ALLOWED_USER_IDS,
+};
 
-mock.module("../slack/enrich", () => ({
-  resolveSlackUserId: mock(async () => undefined),
-  enrichSlackUserEmail: mock(async () => null),
-}));
+function restoreEnvValue(key: keyof typeof originalEnv): void {
+  const value = originalEnv[key];
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
 
-mock.module("../slack/event-dedup", () => ({
-  wasEventSeen: mock(() => false),
-}));
+function installSpyImplementations(): void {
+  createTaskWithSiblingAwarenessSpy.mockImplementation(() => ({ id: "mock-task-id-prod-path" }));
+  getAgentWorkingOnThreadSpy.mockImplementation(() => null);
+  getLeadAgentSpy.mockImplementation(() => ({
+    id: "lead-prod-test-1",
+    name: "TestLead",
+    isLead: true,
+  }));
+  getMostRecentTaskInThreadSpy.mockImplementation(() => null);
+  getAgentByIdSpy.mockImplementation(() => null);
+  getTasksByAgentIdSpy.mockImplementation(() => []);
+  resolveSlackUserIdSpy.mockImplementation(async () => undefined);
+  enrichSlackUserEmailSpy.mockImplementation(async () => null);
+  wasEventSeenSpy.mockImplementation(() => false);
+}
 
-mock.module("../slack/thread-buffer", () => ({
-  bufferThreadMessage: mock(() => {}),
-  getBufferMessageCount: mock(() => 0),
-  instantFlush: mock(async () => {}),
-}));
+beforeAll(async () => {
+  process.env.ADDITIVE_SLACK = "false";
+  delete process.env.SLACK_ALLOWED_EMAIL_DOMAINS;
+  delete process.env.SLACK_ALLOWED_USER_IDS;
 
-mock.module("../prompts/resolver", () => ({
-  resolveTemplate: mock(() => ({ text: "offline" })),
-  configureDbResolver: mock(() => {}),
-  configureHttpResolver: mock(() => {}),
-  resetDbResolver: mock(() => {}),
-  resetHttpResolver: mock(() => {}),
-  isHttpResolverConfigured: mock(() => false),
-}));
+  createTaskWithSiblingAwarenessSpy = spyOn(
+    siblingAwarenessModule,
+    "createTaskWithSiblingAwareness",
+  );
+  getAgentWorkingOnThreadSpy = spyOn(dbModule, "getAgentWorkingOnThread");
+  getLeadAgentSpy = spyOn(dbModule, "getLeadAgent");
+  getMostRecentTaskInThreadSpy = spyOn(dbModule, "getMostRecentTaskInThread");
+  getAgentByIdSpy = spyOn(dbModule, "getAgentById");
+  getTasksByAgentIdSpy = spyOn(dbModule, "getTasksByAgentId");
+  resolveSlackUserIdSpy = spyOn(slackEnrichModule, "resolveSlackUserId");
+  enrichSlackUserEmailSpy = spyOn(slackEnrichModule, "enrichSlackUserEmail");
+  wasEventSeenSpy = spyOn(slackEventDedupModule, "wasEventSeen");
 
-mock.module("../tasks/context-key", () => ({
-  slackContextKey: mock(() => "test-ctx-key"),
-}));
+  installSpyImplementations();
 
-mock.module("../slack/watcher", () => ({
-  registerTreeMessage: mock(() => {}),
-}));
+  ({ createAssistant: createAssistantFn } = await import("../slack/assistant"));
+  ({ registerMessageHandler: registerMessageHandlerFn } = await import("../slack/handlers"));
+});
 
-import { createAssistant } from "../slack/assistant";
-import { registerMessageHandler } from "../slack/handlers";
+beforeEach(() => {
+  createTaskWithSiblingAwarenessSpy.mockClear();
+  getAgentWorkingOnThreadSpy.mockClear();
+  getLeadAgentSpy.mockClear();
+  getMostRecentTaskInThreadSpy.mockClear();
+  getAgentByIdSpy.mockClear();
+  getTasksByAgentIdSpy.mockClear();
+  resolveSlackUserIdSpy.mockClear();
+  enrichSlackUserEmailSpy.mockClear();
+  wasEventSeenSpy.mockClear();
+  installSpyImplementations();
+});
+
+afterAll(() => {
+  restoreEnvValue("ADDITIVE_SLACK");
+  restoreEnvValue("SLACK_ALLOWED_EMAIL_DOMAINS");
+  restoreEnvValue("SLACK_ALLOWED_USER_IDS");
+  mock.restore();
+});
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -120,11 +144,7 @@ describe("assistant.ts — userMessage production-path co-mention guard", () => 
   let userMessageHandler: (args: Record<string, unknown>) => Promise<void>;
 
   beforeAll(() => {
-    userMessageHandler = (createAssistant() as any).userMessage[0] as typeof userMessageHandler;
-  });
-
-  beforeEach(() => {
-    createTaskMock.mockClear();
+    userMessageHandler = (createAssistantFn() as any).userMessage[0] as typeof userMessageHandler;
   });
 
   test("does NOT spawn a task when message @-mentions another agent but not our bot", async () => {
@@ -143,7 +163,7 @@ describe("assistant.ts — userMessage production-path co-mention guard", () => 
       client: mockClient,
     });
 
-    expect(createTaskMock).not.toHaveBeenCalled();
+    expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
   });
 
   test("DOES spawn a task for a plain DM with no @-mentions (baseline)", async () => {
@@ -162,7 +182,7 @@ describe("assistant.ts — userMessage production-path co-mention guard", () => 
       client: mockClient,
     });
 
-    expect(createTaskMock).toHaveBeenCalledTimes(1);
+    expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
   });
 
   test("does NOT spawn a task when message @-mentions a human user but not our bot", async () => {
@@ -181,7 +201,7 @@ describe("assistant.ts — userMessage production-path co-mention guard", () => 
       client: mockClient,
     });
 
-    expect(createTaskMock).not.toHaveBeenCalled();
+    expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -225,11 +245,7 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
         }
       },
     };
-    registerMessageHandler(mockApp as any);
-  });
-
-  beforeEach(() => {
-    createTaskMock.mockClear();
+    registerMessageHandlerFn(mockApp as any);
   });
 
   test("does NOT spawn a task when assistant_thread message @-mentions another agent", async () => {
@@ -248,7 +264,7 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
       say: mock(async () => {}),
     });
 
-    expect(createTaskMock).not.toHaveBeenCalled();
+    expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
   });
 
   test("DOES spawn a task for assistant_thread plain message with no @-mentions (baseline)", async () => {
@@ -267,7 +283,7 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
       say: mock(async () => {}),
     });
 
-    expect(createTaskMock).toHaveBeenCalledTimes(1);
+    expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
   });
 
   test("does NOT spawn a task when assistant_thread message @-mentions a human (not our bot)", async () => {
@@ -286,24 +302,6 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
       say: mock(async () => {}),
     });
 
-    expect(createTaskMock).not.toHaveBeenCalled();
+    expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
   });
-});
-
-// ---------------------------------------------------------------------------
-// Restore the real module implementations after all tests in this file.
-//
-// mock.module() overrides persist for the entire bun process; without this
-// cleanup every subsequent test file that imports ../be/db, ../prompts/resolver,
-// etc. would receive the stub implementations above instead of the real ones.
-// ---------------------------------------------------------------------------
-afterAll(() => {
-  mock.module("../tasks/sibling-awareness", () => _realSiblingAwareness);
-  mock.module("../be/db", () => _realDb);
-  mock.module("../slack/enrich", () => _realEnrich);
-  mock.module("../slack/event-dedup", () => _realEventDedup);
-  mock.module("../slack/thread-buffer", () => _realThreadBuffer);
-  mock.module("../prompts/resolver", () => _realResolver);
-  mock.module("../tasks/context-key", () => _realContextKey);
-  mock.module("../slack/watcher", () => _realWatcher);
 });
