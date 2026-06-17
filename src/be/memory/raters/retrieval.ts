@@ -42,16 +42,17 @@ export function recordRetrievals(
   const db = getDb();
   const insert = db.prepare(
     `INSERT INTO memory_retrieval
-       (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, contextKey, intent, eventType)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, contextKey, intent, eventType, retrievalId, rank)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const now = new Date().toISOString();
+  const retrievalId = crypto.randomUUID();
   const contextKey = extras?.contextKey ?? null;
   const intent = extras?.intent ?? null;
   const eventType = extras?.eventType ?? "search";
 
   db.transaction(() => {
-    for (const r of results) {
+    for (const [rank, r] of results.entries()) {
       insert.run(
         crypto.randomUUID(),
         taskId,
@@ -63,6 +64,8 @@ export function recordRetrievals(
         contextKey,
         intent,
         eventType,
+        retrievalId,
+        rank,
       );
     }
   })();
