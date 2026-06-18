@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.101.0] - 2026-06-18
+
+### Added
+- **Swarm evals now measure delegation reliability with convergent scoring** (#775) — the evals suite gained the `delegation-probe` scenario, seeded-history separation, and mean-score/bootstrap-CI plus Wilson pass-rate summaries so delegation-heavy rosters can be judged on reproducible behavior rather than best-of-`n` luck.
+
+### Changed
+- **Worker-image defaults refreshed for Claude Bridge and weekly harness pins** (#778, #781, #785) — `Dockerfile.worker` now ships Claude Code `2.1.179`, pi-mono `0.79.6`, and `@desplega.ai/claude-bridge` `0.2.1` while keeping the current Codex and opencode pins.
+
+### Fixed
+- **Codex abort paths now preserve descriptive failure reasons** (#782) — worker-initiated cancellation and graceful shutdown now propagate explicit abort reasons through the Codex session runner so diagnostics no longer collapse those cases into a generic `cancelled` failure.
+
 ## [1.100.0] - 2026-06-17
 
 ### Added

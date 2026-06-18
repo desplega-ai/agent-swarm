@@ -401,11 +401,12 @@ docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.178`
-- `PI_CODING_AGENT_VERSION=0.79.4`
+- `CLAUDE_CODE_VERSION=2.1.179`
+- `PI_CODING_AGENT_VERSION=0.79.6`
 - `CODEX_VERSION=0.140.0`
 - `OPENCODE_VERSION=1.17.7`
 - `OPENCODE_SDK_VERSION=1.17.7`
+- `@desplega.ai/claude-bridge=0.2.1`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 

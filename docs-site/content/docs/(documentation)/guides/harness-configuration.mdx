@@ -143,7 +143,7 @@ The default model baked into the worker image is `gpt-5.4`. You can override it 
 - **Cross-keyType failover**: when Codex workers have both `OPENAI_API_KEY` slots and `codex_oauth_*` slots available, the runner now fails over across key types instead of retrying a known-exhausted pool. A successful task also clears stale rate-limit state for the credential that proved healthy.
 - **Per-task subprocess isolation**: each task gets a fresh `codex-session-runner` process, which keeps the worker's baseline memory flat and avoids long-lived SDK heap growth on hot workers.
 - **Small spawn argv**: large system prompts are staged to a temp file and passed via `--append-system-prompt-file`, avoiding Linux `MAX_ARG_STRLEN` / `E2BIG` failures on prompt-heavy repos.
-- **Actionable failure reporting**: subprocess startup / parse failures are emitted back to the parent as structured errors, and non-TTY runs no longer leak cursor escape sequences into the JSON pipe.
+- **Actionable failure reporting**: subprocess startup / parse failures are emitted back to the parent as structured errors, non-TTY runs no longer leak cursor escape sequences into the JSON pipe, and explicit abort sources now survive as descriptive `failureReason` values such as `cancelled` or `graceful_shutdown` instead of collapsing into a generic cancellation.
 
 ---
 
