@@ -127,13 +127,20 @@ export class ClaudeCliLlmRaterClient implements LlmRaterClient {
   async rate(input: LlmRaterInput): Promise<LlmRaterResult | null> {
     const prompt = buildPrompt(input);
     const tmpFile = `/tmp/llm-rater-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
+    // Isolate the inner `claude` into a throwaway cwd (inherited from bash) so
+    // it derives a distinct project slug instead of joining the agent's
+    // `~/.claude/projects/-workspace`. Defense-in-depth mirror of the fix in
+    // complete-structured.ts; this rater is dormant (off the live hook path).
+    const isolatedCwd = `${process.env.TMPDIR ?? "/tmp"}/llm-rater-cwd-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     let stdout = "";
     try {
       await Bun.write(tmpFile, prompt);
+      await Bun.$`mkdir -p ${isolatedCwd}`.quiet().nothrow();
       const proc = Bun.spawn(
         ["bash", "-c", `cat "${tmpFile}" | claude -p --model ${this.model} --output-format json`],
         {
+          cwd: isolatedCwd,
           stdout: "pipe",
           stderr: "pipe",
           env: { ...process.env, SKIP_SESSION_SUMMARY: "1" },
@@ -151,6 +158,7 @@ export class ClaudeCliLlmRaterClient implements LlmRaterClient {
       } catch {
         // best-effort
       }
+      await Bun.$`rm -rf ${isolatedCwd}`.quiet().nothrow();
     }
 
     let envelope: ClaudeCliEnvelope;

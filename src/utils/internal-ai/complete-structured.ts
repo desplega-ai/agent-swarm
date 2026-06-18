@@ -114,9 +114,19 @@ export async function defaultSpawnClaudeCli(
   // `runStopHookSessionSummary` honors this flag — same convention as the
   // `claude -p` shellout in `src/be/memory/raters/llm-client.ts`.
   env.SKIP_SESSION_SUMMARY = "1";
+  // Isolate this sub-session into a throwaway cwd so Claude Code derives a
+  // distinct project slug instead of joining `~/.claude/projects/-workspace`,
+  // where claude-bridge tails the main interactive session's transcript.
+  // Inheriting the hook's `/workspace` cwd forks/evicts that file, so real
+  // swarm tasks emit only system/init + a null-metrics result. Keeping the
+  // same $HOME/.claude.json (OAuth + pre-seeded trust) avoids any headless
+  // onboarding hang. Mirrors the temp-dir idiom in scripts/extract-schema.ts.
+  const isolatedCwd = `${process.env.TMPDIR ?? "/tmp"}/claude-summary-${crypto.randomUUID()}`;
+  await Bun.$`mkdir -p ${isolatedCwd}`.quiet().nothrow();
   const proc = Bun.spawn({
     cmd,
     env,
+    cwd: isolatedCwd,
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -165,6 +175,7 @@ export async function defaultSpawnClaudeCli(
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", abortHandler);
+    await Bun.$`rm -rf ${isolatedCwd}`.quiet().nothrow();
   }
 }
 
