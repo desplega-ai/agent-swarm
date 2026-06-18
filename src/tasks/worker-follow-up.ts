@@ -6,6 +6,7 @@ import {
   getLeadAgent,
   getTaskAttachments,
   getTaskById,
+  hasNonTerminalRerouteDecisionChild,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
@@ -299,6 +300,93 @@ export function createResumeFollowUp(args: {
       `[ResumeFollowUp] Repointed ${repointed} tracker_sync row(s) from ${parent.id.slice(0, 8)} → ${created.id.slice(0, 8)}`,
     );
   }
+
+  return { kind: "created", task: created };
+}
+
+/** Result of `createRerouteDecisionTask`. */
+export type CreateRerouteDecisionResult =
+  | { kind: "created"; task: AgentTask }
+  | { kind: "skipped"; reason: "lead_not_found" | "duplicate_exists" };
+
+/**
+ * Hand the Lead a re-delegation DECISION task for a crash-recovery resume that
+ * was pinned to its original agent but never reclaimed within the grace window
+ * (DES-523). The Lead receives context — the crashed agent's identity + the
+ * original work — and must re-dispatch via `send-task` with an explicit
+ * `agentId`; it does NOT execute the work itself, and the work is never
+ * re-pooled. Mirrors `createWorkerTaskFollowUp`'s Lead-owned-follow-up shape.
+ *
+ * Invoked by the heartbeat reaper (`escalateUnreclaimedResumes`), NOT at crash
+ * time: "gone" can't be distinguished from "restarting" at detection time, so
+ * the Lead path is only reached after a pin has demonstrably failed to be
+ * reclaimed.
+ *
+ * Discriminator: `taskType: "reroute-decision"` (NOT "follow-up") so it is
+ * distinguishable from ordinary completion follow-ups for dedup and so the
+ * `send-task` Slack re-delegation guard (which only fires for `taskType ===
+ * "follow-up"`) never blocks the Lead's re-dispatch.
+ *
+ * Idempotent: skips when a non-terminal reroute-decision child already exists
+ * for the original. No lead → no-op (fail-safe), mirroring
+ * `createWorkerTaskFollowUp`.
+ *
+ * @param staleResume the failed pinned resume (R1). The generation budget for
+ *   the Lead's re-dispatch is derived from it (`gen(R1)+1`), NOT from the root
+ *   `original` (which carries no resume-generation tag and would reset to 1
+ *   every escalation cycle, defeating MAX_RESUME_GENERATIONS via the Lead path).
+ * @param maxGenerations passed in (rather than imported from heartbeat.ts) to
+ *   avoid a circular import — heartbeat.ts already imports this module.
+ */
+export function createRerouteDecisionTask(args: {
+  original: AgentTask;
+  staleResume: AgentTask;
+  reason: ResumeReason;
+  maxGenerations: number;
+}): CreateRerouteDecisionResult {
+  const { original, staleResume, reason, maxGenerations } = args;
+
+  const leadAgent = getLeadAgent();
+  if (!leadAgent) return { kind: "skipped", reason: "lead_not_found" };
+
+  // Idempotency: a prior sweep may already have escalated this original.
+  if (hasNonTerminalRerouteDecisionChild(original.id)) {
+    return { kind: "skipped", reason: "duplicate_exists" };
+  }
+
+  const crashedAgent = original.agentId ? getAgentById(original.agentId) : null;
+  const agentName = crashedAgent?.name || original.agentId?.slice(0, 8) || "unknown";
+  const identitySlice = crashedAgent?.identityMd
+    ? `${crashedAgent.identityMd.slice(0, 500)}${crashedAgent.identityMd.length > 500 ? "..." : ""}`
+    : "(no identity recorded)";
+  const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(original.id));
+
+  const decision = resolveTemplate("task.reroute.decision", {
+    original_agent_name: agentName,
+    original_agent_identity: identitySlice,
+    original_task_id: original.id,
+    reason,
+    task_desc: original.task.slice(0, 200),
+    // Derive from the FAILED PIN (staleResume), not `original` (the root with no
+    // generation tag) — otherwise every escalation resets to gen 1 and the
+    // MAX_RESUME_GENERATIONS cap is never reached on the Lead path.
+    generation_next: getNextResumeGeneration(staleResume),
+    max_generations: maxGenerations,
+    artifacts_block: attachmentsBlock,
+  });
+
+  // Lead-owned `pending` decision task (createTaskExtended derives `pending`
+  // from a set agentId). Slack/VCS/etc. context is inherited from the original
+  // via parentTaskId. taskType is the distinct "reroute-decision" marker.
+  const created = createTaskExtended(decision.text, {
+    agentId: leadAgent.id,
+    creatorAgentId: original.creatorAgentId,
+    source: "system",
+    taskType: "reroute-decision",
+    tags: ["reroute-decision"],
+    priority: Math.min(100, (original.priority ?? 50) + 10),
+    parentTaskId: original.id,
+  });
 
   return { kind: "created", task: created };
 }

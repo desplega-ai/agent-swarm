@@ -1444,6 +1444,31 @@ export function hasNonTerminalResumeChild(parentId: string): boolean {
   return row !== undefined && row !== null;
 }
 
+/**
+ * True when a non-terminal `reroute-decision` child exists for `parentId`.
+ *
+ * Mirrors {@link hasNonTerminalResumeChild} but filters on
+ * `taskType = 'reroute-decision'` — the Lead-owned re-delegation decision
+ * created when a pinned crash-recovery resume is never reclaimed (DES-523).
+ * Makes escalation idempotent: a later heartbeat sweep must not create a second
+ * decision for the same original task. We filter on the taskType marker
+ * specifically (not any child) so ordinary delegation / completion follow-up
+ * children of the original cannot suppress a needed decision, and nothing else
+ * is mistaken for one.
+ */
+export function hasNonTerminalRerouteDecisionChild(parentId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM agent_tasks
+       WHERE parentTaskId = ?
+         AND taskType = 'reroute-decision'
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       LIMIT 1`,
+    )
+    .get(parentId);
+  return row !== undefined && row !== null;
+}
+
 export function updateTaskClaudeSessionId(
   taskId: string,
   claudeSessionId: string,
