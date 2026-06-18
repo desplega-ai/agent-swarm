@@ -691,6 +691,7 @@ const HARNESS_SESSION_DIRS: Record<HarnessConfig["provider"], string[]> = {
   codex: ["/home/worker/.codex/sessions"],
   pi: ["/home/worker/.pi"],
   opencode: ["/home/worker/.local/share/opencode"],
+  "ai-sdk-agent": [],
 };
 
 export const ATTEMPT_START_MARKER = "/tmp/eval-attempt-start";

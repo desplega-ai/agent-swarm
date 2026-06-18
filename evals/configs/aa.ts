@@ -375,6 +375,11 @@ export const AA_UNMATCHED_CONFIG_IDS: Record<string, string> = {
     "no Grok Build row in the 2026-06-12 snapshot — only Grok 4.3 effort rows",
   "pi-owl-alpha": "no Owl Alpha row — AA does not benchmark the OpenRouter stealth model",
   "opencode-owl-alpha": "no Owl Alpha row — AA does not benchmark the OpenRouter stealth model",
+  "ai-sdk-agent-5.4-mini":
+    "no AI SDK Agent serving-profile row; adapter does not set the Codex CLI medium effort profile",
+  "ai-sdk-agent-5.4": "TSV has no plain GPT-5.4 rows — only mini/nano",
+  "ai-sdk-agent-5.5":
+    "no AI SDK Agent serving-profile row; adapter does not set the Codex CLI medium effort profile",
 };
 
 /** Joined blocks, built eagerly so a mapping → missing-row typo fails at import. */
