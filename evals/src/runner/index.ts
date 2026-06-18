@@ -76,26 +76,57 @@ import { topoOrder } from "./topo.ts";
 const DEFAULT_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_RETRIES = 1; // infra retries per attempt (fresh sandboxes each try)
 
-// ---- sql-dump fixture validation (v6 §1.3 — rules FROZEN) ----
+// ---- sql-seed fixture validation (INSERT-only convention) ----
+//
+// Fixtures are INSERT-only seeds: just the reference rows, NO schema and NO
+// `_migrations`. The schema is built PRE-BOOT from the REAL migrations in the
+// API image (see bootStack in swarm/sandbox.ts), so a fixture must NOT carry
+// `CREATE TABLE`/`_migrations` (that would be a stale full-dump — exactly the
+// drift this convention removes). The seed lands AFTER migrations build the
+// schema, so it must contain at least one INSERT, and it must not seed live
+// operational state (see scenarios/fixtures/README.md).
 
 const SQL_DUMP_MAX_BYTES = 5 * 1024 * 1024;
-// A full `sqlite3 <db> .dump` always carries the _migrations table WITH applied
-// rows. A dump missing them would make the migration bootstrapper re-apply 002+
-// onto already-migrated tables at first boot → breakage.
-const SQL_DUMP_MIGRATIONS_DDL_RE = /CREATE TABLE\s+(IF NOT EXISTS\s+)?["'`]?_migrations/i;
-const SQL_DUMP_MIGRATIONS_ROWS_RE = /INSERT INTO\s+["'`]?_migrations/i;
+/** Any INSERT — an INSERT-only seed must carry at least one row. */
+const SQL_SEED_INSERT_RE = /INSERT\s+INTO/i;
+/** A full `.dump` carries DDL; an INSERT-only seed must not. */
+const SQL_SEED_CREATE_TABLE_RE = /CREATE\s+TABLE/i;
+/** The `_migrations` bookkeeping is owned by the pre-boot migrate step, never the seed. */
+const SQL_SEED_MIGRATIONS_RE = /\b_migrations\b/i;
+/**
+ * Forbidden live-operational tables/state (README rules):
+ *  - `agents` — workers self-register at boot; a seeded row would be reused;
+ *  - in-flight (`pending`/`running`) tasks — the booting worker would claim them;
+ *  - `agent_memory` — embeddings live in a sqlite-vec virtual table; use
+ *    `scenario.seed.memories` instead.
+ */
+const SQL_SEED_AGENTS_RE = /INSERT\s+INTO\s+["'`]?agents\b/i;
+const SQL_SEED_AGENT_MEMORY_RE = /INSERT\s+INTO\s+["'`]?agent_memory\b/i;
+const SQL_SEED_INFLIGHT_STATUS_RE = /['"](pending|running)['"]/i;
 
-/** Returns the violation reason, or null when the dump text is acceptable. */
+/** Returns the violation reason, or null when the seed text is acceptable. */
 export function validateSqlDumpText(text: string): string | null {
   const bytes = Buffer.byteLength(text, "utf8");
   if (bytes > SQL_DUMP_MAX_BYTES) {
     return `fixture exceeds the 5 MB cap (${bytes} bytes) — fixtures are reference data, not prod DBs`;
   }
-  if (!SQL_DUMP_MIGRATIONS_DDL_RE.test(text)) {
-    return "dump does not create the _migrations table (use a full `sqlite3 <db> .dump`)";
+  if (SQL_SEED_CREATE_TABLE_RE.test(text)) {
+    return "fixture contains CREATE TABLE — seeds are INSERT-only; the schema is built from the real migrations pre-boot (do not ship a full `.dump`)";
   }
-  if (!SQL_DUMP_MIGRATIONS_ROWS_RE.test(text)) {
-    return "dump carries no applied _migrations rows (use a full `sqlite3 <db> .dump`)";
+  if (SQL_SEED_MIGRATIONS_RE.test(text)) {
+    return "fixture references `_migrations` — seeds are INSERT-only; the `_migrations` bookkeeping is written by the pre-boot migrate step (do not ship a full `.dump`)";
+  }
+  if (!SQL_SEED_INSERT_RE.test(text)) {
+    return "fixture carries no INSERT rows — an INSERT-only seed must seed at least one reference row";
+  }
+  if (SQL_SEED_AGENTS_RE.test(text)) {
+    return "fixture seeds `agents` rows — forbidden (workers self-register at boot; a colliding id would be silently reused)";
+  }
+  if (SQL_SEED_AGENT_MEMORY_RE.test(text)) {
+    return "fixture seeds `agent_memory` rows — forbidden (embeddings are not portable; use `scenario.seed.memories` instead)";
+  }
+  if (SQL_SEED_INFLIGHT_STATUS_RE.test(text)) {
+    return "fixture seeds an in-flight ('pending'/'running') status — forbidden (the booting worker would claim the row); seed only terminal rows";
   }
   return null;
 }
@@ -200,6 +231,33 @@ export function processTerminalTask<T extends SwarmTask>(
     }
   }
   return task;
+}
+
+/**
+ * Classify a task as run-vs-seed for the run-details artifact (display-only —
+ * scoring NEVER consults this). A scenario may seed reference-data tasks into the
+ * same swarm DB the run uses (e.g. delegation-probe's 20 audit-history rows); they
+ * pollute the run-details Tasks panel as if they were run activity.
+ *
+ * A task is a RUN task iff ANY of:
+ *   - its id is one of the scenario's upfront task ids (`upfrontTaskIds`), OR
+ *   - its `creatorAgentId` is one of the run's agent ids (lead + workers), OR
+ *   - its `agentId` is one of the run's agent ids.
+ * Everything else — the pre-existing fixture history, created BEFORE the run's
+ * agents existed and assigned to no run agent — is a SEED task. Defensive: the
+ * delegation fields ride the SwarmTask index signature and may be absent/non-string.
+ */
+export function classifyTaskOrigin(
+  task: SwarmTask,
+  upfrontTaskIds: ReadonlySet<string>,
+  runAgentIds: ReadonlySet<string>,
+): "run" | "seed" {
+  if (typeof task.id === "string" && upfrontTaskIds.has(task.id)) return "run";
+  const creatorAgentId = task.creatorAgentId;
+  if (typeof creatorAgentId === "string" && runAgentIds.has(creatorAgentId)) return "run";
+  const agentId = task.agentId ?? task.assignedAgentId;
+  if (typeof agentId === "string" && runAgentIds.has(agentId)) return "run";
+  return "seed";
 }
 
 /**
@@ -1276,6 +1334,45 @@ async function runAttemptOnce(opts: {
     recordAttemptTimings(attempt.id, timings);
     await updateAttempt(db, attempt.id, { taskIds: tasks.map((t) => t.id) });
 
+    // Runtime-spawned-task enumeration (Plan A §Phase 1). The scenario's upfront
+    // tasks are the only ones we await/capture, but the agents spawn MORE tasks
+    // at runtime — lead-delegated child tasks, the auto follow-ups a worker
+    // completion triggers (taskType="follow-up"), and resume tasks. Those ARE
+    // the delegation artifacts the rubric scores, but they're invisible to
+    // `tasks` (which only holds the upfront set). Fresh-DB-per-attempt means a
+    // full list returns exactly THIS attempt's tasks, so merge any not already
+    // tracked into the set passed to JudgeContext.tasks. Read-only for scoring:
+    // NOT awaited, NOT added to taskIds, NOT pulled into log/cost capture (those
+    // stay scenario-scoped via `activeTasks`). Best-effort — a list failure must
+    // not fail the attempt (scoring degrades to the upfront set).
+    const ctxTasks: SwarmTask[] = [...tasks];
+    const upfrontTaskIds = new Set(tasks.map((t) => t.id));
+    try {
+      const allTasks = await client.listAllTasks();
+      const spawned = allTasks.filter((t) => t.id && !upfrontTaskIds.has(t.id));
+      ctxTasks.push(...spawned);
+      log(`[task] captured ${spawned.length} runtime-spawned task(s) for scoring`);
+    } catch (err) {
+      log(
+        `[task] runtime-spawned-task enumeration failed (scoring upfront set only): ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+    // Tag each task run-vs-seed (display-only — scoring is unaffected). A scenario
+    // may seed reference-data tasks (e.g. delegation-probe's 20 audit-history rows)
+    // into the SAME swarm DB the run uses; listAllTasks() returns them alongside
+    // the real run activity. They were created BEFORE the run's agents existed, so
+    // none carry a run agent id / upfront id — the predicate (see classifyTaskOrigin)
+    // segregates them. The flag rides on the artifact (origin) so the UI can hide the
+    // seed rows by default; the seed tasks STAY in ctxTasks for post-hoc debugging.
+    const runAgentIds = new Set(
+      stack.workers.map((w) => w.agentId).filter((id): id is string => !!id),
+    );
+    for (const t of ctxTasks) {
+      (t as SwarmTask).origin = classifyTaskOrigin(t, upfrontTaskIds, runAgentIds);
+    }
+
     // Skipped tasks never produced a session — exclude them from the log and
     // cost waits (v6 §9.4 frozen); they STAY in tasks/taskIds/tasks.json.
     const activeTasks = tasks.filter((t) => !t.skipped);
@@ -1480,7 +1577,9 @@ async function runAttemptOnce(opts: {
     }));
     const worker0Ctx = ctxWorkers[0] as (typeof ctxWorkers)[number];
     const ctx: JudgeContext = {
-      tasks,
+      // Scenario tasks + runtime-spawned tasks (Plan A §Phase 1) — the latter
+      // are read-only delegation artifacts merged in above for the rubric.
+      tasks: ctxTasks,
       transcript,
       exec: worker0Ctx.exec,
       readFile: worker0Ctx.readFile,
@@ -1663,7 +1762,10 @@ async function runAttemptOnce(opts: {
       attemptId: attempt.id,
       kind: "task",
       name: "tasks.json",
-      content: stack.redact(JSON.stringify(tasks, null, 2)),
+      // Serialize ctxTasks (the upfront set MERGED with runtime-spawned child +
+      // follow-up tasks — the exact set the checks scored), not the upfront `tasks`
+      // alone, so the delegation paper-trail is inspectable post-hoc.
+      content: stack.redact(JSON.stringify(ctxTasks, null, 2)),
     });
     // Entrypoint logs: one artifact per worker — ALWAYS indexed naming, even
     // for a single worker (v6 §0.5; legacy rows keep `worker.log` → worker 0).

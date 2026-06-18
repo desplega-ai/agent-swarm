@@ -205,6 +205,23 @@ export class SwarmClient {
     return (res.agents ?? []).map(normalizeAgent);
   }
 
+  /**
+   * Full task set of the attempt's stack (`?fields=full`). Because each attempt
+   * boots a fresh DB, this returns exactly THIS attempt's tasks — the scenario's
+   * upfront tasks PLUS anything the agents spawned at runtime (lead-delegated
+   * child tasks, auto follow-ups, resume tasks). Shared by the runner's
+   * spawned-task enumeration and any check that needs the delegation paper-trail.
+   * Returns normalized {@link SwarmTask}s (camelCase `taskType`/`parentTaskId`/
+   * `creatorAgentId`/`agentId` survive via the `[key: string]: unknown` index).
+   */
+  async listAllTasks(limit = 200): Promise<SwarmTask[]> {
+    const res = await this.request<{ tasks?: SwarmTask[] }>(
+      "GET",
+      `/api/tasks?fields=full&limit=${limit}`,
+    );
+    return (res.tasks ?? []).map(normalizeTask);
+  }
+
   async getSessionLogs(taskId: string): Promise<SessionLogRow[]> {
     const res = await this.request<{ logs: SessionLogRow[] }>(
       "GET",

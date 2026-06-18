@@ -125,6 +125,8 @@ function emptyTaskRecord(id: string): AttemptTaskRecord {
     skipped: false,
     dependsOn: [],
     agentId: null,
+    // task-ids source = attempt.taskIds only (the run's upfront tasks) → always run.
+    origin: "run",
     costUsd: null,
     tokens: null,
     createdAt: null,
@@ -188,6 +190,10 @@ function normalizeAttemptTask(entry: Record<string, unknown>, id: string): Attem
       ? entry.dependsOn.filter((d): d is string => typeof d === "string")
       : [],
     agentId,
+    // Display-only run-vs-seed tag (runner-set on the tasks.json artifact). Absent
+    // on pre-tag artifacts AND on the live GET /api/tasks/:id payload → "run", so the
+    // panel shows every record by default exactly as before this field existed.
+    origin: entry.origin === "seed" ? "seed" : "run",
     costUsd: null,
     tokens: null,
     createdAt,

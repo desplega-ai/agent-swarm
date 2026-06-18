@@ -36,6 +36,15 @@ const WORKER_TEMPLATE = process.env.EVALS_E2B_TEMPLATE_WORKER ?? "agent-swarm-wo
 const SQL_SEED_OUTPUT_CLIP = 20_000;
 
 /**
+ * Wrap a string as a single POSIX shell single-quoted argument, escaping any
+ * embedded single quotes (`'` → `'\''`). Used to pass the pre-boot migrate+seed
+ * `bun -e` script body to `sandboxExec` without shell-injection or quoting bugs.
+ */
+function shSingleQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
  * One resolved roster member to boot (v7 §9.3 — FROZEN shape). The runner
  * resolves these from the scenario's `workers` / `lead` against the matrix
  * cell's config (frozen §12.3 rule) and passes them to {@link bootStack}.
@@ -65,7 +74,7 @@ export interface WorkerHandle {
 }
 
 export interface SqlSeedResult {
-  fixture: string; // bare filename, e.g. "seeded-history.sql"
+  fixture: string; // bare filename, e.g. "delegation-probe-history.sql"
   exitCode: number; // always 0 on a returned StackHandle (non-zero throws in boot)
   durationMs: number;
   stdout: string;
@@ -392,25 +401,58 @@ export async function bootStack(opts: {
     created.push(apiSandbox);
     opts.signal?.throwIfAborted();
 
-    // SQL-dump seeding (v6 §1.2): import BEFORE the API entrypoint starts, so
-    // the server's first boot forward-applies missing migrations onto the
-    // seeded DB and boot-time caches see the seeded rows. envd is independent
-    // of the entrypoint, so exec/file APIs work pre-boot.
+    // INSERT-only seeding: import BEFORE the API entrypoint starts, so the
+    // server's first boot sees a fully-migrated DB + the seeded rows, and
+    // boot-time caches pick them up. envd is independent of the entrypoint, so
+    // exec/file APIs work pre-boot.
+    //
+    // The fixture is INSERT-only (the seed rows, no schema, no `_migrations`).
+    // We build the schema PRE-BOOT by applying the REAL migration `.sql` files
+    // that ship in the image (`MIGRATIONS_DIR`, default /app/migrations —
+    // Dockerfile COPYs them there) in the SAME way `src/be/migrations/runner.ts`
+    // does, then write the matching `_migrations` bookkeeping (version, name,
+    // applied_at, checksum). The post-boot runner then finds `_migrations` fully
+    // populated and applies ZERO further migrations (and warns on no checksum
+    // mismatch). This kills the schema-drift footgun of the old full-dump
+    // fixtures: the schema is ALWAYS the real migrations.
     let sqlSeed: SqlSeedResult | null = null;
     if (opts.preBootSql) {
       const { fixture, text } = opts.preBootSql;
-      log(`importing SQL seed ${fixture} (${Buffer.byteLength(text, "utf8")} bytes)`);
-      // Upload via the E2B files API (avoids shell-quoting megabyte heredocs).
+      log(`migrate+seed ${fixture} (${Buffer.byteLength(text, "utf8")} bytes)`);
+      // Upload via the E2B files API (avoids shell-quoting the seed body).
       await sandboxWriteFile(apiSandbox.sandboxID, "/tmp/eval-seed.sql", text);
-      // bun:sqlite's multi-statement db.exec handles a full `.dump` (its own
-      // BEGIN TRANSACTION/COMMIT/PRAGMAs included).
-      const importCmd =
-        `mkdir -p /app/data && bun -e '` +
-        `const { Database } = require("bun:sqlite");` +
-        `const db = new Database("/app/data/agent-swarm-db.sqlite");` +
-        `db.exec(require("fs").readFileSync("/tmp/eval-seed.sql", "utf8"));` +
-        `db.close();` +
-        `' && rm -f /tmp/eval-seed.sql`;
+      // Mirror of runMigrations() in src/be/migrations/runner.ts — kept in lockstep
+      // (filename sort, version = parseInt(prefix), name = file minus .sql,
+      // checksum = sha256(content), each in its own transaction, FKs off for the
+      // pass) so the bookkeeping matches byte-for-byte and the post-boot runner
+      // re-applies nothing. Migrations build the schema; then the INSERT-only seed
+      // lands on top. Any failure here = boot failure (caught below).
+      const migrateAndSeed = [
+        'const { Database } = require("bun:sqlite");',
+        'const { createHash } = require("crypto");',
+        'const { readdirSync, readFileSync } = require("fs");',
+        'const { join } = require("path");',
+        'const migrationsDir = process.env.MIGRATIONS_DIR || "/app/migrations";',
+        'const db = new Database("/app/data/agent-swarm-db.sqlite");',
+        'db.run("CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL, checksum TEXT NOT NULL)");',
+        'const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();',
+        'if (files.length === 0) throw new Error("no migration .sql files in " + migrationsDir);',
+        'db.run("PRAGMA foreign_keys = OFF");',
+        "for (const file of files) {",
+        '  const version = parseInt(file.split("_")[0] || "0", 10);',
+        '  const name = file.replace(".sql", "");',
+        '  const sql = readFileSync(join(migrationsDir, file), "utf-8");',
+        '  const checksum = createHash("sha256").update(sql).digest("hex");',
+        "  db.transaction(() => {",
+        "    db.exec(sql);",
+        '    db.run("INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)", [version, name, new Date().toISOString(), checksum]);',
+        "  })();",
+        "}",
+        'db.run("PRAGMA foreign_keys = ON");',
+        'db.exec(readFileSync("/tmp/eval-seed.sql", "utf8"));',
+        "db.close();",
+      ].join("");
+      const importCmd = `mkdir -p /app/data && bun -e ${shSingleQuote(migrateAndSeed)} && rm -f /tmp/eval-seed.sql`;
       const t0 = Date.now();
       const res = await sandboxExec(apiSandbox.sandboxID, importCmd);
       const durationMs = Date.now() - t0;

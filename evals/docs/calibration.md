@@ -44,10 +44,10 @@ and `pi-gemini-3.5-flash` are **NOT** calibration anchors (they stay in the cata
 | Scenario class | Per-attempt target | Examples |
 |----------------|--------------------|----------|
 | Easy / cheap   | ≤ $0.25            | `sql-audit`, `memory-distractor`, `relay-pipeline` |
-| Code / medium  | ~$0.3 – $0.5       | `bug-ladder`, `cross-worker-invent` |
-| Deep / lead    | ~$1 – $2           | `plan-implement-review`, `distributed-audit` |
+| Code / medium  | ~$0.3 – $0.5       | `bug-ladder` |
+| Deep / lead    | ~$1 – $2           | `distributed-audit` |
 
-The **full sweep** = 7 scenarios × 4 anchors × 3 attempts = 84 attempts. Budget roughly **$40 – $120** total
+The **full sweep** = 6 scenarios × 4 anchors × 3 attempts = 72 attempts. Budget roughly **$35 – $100** total
 depending on how many deep/lead scenarios run their full attempt count and how many retries fire.
 
 ## Efficiency is a waste-guard, not a quality discriminator
@@ -98,14 +98,14 @@ cd evals && bun src/cli.ts run \
   --attempts 1 --concurrency 2
 ```
 
-### 2. Full calibration sweep — 7 scenarios × 4 anchors × 3 attempts
+### 2. Full calibration sweep — 6 scenarios × 4 anchors × 3 attempts
 
 Run all at once, or per scenario (so one scenario's failure doesn't abort the batch):
 
 ```bash
 cd evals && bun src/cli.ts run \
   --name "round11-calibration" \
-  --scenarios sql-audit,memory-distractor,bug-ladder,cross-worker-invent,relay-pipeline,plan-implement-review,distributed-audit \
+  --scenarios sql-audit,memory-distractor,bug-ladder,relay-pipeline,distributed-audit,delegation-probe \
   --configs claude-opus-4.8,codex-5.5,pi-deepseek-flash,claude-haiku \
   --attempts 3 --concurrency 4 --max-retries 1
 ```
@@ -153,18 +153,18 @@ Pinned frontier model: `claude-opus-4.8`. Fill in after the sweep.
 | `sql-audit`            |             |           |     |                                     |       |
 | `memory-distractor`    |             |           |     |                                     |       |
 | `bug-ladder`           |             |           |     |                                     |       |
-| `cross-worker-invent`  |             |           |     |                                     |       |
 | `relay-pipeline`       |             |           |     |                                     |       |
-| `plan-implement-review`|             |           |     |                                     |       |
 | `distributed-audit`    |             |           |     |                                     |       |
+| `delegation-probe`     |             |           |     |                                     |       |
 
-## Swarm-mechanics scenarios — finding (2026-06-14, ACCEPTED)
+## Swarm-mechanics scenarios — finding (2026-06-14, ACCEPTED) → PRUNED (2026-06-17, Plan A)
 
 `memory-coordination`, `failure-recovery`, `failure-recovery-mixed` were built to test whether a harness+model is a
 good **swarm participant** (shared memory, coordination, failure recovery) rather than a smart single model. The
-`seed.workerFailures` failure-injection primitive works end-to-end (poisons a chosen worker at seed time, best-effort).
+`seed.workerFailures` failure-injection primitive works end-to-end (poisons a chosen worker at seed time, best-effort)
+and is **retained as a framework primitive** even though no shipped scenario currently exercises it.
 
-**Result: these scenarios do NOT discriminate model tiers at our measurement resolution.** Clean sweeps (opus-4.8 /
+**Result: these scenarios did NOT discriminate model tiers at our measurement resolution.** Clean sweeps (opus-4.8 /
 deepseek-flash / haiku):
 
 | Scenario | opus | deepseek | haiku | gap | note |
@@ -177,7 +177,9 @@ carries the work; and/or (b) the **single-call agentic judge is too noisy** (per
 gap. All tiers recover a poisoned value ~equally and the judge mostly returns ~0.50. A round-3 reading of "opus 0.90 vs
 budget 0.50" was a single lucky attempt and did **not** replicate at n=3; the 3× reweight it motivated was **reverted**.
 
-These three scenarios are **retained as swarm-mechanics coverage** (and as a live exercise of `seed.workerFailures`), NOT as
-tier discriminators, and are excluded from the ship-gate table above. If revisited, the levers are: N-sample median judging
+**Pruned in the swarm-redesign cleanup (Plan A, 2026-06-17):** `memory-coordination`, `failure-recovery`, and
+`failure-recovery-mixed` (along with `cross-worker-invent`) were the audit's clearly-measured non-discriminators and have
+been **removed from the catalog**. If swarm-mechanics coverage is revisited, the levers are: N-sample median judging
 (beat the noise), a tighter *deterministic* detection check (replace the soft judge), or genuinely harder failures
-(mid-task worker KILL, simultaneous/cascading failures) — see the QA report Round-4 section.
+(mid-task worker KILL, simultaneous/cascading failures) — see the QA report Round-4 section. The `seed.workerFailures`
+primitive (runner + types) is preserved for that future work.

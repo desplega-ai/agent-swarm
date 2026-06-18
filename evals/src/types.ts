@@ -105,9 +105,11 @@ export interface ScenarioSeed {
   /** Memories indexed into the swarm API (scope "swarm") before tasks start. */
   memories?: string[];
   /**
-   * Filename of a SQLite text dump under evals/scenarios/fixtures/, imported into
-   * the API sandbox DB BEFORE the API server first boots. Bare filename only
-   * (no path separators), must end in ".sql". Example: "seeded-history.sql".
+   * Filename of an INSERT-only SQL seed under evals/scenarios/fixtures/, applied
+   * to the API sandbox DB BEFORE the API server first boots — after the schema is
+   * built pre-boot from the real migrations (see bootStack in swarm/sandbox.ts).
+   * Bare filename only (no path separators), must end in ".sql".
+   * Example: "delegation-probe-history.sql".
    */
   sqlDump?: string;
   /**
@@ -405,6 +407,13 @@ export interface SwarmTask {
   failureReason?: string | null;
   /** Runner-computed: status === "failed" && CASCADE_SKIP_RE.test(failureReason ?? ""). */
   skipped?: boolean;
+  /**
+   * Runner-tagged at artifact-serialization time (display-only — scoring never
+   * reads this): "run" = real run activity (upfront / run-agent-attributed),
+   * "seed" = pre-existing scenario reference-data the swarm DB carried in. Absent
+   * on pre-tag artifacts; consumers must default a missing value to "run".
+   */
+  origin?: "run" | "seed";
   [key: string]: unknown;
 }
 
@@ -440,6 +449,13 @@ export interface AttemptTaskRecord {
   dependsOn: string[];
   /** Assigned agent id; null when unknown. */
   agentId: string | null;
+  /**
+   * Run-vs-seed classification (display-only — scoring never reads this). "run" =
+   * real run activity; "seed" = pre-existing scenario reference-data the swarm DB
+   * carried in (runner-tagged on the tasks.json artifact). Defaults to "run" on
+   * the live / task-ids sources and on pre-tag artifacts (the run-only contract).
+   */
+  origin: "run" | "seed";
   /**
    * Σ totalCostUsd over this task's PRICED session-cost rows (same rule as the
    * round-7 per-member roster attribution); null when 0 priced rows, when the

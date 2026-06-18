@@ -195,6 +195,13 @@ export interface AttemptTaskJson {
   dependsOn: string[];
   agentId: string | null;
   /**
+   * Run-vs-seed classification (display-only; mirrors AttemptTaskRecord.origin).
+   * "run" = real run activity; "seed" = pre-existing scenario reference-data the
+   * swarm DB carried in. Optional = pre-tag server payloads — default a missing
+   * value to "run" (the run-only contract: never hide a record on absence).
+   */
+  origin?: "run" | "seed";
+  /**
    * Σ priced session-cost rows of this task (same rule as the round-7
    * per-member roster cost). Null = unpriced / no artifact (v1-era) / live.
    */

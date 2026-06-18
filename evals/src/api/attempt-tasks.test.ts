@@ -72,6 +72,7 @@ describe("buildAttemptTaskRecords — tasks-artifact source", () => {
         skipped: false,
         dependsOn: [],
         agentId: "agent-1",
+        origin: "run", // no origin tag on the entry → defaults to run
         costUsd: null, // no session-costs.json
         tokens: null,
         createdAt: "2026-06-12T13:32:52.211Z", // v7.7 item 7: verbatim passthrough
@@ -79,6 +80,18 @@ describe("buildAttemptTaskRecords — tasks-artifact source", () => {
         durationMs: null, // no finishedAt → null
       },
     ]);
+  });
+
+  test("origin: seed entries pass through; missing/other values default to run", () => {
+    const res = build({
+      taskIds: [T1, T2, T3],
+      tasks: [
+        artifactEntry({ id: T1, origin: "seed" }),
+        artifactEntry({ id: T2, origin: "run" }),
+        artifactEntry({ id: T3 }), // no origin tag → run
+      ],
+    });
+    expect(res.tasks.map((t) => t.origin)).toEqual(["seed", "run", "run"]);
   });
 
   test("outcome precedence: result first, output fallback, null when both empty", () => {
@@ -185,6 +198,7 @@ describe("buildAttemptTaskRecords — tasks-artifact source", () => {
       skipped: false,
       dependsOn: [],
       agentId: null,
+      origin: "run",
       costUsd: null,
       tokens: null,
       createdAt: null,
@@ -372,6 +386,7 @@ describe("buildAttemptTaskRecords — back-compat degradation (v1-era rows)", ()
           skipped: false,
           dependsOn: [],
           agentId: null,
+          origin: "run",
           costUsd: null,
           tokens: null,
           createdAt: null,
@@ -387,6 +402,7 @@ describe("buildAttemptTaskRecords — back-compat degradation (v1-era rows)", ()
           skipped: false,
           dependsOn: [],
           agentId: null,
+          origin: "run",
           costUsd: null,
           tokens: null,
           createdAt: null,
@@ -480,6 +496,7 @@ describe("fetchLiveTaskRecords (?live=1 source)", () => {
         skipped: false,
         dependsOn: [],
         agentId: "agent-live",
+        origin: "run", // live source carries no origin tag → defaults to run
         costUsd: null,
         tokens: null,
         createdAt: "2026-06-12T14:00:00.000Z",
@@ -495,6 +512,7 @@ describe("fetchLiveTaskRecords (?live=1 source)", () => {
         skipped: false,
         dependsOn: [T1],
         agentId: "agent-live",
+        origin: "run", // live source carries no origin tag → defaults to run
         costUsd: null,
         tokens: null,
         createdAt: null,

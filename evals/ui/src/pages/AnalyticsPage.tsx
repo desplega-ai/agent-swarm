@@ -481,7 +481,8 @@ function TrendsSection(props: { series: AnalyticsSeries[] }): ReactNode {
 }
 
 // ---- section 2: Efficiency — score vs tokens scatter (v7 §7.3, screenshot 6;
-// round-8 §C4: X selector Tokens|Price|Time, worst quadrant, yDomain "fit") ----
+// round-8 §C4: X selector Tokens|Price|Time, worst quadrant; y-axis pinned to
+// the constant [0,1] domain so the quadrant bands anchor to the true scale) ----
 
 type ScatterYKey = "score" | "passRate";
 type ScatterXKey = "tokens" | "price" | "duration";
@@ -600,7 +601,7 @@ function EfficiencySection(props: { scatter: AnalyticsScatterPoint[] }): ReactNo
     <div className="panel">
       <SectionHead
         title={`Efficiency — ${yKey === "score" ? "Score" : "Pass Rate"} vs ${xDef.label}`}
-        tip="One dot per model: quality on the y axis against the selected spend metric (avg tokens, cost, or duration per attempt) on the x axis — lower is always better on x. Dot size scales with attempts. The green corner is the most attractive quadrant (high quality, low spend) and the red corner the least attractive; the y axis zooms to the plotted range so tightly clustered values (e.g. scores near 1.0) stay readable."
+        tip="One dot per model: quality on the y axis against the selected spend metric (avg tokens, cost, or duration per attempt) on the x axis — lower is always better on x. Dot size scales with attempts. The green corner is the most attractive quadrant (high quality, low spend) and the red corner the least attractive; the y axis is pinned to the full 0–1 range (Score 0.00–1.00, Pass Rate 0–100%) so the quadrants stay correct and comparable across runs, while the x axis auto-scales to the data."
       >
         <span className="an-seg-label dim">X</span>
         <Seg
@@ -639,9 +640,12 @@ function EfficiencySection(props: { scatter: AnalyticsScatterPoint[] }): ReactNo
         xFormat={xDef.format}
         yFormat={yDef.format}
         quadrant={{ x: "low", y: "high", label: "most attractive quadrant", worst: true }}
-        // §C4 differentiation choice: "fit" y-domain — Score and Pass Rate each
-        // zoom to their own [min,max], so near-1.0 clusters spread apart.
-        yDomain="fit"
+        // Both Score and Pass Rate are 0–1 proportions, so pin the y-axis to a
+        // constant [0,1] domain — the quadrant bands then anchor to the true
+        // scale (top band = high quality on the real axis, not the plotted
+        // range) and the chart stays comparable across runs. Score renders as
+        // fixed-decimal ticks (fmtScore), Pass Rate as 0–100% (fmtPct).
+        yDomain={[0, 1]}
         showLabels={points.length <= SCATTER_LABEL_CAP}
         emptyText="No graded attempts with this metric yet — v7 runs capture tokens for every attempt"
       />

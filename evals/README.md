@@ -2,9 +2,11 @@
 
 Evaluation harness for agent-swarm: runs a **scenario × harness-config matrix** against real swarm stacks deployed in **E2B sandboxes**, grades outcomes with **deterministic checks + LLM/agentic judges** (OpenRouter via the AI SDK), and stores results in **Turso** (libsql embedded replica — local WAL file synced with the remote primary; see [Database](#database)).
 
+> **Authoring scenarios, rubrics, or fixtures? → see [SCENARIO-AUTHORING.md](./SCENARIO-AUTHORING.md)** — the durable rulebook (OutcomeSpec v2, deterministic-check patterns, the hard-won rubric-design rules, the de-risk pilot pattern, and how the deployed swarm should propose changes).
+
 ## How it works
 
-Each attempt (one cell of the matrix, possibly repeated for best@n):
+Each attempt (one cell of the matrix, run `n` times per cell):
 
 1. **Boot** a fresh stack — one E2B sandbox for the swarm API (`agent-swarm-api-latest` template) + one per roster member (`agent-swarm-worker-latest`). Each member runs its **effective** config's `HARNESS_PROVIDER` / `MODEL_OVERRIDE` (the matrix cell's config unless the scenario overrides that member — see worker configuration below) and receives only the credentials its provider needs, so heterogeneous rosters get per-sandbox credential isolation for free. Reuses `src/e2b/dispatch.ts` primitives from the repo root.
 2. **Seed** (optional) — shell commands in the worker sandbox (`scenario.seed.exec`).
@@ -115,7 +117,7 @@ bun src/cli.ts run --scenarios build-verify-fix \
 
 Judge model precedence: `scenario.judge.model` > run `--judge-model` > `EVAL_JUDGE_MODEL` > `deepseek/deepseek-v4-pro`.
 
-Scoring per cell: **best@n** (any attempt passed), pass@1, best/avg judge score, total cost, avg duration. Cost is **always tracked** via a fallback chain: harness-reported session-cost rows (`costSource: "harness"`) → recomputed from per-message token usage × the models.dev pricing snapshot (`"recomputed"`) → tagged `"unpriced"` with any extracted tokens still stored. **Token usage is tracked universally**: when harness-priced rows carry no token columns, the recompute extractor still runs (tokens only — cost/source untouched), so every attempt with parseable harness output stores `tokens_json`. On heterogeneous rosters the extractor runs per member (each member's provider/model/session files) and results merge.
+Scoring per cell: the headline is a convergent **mean dimension-score ± bootstrap CI** with a **Wilson pass-rate** companion (the CI tightens ~1/√n, so `n` is a confidence dial, not a luck dial), surfaced in `show`/serve as a ✓/~/✗ threshold-vs-CI indicator; `passedAny`/pass@1/`bestScore` remain as drill-down fields. Plus total cost and avg duration. Cost is **always tracked** via a fallback chain: harness-reported session-cost rows (`costSource: "harness"`) → recomputed from per-message token usage × the models.dev pricing snapshot (`"recomputed"`) → tagged `"unpriced"` with any extracted tokens still stored. **Token usage is tracked universally**: when harness-priced rows carry no token columns, the recompute extractor still runs (tokens only — cost/source untouched), so every attempt with parseable harness output stores `tokens_json`. On heterogeneous rosters the extractor runs per member (each member's provider/model/session files) and results merge.
 
 ## Database
 

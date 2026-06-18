@@ -235,9 +235,12 @@ Hard rules:
 
 </important>
 
-<important if="you are testing Slack integration manually or via E2E">
+<important if="you are sending a task to the swarm, or testing Slack integration manually or via E2E">
 
-Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send `slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")` via the Slack MCP tool to trigger the bot handler → task-assignment flow.
+**Reaching the swarm depends on the target:**
+
+- **LOCAL / dev agent-swarm (Slack):** Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send `slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")` via the Slack MCP tool to trigger the bot handler → task-assignment flow.
+- **PRODUCTION / deployed swarm (MCP):** use the swarm-user MCP `mcp__agent-swarm-user__send-task` (creates an unassigned task in the production pool; read results with `mcp__agent-swarm-user__get-tasks`). Do **NOT** use the dev Slack channel for production swarm work. The MCP may not be enabled in every session — check for `mcp__agent-swarm-user__*` first.
 
 </important>
 
@@ -283,6 +286,12 @@ Same-PR doc-update rule + new-provider checklist: [runbooks/harness-providers.md
 Adapter emits CostData + context_usage → API recomputes USD against the seeded `pricing` table → row tagged `costSource` ('harness' / 'pricing-table' / 'unpriced') → UI badge. Unified context formula is `input + cache_read + cache_create + output` (see `computeContextUsedUnified`).
 
 Same-PR doc-update rule: update [docs-site/.../guides/cost-and-context-computation.mdx](./docs-site/content/docs/(documentation)/guides/cost-and-context-computation.mdx) AND [src/providers/pricing-sources.md](./src/providers/pricing-sources.md) when the contract changes. The pricing-table comes from `src/be/modelsdev-cache.json` (symlinked into `ui/src/lib/modelsdev-cache.json` for the UI model picker); refresh via `bun run scripts/refresh-modelsdev-pricing.ts` and commit the snapshot.
+
+</important>
+
+<important if="you are creating or modifying eval scenarios, rubrics, or fixtures (evals/scenarios/*, evals/scenarios/fixtures/*)">
+
+Full rulebook: [evals/SCENARIO-AUTHORING.md](./evals/SCENARIO-AUTHORING.md). Non-negotiables: **deterministic-first** (a judge is the last resort and never the tier discriminator); **never penalize MANDATORY behavior** (audit every negative check — can a correct run trip it?); **grade artifacts the MODEL controls** (child tasks, merged report — NOT config/timing-dependent system emissions); **de-risk pilot before building an axis** (prove discrimination on ONE dimension × TWO tiers, ~$4, read the dimension gap + whether its CI excludes 0). Validate with `cd evals && bun src/cli.ts registry` + a rubric unit test against a synthetic JudgeContext; the deployed swarm proposes (never runs E2B itself — it costs money).
 
 </important>
 

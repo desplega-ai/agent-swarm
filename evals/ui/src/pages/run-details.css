@@ -284,6 +284,29 @@ a.rd-cellsum-row:hover {
   margin-bottom: 2px;
 }
 
+/* Seed segregation: the toggle that reveals the scenario's seeded reference-data
+   tasks (kept out of the way — they are not run activity). */
+.rd-taskrows-seed-toggle {
+  align-self: flex-start;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--dim);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.rd-taskrows-seed-toggle:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
 .rd-taskrow {
   display: flex;
   align-items: center;

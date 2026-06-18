@@ -1103,19 +1103,57 @@ function TaskRows(props: {
   members: Record<string, TaskMemberInfo> | null;
   onOpenTask: (taskId: string) => void;
 }): ReactNode {
+  // Seed segregation: a scenario may seed reference-data tasks into the same swarm
+  // DB the run uses (e.g. delegation-probe's 20 audit-history rows). The runner tags
+  // each task run-vs-seed (origin); absent ⇒ "run" (pre-tag artifacts show every row
+  // as before). Render RUN activity front-and-center; tuck SEED rows behind a toggle.
+  const [showSeed, setShowSeed] = useState(false);
+  const runTasks = props.tasks.filter((t) => (t.origin ?? "run") !== "seed");
+  const seedTasks = props.tasks.filter((t) => (t.origin ?? "run") === "seed");
+  // Indices stay stable against the FULL list so "Task N" labels + dependency
+  // refs (taskRefLabel resolves by position in props.tasks) never shift.
   return (
     <div className="rd-taskrows">
       <span className="rd-taskrows-label">Tasks</span>
-      {props.tasks.map((t, i) => (
+      {runTasks.map((t) => (
         <TaskRow
           key={t.id}
           task={t}
-          index={i}
+          index={props.tasks.indexOf(t)}
           tasks={props.tasks}
           members={props.members}
           onOpenTask={props.onOpenTask}
         />
       ))}
+      {seedTasks.length > 0 ? (
+        <>
+          <button
+            type="button"
+            className="rd-taskrows-seed-toggle"
+            aria-expanded={showSeed}
+            title={
+              showSeed
+                ? "Hide the scenario's seeded reference-data tasks"
+                : "Show the scenario's seeded reference-data tasks (not run activity)"
+            }
+            onClick={() => setShowSeed((v) => !v)}
+          >
+            {showSeed ? "▾" : "▸"} Seeded history ({seedTasks.length})
+          </button>
+          {showSeed
+            ? seedTasks.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  index={props.tasks.indexOf(t)}
+                  tasks={props.tasks}
+                  members={props.members}
+                  onOpenTask={props.onOpenTask}
+                />
+              ))
+            : null}
+        </>
+      ) : null}
     </div>
   );
 }
