@@ -15,12 +15,20 @@ type ChannelShape = {
   is_pending_ext_shared?: boolean;
 };
 
-function makeClient(opts: { channel?: ChannelShape; joinResult?: () => unknown }): {
+function makeClient(opts: {
+  channel?: ChannelShape;
+  infoResult?: () => unknown;
+  joinResult?: () => unknown;
+}): {
   client: WebClient;
   infoFn: ReturnType<typeof mock>;
   joinFn: ReturnType<typeof mock>;
 } {
-  const infoFn = mock(() => Promise.resolve({ channel: opts.channel ?? { is_ext_shared: false } }));
+  const infoFn = mock(
+    opts.infoResult
+      ? opts.infoResult
+      : () => Promise.resolve({ channel: opts.channel ?? { is_ext_shared: false } }),
+  );
   const joinFn = mock(opts.joinResult ? opts.joinResult : () => Promise.resolve({}));
   const client = {
     conversations: { info: infoFn, join: joinFn },
@@ -60,9 +68,49 @@ describe("withAutoJoin", () => {
     expect(joinFn).toHaveBeenCalledWith({ channel: "CPUB" });
   });
 
+  test("info failure falls back to join and retries fn", async () => {
+    const { client, infoFn, joinFn } = makeClient({
+      infoResult: () => {
+        throw makePlatformError("channel_not_found");
+      },
+    });
+    let callCount = 0;
+    const fn = mock(async () => {
+      callCount++;
+      if (callCount === 1) throw makePlatformError("not_in_channel");
+      return "retried-ok";
+    });
+
+    const result = await withAutoJoin(client, "CPUB", fn);
+    expect(result).toBe("retried-ok");
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(infoFn).toHaveBeenCalledTimes(1);
+    expect(joinFn).toHaveBeenCalledTimes(1);
+    expect(joinFn).toHaveBeenCalledWith({ channel: "CPUB" });
+  });
+
   test("private channel: info returns internal, join fails with method_not_supported → descriptive error", async () => {
     const { client, infoFn, joinFn } = makeClient({
       channel: { is_ext_shared: false },
+      joinResult: () => {
+        throw makePlatformError("method_not_supported_for_channel_type");
+      },
+    });
+    const fn = mock(() => {
+      throw makePlatformError("not_in_channel");
+    });
+
+    await expect(withAutoJoin(client, "CPRIV", fn)).rejects.toThrow("invite the bot");
+    expect(infoFn).toHaveBeenCalledTimes(1);
+    expect(joinFn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("info failure preserves private-channel invite error from join", async () => {
+    const { client, infoFn, joinFn } = makeClient({
+      infoResult: () => {
+        throw makePlatformError("not_in_channel");
+      },
       joinResult: () => {
         throw makePlatformError("method_not_supported_for_channel_type");
       },
