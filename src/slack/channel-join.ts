@@ -9,11 +9,29 @@ function slackCode(error: unknown): string | undefined {
 }
 
 /**
+ * Returns true if the channel has any external (non-host-org) members.
+ * Uses Slack's documented flags: is_ext_shared (accepted Connect) and
+ * is_pending_ext_shared (invite sent, not yet accepted). These two booleans
+ * are the authoritative org-boundary signal per Slack's API docs.
+ */
+async function isExternalChannel(client: WebClient, channelId: string): Promise<boolean> {
+  const resp = await client.conversations.info({ channel: channelId });
+  const ch = (resp.channel ?? {}) as {
+    is_ext_shared?: boolean;
+    is_pending_ext_shared?: boolean;
+  };
+  return ch.is_ext_shared === true || ch.is_pending_ext_shared === true;
+}
+
+/**
  * Wraps a Slack API call with automatic channel join for public channels.
  *
- * On not_in_channel: calls conversations.join and retries the original call once.
- * On private channel (method_not_supported_for_channel_type): throws a descriptive
- * error telling the caller the bot must be /invite-d — it cannot self-join private channels.
+ * On not_in_channel: checks conversations.info first — if is_ext_shared or
+ * is_pending_ext_shared is true the channel has external members; throws a
+ * human-invite error instead of self-joining. Internal channels (including
+ * Enterprise Grid org-shared channels) proceed normally.
+ * On private channel (method_not_supported_for_channel_type): throws a
+ * descriptive error telling the caller to /invite the bot.
  */
 export async function withAutoJoin<T>(
   client: WebClient,
@@ -24,6 +42,13 @@ export async function withAutoJoin<T>(
     return await fn();
   } catch (error) {
     if (slackCode(error) !== "not_in_channel") throw error;
+
+    // Fail closed: never auto-join a channel that has external members.
+    if (await isExternalChannel(client, channelId)) {
+      throw new Error(
+        `Cannot auto-join external channel ${channelId} — invite the bot with /invite @<bot-name> first.`,
+      );
+    }
 
     try {
       await client.conversations.join({ channel: channelId });
