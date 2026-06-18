@@ -13,6 +13,16 @@ import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import { handleComment, handlePullRequestReview } from "../github/handlers";
 import { GITHUB_BOT_NAME } from "../github/mentions";
 import type { CommentEvent, PullRequestReviewEvent } from "../github/types";
+import { getTemplateDefinition } from "../prompts/registry";
+
+// Side-effect import: registers all GitHub templates on first load
+import "../github/templates";
+
+async function ensureTemplatesRegistered(): Promise<void> {
+  if (getTemplateDefinition("github.pull_request.review_submitted")) return;
+  const ts = Date.now();
+  await import(`../github/templates?t=${ts}`);
+}
 
 // Mock GitHub App credentials so fetchReviewComments can obtain a token
 // without a real RSA key. Must come before the handlers import is evaluated.
@@ -51,7 +61,8 @@ afterAll(async () => {
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
-beforeEach(() => {
+beforeEach(async () => {
+  await ensureTemplatesRegistered();
   getDb().prepare("DELETE FROM agent_tasks").run();
 });
 
