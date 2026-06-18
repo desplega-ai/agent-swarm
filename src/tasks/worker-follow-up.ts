@@ -37,6 +37,20 @@ export const HEARTBEAT_PIN_CRASH_RESUME = process.env.HEARTBEAT_PIN_CRASH_RESUME
 
 export const RESUME_GENERATION_TAG_PREFIX = "resume-generation:";
 
+/**
+ * Tag set ONLY on a genuine same-agent `crash_recovery` pin (i.e. when the
+ * resume is actually assigned back to the original agent). The heartbeat reaper
+ * (`getStalePinnedResumes`) scopes its sweep to this tag so it cannot mistake a
+ * *pooled* resume that `autoAssignPoolTasks` later flips to `pending` — which
+ * keeps its original `createdAt` and would otherwise look identical to a stale
+ * pin — for an unreclaimed crash pin, and so it never escalates a
+ * `context_limits` / `manual_supersede` pin under a `crash_recovery` label.
+ *
+ * The literal is duplicated in `getStalePinnedResumes` (src/be/db.ts) rather
+ * than imported, to avoid a worker-follow-up ↔ db import cycle — keep them in sync.
+ */
+export const CRASH_RECOVERY_PIN_TAG = "crash-recovery-pin";
+
 export function getResumeGeneration(task: Pick<AgentTask, "tags">): number {
   const tag = task.tags.find((value) => value.startsWith(RESUME_GENERATION_TAG_PREFIX));
   if (!tag) return 0;
@@ -282,6 +296,14 @@ export function createResumeFollowUp(args: {
     `reason:${args.reason}`,
     `${RESUME_GENERATION_TAG_PREFIX}${getNextResumeGeneration(parent)}`,
   ];
+  // Mark a GENUINE same-agent crash pin (crash_recovery that actually pinned to
+  // the original agent) so the heartbeat reaper can scope to these only. A
+  // pooled resume — including a crash_recovery resume that fell to the pool at
+  // capacity — never gets this tag, so it can't be mistaken for a stale pin
+  // after autoAssignPoolTasks flips it to `pending`.
+  if (args.reason === "crash_recovery" && preferredAgentId !== undefined) {
+    tags.push(CRASH_RECOVERY_PIN_TAG);
+  }
 
   // Identity-shaped fields (dir, VCS provider/repo/number/url/etc.,
   // outputSchema, slack channel/thread/user, agentmail, mention, contextKey,

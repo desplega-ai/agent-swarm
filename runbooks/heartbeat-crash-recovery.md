@@ -69,20 +69,25 @@ resume = createResumeFollowUp(parent, reason = crash_recovery):
             isCrash = (reason == crash_recovery) and HEARTBEAT_PIN_CRASH_RESUME
             if isCrash or (now - cand.lastActivityAt < 30s):   # crash_recovery IGNORES the fresh gate
                 preferredAgentId = cand.id
-    createTaskExtended(resume, agentId = preferredAgentId)
+    tags = [auto-resume, reason:<r>, resume-generation:<n>]
+    if reason == crash_recovery and preferredAgentId: tags += [crash-recovery-pin]   # mark a GENUINE pin
+    createTaskExtended(resume, agentId = preferredAgentId, tags = tags)
     #   agentId set  → status = pending  (PINNED to the original agent)
     #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
 
 # every sweep, inside cleanupStaleResources:
 escalateUnreclaimedResumes():
-    for r in getStalePinnedResumes(grace):           # taskType=resume, status=pending, createdAt < now-grace
+    for r in getStalePinnedResumes(grace):    # tagged crash-recovery-pin, status=pending, createdAt < now-grace
         if getResumeGeneration(r) >= MAX_RESUME_GENERATIONS:
             failPendingResumeIfUnclaimed(r, "failed", budget_exhausted); continue   # bound flapping
         if no lead: continue                          # leave pending — nothing to escalate to
-        if not failPendingResumeIfUnclaimed(r, "cancelled", …): continue  # agent reclaimed it in the gap → skip
-        repointTrackerSyncBySwarmId(r.id, original.id)        # return the external-tracker link
-        createRerouteDecisionTask(original, staleResume = r) → Lead   # Lead re-delegates via send-task(agentId=…)
+        transaction:                                  # atomic: all-or-nothing, else roll back + retry next sweep
+            if not failPendingResumeIfUnclaimed(r, "cancelled", …): abort  # agent reclaimed it in the gap → skip
+            repointTrackerSyncBySwarmId(r.id, original.id)    # return the external-tracker link
+            createRerouteDecisionTask(original, staleResume = r) → Lead    # Lead re-delegates via send-task(agentId=…)
 ```
+
+> The `crash-recovery-pin` tag is the reaper's scoping key: only genuine same-agent pins carry it, so a *pooled* resume that `autoAssignPoolTasks` later flips to `pending` (keeping its old `createdAt`) is never mistaken for a stale pin and reaped.
 
 ---
 

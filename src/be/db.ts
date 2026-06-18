@@ -6532,26 +6532,39 @@ export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentT
 }
 
 /**
- * Crash-recovery resumes pinned to their original agent (DES-523 Phase 1) that
- * were never reclaimed within `graceMin` minutes of creation — i.e. still
- * `pending`. The heartbeat reaper escalates these to a Lead decision.
+ * Genuine same-agent crash-recovery PINS (tagged `crash-recovery-pin`, DES-523
+ * Phase 1) that are still `pending` `graceMin` minutes after creation — the
+ * heartbeat reaper escalates these to a Lead reroute-decision.
  *
- * `status = 'pending'` is the load-bearing "never reclaimed" discriminator: when
- * the original agent restarts and reclaims via the normal poll path, `startTask`
- * flips the row `pending → in_progress`, so a reclaimed resume drops out of this
- * set automatically — no agent-liveness join needed (and `lastActivityAt` is
- * unreliable for a returned-but-idle agent, which is why we do NOT gate on it).
- * `createdAt` is the resume's creation = crash-DETECTION time, so the grace
- * window is measured from detection. Keys only on reboot-durable columns
- * (taskType / status / createdAt), so a pending pin survives a server reboot and
- * is caught on the first post-reboot sweep.
+ * Three scoping clauses, each load-bearing:
+ *  - `tags LIKE '%"crash-recovery-pin"%'` — restricts to resumes actually pinned
+ *    to their original agent on the crash path. Without it, a *pooled* resume
+ *    that `autoAssignPoolTasks` flips to `pending` earlier in the SAME sweep
+ *    (keeping its old `createdAt`) would be reaped and cancelled before the
+ *    assigned worker polls; it also keeps `context_limits` / `manual_supersede`
+ *    pins from being escalated under a `crash_recovery` label. (Literal must
+ *    match `CRASH_RECOVERY_PIN_TAG` in src/tasks/worker-follow-up.ts.)
+ *  - `status = 'pending'` — the "currently unreclaimed" discriminator: when the
+ *    agent reclaims via the normal poll path, `startTask` flips the row to
+ *    `in_progress` and it drops out of this set. (A reclaimed resume whose
+ *    session later orphans can be flipped back to `pending` by
+ *    `resetOrphanedInProgressTasksForAgent`, re-entering this set on a later
+ *    sweep — re-escalating genuinely re-stalled work, which is fine.) We do NOT
+ *    gate on `lastActivityAt` — it is stale for a returned-but-idle agent.
+ *  - `createdAt < cutoff` — `createdAt` is the resume's creation = crash-DETECTION
+ *    time, so the grace window is measured from detection.
+ *
+ * Keys only on reboot-durable columns, so a pending pin survives a server reboot
+ * and is caught on the first post-reboot sweep.
  */
 export function getStalePinnedResumes(graceMin: number): AgentTask[] {
   const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
   return getDb()
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks
-       WHERE taskType = 'resume' AND status = 'pending' AND createdAt < ?
+       WHERE taskType = 'resume' AND status = 'pending'
+         AND tags LIKE '%"crash-recovery-pin"%'
+         AND createdAt < ?
        ORDER BY createdAt ASC`,
     )
     .all(cutoff)

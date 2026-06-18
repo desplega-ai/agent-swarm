@@ -655,43 +655,58 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
 
     if (!hasLead) continue; // No lead → leave the pin pending; nothing to escalate to.
 
-    // Atomically terminalize-if-still-pending. If the agent reclaimed it in the
-    // gap (startTask flipped it to in_progress) this returns null → skip, so we
-    // don't escalate work the worker just resumed (TOCTOU guard).
-    const terminalized = failPendingResumeIfUnclaimed(
-      resume.id,
-      "cancelled",
-      "pin_unreclaimed_escalated",
-    );
-    if (!terminalized) continue;
-
     const original = getTaskById(resume.parentTaskId);
-    if (!original) continue;
+    if (!original) continue; // Parent gone — nothing to escalate against.
 
-    // Return the tracker_sync link to the original: at pin time it moved
-    // original → R1; R1 is now dead, so move it back so the Lead's re-delegated
-    // resume (parentTaskId = original) inherits it via send-task (Phase 3 #4).
-    repointTrackerSyncBySwarmId(resume.id, original.id);
-
-    const decision = createRerouteDecisionTask({
-      original,
-      staleResume: resume,
-      reason: "crash_recovery",
-      maxGenerations: MAX_RESUME_GENERATIONS,
-    });
-    if (decision.kind === "created") {
-      findings.escalatedReroutes.push({
-        originalTaskId: original.id,
-        decisionTaskId: decision.task.id,
-      });
-      console.log(
-        `[Heartbeat] Escalated unreclaimed pinned resume ${resume.id.slice(0, 8)} → Lead reroute-decision ${decision.task.id.slice(0, 8)} (original ${original.id.slice(0, 8)})`,
-      );
-    } else {
+    // Escalate atomically: terminalize the pin + repoint the tracker link
+    // (original → R1 at pin time; R1 is now dead, so move it back so the Lead's
+    // re-delegated resume inherits it via send-task) + create the Lead decision,
+    // all in ONE transaction. A mid-sequence process death therefore can't leave
+    // the pin cancelled with no Lead signal (which would orphan the work — it is
+    // invisible to both the stall detector and this reaper afterward).
+    //  - The conditional terminalize still returns null if the agent reclaimed
+    //    the pin in the gap → abort with no writes and skip (TOCTOU guard).
+    //  - If the decision can't be created (unexpected — hasLead is checked and a
+    //    still-`pending` pin implies no prior decision), throw to roll back the
+    //    cancel so the pin is retried next sweep instead of being stranded.
+    let escalation: { decisionTaskId: string } | null = null;
+    try {
+      escalation = getDb().transaction(() => {
+        const terminalized = failPendingResumeIfUnclaimed(
+          resume.id,
+          "cancelled",
+          "pin_unreclaimed_escalated",
+        );
+        if (!terminalized) return null; // reclaimed in the gap — no writes made
+        repointTrackerSyncBySwarmId(resume.id, original.id);
+        const decision = createRerouteDecisionTask({
+          original,
+          staleResume: resume,
+          reason: "crash_recovery",
+          maxGenerations: MAX_RESUME_GENERATIONS,
+        });
+        if (decision.kind !== "created") {
+          throw new Error(`reroute-decision not created: ${decision.reason}`);
+        }
+        return { decisionTaskId: decision.task.id };
+      })();
+    } catch (err) {
       console.warn(
-        `[Heartbeat] Pinned resume ${resume.id.slice(0, 8)} terminalized but no Lead decision created (${decision.reason})`,
+        `[Heartbeat] Reroute escalation rolled back for resume ${resume.id.slice(0, 8)} — ${
+          err instanceof Error ? err.message : String(err)
+        }; pin left pending for the next sweep`,
       );
+      continue;
     }
+    if (!escalation) continue; // agent reclaimed the pin in the gap
+
+    findings.escalatedReroutes.push({
+      originalTaskId: original.id,
+      decisionTaskId: escalation.decisionTaskId,
+    });
+    console.log(
+      `[Heartbeat] Escalated unreclaimed pinned resume ${resume.id.slice(0, 8)} → Lead reroute-decision ${escalation.decisionTaskId.slice(0, 8)} (original ${original.id.slice(0, 8)})`,
+    );
   }
 }
 

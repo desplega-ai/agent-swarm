@@ -18,6 +18,7 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  failPendingResumeIfUnclaimed,
   getChildTasks,
   getDb,
   getTaskById,
@@ -35,6 +36,7 @@ import {
 import { getTemplateDefinition } from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
 import {
+  CRASH_RECOVERY_PIN_TAG,
   createRerouteDecisionTask,
   createResumeFollowUp,
   RESUME_GENERATION_TAG_PREFIX,
@@ -57,7 +59,14 @@ function seedPinnedCrash(agentName: string) {
     agentId: agent.id,
     parentTaskId: original.id,
     taskType: "resume",
-    tags: ["auto-resume", "reason:crash_recovery", `${RESUME_GENERATION_TAG_PREFIX}1`],
+    // Mirror a genuine same-agent crash pin: the crash-pin tag is what scopes the
+    // reaper's getStalePinnedResumes (pooled resumes never get it).
+    tags: [
+      "auto-resume",
+      "reason:crash_recovery",
+      `${RESUME_GENERATION_TAG_PREFIX}1`,
+      CRASH_RECOVERY_PIN_TAG,
+    ],
   });
   supersedeTask(original.id, { reason: "crash", resumeTaskId: r1.id });
   return { agent, original: getTaskById(original.id)!, r1 };
@@ -286,6 +295,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
         "auto-resume",
         "reason:crash_recovery",
         `${RESUME_GENERATION_TAG_PREFIX}${MAX_RESUME_GENERATIONS}`,
+        CRASH_RECOVERY_PIN_TAG,
       ],
     });
     supersedeTask(original.id, { reason: "crash", resumeTaskId: capped.id });
@@ -358,5 +368,112 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect(getTrackerSync("linear", "task", r2Id)?.externalId).toBe("ENG-900");
     expect(getTrackerSync("linear", "task", original.id)).toBeNull();
     expect(getTrackerSync("linear", "task", r1.id)).toBeNull();
+  });
+
+  test("a fresh (within-grace) crash pin is NOT escalated by the reaper", async () => {
+    createAgent({ name: "lead", isLead: true, status: "busy" });
+    const { original, r1 } = seedPinnedCrash("coder-fresh");
+    // Deliberately do NOT age createdAt — the pin is well within the grace
+    // window, so the reaper must leave it alone. (Guards against a regression
+    // that drops/inverts the createdAt cutoff and escalates pins immediately.)
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.escalatedReroutes.length).toBe(0);
+    expect(getTaskById(r1.id)!.status).toBe("pending"); // still pinned, untouched
+    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
+      0,
+    );
+  });
+
+  test("failPendingResumeIfUnclaimed cancels a pending resume but no-ops a reclaimed (in_progress) one", () => {
+    const agent = createAgent({ name: "toctou-agent", isLead: false, status: "idle" });
+    const parent = createTaskExtended("toctou parent", { agentId: agent.id });
+    startTask(parent.id);
+
+    // (a) pending → terminalized, row returned.
+    const pendingResume = createTaskExtended("pending resume", {
+      agentId: agent.id,
+      parentTaskId: parent.id,
+      taskType: "resume",
+    });
+    expect(pendingResume.status).toBe("pending");
+    const cancelled = failPendingResumeIfUnclaimed(pendingResume.id, "cancelled", "test_reason");
+    expect(cancelled).not.toBeNull();
+    expect(cancelled!.status).toBe("cancelled");
+    expect(getTaskById(pendingResume.id)!.status).toBe("cancelled");
+
+    // (b) in_progress (reclaimed in the gap) → null, status untouched. This is
+    // the load-bearing TOCTOU guard (AND status='pending') the function exists for.
+    const reclaimed = createTaskExtended("reclaimed resume", {
+      agentId: agent.id,
+      parentTaskId: parent.id,
+      taskType: "resume",
+    });
+    startTask(reclaimed.id);
+    expect(getTaskById(reclaimed.id)!.status).toBe("in_progress");
+    const result = failPendingResumeIfUnclaimed(reclaimed.id, "cancelled", "test_reason");
+    expect(result).toBeNull();
+    expect(getTaskById(reclaimed.id)!.status).toBe("in_progress");
+  });
+
+  test("a pooled (untagged) resume auto-assigned in the same sweep is NOT reaped", async () => {
+    // Regression for the same-sweep race: getStalePinnedResumes used to match ANY
+    // pending resume with an old createdAt. autoAssignPoolTasks (runs before the
+    // reaper in the same codeLevelTriage sweep) flips a lingering unassigned
+    // resume to `pending` keeping its old createdAt, and the reaper would then
+    // cancel it before the assigned worker polls. The crash-pin tag scoping fixes
+    // it — a pooled resume never carries the tag.
+    createAgent({ name: "lead", isLead: true, status: "busy" });
+    const worker = createAgent({ name: "idle-worker", isLead: false, status: "idle" });
+    const original = createTaskExtended("pooled original", { agentId: worker.id });
+    startTask(original.id);
+    const pooled = createTaskExtended("pooled resume (no pin tag)", {
+      parentTaskId: original.id,
+      taskType: "resume",
+      tags: ["auto-resume", "reason:graceful_shutdown", `${RESUME_GENERATION_TAG_PREFIX}1`],
+    });
+    expect(pooled.status).toBe("unassigned");
+    supersedeTask(original.id, { reason: "shutdown", resumeTaskId: pooled.id });
+    ageCreatedAtPastGrace(pooled.id);
+
+    const findings = await codeLevelTriage();
+
+    // autoAssignPoolTasks assigned it to the idle worker; the reaper left it alone.
+    const after = getTaskById(pooled.id)!;
+    expect(after.status).toBe("pending");
+    expect(after.agentId).toBe(worker.id);
+    expect(findings.escalatedReroutes.length).toBe(0);
+    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
+      0,
+    );
+  });
+
+  test("a pin at generation MAX-1 escalates (not budget-failed) with next-generation = MAX", async () => {
+    createAgent({ name: "lead", isLead: true, status: "busy" });
+    const agent = createAgent({ name: "coder-genmax", isLead: false, status: "idle" });
+    const original = createTaskExtended("near-cap work", { agentId: agent.id });
+    startTask(original.id);
+    const r = createTaskExtended("resume near cap", {
+      agentId: agent.id,
+      parentTaskId: original.id,
+      taskType: "resume",
+      tags: [
+        "auto-resume",
+        "reason:crash_recovery",
+        `${RESUME_GENERATION_TAG_PREFIX}${MAX_RESUME_GENERATIONS - 1}`,
+        CRASH_RECOVERY_PIN_TAG,
+      ],
+    });
+    supersedeTask(original.id, { reason: "crash", resumeTaskId: r.id });
+    ageCreatedAtPastGrace(r.id);
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.escalatedReroutes.length).toBe(1);
+    const decision = getChildTasks(original.id).find((c) => c.taskType === "reroute-decision");
+    expect(decision).toBeDefined();
+    // generation_next derives from the failed pin (MAX-1) → MAX.
+    expect(decision!.task).toContain(`${RESUME_GENERATION_TAG_PREFIX}${MAX_RESUME_GENERATIONS}`);
   });
 });
