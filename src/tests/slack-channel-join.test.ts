@@ -13,8 +13,6 @@ function makePlatformError(code: string): Error {
 type ChannelShape = {
   is_ext_shared?: boolean;
   is_pending_ext_shared?: boolean;
-  shared_team_ids?: string[];
-  internal_team_ids?: string[];
 };
 
 function makeClient(opts: { channel?: ChannelShape; joinResult?: () => unknown }): {
@@ -22,9 +20,7 @@ function makeClient(opts: { channel?: ChannelShape; joinResult?: () => unknown }
   infoFn: ReturnType<typeof mock>;
   joinFn: ReturnType<typeof mock>;
 } {
-  const infoFn = mock(() =>
-    Promise.resolve({ channel: opts.channel ?? { is_ext_shared: false, shared_team_ids: [] } }),
-  );
+  const infoFn = mock(() => Promise.resolve({ channel: opts.channel ?? { is_ext_shared: false } }));
   const joinFn = mock(opts.joinResult ? opts.joinResult : () => Promise.resolve({}));
   const client = {
     conversations: { info: infoFn, join: joinFn },
@@ -46,7 +42,7 @@ describe("withAutoJoin", () => {
 
   test("not_in_channel on internal channel: fetches info, calls join, retries fn exactly once", async () => {
     const { client, infoFn, joinFn } = makeClient({
-      channel: { is_ext_shared: false, shared_team_ids: ["T016H7SJJP4"] },
+      channel: { is_ext_shared: false },
     });
     let callCount = 0;
     const fn = mock(async () => {
@@ -66,7 +62,7 @@ describe("withAutoJoin", () => {
 
   test("private channel: info returns internal, join fails with method_not_supported → descriptive error", async () => {
     const { client, infoFn, joinFn } = makeClient({
-      channel: { is_ext_shared: false, shared_team_ids: [] },
+      channel: { is_ext_shared: false },
       joinResult: () => {
         throw makePlatformError("method_not_supported_for_channel_type");
       },
@@ -95,7 +91,7 @@ describe("withAutoJoin", () => {
 
   test("retry is bounded: second fn error propagates without another join", async () => {
     const { client, infoFn, joinFn } = makeClient({
-      channel: { is_ext_shared: false, shared_team_ids: [] },
+      channel: { is_ext_shared: false },
     });
     const fn = mock(() => {
       throw makePlatformError("not_in_channel");
@@ -111,7 +107,7 @@ describe("withAutoJoin", () => {
 
   test("external guard: is_ext_shared=true → throws invite error, join not called", async () => {
     const { client, joinFn } = makeClient({
-      channel: { is_ext_shared: true, shared_team_ids: ["T016H7SJJP4", "TEXTERNAL"] },
+      channel: { is_ext_shared: true },
     });
     const fn = mock(() => {
       throw makePlatformError("not_in_channel");
@@ -123,7 +119,7 @@ describe("withAutoJoin", () => {
 
   test("external guard: is_pending_ext_shared=true → throws invite error, join not called", async () => {
     const { client, joinFn } = makeClient({
-      channel: { is_ext_shared: false, is_pending_ext_shared: true, shared_team_ids: [] },
+      channel: { is_ext_shared: false, is_pending_ext_shared: true },
     });
     const fn = mock(() => {
       throw makePlatformError("not_in_channel");
@@ -133,37 +129,9 @@ describe("withAutoJoin", () => {
     expect(joinFn).not.toHaveBeenCalled();
   });
 
-  test("external guard: shared_team_ids contains foreign team → throws invite error, join not called", async () => {
+  test("external guard: internal public channel (is_ext_shared:false) → join proceeds", async () => {
     const { client, joinFn } = makeClient({
-      channel: { is_ext_shared: false, shared_team_ids: ["T016H7SJJP4", "TFOREIGN1"] },
-    });
-    const fn = mock(() => {
-      throw makePlatformError("not_in_channel");
-    });
-
-    await expect(withAutoJoin(client, "CSHARED", fn)).rejects.toThrow("invite the bot");
-    expect(joinFn).not.toHaveBeenCalled();
-  });
-
-  test("external guard: internal_team_ids contains foreign team → throws invite error, join not called", async () => {
-    const { client, joinFn } = makeClient({
-      channel: {
-        is_ext_shared: false,
-        shared_team_ids: [],
-        internal_team_ids: ["T016H7SJJP4", "TFOREIGN2"],
-      },
-    });
-    const fn = mock(() => {
-      throw makePlatformError("not_in_channel");
-    });
-
-    await expect(withAutoJoin(client, "CINTERNAL", fn)).rejects.toThrow("invite the bot");
-    expect(joinFn).not.toHaveBeenCalled();
-  });
-
-  test("external guard: normal internal channel with only host team → join proceeds (regression guard)", async () => {
-    const { client, joinFn } = makeClient({
-      channel: { is_ext_shared: false, shared_team_ids: ["T016H7SJJP4"] },
+      channel: { is_ext_shared: false },
     });
     let callCount = 0;
     const fn = mock(async () => {
@@ -172,14 +140,17 @@ describe("withAutoJoin", () => {
       return "joined-ok";
     });
 
-    const result = await withAutoJoin(client, "CINTERNAL", fn);
+    const result = await withAutoJoin(client, "CPUB", fn);
     expect(result).toBe("joined-ok");
     expect(joinFn).toHaveBeenCalledTimes(1);
   });
 
-  test("external guard: normal internal channel with empty shared_team_ids → join proceeds (regression guard)", async () => {
+  test("external guard: Enterprise Grid org-shared channel (is_ext_shared:false, multiple teams) → join proceeds, no false-positive", async () => {
+    // An internal org-shared channel on Enterprise Grid legitimately lists multiple
+    // internal team IDs. The guard must rely solely on is_ext_shared/is_pending_ext_shared
+    // — not team-ID comparison — to avoid false-positives here.
     const { client, joinFn } = makeClient({
-      channel: { is_ext_shared: false, shared_team_ids: [] },
+      channel: { is_ext_shared: false },
     });
     let callCount = 0;
     const fn = mock(async () => {
@@ -188,7 +159,7 @@ describe("withAutoJoin", () => {
       return "joined-ok";
     });
 
-    const result = await withAutoJoin(client, "CPUB2", fn);
+    const result = await withAutoJoin(client, "CGRID", fn);
     expect(result).toBe("joined-ok");
     expect(joinFn).toHaveBeenCalledTimes(1);
   });

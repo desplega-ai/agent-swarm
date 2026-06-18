@@ -1,9 +1,5 @@
 import type { WebClient } from "@slack/web-api";
 
-// Capchase's Slack workspace team ID. Used to detect external (Slack Connect) channels.
-// Override via SLACK_HOST_TEAM_ID env var if the workspace changes.
-const CAPCHASE_HOST_TEAM_ID = process.env.SLACK_HOST_TEAM_ID ?? "T016H7SJJP4";
-
 // @slack/web-api platform errors set message to "An API error occurred: <code>"
 // and store the raw Slack API code at error.data.error.
 function slackCode(error: unknown): string | undefined {
@@ -13,33 +9,29 @@ function slackCode(error: unknown): string | undefined {
 }
 
 /**
- * Returns true if the channel has any external (non-host-org) members based on
- * conversations.info fields. Fails closed: unknown/missing fields → not external.
+ * Returns true if the channel has any external (non-host-org) members.
+ * Uses Slack's documented flags: is_ext_shared (accepted Connect) and
+ * is_pending_ext_shared (invite sent, not yet accepted). These two booleans
+ * are the authoritative org-boundary signal per Slack's API docs.
  */
 async function isExternalChannel(client: WebClient, channelId: string): Promise<boolean> {
   const resp = await client.conversations.info({ channel: channelId });
   const ch = (resp.channel ?? {}) as {
     is_ext_shared?: boolean;
     is_pending_ext_shared?: boolean;
-    shared_team_ids?: string[];
-    internal_team_ids?: string[];
   };
-
-  if (ch.is_ext_shared === true || ch.is_pending_ext_shared === true) return true;
-
-  const allSharedIds = [...(ch.shared_team_ids ?? []), ...(ch.internal_team_ids ?? [])];
-  return allSharedIds.some((id) => id !== "" && id !== CAPCHASE_HOST_TEAM_ID);
+  return ch.is_ext_shared === true || ch.is_pending_ext_shared === true;
 }
 
 /**
  * Wraps a Slack API call with automatic channel join for public channels.
  *
- * On not_in_channel: checks conversations.info first — if the channel is external
- * (Slack Connect / shared with another org), throws a human-invite error rather than
- * self-joining, to prevent the bot from silently entering channels with external members.
- * For normal internal public channels, calls conversations.join and retries once.
- * On private channel (method_not_supported_for_channel_type): throws a descriptive
- * error telling the caller the bot must be /invite-d — it cannot self-join private channels.
+ * On not_in_channel: checks conversations.info first — if is_ext_shared or
+ * is_pending_ext_shared is true the channel has external members; throws a
+ * human-invite error instead of self-joining. Internal channels (including
+ * Enterprise Grid org-shared channels) proceed normally.
+ * On private channel (method_not_supported_for_channel_type): throws a
+ * descriptive error telling the caller to /invite the bot.
  */
 export async function withAutoJoin<T>(
   client: WebClient,
