@@ -1,5 +1,7 @@
 import type { WebClient } from "@slack/web-api";
 
+const logger = console;
+
 // @slack/web-api platform errors set message to "An API error occurred: <code>"
 // and store the raw Slack API code at error.data.error.
 function slackCode(error: unknown): string | undefined {
@@ -14,13 +16,21 @@ function slackCode(error: unknown): string | undefined {
  * is_pending_ext_shared (invite sent, not yet accepted). These two booleans
  * are the authoritative org-boundary signal per Slack's API docs.
  */
-async function isExternalChannel(client: WebClient, channelId: string): Promise<boolean> {
-  const resp = await client.conversations.info({ channel: channelId });
-  const ch = (resp.channel ?? {}) as {
-    is_ext_shared?: boolean;
-    is_pending_ext_shared?: boolean;
-  };
-  return ch.is_ext_shared === true || ch.is_pending_ext_shared === true;
+async function isKnownExternalChannel(client: WebClient, channelId: string): Promise<boolean> {
+  try {
+    const resp = await client.conversations.info({ channel: channelId });
+    const ch = (resp.channel ?? {}) as {
+      is_ext_shared?: boolean;
+      is_pending_ext_shared?: boolean;
+    };
+    return ch.is_ext_shared === true || ch.is_pending_ext_shared === true;
+  } catch (error) {
+    logger.warn(
+      `[Slack] conversations.info failed for ${channelId}; attempting join fallback:`,
+      error,
+    );
+    return false;
+  }
 }
 
 /**
@@ -43,8 +53,8 @@ export async function withAutoJoin<T>(
   } catch (error) {
     if (slackCode(error) !== "not_in_channel") throw error;
 
-    // Fail closed: never auto-join a channel that has external members.
-    if (await isExternalChannel(client, channelId)) {
+    // Only block when Slack positively identifies an external channel.
+    if (await isKnownExternalChannel(client, channelId)) {
       throw new Error(
         `Cannot auto-join external channel ${channelId} — invite the bot with /invite @<bot-name> first.`,
       );
