@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Crash-recovery resumes pin to their own agent instead of the role-blind pool** (DES-523) — when the heartbeat detects a crashed worker, the `resume` task is now assigned back to the original (stable-ID) agent and reclaimed when it restarts, instead of being released to the unassigned pool where a wrong-specialization worker could grab it. A pin that is never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default 10 min) is escalated to a Lead-owned `task.reroute.decision` follow-up, which re-delegates the work via `send-task` with an explicit agent (never re-pooled). The crash path no longer touches the unassigned pool. Set `HEARTBEAT_PIN_CRASH_RESUME=0` to restore the previous pool-fallback behavior, or `HEARTBEAT_RESUME_PIN_GRACE_MIN=0` to disable the escalation reaper.
+
 ## [1.100.0] - 2026-06-17
 
 ### Added

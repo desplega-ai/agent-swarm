@@ -14,7 +14,7 @@ Owner code: `src/heartbeat/heartbeat.ts`, `src/tasks/worker-follow-up.ts`, plus 
 flowchart TD
   tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> detect["detectAndRemediateStalledTasks()"]
   detect --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
-  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs"]
+  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ reaper: escalate unreclaimed pinned resumes (§3)"]
   cleanup --> assign["autoAssignPoolTasks()<br/>round-robin: unassigned pool → idle workers"]
 
   boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress w/ no session → failTask + retry child"]
@@ -38,18 +38,23 @@ flowchart TD
 - An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, heartbeated by **tool activity** (throttled ~5s; no wall-clock ping between tool calls). "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
 
-## 3. Crash-recovery routing heuristic (`remediateCrashedWorkerTask` → `createResumeFollowUp`)
+## 3. Crash-recovery routing heuristic (`remediateCrashedWorkerTask` → `createResumeFollowUp` → reaper)
 
 ```mermaid
 flowchart TD
   entry["remediateCrashedWorkerTask:<br/>supersedeTask(parent) → frees capacity,<br/>then createResumeFollowUp(crash_recovery)"]
-  entry --> gate{"original agent live?<br/>status≠offline<br/>AND fresh (&lt;30s)<br/>AND hasCap?"}
-  gate -->|"yes (worker still active)"| pin["resume = PENDING, agentId = parent<br/>(reclaimed on the agent's next poll)"]
-  gate -->|"no — incl. EVERY crash_recovery,<br/>since lastActivityAt is ~5m stale"| pool["resume = UNASSIGNED → pool"]
-  pool --> grab["any idle worker claims it (role-blind)<br/>via autoAssignPoolTasks / poll claimTask"]
+  entry --> gate{"original agent row exists,<br/>status≠offline, hasCap?<br/>(crash_recovery IGNORES the 30s fresh gate)"}
+  gate -->|"yes (recoverable / restarting)"| pin["resume = PENDING, agentId = parent<br/>(reclaimed on the agent's next poll —<br/>never enters the pool)"]
+  gate -->|"no — offline (graceful close) / row gone /<br/>HEARTBEAT_PIN_CRASH_RESUME=0"| pool["resume = UNASSIGNED → pool<br/>(genuinely-gone / rollback path)"]
+  pin --> reap{"reaper (every sweep, in cleanupStaleResources):<br/>still PENDING after<br/>HEARTBEAT_RESUME_PIN_GRACE_MIN?"}
+  reap -->|"no — agent reclaimed it"| ok["runs on the original agent"]
+  reap -->|"yes — never reclaimed"| esc["atomically cancel the pin, then<br/>createRerouteDecisionTask → Lead<br/>(over generation cap → fail, no decision)"]
+  esc --> lead["Lead re-delegates via send-task(agentId=…)<br/>— explicit agent, never re-pooled"]
 ```
 
-**Heuristic (current):** the resume prefers the original agent only if it was active within `WORKER_LIVENESS_WINDOW_SECONDS` (30s, env `WORKER_LIVENESS_WINDOW_SECONDS`) **and** has capacity **and** is not `offline`. Because crash detection fires at ~5 min of inactivity, the `fresh` gate is *always false* for `crash_recovery`, so the resume is created **unassigned** and lands in the role-blind pool — where any worker (regardless of role/specialization) can claim it.
+**Heuristic (current):** a `crash_recovery` resume is **pinned back to its own (stable-ID) agent**. `createResumeFollowUp` sets `agentId = parent.agentId` whenever the agent row still exists, is not `offline`, and has capacity — *regardless of the 30s `WORKER_LIVENESS_WINDOW_SECONDS` freshness*. The agent ID survives a crash, so "stale at the ~5-min detection mark" means "restarting", not "gone". The resume is `pending` and reclaimed on the agent's next poll; it **never enters the role-blind pool**, so no wrong-specialization worker can grab it (DES-523). It falls back to the pool only when the agent is genuinely gone (graceful close → `offline`) or its row is absent — or when the `HEARTBEAT_PIN_CRASH_RESUME` rollback switch is `0` (then `crash_recovery` requires `fresh`, restoring the pre-DES-523 behavior). Other reasons (`context_limits` / `manual_supersede`) still require `fresh`; `graceful_shutdown` always pools.
+
+A pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent that looked recoverable never returned) is escalated by the **reaper** (`escalateUnreclaimedResumes`, run inside `cleanupStaleResources` on *every* sweep, including the post-reboot sweep): it atomically cancels the still-`pending` resume (skipping if the agent reclaimed it in the gap — TOCTOU-safe) and creates a Lead-owned `task.reroute.decision` follow-up. The Lead re-delegates via `send-task` with an **explicit `agentId`** — the work is never re-pooled. A resume already at the generation cap (`MAX_RESUME_GENERATIONS`) is failed instead of escalated, bounding a flapping task. Net: the crash path touches the unassigned pool **zero times**.
 
 ### Pseudocode (current)
 
@@ -60,18 +65,24 @@ resume = createResumeFollowUp(parent, reason = crash_recovery):
     preferredAgentId = undefined
     if parent.agentId and reason != graceful_shutdown:
         cand = getAgentById(parent.agentId)
-        if cand and cand.status != "offline"
-           and now - cand.lastActivityAt < 30s          # ← FRESH gate (fails at the 5m mark)
-           and activeCount(cand) < cand.maxTasks:
-            preferredAgentId = cand.id
+        if cand and cand.status != "offline" and activeCount(cand) < cand.maxTasks:
+            isCrash = (reason == crash_recovery) and HEARTBEAT_PIN_CRASH_RESUME
+            if isCrash or (now - cand.lastActivityAt < 30s):   # crash_recovery IGNORES the fresh gate
+                preferredAgentId = cand.id
     createTaskExtended(resume, agentId = preferredAgentId)
-    #   agentId set  → status = pending  (pinned to agent)
-    #   agentId none → status = unassigned (POOL)  ← crash_recovery always lands here
+    #   agentId set  → status = pending  (PINNED to the original agent)
+    #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
 
-# later: autoAssignPoolTasks / worker poll → any idle worker claims the unassigned resume (role-blind).
+# every sweep, inside cleanupStaleResources:
+escalateUnreclaimedResumes():
+    for r in getStalePinnedResumes(grace):           # taskType=resume, status=pending, createdAt < now-grace
+        if getResumeGeneration(r) >= MAX_RESUME_GENERATIONS:
+            failPendingResumeIfUnclaimed(r, "failed", budget_exhausted); continue   # bound flapping
+        if no lead: continue                          # leave pending — nothing to escalate to
+        if not failPendingResumeIfUnclaimed(r, "cancelled", …): continue  # agent reclaimed it in the gap → skip
+        repointTrackerSyncBySwarmId(r.id, original.id)        # return the external-tracker link
+        createRerouteDecisionTask(original, staleResume = r) → Lead   # Lead re-delegates via send-task(agentId=…)
 ```
-
-> ⚠️ **Planned change (DES-523):** a proposal to pin crash-recovery resumes back to their own (stable-ID) agent and fall back to a templated Lead-decision (instead of the role-blind pool) is planned — see `thoughts/taras/plans/2026-06-18-heartbeat-crash-recovery-same-agent.md`. When that lands, update §3 (diagram + heuristic + pseudocode) here to the new behavior and remove this callout.
 
 ---
 
@@ -86,3 +97,5 @@ resume = createResumeFollowUp(parent, reason = crash_recovery):
 | Stale-resource cleanup | 30 min | `HEARTBEAT_STALE_CLEANUP_MIN` |
 | Same-agent liveness window | 30s | `WORKER_LIVENESS_WINDOW_SECONDS` |
 | Resume-generation cap | 3 | `HEARTBEAT_MAX_RESUME_GENERATIONS` |
+| Resume-pin grace, reaper (`0` = off) | 10 min | `HEARTBEAT_RESUME_PIN_GRACE_MIN` |
+| Same-agent crash pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_CRASH_RESUME` |
