@@ -4,6 +4,7 @@ import {
   cleanupStaleSessions,
   createTaskExtended,
   deleteActiveSession,
+  failPendingResumeIfUnclaimed,
   failTask,
   getActiveSessionForTask,
   getActiveTaskCount,
@@ -14,7 +15,9 @@ import {
   getRecentCompletedCount,
   getRecentFailedCount,
   getRecentFailedTasks,
+  getStalePinnedResumes,
   getStalledInProgressTasks,
+  getTaskById,
   getTaskStats,
   getTasksByStatus,
   getUnassignedPoolTasks,
@@ -25,8 +28,14 @@ import {
   supersedeTask,
   updateAgentStatus,
 } from "../be/db";
+import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
-import { createResumeFollowUp, getNextResumeGeneration } from "../tasks/worker-follow-up";
+import {
+  createRerouteDecisionTask,
+  createResumeFollowUp,
+  getNextResumeGeneration,
+  getResumeGeneration,
+} from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
@@ -66,6 +75,22 @@ export const MAX_RESUME_GENERATIONS = Number(process.env.HEARTBEAT_MAX_RESUME_GE
 
 export const RESUME_BUDGET_EXHAUSTED_REASON = "resume_budget_exhausted";
 
+/**
+ * Grace window (minutes) a crash-recovery resume pinned to its original agent
+ * (DES-523 Phase 1) waits to be reclaimed before the reaper concludes the agent
+ * is gone and escalates to a Lead re-delegation decision. Generous enough for a
+ * slow container restart / image pull, short enough that a genuinely-gone
+ * agent's work reaches the Lead promptly. Measured from the resume's `createdAt`
+ * (= crash-detection time), so worst-case crash→escalation latency is
+ * ~`STALL_THRESHOLD_NO_SESSION_MIN` + this. Set to `0` to disable the reaper.
+ *
+ * Uses `??` (not `|| 10`) so an explicit `0` is honored as "reaper off" rather
+ * than coerced back to the default.
+ */
+export const HEARTBEAT_RESUME_PIN_GRACE_MIN = Number(
+  process.env.HEARTBEAT_RESUME_PIN_GRACE_MIN ?? "10",
+);
+
 /** Heartbeat checklist interval: how often to check HEARTBEAT.md (default: 30 min) */
 const HEARTBEAT_CHECKLIST_INTERVAL_MS =
   Number(process.env.HEARTBEAT_CHECKLIST_INTERVAL_MS) || 30 * 60 * 1000;
@@ -92,6 +117,11 @@ export interface HeartbeatFindings {
    * subset of `autoResumedTasks`: the resume `taskId` + the agent it pinned to.
    */
   pinnedResumes: Array<{ taskId: string; agentId: string }>;
+  /**
+   * Pinned crash-recovery resumes that were never reclaimed within the grace
+   * window and were escalated to a Lead re-delegation decision (DES-523 Phase 3).
+   */
+  escalatedReroutes: Array<{ originalTaskId: string; decisionTaskId: string }>;
   workerHealthFixes: Array<{ agentId: string; oldStatus: string; newStatus: string }>;
   autoAssigned: Array<{ taskId: string; agentId: string }>;
   staleCleanup: {
@@ -164,6 +194,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
     autoFailedTasks: [],
     autoResumedTasks: [],
     pinnedResumes: [],
+    escalatedReroutes: [],
     workerHealthFixes: [],
     autoAssigned: [],
     staleCleanup: {
@@ -577,6 +608,94 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
 }
 
 /**
+ * Reaper (DES-523 Phase 3): escalate crash-recovery resumes that were pinned to
+ * their original agent (Phase 1) but never reclaimed within
+ * `HEARTBEAT_RESUME_PIN_GRACE_MIN`. This is the ONLY path to the Lead decision —
+ * "gone" can't be told from "restarting" at crash-detection time, so Phase 1
+ * pins optimistically and this reaper decides "gone" once a pin demonstrably
+ * fails to be reclaimed. After this runs, the heartbeat crash path never touches
+ * the unassigned pool.
+ *
+ * Wired into `cleanupStaleResources`, so it runs on every sweep — including the
+ * cleanup-only preflight-bail path and the first post-reboot sweep — and a
+ * pending pin is reaped even when the system otherwise looks idle.
+ */
+function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
+  // Grace 0 = reaper disabled (rollback switch).
+  if (HEARTBEAT_RESUME_PIN_GRACE_MIN <= 0) return;
+
+  const stale = getStalePinnedResumes(HEARTBEAT_RESUME_PIN_GRACE_MIN);
+  if (stale.length === 0) return;
+
+  // A Lead is required to re-delegate. Without one, leave escalation candidates
+  // `pending` rather than terminalize them into a dead end. The budget-exhaustion
+  // path below is independent of the Lead and still runs.
+  const hasLead = getLeadAgent() != null;
+
+  for (const resume of stale) {
+    if (!resume.parentTaskId) continue; // Defensive — resumes always have a parent.
+
+    // Budget guard: a resume already at the generation cap must NOT spawn another
+    // Lead re-delegation (send-task does not enforce the generation tag, so a
+    // flapping task could loop forever). Terminalize and stop. Atomic, so we
+    // never kill a resume the agent just reclaimed in the gap.
+    if (getResumeGeneration(resume) >= MAX_RESUME_GENERATIONS) {
+      const failed = failPendingResumeIfUnclaimed(
+        resume.id,
+        "failed",
+        RESUME_BUDGET_EXHAUSTED_REASON,
+      );
+      if (failed) {
+        console.warn(
+          `[Heartbeat] Unreclaimed pinned resume ${resume.id.slice(0, 8)} hit the resume-generation cap — terminalized, no Lead decision`,
+        );
+      }
+      continue;
+    }
+
+    if (!hasLead) continue; // No lead → leave the pin pending; nothing to escalate to.
+
+    // Atomically terminalize-if-still-pending. If the agent reclaimed it in the
+    // gap (startTask flipped it to in_progress) this returns null → skip, so we
+    // don't escalate work the worker just resumed (TOCTOU guard).
+    const terminalized = failPendingResumeIfUnclaimed(
+      resume.id,
+      "cancelled",
+      "pin_unreclaimed_escalated",
+    );
+    if (!terminalized) continue;
+
+    const original = getTaskById(resume.parentTaskId);
+    if (!original) continue;
+
+    // Return the tracker_sync link to the original: at pin time it moved
+    // original → R1; R1 is now dead, so move it back so the Lead's re-delegated
+    // resume (parentTaskId = original) inherits it via send-task (Phase 3 #4).
+    repointTrackerSyncBySwarmId(resume.id, original.id);
+
+    const decision = createRerouteDecisionTask({
+      original,
+      staleResume: resume,
+      reason: "crash_recovery",
+      maxGenerations: MAX_RESUME_GENERATIONS,
+    });
+    if (decision.kind === "created") {
+      findings.escalatedReroutes.push({
+        originalTaskId: original.id,
+        decisionTaskId: decision.task.id,
+      });
+      console.log(
+        `[Heartbeat] Escalated unreclaimed pinned resume ${resume.id.slice(0, 8)} → Lead reroute-decision ${decision.task.id.slice(0, 8)} (original ${original.id.slice(0, 8)})`,
+      );
+    } else {
+      console.warn(
+        `[Heartbeat] Pinned resume ${resume.id.slice(0, 8)} terminalized but no Lead decision created (${decision.reason})`,
+      );
+    }
+  }
+}
+
+/**
  * Call existing stale resource cleanup functions.
  */
 async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void> {
@@ -590,6 +709,9 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
   findings.staleCleanup.inboxProcessing = releaseStaleProcessingInbox(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
+  // DES-523 Phase 3: escalate pinned crash-recovery resumes that were never
+  // reclaimed within the grace window to a Lead re-delegation decision.
+  escalateUnreclaimedResumes(findings);
   try {
     findings.staleCleanup.workflowRuns = await recoverIncompleteRuns(getExecutorRegistry());
   } catch {
@@ -873,6 +995,7 @@ export async function runHeartbeatSweep(): Promise<void> {
         autoFailedTasks: [],
         autoResumedTasks: [],
         pinnedResumes: [],
+        escalatedReroutes: [],
         workerHealthFixes: [],
         autoAssigned: [],
         staleCleanup: {
@@ -912,6 +1035,9 @@ function logFindings(findings: HeartbeatFindings): void {
   }
   if (findings.pinnedResumes.length > 0) {
     parts.push(`pinned_resumes=${findings.pinnedResumes.length}`);
+  }
+  if (findings.escalatedReroutes.length > 0) {
+    parts.push(`escalated_reroutes=${findings.escalatedReroutes.length}`);
   }
   if (findings.stalledTasks.length > 0) {
     parts.push(`stalled=${findings.stalledTasks.length}`);

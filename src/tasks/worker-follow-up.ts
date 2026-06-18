@@ -24,6 +24,17 @@ export const WORKER_LIVENESS_WINDOW_SECONDS = Number(
   process.env.WORKER_LIVENESS_WINDOW_SECONDS || "30",
 );
 
+/**
+ * Rollback switch (DES-523) for the same-agent crash-recovery pin. ON by
+ * default: `crash_recovery` resumes pin back to their original agent regardless
+ * of `lastActivityAt` freshness. Set `HEARTBEAT_PIN_CRASH_RESUME=0` to restore
+ * the pre-DES-523 behavior verbatim — `crash_recovery` then requires the 30s
+ * `fresh` window like every other reason, so at the ~5-min detection mark it
+ * falls back to the unassigned pool. A reversible kill-switch for this
+ * production crash-path change (no code revert needed if the pin misbehaves).
+ */
+export const HEARTBEAT_PIN_CRASH_RESUME = process.env.HEARTBEAT_PIN_CRASH_RESUME !== "0";
+
 export const RESUME_GENERATION_TAG_PREFIX = "resume-generation:";
 
 export function getResumeGeneration(task: Pick<AgentTask, "tags">): number {
@@ -180,11 +191,12 @@ export type CreateResumeFollowUpResult =
  * (graceful close → `offline`) or its row is absent.
  *
  * Gone-agent / never-reclaimed case: a pin whose agent never returns is NOT
- * re-pooled — the heartbeat's stale-resume reaper escalates it to a Lead
- * re-delegation decision once a grace window lapses. (That reaper,
- * `escalateUnreclaimedResumes`, is the companion DES-523 change in
- * `src/heartbeat/heartbeat.ts`; until it lands an unreclaimed pin stays
- * `pending`.)
+ * re-pooled — the heartbeat's stale-resume reaper (`escalateUnreclaimedResumes`
+ * in `src/heartbeat/heartbeat.ts`) escalates it to a Lead re-delegation decision
+ * once `HEARTBEAT_RESUME_PIN_GRACE_MIN` lapses.
+ *
+ * The pin itself is gated by `HEARTBEAT_PIN_CRASH_RESUME` (default on); set it to
+ * `0` to restore the pre-DES-523 pool-fallback behavior.
  */
 export function createResumeFollowUp(args: {
   parentId: string;
@@ -236,8 +248,9 @@ export function createResumeFollowUp(args: {
         Date.now() - lastActivity < WORKER_LIVENESS_WINDOW_SECONDS * 1000;
       const activeCount = getActiveTaskCount(candidate.id);
       const hasCap = activeCount < (candidate.maxTasks ?? 1);
-      const isCrashRecovery = args.reason === "crash_recovery";
-      // crash_recovery pins regardless of `fresh`; other reasons still require it.
+      const isCrashRecovery = args.reason === "crash_recovery" && HEARTBEAT_PIN_CRASH_RESUME;
+      // crash_recovery pins regardless of `fresh` (unless the rollback switch is
+      // off); other reasons still require it.
       if (hasCap && (isCrashRecovery || fresh)) {
         preferredAgentId = candidate.id;
       } else if (isCrashRecovery && !hasCap) {

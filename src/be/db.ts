@@ -6532,6 +6532,75 @@ export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentT
 }
 
 /**
+ * Crash-recovery resumes pinned to their original agent (DES-523 Phase 1) that
+ * were never reclaimed within `graceMin` minutes of creation — i.e. still
+ * `pending`. The heartbeat reaper escalates these to a Lead decision.
+ *
+ * `status = 'pending'` is the load-bearing "never reclaimed" discriminator: when
+ * the original agent restarts and reclaims via the normal poll path, `startTask`
+ * flips the row `pending → in_progress`, so a reclaimed resume drops out of this
+ * set automatically — no agent-liveness join needed (and `lastActivityAt` is
+ * unreliable for a returned-but-idle agent, which is why we do NOT gate on it).
+ * `createdAt` is the resume's creation = crash-DETECTION time, so the grace
+ * window is measured from detection. Keys only on reboot-durable columns
+ * (taskType / status / createdAt), so a pending pin survives a server reboot and
+ * is caught on the first post-reboot sweep.
+ */
+export function getStalePinnedResumes(graceMin: number): AgentTask[] {
+  const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE taskType = 'resume' AND status = 'pending' AND createdAt < ?
+       ORDER BY createdAt ASC`,
+    )
+    .all(cutoff)
+    .map(rowToAgentTask);
+}
+
+/**
+ * Atomically terminalize a pinned resume ONLY if it is still `pending`, in one
+ * `UPDATE … RETURNING`. Returns the row when the transition fired, or `null`
+ * when it did not (the agent reclaimed it in the gap → `startTask` already
+ * flipped it to `in_progress`). The heartbeat reaper escalates to the Lead ONLY
+ * when this returns a row, closing the TOCTOU window between reading the resume
+ * as `pending` and writing.
+ *
+ * Deliberately NOT `failTask`: `failTask`'s backing SQL is keyed on `id` with no
+ * status precondition, so it would terminalize an `in_progress` resume the
+ * worker just started. The `AND status = 'pending'` here is the guard.
+ */
+export function failPendingResumeIfUnclaimed(
+  taskId: string,
+  status: "cancelled" | "failed",
+  failureReason: string,
+): AgentTask | null {
+  const now = new Date().toISOString();
+  const scrubbedReason = scrubSecrets(failureReason);
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string, string, string]>(
+      `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
+       WHERE id = ? AND status = 'pending' RETURNING *`,
+    )
+    .get(status, scrubbedReason, now, now, taskId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        agentId: row.agentId ?? undefined,
+        oldValue: "pending",
+        newValue: status,
+        metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
  * Get idle, non-lead, non-offline agents that have capacity for more tasks.
  * Used by the heartbeat for auto-assignment of pool tasks.
  */

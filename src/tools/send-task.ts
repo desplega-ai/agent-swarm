@@ -11,10 +11,11 @@ import {
   getTaskById,
   hasCapacity,
 } from "@/be/db";
+import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema, FollowUpConfigSchema } from "@/types";
+import { type AgentTask, AgentTaskSchema, FollowUpConfigSchema } from "@/types";
 import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
 
 export const sendTaskInputSchema = z.object({
@@ -102,6 +103,40 @@ export const sendTaskOutputSchema = z.object({
 });
 
 type SendTaskArgs = z.infer<typeof sendTaskInputSchema>;
+
+const TRACKER_OWNERSHIP_TRANSFER_PARENT_STATUSES = new Set([
+  "superseded",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+/**
+ * When `send-task` creates a `resume` task whose parent is in a terminal state,
+ * move the parent's `tracker_sync` rows (Linear / Jira / GitHub outbound link)
+ * onto the new resume child so the re-delegated work keeps its external-tracker
+ * completion link. General-correct for any Lead re-delegation of a resume;
+ * specifically it completes the DES-523 tracker chain on the gone-agent path:
+ * original → R1 (pin) → R1 → original (reaper) → original → R2 (here). No-op for
+ * non-resume tasks or when the parent has no tracker_sync rows.
+ */
+function transferTrackerSyncToResumeChild(args: {
+  parentTaskId?: string;
+  taskType?: string;
+  child: AgentTask;
+}): void {
+  if (args.taskType !== "resume" || !args.parentTaskId) return;
+
+  const parent = getTaskById(args.parentTaskId);
+  if (!parent || !TRACKER_OWNERSHIP_TRANSFER_PARENT_STATUSES.has(parent.status)) return;
+
+  const repointed = repointTrackerSyncBySwarmId(parent.id, args.child.id);
+  if (repointed > 0) {
+    console.log(
+      `[send-task] Repointed ${repointed} tracker_sync row(s) from terminal parent ${parent.id.slice(0, 8)} to resume child ${args.child.id.slice(0, 8)}`,
+    );
+  }
+}
 
 export async function sendTaskHandler(
   ctx: ToolCtx,
@@ -278,6 +313,11 @@ export async function sendTaskHandler(
         slackUserId,
         followUpConfig,
       });
+      transferTrackerSyncToResumeChild({
+        parentTaskId: effectiveParentTaskId,
+        taskType,
+        child: newTask,
+      });
 
       return {
         success: true,
@@ -332,6 +372,11 @@ export async function sendTaskHandler(
         slackUserId,
         followUpConfig,
       });
+      transferTrackerSyncToResumeChild({
+        parentTaskId: effectiveParentTaskId,
+        taskType,
+        child: newTask,
+      });
 
       return {
         success: true,
@@ -359,6 +404,11 @@ export async function sendTaskHandler(
       slackThreadTs,
       slackUserId,
       followUpConfig,
+    });
+    transferTrackerSyncToResumeChild({
+      parentTaskId: effectiveParentTaskId,
+      taskType,
+      child: newTask,
     });
 
     return {
