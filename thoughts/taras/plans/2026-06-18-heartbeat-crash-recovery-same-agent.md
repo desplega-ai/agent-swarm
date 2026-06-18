@@ -126,7 +126,7 @@ This makes the resume `status='pending'` for the original agent via the existing
 - [x] A test simulates: worker assigned task → goes stale past `STALL_THRESHOLD_NO_SESSION_MIN` → heartbeat sweep → assert resume is pinned to the same agentId, and a second idle worker polling does NOT receive/claim it.
 
 #### Manual Verification:
-- [ ] Confirm the pinned resume is served back to the original agent on its next poll (covered by Manual E2E).
+- [x] Confirm the pinned resume is served back to the original agent on its next poll (covered by Manual E2E). **Verified 2026-06-18** — Part 1 Scenario 2 (API poll reclaim) + Part 2 (real container restart reclaims in ~6s). Evidence: `thoughts/taras/qa/2026-06-18-des523-crash-recovery-e2e.md`.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit `[phase 1] pin crash-recovery resume to its own agent`.
 
@@ -244,7 +244,7 @@ Wire the call into `cleanupStaleResources` (`main:src/heartbeat/heartbeat.ts:564
 - [x] Test simulates: pin resume → advance time past grace with agent still gone → run sweep → assert Lead decision created and resume no longer stuck; run sweep again → no duplicate decision.
 
 #### Manual Verification:
-- [ ] Confirm the grace default is sensible for the real restart time in the target deployment.
+- [ ] Confirm the grace default is sensible for the real restart time in the target deployment. **Data point (2026-06-18 Part 2):** a local `docker start` restart reclaimed its pin in ~6s (crash detection ~62s after kill); the 10-min default is very generous vs. that. Prod cold-start (image pull) could be longer but still well under 10min — final call is Taras's per target deployment.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit `[phase 3] reaper escalates unreclaimed pinned resumes to Lead`.
 ---
@@ -287,6 +287,11 @@ The full behavior is only complete after Phase 3, so document it here. This intr
 ---
 
 ## Manual E2E
+
+> **EXECUTED 2026-06-18 (approach C).** Full evidence: `thoughts/taras/qa/2026-06-18-des523-crash-recovery-e2e.md`.
+> - **Part 1 (scripted API-level, real server, no containers/LLM): ✅ 38/38, deterministic.** Proves all four gaps — pin to own agent (not pool), same-agent reclaim, gone-agent reaper → Lead reroute-decision (idempotent, original not reassigned), and no role-blind grab.
+> - **Part 2 (focused Docker happy-path, real pi/deepseek worker): ✅ 11/11 core.** Real container SIGKILL → crash-detected (Case B) → resume pinned to stable `AGENT_ID` → same-ID container restart → reclaimed in ~6s. Caveat: resume didn't reach `completed` due to deepseek upstream-idle-timeouts colliding with the 1-min test threshold (model/threshold artifact, not a DES-523 defect; gen-2 also re-pinned to A correctly).
+> - **Not done:** soft/manual check that the Lead LLM re-delegates via `send-task(agentId=B)` (steps 3 below, LLM-dependent, low priority).
 
 Run against a real local swarm using the `swarm-local-e2e` recipe (Docker lead + worker; see `runbooks/testing.md` / `LOCAL_TESTING.md`). Replace `<…>` placeholders with real ids.
 
