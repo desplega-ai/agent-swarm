@@ -364,7 +364,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "ai-sdk-agent"
                     ]
                   },
                   "harness_provider": {
@@ -375,7 +376,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "ai-sdk-agent"
                     ]
                   }
                 },
@@ -477,7 +479,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "ai-sdk-agent"
                     ]
                   }
                 },
@@ -535,7 +538,8 @@
                       "claude",
                       "codex",
                       "pi",
-                      "opencode"
+                      "opencode",
+                      "ai-sdk-agent"
                     ]
                   },
                   "model": {
@@ -956,6 +960,7 @@
                               "devin",
                               "claude-managed",
                               "opencode",
+                              "ai-sdk-agent",
                               null
                             ],
                             "default": null
@@ -1068,6 +1073,7 @@
                           "devin",
                           "claude-managed",
                           "opencode",
+                          "ai-sdk-agent",
                           null
                         ],
                         "default": null
@@ -2289,6 +2295,7 @@
                       "input-output-no-cache",
                       "peak-proxy",
                       "pi-delegated",
+                      "ai-sdk-agent-usage",
                       "harness-reported",
                       "unknown"
                     ]
@@ -5796,6 +5803,7 @@
                               "codex",
                               "pi",
                               "opencode",
+                              "ai-sdk-agent",
                               "devin",
                               "gemini"
                             ]
@@ -5872,6 +5880,7 @@
                 "codex",
                 "pi",
                 "opencode",
+                "ai-sdk-agent",
                 "devin",
                 "gemini"
               ]
@@ -5932,6 +5941,7 @@
                 "codex",
                 "pi",
                 "opencode",
+                "ai-sdk-agent",
                 "devin",
                 "gemini"
               ]
@@ -6004,6 +6014,7 @@
                         "codex",
                         "pi",
                         "opencode",
+                        "ai-sdk-agent",
                         "devin",
                         "gemini"
                       ]
@@ -6080,6 +6091,7 @@
                 "codex",
                 "pi",
                 "opencode",
+                "ai-sdk-agent",
                 "devin",
                 "gemini"
               ]
@@ -6130,6 +6142,7 @@
                         "codex",
                         "pi",
                         "opencode",
+                        "ai-sdk-agent",
                         "devin",
                         "gemini"
                       ]
@@ -6203,6 +6216,7 @@
                 "codex",
                 "pi",
                 "opencode",
+                "ai-sdk-agent",
                 "devin",
                 "gemini"
               ]
@@ -8138,6 +8152,7 @@
                       "codex",
                       "pi",
                       "opencode",
+                      "ai-sdk-agent",
                       "devin",
                       "gemini"
                     ]
@@ -10686,7 +10701,8 @@
                               "pi",
                               "devin",
                               "claude-managed",
-                              "opencode"
+                              "opencode",
+                              "ai-sdk-agent"
                             ]
                           },
                           "providers": {
@@ -10702,7 +10718,8 @@
                                     "pi",
                                     "devin",
                                     "claude-managed",
-                                    "opencode"
+                                    "opencode",
+                                    "ai-sdk-agent"
                                   ]
                                 },
                                 "state": {
@@ -10825,7 +10842,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "ai-sdk-agent"
                     ]
                   }
                 },
@@ -11177,7 +11195,8 @@
                           "codex",
                           "pi",
                           "claude-managed",
-                          "opencode"
+                          "opencode",
+                          "ai-sdk-agent"
                         ]
                       },
                       "model": {
