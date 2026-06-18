@@ -64,7 +64,8 @@ In-flight task sessions stay on the binary they spawned with; new spawns pick up
 - **Bun `>= 1.1`.** The npm package is `@desplega.ai/claude-bridge`; the published bin uses `#!/usr/bin/env bun`.
 - **`tmux` on `PATH`.** The bridge starts interactive Claude Code in a detached tmux pane. The swarm fail-fasts at session-create when `tmux` is missing.
 - **`claude` on `PATH`, version `>= 2.1.80`.** The bridge launches the local Claude CLI.
-- **Auth: unchanged.** The normal Claude harness credential check still applies: `CLAUDE_CODE_OAUTH_TOKEN` is preferred, with `ANTHROPIC_API_KEY` as the alternate accepted by the swarm. The bridge itself relies on the spawned `claude` process auth.
+- **Auth: an OAuth token is required.** The bridge authenticates the spawned `claude` from `CLAUDE_CODE_OAUTH_TOKEN` only — it deliberately strips `ANTHROPIC_*` from the launched process. Bridge mode is therefore gated on an OAuth token: if `SWARM_USE_CLAUDE_BRIDGE` is set but no `CLAUDE_CODE_OAUTH_TOKEN` is present, the adapter logs a warning and falls back to stock `claude` (which Claude Code authenticates fine from `ANTHROPIC_API_KEY`). API-key billing is identical headless vs interactive, so the bridge buys nothing there.
+- **Claude's on-disk transcript must stay enabled.** The bridge reconstructs *all* of its output — cost/token/duration metrics **and** the streamed assistant/tool-use events — by reshaping Claude Code's session transcript (`~/.claude/projects/<slug>/<sessionId>.jsonl`). Anything that suppresses that file breaks the bridge: notably `CLAUDE_CODE_SKIP_PROMPT_HISTORY=1` makes Claude Code emit only `init` + a null-metrics `result` ($0 / 0 tokens / 0ms), with answer text only via the inline `last_assistant_message`. The swarm's Claude runtime guardrails set that var; claude-bridge `>= 0.2.2` strips it from the launched `claude` so the transcript persists.
 
 ## Prompt pre-clear
 

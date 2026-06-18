@@ -144,15 +144,46 @@ export function resolveClaudeBridgeEnabled(
   return parseClaudeBridgeEnabled(candidate);
 }
 
-function resolveClaudeBinaryArgv(
+/**
+ * Resolve the claude binary argv, gating claude-bridge on an OAuth token.
+ *
+ * claude-bridge exists to keep subscription/OAuth billing correct by driving
+ * the real interactive Claude TUI in tmux. It authenticates the child claude
+ * from `CLAUDE_CODE_OAUTH_TOKEN` only — it deliberately strips `ANTHROPIC_*`
+ * from the launched process — so it cannot run on an Anthropic API key. And
+ * API-key billing is identical headless vs interactive, so there's no reason to
+ * pay the bridge's complexity/footguns when only an API key is available.
+ *
+ * Therefore: only route through claude-bridge when an OAuth token is present.
+ * If the bridge is requested (`SWARM_USE_CLAUDE_BRIDGE`) but no OAuth token is
+ * set, fall back to stock `claude`, which Claude Code authenticates fine from
+ * the API key. `bridgeRequestedWithoutOAuth` lets the caller log why.
+ *
+ * Exported for unit testing.
+ */
+export function resolveClaudeBinaryArgv(
   resolvedEnv: Record<string, string | undefined>,
   fallbackEnv: Record<string, string | undefined> = process.env,
-): { raw: string; argv: string[]; useClaudeBridge: boolean } {
-  const useClaudeBridge = resolveClaudeBridgeEnabled(resolvedEnv, fallbackEnv);
+): {
+  raw: string;
+  argv: string[];
+  useClaudeBridge: boolean;
+  bridgeRequestedWithoutOAuth: boolean;
+} {
+  const bridgeRequested = resolveClaudeBridgeEnabled(resolvedEnv, fallbackEnv);
+  const hasOAuthToken = Boolean(
+    (resolvedEnv.CLAUDE_CODE_OAUTH_TOKEN ?? fallbackEnv.CLAUDE_CODE_OAUTH_TOKEN)?.trim(),
+  );
+  const useClaudeBridge = bridgeRequested && hasOAuthToken;
   const raw = useClaudeBridge
     ? CLAUDE_BRIDGE_BINARY
     : resolveClaudeBinary(resolvedEnv, fallbackEnv);
-  return { raw, argv: parseClaudeBinary(raw), useClaudeBridge };
+  return {
+    raw,
+    argv: parseClaudeBinary(raw),
+    useClaudeBridge,
+    bridgeRequestedWithoutOAuth: bridgeRequested && !hasOAuthToken,
+  };
 }
 
 function isLegacyClaudeBridgeCompatBinary(raw: string): boolean {
@@ -898,7 +929,13 @@ export class ClaudeAdapter implements ProviderAdapter {
       raw: claudeBinaryRaw,
       argv: claudeBinaryArgv,
       useClaudeBridge,
+      bridgeRequestedWithoutOAuth,
     } = resolveClaudeBinaryArgv(sourceEnv);
+    if (bridgeRequestedWithoutOAuth) {
+      console.warn(
+        `\x1b[33m[claude]\x1b[0m SWARM_USE_CLAUDE_BRIDGE is set but no CLAUDE_CODE_OAUTH_TOKEN is present — falling back to stock 'claude'. claude-bridge requires a subscription/OAuth token (it forwards only the OAuth token to claude and strips ANTHROPIC_*); API-key billing is identical headless vs interactive, so the bridge isn't needed.`,
+      );
+    }
     const isLegacyBridgeCompat = isLegacyClaudeBridgeCompatBinary(claudeBinaryRaw);
     const effectiveClaudeBinaryArgv = useClaudeBridge
       ? withClaudeBridgeAuthArgs(claudeBinaryArgv, sourceEnv)

@@ -34,6 +34,7 @@ import {
   parseClaudeBridgeEnabled,
   preseedClaudeTrustDialog,
   resolveClaudeBinary,
+  resolveClaudeBinaryArgv,
   resolveClaudeBridgeEnabled,
 } from "../providers/claude-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
@@ -214,6 +215,59 @@ describe("SWARM_USE_CLAUDE_BRIDGE boolean parsing", () => {
         { SWARM_USE_CLAUDE_BRIDGE: "true" },
       ),
     ).toBe(true);
+  });
+});
+
+describe("resolveClaudeBinaryArgv — claude-bridge requires an OAuth token", () => {
+  test("bridge requested + OAuth token present → routes to claude-bridge", () => {
+    const r = resolveClaudeBinaryArgv(
+      { SWARM_USE_CLAUDE_BRIDGE: "true", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" },
+      {},
+    );
+    expect(r.useClaudeBridge).toBe(true);
+    expect(r.argv).toEqual(["claude-bridge"]);
+    expect(r.bridgeRequestedWithoutOAuth).toBe(false);
+  });
+
+  test("bridge requested + no OAuth (only API key) → falls back to stock claude", () => {
+    const r = resolveClaudeBinaryArgv(
+      { SWARM_USE_CLAUDE_BRIDGE: "true", ANTHROPIC_API_KEY: "sk-ant-api" },
+      {},
+    );
+    expect(r.useClaudeBridge).toBe(false);
+    expect(r.argv).toEqual(["claude"]);
+    expect(r.bridgeRequestedWithoutOAuth).toBe(true);
+  });
+
+  test("bridge requested + no creds at all → stock claude, flag set", () => {
+    const r = resolveClaudeBinaryArgv({ SWARM_USE_CLAUDE_BRIDGE: "1" }, {});
+    expect(r.useClaudeBridge).toBe(false);
+    expect(r.bridgeRequestedWithoutOAuth).toBe(true);
+  });
+
+  test("OAuth token from fallbackEnv (container env) also enables the bridge", () => {
+    const r = resolveClaudeBinaryArgv(
+      { SWARM_USE_CLAUDE_BRIDGE: "true" },
+      { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-fallback" },
+    );
+    expect(r.useClaudeBridge).toBe(true);
+    expect(r.bridgeRequestedWithoutOAuth).toBe(false);
+  });
+
+  test("whitespace-only OAuth token does not count as present", () => {
+    const r = resolveClaudeBinaryArgv(
+      { SWARM_USE_CLAUDE_BRIDGE: "true", CLAUDE_CODE_OAUTH_TOKEN: "   " },
+      {},
+    );
+    expect(r.useClaudeBridge).toBe(false);
+    expect(r.bridgeRequestedWithoutOAuth).toBe(true);
+  });
+
+  test("bridge not requested → never flagged, stock claude", () => {
+    const r = resolveClaudeBinaryArgv({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" }, {});
+    expect(r.useClaudeBridge).toBe(false);
+    expect(r.bridgeRequestedWithoutOAuth).toBe(false);
+    expect(r.argv).toEqual(["claude"]);
   });
 });
 
@@ -580,6 +634,26 @@ describe("CLAUDE_BINARY env override", () => {
     );
 
     expect(spawnedArgs[0][0]).toBe("claude");
+  });
+
+  test("SWARM_USE_CLAUDE_BRIDGE=true without OAuth token falls back to stock claude", async () => {
+    const origApiKey = process.env.ANTHROPIC_API_KEY;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
+    try {
+      const adapter = new ClaudeAdapter();
+      await adapter.createSession(makeConfig());
+      // No OAuth token → bridge is skipped, stock claude is used (Claude Code
+      // authenticates fine from ANTHROPIC_API_KEY; the bridge can't).
+      expect(spawnedArgs[0][0]).toBe("claude");
+    } finally {
+      if (origApiKey === undefined) {
+        delete process.env.ANTHROPIC_API_KEY;
+      } else {
+        process.env.ANTHROPIC_API_KEY = origApiKey;
+      }
+    }
   });
 });
 
