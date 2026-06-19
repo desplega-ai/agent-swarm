@@ -295,9 +295,15 @@ Full rulebook: [evals/SCENARIO-AUTHORING.md](./evals/SCENARIO-AUTHORING.md). Non
 
 </important>
 
+<important if="you are modifying heartbeat, crash-recovery, or task-assignment/routing logic (src/heartbeat/*, src/tasks/worker-follow-up.ts resume/remediation, the pool/claim path in src/http/poll.ts + src/be/db.ts, or any stall/liveness/reaper threshold)">
+
+[runbooks/heartbeat-crash-recovery.md](./runbooks/heartbeat-crash-recovery.md) is the canonical flow reference — the heartbeat sweep, the stalled-task classifier, and the crash-recovery routing heuristic, with mermaid diagrams + pseudocode. It stores **only the current behavior (no history)**. Update it in the **same PR** whenever you change any of this logic so the diagrams/pseudocode stay true.
+
+</important>
+
 ## Related
 
-- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts
+- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference

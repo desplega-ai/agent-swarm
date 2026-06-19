@@ -1,0 +1,34 @@
+# Compose override for the DES-523 crash-recovery Part 2 Docker E2E
+# (scripts/e2e-des523-crash-recovery-docker.ts). Pass alongside the base file:
+#
+#   docker compose -f docker-compose.local.yml -f scripts/e2e-des523-crash-recovery.override.yml \
+#     down -v
+#   docker compose -f docker-compose.local.yml -f scripts/e2e-des523-crash-recovery.override.yml \
+#     build api
+#   docker compose -f docker-compose.local.yml -f scripts/e2e-des523-crash-recovery.override.yml \
+#     up -d api pi-worker
+#
+# Then: `bun run scripts/e2e-des523-crash-recovery-docker.ts`
+# Cleanup: same `down -v` as above.
+#
+# No secrets here. Requires API_KEY + OPENROUTER_API_KEY in .env (read by the
+# base compose file).
+services:
+  api:
+    environment:
+      # Shorten crash detection so a SIGKILL'd worker is flagged within ~1 min.
+      # A docker-killed worker leaves a stale active_session (frozen heartbeat) →
+      # Case B; shorten that AND the no-session path. Grace is generous so the
+      # reaper does NOT escalate before the restarted worker reclaims (happy path).
+      - HEARTBEAT_STALL_STALE_HB_MIN=1
+      - HEARTBEAT_STALL_NO_SESSION_MIN=1
+      - HEARTBEAT_RESUME_PIN_GRACE_MIN=10
+      - HEARTBEAT_INTERVAL_MS=10000
+
+  pi-worker:
+    # Do NOT auto-restart on SIGKILL — we want the killed worker to stay down
+    # until we explicitly `docker start` it (the "same agent restarts" hop).
+    restart: "no"
+    environment:
+      # Taras's cross-provider E2E model choice for pi/opencode.
+      - MODEL_OVERRIDE=openrouter/deepseek/deepseek-v4-flash

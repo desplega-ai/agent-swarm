@@ -78,9 +78,12 @@ agent-swarm set-config global github.cancelOnReviewRequestRemoved false
 |-------|-------------|
 | Bot assigned to PR/issue | Creates a task for the lead agent |
 | Review requested from bot | Creates a review task |
+| PR review submitted | Creates a review task for submitted human reviews, including inline comments bundled into the task description when present |
 | `@bot-name` or `@alias` in comment/issue/PR | Creates a task with the mention context |
 | `swarm-review` label added to PR/issue | Creates a task for review (configurable via `GITHUB_EVENT_LABELS`) |
 | Bot unassigned / review request removed | Cancels the linked task by default; both behaviors are runtime-configurable via `github.cancelOnUnassign` and `github.cancelOnReviewRequestRemoved` |
+
+Submitted PR reviews with no top-level body are still processed when they contain inline comments. Agent Swarm fetches the full review-comment bundle, appends an `Inline review comments` section with `path:line` context to the spawned task, and avoids spawning duplicate follow-up tasks from the corresponding standalone `pull_request_review_comment` events.
 
 ### Suppressed Events (Safety Defaults)
 
@@ -88,7 +91,6 @@ The following events are **suppressed by default** to prevent cascade behavior w
 
 - **PR closed/merged** — No automatic task creation on PR close
 - **PR synchronize** (new commits pushed) — No automatic task on push
-- **PR review submitted** — No automatic task from review events
 - **CI check failures** (check_run, check_suite, workflow_run) — No automatic task from CI events
 
 These events still emit to the internal `workflowEventBus` for workflow triggers, but do not create agent tasks.

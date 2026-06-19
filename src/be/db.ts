@@ -753,8 +753,13 @@ export function getAllAgents(opts?: { slim?: boolean }): Agent[] {
 }
 
 export function getLeadAgent(): Agent | null {
-  const agents = getAllAgents();
-  return agents.find((a) => a.isLead) ?? null;
+  const leads = getAllAgents().filter((a) => a.isLead);
+  // Prefer a usable (non-offline) lead so callers route to one that can actually
+  // poll — e.g. an old offline lead must not shadow a live replacement. Falls
+  // back to any lead (incl. offline) so existing "is there a lead at all?"
+  // semantics are preserved; callers that require a live lead must check
+  // `status` themselves (see escalateUnreclaimedResumes).
+  return leads.find((a) => a.status !== "offline") ?? leads[0] ?? null;
 }
 
 export function updateAgentStatus(id: string, status: AgentStatus): Agent | null {
@@ -1437,6 +1442,31 @@ export function hasNonTerminalResumeChild(parentId: string): boolean {
       `SELECT 1 FROM agent_tasks
        WHERE parentTaskId = ?
          AND taskType = 'resume'
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       LIMIT 1`,
+    )
+    .get(parentId);
+  return row !== undefined && row !== null;
+}
+
+/**
+ * True when a non-terminal `reroute-decision` child exists for `parentId`.
+ *
+ * Mirrors {@link hasNonTerminalResumeChild} but filters on
+ * `taskType = 'reroute-decision'` — the Lead-owned re-delegation decision
+ * created when a pinned crash-recovery resume is never reclaimed (DES-523).
+ * Makes escalation idempotent: a later heartbeat sweep must not create a second
+ * decision for the same original task. We filter on the taskType marker
+ * specifically (not any child) so ordinary delegation / completion follow-up
+ * children of the original cannot suppress a needed decision, and nothing else
+ * is mistaken for one.
+ */
+export function hasNonTerminalRerouteDecisionChild(parentId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM agent_tasks
+       WHERE parentTaskId = ?
+         AND taskType = 'reroute-decision'
          AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        LIMIT 1`,
     )
@@ -2949,6 +2979,14 @@ export interface CreateTaskOptions {
    * a schema'd task should be defensive about JSON parsing.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * When a `parentTaskId` is set, the child inherits the parent's `outputSchema`
+   * by default. Set this to `false` to opt out — used by control-plane children
+   * (e.g. the Lead `reroute-decision` task) that must inherit Slack/VCS context
+   * from the parent but must NOT be forced to satisfy the original work's output
+   * contract on completion (which would block the control task — DES-523).
+   */
+  inheritParentOutputSchema?: boolean;
   followUpConfig?: FollowUpConfig;
   requestedByUserId?: string;
   contextKey?: string;
@@ -3101,8 +3139,15 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
 
       // Contract (schema validation) — `store-progress` validates completion
       // output against `outputSchema`, runner injects structured-output
-      // instructions only when it's present.
-      if (parent.outputSchema && !options.outputSchema) {
+      // instructions only when it's present. Opt-out via
+      // `inheritParentOutputSchema: false` for control-plane children (e.g. the
+      // Lead reroute-decision) that must not be held to the original work's
+      // output contract.
+      if (
+        parent.outputSchema &&
+        !options.outputSchema &&
+        options.inheritParentOutputSchema !== false
+      ) {
         options.outputSchema = parent.outputSchema;
       }
 
@@ -6504,6 +6549,88 @@ export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentT
     )
     .all(cutoff)
     .map(rowToAgentTask);
+}
+
+/**
+ * Genuine same-agent crash-recovery PINS (tagged `crash-recovery-pin`, DES-523
+ * Phase 1) that are still `pending` `graceMin` minutes after creation — the
+ * heartbeat reaper escalates these to a Lead reroute-decision.
+ *
+ * Three scoping clauses, each load-bearing:
+ *  - `tags LIKE '%"crash-recovery-pin"%'` — restricts to resumes actually pinned
+ *    to their original agent on the crash path. Without it, a *pooled* resume
+ *    that `autoAssignPoolTasks` flips to `pending` earlier in the SAME sweep
+ *    (keeping its old `createdAt`) would be reaped and cancelled before the
+ *    assigned worker polls; it also keeps `context_limits` / `manual_supersede`
+ *    pins from being escalated under a `crash_recovery` label. (Literal must
+ *    match `CRASH_RECOVERY_PIN_TAG` in src/tasks/worker-follow-up.ts.)
+ *  - `status = 'pending'` — the "currently unreclaimed" discriminator: when the
+ *    agent reclaims via the normal poll path, `startTask` flips the row to
+ *    `in_progress` and it drops out of this set. (A reclaimed resume whose
+ *    session later orphans can be flipped back to `pending` by
+ *    `resetOrphanedInProgressTasksForAgent`, re-entering this set on a later
+ *    sweep — re-escalating genuinely re-stalled work, which is fine.) We do NOT
+ *    gate on `lastActivityAt` — it is stale for a returned-but-idle agent.
+ *  - `createdAt < cutoff` — `createdAt` is the resume's creation = crash-DETECTION
+ *    time, so the grace window is measured from detection.
+ *
+ * Keys only on reboot-durable columns, so a pending pin survives a server reboot
+ * and is caught on the first post-reboot sweep.
+ */
+export function getStalePinnedResumes(graceMin: number): AgentTask[] {
+  const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE taskType = 'resume' AND status = 'pending'
+         AND tags LIKE '%"crash-recovery-pin"%'
+         AND createdAt < ?
+       ORDER BY createdAt ASC`,
+    )
+    .all(cutoff)
+    .map(rowToAgentTask);
+}
+
+/**
+ * Atomically terminalize a pinned resume ONLY if it is still `pending`, in one
+ * `UPDATE … RETURNING`. Returns the row when the transition fired, or `null`
+ * when it did not (the agent reclaimed it in the gap → `startTask` already
+ * flipped it to `in_progress`). The heartbeat reaper escalates to the Lead ONLY
+ * when this returns a row, closing the TOCTOU window between reading the resume
+ * as `pending` and writing.
+ *
+ * Deliberately NOT `failTask`: `failTask`'s backing SQL is keyed on `id` with no
+ * status precondition, so it would terminalize an `in_progress` resume the
+ * worker just started. The `AND status = 'pending'` here is the guard.
+ */
+export function failPendingResumeIfUnclaimed(
+  taskId: string,
+  status: "cancelled" | "failed",
+  failureReason: string,
+): AgentTask | null {
+  const now = new Date().toISOString();
+  const scrubbedReason = scrubSecrets(failureReason);
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string, string, string]>(
+      `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
+       WHERE id = ? AND status = 'pending' RETURNING *`,
+    )
+    .get(status, scrubbedReason, now, now, taskId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        agentId: row.agentId ?? undefined,
+        oldValue: "pending",
+        newValue: status,
+        metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
 }
 
 /**
