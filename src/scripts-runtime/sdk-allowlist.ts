@@ -113,6 +113,7 @@ export const SDK_TOOL_NAME_MAP = {
   tracker_mapAgent: "tracker-map-agent",
 
   // ── skills ──
+  skill_load: "Skill",
   skill_list: "skill-list",
   skill_get: "skill-get",
   skill_getFile: "skill-get-file",

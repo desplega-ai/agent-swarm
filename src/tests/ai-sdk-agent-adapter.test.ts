@@ -73,6 +73,10 @@ describe("AiSdkAgentSession", () => {
         toolCallId: "runner-call",
       } as never);
       expect(toolOutput).toBe("mcp:from-runner");
+      const skillOutput = await tools.Skill.execute?.({ name: "work-on-task" }, {
+        toolCallId: "skill-call",
+      } as never);
+      expect(skillOutput).toContain("# Work on Task");
       onTextDelta("hello");
       onStepUsage({
         inputTokens: 1_000,
@@ -99,10 +103,21 @@ describe("AiSdkAgentSession", () => {
             description: "Echo",
             inputSchema: { type: "object", properties: { value: { type: "string" } } },
           },
+          {
+            name: "Skill",
+            description: "Load a skill into context",
+            inputSchema: { type: "object", properties: { name: { type: "string" } } },
+          },
         ],
-        callTool: async (_name, args) => ({
-          content: [{ type: "text", text: `mcp:${String(args.value)}` }],
-        }),
+        callTool: async (name, args) => {
+          if (name === "Skill") {
+            expect(args).toEqual({ name: "work-on-task" });
+            return { content: [{ type: "text", text: "# Work on Task\n\nLifecycle." }] };
+          }
+          return {
+            content: [{ type: "text", text: `mcp:${String(args.value)}` }],
+          };
+        },
       }),
     });
     session.onEvent((event) => events.push(event));
@@ -115,6 +130,11 @@ describe("AiSdkAgentSession", () => {
     expect(events.some((event) => event.type === "session_init")).toBe(true);
     expect(events.some((event) => event.type === "tool_start")).toBe(true);
     expect(events.some((event) => event.type === "tool_end")).toBe(true);
+    expect(
+      events.some(
+        (event) => event.type === "tool_end" && event.toolName === "Skill" && event.result,
+      ),
+    ).toBe(true);
     expect(events.some((event) => event.type === "context_usage")).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: "result", isError: false });
   });

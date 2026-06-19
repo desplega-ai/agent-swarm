@@ -1293,6 +1293,17 @@ Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md via 
 | `scope` | `global \| swarm` | No | "global" | Scope for the installed skill |
 | `isComplex` | `boolean` | No | false | If true, registers for npx install (metadata only) |
 
+### Skill
+
+**Skill**
+
+Load an installed skill's SKILL.md content into context by name or slug. Exact name matches are preferred; fuzzy matching falls back within the calling agent's available skills.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | No | - | Skill name or slug to load |
+| `skill` | `string` | No | - | Alias for name |
+
 ### skill-get
 
 **Get Skill**
@@ -1460,4 +1471,3 @@ Delete an MCP server definition. Only the owning agent or lead can delete.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | ID of the MCP server to delete |
-

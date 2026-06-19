@@ -35,6 +35,9 @@ export const CORE_TOOLS = new Set([
 
   // Swarm awareness
   "get-swarm", // check who's online
+
+  // Skill loading (Claude Code-style model-facing context loader)
+  "Skill",
 ]);
 
 /** Tools that can be discovered via Tool Search on demand */

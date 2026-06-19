@@ -95,6 +95,7 @@ import {
   registerSkillPublishTool,
   registerSkillSearchTool,
   registerSkillSyncRemoteTool,
+  registerSkillTool,
   registerSkillUninstallTool,
   registerSkillUpdateTool,
 } from "./tools/skills";
@@ -331,6 +332,7 @@ export function createServer() {
   registerSkillCreateTool(server);
   registerSkillUpdateTool(server);
   registerSkillDeleteTool(server);
+  registerSkillTool(server);
   registerSkillGetTool(server);
   registerSkillGetFileTool(server);
   registerSkillListTool(server);

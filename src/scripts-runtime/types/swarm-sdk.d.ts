@@ -275,6 +275,7 @@ declare module "swarm-sdk" {
     user_manage(args: Record<string, unknown>): Promise<unknown>;
 
     // --- skills ---
+    skill_load(args: { name?: string; skill?: string }): Promise<unknown>;
     skill_list(args?: {
       scope?: string;
       scopeId?: string;

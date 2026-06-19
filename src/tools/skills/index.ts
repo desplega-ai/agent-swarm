@@ -1,3 +1,4 @@
+export { registerSkillTool } from "./skill";
 export { registerSkillCreateTool } from "./skill-create";
 export { registerSkillDeleteTool } from "./skill-delete";
 export { registerSkillGetTool } from "./skill-get";
