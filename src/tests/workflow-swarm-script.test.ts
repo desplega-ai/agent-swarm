@@ -255,6 +255,27 @@ describe("SwarmScriptExecutor", () => {
     expect(scriptStep?.output).toMatchObject({ result: { seen: "mapped-value" } });
   });
 
+  test("exact object token outside swarm-script args is still stringified", async () => {
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "echo",
+          type: "echo",
+          config: { value: "{{trigger.payload}}" },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, { payload: { a: 1 } }, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const echoStep = steps.find((step) => step.nodeId === "echo");
+
+    expect(run?.status).toBe("completed");
+    expect(echoStep?.status).toBe("completed");
+    expect(echoStep?.output).toEqual({ value: '{"a":1}' });
+  });
+
   test("{{path}} args: object arg is injected as raw object, not JSON string", async () => {
     await saveScript(
       "echo-obj",
@@ -399,6 +420,34 @@ describe("SwarmScriptExecutor", () => {
     expect(run?.status).toBe("completed");
     expect(scriptStep?.status).toBe("completed");
     expect(scriptStep?.output).toMatchObject({ result: { isNumber: true, value: 3 } });
+  });
+
+  test("{{path}} args: boolean scalar arg is injected as a boolean, not a string", async () => {
+    await saveScript(
+      "echo-bool",
+      `export default async (args: { enabled: boolean }) => ({ isBoolean: typeof args.enabled === "boolean", value: args.enabled });`,
+    );
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "script",
+          type: "swarm-script",
+          config: {
+            scriptName: "echo-bool",
+            args: { enabled: "{{trigger.enabled}}" },
+          },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, { enabled: false }, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const scriptStep = steps.find((step) => step.nodeId === "script");
+
+    expect(run?.status).toBe("completed");
+    expect(scriptStep?.status).toBe("completed");
+    expect(scriptStep?.output).toMatchObject({ result: { isBoolean: true, value: false } });
   });
 
   test("{{path}} args: mixed string template still produces a string via interpolation", async () => {

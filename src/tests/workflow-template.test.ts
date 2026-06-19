@@ -205,6 +205,23 @@ describe("deepInterpolate", () => {
     expect(unresolved).toEqual([]);
   });
 
+  test("exact object token is stringified by default", () => {
+    const { value, unresolved } = deepInterpolate("{{body}}", { body: { message: "hello" } });
+    expect(value).toBe('{"message":"hello"}');
+    expect(unresolved).toEqual([]);
+  });
+
+  test("exact object token preserves raw value when requested", () => {
+    const body = { message: "hello" };
+    const { value, unresolved } = deepInterpolate(
+      "{{body}}",
+      { body },
+      { preserveRawTokens: true },
+    );
+    expect(value).toBe(body);
+    expect(unresolved).toEqual([]);
+  });
+
   test("mixed array (string + number + boolean)", () => {
     const { value, unresolved } = deepInterpolate(["{{name}}", 42, true, null], {
       name: "Test",

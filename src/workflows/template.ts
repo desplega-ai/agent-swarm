@@ -10,6 +10,10 @@ export interface InterpolateResult {
   unresolved: string[];
 }
 
+export interface DeepInterpolateOptions {
+  preserveRawTokens?: boolean;
+}
+
 export function interpolate(template: string, ctx: Record<string, unknown>): InterpolateResult {
   const unresolved: string[] = [];
   const result = template.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
@@ -68,10 +72,10 @@ function resolvePath(
 /**
  * Deep-interpolate an arbitrary value tree (objects, arrays, strings).
  *
- * When a string value is **exactly** one `{{path}}` token with no surrounding
- * text, the resolved value is returned as-is (preserving object / array /
- * number / boolean types).  This is the "raw injection" path used by
- * `swarm-script` node `config.args`.
+ * When `preserveRawTokens` is true and a string value is **exactly** one
+ * `{{path}}` token with no surrounding text, the resolved value is returned
+ * as-is (preserving object / array / number / boolean types). This is the
+ * "raw injection" path used by `swarm-script` node `config.args`.
  *
  * When a string contains multiple tokens or surrounding text (e.g.
  * `"prefix-{{x}}"`) the existing string-interpolation path is used so the
@@ -82,15 +86,13 @@ function resolvePath(
 export function deepInterpolate(
   value: unknown,
   ctx: Record<string, unknown>,
+  options: DeepInterpolateOptions = {},
 ): { value: unknown; unresolved: string[] } {
   const allUnresolved: string[] = [];
 
   function walk(v: unknown): unknown {
     if (typeof v === "string") {
-      // Single exact-match token → return the raw resolved value so that
-      // objects / arrays / numbers / booleans keep their JS types instead of
-      // being coerced to strings via JSON.stringify / String().
-      const exactMatch = EXACT_TOKEN_RE.exec(v);
+      const exactMatch = options.preserveRawTokens ? EXACT_TOKEN_RE.exec(v) : null;
       if (exactMatch?.[1]) {
         const path = exactMatch[1].trim();
         const resolved = resolvePath(path, ctx);
@@ -100,7 +102,6 @@ export function deepInterpolate(
         }
         return resolved.value;
       }
-      // Multi-token or mixed string — fall back to string interpolation.
       const { result, unresolved } = interpolate(v, ctx);
       allUnresolved.push(...unresolved);
       return result;
