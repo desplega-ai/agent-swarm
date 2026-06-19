@@ -1,1 +1,2 @@
 {"type":"bootstrap","createdAt":"2026-06-09T00:00:00.000Z","note":"Real image-size records are appended by .github/workflows/docker-image-size.yml on push to main."}
+{"measuredAt":"2026-06-19T14:47:20.797Z","sha":"791947c6d86d270f202552ad5ef7c1501a57fd16","images":{"api":{"compressedBytes":193343777,"uncompressedBytes":549796993},"worker":{"compressedBytes":3116826849,"uncompressedBytes":7007268459}}}
