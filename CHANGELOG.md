@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.100.4] - 2026-06-20
+
+### Fixed
+- **`swarm-script` workflow args now preserve exact-token JSON types without leaking cross-scope values** (#798, #799) — `config.args` entries written as a single token such as `{{input.payload}}` now keep native object/array/number/boolean shapes instead of stringifying them, while mixed strings still interpolate as strings and raw token resolution stays scoped to the node's local interpolation context during retries and fan-out.
+
 ## [1.100.3] - 2026-06-19
 
 ### Added
