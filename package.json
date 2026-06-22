@@ -22,6 +22,7 @@
     "access": "public"
   },
   "files": [
+    "dist/",
     "src/",
     "tsconfig.json",
     "plugin/commands/",
@@ -34,7 +35,7 @@
   "module": "src/http.ts",
   "type": "module",
   "bin": {
-    "agent-swarm": "./src/cli.tsx"
+    "agent-swarm": "./dist/cli.js"
   },
   "@desplega.ai/agent-swarm": "link:@desplega.ai/agent-swarm",
   "config": {
@@ -42,6 +43,8 @@
   },
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
+    "build:cli": "bun run scripts/build-cli.ts",
+    "prepack": "bun run build:cli",
     "tsc:check": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",

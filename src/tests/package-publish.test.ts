@@ -14,7 +14,7 @@ afterAll(() => {
 });
 
 describe("published package", () => {
-  test("version command works from an unpacked tarball", () => {
+  test("version command works from the packaged node bin", () => {
     const tarballPath = join(tempDir, "agent-swarm.tgz");
     const unpackDir = join(tempDir, "unpacked");
 
@@ -36,7 +36,7 @@ describe("published package", () => {
       { stdio: "pipe" },
     );
 
-    const output = execSync(`bun ./package/src/cli.tsx version`, {
+    const output = execSync(`node ./package/dist/cli.js version`, {
       cwd: unpackDir,
       encoding: "utf-8",
       stdio: "pipe",
