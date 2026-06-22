@@ -246,7 +246,7 @@ describe("runCodexLogin", () => {
       resolveConfig: async () => ({
         apiUrl: "http://localhost:3013",
         apiKey: "test-key",
-        slot: 32,
+        slot: 101,
       }),
       login: mock(async () => {
         throw new Error("should not start oauth");
@@ -259,7 +259,7 @@ describe("runCodexLogin", () => {
     });
 
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("--slot must be an integer between 0 and 31"),
+      expect.stringContaining("--slot must be an integer between 0 and 100"),
     );
     expect(exit).toHaveBeenCalledWith(1);
     expect(store).not.toHaveBeenCalled();
@@ -297,8 +297,8 @@ describe("runCodexLogin", () => {
     const error = mock(() => {});
     const exit = mock(() => {});
 
-    // All 32 slots occupied (0-31)
-    const allSlots = Array.from({ length: 32 }, (_, i) => ({
+    // All 101 slots occupied (0-100)
+    const allSlots = Array.from({ length: 101 }, (_, i) => ({
       slot: i,
       creds: { access: "", refresh: "", expires: 0, accountId: "" },
     }));
