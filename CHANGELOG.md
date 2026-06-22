@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.101.0] - 2026-06-22
+
+### Added
+- **`codex-login` accepts credential slots above 9** (#802) — the slot ceiling (`MAX_SLOT`) was raised from 9 to 31, so operators can register more than 10 Codex OAuth credentials in the sandbox pool. The rest of the stack (storage-key regex, runner enumeration, api-keys endpoint) was already unbounded; this removes the only enforced limit.
+
+### Fixed
+- **`swarm-script` workflow nodes can trigger workflows (and other fall-through MCP tools) again** (#801) — `trigger-workflow` was returning a 403 because `mcp-bridge.ts` checked the MCP tool name against the SDK method-name set. A new `isMcpToolAllowedForScripts()` check matches against MCP names, also unblocking `slack_post`, `page_create`, `schedule_*`, and other previously-403ing tools. A latent arg-name drift (`workflow_trigger` typed as `{ id; input? }` while the tool reads `triggerData`) was fixed and the generated SDK type defs regenerated.
+
 ## [1.100.4] - 2026-06-20
 
 ### Fixed
