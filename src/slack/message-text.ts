@@ -81,11 +81,19 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
       const a = raw as SlackAttachment;
       const attParts: string[] = [];
 
-      // Primary text: first non-empty of fallback/text/title/pretext.
+      // Collect all non-empty primary text fields as separate parts; dedup exact matches.
+      // fallback is a short notification-only summary — text often carries the full body,
+      // so we must not let fallback suppress text via short-circuit (a.fallback || a.text).
       // Prefer a mrkdwn link for title when title_link is present.
       const titleText = a.title_link && a.title ? `<${a.title_link}|${a.title}>` : a.title;
-      const primary = a.fallback || a.text || titleText || a.pretext;
-      if (primary) attParts.push(primary);
+      const seenPrimary = new Set<string>();
+      for (const part of [a.pretext, titleText, a.text, a.fallback]) {
+        const s = part?.trim();
+        if (s && !seenPrimary.has(s)) {
+          seenPrimary.add(s);
+          attParts.push(s);
+        }
+      }
 
       // Datadog-style attachment fields (title/value pairs)
       if (Array.isArray(a.fields)) {
@@ -156,9 +164,16 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
 
   const bodyText = [...attachmentParts, ...blockParts].filter(Boolean).join("\n");
 
-  // Include the top-level text unless it is already verbatim in the body
-  // (alert apps echo the fallback title as a block — avoid double-printing it).
-  if (topText && !bodyText.includes(topText)) {
+  // Include the top-level text unless it already appears as a complete line in the body.
+  // Boundary-aware check: "hi".includes check would silently drop "hi" when the body
+  // contains "this" (substring match). Compare against trimmed lines instead.
+  const bodyLines = new Set(
+    bodyText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean),
+  );
+  if (topText && !bodyLines.has(topText)) {
     return bodyText ? `${topText}\n${bodyText}` : topText;
   }
   return bodyText || topText;

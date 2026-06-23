@@ -64,6 +64,19 @@ describe("extractSlackMessageText", () => {
       const msg = { text: "top text", attachments: [{ fallback: "attachment content" }] };
       expect(extractSlackMessageText(msg)).toBe("top text\nattachment content");
     });
+
+    test("preserves detailed attachment text even when fallback is also present", () => {
+      // Slack attachments commonly carry a short `fallback` for notifications and a
+      // full `text` body. The old code used `fallback || text`, silently dropping `text`.
+      const msg = {
+        text: "fallback",
+        attachments: [{ fallback: "fallback", text: "detailed attachment body" }],
+      };
+      const result = extractSlackMessageText(msg);
+      expect(result).toContain("detailed attachment body");
+      // "fallback" appears exactly once (either from top-level or attachment — not both)
+      expect(result.split("fallback").length - 1).toBe(1);
+    });
   });
 
   describe("Block Kit blocks fallback", () => {
@@ -200,6 +213,20 @@ describe("extractSlackMessageText", () => {
       expect(result).toContain("*Tags:* env:production");
       expect(result).toContain("https://app.datadoghq.com/apm/traces");
       expect(result).toContain("Check traces");
+    });
+
+    test("short top-level text not dropped when it appears as substring inside block text", () => {
+      // "hi" is a substring of "this has unrelated substring" but not a complete line —
+      // the old bodyText.includes(topText) check would silently drop it.
+      const msg = {
+        text: "hi",
+        blocks: [
+          { type: "section", text: { type: "plain_text", text: "this has unrelated substring" } },
+        ],
+      };
+      const result = extractSlackMessageText(msg);
+      expect(result).toContain("hi");
+      expect(result).toContain("this has unrelated substring");
     });
 
     test("top-level text deduped when verbatim present in blocks body", () => {
