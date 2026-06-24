@@ -248,6 +248,7 @@ function TaskTurn({
           text={task.task}
           requestedByUserId={task.requestedByUserId}
           createdAt={task.createdAt}
+          attachments={task.attachments}
         />
       ) : null}
       <TaskCard

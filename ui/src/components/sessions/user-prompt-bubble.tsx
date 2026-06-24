@@ -8,7 +8,10 @@
  * cascading down the page as a giant right-aligned block.
  */
 
+import { ExternalLink, Paperclip } from "lucide-react";
 import { useUsers } from "@/api/hooks/use-users";
+import type { TaskAttachment } from "@/api/types";
+import { buildAgentFsLiveUrl } from "@/components/shared/task-attachments-section";
 import { cn } from "@/lib/utils";
 
 export interface UserPromptBubbleProps {
@@ -16,13 +19,88 @@ export interface UserPromptBubbleProps {
   /** Look up the requester's display name from the users cache. */
   requestedByUserId: string | null | undefined;
   createdAt: string;
+  attachments?: TaskAttachment[];
   className?: string;
+}
+
+const USER_UPLOAD_ATTACHMENT_MARKER = "\n\n---\nUser-uploaded attachments:\n";
+
+function visibleMessageText(text: string): string {
+  const markerIndex = text.indexOf(USER_UPLOAD_ATTACHMENT_MARKER);
+  return (markerIndex === -1 ? text : text.slice(0, markerIndex)).trimEnd();
+}
+
+function attachmentHref(attachment: TaskAttachment): string | null {
+  switch (attachment.kind) {
+    case "agent-fs":
+      return buildAgentFsLiveUrl({
+        path: attachment.path,
+        orgId: attachment.orgId,
+        driveId: attachment.driveId,
+      });
+    case "url":
+      return attachment.url ?? null;
+    case "page":
+      return attachment.pageId ? `/pages/${attachment.pageId}` : null;
+    case "shared-fs":
+      return null;
+  }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function UserAttachmentList({ attachments }: { attachments: TaskAttachment[] | undefined }) {
+  if (!attachments || attachments.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      {attachments.map((attachment) => {
+        const href = attachmentHref(attachment);
+        const label = (
+          <>
+            <Paperclip className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{attachment.name}</span>
+            {attachment.sizeBytes != null ? (
+              <span className="font-mono text-[10px] text-muted-foreground">
+                {formatFileSize(attachment.sizeBytes)}
+              </span>
+            ) : null}
+            {href ? <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" /> : null}
+          </>
+        );
+        const className = cn(
+          "inline-flex max-w-full items-center gap-1.5 rounded-md border border-border",
+          "bg-background/70 px-2 py-1 text-xs text-foreground/90",
+        );
+        return href ? (
+          <a
+            key={attachment.id}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={className}
+          >
+            {label}
+          </a>
+        ) : (
+          <span key={attachment.id} className={className}>
+            {label}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 export function UserPromptBubble({
   text,
   requestedByUserId,
   createdAt,
+  attachments,
   className,
 }: UserPromptBubbleProps) {
   const { data: users } = useUsers();
@@ -30,6 +108,7 @@ export function UserPromptBubble({
     (requestedByUserId && users?.find((u) => u.id === requestedByUserId)?.name) || "User";
   const date = new Date(createdAt);
   const dateLabel = date.toLocaleString();
+  const displayText = visibleMessageText(text);
   return (
     <section
       aria-label="User message"
@@ -48,7 +127,8 @@ export function UserPromptBubble({
             "whitespace-pre-wrap break-words text-left min-w-0",
           )}
         >
-          {text}
+          {displayText ? <div>{displayText}</div> : null}
+          <UserAttachmentList attachments={attachments} />
         </div>
       </div>
     </section>

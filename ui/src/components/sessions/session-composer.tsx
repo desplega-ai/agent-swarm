@@ -22,30 +22,39 @@ export function SessionComposer({ rootTaskId, latestLeafTaskId }: SessionCompose
   const queryClient = useQueryClient();
   const { userId } = useCurrentUser();
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
 
   const createTask = useMutation({
-    mutationFn: (input: { task: string; parentTaskId?: string; requestedByUserId?: string }) =>
+    mutationFn: (input: {
+      task: string;
+      parentTaskId?: string;
+      requestedByUserId?: string;
+      attachments?: File[];
+    }) =>
       api.createTask({
         task: input.task,
         parentTaskId: input.parentTaskId,
         requestedByUserId: input.requestedByUserId,
         source: "ui",
+        attachments: input.attachments,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["session", rootTaskId] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       setDraft("");
+      setAttachments([]);
     },
   });
 
   const submit = () => {
     const trimmed = draft.trim();
-    if (trimmed.length === 0 || createTask.isPending) return;
+    if ((trimmed.length === 0 && attachments.length === 0) || createTask.isPending) return;
     createTask.mutate({
-      task: trimmed,
+      task: trimmed || "Please see attached file.",
       parentTaskId: latestLeafTaskId ?? rootTaskId,
       requestedByUserId: userId ?? undefined,
+      attachments,
     });
   };
 
@@ -60,6 +69,11 @@ export function SessionComposer({ rootTaskId, latestLeafTaskId }: SessionCompose
       placeholder={userId ? "Continue the session…" : "Pick an identity above to send messages."}
       disabled={!userId}
       sendLabel="Send"
+      attachments={attachments}
+      onFilesSelected={(files) => setAttachments((current) => [...current, ...files])}
+      onRemoveFile={(index) =>
+        setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))
+      }
     />
   );
 }

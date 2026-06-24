@@ -151,11 +151,10 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
 }
 
 class ApiClient {
-  private getHeaders(): HeadersInit {
+  private getHeaders(opts?: { json?: boolean }): HeadersInit {
     const config = getConfig();
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
-    };
+    const headers: Record<string, string> = {};
+    if (opts?.json !== false) headers["Content-Type"] = "application/json";
     if (config.apiKey) {
       headers.Authorization = `Bearer ${config.apiKey}`;
     }
@@ -303,12 +302,24 @@ class ApiClient {
     contextKey?: string;
     model?: string;
     modelTier?: string;
+    attachments?: File[];
   }): Promise<TaskWithLogs> {
     const url = `${this.getBaseUrl()}/api/tasks`;
+    const { attachments, ...payload } = data;
+    const files = attachments?.filter((file) => file.size > 0) ?? [];
+    const body =
+      files.length > 0
+        ? (() => {
+            const form = new FormData();
+            form.set("payload", JSON.stringify(payload));
+            for (const file of files) form.append("files", file, file.name);
+            return form;
+          })()
+        : JSON.stringify(payload);
     const res = await fetch(url, {
       method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(data),
+      headers: this.getHeaders({ json: files.length === 0 }),
+      body,
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to create task" }));
