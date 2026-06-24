@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
-import { createServer as createHttpServer, type Server } from "node:http";
+import { createServer as createHttpServer, type IncomingMessage, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { closeDb, createAgent, createUser, getTaskAttachments, initDb } from "../be/db";
 import { handleSessions } from "../http/sessions";
-import { handleTasks } from "../http/tasks";
+import { handleTasks, taskUploadTestHooks } from "../http/tasks";
 import { getPathSegments, jsonError, parseQueryParams } from "../http/utils";
 
 const TEST_DB_PATH = "./test-task-upload-attachments.sqlite";
@@ -19,6 +20,43 @@ function createTestServer(): Server {
     if (await handleSessions(req, res, pathSegments, queryParams)) return;
     jsonError(res, "Not found", 404);
   });
+}
+
+async function* oversizedMultipartChunks(
+  boundary: string,
+  fileBytes: number,
+): AsyncGenerator<Buffer> {
+  yield Buffer.from(
+    `${[
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="payload"',
+      "",
+      JSON.stringify({ task: "Please inspect this large file", source: "ui" }),
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="files"; filename="large.bin"',
+      "Content-Type: application/octet-stream",
+      "",
+    ].join("\r\n")}\r\n`,
+  );
+  const chunk = Buffer.alloc(1024 * 1024);
+  chunk.fill(97);
+
+  let remaining = fileBytes;
+  while (remaining > 0) {
+    const size = Math.min(chunk.byteLength, remaining);
+    yield size === chunk.byteLength ? chunk : chunk.subarray(0, size);
+    remaining -= size;
+  }
+
+  yield Buffer.from(`\r\n--${boundary}--\r\n`);
+}
+
+function oversizedMultipartRequest(boundary: string, fileBytes: number): IncomingMessage {
+  const req = Readable.from(oversizedMultipartChunks(boundary, fileBytes)) as IncomingMessage;
+  Object.assign(req, {
+    headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+  });
+  return req;
 }
 
 describe("task uploads from sessions composer", () => {
@@ -149,5 +187,17 @@ printf '{}\\n'
     };
     expect(session.root.attachments).toHaveLength(1);
     expect(session.chain[0]?.attachments).toHaveLength(1);
+  });
+
+  test("multipart task parsing rejects streamed bodies over the request cap", async () => {
+    const boundary = "----swarm-upload-over-limit";
+    const request = oversizedMultipartRequest(
+      boundary,
+      taskUploadTestHooks.maxMultipartCreateTaskBytes + 1,
+    );
+
+    await expect(taskUploadTestHooks.parseMultipartCreateTask(request)).rejects.toThrow(
+      "Multipart task creation request is too large",
+    );
   });
 });

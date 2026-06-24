@@ -69,6 +69,7 @@ type CreateTaskBody = z.infer<typeof createTaskBodySchema>;
 const USER_UPLOAD_ATTACHMENT_MARKER = "\n\n---\nUser-uploaded attachments:\n";
 const MAX_USER_UPLOAD_FILES = 5;
 const MAX_USER_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_MULTIPART_CREATE_TASK_BYTES = MAX_USER_UPLOAD_FILES * MAX_USER_UPLOAD_BYTES + 1024 * 1024;
 
 const listTasks = route({
   method: "get",
@@ -110,6 +111,7 @@ const createTask = route({
   responses: {
     201: { description: "Task created" },
     400: { description: "Validation error" },
+    413: { description: "Multipart request body too large" },
   },
 });
 
@@ -371,22 +373,69 @@ function formatBytes(bytes: number): string {
   return `${mb.toFixed(1)} MB`;
 }
 
+class MultipartRequestTooLargeError extends Error {}
+
+function multipartRequestTooLargeError(): MultipartRequestTooLargeError {
+  return new MultipartRequestTooLargeError(
+    `Multipart task creation request is too large (max ${formatBytes(
+      MAX_MULTIPART_CREATE_TASK_BYTES,
+    )})`,
+  );
+}
+
 function sha256Hex(bytes: ArrayBuffer): string {
   const hasher = new Bun.CryptoHasher("sha256");
   hasher.update(new Uint8Array(bytes));
   return hasher.digest("hex");
 }
 
-async function readRequestBuffer(req: IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
+async function readRequestBuffer(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const declaredLength = Number(getHeader(req, "content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw multipartRequestTooLargeError();
   }
-  return Buffer.concat(chunks);
+
+  return await new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let settled = false;
+
+    const cleanup = () => {
+      req.off("data", onData);
+      req.off("end", onEnd);
+      req.off("error", onError);
+    };
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const onData = (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.length;
+      if (totalBytes > maxBytes) {
+        req.pause();
+        settle(() => reject(multipartRequestTooLargeError()));
+        return;
+      }
+      chunks.push(buffer);
+    };
+    const onEnd = () => {
+      settle(() => resolve(Buffer.concat(chunks, totalBytes)));
+    };
+    const onError = (error: Error) => {
+      settle(() => reject(error));
+    };
+
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+  });
 }
 
 async function parseMultipartCreateTask(req: IncomingMessage): Promise<MultipartCreateTaskRequest> {
-  const body = await readRequestBuffer(req);
+  const body = await readRequestBuffer(req, MAX_MULTIPART_CREATE_TASK_BYTES);
   const request = new Request("http://localhost/api/tasks", {
     method: "POST",
     headers: { "content-type": getHeader(req, "content-type") },
@@ -424,6 +473,15 @@ async function parseMultipartCreateTask(req: IncomingMessage): Promise<Multipart
 
   return { body: createTaskBodySchema.parse(payload), files };
 }
+
+/** Exported for upload-limit regression tests; production callers use handleTasks. */
+export const taskUploadTestHooks: {
+  maxMultipartCreateTaskBytes: number;
+  parseMultipartCreateTask: (req: IncomingMessage) => Promise<unknown>;
+} = {
+  maxMultipartCreateTaskBytes: MAX_MULTIPART_CREATE_TASK_BYTES,
+  parseMultipartCreateTask,
+};
 
 async function runAgentFsJson(args: string[]): Promise<unknown> {
   const binary = process.env.AGENT_FS_BINARY || "agent-fs";
@@ -649,7 +707,7 @@ export async function handleTasks(
             : error instanceof Error
               ? error.message
               : "Invalid multipart task creation request";
-        jsonError(res, message, 400);
+        jsonError(res, message, error instanceof MultipartRequestTooLargeError ? 413 : 400);
         return true;
       }
 

@@ -11093,6 +11093,9 @@
           },
           "400": {
             "description": "Validation error"
+          },
+          "413": {
+            "description": "Multipart request body too large"
           }
         }
       }
