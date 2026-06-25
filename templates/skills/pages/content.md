@@ -24,17 +24,6 @@ Always apply the minimalist baseline:
 
 If the full minimalist source is available, use `taste-minimalist-skill` for the deeper primitives: bento grids, status badges, `<kbd>` keys, flat tables, code blocks, and the detailed anti-slop checks.
 
-## Opt-In Layout Variants
-
-The universal baseline is minimalist style. Do not treat cinematic marketing flow as the default for every page.
-
-- Use `taste-skill` when the brief asks for a public landing, campaign, portfolio, editorial, or brand-heavy page that needs a hero-driven marketing layout.
-- Use `taste-redesign-skill` when improving an existing public page or site.
-- Use `taste-soft-skill` for high-end agency, premium consumer, or cinematic-but-polished art direction.
-- Use `taste-brutalist-skill` for raw, industrial, tactical, experimental, or intentionally stark art direction.
-- Use `taste-output-skill` when full file/page output is likely to be truncated.
-
-These variants are layout and art-direction layers. Reports, dashboards, data tables, audits, and internal summaries keep the minimalist style baseline and add the report-density layer below instead of adopting cinematic marketing structure.
 
 ## When to Create a Page
 
