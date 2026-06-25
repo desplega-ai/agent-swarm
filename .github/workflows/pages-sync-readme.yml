@@ -43,17 +43,6 @@ jobs:
             "",
             "<!-- Generated from README.md by .github/workflows/pages-sync-readme.yml. -->",
             "",
-            "# 📚 [Read the full documentation →](https://agent-swarm.dev)",
-            "",
-            "<p>",
-            '  <a href="https://agent-swarm.dev" style="display:inline-block;padding:0.75rem 1rem;border-radius:0.5rem;background:#111827;color:#fff;font-weight:700;text-decoration:none;">',
-            "    Open agent-swarm.dev",
-            "  </a>",
-            "</p>",
-            "",
-            "---",
-            "",
-            "",
           ].join("\n");
 
           writeFileSync("docs/index.md", `${header}${readme}`);

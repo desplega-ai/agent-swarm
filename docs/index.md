@@ -4,17 +4,6 @@ title: Agent Swarm
 ---
 
 <!-- Generated from README.md by .github/workflows/pages-sync-readme.yml. -->
-
-# 📚 [Read the full documentation →](https://agent-swarm.dev)
-
-<p>
-  <a href="https://agent-swarm.dev" style="display:inline-block;padding:0.75rem 1rem;border-radius:0.5rem;background:#111827;color:#fff;font-weight:700;text-decoration:none;">
-    Open agent-swarm.dev
-  </a>
-</p>
-
----
-
 <p align="center">
   <a href="https://github.com/desplega-ai/agent-swarm/stargazers"><img src="https://img.shields.io/github/stars/desplega-ai/agent-swarm?style=flat-square&color=yellow" alt="GitHub Stars"></a>
   <a href="https://github.com/desplega-ai/agent-swarm/blob/main/LICENSE"><img src="https://img.shields.io/github/license/desplega-ai/agent-swarm?style=flat-square" alt="MIT License"></a>
