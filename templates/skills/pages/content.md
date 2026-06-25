@@ -1,46 +1,47 @@
 # Pages
 
-Pages are persistent, shareable HTML documents created via the swarm's page tooling. Use them when the output benefits from layout, tables, headers, and persistent sharing. A page should be a clean human-facing report, not a raw dump with a URL.
+Pages are persistent, shareable HTML documents created via the swarm's page tooling. Use them when the output benefits from layout, tables, headers, and persistent sharing. A page should be a clean human-facing artifact, not a raw dump with a URL.
 
-This skill covers both how to publish and how to choose the right design lane. Start by reading the brief and classifying the page before writing HTML:
+This skill covers how to publish pages and the default taste baseline every page should follow. The baseline is `taste-minimalist-skill`: warm monochrome palette, strong typography hierarchy, macro-whitespace, crisp borders, near-zero shadows, restrained motion, and an anti-slop ban list. Apply it to every page, including reports, dashboards, tables, audits, public explainers, and data-heavy summaries.
 
-- **Landing / marketing / portfolio / editorial / public redesign page**: taste-skill is the default design authority. Apply `taste-skill` first, and optionally add one of `taste-minimalist-skill`, `taste-soft-skill`, `taste-brutalist-skill`, `taste-redesign-skill`, or `taste-output-skill` when the brief calls for that direction.
-- **Report / dashboard / data table / internal analysis / task summary page**: use the report defaults in this skill. Taste-skill explicitly excludes dashboards, data tables, and multi-step product UI; do not force cinematic marketing design onto evidence-heavy internal work.
+For reports, dashboards, and other dense pages, add the report-density layer below on top of the minimalist baseline. Density is an information-architecture layer, not a separate aesthetic.
 
-The default behavior for page generation is therefore: **route first, then design**. Marketing-style pages should feel shaped by [tasteskill.dev](https://www.tasteskill.dev/). Data-heavy pages should remain fast to scan, restrained, and report-oriented.
-
-## Design Routing
+## Universal Baseline
 
 Before creating a page, write a one-line design read for yourself:
 
-> Reading this as: `<page kind>` for `<audience>`, with a `<design lane>` treatment.
+> Reading this as: `<page kind>` for `<audience>`, using minimalist taste plus `<density needs>`.
 
-Use that read to pick the lane:
+Always apply the minimalist baseline:
 
-| Brief signal | Lane | Skill guidance |
-|---|---|---|
-| Public landing page, campaign, product page, portfolio, editorial page | Taste default | Use `taste-skill` and its design-read-first method |
-| Existing public page needs a visual upgrade | Taste redesign | Use `taste-skill` plus `taste-redesign-skill` |
-| Minimal, premium, Linear-style, calm, editorial | Taste minimalist | Use `taste-skill` plus `taste-minimalist-skill` |
-| High-end agency, premium consumer, cinematic but polished | Taste soft | Use `taste-skill` plus `taste-soft-skill` |
-| Raw, industrial, tactical, experimental, intentionally stark | Taste brutalist | Use `taste-skill` plus `taste-brutalist-skill` |
-| Full file/page output is likely to be truncated | Taste output | Use `taste-output-skill` in addition to the chosen design lane |
-| Internal report, dashboard, audit summary, KPI page, evidence table | Report default | Use the report defaults below |
+- Use a warm monochrome canvas (`#FFFFFF`, `#FBFBFA`, `#F7F6F3`) with charcoal text and scarce muted accents.
+- Build a clear type hierarchy with premium/system typography; use monospace for code, metadata, and `<kbd>`.
+- Use macro-whitespace and strong alignment. Give summaries room to breathe and keep tables compact enough to scan.
+- Prefer flat surfaces: crisp `1px` borders, `8px` or `12px` radii, and practically no shadows.
+- Use restrained motion only where it clarifies hierarchy or interaction state.
+- Keep visual language quiet and precise: no AI-purple gradient mesh, centered hero plus three equal cards, decorative glassmorphism, emojis as UI decoration, fake screenshots made from rectangles, oversized decorative art, nested cards, or low-contrast text.
+- Make responsive behavior explicit: readable type, stable grids, horizontal table scroll where needed, and no overlapping content.
 
-For taste-routed pages, carry over the core taste-skill discipline:
+If the full minimalist source is available, use `taste-minimalist-skill` for the deeper primitives: bento grids, status badges, `<kbd>` keys, flat tables, code blocks, and the detailed anti-slop checks.
 
-- **Read the room first**: infer page kind, audience, references, existing brand assets, and constraints before choosing an aesthetic.
-- **Use the three dials**: set `DESIGN_VARIANCE`, `MOTION_INTENSITY`, and `VISUAL_DENSITY` from the brief instead of falling into a template.
-- **Avoid generic AI defaults**: no AI-purple gradient mesh, centered hero plus three equal cards, default glassmorphism everywhere, or motion for its own sake.
-- **Use real visuals when the page needs inspection or persuasion**: generated bitmap assets, real screenshots, product imagery, or deliberate placeholders with clear placement notes. Do not substitute fake UI screenshots made from decorative rectangles.
-- **Keep responsive behavior intentional**: no clipped hero text, no overlapping controls, no decorative motion that breaks mobile performance.
+## Opt-In Layout Variants
+
+The universal baseline is minimalist style. Do not treat cinematic marketing flow as the default for every page.
+
+- Use `taste-skill` when the brief asks for a public landing, campaign, portfolio, editorial, or brand-heavy page that needs a hero-driven marketing layout.
+- Use `taste-redesign-skill` when improving an existing public page or site.
+- Use `taste-soft-skill` for high-end agency, premium consumer, or cinematic-but-polished art direction.
+- Use `taste-brutalist-skill` for raw, industrial, tactical, experimental, or intentionally stark art direction.
+- Use `taste-output-skill` when full file/page output is likely to be truncated.
+
+These variants are layout and art-direction layers. Reports, dashboards, data tables, audits, and internal summaries keep the minimalist style baseline and add the report-density layer below instead of adopting cinematic marketing structure.
 
 ## When to Create a Page
 
 - A report, dashboard, or summary that benefits from structured layout
 - Analysis that should be linkable and bookmarkable
 - Results that need to be reviewed asynchronously
-- A public-facing landing, marketing, portfolio, editorial, or redesign deliverable that should be shared as HTML
+- A public-facing explainer, reference page, or polished deliverable that should be shared as HTML
 - Content that is too long or rich for a `store-progress.output` string
 
 Do NOT use pages for:
@@ -50,20 +51,23 @@ Do NOT use pages for:
 - Large binary files; use agent-fs for PNG/MP4
 - Raw verbose logs; summarize them and link to artifacts
 
-## Report Design Defaults
+## Report Density Layer
 
-Use these defaults for reports, dashboards, data tables, and internal summaries. They distill the current external design guidance from Anthropic's `frontend-design`, Vercel's `composition-patterns`, and Vercel's `web-design-guidelines`: start from content hierarchy, use a small spacing system, keep typography readable, prefer restraint over decoration, and make responsive behavior intentional.
+Use this layer for reports, dashboards, data tables, and internal summaries. Keep the minimalist style floor, then compress the information architecture enough that busy readers can scan evidence quickly.
 
-Every page should be useful at a glance.
+These defaults also distill the current external design guidance from Anthropic's `frontend-design`, Vercel's `composition-patterns`, and Vercel's `web-design-guidelines`: start from content hierarchy, use a small spacing system, keep typography readable, prefer restraint over decoration, and make responsive behavior intentional.
+
+Every dense page should be useful at a glance.
 
 - Put the page's point in the first viewport: title, one-sentence summary, and 3-6 key numbers or statuses.
-- Use a single-column reading spine with `max-width: 1120px`; keep prose measure around 65-75 characters.
-- Use system fonts unless there is a clear reason not to: `Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`.
-- Use a restrained palette: neutral background, high-contrast text, white panels, one accent color, and semantic colors for statuses only.
+- Use a single-column reading spine with `max-width: 1120px`; keep prose measure around 65-75 characters and reserve denser grids for metrics/evidence.
+- Use premium/system typography unless there is a clear brand reason not to: `"SF Pro Display", "Geist Sans", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif`.
+- Use the minimalist palette: warm off-white background, charcoal text, white or near-white panels, light borders, one scarce accent, and semantic colors for statuses only.
 - Use a consistent spacing scale: `8, 12, 16, 24, 32, 48, 72`.
 - Use clear type hierarchy: page title 36-48px desktop / 30-36px mobile, section titles 22-28px, body 15-16px, supporting text 13-14px.
 - Keep tables readable: sticky/scannable headers where useful, padded cells, zebra-free or very subtle row borders, `tabular-nums` for numbers, horizontal scroll on narrow screens.
-- Prefer cards only for repeated records or metrics. Do not nest cards inside cards.
+- Prefer flat bordered cards only for repeated records or metrics. Do not nest cards inside cards.
+- Use shadows only when they solve a hierarchy problem; keep them ultra-diffuse and below `0.05` opacity.
 - Hide raw JSON behind a collapsed `<details>` block at the bottom.
 - Make mobile explicit with media queries: single-column grids, reduced padding, no overflow except intentional table scroll.
 
@@ -71,7 +75,7 @@ Every page should be useful at a glance.
 
 Use this order unless the task gives a better domain-specific structure:
 
-1. Hero: title, short summary, timestamp/source context
+1. Header: title, short summary, timestamp/source context
 2. Key metrics: 3-6 tiles that answer "how big / how bad / what changed?"
 3. Findings or sections grouped by theme, owner, severity, or stage
 4. Evidence tables or samples under each finding
@@ -104,14 +108,14 @@ const html = `<!doctype html>
       --warn: #b54708;
       --ok: #067647;
       --radius: 8px;
-      --shadow: 0 1px 2px rgba(24, 24, 27, 0.06), 0 12px 32px rgba(24, 24, 27, 0.07);
+      --shadow: 0 1px 2px rgba(24, 24, 27, 0.04);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       background: var(--bg);
       color: var(--ink);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "SF Pro Display", "Geist Sans", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
       font-size: 16px;
       line-height: 1.55;
     }
@@ -254,7 +258,7 @@ Before publishing:
 - Tables scroll horizontally on mobile instead of crushing columns.
 - Status colors are semantic and not the whole visual identity.
 - Raw JSON/logs are collapsed or linked, not the primary experience.
-- No nested cards, decorative gradients, oversized hero art, or cramped default browser styles.
+- No nested cards, decorative gradients, oversized art, or cramped default browser styles.
 - No text overlaps, clipped buttons, or unreadable low-contrast text.
 
 ## Page vs Agent-fs
