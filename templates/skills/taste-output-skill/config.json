@@ -1,0 +1,19 @@
+{
+  "kind": "skill",
+  "name": "taste-output-skill",
+  "displayName": "Taste Output Skill",
+  "slug": "taste-output-skill",
+  "title": "Taste Output Skill",
+  "description": "Full-output enforcement guidance from tasteskill.dev for complete, unabridged page/code generation.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": false,
+  "tags": [
+    "pages",
+    "design",
+    "taste-skill"
+  ],
+  "must": false
+}

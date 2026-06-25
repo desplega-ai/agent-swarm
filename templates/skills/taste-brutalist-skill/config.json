@@ -1,0 +1,19 @@
+{
+  "kind": "skill",
+  "name": "taste-brutalist-skill",
+  "displayName": "Taste Brutalist Skill",
+  "slug": "taste-brutalist-skill",
+  "title": "Taste Brutalist Skill",
+  "description": "Industrial brutalist page design guidance from tasteskill.dev: Swiss grids, tactical typography, sharp contrast.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": false,
+  "tags": [
+    "pages",
+    "design",
+    "taste-skill"
+  ],
+  "must": false
+}

@@ -1,0 +1,19 @@
+{
+  "kind": "skill",
+  "name": "taste-redesign-skill",
+  "displayName": "Taste Redesign Skill",
+  "slug": "taste-redesign-skill",
+  "title": "Taste Redesign Skill",
+  "description": "Redesign audit and upgrade guidance from tasteskill.dev for improving existing websites and apps.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": false,
+  "tags": [
+    "pages",
+    "design",
+    "taste-skill"
+  ],
+  "must": false
+}

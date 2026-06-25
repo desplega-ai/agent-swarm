@@ -1,0 +1,19 @@
+{
+  "kind": "skill",
+  "name": "taste-skill",
+  "displayName": "Taste Skill",
+  "slug": "taste-skill",
+  "title": "Taste Skill",
+  "description": "Anti-slop frontend design framework for landing pages, portfolios, and redesigns from tasteskill.dev.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": false,
+  "tags": [
+    "pages",
+    "design",
+    "taste-skill"
+  ],
+  "must": false
+}

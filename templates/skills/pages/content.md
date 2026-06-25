@@ -2,13 +2,45 @@
 
 Pages are persistent, shareable HTML documents created via the swarm's page tooling. Use them when the output benefits from layout, tables, headers, and persistent sharing. A page should be a clean human-facing report, not a raw dump with a URL.
 
-This skill covers both how to publish and how to design the page. It distills the current external design guidance from Anthropic's `frontend-design`, Vercel's `composition-patterns`, and Vercel's `web-design-guidelines`: start from content hierarchy, use a small spacing system, keep typography readable, prefer restraint over decoration, and make responsive behavior intentional.
+This skill covers both how to publish and how to choose the right design lane. Start by reading the brief and classifying the page before writing HTML:
+
+- **Landing / marketing / portfolio / editorial / public redesign page**: taste-skill is the default design authority. Apply `taste-skill` first, and optionally add one of `taste-minimalist-skill`, `taste-soft-skill`, `taste-brutalist-skill`, `taste-redesign-skill`, or `taste-output-skill` when the brief calls for that direction.
+- **Report / dashboard / data table / internal analysis / task summary page**: use the report defaults in this skill. Taste-skill explicitly excludes dashboards, data tables, and multi-step product UI; do not force cinematic marketing design onto evidence-heavy internal work.
+
+The default behavior for page generation is therefore: **route first, then design**. Marketing-style pages should feel shaped by [tasteskill.dev](https://www.tasteskill.dev/). Data-heavy pages should remain fast to scan, restrained, and report-oriented.
+
+## Design Routing
+
+Before creating a page, write a one-line design read for yourself:
+
+> Reading this as: `<page kind>` for `<audience>`, with a `<design lane>` treatment.
+
+Use that read to pick the lane:
+
+| Brief signal | Lane | Skill guidance |
+|---|---|---|
+| Public landing page, campaign, product page, portfolio, editorial page | Taste default | Use `taste-skill` and its design-read-first method |
+| Existing public page needs a visual upgrade | Taste redesign | Use `taste-skill` plus `taste-redesign-skill` |
+| Minimal, premium, Linear-style, calm, editorial | Taste minimalist | Use `taste-skill` plus `taste-minimalist-skill` |
+| High-end agency, premium consumer, cinematic but polished | Taste soft | Use `taste-skill` plus `taste-soft-skill` |
+| Raw, industrial, tactical, experimental, intentionally stark | Taste brutalist | Use `taste-skill` plus `taste-brutalist-skill` |
+| Full file/page output is likely to be truncated | Taste output | Use `taste-output-skill` in addition to the chosen design lane |
+| Internal report, dashboard, audit summary, KPI page, evidence table | Report default | Use the report defaults below |
+
+For taste-routed pages, carry over the core taste-skill discipline:
+
+- **Read the room first**: infer page kind, audience, references, existing brand assets, and constraints before choosing an aesthetic.
+- **Use the three dials**: set `DESIGN_VARIANCE`, `MOTION_INTENSITY`, and `VISUAL_DENSITY` from the brief instead of falling into a template.
+- **Avoid generic AI defaults**: no AI-purple gradient mesh, centered hero plus three equal cards, default glassmorphism everywhere, or motion for its own sake.
+- **Use real visuals when the page needs inspection or persuasion**: generated bitmap assets, real screenshots, product imagery, or deliberate placeholders with clear placement notes. Do not substitute fake UI screenshots made from decorative rectangles.
+- **Keep responsive behavior intentional**: no clipped hero text, no overlapping controls, no decorative motion that breaks mobile performance.
 
 ## When to Create a Page
 
 - A report, dashboard, or summary that benefits from structured layout
 - Analysis that should be linkable and bookmarkable
 - Results that need to be reviewed asynchronously
+- A public-facing landing, marketing, portfolio, editorial, or redesign deliverable that should be shared as HTML
 - Content that is too long or rich for a `store-progress.output` string
 
 Do NOT use pages for:
@@ -18,7 +50,9 @@ Do NOT use pages for:
 - Large binary files; use agent-fs for PNG/MP4
 - Raw verbose logs; summarize them and link to artifacts
 
-## Page Design Defaults
+## Report Design Defaults
+
+Use these defaults for reports, dashboards, data tables, and internal summaries. They distill the current external design guidance from Anthropic's `frontend-design`, Vercel's `composition-patterns`, and Vercel's `web-design-guidelines`: start from content hierarchy, use a small spacing system, keep typography readable, prefer restraint over decoration, and make responsive behavior intentional.
 
 Every page should be useful at a glance.
 

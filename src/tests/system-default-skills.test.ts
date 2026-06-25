@@ -39,11 +39,18 @@ describe("system-default skills", () => {
     expect(names).toContain("attio-interaction");
     expect(names).toContain("script-workflows");
     expect(names).toContain("swarm-scripts");
+    expect(names).toContain("taste-skill");
+    expect(names).toContain("taste-minimalist-skill");
+    expect(names).toContain("taste-brutalist-skill");
+    expect(names).toContain("taste-soft-skill");
+    expect(names).toContain("taste-redesign-skill");
+    expect(names).toContain("taste-output-skill");
     expect(skills.find((skill) => skill.name === "attio-interaction")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "script-workflows")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "swarm-scripts")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "kv-storage")?.systemDefault).toBe(true);
     expect(skills.find((skill) => skill.name === "pages")?.systemDefault).toBe(true);
+    expect(skills.find((skill) => skill.name === "taste-skill")?.systemDefault).toBe(false);
 
     const result = await runSeeder(skillsSeeder, { quiet: true });
     expect(result.failed).toEqual([]);
@@ -54,6 +61,7 @@ describe("system-default skills", () => {
     expect(defaults).toContain("swarm-scripts");
     expect(defaults).toContain("kv-storage");
     expect(defaults).toContain("pages");
+    expect(defaults).not.toContain("taste-skill");
   });
 
   test("existing agents see system-default skills through the self-healing view", () => {
