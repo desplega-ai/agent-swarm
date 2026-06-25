@@ -1,0 +1,73 @@
+name: Sync GitHub Pages README
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - README.md
+      - .github/workflows/pages-sync-readme.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync docs/index.md
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Generate Pages index
+        run: |
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require("node:fs");
+
+          const repositoryUrl = "https://github.com/desplega-ai/agent-swarm";
+          const readme = readFileSync("README.md", "utf8")
+            .replaceAll('href="./assets/agent-swarm.mp4"', `href="${repositoryUrl}/blob/main/assets/agent-swarm.mp4"`)
+            .replaceAll('href="./assets/agent-swarm-slack-to-pr.mp4"', `href="${repositoryUrl}/blob/main/assets/agent-swarm-slack-to-pr.mp4"`)
+            .replaceAll('href="./assets/video-source"', `href="${repositoryUrl}/tree/main/assets/video-source"`)
+            .replaceAll("](./DEPLOYMENT.md)", `](${repositoryUrl}/blob/main/DEPLOYMENT.md)`)
+            .replaceAll("](./CONTRIBUTING.md)", `](${repositoryUrl}/blob/main/CONTRIBUTING.md)`)
+            .replaceAll("](./LICENSE)", `](${repositoryUrl}/blob/main/LICENSE)`);
+
+          const header = [
+            "---",
+            "layout: default",
+            "title: Agent Swarm",
+            "---",
+            "",
+            "<!-- Generated from README.md by .github/workflows/pages-sync-readme.yml. -->",
+            "",
+            "# 📚 [Read the full documentation →](https://agent-swarm.dev)",
+            "",
+            "<p>",
+            '  <a href="https://agent-swarm.dev" style="display:inline-block;padding:0.75rem 1rem;border-radius:0.5rem;background:#111827;color:#fff;font-weight:700;text-decoration:none;">',
+            "    Open agent-swarm.dev",
+            "  </a>",
+            "</p>",
+            "",
+            "---",
+            "",
+            "",
+          ].join("\n");
+
+          writeFileSync("docs/index.md", `${header}${readme}`);
+          NODE
+
+      - name: Commit updated page
+        run: |
+          if git diff --quiet -- docs/index.md; then
+            echo "docs/index.md is already up to date."
+            exit 0
+          fi
+
+          git config user.name "desplega-bot"
+          git config user.email "bot@desplega.ai"
+          git add docs/index.md
+          git commit -m "docs: sync github pages readme"
+          git push
