@@ -65,6 +65,7 @@ describe("task uploads from sessions composer", () => {
   let oldPath: string | undefined;
   let oldAgentFsBinary: string | undefined;
   let oldSharedOrgId: string | undefined;
+  let oldDefaultDriveId: string | undefined;
   const baseUrl = `http://localhost:${TEST_PORT}`;
 
   beforeAll(async () => {
@@ -113,9 +114,14 @@ printf '{}\\n'
     oldPath = process.env.PATH;
     oldAgentFsBinary = process.env.AGENT_FS_BINARY;
     oldSharedOrgId = process.env.AGENT_FS_SHARED_ORG_ID;
+    oldDefaultDriveId = process.env.AGENT_FS_DEFAULT_DRIVE_ID;
     process.env.PATH = `${fakeBinDir}:${oldPath ?? ""}`;
     process.env.AGENT_FS_BINARY = fakeAgentFs;
     process.env.AGENT_FS_SHARED_ORG_ID = "shared-org";
+    // A real worker env sets AGENT_FS_DEFAULT_DRIVE_ID, which makes
+    // resolveAgentFsTarget() short-circuit to the real default drive and skip the
+    // fake `agent-fs drive list`. Clear it so the fake drive is resolved here.
+    delete process.env.AGENT_FS_DEFAULT_DRIVE_ID;
 
     server = createTestServer();
     await new Promise<void>((resolve) => server.listen(TEST_PORT, resolve));
@@ -130,6 +136,8 @@ printf '{}\\n'
     else process.env.AGENT_FS_BINARY = oldAgentFsBinary;
     if (oldSharedOrgId === undefined) delete process.env.AGENT_FS_SHARED_ORG_ID;
     else process.env.AGENT_FS_SHARED_ORG_ID = oldSharedOrgId;
+    if (oldDefaultDriveId === undefined) delete process.env.AGENT_FS_DEFAULT_DRIVE_ID;
+    else process.env.AGENT_FS_DEFAULT_DRIVE_ID = oldDefaultDriveId;
     await rm(fakeBinDir, { recursive: true, force: true });
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
