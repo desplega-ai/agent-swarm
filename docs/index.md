@@ -48,7 +48,7 @@ title: Agent Swarm
 
 > **Agent Swarm is your Company's Compounding Intelligence Layer. A system of AI agents that remember, reason, act and get better with every task.**
 
-> AI-Native · Compounds · Presence · Harness & LLM-Agnostic · Your Infra · Your Memory · 
+> AI-Native · Compounds · Presence · Harness & LLM-Agnostic · Your Infra · Your Memory ·
 
 ## What it does
 

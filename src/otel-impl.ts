@@ -275,10 +275,13 @@ function ensureInstruments(): void {
 
 export function recordSessionCost(m: SessionCostMetric): void {
   ensureInstruments();
+  // Scrub all free-form string attributes before they reach the OTLP exporter.
+  // `model` comes from the /api/session-costs request body and may contain
+  // arbitrary operator-supplied text; scrubbing prevents accidental secret egress.
   const attrs = {
-    harness: m.harness || "unknown",
-    model: m.model || "unknown",
-    cost_source: m.costSource || "unknown",
+    harness: scrubSecrets(m.harness || "unknown"),
+    model: scrubSecrets(m.model || "unknown"),
+    cost_source: scrubSecrets(m.costSource || "unknown"),
     is_error: m.isError,
   };
   if (Number.isFinite(m.totalCostUsd) && m.totalCostUsd > 0) {
@@ -289,4 +292,12 @@ export function recordSessionCost(m: SessionCostMetric): void {
       tokenCounter!.add(n, { ...attrs, token_type });
     }
   }
+}
+
+export function _injectCountersForTests(
+  cost: Counter | undefined,
+  token: Counter | undefined,
+): void {
+  costCounter = cost;
+  tokenCounter = token;
 }
