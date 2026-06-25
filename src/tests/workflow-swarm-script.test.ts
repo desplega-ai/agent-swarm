@@ -255,6 +255,231 @@ describe("SwarmScriptExecutor", () => {
     expect(scriptStep?.output).toMatchObject({ result: { seen: "mapped-value" } });
   });
 
+  test("exact object token outside swarm-script args is still stringified", async () => {
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "echo",
+          type: "echo",
+          config: { value: "{{trigger.payload}}" },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, { payload: { a: 1 } }, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const echoStep = steps.find((step) => step.nodeId === "echo");
+
+    expect(run?.status).toBe("completed");
+    expect(echoStep?.status).toBe("completed");
+    expect(echoStep?.output).toEqual({ value: '{"a":1}' });
+  });
+
+  test("{{path}} args: object arg is injected as raw object, not JSON string", async () => {
+    await saveScript(
+      "echo-obj",
+      `export default async (args: { data: Record<string, unknown> }) => ({ isObject: typeof args.data === "object" && !Array.isArray(args.data), keys: Object.keys(args.data ?? {}) });`,
+    );
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "script",
+          type: "swarm-script",
+          config: {
+            scriptName: "echo-obj",
+            args: { data: "{{trigger.payload}}" },
+          },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, { payload: { a: 1, b: 2 } }, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const scriptStep = steps.find((step) => step.nodeId === "script");
+
+    expect(run?.status).toBe("completed");
+    expect(scriptStep?.status).toBe("completed");
+    expect(scriptStep?.output).toMatchObject({ result: { isObject: true, keys: ["a", "b"] } });
+  });
+
+  test("{{path}} args: array arg is injected as raw array, not JSON string", async () => {
+    await saveScript(
+      "echo-arr",
+      `export default async (args: { items: string[] }) => ({ isArray: Array.isArray(args.items), length: args.items.length });`,
+    );
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "script",
+          type: "swarm-script",
+          config: {
+            scriptName: "echo-arr",
+            args: { items: "{{trigger.list}}" },
+          },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, { list: ["x", "y", "z"] }, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const scriptStep = steps.find((step) => step.nodeId === "script");
+
+    expect(run?.status).toBe("completed");
+    expect(scriptStep?.status).toBe("completed");
+    expect(scriptStep?.output).toMatchObject({ result: { isArray: true, length: 3 } });
+  });
+
+  test("{{path}} args: empty array is injected as raw empty array with length 0, not '[]' string", async () => {
+    await saveScript(
+      "echo-empty-arr",
+      `export default async (args: { items: string[] }) => ({ isArray: Array.isArray(args.items), length: args.items.length });`,
+    );
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "script",
+          type: "swarm-script",
+          config: {
+            scriptName: "echo-empty-arr",
+            args: { items: "{{trigger.empty}}" },
+          },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, { empty: [] }, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const scriptStep = steps.find((step) => step.nodeId === "script");
+
+    expect(run?.status).toBe("completed");
+    expect(scriptStep?.status).toBe("completed");
+    expect(scriptStep?.output).toMatchObject({ result: { isArray: true, length: 0 } });
+  });
+
+  test("{{path}} args: string scalar arg is injected as the string value", async () => {
+    await saveScript(
+      "echo-str",
+      `export default async (args: { name: string }) => ({ isString: typeof args.name === "string", value: args.name });`,
+    );
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "script",
+          type: "swarm-script",
+          config: {
+            scriptName: "echo-str",
+            args: { name: "{{trigger.ruleName}}" },
+          },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(
+      wf,
+      { ruleName: "local-rules/cognitive-complexity" },
+      registry,
+    );
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const scriptStep = steps.find((step) => step.nodeId === "script");
+
+    expect(run?.status).toBe("completed");
+    expect(scriptStep?.status).toBe("completed");
+    expect(scriptStep?.output).toMatchObject({
+      result: { isString: true, value: "local-rules/cognitive-complexity" },
+    });
+  });
+
+  test("{{path}} args: number scalar arg is injected as a number, not a string", async () => {
+    await saveScript(
+      "echo-num",
+      `export default async (args: { count: number }) => ({ isNumber: typeof args.count === "number", value: args.count });`,
+    );
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "script",
+          type: "swarm-script",
+          config: {
+            scriptName: "echo-num",
+            args: { count: "{{trigger.maxFiles}}" },
+          },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, { maxFiles: 3 }, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const scriptStep = steps.find((step) => step.nodeId === "script");
+
+    expect(run?.status).toBe("completed");
+    expect(scriptStep?.status).toBe("completed");
+    expect(scriptStep?.output).toMatchObject({ result: { isNumber: true, value: 3 } });
+  });
+
+  test("{{path}} args: boolean scalar arg is injected as a boolean, not a string", async () => {
+    await saveScript(
+      "echo-bool",
+      `export default async (args: { enabled: boolean }) => ({ isBoolean: typeof args.enabled === "boolean", value: args.enabled });`,
+    );
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "script",
+          type: "swarm-script",
+          config: {
+            scriptName: "echo-bool",
+            args: { enabled: "{{trigger.enabled}}" },
+          },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, { enabled: false }, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const scriptStep = steps.find((step) => step.nodeId === "script");
+
+    expect(run?.status).toBe("completed");
+    expect(scriptStep?.status).toBe("completed");
+    expect(scriptStep?.output).toMatchObject({ result: { isBoolean: true, value: false } });
+  });
+
+  test("{{path}} args: mixed string template still produces a string via interpolation", async () => {
+    await saveScript(
+      "echo-mixed",
+      `export default async (args: { label: string }) => ({ isString: typeof args.label === "string", value: args.label });`,
+    );
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "script",
+          type: "swarm-script",
+          config: {
+            scriptName: "echo-mixed",
+            args: { label: "rule-{{trigger.ruleName}}" },
+          },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, { ruleName: "no-explicit-any" }, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const scriptStep = steps.find((step) => step.nodeId === "script");
+
+    expect(run?.status).toBe("completed");
+    expect(scriptStep?.status).toBe("completed");
+    expect(scriptStep?.output).toMatchObject({
+      result: { isString: true, value: "rule-no-explicit-any" },
+    });
+  });
+
   test("fsMode workspace-rw is rejected at config validation with a clear error message", async () => {
     await saveScript("noop", `export default async () => ({ ok: true });`);
     const executor = new SwarmScriptExecutor(deps);

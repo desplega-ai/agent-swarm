@@ -19,19 +19,19 @@ describe("extractSlackMessageText", () => {
     test("uses fallback when text is empty", () => {
       const msg = {
         text: "",
-        attachments: [{ fallback: "Triggered: [P3] A Bull job process-inscribe-webhook failed" }],
+        attachments: [{ fallback: "Triggered: [P3] A Bull job email-dispatch-worker failed" }],
       };
       expect(extractSlackMessageText(msg)).toBe(
-        "Triggered: [P3] A Bull job process-inscribe-webhook failed",
+        "Triggered: [P3] A Bull job email-dispatch-worker failed",
       );
     });
 
     test("uses attachment text when fallback is absent", () => {
       const msg = {
         text: "",
-        attachments: [{ text: "Job failed in queue document_fraud_check" }],
+        attachments: [{ text: "Job failed in queue email_dispatch_queue" }],
       };
-      expect(extractSlackMessageText(msg)).toBe("Job failed in queue document_fraud_check");
+      expect(extractSlackMessageText(msg)).toBe("Job failed in queue email_dispatch_queue");
     });
 
     test("uses attachment title as tertiary fallback", () => {
@@ -60,9 +60,22 @@ describe("extractSlackMessageText", () => {
       expect(extractSlackMessageText(msg)).toBe("real content");
     });
 
-    test("top-level text wins over attachments", () => {
-      const msg = { text: "top text", attachments: [{ fallback: "ignored" }] };
-      expect(extractSlackMessageText(msg)).toBe("top text");
+    test("top-level text appears first, attachment content still included", () => {
+      const msg = { text: "top text", attachments: [{ fallback: "attachment content" }] };
+      expect(extractSlackMessageText(msg)).toBe("top text\nattachment content");
+    });
+
+    test("preserves detailed attachment text even when fallback is also present", () => {
+      // Slack attachments commonly carry a short `fallback` for notifications and a
+      // full `text` body. The old code used `fallback || text`, silently dropping `text`.
+      const msg = {
+        text: "fallback",
+        attachments: [{ fallback: "fallback", text: "detailed attachment body" }],
+      };
+      const result = extractSlackMessageText(msg);
+      expect(result).toContain("detailed attachment body");
+      // "fallback" appears exactly once (either from top-level or attachment — not both)
+      expect(result.split("fallback").length - 1).toBe(1);
     });
   });
 
@@ -150,13 +163,13 @@ describe("extractSlackMessageText", () => {
       expect(extractSlackMessageText(msg)).toBe("Line 1\nLine 2");
     });
 
-    test("attachments take priority over blocks", () => {
+    test("attachments appear before blocks when both present", () => {
       const msg = {
         text: "",
         attachments: [{ fallback: "from attachment" }],
         blocks: [{ type: "section", text: { type: "plain_text", text: "from block" } }],
       };
-      expect(extractSlackMessageText(msg)).toBe("from attachment");
+      expect(extractSlackMessageText(msg)).toBe("from attachment\nfrom block");
     });
 
     test("returns empty string when blocks have no extractable text", () => {
@@ -165,6 +178,199 @@ describe("extractSlackMessageText", () => {
         blocks: [{ type: "divider" }, { type: "image" }],
       };
       expect(extractSlackMessageText(msg)).toBe("");
+    });
+  });
+
+  describe("all layers combined — Datadog/alert-app shapes", () => {
+    test("Datadog-style: fallback text + section fields + actions button URL all captured", () => {
+      const msg = {
+        text: "Triggered: [P2] PaymentsService | [production] API failure with 500",
+        blocks: [
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: "*PoC:* @oncall" },
+              { type: "mrkdwn", text: "*Error rate:* 1.0/0.0" },
+              { type: "mrkdwn", text: "*Tags:* env:production, http.status_code:500" },
+            ],
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                text: { type: "plain_text", text: "Check traces" },
+                url: "https://app.datadoghq.com/apm/traces?query=service:payments-service",
+              },
+            ],
+          },
+        ],
+      };
+      const result = extractSlackMessageText(msg);
+      expect(result).toContain("Triggered: [P2] PaymentsService");
+      expect(result).toContain("*PoC:* @oncall");
+      expect(result).toContain("*Error rate:* 1.0/0.0");
+      expect(result).toContain("*Tags:* env:production");
+      expect(result).toContain("https://app.datadoghq.com/apm/traces");
+      expect(result).toContain("Check traces");
+    });
+
+    test("short top-level text not dropped when it appears as substring inside block text", () => {
+      // "hi" is a substring of "this has unrelated substring" but not a complete line —
+      // the old bodyText.includes(topText) check would silently drop it.
+      const msg = {
+        text: "hi",
+        blocks: [
+          { type: "section", text: { type: "plain_text", text: "this has unrelated substring" } },
+        ],
+      };
+      const result = extractSlackMessageText(msg);
+      expect(result).toContain("hi");
+      expect(result).toContain("this has unrelated substring");
+    });
+
+    test("top-level text deduped when verbatim present in blocks body", () => {
+      const msg = {
+        text: "Alert fired",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "Alert fired\nDetails here" } }],
+      };
+      const result = extractSlackMessageText(msg);
+      // "Alert fired" should NOT appear twice
+      expect(result.split("Alert fired").length - 1).toBe(1);
+      expect(result).toContain("Details here");
+    });
+
+    test("context block elements are captured", () => {
+      const msg = {
+        text: "",
+        blocks: [
+          {
+            type: "context",
+            elements: [
+              { type: "mrkdwn", text: "Environment: *production*" },
+              { type: "plain_text", text: "Service: payments-service" },
+            ],
+          },
+        ],
+      };
+      const result = extractSlackMessageText(msg);
+      expect(result).toContain("Environment: *production*");
+      expect(result).toContain("Service: payments-service");
+    });
+
+    test("header block text is captured", () => {
+      const msg = {
+        text: "",
+        blocks: [
+          { type: "header", text: { type: "plain_text", text: "New alert triggered" } },
+          { type: "section", text: { type: "mrkdwn", text: "Details below" } },
+        ],
+      };
+      const result = extractSlackMessageText(msg);
+      expect(result).toContain("New alert triggered");
+      expect(result).toContain("Details below");
+    });
+
+    test("actions block button without url emits label only", () => {
+      const msg = {
+        text: "",
+        blocks: [
+          {
+            type: "actions",
+            elements: [{ type: "button", text: { type: "plain_text", text: "Dismiss" } }],
+          },
+        ],
+      };
+      expect(extractSlackMessageText(msg)).toBe("Dismiss");
+    });
+
+    test("actions block button without label emits url only", () => {
+      const msg = {
+        text: "",
+        blocks: [
+          {
+            type: "actions",
+            elements: [{ type: "button", url: "https://example.com/resolve" }],
+          },
+        ],
+      };
+      expect(extractSlackMessageText(msg)).toBe("https://example.com/resolve");
+    });
+  });
+
+  describe("legacy attachment extras — fields and action URLs", () => {
+    test("attachment fields (title/value pairs) are captured", () => {
+      const msg = {
+        text: "",
+        attachments: [
+          {
+            fields: [
+              { title: "Priority", value: "P2" },
+              { title: "Service", value: "payments-service" },
+            ],
+          },
+        ],
+      };
+      const result = extractSlackMessageText(msg);
+      expect(result).toContain("Priority: P2");
+      expect(result).toContain("Service: payments-service");
+    });
+
+    test("attachment title_link emitted as mrkdwn link", () => {
+      const msg = {
+        text: "",
+        attachments: [{ title: "View alert", title_link: "https://app.datadoghq.com/event/1" }],
+      };
+      expect(extractSlackMessageText(msg)).toBe("<https://app.datadoghq.com/event/1|View alert>");
+    });
+
+    test("attachment actions[].url emitted as mrkdwn link with label", () => {
+      const msg = {
+        text: "",
+        attachments: [
+          {
+            fallback: "Alert",
+            actions: [{ text: "Resolve", url: "https://pagerduty.com/resolve/123" }],
+          },
+        ],
+      };
+      const result = extractSlackMessageText(msg);
+      expect(result).toContain("Alert");
+      expect(result).toContain("<https://pagerduty.com/resolve/123|Resolve>");
+    });
+
+    test("attachment actions[].url without text emits bare URL", () => {
+      const msg = {
+        text: "",
+        attachments: [{ actions: [{ url: "https://example.com/ack" }] }],
+      };
+      expect(extractSlackMessageText(msg)).toBe("https://example.com/ack");
+    });
+
+    test("attachment field with only title emits title", () => {
+      const msg = {
+        text: "",
+        attachments: [{ fields: [{ title: "OnCall" }] }],
+      };
+      expect(extractSlackMessageText(msg)).toBe("OnCall");
+    });
+
+    test("attachment field with only value emits value", () => {
+      const msg = {
+        text: "",
+        attachments: [{ fields: [{ value: "jane.doe" }] }],
+      };
+      expect(extractSlackMessageText(msg)).toBe("jane.doe");
+    });
+  });
+
+  describe("regression — plain messages unaffected", () => {
+    test("plain text-only message still returns just that text", () => {
+      expect(extractSlackMessageText({ text: "hello world" })).toBe("hello world");
+    });
+
+    test("empty message still returns empty string", () => {
+      expect(extractSlackMessageText({})).toBe("");
     });
   });
 

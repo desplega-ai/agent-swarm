@@ -6,8 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.101.0] - 2026-06-22
+
+### Added
+- **`codex-login` accepts credential slots above 9** (#802) — the slot ceiling (`MAX_SLOT`) was raised from 9 to 31, so operators can register more than 10 Codex OAuth credentials in the sandbox pool. The rest of the stack (storage-key regex, runner enumeration, api-keys endpoint) was already unbounded; this removes the only enforced limit.
+
+### Fixed
+- **`swarm-script` workflow nodes can trigger workflows (and other fall-through MCP tools) again** (#801) — `trigger-workflow` was returning a 403 because `mcp-bridge.ts` checked the MCP tool name against the SDK method-name set. A new `isMcpToolAllowedForScripts()` check matches against MCP names, also unblocking `slack_post`, `page_create`, `schedule_*`, and other previously-403ing tools. A latent arg-name drift (`workflow_trigger` typed as `{ id; input? }` while the tool reads `triggerData`) was fixed and the generated SDK type defs regenerated.
+
+## [1.100.4] - 2026-06-20
+
+### Fixed
+- **`swarm-script` workflow args now preserve exact-token JSON types without leaking cross-scope values** (#798, #799) — `config.args` entries written as a single token such as `{{input.payload}}` now keep native object/array/number/boolean shapes instead of stringifying them, while mixed strings still interpolate as strings and raw token resolution stays scoped to the node's local interpolation context during retries and fan-out.
+
+## [1.100.3] - 2026-06-19
+
+### Added
+- **Memory retrieval rows now carry grouping metadata** (#780) — `memory_retrieval` records now capture a stable `retrievalId` plus per-result rank so downstream raters and analytics can group one search/get fan-out into a coherent retrieval event.
+
 ### Changed
 - **Crash-recovery resumes pin to their own agent instead of the role-blind pool** (DES-523) — when the heartbeat detects a crashed worker, the `resume` task is now assigned back to the original (stable-ID) agent and reclaimed when it restarts, instead of being released to the unassigned pool where a wrong-specialization worker could grab it. A pin that is never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default 10 min) is escalated to a Lead-owned `task.reroute.decision` follow-up, which re-delegates the work via `send-task` with an explicit agent (never re-pooled). The crash path no longer touches the unassigned pool. Set `HEARTBEAT_PIN_CRASH_RESUME=0` to restore the previous pool-fallback behavior, or `HEARTBEAT_RESUME_PIN_GRACE_MIN=0` to disable the escalation reaper.
+
+### Fixed
+- **Slack auto-join now preserves the info-failure fallback while still blocking external Slack Connect channels** (#790, #792) — public internal channels still auto-join on demand, but external/shared channels now return an explicit invite-required error and a `conversations.info` failure no longer disables the original join-and-retry fallback.
+- **Assistant-side Slack co-mentions no longer spawn accidental tasks** (#784) — assistant-thread messages that only mention another user are ignored unless they also mention the swarm bot, preventing side conversations from triggering lead work.
+- **GitHub review tasks now include inline review comments instead of dropping body-less reviews** (#788) — submitted PR reviews fetch and append inline comments with file/line context, and large review bundles are paginated so all comments reach the worker task.
+- **Claude Bridge only activates with OAuth and now preserves transcript-backed metrics again** (#789) — `SWARM_USE_CLAUDE_BRIDGE=true` now requires `CLAUDE_CODE_OAUTH_TOKEN` (otherwise the adapter falls back to stock `claude`), and the worker image pins `@desplega.ai/claude-bridge` `0.2.2` so Claude's transcript stays enabled for cost/token/event reconstruction.
 
 ## [1.100.0] - 2026-06-17
 

@@ -399,7 +399,9 @@ export default function TasksPage() {
           });
         }
       } else {
-        setDialogInitialValues(undefined);
+        setDialogInitialValues({
+          ...(searchParams.get("agentId") ? { agentId: searchParams.get("agentId") ?? "" } : {}),
+        });
       }
       setDialogOpen(true);
       setSearchParams(
@@ -407,6 +409,7 @@ export default function TasksPage() {
           const next = new URLSearchParams(prev);
           next.delete("new");
           next.delete("prefill");
+          next.delete("agentId");
           return next;
         },
         { replace: true },

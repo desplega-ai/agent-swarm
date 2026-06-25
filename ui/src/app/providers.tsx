@@ -1,4 +1,6 @@
+import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import type { ReactNode } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { IdentityModal } from "@/components/identity/identity-modal";
@@ -12,10 +14,19 @@ const queryClient = new QueryClient({
     queries: {
       refetchInterval: 10000,
       staleTime: 2000,
+      gcTime: 1000 * 60 * 60 * 24,
       retry: 2,
     },
   },
 });
+
+const localStoragePersister =
+  typeof window === "undefined"
+    ? undefined
+    : createSyncStoragePersister({
+        key: "agent-swarm-query-cache-v1",
+        storage: window.localStorage,
+      });
 
 function ConfigProvider({ children }: { children: ReactNode }) {
   const value = useConfigProvider();
@@ -38,18 +49,33 @@ function IdentityGate() {
 }
 
 export function Providers({ children }: { children: ReactNode }) {
+  const content = (
+    <ThemeProvider>
+      <ConfigProvider>
+        <CurrentUserProvider>
+          <TooltipProvider>
+            {children}
+            <IdentityGate />
+          </TooltipProvider>
+        </CurrentUserProvider>
+      </ConfigProvider>
+    </ThemeProvider>
+  );
+
+  if (!localStoragePersister) {
+    return <QueryClientProvider client={queryClient}>{content}</QueryClientProvider>;
+  }
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <ConfigProvider>
-          <CurrentUserProvider>
-            <TooltipProvider>
-              {children}
-              <IdentityGate />
-            </TooltipProvider>
-          </CurrentUserProvider>
-        </ConfigProvider>
-      </ThemeProvider>
-    </QueryClientProvider>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{
+        buster: `ui-${__APP_VERSION__}`,
+        maxAge: 1000 * 60 * 60 * 6,
+        persister: localStoragePersister,
+      }}
+    >
+      {content}
+    </PersistQueryClientProvider>
   );
 }

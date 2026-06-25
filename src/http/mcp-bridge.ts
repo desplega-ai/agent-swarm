@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createServer } from "@/server";
-import { isSdkToolAllowed } from "../scripts-runtime/sdk-allowlist";
+import { isMcpToolAllowedForScripts } from "../scripts-runtime/sdk-allowlist";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -55,7 +55,7 @@ export async function handleMcpBridge(
 
   const { tool: toolName, args } = parsed.body;
 
-  if (!isSdkToolAllowed(toolName)) {
+  if (!isMcpToolAllowedForScripts(toolName)) {
     jsonError(res, `Tool '${toolName}' is not in the SDK allowlist`, 403);
     return true;
   }

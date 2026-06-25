@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.100.2",
+  "version": "1.101.0",
   "description": "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants",
   "license": "MIT",
   "author": "desplega.sh <contact@desplega.sh>",
@@ -22,6 +22,7 @@
     "access": "public"
   },
   "files": [
+    "dist/",
     "src/",
     "tsconfig.json",
     "plugin/commands/",
@@ -34,7 +35,7 @@
   "module": "src/http.ts",
   "type": "module",
   "bin": {
-    "agent-swarm": "./src/cli.tsx"
+    "agent-swarm": "./dist/cli.js"
   },
   "@desplega.ai/agent-swarm": "link:@desplega.ai/agent-swarm",
   "config": {
@@ -42,6 +43,8 @@
   },
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
+    "build:cli": "bun run scripts/build-cli.ts",
+    "prepack": "bun run build:cli",
     "tsc:check": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
@@ -111,14 +114,14 @@
     "@aws-sdk/client-bedrock": "3.1048.0",
     "@desplega.ai/business-use": "^0.4.2",
     "@desplega.ai/localtunnel": "^2.2.0",
-    "@earendil-works/pi-agent-core": "^0.79.6",
-    "@earendil-works/pi-ai": "^0.79.6",
-    "@earendil-works/pi-coding-agent": "^0.79.6",
+    "@earendil-works/pi-agent-core": "^0.80.2",
+    "@earendil-works/pi-ai": "^0.80.2",
+    "@earendil-works/pi-coding-agent": "^0.80.2",
     "@inkjs/ui": "^2.0.0",
     "@linear/sdk": "^77.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "@openai/codex-sdk": "^0.140.0",
-    "@opencode-ai/sdk": "^1.17.7",
+    "@openai/codex-sdk": "^0.142.0",
+    "@opencode-ai/sdk": "^1.17.9",
     "@openfort/openfort-node": "^0.9.1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",

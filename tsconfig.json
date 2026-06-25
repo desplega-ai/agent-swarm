@@ -38,6 +38,7 @@
     "ui",
     "templates-ui",
     "node_modules",
+    "dist",
     "scripts",
     "src/tests",
     "work",

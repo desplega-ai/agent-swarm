@@ -478,7 +478,7 @@ Codex workers support three auth paths:
 
 1. `OPENAI_API_KEY`
 2. Pre-seeded `~/.codex/auth.json`
-3. ChatGPT OAuth stored in the swarm config store as `codex_oauth`
+3. ChatGPT OAuth stored in the swarm config store as pooled `codex_oauth_<slot>` entries
 
 For Docker Compose deployments, the ChatGPT OAuth flow happens on your laptop, not inside the worker container:
 
@@ -486,7 +486,7 @@ For Docker Compose deployments, the ChatGPT OAuth flow happens on your laptop, n
 bun run src/cli.tsx codex-login --api-url https://your-swarm.example.com --api-key <api-key>
 ```
 
-That command completes the browser OAuth flow locally and stores the credential in the swarm API config store. Then restart codex workers. On boot, `docker-entrypoint.sh` fetches `codex_oauth` from the API and writes `/home/worker/.codex/auth.json` automatically.
+That command completes the browser OAuth flow locally and stores the credential in the swarm API config store. The default behavior picks the next free pool slot (`codex_oauth_0`, `codex_oauth_1`, ...), and you can pin a specific slot with `--slot <n>` for any integer from `0` through `100`. Then restart codex workers. On boot, `docker-entrypoint.sh` enumerates the stored `codex_oauth_<slot>` entries from the API and writes the selected credential to `/home/worker/.codex/auth.json` automatically.
 
 Worker requirements for this path:
 

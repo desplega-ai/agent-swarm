@@ -1,3 +1,4 @@
+import { mcpToolNameForSdkMethod } from "../scripts-runtime/sdk-allowlist";
 import { stdlib } from "../scripts-runtime/stdlib";
 
 type StepStatusResponse =
@@ -161,7 +162,7 @@ export function buildWorkflowCtx(input: {
       return (args?: unknown) =>
         fetchJson("/api/mcp-bridge", {
           method: "POST",
-          body: JSON.stringify({ tool: prop.replaceAll("_", "-"), args: args ?? {} }),
+          body: JSON.stringify({ tool: mcpToolNameForSdkMethod(prop), args: args ?? {} }),
         });
     },
   });

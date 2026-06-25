@@ -143,6 +143,7 @@ The bot supports Slack's [Assistant](https://api.slack.com/docs/apps/ai) sidebar
 - Open the sidebar in any channel or DM to start a conversation
 - Suggested prompts help you get started ("Check agent status", "Assign a task", "List recent tasks")
 - Follow-up messages in assistant threads route to the same agent that handled the original task
+- Assistant-thread messages that only @mention another user are ignored unless they also mention the swarm bot, preventing accidental task creation from co-mentions like `@Devin are you here?`
 - File uploads (`file_share` messages) in assistant threads are automatically detected and routed to the lead agent
 - The assistant sets a typing status while the agent is working (gracefully handles permission errors in non-assistant threads)
 
@@ -164,7 +165,7 @@ The lead agent can post messages to channels using `slack-post`. By default each
 
 ### Channel Membership
 
-If the bot is not yet a member of a **public** channel, `slack-read`, `slack-post`, `slack-reply`, and `slack-start-thread` automatically join it (via the `channels:join` scope) and retry — no manual `/invite` needed. **Private** channels cannot be self-joined: the tools return a clear error asking you to invite the bot with `/invite @<bot-name>` first.
+If the bot is not yet a member of a **public, internal** channel, `slack-read`, `slack-post`, `slack-reply`, and `slack-start-thread` automatically join it (via the `channels:join` scope) and retry — no manual `/invite` needed. **Private** channels and **external Slack Connect** channels cannot be self-joined: the tools return a clear error asking you to invite the bot with `/invite @<bot-name>` first.
 
 ## User Filtering
 

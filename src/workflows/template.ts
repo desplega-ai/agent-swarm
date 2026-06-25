@@ -10,6 +10,10 @@ export interface InterpolateResult {
   unresolved: string[];
 }
 
+export interface DeepInterpolateOptions {
+  preserveRawTokens?: boolean;
+}
+
 export function interpolate(template: string, ctx: Record<string, unknown>): InterpolateResult {
   const unresolved: string[] = [];
   const result = template.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
@@ -43,18 +47,62 @@ function safeStringify(value: unknown): string {
   }
 }
 
+/** Matches a string that is EXACTLY one {{path}} token with no surrounding text. */
+const EXACT_TOKEN_RE = /^\{\{([^}]+)\}\}$/;
+
+/**
+ * Resolve a dot-separated path against a context object.
+ * Returns `{ found: true, value }` on success, `{ found: false }` when any
+ * segment is missing or the traversal hits a non-object.
+ */
+function resolvePath(
+  path: string,
+  ctx: Record<string, unknown>,
+): { found: true; value: unknown } | { found: false } {
+  const keys = path.trim().split(".");
+  let value: unknown = ctx;
+  for (const key of keys) {
+    if (value == null || typeof value !== "object") return { found: false };
+    value = (value as Record<string, unknown>)[key];
+  }
+  if (value === undefined) return { found: false };
+  return { found: true, value };
+}
+
 /**
  * Deep-interpolate an arbitrary value tree (objects, arrays, strings).
+ *
+ * When `preserveRawTokens` is true and a string value is **exactly** one
+ * `{{path}}` token with no surrounding text, the resolved value is returned
+ * as-is (preserving object / array / number / boolean types). This is the
+ * "raw injection" path used by `swarm-script` node `config.args`.
+ *
+ * When a string contains multiple tokens or surrounding text (e.g.
+ * `"prefix-{{x}}"`) the existing string-interpolation path is used so the
+ * result remains a string.
+ *
  * Non-string leaves are passed through unchanged.
  */
 export function deepInterpolate(
   value: unknown,
   ctx: Record<string, unknown>,
+  options: DeepInterpolateOptions = {},
 ): { value: unknown; unresolved: string[] } {
   const allUnresolved: string[] = [];
 
   function walk(v: unknown): unknown {
     if (typeof v === "string") {
+      const exactMatch = options.preserveRawTokens ? EXACT_TOKEN_RE.exec(v) : null;
+      if (exactMatch?.[1]) {
+        const path = exactMatch[1].trim();
+        const resolved = resolvePath(path, ctx);
+        if (!resolved.found) {
+          allUnresolved.push(path);
+          return "";
+        }
+        return resolved.value;
+      }
+      // Multi-token or mixed string - fall back to string interpolation.
       const { result, unresolved } = interpolate(v, ctx);
       allUnresolved.push(...unresolved);
       return result;

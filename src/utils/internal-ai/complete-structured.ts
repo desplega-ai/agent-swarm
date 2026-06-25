@@ -16,7 +16,8 @@
  */
 
 import type { ToolCall } from "@earendil-works/pi-ai";
-import { complete, getModel } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
+import { getBuiltinModel as getModel } from "@earendil-works/pi-ai/providers/all";
 import type { TSchema } from "typebox";
 import { z } from "zod";
 import { type ResolvedCredential, resolveCredential } from "./credentials.js";

@@ -246,7 +246,7 @@ describe("runCodexLogin", () => {
       resolveConfig: async () => ({
         apiUrl: "http://localhost:3013",
         apiKey: "test-key",
-        slot: 15,
+        slot: 101,
       }),
       login: mock(async () => {
         throw new Error("should not start oauth");
@@ -259,18 +259,46 @@ describe("runCodexLogin", () => {
     });
 
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("--slot must be an integer between 0 and 9"),
+      expect.stringContaining("--slot must be an integer between 0 and 100"),
     );
     expect(exit).toHaveBeenCalledWith(1);
     expect(store).not.toHaveBeenCalled();
+  });
+
+  it("accepts slot 10 (previously rejected by the old 0-9 cap)", async () => {
+    let storedSlot: number | undefined;
+    const store = mock(async (_apiUrl: string, _apiKey: string, _creds: unknown, slot?: number) => {
+      storedSlot = slot;
+    });
+
+    await runCodexLogin([], {
+      resolveConfig: async () => ({
+        apiUrl: "http://localhost:3013",
+        apiKey: "test-key",
+        slot: 10,
+      }),
+      login: mock(async () => ({
+        access: "at_test",
+        refresh: "rt_test",
+        expires: Date.now() + 3600000,
+        accountId: "acc-test",
+      })),
+      store,
+      loadAllSlots: mock(async () => []),
+      log: () => {},
+      error: () => {},
+      exit: () => {},
+    });
+
+    expect(storedSlot).toBe(10);
   });
 
   it("errors when all slots are occupied", async () => {
     const error = mock(() => {});
     const exit = mock(() => {});
 
-    // All 10 slots occupied
-    const allSlots = Array.from({ length: 10 }, (_, i) => ({
+    // All 101 slots occupied (0-100)
+    const allSlots = Array.from({ length: 101 }, (_, i) => ({
       slot: i,
       creds: { access: "", refresh: "", expires: 0, accountId: "" },
     }));

@@ -149,7 +149,7 @@ export interface SwarmSdk {
   workflow_patch(args: Record<string, unknown>): Promise<unknown>;
   workflow_patchNode(args: Record<string, unknown>): Promise<unknown>;
   workflow_delete(args: { id: string }): Promise<unknown>;
-  workflow_trigger(args: { id: string; input?: Record<string, unknown> }): Promise<unknown>;
+  workflow_trigger(args: { id: string; triggerData?: Record<string, unknown> }): Promise<unknown>;
   workflow_retryRun(args: { id: string }): Promise<unknown>;
   workflow_cancelRun(args: { id: string }): Promise<unknown>;
 
