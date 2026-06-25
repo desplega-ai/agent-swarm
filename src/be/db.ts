@@ -5413,6 +5413,8 @@ type ScheduledTaskRow = {
   scheduleType: string;
   createdAt: string;
   lastUpdatedAt: string;
+  created_by: string | null;
+  updated_by: string | null;
 };
 
 // ── List-endpoint slimming helpers ──────────────────────────────────────────
@@ -5455,6 +5457,8 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     scheduleType: row.scheduleType as "recurring" | "one_time",
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
+    createdBy: row.created_by ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
   };
 }
 
@@ -5548,6 +5552,7 @@ export interface CreateScheduledTaskData {
   model?: string;
   modelTier?: ModelTier;
   scheduleType?: "recurring" | "one_time";
+  createdBy?: string;
 }
 
 export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTask {
@@ -5559,8 +5564,9 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       `INSERT INTO scheduled_tasks (
         id, name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, timezone, model, modelTier, scheduleType, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        createdByAgentId, timezone, model, modelTier, scheduleType, createdAt, lastUpdatedAt,
+        created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -5582,6 +5588,8 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       data.scheduleType ?? "recurring",
       now,
       now,
+      data.createdBy ?? null,
+      data.createdBy ?? null,
     );
 
   if (!row) throw new Error("Failed to create scheduled task");
@@ -5609,6 +5617,7 @@ export interface UpdateScheduledTaskData {
   modelTier?: ModelTier | null;
   scheduleType?: "recurring" | "one_time";
   lastUpdatedAt?: string;
+  updatedBy?: string;
 }
 
 export function updateScheduledTask(
@@ -5693,6 +5702,10 @@ export function updateScheduledTask(
   if (data.scheduleType !== undefined) {
     updates.push("scheduleType = ?");
     params.push(data.scheduleType);
+  }
+  if (data.updatedBy !== undefined) {
+    updates.push("updated_by = ?");
+    params.push(data.updatedBy);
   }
 
   if (updates.length === 0) {
@@ -6723,6 +6736,8 @@ type WorkflowRow = {
   createdByAgentId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
+  created_by: string | null;
+  updated_by: string | null;
 };
 
 function rowToWorkflow(row: WorkflowRow): Workflow {
@@ -6743,6 +6758,8 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     createdByAgentId: row.createdByAgentId ?? undefined,
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
+    createdBy: row.created_by ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
   };
 }
 
@@ -6757,6 +6774,7 @@ export function createWorkflow(data: {
   dir?: string;
   vcsRepo?: string;
   createdByAgentId?: string;
+  createdBy?: string;
 }): Workflow {
   const id = crypto.randomUUID();
   const row = getDb()
@@ -6774,10 +6792,12 @@ export function createWorkflow(data: {
         string | null,
         string | null,
         string | null,
+        string | null,
+        string | null,
       ]
     >(
-      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -6791,6 +6811,8 @@ export function createWorkflow(data: {
       data.dir ?? null,
       data.vcsRepo ?? null,
       data.createdByAgentId ?? null,
+      data.createdBy ?? null,
+      data.createdBy ?? null,
     );
   if (!row) throw new Error("Failed to create workflow");
   return rowToWorkflow(row);
@@ -6866,6 +6888,7 @@ export function updateWorkflow(
     triggerSchema?: Record<string, unknown> | null;
     dir?: string | null;
     vcsRepo?: string | null;
+    updatedBy?: string;
   },
 ): Workflow | null {
   const updates: string[] = [];
@@ -6909,6 +6932,10 @@ export function updateWorkflow(
   if (data.vcsRepo !== undefined) {
     updates.push("vcs_repo = ?");
     params.push(data.vcsRepo ?? null);
+  }
+  if (data.updatedBy !== undefined) {
+    updates.push("updated_by = ?");
+    params.push(data.updatedBy);
   }
   if (updates.length === 0) return getWorkflow(id);
   updates.push("lastUpdatedAt = ?");

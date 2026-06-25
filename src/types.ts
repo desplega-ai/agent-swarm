@@ -907,6 +907,8 @@ export const ScheduledTaskSchema = z
     scheduleType: z.enum(["recurring", "one_time"]).default("recurring"),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
+    createdBy: z.string().optional(),
+    updatedBy: z.string().optional(),
   })
   .refine(
     (data) => {
@@ -1294,6 +1296,8 @@ export const WorkflowSchema = z.object({
   createdByAgentId: z.string().uuid().optional(),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
+  createdBy: z.string().optional(),
+  updatedBy: z.string().optional(),
 });
 export type Workflow = z.infer<typeof WorkflowSchema>;
 

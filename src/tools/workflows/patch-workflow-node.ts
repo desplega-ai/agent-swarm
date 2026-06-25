@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow, updateWorkflow } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { WorkflowNodePatchSchema } from "@/types";
@@ -60,7 +61,15 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
 
         const version = snapshotWorkflow(id, requestInfo.agentId);
 
-        const workflow = updateWorkflow(id, { definition: patchResult.definition });
+        const updatedBy =
+          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
+        const updateArgs: Parameters<typeof updateWorkflow>[1] = {
+          definition: patchResult.definition,
+        };
+        if (updatedBy !== undefined) {
+          updateArgs.updatedBy = updatedBy;
+        }
+        const workflow = updateWorkflow(id, updateArgs);
         if (!workflow) {
           return {
             content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],

@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
   createWorkflow,
   deleteWorkflow,
@@ -429,6 +430,7 @@ export async function handleWorkflows(
       dir: parsed.body.dir,
       vcsRepo: parsed.body.vcsRepo,
       createdByAgentId: myAgentId ?? undefined,
+      createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
     });
     json(res, workflow, 201);
     return true;
@@ -483,7 +485,11 @@ export async function handleWorkflows(
       // Snapshot failure should not block the update
     }
 
-    const workflow = updateWorkflow(id, { definition: patchResult.definition });
+    const updatedBy0 = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
+    const workflow = updateWorkflow(id, {
+      definition: patchResult.definition,
+      updatedBy: updatedBy0,
+    });
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -523,11 +529,15 @@ export async function handleWorkflows(
       // Snapshot failure should not block the update
     }
 
+    const updatedBy1 = resolveHttpAuditUserId(req, myAgentId);
     const updateArgs: Parameters<typeof updateWorkflow>[1] = {
       definition: patchResult.definition,
     };
     if (parsed.body.triggerSchema !== undefined) {
       updateArgs.triggerSchema = parsed.body.triggerSchema;
+    }
+    if (updatedBy1 !== null) {
+      updateArgs.updatedBy = updatedBy1;
     }
     const workflow = updateWorkflow(id, updateArgs);
     if (!workflow) {
@@ -569,6 +579,7 @@ export async function handleWorkflows(
       // Snapshot failure should not block the update — log and continue
     }
 
+    const updatedBy2 = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
     const workflow = updateWorkflow(id, {
       name: body.name,
       description: body.description,
@@ -580,6 +591,7 @@ export async function handleWorkflows(
       dir: body.dir === null ? null : body.dir,
       vcsRepo: body.vcsRepo === null ? null : body.vcsRepo,
       enabled: body.enabled,
+      updatedBy: updatedBy2,
     });
     if (!workflow) {
       res.writeHead(404);
