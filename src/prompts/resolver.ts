@@ -8,7 +8,7 @@
  *   workers which have no local database (architecture invariant: workers communicate via HTTP only).
  */
 
-import { interpolate } from "../workflows/template";
+import { interpolate } from "../utils/template";
 import { getTemplateDefinition } from "./registry";
 
 // ─── DB Resolver Injection ──────────────────────────────────────────────────

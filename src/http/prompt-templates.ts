@@ -12,7 +12,7 @@ import {
 } from "../be/db";
 import { getAllTemplateDefinitions, getTemplateDefinition } from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
-import { interpolate } from "../workflows/template";
+import { interpolate } from "../utils/template";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
