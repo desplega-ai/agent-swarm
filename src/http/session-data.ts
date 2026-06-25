@@ -14,6 +14,7 @@ import {
   getTaskById,
 } from "../be/db";
 import { normalizeModelKey } from "../be/pricing-normalize";
+import { recordSessionCost } from "../otel";
 import type { SessionCost, SessionCostSource } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -289,6 +290,21 @@ export async function handleSessionData(
         model,
         isError: parsed.body.isError ?? false,
         costSource,
+      });
+      recordSessionCost({
+        totalCostUsd,
+        harness: parsed.body.provider ?? "unknown",
+        model,
+        costSource,
+        isError: parsed.body.isError ?? false,
+        tokens: {
+          input: inputTokens,
+          output: outputTokens,
+          cacheRead: cachedInputTokens,
+          cacheWrite: parsed.body.cacheWriteTokens ?? 0,
+          reasoning: parsed.body.reasoningOutputTokens ?? 0,
+          thinking: parsed.body.thinkingTokens ?? 0,
+        },
       });
       json(res, { success: true, cost }, 201);
     } catch (error) {
