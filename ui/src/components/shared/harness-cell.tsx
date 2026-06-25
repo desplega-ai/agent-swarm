@@ -9,6 +9,7 @@ const HARNESS_LABEL: Record<string, string> = {
   codex: "Codex",
   devin: "Devin",
   opencode: "Opencode",
+  "ai-sdk-agent": "AI SDK Agent",
   pi: "Pi-Mono",
 };
 

@@ -76,6 +76,13 @@ const ANTHROPIC_SHORTNAME_TO_MODELSDEV: Record<string, string> = {
   haiku: "claude-haiku-4-5",
 };
 
+const AI_SDK_AGENT_SHORTNAME_TO_OPENAI: Record<string, string> = {
+  fable: "gpt-5.5",
+  opus: "gpt-5.4",
+  sonnet: "gpt-5.4",
+  haiku: "gpt-5.4-mini",
+};
+
 export interface PricingSeedRow {
   provider: PricingProvider;
   model: string;
@@ -172,11 +179,21 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     for (const row of projectCostBlock("codex", id, model.cost)) {
       rows.push(row);
     }
+    for (const row of projectCostBlock("ai-sdk-agent", id, model.cost)) {
+      rows.push(row);
+    }
     // Phase 2 fix — pi-mono can route to openai models through the
     // github-copilot proxy (`github-copilot/gpt-5.4`). The lookup helper
     // strips the prefix, so we seed the bare id under `pi` too. Without this
     // every gh-copilot-backed pi run fell through to `costSource='unpriced'`.
     for (const row of projectCostBlock("pi", id, model.cost)) {
+      rows.push(row);
+    }
+  }
+  for (const [shortname, fullId] of Object.entries(AI_SDK_AGENT_SHORTNAME_TO_OPENAI)) {
+    const target = openai[fullId];
+    if (!target?.cost) continue;
+    for (const row of projectCostBlock("ai-sdk-agent", shortname, target.cost)) {
       rows.push(row);
     }
   }

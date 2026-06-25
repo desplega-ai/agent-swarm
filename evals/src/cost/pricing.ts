@@ -68,6 +68,7 @@ export async function listOpenrouterModels(): Promise<PricedModel[]> {
 const PROVIDER_SECTION: Record<HarnessProvider, string> = {
   claude: "anthropic",
   codex: "openai",
+  "ai-sdk-agent": "openai",
   pi: "openrouter",
   opencode: "openrouter",
 };
@@ -101,7 +102,7 @@ export function getClaudeAliasMap(): Promise<Record<string, string>> {
  *             FIRST to the latest family member via the frozen alias map (v7 §8);
  *             dated ids strip their suffix /-\d{8}$/
  *             (e.g. "claude-haiku-4-5-20251001" → "claude-haiku-4-5")
- *   codex   → "openai" section, bare id
+ *   codex / ai-sdk-agent → "openai" section, bare id
  *   pi / opencode → strip leading "openrouter/" then look up in the "openrouter" section
  *             (e.g. "openrouter/deepseek/deepseek-v4-flash" → "deepseek/deepseek-v4-flash");
  *             ids without the prefix (as emitted in harness session files) look up directly.

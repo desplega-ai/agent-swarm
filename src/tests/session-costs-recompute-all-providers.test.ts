@@ -119,6 +119,7 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
     "codex",
     "pi",
     "opencode",
+    "ai-sdk-agent",
     "devin",
     "gemini",
   ] as const) {

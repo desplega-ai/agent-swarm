@@ -65,20 +65,28 @@ describe("models.dev runtime pricing refresh", () => {
       fetchImpl: async () => responseFor(openAiCache(2, 8), '"etag-1"'),
     });
     expect(first.status).toBe("refreshed");
-    expect(first.candidateRows).toBe(4);
-    expect(first.inserted).toBe(4);
+    expect(first.candidateRows).toBe(6);
+    expect(first.inserted).toBe(6);
     expect(first.unchanged).toBe(0);
 
     const activeChanged = getActivePricingRow("codex", "gpt-refresh-test", "input", 1_000);
     expect(activeChanged?.effectiveFrom).toBe(1_000);
     expect(activeChanged?.pricePerMillionUsd).toBe(2);
+    const activeAiSdkAgentChanged = getActivePricingRow(
+      "ai-sdk-agent",
+      "gpt-refresh-test",
+      "input",
+      1_000,
+    );
+    expect(activeAiSdkAgentChanged?.effectiveFrom).toBe(1_000);
+    expect(activeAiSdkAgentChanged?.pricePerMillionUsd).toBe(2);
 
     const second = await refreshPricingFromModelsDev({
       now: 2_000,
       fetchImpl: async () => responseFor(openAiCache(2, 8), '"etag-2"'),
     });
     expect(second.inserted).toBe(0);
-    expect(second.unchanged).toBe(4);
+    expect(second.unchanged).toBe(6);
 
     const rows = db
       .prepare<{ effective_from: number }, []>(
@@ -150,7 +158,7 @@ describe("models.dev runtime pricing refresh", () => {
 
     const logs = getLogsByEventType("pricing.refresh");
     expect(logs).toHaveLength(1);
-    expect(logs[0]?.newValue).toContain("inserted=4");
+    expect(logs[0]?.newValue).toContain("inserted=6");
     expect(logs[0]?.metadata).toContain('"etag":"\\"etag-log\\""');
   });
 });

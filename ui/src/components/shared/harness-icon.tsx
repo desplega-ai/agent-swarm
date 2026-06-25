@@ -105,12 +105,22 @@ function DevinIcon(props: IconProps) {
   );
 }
 
+function AiSdkAgentIcon(props: IconProps) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, harness label provides accessible name
+    <svg aria-hidden {...ICON_BASE_24} {...props}>
+      <path d="M12 2 4 6v12l8 4 8-4V6l-8-4zm0 3.35L16.7 7.7 12 10.05 7.3 7.7 12 5.35zM6.5 10.12l4 2v5.98l-4-2v-5.98zm11 0v5.98l-4 2v-5.98l4-2z" />
+    </svg>
+  );
+}
+
 const ICON_BY_HARNESS: Record<string, (p: IconProps) => ReactElement> = {
   claude: ClaudeIcon,
   "claude-managed": ClaudeManagedIcon,
   codex: CodexIcon,
   pi: PiIcon,
   opencode: OpencodeIcon,
+  "ai-sdk-agent": AiSdkAgentIcon,
   devin: DevinIcon,
 };
 

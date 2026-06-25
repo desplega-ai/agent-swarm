@@ -104,8 +104,8 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   } else if (args.provider === "pi") {
     // Pi has no context-mode MCP wiring yet (deferred to DES-514), so it uses a
     // worker composite that omits the context_mode block to avoid advertising
-    // phantom `ctx_*` tools. All other local providers (claude, codex, opencode)
-    // keep the block via the standard worker composite.
+    // phantom `ctx_*` tools. All other local providers (claude, codex,
+    // opencode, ai-sdk-agent) keep the block via the standard worker composite.
     compositeEventType = "system.session.worker.pi";
   } else {
     compositeEventType = "system.session.worker";
@@ -161,10 +161,13 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   }
 
   // Installed skills section (progressive disclosure — name + description only)
-  // Skip for providers without MCP — skills require the Skill MCP tool
   if (hasMcp && args.skillsSummary && args.skillsSummary.length > 0) {
     const summaries = args.skillsSummary.map((s) => `- /${s.name}: ${s.description}`).join("\n");
-    prompt += `\n\n## Installed Skills\n\nThe following skills are available. Use the Skill tool to invoke them by name.\n\n${summaries}\n`;
+    const usage =
+      args.provider === "ai-sdk-agent"
+        ? "Use the Skill tool to load them by name."
+        : "Use the slash-command name when invoking them.";
+    prompt += `\n\n## Installed Skills\n\nThe following skills are available. ${usage}\n\n${summaries}\n`;
   }
 
   // Installed MCP servers section — skip for providers without MCP

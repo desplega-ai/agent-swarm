@@ -207,6 +207,12 @@ describe("getModelAwareCredentialVars", () => {
     expect(vars).not.toContain("OPENAI_API_KEY");
   });
 
+  it("uses OPENAI_API_KEY for ai-sdk-agent even with openai-prefixed models", () => {
+    expect(getModelAwareCredentialVars("ai-sdk-agent", "openai/gpt-5.4")).toEqual([
+      "OPENAI_API_KEY",
+    ]);
+  });
+
   it("falls back to all pool vars for unknown provider", () => {
     const vars = getModelAwareCredentialVars("unknown-provider", "some-model");
     expect(vars).toEqual(CREDENTIAL_POOL_VARS);

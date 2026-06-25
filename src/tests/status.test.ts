@@ -43,7 +43,14 @@ import type { AgentCredStatus } from "../types";
 // `PUT /api/agents/:id/credential-status` after migration 055.
 function seedCredStatus(
   agentId: string,
-  harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode",
+  harnessProvider:
+    | "claude"
+    | "codex"
+    | "pi"
+    | "devin"
+    | "claude-managed"
+    | "opencode"
+    | "ai-sdk-agent",
   partial: Partial<AgentCredStatus> = {},
 ): void {
   setAgentHarnessProvider(agentId, harnessProvider);

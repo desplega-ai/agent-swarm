@@ -1,6 +1,6 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, or Claude Managed Agents) that powers your agents
+description: Configure the AI provider (Claude Code, Codex, AI SDK Agent, opencode, pi-mono, Devin, or Claude Managed Agents) that powers your agents
 ---
 
 Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
@@ -11,6 +11,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 |----------|-------------------|-------------|
 | **Claude Code** | `claude` (default) | Anthropic's Claude Code CLI. Recommended for most use cases |
 | **Codex** | `codex` | OpenAI Codex CLI with API-key or ChatGPT OAuth authentication |
+| **AI SDK Agent** | `ai-sdk-agent` | In-process Vercel AI SDK `ToolLoopAgent` backed by direct OpenAI API credentials |
 | **opencode** | `opencode` | OpenCode coding agent powered by OpenRouter. Uses Qwen Coder Flash by default; supports any OpenRouter, Anthropic, or OpenAI model |
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
 | **Devin** | `devin` | Cognition's Devin via the `/sessions` API — session executes in Devin's managed cloud, ACU-based cost tracking |
@@ -23,6 +24,7 @@ The `HARNESS_PROVIDER` environment variable selects which provider adapter is us
 ```
 HARNESS_PROVIDER=claude          →  ClaudeAdapter         →  spawns `claude` CLI process
 HARNESS_PROVIDER=codex           →  CodexAdapter          →  spawns `codex` CLI process
+HARNESS_PROVIDER=ai-sdk-agent    →  AiSdkAgentAdapter     →  creates in-process AI SDK ToolLoopAgent
 HARNESS_PROVIDER=opencode        →  OpencodeAdapter       →  spawns `opencode` CLI process
 HARNESS_PROVIDER=pi              →  PiMonoAdapter         →  creates in-process pi-mono session
 HARNESS_PROVIDER=devin           →  DevinAdapter          →  POSTs /sessions, polls events
@@ -34,7 +36,7 @@ HARNESS_PROVIDER=claude-managed  →  ClaudeManagedAdapter  →  opens SSE strea
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
 
-For local coding harnesses, Agent Swarm now wires in the `context-mode` MCP server by default for Claude Code, Codex, and opencode. That gives those providers the same `ctx_*` compressed-search / fetch-and-index tools out of the box. Hook guidance now nudges agents toward `ctx_execute` / `ctx_batch_execute` after every 3 qualifying external-MCP calls by default (override with `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY`). Set `CONTEXT_MODE_DISABLED=true` to opt a worker out.
+For local coding harnesses, Agent Swarm now wires in the `context-mode` MCP server by default for Claude Code, Codex, AI SDK Agent, and opencode. That gives those providers the same `ctx_*` compressed-search / fetch-and-index tools out of the box. Hook guidance now nudges agents toward `ctx_execute` / `ctx_batch_execute` after every 3 qualifying external-MCP calls by default (override with `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY`). Set `CONTEXT_MODE_DISABLED=true` to opt a worker out.
 
 When the runner refreshes an already-cloned repo for a new task, dirty working trees are auto-stashed instead of forcing a skipped pull. Any resulting `swarm-autostash` refs are appended to the composed prompt so the agent can restore them intentionally with `git stash apply <ref>` or `git stash pop <ref>` when that work matters to the current task.
 

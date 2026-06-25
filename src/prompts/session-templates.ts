@@ -679,8 +679,8 @@ registerTemplate({
 // OMITS the `system.agent.context_mode` block — pi has no context-mode MCP
 // wiring yet (deferred to DES-514), so advertising the `ctx_*` tools to pi
 // workers would point at phantom tools. `getBasePrompt` selects this composite
-// when `provider === 'pi'`; all other local providers (claude, codex, opencode)
-// keep the context_mode block via `system.session.worker`.
+// when `provider === 'pi'`; all other local providers (claude, codex, opencode,
+// ai-sdk-agent) keep the context_mode block via `system.session.worker`.
 registerTemplate({
   eventType: "system.session.worker.pi",
   header: "",

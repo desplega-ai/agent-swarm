@@ -14,7 +14,7 @@ A *harness provider* is the runtime that actually drives an LLM: it owns the sub
   For **configuring** an existing provider, see [Harness Configuration](/docs/guides/harness-configuration). This guide is for **implementing a new one**.
 </Callout>
 
-**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK hosted inside a per-task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping; experimental, rolling out across DES-295 → DES-299).
+**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK hosted inside a per-task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping; experimental, rolling out across DES-295 → DES-299), `ai-sdk-agent` (Vercel AI SDK `ToolLoopAgent` backed by OpenAI).
 
 ---
 
@@ -103,6 +103,11 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*`, AWS SDK default chain (probed via `ListFoundationModels`; see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`, sends session config over stdin, and receives line-delimited events/results over stdout; the child hosts `@openai/codex-sdk` `Codex` / `Thread` and streams `ThreadEvent`s back | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
+| [`src/providers/ai-sdk-agent-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/ai-sdk-agent-adapter.ts) | In-process Vercel AI SDK `ToolLoopAgent`; converts MCP tools to AI SDK tools and adds an adapter-local `Skill` tool that loads the current agent's installed skill content on demand | `OPENAI_API_KEY` |
+
+### ai-sdk-agent skill loading
+
+`ai-sdk-agent` exposes a provider-local tool named `Skill` to the model loop. It is not registered in the global MCP server and does not appear in `CORE_TOOLS`, so other harnesses keep using their existing slash-skill resolver path. The tool resolves only the current agent's installed skills, prefers exact normalized name/slug matches, falls back to fuzzy name/description matching, and truncates loaded content with `MAX_SKILL_CHARS`.
 
 ### pi-mono + Amazon Bedrock auth
 

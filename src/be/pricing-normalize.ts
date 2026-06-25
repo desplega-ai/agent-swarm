@@ -45,6 +45,9 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   // codex normally reports a bare id, but a user may set MODEL_OVERRIDE to a
   // prefixed form. Be forgiving on the lookup side.
   codex: ["openai/", "github-copilot/"],
+  // ai-sdk-agent is a direct OpenAI harness. Strip optional routing prefixes
+  // users may pass in MODEL_OVERRIDE so pricing rows match models.dev keys.
+  "ai-sdk-agent": ["openai/"],
   // claude / claude-managed / devin / gemini emit bare ids today. The empty
   // list keeps the helper a no-op for them but the entry-per-provider shape
   // means a future provider can opt in without changing call-sites.

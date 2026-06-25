@@ -63,7 +63,7 @@ Key endpoints: `GET/POST /api/runs`, `POST /api/runs/:id/{resume,cancel}`, `GET 
 ## Defining scenarios and configs
 
 - Scenarios live in `scenarios/*.ts` (`Scenario` type): description, optional seeding, initial task(s), and an `outcome` (deterministic `checks`, `llmJudge` and/or `agenticJudge` rubrics, `passThreshold`). Register in `scenarios/index.ts` — every scenario is shape-validated at registry load (`validateScenario`; bad definitions fail CLI/server startup with the full violation list).
-- Harness configs live in `configs/index.ts` (`HarnessConfig`): provider (`claude` / `pi` / `codex` / `opencode`), concrete `model` (worker `MODEL_OVERRIDE`) or `modelTier`, plus extra env.
+- Harness configs live in `configs/index.ts` (`HarnessConfig`): provider (`claude` / `pi` / `codex` / `opencode` / `ai-sdk-agent`), concrete `model` (worker `MODEL_OVERRIDE`) or `modelTier`, plus extra env.
 
 ### Seeding (`scenario.seed`)
 
@@ -135,7 +135,7 @@ The old `evals/evals.db` (+ `-wal`/`-shm`) is a **frozen backup** of the pre-Tur
 | `E2B_API_KEY` | sandbox creation (required) |
 | `OPENROUTER_API_KEY` | judges + pi/opencode workers |
 | `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | claude workers |
-| `OPENAI_API_KEY` | codex workers |
+| `OPENAI_API_KEY` | codex + ai-sdk-agent workers |
 | `EMBEDDING_API_KEY` | API-sandbox memory embeddings — **required for memory seeding**; the `OPENAI_API_KEY` fallback is no longer injected (`EMBEDDING_MODEL` / `EMBEDDING_API_BASE_URL` pass through when set) |
 | `EVAL_JUDGE_MODEL` | default judge model |
 | `EVALS_DB_SYNC_URL` + `EVALS_DB_AUTH_TOKEN` | Turso embedded replica (DB of record — see [Database](#database)) |

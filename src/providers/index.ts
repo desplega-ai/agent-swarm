@@ -47,9 +47,13 @@ export async function createProviderAdapter(provider: string): Promise<ProviderA
       const { OpencodeAdapter } = await import("./opencode-adapter");
       return new OpencodeAdapter();
     }
+    case "ai-sdk-agent": {
+      const { AiSdkAgentAdapter } = await import("./ai-sdk-agent-adapter");
+      return new AiSdkAgentAdapter();
+    }
     default:
       throw new Error(
-        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed, opencode`,
+        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed, opencode, ai-sdk-agent`,
       );
   }
 }

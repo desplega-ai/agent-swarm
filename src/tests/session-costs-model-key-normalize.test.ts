@@ -114,6 +114,10 @@ describe("normalizeModelKey()", () => {
     );
   });
 
+  test("strips ai-sdk-agent routing prefix `openai/`", () => {
+    expect(normalizeModelKey("ai-sdk-agent", "openai/gpt-5.4")).toBe("gpt-5.4");
+  });
+
   test("strips pi routing prefix `openrouter/` for deepseek (Phase 3 fix regression)", () => {
     // The exact case from today's E2E (2026-05-18): pi-mono emits
     // `openrouter/deepseek/deepseek-v4-flash`, the pricing seed keys the row

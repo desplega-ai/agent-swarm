@@ -12,6 +12,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
+| AI SDK Agent | `ai-sdk-agent` | `AiSdkAgentAdapter` | In-process Vercel AI SDK `ToolLoopAgent`; OpenAI; adds provider-local `Skill` tool |
 
 ## `HARNESS_PROVIDER` resolution + live re-assignment
 
@@ -33,6 +34,12 @@ Invalid `HARNESS_PROVIDER` values are rejected at write time (HTTP 400 from `PUT
 The `docker-entrypoint.sh` swarm_config-fetch step explicitly **skips** `HARNESS_PROVIDER` when exporting config to env. Baking it would shadow swarm_config deletes with the stale value persisted in `process.env`.
 
 **Canonical conceptual reference:** [docs-site/.../guides/harness-providers.mdx](../docs-site/content/docs/(documentation)/guides/harness-providers.mdx). That guide is the source of truth for how the `ProviderAdapter` interface, the runner's poll→spawn→events→finish flow, system-prompt composition, entrypoint credential restoration, and OAuth flows fit together. Read it before non-trivial work.
+
+## ai-sdk-agent `Skill` tool
+
+`ai-sdk-agent` synthesizes a model-facing `Skill` tool inside `src/providers/ai-sdk-agent-adapter.ts`. This is intentionally provider-local: it is not registered in `createServer()`, `CORE_TOOLS`, the MCP bridge, or the swarm-script SDK allowlist. Other harnesses continue to use slash-skill prompt resolution.
+
+The local tool loads only the current agent's installed skills, resolves exact normalized skill names/slugs before fuzzy name/description matches, and applies `MAX_SKILL_CHARS` truncation before returning `SKILL.md` content to the AI SDK loop.
 
 ## Per-task `outputSchema` support
 

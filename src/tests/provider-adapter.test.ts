@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createProviderAdapter } from "../providers";
+import { AiSdkAgentAdapter } from "../providers/ai-sdk-agent-adapter";
 import { ClaudeAdapter } from "../providers/claude-adapter";
 import { OpencodeAdapter } from "../providers/opencode-adapter";
 import { PiMonoAdapter } from "../providers/pi-mono-adapter";
@@ -24,9 +25,15 @@ describe("createProviderAdapter", () => {
     expect(adapter.name).toBe("opencode");
   });
 
+  test("returns AiSdkAgentAdapter for 'ai-sdk-agent'", async () => {
+    const adapter = await createProviderAdapter("ai-sdk-agent");
+    expect(adapter).toBeInstanceOf(AiSdkAgentAdapter);
+    expect(adapter.name).toBe("ai-sdk-agent");
+  });
+
   test("throws for unknown provider", async () => {
     expect(createProviderAdapter("unknown")).rejects.toThrow(
-      'Unknown HARNESS_PROVIDER: "unknown". Supported: claude, pi, codex, devin, claude-managed, opencode',
+      'Unknown HARNESS_PROVIDER: "unknown". Supported: claude, pi, codex, devin, claude-managed, opencode, ai-sdk-agent',
     );
   });
 

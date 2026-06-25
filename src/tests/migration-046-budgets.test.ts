@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
 import { seedPricingFromModelsDev } from "../be/seed-pricing";
+import { AI_SDK_AGENT_MODEL_PRICING } from "../providers/ai-sdk-agent-models";
 import { CODEX_MODEL_PRICING } from "../providers/codex-models";
 
 const TEST_DB_PATH = "./test-migration-046.sqlite";
@@ -168,6 +169,34 @@ describe("migration 046 — budgets and pricing", () => {
       const outputRow = db
         .prepare<PricingRow, [string, string, number]>(
           "SELECT * FROM pricing WHERE provider = 'codex' AND model = ? AND token_class = ? AND effective_from = ?",
+        )
+        .get(model, "output", 0);
+      expect(outputRow?.price_per_million_usd).toBe(pricing.outputPerMillion);
+    }
+  });
+
+  test("models.dev seed includes every known ai-sdk-agent model/token class at effective_from=0", () => {
+    const db = getDb();
+    seedPricingFromModelsDev({ quiet: true });
+
+    for (const [model, pricing] of Object.entries(AI_SDK_AGENT_MODEL_PRICING)) {
+      const inputRow = db
+        .prepare<PricingRow, [string, string, number]>(
+          "SELECT * FROM pricing WHERE provider = 'ai-sdk-agent' AND model = ? AND token_class = ? AND effective_from = ?",
+        )
+        .get(model, "input", 0);
+      expect(inputRow?.price_per_million_usd).toBe(pricing.inputPerMillion);
+
+      const cachedRow = db
+        .prepare<PricingRow, [string, string, number]>(
+          "SELECT * FROM pricing WHERE provider = 'ai-sdk-agent' AND model = ? AND token_class = ? AND effective_from = ?",
+        )
+        .get(model, "cached_input", 0);
+      expect(cachedRow?.price_per_million_usd).toBe(pricing.cachedInputPerMillion);
+
+      const outputRow = db
+        .prepare<PricingRow, [string, string, number]>(
+          "SELECT * FROM pricing WHERE provider = 'ai-sdk-agent' AND model = ? AND token_class = ? AND effective_from = ?",
         )
         .get(model, "output", 0);
       expect(outputRow?.price_per_million_usd).toBe(pricing.outputPerMillion);

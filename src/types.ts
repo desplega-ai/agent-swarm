@@ -107,6 +107,7 @@ export const ProviderNameSchema = z.enum([
   "devin",
   "claude-managed",
   "opencode",
+  "ai-sdk-agent",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -126,6 +127,7 @@ export type ProviderMetaMap = {
   pi: NoProviderMeta;
   "claude-managed": NoProviderMeta;
   opencode: NoProviderMeta;
+  "ai-sdk-agent": NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z.object({
@@ -1946,6 +1948,7 @@ export const ContextFormulaSchema = z.enum([
   "input-output-no-cache", // pre-unification claude-managed formula
   "peak-proxy", // pre-unification codex formula
   "pi-delegated", // numbers come from the pi-ai SDK
+  "ai-sdk-agent-usage", // numbers come from AI SDK ToolLoopAgent usage
   "harness-reported", // numbers come from a harness API (devin)
   "unknown", // pre-migration backfill or adapter didn't tag
 ]);
@@ -2014,6 +2017,7 @@ export const PricingProviderSchema = z.enum([
   "codex",
   "pi",
   "opencode",
+  "ai-sdk-agent",
   "devin",
   "gemini",
 ]);

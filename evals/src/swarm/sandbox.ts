@@ -159,6 +159,10 @@ export function credentialsForConfig(config: HarnessConfig): Record<string, stri
       need("OPENAI_API_KEY");
       break;
     }
+    case "ai-sdk-agent": {
+      need("OPENAI_API_KEY");
+      break;
+    }
     case "pi":
     case "opencode": {
       // Credential gate is MODEL_OVERRIDE-prefix-aware: forward the key matching
@@ -687,6 +691,7 @@ const HARNESS_SESSION_DIRS: Record<HarnessConfig["provider"], string[]> = {
   codex: ["/home/worker/.codex/sessions"],
   pi: ["/home/worker/.pi"],
   opencode: ["/home/worker/.local/share/opencode"],
+  "ai-sdk-agent": [],
 };
 
 export const ATTEMPT_START_MARKER = "/tmp/eval-attempt-start";

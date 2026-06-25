@@ -284,7 +284,7 @@ When a score lands somewhere surprising, debug from the persisted per-attempt ar
 |---|---|
 | `task` | The full task records (upfront + runtime-spawned). |
 | `raw-session-logs` | `session-logs.jsonl` — the swarm session events your checks parse. |
-| `harness-session` | The harness's own raw session files (Claude `~/.claude/projects/**`, codex, pi, opencode). |
+| `harness-session` | The harness's own raw session files (Claude `~/.claude/projects/**`, codex, pi, opencode, ai-sdk-agent when available). |
 | `transcript` | Flattened transcript. |
 | `sandbox-log` | Worker + API entrypoint log tails. |
 | `meta` / `deterministic` / `llm` | Judgment rows + seed/roster/cost metadata. |
@@ -296,7 +296,7 @@ Read these to see *what the model actually did* — e.g. open `raw-session-logs`
 ## 9. Gotchas
 
 - **Evals talk to the API over HTTP only.** Never import `src/be/db` or `bun:sqlite` from `evals/`. Checks read state via `ctx.apiGet` / `client.listAllTasks` — never a direct DB handle.
-- **Session logs are provider-shape-dependent.** `parseToolUses` normalizes Claude / pi / codex / opencode envelopes (`src/judge/session-log-parse.ts`). Claude/pi share the `{type:"assistant", message.content[].type==="tool_use"}` shape; codex mirrors raw SDK ThreadEvents; opencode emits native `tool_start`/`tool_end`/`message.part.updated`. Don't assume a single shape.
+- **Session logs are provider-shape-dependent.** `parseToolUses` normalizes Claude / pi / codex / opencode / ai-sdk-agent envelopes (`src/judge/session-log-parse.ts`). Claude/pi share the `{type:"assistant", message.content[].type==="tool_use"}` shape; codex mirrors raw SDK ThreadEvents; opencode and ai-sdk-agent emit native `tool_start`/`tool_end` events. Don't assume a single shape.
 - **opencode tool-error caveat.** The swarm opencode adapter only fires `tool_end` on a `completed` part and **never propagates an error flag**, so MCP-error results read as `completed` → opencode's tool-error *rate* reads artificially low. Don't build a discriminating check on opencode error-rate alone.
 - **Match Biome style.** Use Bun APIs (`Bun.file`, `Bun.$`), not Node. Match surrounding formatting.
 - **Before commit, run** (from `evals/` unless noted):

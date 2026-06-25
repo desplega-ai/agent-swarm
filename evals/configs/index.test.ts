@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { configs, DEFAULT_CONFIG_IDS } from "./index.ts";
 
 /** Frozen naming contract (v6 §0.14). */
-const NAMING_RE = /^(claude|pi|opencode|codex)-[a-z0-9][a-z0-9.-]*$/;
+const NAMING_RE = /^(claude|pi|opencode|codex|ai-sdk-agent)-[a-z0-9][a-z0-9.-]*$/;
 
 describe("config catalog invariants (v6 §0.14 / §10)", () => {
-  test("catalog has exactly 66 entries (12 legacy + 14 round-6 + pi-gemini-pro + 10 round-8 OSS refresh + 17 round-9 expansion + 12 round-10 leaderboard additions)", () => {
-    expect(configs.length).toBe(66);
+  test("catalog has exactly 69 entries (12 legacy + 14 round-6 + pi-gemini-pro + 10 round-8 OSS refresh + 17 round-9 expansion + 12 round-10 leaderboard additions + 3 ai-sdk-agent configs)", () => {
+    expect(configs.length).toBe(69);
   });
 
   test("ids are unique", () => {

@@ -18,6 +18,7 @@
  * runs the predicate itself — it just reads the agent row.
  */
 
+import { checkAiSdkAgentCredentials } from "../providers/ai-sdk-agent-adapter";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
@@ -27,7 +28,14 @@ import type { CredCheckOptions, CredStatus } from "../providers/types";
 import type { AgentCredStatus, AgentLatestModel, ProviderName } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
-export type SupportedProvider = "claude" | "claude-managed" | "codex" | "devin" | "opencode" | "pi";
+export type SupportedProvider =
+  | "claude"
+  | "claude-managed"
+  | "codex"
+  | "devin"
+  | "opencode"
+  | "ai-sdk-agent"
+  | "pi";
 
 /**
  * True when the pi harness should use the AWS SDK Bedrock path: either an
@@ -63,6 +71,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY", "DEVIN_ORG_ID"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
+  "ai-sdk-agent": ["OPENAI_API_KEY"],
   pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
 };
 
@@ -90,13 +99,15 @@ export async function checkProviderCredentials(
       return checkDevinCredentials(env);
     case "opencode":
       return checkOpencodeCredentials(env, opts);
+    case "ai-sdk-agent":
+      return checkAiSdkAgentCredentials(env);
     case "pi": {
       const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
       return checkPiMonoCredentials(env, opts);
     }
     default:
       throw new Error(
-        `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi.`,
+        `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, ai-sdk-agent, pi.`,
       );
   }
 }
@@ -256,6 +267,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `claude`         | `CLAUDE_CODE_OAUTH_TOKEN` (Pro/Max OAuth) → `ANTHROPIC_API_KEY`         | Anthropic `/v1/models`         |
  * | `claude-managed` | `ANTHROPIC_API_KEY` (managed agents always use API key + managed envs)  | Anthropic `/v1/models`         |
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
+ * | `ai-sdk-agent`   | `OPENAI_API_KEY`                                                         | OpenAI `/v1/models` |
  * | `opencode`       | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` (pi-style) | matching provider's `/v1/models` |
  * | `pi`             | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY`           | matching provider's `/v1/models` |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (real check is the worker-side Bedrock enumeration) |
@@ -315,6 +327,14 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
           latency_ms: Date.now() - startedAt,
         };
       }
+      case "ai-sdk-agent": {
+        if (env.OPENAI_API_KEY) return checkOpenAiApiKey(env.OPENAI_API_KEY);
+        return {
+          ok: false,
+          error: "OPENAI_API_KEY is not set.",
+          latency_ms: Date.now() - startedAt,
+        };
+      }
       case "pi":
       case "opencode": {
         // For the pi Bedrock path, the real credential check is the AWS SDK
@@ -367,7 +387,7 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
       default:
         return {
           ok: false,
-          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi.`,
+          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, ai-sdk-agent, pi.`,
           latency_ms: Date.now() - startedAt,
         };
     }

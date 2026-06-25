@@ -27,6 +27,7 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
+  "ai-sdk-agent": ["OPENAI_API_KEY"],
 };
 
 /**

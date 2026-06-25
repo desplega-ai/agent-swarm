@@ -297,7 +297,7 @@ function harnessMilestone(): SetupMilestone {
       id: "harness",
       label: "Harness configured",
       state: "unverified",
-      hint: "No worker agents registered yet. Start a worker with HARNESS_PROVIDER set to one of: claude, codex, pi, devin, claude-managed, opencode.",
+      hint: "No worker agents registered yet. Start a worker with HARNESS_PROVIDER set to one of: claude, codex, pi, devin, claude-managed, opencode, ai-sdk-agent.",
       action_url: "/agents",
     };
   }

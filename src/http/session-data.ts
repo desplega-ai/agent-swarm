@@ -15,6 +15,7 @@ import {
 } from "../be/db";
 import { normalizeModelKey } from "../be/pricing-normalize";
 import type { SessionCost, SessionCostSource } from "../types";
+import { PricingProviderSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -88,9 +89,7 @@ const createSessionCostRoute = route({
      * Phase 6 (extended migration 063): drives the API recompute path. After
      * Phase 2 every provider with seeded pricing rows participates.
      */
-    provider: z
-      .enum(["claude", "claude-managed", "codex", "pi", "opencode", "devin", "gemini"])
-      .optional(),
+    provider: PricingProviderSchema.optional(),
     /**
      * Phase 6: epoch-ms timestamp used as the "active price at time T" lookup
      * basis. Defaults to `Date.now()` when omitted. Including it lets

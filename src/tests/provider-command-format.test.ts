@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { AiSdkAgentAdapter } from "../providers/ai-sdk-agent-adapter";
 import { ClaudeAdapter } from "../providers/claude-adapter";
 import { CodexAdapter } from "../providers/codex-adapter";
 import { createProviderAdapter } from "../providers/index";
@@ -10,6 +11,7 @@ describe("ProviderAdapter.formatCommand", () => {
   const pi = new PiMonoAdapter();
   const codex = new CodexAdapter();
   const opencode = new OpencodeAdapter();
+  const aiSdkAgent = new AiSdkAgentAdapter();
 
   test("claude formats commands with / prefix", () => {
     expect(claude.formatCommand("work-on-task")).toBe("/work-on-task");
@@ -39,11 +41,18 @@ describe("ProviderAdapter.formatCommand", () => {
     expect(opencode.formatCommand("swarm-chat")).toBe("/swarm-chat");
   });
 
+  test("ai-sdk-agent formats commands with / prefix", () => {
+    expect(aiSdkAgent.formatCommand("work-on-task")).toBe("/work-on-task");
+    expect(aiSdkAgent.formatCommand("review-offered-task")).toBe("/review-offered-task");
+    expect(aiSdkAgent.formatCommand("swarm-chat")).toBe("/swarm-chat");
+  });
+
   test("adapter name matches expected provider", () => {
     expect(claude.name).toBe("claude");
     expect(pi.name).toBe("pi");
     expect(codex.name).toBe("codex");
     expect(opencode.name).toBe("opencode");
+    expect(aiSdkAgent.name).toBe("ai-sdk-agent");
   });
 
   test("createProviderAdapter returns adapters that implement formatCommand", async () => {
@@ -51,14 +60,17 @@ describe("ProviderAdapter.formatCommand", () => {
     const piAdapter = await createProviderAdapter("pi");
     const codexAdapter = await createProviderAdapter("codex");
     const opencodeAdapter = await createProviderAdapter("opencode");
+    const aiSdkAgentAdapter = await createProviderAdapter("ai-sdk-agent");
     expect(typeof claudeAdapter.formatCommand).toBe("function");
     expect(typeof piAdapter.formatCommand).toBe("function");
     expect(typeof codexAdapter.formatCommand).toBe("function");
     expect(typeof opencodeAdapter.formatCommand).toBe("function");
+    expect(typeof aiSdkAgentAdapter.formatCommand).toBe("function");
     expect(claudeAdapter.formatCommand("work-on-task")).toBe("/work-on-task");
     expect(piAdapter.formatCommand("work-on-task")).toBe("/skill:work-on-task");
     expect(codexAdapter.formatCommand("work-on-task")).toBe("/work-on-task");
     expect(opencodeAdapter.formatCommand("work-on-task")).toBe("/work-on-task");
+    expect(aiSdkAgentAdapter.formatCommand("work-on-task")).toBe("/work-on-task");
   });
 });
 

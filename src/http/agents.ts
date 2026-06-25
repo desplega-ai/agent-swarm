@@ -79,7 +79,7 @@ const setAgentHarnessProviderRoute = route({
   },
 });
 
-const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode"]);
+const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode", "ai-sdk-agent"]);
 
 const updateAgentRuntimeRoute = route({
   method: "patch",

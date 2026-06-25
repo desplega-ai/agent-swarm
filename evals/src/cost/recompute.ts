@@ -234,6 +234,8 @@ function extractEvents(input: RecomputeInput): UsageEvent[] {
       return extractOpencode(input.sessionFiles);
     case "codex":
       return extractCodex(input.sessionFiles);
+    case "ai-sdk-agent":
+      return [];
   }
 }
 

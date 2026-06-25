@@ -5,6 +5,7 @@ import {
   isCredCheckDisabled,
   REQUIRED_CRED_VARS_BY_PROVIDER,
 } from "../commands/provider-credentials";
+import { checkAiSdkAgentCredentials } from "../providers/ai-sdk-agent-adapter";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
@@ -132,6 +133,24 @@ describe("checkCodexCredentials", () => {
     expect(status.missing).toContain("OPENAI_API_KEY");
     expect(status.missing).toContain("CODEX_OAUTH");
     expect(status.missing).toContain(AUTH);
+  });
+});
+
+// ─── ai-sdk-agent ────────────────────────────────────────────────────────────
+
+describe("checkAiSdkAgentCredentials", () => {
+  test("ready when OPENAI_API_KEY is set", () => {
+    const status = checkAiSdkAgentCredentials({ OPENAI_API_KEY: "sk-proj" });
+    expect(status.ready).toBe(true);
+    expect(status.missing).toEqual([]);
+    expect(status.satisfiedBy).toBe("env");
+  });
+
+  test("not ready when OPENAI_API_KEY is missing", () => {
+    const status = checkAiSdkAgentCredentials({});
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["OPENAI_API_KEY"]);
+    expect(status.hint).toContain("ai-sdk-agent");
   });
 });
 
@@ -637,6 +656,10 @@ describe("checkProviderCredentials dispatcher", () => {
         )
       ).ready,
     ).toBe(true);
+
+    expect((await checkProviderCredentials("ai-sdk-agent", { OPENAI_API_KEY: "x" })).ready).toBe(
+      true,
+    );
   });
 
   test("throws on unknown provider", async () => {
@@ -648,7 +671,15 @@ describe("checkProviderCredentials dispatcher", () => {
 
 describe("snapshot: every provider", () => {
   const HOME = "/home/worker";
-  const providers = ["claude", "claude-managed", "codex", "devin", "opencode", "pi"] as const;
+  const providers = [
+    "claude",
+    "claude-managed",
+    "codex",
+    "devin",
+    "opencode",
+    "ai-sdk-agent",
+    "pi",
+  ] as const;
 
   test("fully unset env → ready=false with non-empty missing[] and hint", async () => {
     for (const p of providers) {
@@ -671,6 +702,7 @@ describe("snapshot: every provider", () => {
       codex: { OPENAI_API_KEY: "x" },
       devin: { DEVIN_API_KEY: "x", DEVIN_ORG_ID: "y" },
       opencode: { OPENROUTER_API_KEY: "x" },
+      "ai-sdk-agent": { OPENAI_API_KEY: "x" },
       pi: { ANTHROPIC_API_KEY: "x" },
     };
     for (const p of providers) {
@@ -687,7 +719,15 @@ describe("snapshot: every provider", () => {
 
 describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
   test("covers every supported provider", () => {
-    const providers = ["claude", "claude-managed", "codex", "devin", "opencode", "pi"] as const;
+    const providers = [
+      "claude",
+      "claude-managed",
+      "codex",
+      "devin",
+      "opencode",
+      "ai-sdk-agent",
+      "pi",
+    ] as const;
     for (const p of providers) {
       expect(REQUIRED_CRED_VARS_BY_PROVIDER[p]).toBeDefined();
       expect(REQUIRED_CRED_VARS_BY_PROVIDER[p].length).toBeGreaterThan(0);

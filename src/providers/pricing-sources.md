@@ -32,7 +32,10 @@ rate by hand should also update this file.
     Shortnames (`opus`, `sonnet`, `haiku`) ALSO get rows keyed by the current
     default full id (e.g. `opus → claude-opus-4-7`). Pi-mono uses the same
     shortname forms, so they're projected under `provider='pi'` as well.
-  - OpenAI models → rows under `provider='codex'`.
+  - OpenAI models → rows under `provider='codex'` and `provider='ai-sdk-agent'`.
+    AI SDK Agent also gets `fable` / `opus` / `sonnet` / `haiku` shortname
+    projections mapped to its OpenAI defaults, and lookup strips an optional
+    `openai/` routing prefix.
   - OpenRouter models → rows under `provider='opencode'`. Any `google/...`
     row additionally gets projected under `provider='gemini'` (both the
     stripped name and the full `google/...` id) so internal-ai callers find

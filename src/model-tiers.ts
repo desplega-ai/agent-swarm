@@ -51,6 +51,12 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "openrouter/deepseek/deepseek-v4-pro",
     ultra: "openrouter/anthropic/claude-opus-4.8",
   },
+  "ai-sdk-agent": {
+    smol: "gpt-5.4-mini",
+    regular: "gpt-5.4",
+    smart: "gpt-5.5",
+    ultra: "gpt-5.5",
+  },
   devin: {
     smol: "devin",
     regular: "devin",

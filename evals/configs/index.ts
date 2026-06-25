@@ -7,7 +7,7 @@ import type { HarnessConfig } from "../src/types.ts";
  * standing repo convention.)
  *
  * Catalog contract (v6 §0.14, frozen):
- * - ids match /^(claude|pi|opencode|codex)-[a-z0-9][a-z0-9.-]*$/ — `<short>`
+ * - ids match /^(claude|pi|opencode|codex|ai-sdk-agent)-[a-z0-9][a-z0-9.-]*$/ — `<short>`
  *   drops the vendor path (deepseek-pro, not deepseek-deepseek-v4-pro).
  * - NO `env` blocks: provider creds are injected at boot exclusively by
  *   `credentialsForConfig` (src/swarm/sandbox.ts) — openrouter/-prefixed
@@ -455,6 +455,24 @@ export const configs: HarnessConfig[] = [
     id: "codex-5.5",
     label: "Codex / gpt-5.5",
     provider: "codex",
+    model: "gpt-5.5",
+  },
+  {
+    id: "ai-sdk-agent-5.4-mini",
+    label: "AI SDK Agent / gpt-5.4-mini",
+    provider: "ai-sdk-agent",
+    model: "gpt-5.4-mini",
+  },
+  {
+    id: "ai-sdk-agent-5.4",
+    label: "AI SDK Agent / gpt-5.4",
+    provider: "ai-sdk-agent",
+    model: "gpt-5.4",
+  },
+  {
+    id: "ai-sdk-agent-5.5",
+    label: "AI SDK Agent / gpt-5.5",
+    provider: "ai-sdk-agent",
     model: "gpt-5.5",
   },
 ];

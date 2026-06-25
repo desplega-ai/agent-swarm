@@ -147,6 +147,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   codex: "Codex",
   pi: "Pi",
   opencode: "OpenCode",
+  "ai-sdk-agent": "AI SDK Agent",
 };
 
 function providerLabel(provider: string): string {

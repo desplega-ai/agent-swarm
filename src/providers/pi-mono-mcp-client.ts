@@ -15,6 +15,7 @@ interface McpTool {
 interface McpToolCallResult {
   content: Array<{ type: string; text?: string }>;
   isError?: boolean;
+  structuredContent?: unknown;
 }
 
 export class McpHttpClient {

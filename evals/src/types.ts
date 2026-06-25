@@ -7,7 +7,7 @@
  * completion, then grades the outcome (LLM judge + deterministic checks).
  */
 
-export type HarnessProvider = "claude" | "pi" | "codex" | "opencode";
+export type HarnessProvider = "claude" | "pi" | "codex" | "opencode" | "ai-sdk-agent";
 
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
 
