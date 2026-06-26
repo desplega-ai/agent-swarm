@@ -506,7 +506,7 @@ describe("Memory System", () => {
         name: "Wrong source",
         content: "Content",
         source: "manual",
-        sourcePath: "/workspace/src/MemoryPage.tsx",
+        sourcePath: "/workspace/src/OtherPage.tsx",
       });
       store.store({
         agentId: agentA,

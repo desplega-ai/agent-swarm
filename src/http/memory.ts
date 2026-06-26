@@ -272,6 +272,30 @@ const getMemoryEdges = route({
   },
 });
 
+const editMemory = route({
+  method: "post",
+  path: "/api/memory/edit",
+  pattern: ["api", "memory", "edit"],
+  summary: "Edit a memory in place (id-preserving, versioned)",
+  tags: ["Memory"],
+  auth: { apiKey: true, agentId: true },
+  body: z.object({
+    memoryId: z.string().min(1).optional().describe("Memory ID to edit."),
+    key: z.string().min(1).optional().describe("Structured key lookup."),
+    scope: z.enum(["agent", "swarm"]).optional(),
+    mode: z.enum(["replace", "exact"]),
+    content: z.string().min(1).optional(),
+    oldString: z.string().min(1).optional(),
+    newString: z.string().optional(),
+    name: z.string().min(1).max(500).optional(),
+    intent: z.string().min(1).describe("Why you are editing."),
+  }),
+  responses: {
+    200: { description: "Edit result" },
+    400: { description: "Validation error" },
+  },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleMemory(
@@ -319,7 +343,49 @@ export async function handleMemory(
     const store = getMemoryStore();
     const provider = getEmbeddingProvider();
 
-    // Dedup — delete old chunks for this source path
+    // Id-preserving re-index for single-chunk memories (Phase 2)
+    if (sourcePath && agentId && contentChunks.length === 1) {
+      const existing = store.findBySourcePath(sourcePath, agentId);
+      if (existing.length === 1 && existing[0]!.totalChunks === 1) {
+        const editResult = store.edit({
+          id: existing[0]!.id,
+          mode: "replace",
+          content: contentChunks[0]!.content,
+          name,
+          intent: "re-index via /api/memory/index",
+          changedByAgentId: agentId,
+        });
+
+        if (editResult.changed && editResult.id) {
+          // Re-resolve links
+          try {
+            storeLinks(editResult.id, agentId, contentChunks[0]!.content);
+          } catch (err) {
+            console.error(
+              `[memory] Link resolution failed for ${editResult.id}:`,
+              (err as Error).message,
+            );
+          }
+
+          // Async re-embed
+          (async () => {
+            try {
+              const embeddings = await provider.embedBatch([contentChunks[0]!.content]);
+              if (embeddings[0]) {
+                store.updateEmbedding(editResult.id!, embeddings[0]!, provider.name);
+              }
+            } catch (err) {
+              console.error("[memory] Re-embed failed:", (err as Error).message);
+            }
+          })();
+        }
+
+        json(res, { queued: true, memoryIds: [existing[0]!.id], edited: true }, 202);
+        return true;
+      }
+    }
+
+    // Multi-chunk or new: delete old chunks for this source path (existing path)
     if (sourcePath && agentId) {
       store.deleteBySourcePath(sourcePath, agentId);
     }
@@ -407,6 +473,7 @@ export async function handleMemory(
         limit: candidateLimit,
         source,
         isLead: false,
+        queryText: query,
       });
       const ranked = rerank(candidates, { limit: Math.min(limit, 20) });
 
@@ -484,6 +551,7 @@ export async function handleMemory(
           limit: candidateLimit,
           isLead: true,
           source,
+          queryText: query.trim(),
         });
         if (agentId) {
           candidates = candidates.filter((c) => c.agentId === agentId);
@@ -693,6 +761,76 @@ export async function handleMemory(
     }
 
     json(res, { applied, rejected });
+    return true;
+  }
+
+  if (editMemory.match(req.method, pathSegments)) {
+    if (!myAgentId) {
+      jsonError(res, "Missing X-Agent-ID header", 400);
+      return true;
+    }
+
+    const parsed = await editMemory.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
+
+    const { memoryId, key, scope, mode, content, oldString, newString, name, intent } = parsed.body;
+
+    if (!memoryId && !key) {
+      jsonError(res, "Provide either memoryId or key", 400);
+      return true;
+    }
+
+    const store = getMemoryStore();
+    const result = store.edit({
+      id: memoryId,
+      key,
+      scope: scope as "agent" | "swarm" | undefined,
+      agentId: myAgentId,
+      mode,
+      content,
+      oldString,
+      newString,
+      name,
+      intent,
+      changedByAgentId: myAgentId,
+    });
+
+    if (!result.changed) {
+      json(res, result);
+      return true;
+    }
+
+    // Async re-embed + re-resolve links
+    if (result.id) {
+      const memory = store.peek(result.id);
+      if (memory) {
+        try {
+          storeLinks(result.id, myAgentId, memory.content);
+        } catch (err) {
+          console.error(
+            `[memory-edit] Link resolution failed for ${result.id}:`,
+            (err as Error).message,
+          );
+        }
+
+        (async () => {
+          try {
+            const provider = getEmbeddingProvider();
+            const embedding = await provider.embed(memory.content);
+            if (embedding) {
+              store.updateEmbedding(result.id!, embedding, provider.name);
+            }
+          } catch (err) {
+            console.error(
+              `[memory-edit] Re-embed failed for ${result.id}:`,
+              (err as Error).message,
+            );
+          }
+        })();
+      }
+    }
+
+    json(res, result);
     return true;
   }
 

@@ -347,7 +347,7 @@ describe("SqliteMemoryStore", () => {
 
   describe("deleteBySourcePath()", () => {
     test("removes all matching memories", () => {
-      const path = "/test/delete-path.ts";
+      const path = `/test/delete-path-${crypto.randomUUID()}.ts`;
       store.store({
         agentId: agentA,
         scope: "agent",
@@ -355,6 +355,8 @@ describe("SqliteMemoryStore", () => {
         content: "c1",
         source: "file_index",
         sourcePath: path,
+        chunkIndex: 0,
+        totalChunks: 2,
       });
       store.store({
         agentId: agentA,
@@ -363,6 +365,8 @@ describe("SqliteMemoryStore", () => {
         content: "c2",
         source: "file_index",
         sourcePath: path,
+        chunkIndex: 1,
+        totalChunks: 2,
       });
 
       const deleted = store.deleteBySourcePath(path, agentA);

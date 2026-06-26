@@ -89,6 +89,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
           limit: candidateLimit,
           source,
           isLead,
+          queryText: query,
         });
         const ranked = rerank(candidates, { limit });
 

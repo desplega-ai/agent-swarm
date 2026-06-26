@@ -1153,6 +1153,10 @@ export const AgentMemorySchema = z.object({
   expiresAt: z.string().nullable().optional(),
   accessCount: z.number().int().min(0).default(0).optional(),
   embeddingModel: z.string().nullable().optional(),
+  key: z.string().nullable().optional(),
+  contentHash: z.string().nullable().optional(),
+  version: z.number().int().min(1).default(1).optional(),
+  updatedAt: z.string().nullable().optional(),
 });
 
 export type AgentMemoryScope = z.infer<typeof AgentMemoryScopeSchema>;

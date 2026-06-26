@@ -6,6 +6,7 @@ active_sessions
 agent_log
 agent_mcp_servers
 agent_memory_edge
+agent_memory_version
 agent_skills
 api_key_status
 budget_refusal_notifications

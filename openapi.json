@@ -4708,6 +4708,87 @@
         }
       }
     },
+    "/api/memory/edit": {
+      "post": {
+        "summary": "Edit a memory in place (id-preserving, versioned)",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "memoryId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Memory ID to edit."
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Structured key lookup."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "agent",
+                      "swarm"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "replace",
+                      "exact"
+                    ]
+                  },
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "oldString": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "newString": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "intent": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Why you are editing."
+                  }
+                },
+                "required": [
+                  "mode",
+                  "intent"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Edit result"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
     "/@swarm/api/{path}": {
       "get": {
         "summary": "Cookie-gated proxy to the swarm API (used by db-backed page iframes)",

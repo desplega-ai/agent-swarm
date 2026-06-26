@@ -32,6 +32,9 @@ export interface MemoryStore {
   deleteBySourcePath(sourcePath: string, agentId: string): number;
   purgeExpired(): number;
   updateEmbedding(id: string, embedding: Float32Array, model: string): void;
+  edit(input: MemoryEditInput): MemoryEditResult;
+  findByKey(key: string, scope: string, agentId: string, chunkIndex?: number): AgentMemory | null;
+  findBySourcePath(sourcePath: string, agentId: string): AgentMemory[];
   getStats(agentId: string): MemoryStats;
   getHealth(): MemoryHealth;
 }
@@ -53,6 +56,7 @@ export interface MemoryInput {
   totalChunks?: number;
   tags?: string[];
   contextKey?: string | null;
+  intent?: string | null;
 }
 
 export interface MemoryCandidate extends AgentMemory {
@@ -75,6 +79,30 @@ export interface MemorySearchOptions {
   source?: AgentMemorySource;
   isLead?: boolean;
   includeExpired?: boolean;
+  queryText?: string;
+}
+
+export interface MemoryEditInput {
+  id?: string;
+  key?: string;
+  scope?: AgentMemoryScope;
+  agentId?: string | null;
+  chunkIndex?: number;
+  mode: "replace" | "exact";
+  content?: string;
+  oldString?: string;
+  newString?: string;
+  name?: string;
+  intent: string;
+  changedByAgentId?: string | null;
+}
+
+export interface MemoryEditResult {
+  changed: boolean;
+  id?: string;
+  version?: number;
+  contentHash?: string;
+  reason?: string;
 }
 
 export interface MemoryListOptions {
@@ -104,6 +132,9 @@ export interface MemoryHealth {
     distanceMetric: "cosine";
     schema: string | null;
     lastPopulate: MemoryVecPopulateStats | null;
+  };
+  fts: {
+    initialized: boolean;
   };
   counts: {
     total: number;
