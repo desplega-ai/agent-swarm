@@ -7,6 +7,7 @@
  * - Importable from both API server and workers
  */
 import { randomUUID } from "node:crypto";
+import pkg from "../package.json";
 
 const TELEMETRY_ENDPOINT = "https://proxy.desplega.sh/v1/events";
 const PRODUCT = "agent-swarm";
@@ -195,6 +196,7 @@ export function track(options: TrackOptions): void {
         // anonymous, and the boolean is sufficient to split cloud vs self-host.
         is_cloud: cachedIsCloud,
         is_e2b: cachedIsE2b,
+        swarmVersion: pkg.version,
       },
       metadata: {
         transport: "https",
@@ -238,7 +240,6 @@ export const telemetry = {
     props: {
       taskId: string;
       source?: string;
-      tags?: string[];
       durationMs?: number;
       hasParent?: boolean;
       agentId?: string;

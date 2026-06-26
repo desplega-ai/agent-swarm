@@ -1558,6 +1558,8 @@ interface RunningTask {
   hasLocalEnvironment: boolean;
   /** Harness variant captured on session_init (e.g. "bridge" or "stock") */
   harnessVariant?: string;
+  /** Harness metadata captured on session_init (currently includes provider package version) */
+  harnessVariantMeta?: Record<string, unknown>;
   /** Resolved model used for the provider session, when configured */
   model?: string;
 }
@@ -2870,6 +2872,7 @@ async function spawnProviderProcess(
         case "session_init":
           providerSessionId = event.sessionId;
           runningTask.harnessVariant = event.harnessVariant;
+          runningTask.harnessVariantMeta = event.harnessVariantMeta;
           sessionSpan.setAttributes({
             "agentswarm.provider.session_id": providerSessionId,
             "agentswarm.provider.name": event.provider,
@@ -3387,6 +3390,7 @@ async function checkCompletedProcesses(
     harnessProvider: ProviderName;
     hasLocalEnvironment: boolean;
     harnessVariant?: string;
+    harnessVariantMeta?: Record<string, unknown>;
     model?: string;
     durationMs: number;
   }> = [];
@@ -3407,6 +3411,7 @@ async function checkCompletedProcesses(
         harnessProvider: task.harnessProvider,
         hasLocalEnvironment: task.hasLocalEnvironment,
         harnessVariant: task.harnessVariant,
+        harnessVariantMeta: task.harnessVariantMeta,
         model: task.model,
         durationMs: Date.now() - task.startTime.getTime(),
       });
@@ -3422,6 +3427,7 @@ async function checkCompletedProcesses(
     credentialInfo,
     harnessProvider,
     harnessVariant,
+    harnessVariantMeta,
     model,
     durationMs,
   } of completedTasks) {
@@ -3550,6 +3556,11 @@ async function checkCompletedProcesses(
         provider: result.cost?.provider ?? harnessProvider,
         model: result.cost?.model ?? model,
         harnessVariant,
+        harnessVersion:
+          typeof harnessVariantMeta?.version === "string" ||
+          typeof harnessVariantMeta?.version === "number"
+            ? String(harnessVariantMeta.version)
+            : undefined,
         exitCode: result.exitCode,
         isError: result.exitCode !== 0,
         durationMs,

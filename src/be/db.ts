@@ -116,6 +116,11 @@ let db: Database | null = null;
 let sqliteVecAvailable = false;
 
 type TaskTelemetryProps = Parameters<typeof telemetry.taskEvent>[1];
+type TaskTelemetryContext = {
+  provider?: ProviderName;
+  harnessVariant?: string;
+  harnessVersion?: string;
+};
 
 function emitTaskLifecycleTelemetryAfterCommit(
   event: string,
@@ -128,8 +133,15 @@ function emitTaskLifecycleTelemetryAfterCommit(
   });
 }
 
-function taskTagsForTelemetry(task: AgentTask): string[] {
-  return Array.isArray(task.tags) ? task.tags : [];
+function taskContextForTelemetry(task: AgentTask): TaskTelemetryContext {
+  const harnessVersion = task.harnessVariantMeta?.version;
+  const context: TaskTelemetryContext = {};
+  if (task.provider) context.provider = task.provider;
+  if (task.harnessVariant) context.harnessVariant = task.harnessVariant;
+  if (typeof harnessVersion === "string" || typeof harnessVersion === "number") {
+    context.harnessVersion = String(harnessVersion);
+  }
+  return context;
 }
 
 export function isSqliteVecAvailable(): boolean {
@@ -2158,7 +2170,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
       {
         taskId: id,
         source: oldTask.source,
-        tags: taskTagsForTelemetry(oldTask),
+        ...taskContextForTelemetry(oldTask),
         agentId: row.agentId ?? undefined,
         durationMs: row.createdAt ? Date.now() - new Date(row.createdAt).getTime() : undefined,
       },
@@ -2210,7 +2222,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
       {
         taskId: id,
         source: oldTask.source,
-        tags: taskTagsForTelemetry(oldTask),
+        ...taskContextForTelemetry(oldTask),
         agentId: row.agentId ?? undefined,
         durationMs: row.createdAt ? Date.now() - new Date(row.createdAt).getTime() : undefined,
       },
@@ -2350,7 +2362,7 @@ export function supersedeTask(
       {
         taskId: id,
         source: oldTask.source,
-        tags: taskTagsForTelemetry(oldTask),
+        ...taskContextForTelemetry(oldTask),
         agentId: row.agentId ?? undefined,
         reason: args.reason,
         durationMs: oldTask.createdAt
@@ -3278,7 +3290,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     {
       taskId: row.id,
       source: row.source,
-      tags: options?.tags ?? [],
+      ...taskContextForTelemetry(rowToAgentTask(row)),
       hasParent: !!row.parentTaskId,
       priority: row.priority,
     },
