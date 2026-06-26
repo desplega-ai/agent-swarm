@@ -3,6 +3,7 @@ import pkg from "../package.json";
 import { initDb } from "./be/db";
 import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { seedPricingFromModelsDev } from "./be/seed-pricing";
+import { registerGithubTaskReactions } from "./github/task-reactions";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
@@ -174,6 +175,10 @@ export function createServer() {
   // and the manual-override constants for runtime-fee / ACU pricing.
   seedPricingFromModelsDev();
   startPricingRefreshLoop();
+
+  // Subscribe API-side integrations to task-lifecycle events. Idempotent.
+  // (Inverts the old be/db → github/task-reactions import; see cycle-break #4.)
+  registerGithubTaskReactions();
 
   const server = new McpServer(
     {

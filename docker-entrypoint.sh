@@ -652,8 +652,23 @@ if [ -n "$AGENT_ID" ]; then
                 # — otherwise the runner (post-gosu) hits "dubious ownership".
                 # gosu inherits env, so GH_TOKEN/GITHUB_TOKEN propagate to gh.
                 if [ -d "${REPO_DIR}/.git" ]; then
-                    echo "  Pulling ${REPO_NAME} (${REPO_BRANCH}) at ${REPO_DIR}..."
-                    gosu worker bash -c "cd '$REPO_DIR' && git pull origin '$REPO_BRANCH' --ff-only" || echo "  Warning: Could not pull ${REPO_NAME}"
+                    echo "  Syncing ${REPO_NAME} (${REPO_BRANCH}) at ${REPO_DIR}..."
+                    # Auto-cloned default branches are disposable tracking checkouts.
+                    # Keep feature branches and dirty worktrees untouched; clean default
+                    # branches are reset to origin so local swarm-autostash commits do
+                    # not permanently block startup updates.
+                    gosu worker bash -c "cd '$REPO_DIR' && \
+                        CURRENT_BRANCH=\$(git branch --show-current) && \
+                        if [ \"\$CURRENT_BRANCH\" != '$REPO_BRANCH' ]; then \
+                            echo '    Skipping sync: checked out on' \"\$CURRENT_BRANCH\"; \
+                            exit 0; \
+                        fi && \
+                        if ! git diff --quiet || ! git diff --cached --quiet; then \
+                            echo '    Skipping sync: worktree has local changes'; \
+                            exit 0; \
+                        fi && \
+                        git fetch origin '$REPO_BRANCH' --prune && \
+                        git reset --hard 'origin/$REPO_BRANCH'" || echo "  Warning: Could not sync ${REPO_NAME}"
                 else
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
                     gosu worker bash -c "gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" || echo "  Warning: Could not clone ${REPO_NAME}"

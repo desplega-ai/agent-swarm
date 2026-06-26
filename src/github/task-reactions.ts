@@ -1,3 +1,4 @@
+import { onTaskStarted } from "../be/task-lifecycle-events";
 import type { AgentTask } from "../types";
 import {
   addGraphQLReaction,
@@ -63,4 +64,24 @@ export async function addEyesReactionOnTaskStart(task: AgentTask): Promise<void>
     // Never fail the task start due to a reaction error
     console.error("[GitHub] Failed to add eyes reaction on task start:", error);
   }
+}
+
+let registered = false;
+
+/**
+ * Subscribe the GitHub eyes-reaction handler to the task-started lifecycle event.
+ *
+ * Call this once at API-server boot (from `createServer`). It is the API-side
+ * inverse of the old `be/db` → `github/task-reactions` import: the data layer now
+ * emits `task-started` and this integration reacts. Idempotent — `createServer`
+ * may run more than once per process, so repeated calls register only once.
+ *
+ * API-server only — never wire this on the worker side.
+ */
+export function registerGithubTaskReactions(): void {
+  if (registered) return;
+  registered = true;
+  onTaskStarted((task) => {
+    addEyesReactionOnTaskStart(task).catch(() => {});
+  });
 }

@@ -2823,6 +2823,25 @@ async function spawnProviderProcess(
   // snapshots carry a real `cumulativeOutputTokens` (was 0 until completion).
   let cumulativeProgressOutputTokens = 0;
 
+  function bufferSessionLogLine(content: string) {
+    if (!shouldStream) return;
+    logBuffer.lines.push(content);
+    const shouldFlush =
+      logBuffer.lines.length >= LOG_BUFFER_SIZE ||
+      Date.now() - logBuffer.lastFlush >= LOG_FLUSH_INTERVAL_MS;
+    if (shouldFlush) {
+      flushLogBuffer(logBuffer, {
+        apiUrl: opts.apiUrl,
+        apiKey: opts.apiKey,
+        agentId: opts.agentId,
+        sessionId: opts.runnerSessionId,
+        iteration: opts.iteration,
+        taskId: effectiveTaskId,
+        cli: adapter.name,
+      }).catch(() => {});
+    }
+  }
+
   session.onEvent((event) =>
     withSpanContext(sessionSpan, () => {
       sessionSpan.addEvent(`provider.${event.type}`, providerEventAttributes(event));
@@ -3093,26 +3112,17 @@ async function spawnProviderProcess(
         }
         case "raw_log":
           prettyPrintLine(event.content, opts.role);
-          if (shouldStream) {
-            logBuffer.lines.push(event.content);
-            const shouldFlush =
-              logBuffer.lines.length >= LOG_BUFFER_SIZE ||
-              Date.now() - logBuffer.lastFlush >= LOG_FLUSH_INTERVAL_MS;
-            if (shouldFlush) {
-              flushLogBuffer(logBuffer, {
-                apiUrl: opts.apiUrl,
-                apiKey: opts.apiKey,
-                agentId: opts.agentId,
-                sessionId: opts.runnerSessionId,
-                iteration: opts.iteration,
-                taskId: effectiveTaskId,
-                cli: adapter.name,
-              }).catch(() => {});
-            }
-          }
+          bufferSessionLogLine(event.content);
           break;
         case "raw_stderr":
           prettyPrintStderr(event.content, opts.role);
+          bufferSessionLogLine(
+            JSON.stringify({
+              type: "stderr",
+              content: event.content,
+              timestamp: new Date().toISOString(),
+            }),
+          );
           break;
 
         case "progress": {

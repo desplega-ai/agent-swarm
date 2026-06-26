@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
-import { addEyesReactionOnTaskStart } from "../github/task-reactions";
 import { type ModelTier, parseModelTier } from "../model-tiers";
 import { configureDbResolver } from "../prompts/resolver";
 import { telemetry } from "../telemetry";
@@ -111,6 +110,7 @@ import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
 import { seedDefaultTemplates } from "./seed-prompt-templates";
 import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
+import { emitTaskStarted } from "./task-lifecycle-events";
 
 let db: Database | null = null;
 let sqliteVecAvailable = false;
@@ -1375,9 +1375,9 @@ export function startTask(taskId: string): AgentTask | null {
     } catch {}
   }
   const result = row ? rowToAgentTask(row) : null;
-  // Fire-and-forget: add eyes reaction for GitHub-sourced tasks
+  // Fire-and-forget: notify lifecycle subscribers (e.g. GitHub eyes reaction)
   if (result && oldTask.status !== "in_progress") {
-    addEyesReactionOnTaskStart(result).catch(() => {});
+    emitTaskStarted(result);
   }
   return result;
 }
@@ -3305,9 +3305,9 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
   }
 
   const result = row ? rowToAgentTask(row) : null;
-  // Fire-and-forget: add eyes reaction for GitHub-sourced tasks
+  // Fire-and-forget: notify lifecycle subscribers (e.g. GitHub eyes reaction)
   if (result) {
-    addEyesReactionOnTaskStart(result).catch(() => {});
+    emitTaskStarted(result);
   }
   return result;
 }
