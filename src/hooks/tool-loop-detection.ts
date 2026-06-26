@@ -22,6 +22,7 @@ const HISTORY_DIR = "/tmp/agent-swarm-tool-history";
 const MAX_HISTORY = 30; // Sliding window size
 const REPEAT_WARNING_THRESHOLD = 8;
 const REPEAT_CRITICAL_THRESHOLD = 15;
+const LOW_CARDINALITY_FILE_CHANGE_CRITICAL_THRESHOLD = 24;
 const PINGPONG_WARNING_THRESHOLD = 6;
 const PINGPONG_CRITICAL_THRESHOLD = 12;
 
@@ -38,6 +39,38 @@ function hashArgs(args: Record<string, unknown>): string {
     hash |= 0; // Convert to 32bit integer
   }
   return hash.toString(36);
+}
+
+function isCodexFileChangeArgs(toolName: string, toolInput: Record<string, unknown>): boolean {
+  if (toolName !== "Edit" && toolName !== "Write" && toolName !== "Delete") {
+    return false;
+  }
+
+  const topLevelKeys = Object.keys(toolInput);
+  if (topLevelKeys.length !== 1 || topLevelKeys[0] !== "changes") {
+    return false;
+  }
+
+  const changes = toolInput.changes;
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return false;
+  }
+
+  return changes.every((change) => {
+    if (!change || typeof change !== "object" || Array.isArray(change)) {
+      return false;
+    }
+
+    const entry = change as Record<string, unknown>;
+    const keys = Object.keys(entry).sort();
+    return (
+      keys.length === 2 &&
+      keys[0] === "kind" &&
+      keys[1] === "path" &&
+      typeof entry.path === "string" &&
+      (entry.kind === "add" || entry.kind === "update" || entry.kind === "delete")
+    );
+  });
 }
 
 /**
@@ -92,6 +125,9 @@ export async function checkToolLoop(
 
   // Strategy 1: Same tool + same args repeated
   const key = `${toolName}:${argsHash}`;
+  const repeatCriticalThreshold = isCodexFileChangeArgs(toolName, toolInput)
+    ? LOW_CARDINALITY_FILE_CHANGE_CRITICAL_THRESHOLD
+    : REPEAT_CRITICAL_THRESHOLD;
   let repeatCount = 0;
   for (const record of history) {
     if (`${record.toolName}:${record.argsHash}` === key) {
@@ -99,7 +135,7 @@ export async function checkToolLoop(
     }
   }
 
-  if (repeatCount >= REPEAT_CRITICAL_THRESHOLD) {
+  if (repeatCount >= repeatCriticalThreshold) {
     return {
       blocked: true,
       severity: "critical",

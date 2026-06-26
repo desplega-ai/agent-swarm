@@ -62,6 +62,46 @@ describe("tool-loop-detection", () => {
       expect(result!.reason).toContain("stuck in a loop");
     });
 
+    test("returns critical/blocked at 15 identical fully-specified edits", async () => {
+      let result: Awaited<ReturnType<typeof checkToolLoop>> | undefined;
+      for (let i = 0; i < 15; i++) {
+        result = await checkToolLoop(SESSION_KEY, "Edit", {
+          file_path: "/same.ts",
+          old_string: "before",
+          new_string: "after",
+        });
+      }
+      expect(result!.blocked).toBe(true);
+      expect(result!.severity).toBe("critical");
+      expect(result!.reason).toContain("15 times");
+      expect(result!.reason).toContain("Edit");
+    });
+
+    test("does not block normal codex file_change edits to the same file at 15 calls", async () => {
+      let result: Awaited<ReturnType<typeof checkToolLoop>> | undefined;
+      for (let i = 0; i < 15; i++) {
+        result = await checkToolLoop(SESSION_KEY, "Edit", {
+          changes: [{ path: "src/be/db.ts", kind: "update" }],
+        });
+        expect(result.blocked).toBe(false);
+      }
+      expect(result!.severity).toBe("warning");
+      expect(result!.reason).toContain("15 times");
+    });
+
+    test("still blocks prolonged codex file_change repetition", async () => {
+      let result: Awaited<ReturnType<typeof checkToolLoop>> | undefined;
+      for (let i = 0; i < 24; i++) {
+        result = await checkToolLoop(SESSION_KEY, "Edit", {
+          changes: [{ path: "src/be/db.ts", kind: "update" }],
+        });
+      }
+      expect(result!.blocked).toBe(true);
+      expect(result!.severity).toBe("critical");
+      expect(result!.reason).toContain("24 times");
+      expect(result!.reason).toContain("Edit");
+    });
+
     test("does not trigger for different args on same tool", async () => {
       for (let i = 0; i < 20; i++) {
         const result = await checkToolLoop(SESSION_KEY, "Read", {
