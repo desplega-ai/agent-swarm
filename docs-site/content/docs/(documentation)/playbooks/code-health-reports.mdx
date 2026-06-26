@@ -20,7 +20,7 @@ description: Run recurring Code Maat + D3.js code-health reports for any Git rep
   }}
 />
 
-This playbook turns behavioral code analysis into a recurring swarm report. It is separate from [Code Health & Alert Management](/docs/playbooks/code-health-alert-management): that playbook covers alert triage and repair loops; this one is the **reports-on-autopilot** flow for Code Maat + D3.js.
+This is the Code Health home for recurring repository analysis. The main flow is the **reports-on-autopilot** path for Code Maat + D3.js; the alerting-specific playbook is now focused on [Observability Alert Management](/docs/playbooks/code-health-alert-management).
 
 <Mermaid chart={`flowchart LR
   LP["Lead prompt<br/>repo + branch + scope"] --> WR["Worker workspace<br/>/workspace/code-maat"]
@@ -77,6 +77,10 @@ The first run installs or downloads what it needs. You do not pre-install Code M
 ## Workflows / Schedules
 
 - **[`weekly-code-health-reports`](https://templates.agent-swarm.dev/schedules/weekly-code-health-reports)** — weekly by default. Installs or updates the runner workspace, executes the Code Maat + Lizard analysis, generates `latest.html` and `latest.json`, updates the same stable Page ID, then verifies the D3 charts render.
+
+<Callout type="info">
+Small static-scan companion: `weekly-code-health` runs knip + desloppify and routes the top concerns into focused follow-up work.
+</Callout>
 
 Default cadence:
 
