@@ -5,7 +5,7 @@ import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createScheduledTask, getAgentById, getScheduledTaskByName } from "@/be/db";
 import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar } from "@/tools/utils";
-import { ModelTierSchema, splitLegacyModelAlias } from "../../model-tiers";
+import { ModelTierSchema, splitLegacyModelAlias } from "../../types";
 
 export const createScheduleInputSchema = z.object({
   name: z.string().min(1).max(100).describe("Unique name for the schedule (e.g., 'daily-cleanup')"),

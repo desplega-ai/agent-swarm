@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
-import { type ModelTier, parseModelTier } from "../model-tiers";
 import { configureDbResolver } from "../prompts/resolver";
 import { telemetry } from "../telemetry";
 import type {
@@ -100,7 +99,12 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "../types";
-import { FollowUpConfigSchema, isTerminalTaskStatus } from "../types";
+import {
+  FollowUpConfigSchema,
+  isTerminalTaskStatus,
+  type ModelTier,
+  parseModelTier,
+} from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";

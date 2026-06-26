@@ -2,7 +2,6 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { ensure, initialize } from "@desplega.ai/business-use";
 import type { TemplateResponse } from "../../templates/schema.ts";
-import { resolveTaskModelSelection } from "../model-tiers.ts";
 import {
   type Attributes,
   initOtel,
@@ -34,7 +33,7 @@ import {
   type ProviderSessionConfig,
 } from "../providers/index.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
-import type { ProviderName, RepoGuidelines } from "../types.ts";
+import { type ProviderName, type RepoGuidelines, resolveTaskModelSelection } from "../types.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";

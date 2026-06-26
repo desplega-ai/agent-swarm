@@ -13,8 +13,8 @@ import {
   updateScheduledTask,
 } from "../be/db";
 import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/validate";
-import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
 import { calculateNextRun, createStandaloneScheduleTask } from "../scheduler/scheduler";
+import { ModelTierSchema, splitLegacyModelAlias } from "../types";
 import { getExecutorRegistry } from "../workflows";
 import { handleScheduleTrigger } from "../workflows/triggers";
 import { route } from "./route-def";

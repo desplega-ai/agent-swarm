@@ -15,8 +15,13 @@ import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
-import { type AgentTask, AgentTaskSchema, FollowUpConfigSchema } from "@/types";
-import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
+import {
+  type AgentTask,
+  AgentTaskSchema,
+  FollowUpConfigSchema,
+  ModelTierSchema,
+  splitLegacyModelAlias,
+} from "@/types";
 
 export const sendTaskInputSchema = z.object({
   agentId: z

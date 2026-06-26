@@ -1,7 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import pkg from "../package.json";
-import { ModelTierSchema } from "./model-tiers";
 import {
   cancelTaskHandler,
   cancelTaskInputSchema,
@@ -21,7 +20,7 @@ import {
 } from "./tools/task-action";
 import { userCtx } from "./tools/task-tool-ctx";
 import { createToolRegistrar } from "./tools/utils";
-import type { User } from "./types";
+import { ModelTierSchema, type User } from "./types";
 
 const userSendTaskInputSchema = z.object({
   task: z.string().min(1).describe("The task description to send."),

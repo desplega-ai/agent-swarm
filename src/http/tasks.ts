@@ -23,7 +23,6 @@ import {
   updateTaskProgress,
   updateTaskVcs,
 } from "../be/db";
-import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import {
@@ -32,8 +31,10 @@ import {
   type AgentTaskStatus,
   AgentTaskStatusSchema,
   isTerminalTaskStatus,
+  ModelTierSchema,
   ProviderNameSchema,
   ResumeReasonSchema,
+  splitLegacyModelAlias,
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
