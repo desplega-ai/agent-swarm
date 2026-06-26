@@ -9,6 +9,7 @@ import { registerContextHistoryTool } from "./tools/context-history";
 import { registerCreateChannelTool } from "./tools/create-channel";
 import { registerCreateMetricTool } from "./tools/create-metric";
 import { registerCreatePageTool } from "./tools/create-page";
+import { registerCredentialBindingsTool } from "./tools/credential-bindings";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 import { registerGetMetricsTool } from "./tools/get-metrics";
@@ -213,6 +214,7 @@ export function createServer() {
   registerGetConfigTool(server);
   registerListConfigTool(server);
   registerDeleteConfigTool(server);
+  registerCredentialBindingsTool(server);
 
   // Repo management tools - always registered (repo config is fundamental)
   registerGetReposTool(server);

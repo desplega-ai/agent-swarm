@@ -1,0 +1,1 @@
+export { registerCredentialBindingsTool } from "./tool";

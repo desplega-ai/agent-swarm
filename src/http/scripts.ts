@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
+import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import {
   deleteScript,
   getScript,
@@ -371,6 +372,7 @@ export async function handleScripts(
       args: parsed.body.args,
       fsMode,
       agentId: agent.id,
+      egressSecrets: buildScriptCredentialBindings({ agentId: agent.id }),
     });
 
     // Persist output to KV when idempotencyKey is provided and run succeeded

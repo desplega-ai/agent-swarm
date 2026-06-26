@@ -1,10 +1,8 @@
+import type { ResolvedCredentialBinding } from "../credential-broker";
+
 export type ScriptFsMode = "none" | "workspace-rw";
 
-export type EgressSecretEntry = {
-  placeholder: string;
-  hosts: string[];
-  value: string;
-};
+export type EgressSecretEntry = ResolvedCredentialBinding;
 
 export type SwarmConfigPayload = {
   system: {

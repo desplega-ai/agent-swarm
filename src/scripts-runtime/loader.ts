@@ -4,6 +4,7 @@ import { buildEgressSecrets } from "./egress-secrets";
 import { getScriptExecutor } from "./executors/registry";
 import {
   DEFAULT_SCRIPT_RESOURCES,
+  type EgressSecretEntry,
   type ExecutorOutput,
   type ScriptFsMode,
   type ScriptResourcePolicy,
@@ -21,6 +22,7 @@ export type RunScriptInput = {
   mcpBaseUrl?: string;
   resources?: Partial<ScriptResourcePolicy>;
   userConfig?: Record<string, { value: string; isSecret: boolean }>;
+  egressSecrets?: EgressSecretEntry[];
 };
 
 export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr"> & {
@@ -45,7 +47,7 @@ function buildConfigPayload(input: RunScriptInput): SwarmConfigPayload {
       },
     },
     user: input.userConfig ?? {},
-    egressSecrets: buildEgressSecrets(),
+    egressSecrets: input.egressSecrets ?? buildEgressSecrets(),
   };
 }
 

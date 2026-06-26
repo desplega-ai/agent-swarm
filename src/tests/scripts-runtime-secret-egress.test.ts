@@ -54,8 +54,13 @@ describe("egress-substitution", () => {
       const secrets = buildEgressSecrets();
       expect(secrets).toEqual([
         {
+          configKey: "GITHUB_TOKEN",
           placeholder: "[REDACTED:GITHUB_TOKEN]",
-          hosts: ["api.github.com"],
+          allowedHosts: ["api.github.com"],
+          headerTemplate: "Authorization: Bearer [REDACTED:GITHUB_TOKEN]",
+          scope: "global",
+          scopeId: null,
+          active: true,
           value: "ghp_test1234567890abcdef",
         },
       ]);
@@ -89,7 +94,11 @@ describe("egress-substitution", () => {
       patchFetchWithEgressSubstitution([
         {
           placeholder: "[REDACTED:GITHUB_TOKEN]",
-          hosts: ["api.github.com"],
+          allowedHosts: ["api.github.com"],
+          headerTemplate: "Authorization: Bearer [REDACTED:GITHUB_TOKEN]",
+          scope: "global",
+          scopeId: null,
+          active: true,
           value: "ghp_real_secret_value_123",
         },
       ]);
@@ -111,7 +120,11 @@ describe("egress-substitution", () => {
       patchFetchWithEgressSubstitution([
         {
           placeholder: "[REDACTED:GITHUB_TOKEN]",
-          hosts: ["api.github.com"],
+          allowedHosts: ["api.github.com"],
+          headerTemplate: "Authorization: Bearer [REDACTED:GITHUB_TOKEN]",
+          scope: "global",
+          scopeId: null,
+          active: true,
           value: "ghp_real_secret_value_123",
         },
       ]);
@@ -133,7 +146,11 @@ describe("egress-substitution", () => {
       patchFetchWithEgressSubstitution([
         {
           placeholder: "[REDACTED:GITHUB_TOKEN]",
-          hosts: ["api.github.com"],
+          allowedHosts: ["api.github.com"],
+          headerTemplate: "Authorization: Bearer [REDACTED:GITHUB_TOKEN]",
+          scope: "global",
+          scopeId: null,
+          active: true,
           value: "ghp_real_secret_value_123",
         },
       ]);
@@ -155,7 +172,11 @@ describe("egress-substitution", () => {
       patchFetchWithEgressSubstitution([
         {
           placeholder: "[REDACTED:GITHUB_TOKEN]",
-          hosts: ["api.github.com"],
+          allowedHosts: ["api.github.com"],
+          headerTemplate: "Authorization: Bearer [REDACTED:GITHUB_TOKEN]",
+          scope: "global",
+          scopeId: null,
+          active: true,
           value: "ghp_real_secret_value_123",
         },
       ]);
