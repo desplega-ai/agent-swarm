@@ -2821,6 +2821,9 @@ async function spawnProviderProcess(
   const eventFlushTimer = setInterval(flushEvents, EVENT_FLUSH_INTERVAL_MS);
   const sessionStartTime = Date.now();
   let providerSessionId = session.sessionId;
+  let pendingHarnessVariant: string | undefined;
+  let pendingHarnessVariantMeta: Record<string, unknown> | undefined;
+  let runningTaskForSessionInit: RunningTask | undefined;
   const activeToolSpans = new Map<
     string,
     {
@@ -2870,8 +2873,12 @@ async function spawnProviderProcess(
       switch (event.type) {
         case "session_init":
           providerSessionId = event.sessionId;
-          runningTask.harnessVariant = event.harnessVariant;
-          runningTask.harnessVariantMeta = event.harnessVariantMeta;
+          pendingHarnessVariant = event.harnessVariant;
+          pendingHarnessVariantMeta = event.harnessVariantMeta;
+          if (runningTaskForSessionInit) {
+            runningTaskForSessionInit.harnessVariant = event.harnessVariant;
+            runningTaskForSessionInit.harnessVariantMeta = event.harnessVariantMeta;
+          }
           sessionSpan.setAttributes({
             "agentswarm.provider.session_id": providerSessionId,
             "agentswarm.provider.name": event.provider,
@@ -3359,6 +3366,13 @@ async function spawnProviderProcess(
     hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
     model: model || undefined,
   };
+  runningTaskForSessionInit = runningTask;
+  if (pendingHarnessVariant !== undefined) {
+    runningTask.harnessVariant = pendingHarnessVariant;
+  }
+  if (pendingHarnessVariantMeta !== undefined) {
+    runningTask.harnessVariantMeta = pendingHarnessVariantMeta;
+  }
 
   // Non-blocking completion tracking
   promise
