@@ -663,6 +663,7 @@ export async function handleWorkflows(
     let runId: string;
     try {
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
+        triggerType: "api",
         requestedByUserId: auth?.kind === "user" ? auth.userId : undefined,
       });
     } catch (err) {

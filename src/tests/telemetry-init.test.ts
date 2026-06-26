@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import pkg from "../../package.json";
 import {
   _getInstallationIdForTests,
   _isE2bSandbox,
@@ -475,6 +476,37 @@ describe("initTelemetry", () => {
 
       const properties = (captured as { properties: Record<string, unknown> }).properties;
       expect(properties.is_cloud).toBe(true);
+    });
+  });
+
+  describe("track() ships swarmVersion in properties", () => {
+    const originalFetch = globalThis.fetch;
+    let captured: Record<string, unknown> | null = null;
+
+    beforeEach(() => {
+      captured = null;
+      globalThis.fetch = (async (_url: string, init?: { body?: string }) => {
+        captured = init?.body ? JSON.parse(init.body) : null;
+        return new Response(null, { status: 204 });
+      }) as typeof fetch;
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    test("includes the package version on every event and ignores caller overrides", async () => {
+      await initTelemetry(
+        "worker",
+        async () => "install_version_test",
+        async () => {},
+      );
+
+      track({ event: "test.event", properties: { swarmVersion: "spoofed" } });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const properties = (captured as { properties: Record<string, unknown> }).properties;
+      expect(properties.swarmVersion).toBe(pkg.version);
     });
   });
 

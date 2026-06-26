@@ -10,6 +10,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { shouldSkipCooldown } from "./cooldown";
@@ -27,6 +28,7 @@ const MAX_STEPS_PER_RUN = Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN) || 500;
 
 export interface WorkflowExecutionOptions {
   requestedByUserId?: string;
+  triggerType?: "schedule" | "manual" | "event" | "api";
 }
 
 /**
@@ -78,6 +80,11 @@ export async function startWorkflowExecution(
 
   const runId = crypto.randomUUID();
   createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
+  telemetry.workflow("started", {
+    workflowId: workflow.id,
+    nodeCount: workflow.definition.nodes.length,
+    triggerType: options.triggerType ?? "manual",
+  });
 
   // Resolve inputs and merge into initial context
   const ctx: Record<string, unknown> = { trigger: triggerData };

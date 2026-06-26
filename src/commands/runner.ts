@@ -1484,7 +1484,11 @@ function setupShutdownHandlers(
     }
 
     if (apiConfig) {
-      telemetry.session("ended", { agentId: apiConfig.agentId });
+      telemetry.session("ended", {
+        agentId: apiConfig.agentId,
+        durationMs: state ? Date.now() - state.startedAt : undefined,
+        tasksProcessed: state?.tasksProcessed ?? 0,
+      });
       await closeAgent(apiConfig, role);
     }
     await savePm2State(role);
@@ -1554,12 +1558,18 @@ interface RunningTask {
   hasLocalEnvironment: boolean;
   /** Harness variant captured on session_init (e.g. "bridge" or "stock") */
   harnessVariant?: string;
+  /** Harness metadata captured on session_init (currently includes provider package version) */
+  harnessVariantMeta?: Record<string, unknown>;
+  /** Resolved model used for the provider session, when configured */
+  model?: string;
 }
 
 /** Runner state for tracking concurrent tasks */
 interface RunnerState {
   activeTasks: Map<string, RunningTask>;
   maxConcurrent: number;
+  startedAt: number;
+  tasksProcessed: number;
   /**
    * Effective harness provider for this worker boot session — resolved
    * from `swarm_config` (overlay) > `process.env.HARNESS_PROVIDER` > "claude".
@@ -2542,6 +2552,19 @@ function providerEventAttributes(event: ProviderEvent): Attributes {
   }
 }
 
+function normalizeSessionErrorCategory(category: string | undefined): string {
+  switch (category) {
+    case "rate_limit":
+    case "api_error":
+    case "context_overflow":
+    case "timeout":
+    case "provider_error":
+      return category;
+    default:
+      return "unknown";
+  }
+}
+
 /**
  * Entry shape for the `activeToolSpans` map maintained by `runWithSession`.
  * Exported for unit tests that exercise `implicitCloseActiveToolSpans`.
@@ -2848,6 +2871,8 @@ async function spawnProviderProcess(
       switch (event.type) {
         case "session_init":
           providerSessionId = event.sessionId;
+          runningTask.harnessVariant = event.harnessVariant;
+          runningTask.harnessVariantMeta = event.harnessVariantMeta;
           sessionSpan.setAttributes({
             "agentswarm.provider.session_id": providerSessionId,
             "agentswarm.provider.name": event.provider,
@@ -3093,6 +3118,11 @@ async function spawnProviderProcess(
         }
         case "compaction": {
           // Always record compaction events (no throttle)
+          telemetry.compaction("triggered", {
+            compactTrigger: event.compactTrigger,
+            preCompactTokens: event.preCompactTokens,
+            contextTotalTokens: event.contextTotalTokens,
+          });
           fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
             method: "POST",
             headers: {
@@ -3212,6 +3242,21 @@ async function spawnProviderProcess(
             "gen_ai.usage.output_tokens": result.cost.outputTokens ?? 0,
             "agentswarm.cost.total_usd": result.cost.totalCostUsd ?? 0,
           });
+          telemetry.session("cost", {
+            agentId: opts.agentId,
+            model: result.cost.model,
+            provider: result.cost.provider ?? opts.harnessProvider,
+            inputTokens: result.cost.inputTokens ?? 0,
+            outputTokens: result.cost.outputTokens ?? 0,
+            cacheReadTokens: result.cost.cacheReadTokens,
+            cacheWriteTokens: result.cost.cacheWriteTokens,
+            reasoningOutputTokens: result.cost.reasoningOutputTokens,
+            thinkingTokens: result.cost.thinkingTokens,
+            totalCostUsd: result.cost.totalCostUsd,
+            durationMs: result.cost.durationMs,
+            numTurns: result.cost.numTurns,
+            isError: result.cost.isError,
+          });
           try {
             await saveCostData(
               { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId },
@@ -3313,6 +3358,7 @@ async function spawnProviderProcess(
     // swap that mutates the global RunnerState (review finding 2).
     harnessProvider: opts.harnessProvider,
     hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
+    model: model || undefined,
   };
 
   // Non-blocking completion tracking
@@ -3343,6 +3389,10 @@ async function checkCompletedProcesses(
     credentialInfo?: RunningTask["credentialInfo"];
     harnessProvider: ProviderName;
     hasLocalEnvironment: boolean;
+    harnessVariant?: string;
+    harnessVariantMeta?: Record<string, unknown>;
+    model?: string;
+    durationMs: number;
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -3360,6 +3410,10 @@ async function checkCompletedProcesses(
         credentialInfo: task.credentialInfo,
         harnessProvider: task.harnessProvider,
         hasLocalEnvironment: task.hasLocalEnvironment,
+        harnessVariant: task.harnessVariant,
+        harnessVariantMeta: task.harnessVariantMeta,
+        model: task.model,
+        durationMs: Date.now() - task.startTime.getTime(),
       });
     }
   }
@@ -3372,6 +3426,10 @@ async function checkCompletedProcesses(
     workingDir,
     credentialInfo,
     harnessProvider,
+    harnessVariant,
+    harnessVariantMeta,
+    model,
+    durationMs,
   } of completedTasks) {
     state.activeTasks.delete(taskId);
     vcsDetectedTasks.delete(taskId);
@@ -3491,6 +3549,33 @@ async function checkCompletedProcesses(
         harnessProvider,
         bridgeFailureDiagnostics,
       );
+
+      telemetry.taskEvent("session_completed", {
+        taskId,
+        agentId: apiConfig.agentId,
+        provider: result.cost?.provider ?? harnessProvider,
+        model: result.cost?.model ?? model,
+        harnessVariant,
+        harnessVersion:
+          typeof harnessVariantMeta?.version === "string" ||
+          typeof harnessVariantMeta?.version === "number"
+            ? String(harnessVariantMeta.version)
+            : undefined,
+        exitCode: result.exitCode,
+        isError: result.exitCode !== 0,
+        durationMs,
+      });
+      if (result.exitCode !== 0 || result.isError) {
+        telemetry.session("failure", {
+          agentId: apiConfig.agentId,
+          errorCategory: normalizeSessionErrorCategory(result.errorCategory),
+          provider: result.cost?.provider ?? harnessProvider,
+          model: result.cost?.model ?? model,
+          durationMs: result.cost?.durationMs ?? durationMs,
+          wasRateLimited: result.rateLimitResetAt != null,
+        });
+      }
+      state.tasksProcessed += 1;
 
       if (result.exitCode === 0 && credentialInfo) {
         reportKeyClearRateLimit(
@@ -3670,6 +3755,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Failures (network, API down, malformed value) fall back to env then "claude"
   // so a swarm_config outage cannot wedge boot.
   let bootProvider: ProviderName;
+  let bootModel = process.env.MODEL_OVERRIDE || "";
   // Codex credits-exhausted cooldown is sourced solely from the global swarm_config
   // (key `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS`). Initialize to the default constant
   // for the case where it is unset, then apply the swarm_config value below; on a
@@ -3679,6 +3765,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   try {
     const bootEnv = await fetchResolvedEnv(apiUrl, apiKey, agentId);
     bootProvider = bootEnv.resolvedProvider;
+    bootModel = (bootEnv.env.MODEL_OVERRIDE as string | undefined) || bootModel;
     bootCooldownMs = resolveCodexCreditsExhaustedCooldownMs(
       bootEnv.env.CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
     );
@@ -3743,7 +3830,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       },
     );
   }
-  telemetry.session("started", { agentId });
+  telemetry.session("started", {
+    agentId,
+    harnessProvider: bootProvider,
+    model: bootModel || undefined,
+    role,
+  });
 
   let capabilities = config.capabilities;
 
@@ -3888,6 +3980,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const state: RunnerState = {
     activeTasks: new Map(),
     maxConcurrent,
+    startedAt: Date.now(),
+    tasksProcessed: 0,
     harnessProvider: bootProvider,
     codexCreditsExhaustedCooldownMs: bootCooldownMs,
   };

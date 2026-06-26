@@ -22,6 +22,7 @@ import {
   withSpanContext,
 } from "../otel";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
+import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
 import { getApiKey } from "../utils/api-key";
@@ -113,6 +114,8 @@ const globalState = globalThis as typeof globalThis & {
 
 const API_GC_INTERVAL_MS = 5 * 60 * 1000;
 const MCP_TRANSPORT_IDLE_TIMEOUT_MS = DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS;
+const serverStartedAt = Date.now();
+let shutdownSignal = "unknown";
 
 type GcCapableGlobal = typeof globalThis & { gc?: () => void };
 
@@ -363,6 +366,11 @@ globalState.__transportActivityUser = transportActivityUser;
 
 async function shutdown() {
   console.log("Shutting down HTTP server...");
+  telemetry.server("shutdown", {
+    signal: shutdownSignal,
+    uptimeMs: Date.now() - serverStartedAt,
+    sessionsProcessed: getServerSessionsProcessed(),
+  });
 
   // Stop scheduler (if enabled)
   if (hasCapability("scheduling")) {
@@ -424,8 +432,14 @@ async function shutdown() {
 // Only register signal handlers once (avoid duplicates on hot reload)
 if (!globalState.__sigintRegistered) {
   globalState.__sigintRegistered = true;
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => {
+    shutdownSignal = "SIGINT";
+    shutdown();
+  });
+  process.on("SIGTERM", () => {
+    shutdownSignal = "SIGTERM";
+    shutdown();
+  });
 }
 
 if (!globalState.__runId) {

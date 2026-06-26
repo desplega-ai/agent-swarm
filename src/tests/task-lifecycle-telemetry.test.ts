@@ -9,6 +9,7 @@ import {
   failTask,
   getDb,
   initDb,
+  updateTaskClaudeSessionId,
 } from "../be/db";
 import { telemetry } from "../telemetry";
 
@@ -69,7 +70,6 @@ describe("task lifecycle telemetry", () => {
         props: {
           taskId: task.id,
           source: "mcp",
-          tags: ["telemetry"],
           hasParent: false,
           priority: 60,
         },
@@ -149,5 +149,41 @@ describe("task lifecycle telemetry", () => {
       },
     });
     expect(typeof calls[0]?.props.durationMs).toBe("number");
+  });
+
+  test("emits structured task provider and harness context instead of tags", async () => {
+    const task = createTaskExtended("complete telemetry with harness context", {
+      agentId: WORKER_ID,
+      source: "mcp",
+      tags: ["telemetry"],
+    });
+    updateTaskClaudeSessionId(
+      task.id,
+      "provider-session-1",
+      "codex",
+      undefined,
+      "gpt-5.5",
+      "stock",
+      { version: "0.40.1" },
+    );
+    await flushMicrotasks();
+    calls = [];
+
+    completeTask(task.id, "done");
+    await flushMicrotasks();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      event: "completed",
+      props: {
+        taskId: task.id,
+        source: "mcp",
+        agentId: WORKER_ID,
+        provider: "codex",
+        harnessVariant: "stock",
+        harnessVersion: "0.40.1",
+      },
+    });
+    expect(calls[0]?.props.tags).toBeUndefined();
   });
 });
