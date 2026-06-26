@@ -55,6 +55,7 @@ interface RepoFormData {
   clonePath: string;
   defaultBranch: string;
   autoClone: boolean;
+  hooks: { enabled: boolean };
 }
 
 function RepoEditDialog({
@@ -74,6 +75,7 @@ function RepoEditDialog({
     clonePath: repo.clonePath,
     defaultBranch: repo.defaultBranch,
     autoClone: repo.autoClone,
+    hooks: repo.hooks,
   });
 
   function handleSubmit(e: React.FormEvent) {
@@ -115,7 +117,7 @@ function RepoEditDialog({
               <Label htmlFor="repo-clone-path">Clone Path</Label>
               <Input
                 id="repo-clone-path"
-                placeholder="/workspace/repos/my-repo"
+                placeholder="/workspace/personal/repos/my-repo"
                 value={form.clonePath}
                 onChange={(e) => setForm({ ...form, clonePath: e.target.value })}
               />
@@ -136,6 +138,14 @@ function RepoEditDialog({
                 onCheckedChange={(checked) => setForm({ ...form, autoClone: checked })}
               />
               <Label htmlFor="repo-auto-clone">Auto-clone on worker start</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="repo-hooks-enabled"
+                checked={form.hooks.enabled}
+                onCheckedChange={(checked) => setForm({ ...form, hooks: { enabled: checked } })}
+              />
+              <Label htmlFor="repo-hooks-enabled">Install git hooks</Label>
             </div>
           </div>
           <DialogFooter>
@@ -285,6 +295,17 @@ export default function RepoDetailPage() {
             >
               {repo.autoClone ? "Auto-clone ON" : "Auto-clone OFF"}
             </Badge>
+            <Badge
+              variant="outline"
+              size="tag"
+              className={
+                repo.hooks.enabled
+                  ? "bg-status-success/15 text-status-success border-status-success/30"
+                  : ""
+              }
+            >
+              {repo.hooks.enabled ? "Hooks ON" : "Hooks OFF"}
+            </Badge>
           </div>
         }
         action={
@@ -359,6 +380,7 @@ export default function RepoDetailPage() {
               />
               <QuickStat label="Created" value={formatSmartTime(repo.createdAt)} />
               <QuickStat label="Auto-clone" value={repo.autoClone ? "Enabled" : "Disabled"} />
+              <QuickStat label="Git Hooks" value={repo.hooks.enabled ? "Enabled" : "Disabled"} />
             </QuickStats>
           </DetailPageRail>
         }

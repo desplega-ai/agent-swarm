@@ -6297,8 +6297,8 @@ export function createSwarmRepo(data: {
 }): SwarmRepo {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const clonePath = data.clonePath || `/workspace/repos/${data.name}`;
-  const hooksJson = data.hooks ? JSON.stringify(data.hooks) : null;
+  const clonePath = data.clonePath || `/workspace/personal/repos/${data.name}`;
+  const hooksJson = JSON.stringify(data.hooks ?? { enabled: true });
   const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
   const row = getDb()

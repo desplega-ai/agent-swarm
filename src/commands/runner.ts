@@ -4655,7 +4655,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           const effectiveConfig = repoConfig ?? {
             url: task.vcsRepo,
             name: task.vcsRepo.split("/").pop() || task.vcsRepo,
-            clonePath: `/workspace/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
+            clonePath: `/workspace/personal/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
             defaultBranch: "main",
           };
           const repoContext = await ensureRepoForTask(effectiveConfig, role);
@@ -5046,7 +5046,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           const effectiveConfig = repoConfig ?? {
             url: taskVcsRepo,
             name: taskVcsRepo.split("/").pop() || taskVcsRepo,
-            clonePath: `/workspace/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
+            clonePath: `/workspace/personal/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
             defaultBranch: "main",
           };
           const repoResult = await ensureRepoForTask(effectiveConfig, role);

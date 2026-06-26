@@ -37,14 +37,18 @@ interface RepoFormData {
   clonePath: string;
   defaultBranch: string;
   autoClone: boolean;
+  hooks: { enabled: boolean };
 }
+
+const clonePathForName = (name: string) => (name ? `/workspace/personal/repos/${name}` : "");
 
 const emptyForm: RepoFormData = {
   url: "",
   name: "",
   clonePath: "",
   defaultBranch: "main",
-  autoClone: false,
+  autoClone: true,
+  hooks: { enabled: true },
 };
 
 function RepoDialog({
@@ -66,6 +70,7 @@ function RepoDialog({
           clonePath: editRepo.clonePath,
           defaultBranch: editRepo.defaultBranch,
           autoClone: editRepo.autoClone,
+          hooks: editRepo.hooks,
         }
       : emptyForm,
   );
@@ -103,7 +108,18 @@ function RepoDialog({
                 id="repo-name"
                 placeholder="my-repo"
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  setForm((current) => ({
+                    ...current,
+                    name,
+                    clonePath:
+                      !editRepo &&
+                      (!current.clonePath || current.clonePath === clonePathForName(current.name))
+                        ? clonePathForName(name)
+                        : current.clonePath,
+                  }));
+                }}
                 required
               />
             </div>
@@ -111,7 +127,7 @@ function RepoDialog({
               <Label htmlFor="repo-clone-path">Clone Path</Label>
               <Input
                 id="repo-clone-path"
-                placeholder="/workspace/repos/my-repo"
+                placeholder="/workspace/personal/repos/my-repo"
                 value={form.clonePath}
                 onChange={(e) => setForm({ ...form, clonePath: e.target.value })}
               />
@@ -132,6 +148,14 @@ function RepoDialog({
                 onCheckedChange={(checked) => setForm({ ...form, autoClone: checked })}
               />
               <Label htmlFor="repo-auto-clone">Auto-clone on worker start</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="repo-hooks-enabled"
+                checked={form.hooks.enabled}
+                onCheckedChange={(checked) => setForm({ ...form, hooks: { enabled: checked } })}
+              />
+              <Label htmlFor="repo-hooks-enabled">Install git hooks</Label>
             </div>
           </div>
           <DialogFooter>
@@ -242,6 +266,23 @@ export default function ReposPage() {
         field: "autoClone",
         headerName: "Auto-Clone",
         width: 110,
+        cellRenderer: (params: { value: boolean }) => (
+          <Badge
+            variant="outline"
+            className={
+              params.value
+                ? "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center bg-status-success/15 text-status-success border-status-success/30"
+                : "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
+            }
+          >
+            {params.value ? "ON" : "OFF"}
+          </Badge>
+        ),
+      },
+      {
+        headerName: "Hooks",
+        width: 100,
+        valueGetter: (params) => params.data?.hooks.enabled ?? false,
         cellRenderer: (params: { value: boolean }) => (
           <Badge
             variant="outline"

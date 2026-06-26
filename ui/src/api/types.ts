@@ -788,6 +788,10 @@ export interface RepoGuidelines {
   review: string[];
 }
 
+export interface RepoHooks {
+  enabled: boolean;
+}
+
 export interface SwarmRepo {
   id: string;
   url: string;
@@ -795,6 +799,7 @@ export interface SwarmRepo {
   clonePath: string;
   defaultBranch: string;
   autoClone: boolean;
+  hooks: RepoHooks;
   guidelines: RepoGuidelines | null;
   createdAt: string;
   lastUpdatedAt: string;

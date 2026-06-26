@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
-import type { RepoGuidelines } from "../types";
+import type { RepoGuidelines, RepoHooks } from "../types";
 
 export function useRepo(id: string) {
   return useQuery({
@@ -28,6 +28,7 @@ export function useCreateRepo() {
       clonePath?: string;
       defaultBranch?: string;
       autoClone?: boolean;
+      hooks?: RepoHooks;
     }) => api.createRepo(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["repos"] });
@@ -50,6 +51,7 @@ export function useUpdateRepo() {
         clonePath: string;
         defaultBranch: string;
         autoClone: boolean;
+        hooks: RepoHooks | null;
         guidelines: RepoGuidelines | null;
       }>;
     }) => api.updateRepo(id, data),
