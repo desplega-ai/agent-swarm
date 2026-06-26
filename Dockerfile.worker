@@ -2,6 +2,12 @@
 # Runs Claude in headless loop mode as a worker agent
 # Multi-stage build: compiles to standalone binary with full dev environment
 
+ARG PREK_VERSION=0.4.5
+
+# Official prek docs recommend copying the pinned binary from its distroless
+# image into Debian-based images.
+FROM ghcr.io/j178/prek:v${PREK_VERSION} AS prek
+
 # Stage 1: Build the binary
 FROM oven/bun:1.3.11 AS builder
 WORKDIR /build
@@ -170,6 +176,9 @@ RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
 ARG CONTEXT_MODE_VERSION=1.0.151
 RUN sudo npm install -g context-mode@${CONTEXT_MODE_VERSION}
 
+# Install prek for opt-in worker repo hook setup.
+COPY --from=prek /prek /usr/local/bin/prek
+
 # Install Claude marketplace plugins (build-time cache)
 RUN mkdir -p /home/worker/.claude \
     # Main desplega toolbox plugin
@@ -291,6 +300,10 @@ RUN chmod +x /usr/local/bin/init-local-postgres.sh
 # Optional helper to start local Redis (not invoked automatically)
 COPY scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 RUN chmod +x /usr/local/bin/init-local-redis.sh
+
+# Best-effort repo hook installer used after opt-in worker repo clones.
+COPY scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+RUN chmod +x /usr/local/bin/install-repo-hooks.sh
 
 # Copy commands (changes on code change — keep late)
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/

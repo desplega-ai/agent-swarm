@@ -6311,6 +6311,18 @@
                       "type": "boolean",
                       "default": true
                     },
+                    "hooks": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "default": {
+                        "enabled": false
+                      }
+                    },
                     "guidelines": {
                       "type": [
                         "object",
@@ -6427,6 +6439,18 @@
                   "autoClone": {
                     "type": "boolean"
                   },
+                  "hooks": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean",
+                        "default": false
+                      }
+                    }
+                  },
                   "guidelines": {
                     "type": [
                       "object",
@@ -6499,6 +6523,18 @@
                     "autoClone": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "hooks": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "default": {
+                        "enabled": false
+                      }
                     },
                     "guidelines": {
                       "type": [
@@ -6724,6 +6760,18 @@
                             "type": "boolean",
                             "default": true
                           },
+                          "hooks": {
+                            "type": "object",
+                            "properties": {
+                              "enabled": {
+                                "type": "boolean",
+                                "default": false
+                              }
+                            },
+                            "default": {
+                              "enabled": false
+                            }
+                          },
                           "guidelines": {
                             "type": [
                               "object",
@@ -6819,6 +6867,15 @@
                   "autoClone": {
                     "type": "boolean"
                   },
+                  "hooks": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean",
+                        "default": false
+                      }
+                    }
+                  },
                   "guidelines": {
                     "type": [
                       "object",
@@ -6895,6 +6952,18 @@
                     "autoClone": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "hooks": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "default": {
+                        "enabled": false
+                      }
                     },
                     "guidelines": {
                       "type": [

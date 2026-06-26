@@ -130,6 +130,7 @@ async function fetchRepoConfig(
   name: string;
   clonePath: string;
   defaultBranch: string;
+  hooks?: { enabled: boolean } | null;
   guidelines?: RepoGuidelines | null;
 } | null> {
   try {
@@ -144,6 +145,7 @@ async function fetchRepoConfig(
         name: string;
         clonePath: string;
         defaultBranch: string;
+        hooks?: { enabled: boolean } | null;
         guidelines?: RepoGuidelines | null;
       }>;
     };
@@ -234,12 +236,40 @@ async function refreshExistingRepoForTask(
   }
 }
 
+function getInstallRepoHooksScriptPath(): string {
+  const imagePath = "/usr/local/bin/install-repo-hooks.sh";
+  if (existsSync(imagePath)) return imagePath;
+  return `${process.cwd()}/scripts/install-repo-hooks.sh`;
+}
+
+async function installRepoHooksForTask(
+  repoConfig: { name: string; clonePath: string; hooks?: { enabled: boolean } | null },
+  role: string,
+): Promise<void> {
+  if (repoConfig.hooks?.enabled !== true) return;
+
+  try {
+    const scriptPath = getInstallRepoHooksScriptPath();
+    await Bun.$`bash ${scriptPath} ${repoConfig.clonePath} ${repoConfig.name}`;
+    console.log(`[${role}] Installed git hooks for ${repoConfig.name}`);
+  } catch (err) {
+    const errorMsg = scrubSecrets((err as Error).message);
+    console.warn(`[${role}] Could not install git hooks for ${repoConfig.name}: ${errorMsg}`);
+  }
+}
+
 /**
  * Ensure a repo is cloned and up-to-date for a task.
  * Returns { clonePath, claudeMd, warning }.
  */
 export async function ensureRepoForTask(
-  repoConfig: { url: string; name: string; clonePath: string; defaultBranch: string },
+  repoConfig: {
+    url: string;
+    name: string;
+    clonePath: string;
+    defaultBranch: string;
+    hooks?: { enabled: boolean } | null;
+  },
   role: string,
 ): Promise<{
   clonePath: string;
@@ -273,6 +303,8 @@ export async function ensureRepoForTask(
       console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
       warning = await refreshExistingRepoForTask({ name, clonePath, defaultBranch }, role);
     }
+
+    await installRepoHooksForTask(repoConfig, role);
 
     const claudeMd = await readClaudeMd(clonePath, role);
     const autoStashes = await listSwarmAutostashes(clonePath, role);

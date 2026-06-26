@@ -641,6 +641,7 @@ if [ -n "$AGENT_ID" ]; then
                 REPO_NAME=$(echo "$repo" | jq -r '.name')
                 REPO_BRANCH=$(echo "$repo" | jq -r '.defaultBranch // "main"')
                 REPO_DIR=$(echo "$repo" | jq -r '.clonePath')
+                REPO_HOOKS_ENABLED=$(echo "$repo" | jq -r '.hooks.enabled // false')
 
                 # Ensure parent directory exists and is owned by worker so the
                 # gosu-dropped clone/pull below can write into it. Lenient chown
@@ -672,6 +673,10 @@ if [ -n "$AGENT_ID" ]; then
                 else
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
                     gosu worker bash -c "gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" || echo "  Warning: Could not clone ${REPO_NAME}"
+                fi
+
+                if [ "$REPO_HOOKS_ENABLED" = "true" ] && [ -d "${REPO_DIR}/.git" ]; then
+                    gosu worker /usr/local/bin/install-repo-hooks.sh "$REPO_DIR" "$REPO_NAME" || echo "  Warning: Could not install git hooks for ${REPO_NAME}"
                 fi
             done
         else
