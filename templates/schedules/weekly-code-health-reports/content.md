@@ -2,6 +2,8 @@
 
 Run a recurring Code Maat + D3 code-health report for a repository and update the same stable report page in place.
 
+This schedule is the templates gallery entry point for the community package in `templates/community/code-health-reports/`. The package itself is intentionally not an agent-template config; it is a runnable playbook bundle (`PLAYBOOK.md`, `run.sh`, `report.mjs`, and `lead-prompt.md`) used by this schedule.
+
 ## Schedule
 
 ```json
@@ -27,7 +29,7 @@ Stable page ID: `<PAGE_ID>`
 
 ## Instructions
 
-1. Use the community template in `templates/community/code-health-reports/`.
+1. Use the community template in `templates/community/code-health-reports/`. See the docs playbook at `https://docs.agent-swarm.dev/docs/playbooks/code-health-reports` for the full setup and attribution notes.
 2. Install or update the runner workspace under `/workspace/code-maat`:
    - `run.sh`
    - `report.mjs`

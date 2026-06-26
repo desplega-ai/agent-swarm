@@ -4,10 +4,10 @@
   "displayName": "Weekly Code Health Reports",
   "slug": "weekly-code-health-reports",
   "title": "Weekly Code Health Reports",
-  "description": "Run a recurring Code Maat + D3 code-health report and update a stable page in place.",
+  "description": "Gallery entry point for the community Code Maat + D3 code-health report package. Run a weekly report and update a stable page in place.",
   "version": "1.0.0",
   "category": "schedules",
   "placeholders": ["REPO_URL", "BRANCH", "SCOPE_PATH", "REPORT_NAME", "PAGE_ID", "TIMEZONE"],
   "runAllSeedersCandidate": false,
-  "tags": ["code-quality", "maintenance", "reporting"]
+  "tags": ["code-quality", "maintenance", "reporting", "community-template"]
 }
