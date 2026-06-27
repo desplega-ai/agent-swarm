@@ -484,7 +484,11 @@ export async function handleMemory(
           recordRetrievals(
             sourceTaskId,
             myAgentId,
-            ranked.map((r) => ({ memoryId: r.id, similarity: r.similarity })),
+            ranked.map((r) => ({
+              memoryId: r.id,
+              similarity: r.similarity,
+              retrievalSource: r.retrievalSource,
+            })),
             undefined,
             { intent, contextKey, eventType: "search" },
           );
@@ -501,6 +505,7 @@ export async function handleMemory(
           similarity: r.similarity,
           rawSimilarity: r.rawSimilarity,
           compositeScore: r.compositeScore,
+          retrievalSource: r.retrievalSource,
           source: r.source,
           scope: r.scope,
         })),
@@ -559,6 +564,7 @@ export async function handleMemory(
             similarity: r.similarity,
             rawSimilarity: r.rawSimilarity,
             compositeScore: r.compositeScore,
+            retrievalSource: r.retrievalSource,
             createdAt: r.createdAt,
             accessedAt: r.accessedAt,
             accessCount: r.accessCount ?? 0,

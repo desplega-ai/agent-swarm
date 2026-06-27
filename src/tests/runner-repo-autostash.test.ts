@@ -10,13 +10,40 @@ const execFileAsync = promisify(execFile);
 
 let tempRoot = "";
 
+function gitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key === "GIT_CONFIG_NOSYSTEM" || key.startsWith("GIT_TRACE")) continue;
+    if (key.startsWith("GIT_")) delete env[key];
+  }
+  return env;
+}
+
 async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", ["-C", cwd, ...args]);
+  const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], { env: gitEnv() });
   return stdout;
 }
 
 async function gitRaw(args: string[]): Promise<void> {
-  await execFileAsync("git", args);
+  await execFileAsync("git", args, { env: gitEnv() });
+}
+
+async function withCleanGitEnv<T>(fn: () => Promise<T>): Promise<T> {
+  const removed = new Map<string, string>();
+  for (const key of Object.keys(process.env)) {
+    if (key === "GIT_CONFIG_NOSYSTEM" || key.startsWith("GIT_TRACE")) continue;
+    if (!key.startsWith("GIT_")) continue;
+    const value = process.env[key];
+    if (value !== undefined) removed.set(key, value);
+    delete process.env[key];
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of removed) {
+      process.env[key] = value;
+    }
+  }
 }
 
 async function commitAll(cwd: string, message: string): Promise<void> {
@@ -63,9 +90,11 @@ describe("ensureRepoForTask auto-stash refresh", () => {
     await commitAll(upstreamPath, "remote update");
     await git(upstreamPath, ["push", "origin", "main"]);
 
-    const result = await ensureRepoForTask(
-      { url: remotePath, name: "repo", clonePath, defaultBranch: "main" },
-      "test",
+    const result = await withCleanGitEnv(() =>
+      ensureRepoForTask(
+        { url: remotePath, name: "repo", clonePath, defaultBranch: "main" },
+        "test",
+      ),
     );
 
     expect(result.warning).toBeNull();
@@ -103,9 +132,11 @@ describe("ensureRepoForTask auto-stash refresh", () => {
     await commitAll(upstreamPath, "remote commit");
     await git(upstreamPath, ["push", "origin", "main"]);
 
-    const result = await ensureRepoForTask(
-      { url: remotePath, name: "repo", clonePath, defaultBranch: "main" },
-      "test",
+    const result = await withCleanGitEnv(() =>
+      ensureRepoForTask(
+        { url: remotePath, name: "repo", clonePath, defaultBranch: "main" },
+        "test",
+      ),
     );
 
     expect(result.warning).toBeNull();

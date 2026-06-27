@@ -43,6 +43,7 @@ export type RetrievalListRow = {
    */
   scheduleId: string | null;
   similarity: number | null;
+  retrievalSource: string | null;
   retrievedAt: string;
 };
 
@@ -87,6 +88,7 @@ export function getRetrievalsForAgent(
            am.source    AS source,
            at.scheduleId AS scheduleId,
            mr.similarity AS similarity,
+           mr.retrievalSource AS retrievalSource,
            mr.retrievedAt AS retrievedAt
       FROM memory_retrieval mr
       INNER JOIN agent_memory am ON am.id = mr.memoryId

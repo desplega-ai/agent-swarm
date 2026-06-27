@@ -86,6 +86,39 @@ describe("memory hybrid search", () => {
 
     expect(results.some((result) => result.id === exact.id)).toBe(true);
     expect(new Set(results.map((result) => result.id)).size).toBe(results.length);
+    expect(results.find((result) => result.id === exact.id)?.retrievalSource).toBe("hybrid");
+    expect(results.find((result) => result.id === semantic.id)?.retrievalSource).toBe("vec");
+  });
+
+  test("hybrid RRF compounds memories present in both vector and FTS arms", () => {
+    const both = store.store({
+      agentId,
+      scope: "agent",
+      name: "compound exact",
+      content: "The exact compound marker is rrfneedle.",
+      source: "manual",
+    });
+    const vectorOnly = store.store({
+      agentId,
+      scope: "agent",
+      name: "compound semantic",
+      content: "A semantic-only note.",
+      source: "manual",
+    });
+    store.updateEmbedding(both.id, vector(1), "test");
+    store.updateEmbedding(vectorOnly.id, vector(1), "test");
+
+    const results = store.search(vector(1), agentId, {
+      scope: "agent",
+      limit: 10,
+      queryText: "rrfneedle",
+    });
+
+    const bothResult = results.find((result) => result.id === both.id);
+    const vectorOnlyResult = results.find((result) => result.id === vectorOnly.id);
+    expect(bothResult?.retrievalSource).toBe("hybrid");
+    expect(vectorOnlyResult?.retrievalSource).toBe("vec");
+    expect(bothResult!.similarity).toBeGreaterThan(vectorOnlyResult!.similarity);
   });
 
   test("falls back to keyword-only search when vector query is unavailable", () => {
@@ -104,5 +137,38 @@ describe("memory hybrid search", () => {
     });
 
     expect(results.map((result) => result.id)).toContain(exact.id);
+    expect(results.find((result) => result.id === exact.id)?.retrievalSource).toBe("fts");
+  });
+
+  test("applies source-aware recency decay to FTS-only ranking", () => {
+    const stale = store.store({
+      agentId,
+      scope: "agent",
+      name: "stale keyword",
+      content: "The decay marker is decayneedle.",
+      source: "task_completion",
+    });
+    const fresh = store.store({
+      agentId,
+      scope: "agent",
+      name: "fresh keyword",
+      content: "The decay marker is decayneedle.",
+      source: "task_completion",
+    });
+    getDb()
+      .prepare("UPDATE agent_memory SET createdAt = ? WHERE id = ?")
+      .run(new Date(Date.now() - 60 * 86400000).toISOString(), stale.id);
+
+    const results = store.search(new Float32Array(0), agentId, {
+      scope: "agent",
+      limit: 10,
+      queryText: "decayneedle",
+    });
+
+    const staleIndex = results.findIndex((result) => result.id === stale.id);
+    const freshIndex = results.findIndex((result) => result.id === fresh.id);
+    expect(freshIndex).toBeGreaterThanOrEqual(0);
+    expect(staleIndex).toBeGreaterThanOrEqual(0);
+    expect(freshIndex).toBeLessThan(staleIndex);
   });
 });

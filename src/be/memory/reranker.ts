@@ -74,9 +74,12 @@ export function usefulness(alpha: number, beta: number): number {
  * source quality, and Beta-Binomial usefulness.
  */
 export function computeScore(candidate: MemoryCandidate, now: Date): number {
+  const decay = candidate.recencyDecayApplied
+    ? 1.0
+    : recencyDecay(candidate.createdAt, now, candidate.source);
   return (
     candidate.similarity *
-    recencyDecay(candidate.createdAt, now, candidate.source) *
+    decay *
     accessBoost(candidate.accessedAt, candidate.accessCount, now) *
     sourceQuality(candidate.source) *
     usefulness(candidate.alpha, candidate.beta)
@@ -92,7 +95,7 @@ export function rerank(candidates: MemoryCandidate[], options: RerankOptions): M
   const { limit, now = new Date() } = options;
 
   const scored = candidates.map((candidate) => {
-    const rawSimilarity = candidate.similarity;
+    const rawSimilarity = candidate.rawSimilarity ?? candidate.similarity;
     const compositeScore = computeScore(candidate, now);
     return {
       ...candidate,

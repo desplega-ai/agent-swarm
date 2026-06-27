@@ -8,6 +8,7 @@ import {
   PROTECTED_SOURCES,
   TTL_DEFAULTS,
 } from "../constants";
+import { recencyDecay } from "../reranker";
 import type {
   MemoryCandidate,
   MemoryEditInput,
@@ -15,6 +16,7 @@ import type {
   MemoryHealth,
   MemoryInput,
   MemoryListOptions,
+  MemoryRetrievalSource,
   MemorySearchOptions,
   MemoryStats,
   MemoryStore,
@@ -86,6 +88,13 @@ function rowToCandidate(row: AgentMemoryRow, similarity: number): MemoryCandidat
     alpha: row.alpha ?? 1.0,
     beta: row.beta ?? 1.0,
   };
+}
+
+function retrievalSourceFor(sources: Set<MemoryRetrievalSource>): MemoryRetrievalSource {
+  if (sources.has("fts") && sources.has("vec")) return "hybrid";
+  if (sources.has("fts")) return "fts";
+  if (sources.has("vec")) return "vec";
+  return "fallback";
 }
 
 function computeExpiresAt(source: AgentMemorySource): string | null {
@@ -508,9 +517,17 @@ export class SqliteMemoryStore implements MemoryStore {
 
     const byId = new Map<string, MemoryCandidate>();
     const scores = new Map<string, number>();
+    const sources = new Map<string, Set<MemoryRetrievalSource>>();
+    const now = new Date();
     const add = (candidate: MemoryCandidate, rank: number) => {
       byId.set(candidate.id, byId.get(candidate.id) ?? candidate);
-      scores.set(candidate.id, (scores.get(candidate.id) ?? 0) + 1 / (60 + rank + 1));
+      const retrievalSource = candidate.retrievalSource === "fts" ? "fts" : "vec";
+      const candidateSources = sources.get(candidate.id) ?? new Set<MemoryRetrievalSource>();
+      candidateSources.add(retrievalSource);
+      sources.set(candidate.id, candidateSources);
+
+      const decay = recencyDecay(candidate.createdAt, now, candidate.source);
+      scores.set(candidate.id, (scores.get(candidate.id) ?? 0) + (1 / (60 + rank + 1)) * decay);
     };
 
     vectorCandidates.forEach(add);
@@ -521,6 +538,8 @@ export class SqliteMemoryStore implements MemoryStore {
         ...candidate,
         rawSimilarity: candidate.rawSimilarity ?? candidate.similarity,
         similarity: scores.get(candidate.id) ?? candidate.similarity,
+        retrievalSource: retrievalSourceFor(sources.get(candidate.id) ?? new Set()),
+        recencyDecayApplied: true,
       }))
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, options.limit);
@@ -557,6 +576,7 @@ export class SqliteMemoryStore implements MemoryStore {
     }
 
     try {
+      const sqlLimit = Math.min(Math.max(limit * 4, limit), 100);
       const rows = db
         .prepare<AgentMemoryRow & { rank: number }, (Buffer | string | number | null)[]>(
           `SELECT m.*, bm25(memory_fts) AS rank
@@ -566,9 +586,24 @@ export class SqliteMemoryStore implements MemoryStore {
            ORDER BY rank
            LIMIT ?`,
         )
-        .all(...params, limit);
+        .all(...params, sqlLimit);
 
-      return rows.map((row, index) => rowToCandidate(row, 1 / (index + 1)));
+      const now = new Date();
+      return rows
+        .map((row, index) => {
+          const rawSimilarity = 1 / (index + 1);
+          return {
+            ...rowToCandidate(
+              row,
+              rawSimilarity * recencyDecay(row.createdAt, now, row.source as AgentMemorySource),
+            ),
+            rawSimilarity,
+            retrievalSource: "fts" as const,
+            recencyDecayApplied: true,
+          };
+        })
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
     } catch (err) {
       console.warn("[memory-fts] query failed:", (err as Error).message);
       return [];
@@ -636,7 +671,7 @@ export class SqliteMemoryStore implements MemoryStore {
     for (const row of rows) {
       const similarity = 1 - row.distance;
       if (similarity < MIN_SIMILARITY) continue;
-      candidates.push(rowToCandidate(row, similarity));
+      candidates.push({ ...rowToCandidate(row, similarity), retrievalSource: "vec" });
     }
 
     return candidates;
@@ -683,7 +718,7 @@ export class SqliteMemoryStore implements MemoryStore {
       if (emb.length !== queryEmbedding.length) continue;
       const similarity = cosineSimilarity(queryEmbedding, emb);
       if (similarity < MIN_SIMILARITY) continue;
-      candidates.push(rowToCandidate(row, similarity));
+      candidates.push({ ...rowToCandidate(row, similarity), retrievalSource: "fallback" });
     }
 
     candidates.sort((a, b) => b.similarity - a.similarity);

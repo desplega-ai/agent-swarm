@@ -64,6 +64,10 @@ export interface MemoryCandidate extends AgentMemory {
   rawSimilarity?: number;
   /** Final composite score after reranking (recency × source × usefulness × access). */
   compositeScore?: number;
+  /** Search arm that surfaced the candidate. Memory `source` remains manual/file_index/etc. */
+  retrievalSource?: MemoryRetrievalSource;
+  /** True when `similarity` already includes source-aware recency decay. */
+  recencyDecayApplied?: boolean;
   accessCount: number;
   expiresAt: string | null;
   embeddingModel: string | null;
@@ -71,6 +75,8 @@ export interface MemoryCandidate extends AgentMemory {
   alpha: number;
   beta: number;
 }
+
+export type MemoryRetrievalSource = "vec" | "fts" | "hybrid" | "fallback";
 
 export interface MemorySearchOptions {
   scope?: "agent" | "swarm" | "all";
