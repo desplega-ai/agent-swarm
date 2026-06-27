@@ -1,5 +1,5 @@
+import { createArtifactServer } from "@swarm/artifacts";
 import { Hono } from "hono";
-import { createArtifactServer } from "../artifact-sdk";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
 

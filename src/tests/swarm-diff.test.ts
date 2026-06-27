@@ -8,7 +8,7 @@
  * anchor ids, severity badges) without dragging in a real DOM lib.
  */
 import { describe, expect, test } from "bun:test";
-import { SWARM_UI_JS } from "../artifact-sdk/browser-sdk";
+import { SWARM_UI_JS } from "@swarm/artifacts";
 
 const EXAMPLE_HUNK = {
   hunks: [

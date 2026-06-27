@@ -3,8 +3,12 @@
 // importable by package name before any files move. Regenerate after editing
 // packages.map.json:  bun scripts/generate-barrels.ts
 
-export * from "../../src/artifact-sdk/browser-sdk";
-export * from "../../src/artifact-sdk/index";
-export * from "../../src/artifact-sdk/port";
-export * as ArtifactSdkServer from "../../src/artifact-sdk/server";
-export * from "../../src/artifact-sdk/tunnel";
+export * from "./src/artifact-sdk/browser-sdk";
+export * from "./src/artifact-sdk/index";
+export * from "./src/artifact-sdk/port";
+export * as ArtifactSdkServer from "./src/artifact-sdk/server";
+// server.ts is namespaced because index.ts re-exports its ArtifactServer/
+// ArtifactServerOptions/createArtifactServer (collision). Its two server-only helpers
+// do NOT collide — expose them flat so direct consumers (artifact-sdk.test) resolve them.
+export { createBunHonoFetchHandler, createBunResponse } from "./src/artifact-sdk/server";
+export * from "./src/artifact-sdk/tunnel";

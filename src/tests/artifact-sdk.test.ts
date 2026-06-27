@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { getBasePrompt } from "@swarm/prompt-templates";
-import { BROWSER_SDK_JS } from "../artifact-sdk/browser-sdk";
-import { getAvailablePort } from "../artifact-sdk/port";
 import {
+  BROWSER_SDK_JS,
   createArtifactServer,
   createBunHonoFetchHandler,
   createBunResponse,
-} from "../artifact-sdk/server";
+  getAvailablePort,
+} from "@swarm/artifacts";
+import { getBasePrompt } from "@swarm/prompt-templates";
 
 // ─── Port allocation tests ──────────────────────────────────────────────
 
@@ -468,7 +468,7 @@ describe("createArtifactServer", () => {
 
 describe("createTunnel", () => {
   test("module exports createTunnel function", async () => {
-    const tunnelMod = await import("../artifact-sdk/tunnel");
+    const tunnelMod = await import("@swarm/artifacts");
     expect(typeof tunnelMod.createTunnel).toBe("function");
   });
 });
@@ -477,13 +477,13 @@ describe("createTunnel", () => {
 
 describe("artifact-sdk index exports", () => {
   test("exports createArtifactServer", async () => {
-    const sdk = await import("../artifact-sdk/index");
+    const sdk = await import("@swarm/artifacts");
     expect(typeof sdk.createArtifactServer).toBe("function");
   });
 
   test("createArtifactServer from index is same as from server", async () => {
-    const sdk = await import("../artifact-sdk/index");
-    const { createArtifactServer: direct } = await import("../artifact-sdk/server");
+    const sdk = await import("@swarm/artifacts");
+    const { createArtifactServer: direct } = await import("@swarm/artifacts");
     expect(sdk.createArtifactServer).toBe(direct);
   });
 });

@@ -1,7 +1,6 @@
+import { getApiKey, getMcpBaseUrl } from "@swarm/core-utils";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
-import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
 import { BROWSER_SDK_JS } from "./browser-sdk";
 import { getAvailablePort } from "./port";
 import { createTunnel } from "./tunnel";
