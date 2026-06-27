@@ -3,6 +3,25 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  buildImageTemplate,
+  buildTemplateArgs,
+  buildTrackedShell,
+  deleteTemplate,
+  type E2BSandboxInfo,
+  e2bSdkConnectionOptions,
+  parseDotenv,
+  parseKeyValue,
+  redactObjectWithEnv,
+  redactWithEnv,
+  resolveSwarmApiKey,
+  sandboxLogPath,
+  sandboxPortHost,
+  selectEnv,
+  setTemplateVisibility,
+  ttlRemaining,
+  waitForAgentRegistration,
+} from "@swarm/e2b-dispatch";
+import {
   buildDashboardDeepLink,
   type LaunchSpec,
   loadRuntimeEnv,
@@ -12,27 +31,6 @@ import {
   swarmGroupMembers,
 } from "../commands/e2b";
 import { buildOnboardDashboardUrl } from "../commands/onboard/dashboard-url";
-import {
-  buildImageTemplate,
-  buildTemplateArgs,
-  buildTrackedShell,
-  deleteTemplate,
-  type E2BSandboxInfo,
-  e2bSdkConnectionOptions,
-  sandboxLogPath,
-  sandboxPortHost,
-  setTemplateVisibility,
-  ttlRemaining,
-  waitForAgentRegistration,
-} from "../e2b/dispatch";
-import {
-  parseDotenv,
-  parseKeyValue,
-  redactObjectWithEnv,
-  redactWithEnv,
-  resolveSwarmApiKey,
-  selectEnv,
-} from "../e2b/env";
 
 describe("E2B env helpers", () => {
   test("parses common dotenv forms", () => {

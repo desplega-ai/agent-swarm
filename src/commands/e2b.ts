@@ -1,30 +1,18 @@
 import { dirname, resolve } from "node:path";
 import { getAppUrl } from "@swarm/core-utils";
-import { render } from "ink";
-import { createElement } from "react";
 import {
+  absolutePath,
   buildImageTemplate,
   buildTemplate,
   createSandbox,
-  deleteTemplate,
-  type E2BSandboxInfo,
-  killSandbox,
-  listSandboxes,
-  sandboxPortUrl,
-  setSandboxTimeout,
-  setTemplateVisibility,
-  startDetachedProcess,
-  streamSandboxLog,
-  ttlRemaining,
-  waitForAgentRegistration,
-  waitForHttpOk,
-} from "../e2b/dispatch";
-import {
-  absolutePath,
   DEFAULT_E2B_API_BASE,
   DEFAULT_E2B_FORWARD_KEYS,
   DEFAULT_E2B_TEMPLATE_NAMES,
+  deleteTemplate,
+  type E2BSandboxInfo,
   type EnvMap,
+  killSandbox,
+  listSandboxes,
   maybeReadDotenvFile,
   parseKeyValue,
   readDotenvFile,
@@ -32,9 +20,19 @@ import {
   redactWithEnv,
   resolveSwarmApiKey,
   type SwarmRole,
+  sandboxPortUrl,
   selectEnv,
+  setSandboxTimeout,
+  setTemplateVisibility,
   splitKeys,
-} from "../e2b/env";
+  startDetachedProcess,
+  streamSandboxLog,
+  ttlRemaining,
+  waitForAgentRegistration,
+  waitForHttpOk,
+} from "@swarm/e2b-dispatch";
+import { render } from "ink";
+import { createElement } from "react";
 import {
   DEFAULT_STACK_TIMEOUT_SEC,
   DEFAULT_STACK_WORKERS,

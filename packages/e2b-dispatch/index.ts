@@ -3,5 +3,5 @@
 // importable by package name before any files move. Regenerate after editing
 // packages.map.json:  bun scripts/generate-barrels.ts
 
-export * from "../../src/e2b/dispatch";
-export * from "../../src/e2b/env";
+export * from "./src/e2b/dispatch";
+export * from "./src/e2b/env";

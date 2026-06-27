@@ -19,12 +19,12 @@ import {
   e2bSdkConnectionOptions,
   killSandbox,
   listSandboxes,
+  redactWithEnv,
   sandboxPortUrl,
   startDetachedProcess,
   waitForAgentRegistration,
   waitForHttpOk,
-} from "../../../src/e2b/dispatch";
-import { redactWithEnv } from "../../../src/e2b/env";
+} from "@swarm/e2b-dispatch";
 import { defaultMemberIdentity, type HarnessConfig, type WorkerSpec } from "../types.ts";
 import { cleanVersion } from "./version.ts";
 
