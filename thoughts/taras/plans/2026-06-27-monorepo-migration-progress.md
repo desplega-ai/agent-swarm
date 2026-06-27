@@ -17,7 +17,7 @@ the full suite green. Update #833's title/body from "Phase 0" → full migration
 |---|---|
 | 0 — Bun workspaces + Turbo scaffold | ✅ DONE (commit c074abc4) |
 | 1 — tsconfig bridge + ts-morph codemod + packages.map.json | ✅ DONE (verified: tsc 0, test 5439, docker, lint, turbo) |
-| 2 — Extract L0+L1 leaves | 🔄 DONE: types, otel, credentials, prompt-templates, artifacts, core-utils (04fee212), scripts (c2e3e23b), e2b-dispatch (a5a333e7). TODO: ai-pricing, swarm-templates, api-client |
+| 2 — Extract L0+L1 leaves | 🔄 DONE (9): types, otel, credentials, prompt-templates, artifacts, core-utils, scripts, e2b-dispatch, ai-pricing (204c11e9). DEFERRED: swarm-templates (touches templates-ui Next app prebuild + folds schema types into @swarm/types — do with app split), api-client (NET-NEW generated from openapi + CI gate — additive, not on critical path) |
 | 3 — Extract L2 (ai-llm [+raters hoist&fold], mcp-tool) | ⬜ |
 | 4 — Extract L3 (harness, storage [+test-preload pivot]) | ⬜ |
 | 5 — Extract L4+L5 (workflows, integrations [slack-first]) | ⬜ |
