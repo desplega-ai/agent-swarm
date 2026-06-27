@@ -12,7 +12,7 @@ import type {
   ServerRequest,
   ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
-import { withSpan } from "../otel";
+import { withSpan } from "@swarm/otel";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;

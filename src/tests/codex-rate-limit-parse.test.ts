@@ -3,7 +3,7 @@ import {
   MAX_RATE_LIMIT_RESET_MS,
   parseCodexRateLimitResetTime,
   SessionErrorTracker,
-} from "../utils/error-tracker";
+} from "@swarm/otel";
 
 // Verbatim from Linear CAI-1284 issue body (Team/Business plan fixture)
 const VERBATIM_ERROR_MESSAGE =

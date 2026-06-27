@@ -1,18 +1,26 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { ensure, initialize } from "@desplega.ai/business-use";
-import { type ProviderName, type RepoGuidelines, resolveTaskModelSelection } from "@swarm/types";
-import type { TemplateResponse } from "../../templates/schema.ts";
 import {
   type Attributes,
   initOtel,
+  initTelemetry,
   injectTraceContext,
+  isCodexCreditsExhaustedMessage,
   isPollTracingEnabled,
+  isRateLimitMessage,
+  MAX_RATE_LIMIT_RESET_MS,
+  parseRateLimitResetTime,
+  type RateLimitWindowTelemetry,
+  resolveCodexCreditsExhaustedCooldownMs,
   type SwarmSpan,
   startSpan,
+  telemetry,
   withSpan,
   withSpanContext,
-} from "../otel.ts";
+} from "@swarm/otel";
+import { type ProviderName, type RepoGuidelines, resolveTaskModelSelection } from "@swarm/types";
+import type { TemplateResponse } from "../../templates/schema.ts";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
 import {
   generateDefaultClaudeMd,
@@ -33,20 +41,11 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
-import { initTelemetry, telemetry } from "../telemetry.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
-import {
-  isCodexCreditsExhaustedMessage,
-  isRateLimitMessage,
-  MAX_RATE_LIMIT_RESET_MS,
-  parseRateLimitResetTime,
-  type RateLimitWindowTelemetry,
-  resolveCodexCreditsExhaustedCooldownMs,
-} from "../utils/error-tracker.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";

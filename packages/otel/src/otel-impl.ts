@@ -15,9 +15,9 @@ import {
 } from "@opentelemetry/resources";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import pkg from "../package.json";
+import { scrubSecrets } from "@swarm/core-utils";
+import pkg from "../../../package.json";
 import type { SwarmSpan } from "./otel";
-import { scrubSecrets } from "./utils/secret-scrubber";
 
 type AttributeValue = string | number | boolean | string[] | number[] | boolean[];
 type Attributes = Record<string, AttributeValue | undefined>;

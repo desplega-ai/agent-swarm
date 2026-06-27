@@ -6,7 +6,7 @@ import {
   parseStderrForErrors,
   SessionErrorTracker,
   trackErrorFromJson,
-} from "../utils/error-tracker";
+} from "@swarm/otel";
 
 // Verbatim fixture from Linear CAI-1279 (session logs for task b7fbbdb9-4922-41d9-88ec-21febd6c4fec)
 const FIXTURE_REJECTED = {

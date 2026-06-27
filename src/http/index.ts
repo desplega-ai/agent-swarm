@@ -6,6 +6,15 @@ import {
 } from "node:http";
 import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import {
+  initOtel,
+  initTelemetry,
+  isPollTracingEnabled,
+  startSpan,
+  telemetry,
+  withRemoteContext,
+  withSpanContext,
+} from "@swarm/otel";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
 import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
@@ -14,17 +23,9 @@ import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
 import { initJira } from "../jira";
 import { initLinear } from "../linear";
-import {
-  initOtel,
-  isPollTracingEnabled,
-  startSpan,
-  withRemoteContext,
-  withSpanContext,
-} from "../otel";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
-import { initTelemetry, telemetry } from "../telemetry";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
 import { scrubSecrets } from "../utils/secret-scrubber";

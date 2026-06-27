@@ -7,7 +7,7 @@
  * - Importable from both API server and workers
  */
 import { randomUUID } from "node:crypto";
-import pkg from "../package.json";
+import pkg from "../../../package.json";
 
 const TELEMETRY_ENDPOINT = "https://proxy.desplega.sh/v1/events";
 const PRODUCT = "agent-swarm";

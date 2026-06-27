@@ -2,6 +2,7 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type Span, trace } from "@opentelemetry/api";
+import { parseStderrForErrors, SessionErrorTracker, trackErrorFromJson } from "@swarm/otel";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -9,11 +10,6 @@ import {
   getContextWindowSize,
 } from "../utils/context-window";
 import { validateClaudeCredentials } from "../utils/credentials";
-import {
-  parseStderrForErrors,
-  SessionErrorTracker,
-  trackErrorFromJson,
-} from "../utils/error-tracker";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";

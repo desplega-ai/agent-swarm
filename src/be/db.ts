@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite";
+import type { RateLimitWindowTelemetry } from "@swarm/otel";
+import { telemetry } from "@swarm/otel";
 import type {
   ActiveSession,
   Agent,
@@ -104,9 +106,7 @@ import {
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
 import { configureDbResolver } from "../prompts/resolver";
-import { telemetry } from "../telemetry";
 import { deriveProviderFromKeyType } from "../utils/credentials";
-import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";

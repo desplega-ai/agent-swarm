@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import pkg from "../../package.json";
 import {
   _getInstallationIdForTests,
   _isE2bSandbox,
@@ -7,7 +6,8 @@ import {
   _resolveCloudMode,
   initTelemetry,
   track,
-} from "../telemetry";
+} from "@swarm/otel";
+import pkg from "../../package.json";
 
 // initTelemetry no-ops when ANONYMIZED_TELEMETRY=false. The CI env or local
 // setup may set this, so force-enable for the duration of this file.

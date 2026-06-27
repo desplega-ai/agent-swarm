@@ -11,7 +11,7 @@ import {
   resolveCodexCreditsExhaustedCooldownMs,
   SessionErrorTracker,
   trackErrorFromJson,
-} from "../utils/error-tracker";
+} from "@swarm/otel";
 
 describe("SessionErrorTracker — getRateLimitResetAt", () => {
   test("returns undefined when no rate_limit_event was processed", () => {

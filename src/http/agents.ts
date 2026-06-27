@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
+import { telemetry } from "@swarm/otel";
 import {
   AgentCredStatusSchema,
   AgentLatestModelSchema,
@@ -27,7 +28,6 @@ import {
   updateAgentStatus,
   upsertSwarmConfig,
 } from "../be/db";
-import { telemetry } from "../telemetry";
 import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
 

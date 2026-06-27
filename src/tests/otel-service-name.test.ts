@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resolveServiceName } from "../otel-impl";
+import { resolveServiceName } from "@swarm/otel";
 
 describe("resolveServiceName", () => {
   let savedServiceName: string | undefined;
