@@ -19,7 +19,7 @@ the full suite green. Update #833's title/body from "Phase 0" → full migration
 | 1 — tsconfig bridge + ts-morph codemod + packages.map.json | ✅ DONE (verified: tsc 0, test 5439, docker, lint, turbo) |
 | 2 — Extract L0+L1 leaves | 🔄 DONE (9): types, otel, credentials, prompt-templates, artifacts, core-utils, scripts, e2b-dispatch, ai-pricing (204c11e9). DEFERRED: swarm-templates (touches templates-ui Next app prebuild + folds schema types into @swarm/types — do with app split), api-client (NET-NEW generated from openapi + CI gate — additive, not on critical path) |
 | 3 — Extract L2 (ai-llm [+raters hoist&fold], mcp-tool) | ✅ DONE: ai-llm (0391056c, cycle-break #2 — grep be/ empty), mcp-tool (ae35a5b8) |
-| 4 — Extract L3 (harness, storage [+test-preload pivot]) | 🔄 harness DONE (eae401d0, +3 lazy-adapter smoke tests, dynamic factory preserved). storage TODO — THE PRELOAD PIVOT (do fresh, careful) |
+| 4 — Extract L3 (harness, storage [+test-preload pivot]) | 🔄 harness DONE (eae401d0). storage ATTEMPTED + cleanly REVERTED — needs 2 infra fixes first (below). Tree green at 68667e81. |
 | 5 — Extract L4+L5 (workflows, integrations [slack-first]) | ⬜ |
 | 6 — api-server + apps split + CI/Docker/openapi cutover + createServer side-effect extraction + dependency-cruiser | ⬜ |
 
@@ -112,6 +112,29 @@ integrations (Phase5), api-server + apps split + cutover (Phase6), swarm-templat
   - Verify `grep -rn 'github|slack|linear|jira' packages/storage/src` is empty (be→github already inverted PR#822).
   - Fresh-DB migration smoke: `rm -f agent-swarm-db.sqlite && bun run start:http`.
   - DB-bound: barrels here have 27 collisions — expect collision fixes. `bunfig.toml` preload path moves with it.
+
+## ⚠️ STORAGE: attempted, reverted clean. The move/codemod/preload/migrations/boundaries ALL worked
+## (677 specifiers/422 files rewritten, ~130 files moved, preload smoke passed, tsc 0, lint 0, boundaries OK,
+## inversion held). Blocked on 2 things — DECISIONS MADE, do these FIRST next attempt:
+## 1. **Barrel text-import poisoning (production bug, must fix).** The storage bridge barrel `export *`s the
+##    `be/seed-scripts/catalog/*.ts` files, but `seed-scripts/index.ts` text-imports them `with {type:"text"}`.
+##    Eager ESM barrel eval loads the catalog MODULES before seed-scripts/index, so the text-import gets the
+##    module (a function) not source text → `SEED_SCRIPTS[*].source` corrupted (15/18). Same class as the 4
+##    `.inline.ts` files already dropped from the scripts barrel. **FIX: exclude every text-imported source
+##    file (catalog/*, *.inline.ts) from the storage barrel** (only consumer is seed-scripts.test.ts, which
+##    should import them directly/relatively). Also patch `scripts/generate-barrels.ts` to skip files that are
+##    text-imported anywhere (detect `with { type: "text" }`) so future bridge barrels don't reintroduce it.
+## 2. **Codemod gaps + test-reference repoints — AUTHORIZED.** The "never edit tests" rule = never change what a
+##    test ASSERTS; mechanically repointing a MOVED import specifier in a test file IS allowed (it's not a logic
+##    change). The codemod doesn't yet rewrite: `require("..")`, `mock.module("..")`, a default-import of a
+##    barrel named-default, a namespaced-collision import, or `new URL("../..", import.meta.url)` / `join(import.meta.dir,"..")`
+##    PATH STRINGS (depth changes on move). EITHER extend the codemod for `require()`+`mock.module()` (mechanical)
+##    OR hand-repoint the ~4 affected files (gitlab-vcs-db, mcp-oauth-queries require(); memory-http-recall-gating
+##    mock.module(); seed-scripts.test.ts default/namespaced/join-path; extract-schema.ts new URL depth). With #1+#2
+##    the agent confirmed storage reaches green (it got to 5427/1fail, the 1 fail was purely the #1 poisoning).
+## 3. preload.ts: import initDb/getDb/closeDb/serialize — the agent found the storage barrel eager-loads the whole
+##    graph, so preload should import db.ts DIRECTLY (relative or a dedicated lightweight `@swarm/storage/db` subpath),
+##    not the fat barrel. bunfig preload path itself stays (tests stay co-located).
 
 ## Phase 5 (workflows [engine+swarm+scheduler+tasks], integrations [slack-first, one subdir at a time])
 ## Phase 6 (api-server + apps split + createServer side-effect→apps/api bootstrap + CI/Docker/openapi cutover +
