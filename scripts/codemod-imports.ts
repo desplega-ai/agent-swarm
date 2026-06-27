@@ -91,7 +91,12 @@ function resolveModuleFile(fromAbs: string, spec: string): string | null {
     return null; // external / bare specifier
   }
   const target = join(baseDir, rest);
-  const cands = [target, `${target}.ts`, `${target}.tsx`, join(target, "index.ts"), join(target, "index.tsx")];
+  // TS source frequently writes `.js`/`.mjs` specifiers that actually resolve to `.ts`/`.tsx`
+  // files (e.g. src/providers/codex-oauth/*.js). Try the TS twin first so those resolve.
+  const jsExt = target.match(/\.(js|jsx|mjs|cjs)$/);
+  const cands = jsExt
+    ? [`${target.slice(0, -jsExt[0].length)}.ts`, `${target.slice(0, -jsExt[0].length)}.tsx`, target]
+    : [target, `${target}.ts`, `${target}.tsx`, join(target, "index.ts"), join(target, "index.tsx")];
   for (const c of cands) if (existsSync(c) && statSync(c).isFile()) return c;
   return null;
 }
