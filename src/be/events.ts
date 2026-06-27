@@ -1,4 +1,4 @@
-import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "../types";
+import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "@swarm/types";
 import { getDb } from "./db";
 
 // -- Events --

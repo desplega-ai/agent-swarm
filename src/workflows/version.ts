@@ -1,5 +1,5 @@
+import type { WorkflowSnapshot, WorkflowVersion } from "@swarm/types";
 import { createWorkflowVersion, getWorkflow, getWorkflowVersions } from "../be/db";
-import type { WorkflowSnapshot, WorkflowVersion } from "../types";
 
 /**
  * Create a version snapshot of a workflow's current state.

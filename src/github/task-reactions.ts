@@ -1,5 +1,5 @@
+import type { AgentTask } from "@swarm/types";
 import { onTaskStarted } from "../be/task-lifecycle-events";
-import type { AgentTask } from "../types";
 import {
   addGraphQLReaction,
   addIssueReaction,

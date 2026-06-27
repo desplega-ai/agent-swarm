@@ -1,5 +1,5 @@
+import type { CooldownConfig } from "@swarm/types";
 import { getLastRunStart, getLastSuccessfulRun } from "../be/db";
-import type { CooldownConfig } from "../types";
 
 /**
  * Convert a CooldownConfig to total milliseconds.

@@ -1,14 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
-import { resolveTaskAuditUserId } from "@/be/audit-user";
-import { createWorkflow } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
 import {
   CooldownConfigSchema,
   InputValueSchema,
   TriggerConfigSchema,
   WorkflowDefinitionSchema,
-} from "@/types";
+} from "@swarm/types";
+import { z } from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
+import { createWorkflow } from "@/be/db";
+import { createToolRegistrar } from "@/tools/utils";
 import { validateDefinition } from "@/workflows/definition";
 
 export const registerCreateWorkflowTool = (server: McpServer) => {

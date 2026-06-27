@@ -7,10 +7,10 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import type { Metric } from "@swarm/types";
 import { closeDb, getMetricVersions, initDb } from "../be/db";
 import { handleMetrics } from "../http/metrics";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import type { Metric } from "../types";
 
 const TEST_DB_PATH = "./test-metrics-http.sqlite";
 const TEST_PORT = 13083;

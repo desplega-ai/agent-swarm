@@ -1,4 +1,4 @@
-import { ProviderNameSchema } from "../types";
+import { ProviderNameSchema } from "@swarm/types";
 
 /**
  * Guards against storing reserved keys in the swarm_config table.

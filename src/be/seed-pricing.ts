@@ -19,7 +19,7 @@
  * admin route (`POST /api/pricing`) — we don't overwrite seed rows.
  */
 
-import type { PricingProvider, PricingTokenClass } from "../types";
+import type { PricingProvider, PricingTokenClass } from "@swarm/types";
 import { getDb } from "./db";
 import {
   loadModelsDevCache,

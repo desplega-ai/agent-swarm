@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@swarm/types";
 import * as z from "zod";
 import { getSwarmConfigs, maskSecrets } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
 
 export const registerListConfigTool = (server: McpServer) => {

@@ -1,4 +1,4 @@
-import type { AgentMemorySource } from "@/types";
+import type { AgentMemorySource } from "@swarm/types";
 
 function numEnv(key: string, fallback: number): number {
   const val = process.env[key];

@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
+import { AgentCredStatusSchema } from "@swarm/types";
 import {
   buildCredStatusReport,
   checkProviderCredentials,
@@ -11,7 +12,6 @@ import { checkCodexCredentials } from "../providers/codex-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import { checkPiMonoCredentials } from "../providers/pi-mono-adapter";
-import { AgentCredStatusSchema } from "../types";
 
 /** Build a stub `fs` whose `existsSync` returns true only for paths in the set. */
 function fsWith(present: Set<string>): { existsSync(p: string): boolean } {

@@ -1,3 +1,4 @@
+import type { Workflow, WorkflowDefinition, WorkflowNode } from "@swarm/types";
 import {
   createWorkflowRun,
   createWorkflowRunStep,
@@ -11,7 +12,6 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { telemetry } from "../telemetry";
-import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";

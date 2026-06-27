@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { Workflow } from "@swarm/types";
 import {
   closeDb,
   createWorkflow,
@@ -8,7 +9,6 @@ import {
   initDb,
   updateWorkflow,
 } from "../be/db";
-import type { Workflow } from "../types";
 import { snapshotWorkflow } from "../workflows/version";
 
 const TEST_DB_PATH = "./test-workflow-versions.sqlite";

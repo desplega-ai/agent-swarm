@@ -1,4 +1,4 @@
-import type { ProviderMetaMap, ProviderName } from "@/types";
+import type { ProviderMetaMap, ProviderName } from "@swarm/types";
 
 export function parseProviderMeta<TProvider extends ProviderName>(
   rawProvider: TProvider | null | undefined,

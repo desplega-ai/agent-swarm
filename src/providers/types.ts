@@ -33,7 +33,7 @@ export interface CostData {
   provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin";
 }
 
-import type { ProviderName } from "../types";
+import type { ProviderName } from "@swarm/types";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 
 /** Normalized event emitted by any provider adapter. */

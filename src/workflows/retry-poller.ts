@@ -1,3 +1,4 @@
+import type { RetryPolicy } from "@swarm/types";
 import {
   getRetryableSteps,
   getWorkflow,
@@ -5,7 +6,6 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import type { RetryPolicy } from "../types";
 import { checkpointStep, checkpointStepFailure } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { interpolateNodeConfig, walkGraph } from "./engine";

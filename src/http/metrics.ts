@@ -1,4 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  type Metric,
+  MetricDefinitionSchema,
+  type MetricParam,
+  type MetricSummary,
+  type MetricVariable,
+  MetricVersionSchema,
+  type MetricWidget,
+} from "@swarm/types";
 import { z } from "zod";
 import {
   countAllMetrics,
@@ -13,15 +22,6 @@ import {
   updateMetric,
 } from "../be/db";
 import { snapshotMetric } from "../metrics/version";
-import {
-  type Metric,
-  MetricDefinitionSchema,
-  type MetricParam,
-  type MetricSummary,
-  type MetricVariable,
-  MetricVersionSchema,
-  type MetricWidget,
-} from "../types";
 import { assertSelectOnlyQuery, executeReadOnlyQuery } from "./db-query";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";

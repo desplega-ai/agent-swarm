@@ -1,5 +1,5 @@
+import type { ExecutorMeta, RetryPolicy } from "@swarm/types";
 import type { ZodType, z } from "zod";
-import type { ExecutorMeta, RetryPolicy } from "../../types";
 import type { WorkflowEventBus } from "../event-bus";
 
 // ─── Dependencies ──────────────────────────────────────────

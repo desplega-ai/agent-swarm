@@ -21,10 +21,10 @@
  * paths (errors only) DO scrub via `scrubSecrets`.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Page } from "@swarm/types";
 import { z } from "zod";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../artifact-sdk/browser-sdk";
 import { getPage, incrementPageViewCount } from "../be/db";
-import type { Page } from "../types";
 import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
 import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";

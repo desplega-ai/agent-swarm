@@ -7,10 +7,10 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import type { Page } from "@swarm/types";
 import { closeDb, initDb } from "../be/db";
 import { handlePages } from "../http/pages";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import type { Page } from "../types";
 
 const TEST_DB_PATH = "./test-pages-http.sqlite";
 const TEST_PORT = 13037;

@@ -1,8 +1,8 @@
+import type { ExecutorMeta } from "@swarm/types";
+import { FollowUpConfigSchema, ModelTierSchema, splitLegacyModelAlias } from "@swarm/types";
 import { z } from "zod";
 import { workflowContextKey } from "../../tasks/context-key";
 import { withSiblingAwareness } from "../../tasks/sibling-awareness";
-import type { ExecutorMeta } from "../../types";
-import { FollowUpConfigSchema, ModelTierSchema, splitLegacyModelAlias } from "../../types";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 

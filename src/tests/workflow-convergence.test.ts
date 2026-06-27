@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
 import { z } from "zod";
 import {
   closeDb,
@@ -9,7 +10,6 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
 } from "../be/db";
-import type { Workflow, WorkflowDefinition } from "../types";
 import { findReadyNodes, startWorkflowExecution, walkGraph } from "../workflows/engine";
 import {
   BaseExecutor,

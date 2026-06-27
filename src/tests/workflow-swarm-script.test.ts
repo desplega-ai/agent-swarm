@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
 import { z } from "zod";
 import {
   closeDb,
@@ -12,7 +13,6 @@ import {
 } from "../be/db";
 import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
-import type { Workflow, WorkflowDefinition } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
 import {

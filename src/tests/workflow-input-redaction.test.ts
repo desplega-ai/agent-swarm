@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { WorkflowDefinition } from "@swarm/types";
 import { z } from "zod";
 import {
   closeDb,
@@ -9,7 +10,6 @@ import {
   initDb,
   upsertSwarmConfig,
 } from "../be/db";
-import type { WorkflowDefinition } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import {
   BaseExecutor,

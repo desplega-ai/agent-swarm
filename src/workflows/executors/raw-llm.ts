@@ -1,5 +1,5 @@
+import type { ExecutorMeta } from "@swarm/types";
 import { z } from "zod";
-import type { ExecutorMeta } from "../../types";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 // ─── Schemas ────────────────────────────────────────────────

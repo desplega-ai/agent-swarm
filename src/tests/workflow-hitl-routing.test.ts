@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
 import { z } from "zod";
 import {
   closeDb,
@@ -9,7 +10,6 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
 } from "../be/db";
-import type { Workflow, WorkflowDefinition } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
 import {
@@ -47,7 +47,7 @@ class MockHITLExecutor extends BaseExecutor<
   protected async execute(
     config: z.infer<typeof MockHITLExecutor.schema>,
     _context: Readonly<Record<string, unknown>>,
-    meta: import("../types").ExecutorMeta,
+    meta: import("@swarm/types").ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof MockHITLExecutor.outSchema>>> {
     // Create a real approval request in the DB so resumeFromApprovalResolution can find it
     const requestId = crypto.randomUUID();
@@ -90,7 +90,7 @@ class MockAsyncTaskExecutor extends BaseExecutor<
   protected async execute(
     _config: z.infer<typeof MockAsyncTaskExecutor.schema>,
     _context: Readonly<Record<string, unknown>>,
-    meta: import("../types").ExecutorMeta,
+    meta: import("@swarm/types").ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof MockAsyncTaskExecutor.outSchema>>> {
     this.lastMeta = { runId: meta.runId, stepId: meta.stepId, nodeId: meta.nodeId };
     return {

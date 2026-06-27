@@ -1,3 +1,4 @@
+import type { AgentTask } from "@swarm/types";
 import {
   assignUnassignedTaskPending,
   backfillSupersedeTaskResumeTaskId,
@@ -36,7 +37,6 @@ import {
   getNextResumeGeneration,
   getResumeGeneration,
 } from "../tasks/worker-follow-up";
-import type { AgentTask } from "../types";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
 // Side-effect import: registers heartbeat event templates in the in-memory registry

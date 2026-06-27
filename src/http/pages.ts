@@ -1,4 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  type Page,
+  PageAuthModeSchema,
+  PageContentTypeSchema,
+  type PageSummary,
+} from "@swarm/types";
 import { z } from "zod";
 import {
   countAllPages,
@@ -13,7 +19,6 @@ import {
   updatePage,
 } from "../be/db";
 import { snapshotPage } from "../pages/version";
-import { type Page, PageAuthModeSchema, PageContentTypeSchema, type PageSummary } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { issuePageSessionCookie } from "../utils/page-session";
 import { route } from "./route-def";

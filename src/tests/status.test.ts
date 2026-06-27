@@ -16,6 +16,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AgentCredStatus } from "@swarm/types";
 import {
   closeDb,
   createAgent,
@@ -36,7 +37,6 @@ import {
   computeHealth,
   type SetupMilestone,
 } from "../http/status";
-import type { AgentCredStatus } from "../types";
 
 // Helper for tests: stamp an agent row with a cred_status snapshot so the
 // `/status` endpoint sees it. Mirrors what the worker boot loop does via

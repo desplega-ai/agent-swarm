@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import type { Agent } from "@swarm/types";
 import pkg from "../../package.json";
 import {
   buildRatingsFromLlm,
@@ -10,7 +11,6 @@ import {
   type RetrievalRow,
 } from "../be/memory/raters/llm";
 import { contentSha256, readIdentityBaselines } from "../commands/profile-sync";
-import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";

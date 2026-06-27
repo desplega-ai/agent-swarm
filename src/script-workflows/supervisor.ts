@@ -1,5 +1,5 @@
+import type { ScriptRun } from "@swarm/types";
 import { getRunningScriptRuns, getScriptRun, updateScriptRun } from "../be/db";
-import type { ScriptRun } from "../types";
 import { getApiKey } from "../utils/api-key";
 import {
   localProcessScriptExecutor,

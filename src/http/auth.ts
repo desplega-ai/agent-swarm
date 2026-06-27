@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
+import type { User } from "@swarm/types";
 import { fingerprintApiKey, resolveUserByToken } from "../be/users";
-import type { User } from "../types";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
 
 function extractBearer(req: IncomingMessage): string | null {

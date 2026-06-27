@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ServiceSchema, ServiceStatusSchema } from "@swarm/types";
 import * as z from "zod";
 import { getServiceByAgentAndName, getServiceById, updateServiceStatus } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { ServiceSchema, ServiceStatusSchema } from "@/types";
 
 export const registerUpdateServiceStatusTool = (server: McpServer) => {
   createToolRegistrar(server)(

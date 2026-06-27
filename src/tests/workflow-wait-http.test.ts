@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
 import * as db from "../be/db";
 import {
   closeDb,
@@ -12,7 +13,6 @@ import {
 } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflowEvents } from "../http/workflow-events";
-import type { Workflow, WorkflowDefinition } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";

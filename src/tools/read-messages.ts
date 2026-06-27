@@ -1,4 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ChannelMessage } from "@swarm/types";
+import { ChannelMessageSchema } from "@swarm/types";
 import * as z from "zod";
 import {
   getAllChannels,
@@ -11,8 +13,6 @@ import {
   updateReadState,
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import type { ChannelMessage } from "@/types";
-import { ChannelMessageSchema } from "@/types";
 
 export const registerReadMessagesTool = (server: McpServer) => {
   createToolRegistrar(server)(

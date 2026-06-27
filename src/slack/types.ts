@@ -1,4 +1,4 @@
-import type { Agent } from "../types";
+import type { Agent } from "@swarm/types";
 
 export interface SlackMessageContext {
   channelId: string;

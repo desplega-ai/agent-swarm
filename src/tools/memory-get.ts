@@ -1,10 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { AgentMemorySource } from "@swarm/types";
+import { AgentMemorySchema } from "@swarm/types";
 import * as z from "zod";
 import { getMemoryStore } from "@/be/memory";
 import { recordRetrievals } from "@/be/memory/raters/retrieval";
 import { createToolRegistrar } from "@/tools/utils";
-import type { AgentMemorySource } from "@/types";
-import { AgentMemorySchema } from "@/types";
 
 const NUDGE_ELIGIBLE_SOURCES: ReadonlySet<AgentMemorySource> = new Set(["manual", "file_index"]);
 

@@ -1,5 +1,5 @@
+import type { RetryPolicy } from "@swarm/types";
 import { getDb, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
-import type { RetryPolicy } from "../types";
 
 /**
  * Checkpoint a successful step — atomic DB write of step result + run context.

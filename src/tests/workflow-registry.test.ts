@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { ExecutorMeta, WorkflowDefinition } from "@swarm/types";
 import { z } from "zod";
 import { closeDb, initDb } from "../be/db";
-import type { ExecutorMeta, WorkflowDefinition } from "../types";
 import {
   findEntryNodes,
   generateEdges,

@@ -14,6 +14,7 @@
  * `swarmId = ""` — reconcilable on retry.
  */
 
+import { type Agent, isTerminalTaskStatus } from "@swarm/types";
 import { cancelTask, getAllAgents, getTaskById } from "../be/db";
 import { getOAuthTokens } from "../be/db-queries/oauth";
 import {
@@ -25,7 +26,6 @@ import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { buildJiraContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { type Agent, isTerminalTaskStatus } from "../types";
 import { extractMentions, extractText } from "./adf";
 import { getJiraMetadata } from "./metadata";
 // Side-effect import: registers all Jira event templates in the prompt registry

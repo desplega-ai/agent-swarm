@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { IncomingMessage } from "node:http";
-import type { User } from "../types";
+import type { User } from "@swarm/types";
 
 export type HttpRequestAuth =
   | { kind: "operator"; fingerprint: string }

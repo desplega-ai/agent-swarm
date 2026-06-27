@@ -1,4 +1,4 @@
-import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
+import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@swarm/types";
 
 // ============================================================================
 // EmbeddingProvider — text to vector, swappable

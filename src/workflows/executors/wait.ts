@@ -1,5 +1,5 @@
+import type { ExecutorMeta } from "@swarm/types";
 import { z } from "zod";
-import type { ExecutorMeta } from "../../types";
 import { subscribeWaitToBus } from "../resume";
 import { compileStringFilter } from "../wait-filter";
 import type { ExecutorResult } from "./base";

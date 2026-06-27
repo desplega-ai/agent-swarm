@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ScriptRunStatusSchema } from "@swarm/types";
 import * as z from "zod";
 import { createToolRegistrar } from "@/tools/utils";
-import { ScriptRunStatusSchema } from "@/types";
 import { proxyScriptsApi, scriptNameSchema, scriptToolOutputSchema } from "./script-common";
 
 export const LAUNCH_SCRIPT_RUN_DESCRIPTION =

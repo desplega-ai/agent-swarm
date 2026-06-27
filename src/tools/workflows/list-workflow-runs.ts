@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { WorkflowRunStatusSchema } from "@swarm/types";
 import { z } from "zod";
 import { listWorkflowRuns } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { WorkflowRunStatusSchema } from "@/types";
 
 export const registerListWorkflowRunsTool = (server: McpServer) => {
   createToolRegistrar(server)(

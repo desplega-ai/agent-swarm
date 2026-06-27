@@ -1,4 +1,4 @@
-import type { ScriptFsMode, ScriptRecord, ScriptScope, ScriptVersionRecord } from "../../types";
+import type { ScriptFsMode, ScriptRecord, ScriptScope, ScriptVersionRecord } from "@swarm/types";
 import { computeContentHash, getDb } from "../db";
 import { embedScript } from "./embeddings";
 

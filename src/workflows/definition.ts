@@ -4,7 +4,7 @@ import type {
   WorkflowEdge,
   WorkflowNode,
   WorkflowPatch,
-} from "../types";
+} from "@swarm/types";
 import type { ExecutorRegistry } from "./executors/registry";
 
 /** Extract all target node IDs from a node's `next` field */

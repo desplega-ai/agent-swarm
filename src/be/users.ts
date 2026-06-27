@@ -20,7 +20,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import type { User } from "../types";
+import type { User } from "@swarm/types";
 import { getDb } from "./db";
 
 // ---------------------------------------------------------------------------

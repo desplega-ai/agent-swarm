@@ -1,4 +1,4 @@
-import type { OAuthApp, OAuthTokens } from "../../tracker/types";
+import type { OAuthApp, OAuthTokens } from "@swarm/types";
 import { normalizeDateRequired } from "../date-utils";
 import { getDb } from "../db";
 

@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ServiceSchema } from "@swarm/types";
 import * as z from "zod";
 import { getAgentById, upsertService } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { ServiceSchema } from "@/types";
 
 const SWARM_URL = process.env.SWARM_URL ?? "localhost";
 

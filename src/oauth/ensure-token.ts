@@ -1,3 +1,4 @@
+import type { OAuthTokens } from "@swarm/types";
 import {
   acquireOAuthRefreshLock,
   getOAuthApp,
@@ -5,7 +6,6 @@ import {
   isTokenExpiringSoon,
   releaseOAuthRefreshLock,
 } from "../be/db-queries/oauth";
-import type { OAuthTokens } from "../tracker/types";
 import { type OAuthProviderConfig, refreshAccessToken } from "./wrapper";
 
 const refreshLocks = new Map<string, Promise<void>>();

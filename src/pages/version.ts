@@ -1,5 +1,5 @@
+import type { PageSnapshot, PageVersion } from "@swarm/types";
 import { createPageVersion, getPage, getPageVersions } from "../be/db";
-import type { PageSnapshot, PageVersion } from "../types";
 
 /**
  * Create a version snapshot of a page's current state.

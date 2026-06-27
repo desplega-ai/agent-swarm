@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { VersionableField } from "@swarm/types";
 import * as z from "zod";
 import { getAgentById, getContextVersionHistory } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import type { VersionableField } from "@/types";
 
 export const registerContextHistoryTool = (server: McpServer) => {
   createToolRegistrar(server)(

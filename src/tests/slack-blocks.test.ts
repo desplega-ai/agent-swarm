@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { TaskAttachment } from "@swarm/types";
 import {
   buildAssignmentSummaryBlocks,
   buildBufferFlushBlocks,
@@ -14,7 +15,6 @@ import {
   markdownToSlack,
   type TreeNode,
 } from "../slack/blocks";
-import type { TaskAttachment } from "../types";
 
 describe("markdownToSlack", () => {
   test("converts bold correctly without italic interference", () => {

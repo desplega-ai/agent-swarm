@@ -7,6 +7,15 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import type {
+  Workflow,
+  WorkflowDefinition,
+  WorkflowEdge,
+  WorkflowRun,
+  WorkflowRunStep,
+  WorkflowSummary,
+  WorkflowVersion,
+} from "@swarm/types";
 import {
   closeDb,
   createWorkflowRun,
@@ -16,15 +25,6 @@ import {
 } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
-import type {
-  Workflow,
-  WorkflowDefinition,
-  WorkflowEdge,
-  WorkflowRun,
-  WorkflowRunStep,
-  WorkflowSummary,
-  WorkflowVersion,
-} from "../types";
 import { initWorkflows, stopRetryPoller } from "../workflows";
 
 const TEST_DB_PATH = "./test-workflow-http-v2.sqlite";

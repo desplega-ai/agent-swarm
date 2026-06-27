@@ -1,4 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  type ScriptDetail,
+  ScriptFsModeSchema,
+  type ScriptListItem,
+  type ScriptRecord,
+  type ScriptScope,
+  ScriptScopeSchema,
+} from "@swarm/types";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
@@ -16,14 +24,6 @@ import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
 import { SCRIPT_SDK_TYPES, SCRIPT_STDLIB_TYPES, typecheckScript } from "../be/scripts/typecheck";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { runScript } from "../scripts-runtime/loader";
-import {
-  type ScriptDetail,
-  ScriptFsModeSchema,
-  type ScriptListItem,
-  type ScriptRecord,
-  type ScriptScope,
-  ScriptScopeSchema,
-} from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";

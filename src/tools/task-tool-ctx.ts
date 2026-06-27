@@ -1,5 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AgentTask, User } from "@/types";
+import type { AgentTask, User } from "@swarm/types";
 import type { RequestInfo } from "./utils";
 
 export type ToolCtx =

@@ -1,4 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  EventCategorySchema,
+  EventNameSchema,
+  EventSourceSchema,
+  EventStatusSchema,
+} from "@swarm/types";
 import { z } from "zod";
 import {
   createEvent,
@@ -6,12 +12,6 @@ import {
   getEventCountsFiltered,
   getEventsFiltered,
 } from "../be/events";
-import {
-  EventCategorySchema,
-  EventNameSchema,
-  EventSourceSchema,
-  EventStatusSchema,
-} from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

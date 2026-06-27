@@ -3,9 +3,9 @@ process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION = "true";
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
+import type { Agent } from "@swarm/types";
 import { closeDb, createAgent, createTaskExtended, initDb } from "../be/db";
 import { routeMessage } from "../slack/router";
-import type { Agent } from "../types";
 
 const TEST_DB_PATH = "./test-slack-router-require-mention.sqlite";
 

@@ -1,5 +1,5 @@
+import type { MetricSnapshot, MetricVersion } from "@swarm/types";
 import { createMetricVersion, getMetric, getMetricVersions } from "../be/db";
-import type { MetricSnapshot, MetricVersion } from "../types";
 
 export function snapshotMetric(metricId: string, changedByAgentId?: string): MetricVersion {
   const metric = getMetric(metricId);

@@ -1,4 +1,4 @@
-import type { ProviderName } from "../types";
+import type { ProviderName } from "@swarm/types";
 
 /**
  * # Native session resume is deprecated.

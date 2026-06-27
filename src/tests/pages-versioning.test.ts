@@ -21,10 +21,10 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import type { PageVersion } from "@swarm/types";
 import { closeDb, initDb } from "../be/db";
 import { handlePages } from "../http/pages";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import type { PageVersion } from "../types";
 
 const TEST_DB_PATH = "./test-pages-versioning.sqlite";
 const TEST_PORT = 13041;

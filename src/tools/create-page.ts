@@ -18,11 +18,11 @@
  * lives on the API side.
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { PageAuthModeSchema, PageContentTypeSchema } from "@swarm/types";
 import * as z from "zod";
 import { createPage, getPage, getPageBySlug, getPageVersions, updatePage } from "@/be/db";
 import { snapshotPage } from "@/pages/version";
 import { createToolRegistrar } from "@/tools/utils";
-import { PageAuthModeSchema, PageContentTypeSchema } from "@/types";
 import { getAppUrl, getPublicMcpBaseUrl } from "@/utils/constants";
 
 /** Same slugifier used by the HTTP createPage handler. */

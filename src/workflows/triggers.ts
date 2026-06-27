@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
+import type { ScheduledTask, TriggerConfig } from "@swarm/types";
 import { getWorkflow, getWorkflowsByScheduleId } from "../be/db";
-import type { ScheduledTask, TriggerConfig } from "../types";
 import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputValue } from "./input";

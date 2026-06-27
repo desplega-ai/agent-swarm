@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { ScheduledTask } from "@swarm/types";
 import {
   closeDb,
   createAgent,
@@ -13,7 +14,6 @@ import {
   updateScheduledTask,
 } from "../be/db";
 import { calculateNextRun, runScheduleNow } from "../scheduler";
-import type { ScheduledTask } from "../types";
 
 const TEST_DB_PATH = "./test-scheduled-tasks.sqlite";
 

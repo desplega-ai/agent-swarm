@@ -1,4 +1,4 @@
-import type { AgentTask } from "../types";
+import type { AgentTask } from "@swarm/types";
 
 /**
  * Minimal in-process task-lifecycle event emitter.

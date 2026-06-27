@@ -1,4 +1,4 @@
-import type { ExecutorMeta, WorkflowNode } from "../types";
+import type { ExecutorMeta, WorkflowNode } from "@swarm/types";
 import type { ExecutorRegistry } from "./executors/registry";
 
 export type ValidationOutcome = "pass" | "halt" | "retry";

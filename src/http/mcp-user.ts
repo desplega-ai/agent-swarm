@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import type { User } from "@swarm/types";
 import { resolveUserByToken } from "@/be/users";
 import { createUserServer } from "@/server-user";
-import type { User } from "@/types";
 import { closeIdleMcpTransports, type McpTransportActivity, markMcpTransportActivity } from "./mcp";
 
 function unauthorized(res: ServerResponse): true {

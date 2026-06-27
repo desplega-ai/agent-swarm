@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { AgentLog } from "@swarm/types";
 import { z } from "zod";
 import {
   getAllAgents,
@@ -10,7 +11,6 @@ import {
   getSwarmMetrics,
   getTaskStats,
 } from "../be/db";
-import type { AgentLog } from "../types";
 import { route } from "./route-def";
 import { json } from "./utils";
 
@@ -159,7 +159,7 @@ export async function handleStats(
     const parsed = await listServices.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const services = getAllServices({
-      status: (parsed.query.status as import("../types").ServiceStatus) || undefined,
+      status: (parsed.query.status as import("@swarm/types").ServiceStatus) || undefined,
       agentId: parsed.query.agentId || undefined,
       name: parsed.query.name || undefined,
     });

@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { RepoGuidelinesSchema, SwarmRepoSchema } from "@swarm/types";
 import * as z from "zod";
 import { updateSwarmRepo } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { RepoGuidelinesSchema, SwarmRepoSchema } from "@/types";
 
 export const registerUpdateRepoTool = (server: McpServer) => {
   createToolRegistrar(server)(

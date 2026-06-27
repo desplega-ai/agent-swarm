@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { KvEntrySchema, KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "@swarm/types";
 import * as z from "zod";
 import { getAgentById, upsertKv } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { KvEntrySchema, KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "@/types";
 import { resolveNamespace } from "./resolve-namespace";
 
 // 2 MiB cap — mirrors the HTTP enforcement.

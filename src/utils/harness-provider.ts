@@ -1,4 +1,4 @@
-import { type ProviderName, ProviderNameSchema } from "../types";
+import { type ProviderName, ProviderNameSchema } from "@swarm/types";
 
 const SUPPORTED_PROVIDERS = ProviderNameSchema.options;
 

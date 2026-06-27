@@ -1,4 +1,4 @@
-import type { TrackerAgentMapping, TrackerSync } from "../../tracker/types";
+import type { TrackerAgentMapping, TrackerSync } from "@swarm/types";
 import { normalizeDateRequired } from "../date-utils";
 import { getDb } from "../db";
 

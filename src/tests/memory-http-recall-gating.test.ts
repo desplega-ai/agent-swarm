@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
+import type { AgentMemory } from "@swarm/types";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import type { AgentMemory } from "../types";
 
 const memoryId = randomUUID();
 const agentId = randomUUID();

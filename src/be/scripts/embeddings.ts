@@ -1,4 +1,4 @@
-import type { ScriptRecord, ScriptScope } from "../../types";
+import type { ScriptRecord, ScriptScope } from "@swarm/types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { getDb } from "../db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "../embedding";

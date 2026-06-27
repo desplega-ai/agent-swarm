@@ -1,4 +1,4 @@
-import type { WorkflowDefinition, WorkflowTemplate } from "../types";
+import type { WorkflowDefinition, WorkflowTemplate } from "@swarm/types";
 
 /**
  * Validate that all required template variables are provided.

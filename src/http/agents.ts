@@ -1,5 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
+import {
+  AgentCredStatusSchema,
+  AgentLatestModelSchema,
+  type ProviderName,
+  ProviderNameSchema,
+} from "@swarm/types";
 import { z } from "zod";
 import {
   createAgent,
@@ -22,12 +28,6 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { telemetry } from "../telemetry";
-import {
-  AgentCredStatusSchema,
-  AgentLatestModelSchema,
-  type ProviderName,
-  ProviderNameSchema,
-} from "../types";
 import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
 
@@ -451,7 +451,7 @@ export async function handleAgentsRest(
       body.changeSource || body.changedByAgentId || body.changeReason
         ? {
             changeSource: validChangeSources.includes(body.changeSource ?? "")
-              ? (body.changeSource as import("../types").ChangeSource)
+              ? (body.changeSource as import("@swarm/types").ChangeSource)
               : undefined,
             changedByAgentId: body.changedByAgentId ?? null,
             changeReason: body.changeReason ?? null,

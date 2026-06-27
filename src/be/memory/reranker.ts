@@ -1,4 +1,4 @@
-import type { AgentMemorySource } from "@/types";
+import type { AgentMemorySource } from "@swarm/types";
 import {
   ACCESS_BOOST_MAX_MULTIPLIER,
   ACCESS_BOOST_RECENCY_WINDOW_HOURS,

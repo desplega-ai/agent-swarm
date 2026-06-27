@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AgentTaskSchema } from "@swarm/types";
 import { addMinutes } from "date-fns";
 import * as z from "zod";
 import {
@@ -14,7 +15,6 @@ import {
   updateAgentStatus,
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema } from "@/types";
 
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const MAX_POLL_DURATION_MS = 1 * 60 * 1000;

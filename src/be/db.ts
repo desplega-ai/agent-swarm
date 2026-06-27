@@ -1,8 +1,4 @@
 import { Database } from "bun:sqlite";
-import { parseProviderMeta } from "@/utils/provider-metadata.ts";
-import pkg from "../../package.json";
-import { configureDbResolver } from "../prompts/resolver";
-import { telemetry } from "../telemetry";
 import type {
   ActiveSession,
   Agent,
@@ -98,13 +94,17 @@ import type {
   WorkflowSnapshot,
   WorkflowSummary,
   WorkflowVersion,
-} from "../types";
+} from "@swarm/types";
 import {
   FollowUpConfigSchema,
   isTerminalTaskStatus,
   type ModelTier,
   parseModelTier,
-} from "../types";
+} from "@swarm/types";
+import { parseProviderMeta } from "@/utils/provider-metadata.ts";
+import pkg from "../../package.json";
+import { configureDbResolver } from "../prompts/resolver";
+import { telemetry } from "../telemetry";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";

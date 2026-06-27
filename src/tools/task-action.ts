@@ -1,5 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+  AgentTaskSchema,
+  BudgetRefusalCauseSchema,
+  ModelTierSchema,
+  splitLegacyModelAlias,
+} from "@swarm/types";
 import * as z from "zod";
 import { canClaim } from "@/be/budget-admission";
 import {
@@ -27,12 +33,6 @@ import {
 } from "@/be/db";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
-import {
-  AgentTaskSchema,
-  BudgetRefusalCauseSchema,
-  ModelTierSchema,
-  splitLegacyModelAlias,
-} from "@/types";
 
 export const TaskActionSchema = z.enum([
   "create",

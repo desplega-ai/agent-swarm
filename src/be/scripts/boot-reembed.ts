@@ -7,8 +7,8 @@
  * Mirrors the memory boot-reembed pattern (src/be/memory/boot-reembed.ts).
  */
 
+import type { ScriptScope } from "@swarm/types";
 import { getDb } from "@/be/db";
-import type { ScriptScope } from "@/types";
 import { embeddingProvider, embedScript } from "./embeddings";
 
 type ScriptRow = {

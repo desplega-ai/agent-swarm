@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { AgentTask } from "../types";
+import type { AgentTask } from "@swarm/types";
 
 // ── Mocks ──
 

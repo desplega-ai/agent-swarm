@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@swarm/types";
 import { z } from "zod";
 import { chunkContent } from "../be/chunking";
 import { getDb, getTaskById } from "../be/db";
@@ -16,7 +17,6 @@ import {
 import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
-import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError, parseQueryParams } from "./utils";
 

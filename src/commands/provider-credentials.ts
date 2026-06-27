@@ -18,13 +18,13 @@
  * runs the predicate itself — it just reads the agent row.
  */
 
+import type { AgentCredStatus, AgentLatestModel, ProviderName } from "@swarm/types";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
-import type { AgentCredStatus, AgentLatestModel, ProviderName } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export type SupportedProvider = "claude" | "claude-managed" | "codex" | "devin" | "opencode" | "pi";

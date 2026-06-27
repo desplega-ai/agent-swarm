@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { AgentStatus } from "@swarm/types";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
   getAgentById,
@@ -14,7 +15,6 @@ import { initGitHub, resetGitHub } from "../github";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
-import type { AgentStatus } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";

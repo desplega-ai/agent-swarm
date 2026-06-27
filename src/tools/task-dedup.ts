@@ -1,5 +1,5 @@
+import type { AgentTask } from "@swarm/types";
 import { findRecentSimilarTasks } from "@/be/db";
-import type { AgentTask } from "@/types";
 
 /**
  * Jaccard similarity on word sets.

@@ -1,6 +1,6 @@
 import type { WebClient } from "@slack/web-api";
+import type { Agent, AgentTask } from "@swarm/types";
 import { getAgentById, getTaskAttachments } from "../be/db";
-import type { Agent, AgentTask } from "../types";
 import { getSlackApp } from "./app";
 import {
   buildCancelledBlocks,

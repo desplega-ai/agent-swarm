@@ -7,7 +7,7 @@ mock.module("../slack/app", () => ({
   getSlackApp: () => null,
 }));
 
-import type { ExecutorMeta } from "../types";
+import type { ExecutorMeta } from "@swarm/types";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
 import { CodeMatchExecutor, CodeMatchOutputSchema } from "../workflows/executors/code-match";
 import { NotifyExecutor } from "../workflows/executors/notify";

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { RetryPolicy, Workflow, WorkflowDefinition } from "@swarm/types";
 import { z } from "zod";
 import {
   closeDb,
@@ -15,7 +16,6 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import type { RetryPolicy, Workflow, WorkflowDefinition } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import {

@@ -16,6 +16,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { type AgentCredStatus, ProviderNameSchema } from "@swarm/types";
 import { z } from "zod";
 import {
   getAgentHarnessProviders,
@@ -26,7 +27,6 @@ import {
   listAgentsWithCredStatusByProvider,
 } from "../be/db";
 import { getOAuthApp, getOAuthTokens } from "../be/db-queries/oauth";
-import { type AgentCredStatus, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

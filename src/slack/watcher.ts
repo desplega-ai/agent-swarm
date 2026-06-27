@@ -1,3 +1,4 @@
+import type { AgentTask } from "@swarm/types";
 import {
   getAgentById,
   getChildTasks,
@@ -7,7 +8,6 @@ import {
   getTaskById,
   setSlackMessageTracking,
 } from "../be/db";
-import type { AgentTask } from "../types";
 import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";

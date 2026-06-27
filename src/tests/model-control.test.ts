@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
+  parseModelTier,
+  resolveModelTier,
+  resolveTaskModelSelection,
+  splitLegacyModelAlias,
+} from "@swarm/types";
+import {
   closeDb,
   createAgent,
   createScheduledTask,
@@ -17,12 +23,6 @@ import { createScheduleInputSchema } from "../tools/schedules/create-schedule";
 import { updateScheduleInputSchema } from "../tools/schedules/update-schedule";
 import { sendTaskInputSchema } from "../tools/send-task";
 import { taskActionInputSchema } from "../tools/task-action";
-import {
-  parseModelTier,
-  resolveModelTier,
-  resolveTaskModelSelection,
-  splitLegacyModelAlias,
-} from "../types";
 
 const TEST_DB_PATH = "./test-model-control.sqlite";
 

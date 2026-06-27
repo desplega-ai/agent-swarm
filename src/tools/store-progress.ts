@@ -1,5 +1,6 @@
 import { ensure } from "@desplega.ai/business-use";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AgentTaskSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@swarm/types";
 import * as z from "zod";
 import {
   completeTask,
@@ -19,7 +20,6 @@ import { runServerRaters } from "@/be/memory/raters/run-server-raters";
 import { shouldPersistTaskCompletionMemory } from "@/memory/automatic-task-gate";
 import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input

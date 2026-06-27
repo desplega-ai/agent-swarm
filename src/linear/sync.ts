@@ -1,3 +1,4 @@
+import { isTerminalTaskStatus } from "@swarm/types";
 import { cancelTask, getAllAgents, getKv, getTaskById, incrKv, upsertKv } from "../be/db";
 import { getOAuthTokens } from "../be/db-queries/oauth";
 import {
@@ -11,7 +12,6 @@ import { ensureToken } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { linearContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { isTerminalTaskStatus } from "../types";
 import {
   buildSkipMessage,
   getLinearGateConfig,

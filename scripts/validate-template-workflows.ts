@@ -10,7 +10,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { WorkflowDefinitionSchema } from "../src/types";
+import { WorkflowDefinitionSchema } from "@swarm/types";
 import { validateDefinition } from "../src/workflows/definition";
 
 const TEMPLATES_DIR = join(import.meta.dir, "..", "templates", "workflows");

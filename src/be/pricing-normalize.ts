@@ -24,7 +24,7 @@
  * the same canonical form).
  */
 
-import type { PricingProvider } from "../types";
+import type { PricingProvider } from "@swarm/types";
 
 /**
  * Routing prefixes that a harness may prepend to the underlying model id but

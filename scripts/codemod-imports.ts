@@ -23,7 +23,7 @@
  *     --apply           write changes to disk
  *     --package <name>  only rewrite imports TARGETING that package
  */
-import { Project } from "ts-morph";
+import { Project, SyntaxKind } from "ts-morph";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
@@ -109,10 +109,12 @@ if (fileArgs.length > 0) {
     else project.addSourceFilesAtPaths(f);
   }
 } else {
-  project.addSourceFilesAtPaths(["src/**/*.ts", "src/**/*.tsx"]);
+  // Scope: src/ (incl tests) + root tooling that imports src/ (scripts/, deploy/). NOT
+  // evals/ (separate package, repointed explicitly) or packages/ (barrels — skipped below).
+  project.addSourceFilesAtPaths(["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "deploy/**/*.ts"]);
 }
 
-type Change = { file: string; line: number; from: string; to: string; kind: "import" | "export" };
+type Change = { file: string; line: number; from: string; to: string; kind: "import" | "export" | "importtype" | "dynamic" };
 const changes: Change[] = [];
 
 for (const sf of project.getSourceFiles()) {
@@ -121,7 +123,8 @@ for (const sf of project.getSourceFiles()) {
   if (rel.startsWith("packages/") || rel.includes("/node_modules/")) continue;
   const importerPkg = resolveOwner(rel);
 
-  const decls: { spec: string; set: (s: string) => void; line: number; kind: "import" | "export" }[] = [];
+  type Kind = "import" | "export" | "importtype" | "dynamic";
+  const decls: { spec: string; set: (s: string) => void; line: number; kind: Kind }[] = [];
   for (const d of sf.getImportDeclarations()) {
     decls.push({
       spec: d.getModuleSpecifierValue(),
@@ -134,6 +137,21 @@ for (const sf of project.getSourceFiles()) {
     const spec = d.getModuleSpecifierValue();
     if (!spec) continue; // local `export { x }` — no specifier
     decls.push({ spec, set: (s) => d.setModuleSpecifier(s), line: d.getStartLineNumber(), kind: "export" });
+  }
+  // Type-position `import("X").Y` references (ImportTypeNode) — rewrite the specifier
+  // STRING only; the node stays a type import (verbatimModuleSyntax safe).
+  for (const it of sf.getDescendantsOfKind(SyntaxKind.ImportType)) {
+    const lit = it.getArgument().asKind(SyntaxKind.LiteralType)?.getLiteral()?.asKind(SyntaxKind.StringLiteral);
+    if (!lit) continue;
+    decls.push({ spec: lit.getLiteralValue(), set: (s) => lit.setLiteralValue(s), line: it.getStartLineNumber(), kind: "importtype" });
+  }
+  // Dynamic `import("X")` CALL expressions — rewrite the specifier STRING only; the call
+  // stays dynamic (we never convert it to a static import — provider factory PR#452).
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (call.getExpression().getKind() !== SyntaxKind.ImportKeyword) continue;
+    const lit = call.getArguments()[0]?.asKind(SyntaxKind.StringLiteral);
+    if (!lit) continue;
+    decls.push({ spec: lit.getLiteralValue(), set: (s) => lit.setLiteralValue(s), line: call.getStartLineNumber(), kind: "dynamic" });
   }
 
   for (const d of decls) {

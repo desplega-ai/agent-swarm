@@ -110,7 +110,7 @@ export const registerContextDiffTool = (server: McpServer) => {
       }
 
       // Get the comparison version
-      let compareVersion: import("@/types").ContextVersion | null | undefined;
+      let compareVersion: import("@swarm/types").ContextVersion | null | undefined;
       if (compareToVersionId) {
         compareVersion = getContextVersion(compareToVersionId);
         if (!compareVersion) {

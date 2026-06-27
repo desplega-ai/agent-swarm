@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { ExecutorMeta } from "@swarm/types";
 import {
   closeDb,
   createWorkflow,
@@ -8,7 +9,6 @@ import {
   getTaskById,
   initDb,
 } from "../be/db";
-import type { ExecutorMeta } from "../types";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
 import type { ExecutorDependencies } from "../workflows/executors/base";
 
