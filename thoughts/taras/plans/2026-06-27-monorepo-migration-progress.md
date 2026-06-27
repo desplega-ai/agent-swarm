@@ -19,7 +19,7 @@ the full suite green. Update #833's title/body from "Phase 0" → full migration
 | 1 — tsconfig bridge + ts-morph codemod + packages.map.json | ✅ DONE (verified: tsc 0, test 5439, docker, lint, turbo) |
 | 2 — Extract L0+L1 leaves | 🔄 DONE (9): types, otel, credentials, prompt-templates, artifacts, core-utils, scripts, e2b-dispatch, ai-pricing (204c11e9). DEFERRED: swarm-templates (touches templates-ui Next app prebuild + folds schema types into @swarm/types — do with app split), api-client (NET-NEW generated from openapi + CI gate — additive, not on critical path) |
 | 3 — Extract L2 (ai-llm [+raters hoist&fold], mcp-tool) | ✅ DONE: ai-llm (0391056c, cycle-break #2 — grep be/ empty), mcp-tool (ae35a5b8) |
-| 4 — Extract L3 (harness, storage [+test-preload pivot]) | 🔄 harness DONE (eae401d0). storage ATTEMPTED + cleanly REVERTED — needs 2 infra fixes first (below). Tree green at 68667e81. |
+| 4 — Extract L3 (harness, storage [+test-preload pivot]) | ✅ DONE: harness (eae401d0), **storage (b5c4af0e)** — the keystone. src/be/ GONE. Preload pivot via @swarm/storage/db subpath; barrel text-import fixed; 176 files moved; fresh-DB boot 96 migrations; test 5444. main MERGED in (31acccbc). |
 | 5 — Extract L4+L5 (workflows, integrations [slack-first]) | ⬜ |
 | 6 — api-server + apps split + CI/Docker/openapi cutover + createServer side-effect extraction + dependency-cruiser | ⬜ |
 
