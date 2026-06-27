@@ -25,8 +25,8 @@
  *   {"kind":"error", "message": "..."}
  */
 
-import { createInProcessCodexSession } from "../providers/codex-adapter";
-import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
+import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "@swarm/harness";
+import { createInProcessCodexSession } from "@swarm/harness";
 
 interface CodexSubprocessInput {
   config: ProviderSessionConfig;

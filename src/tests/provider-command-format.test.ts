@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { ClaudeAdapter } from "../providers/claude-adapter";
-import { CodexAdapter } from "../providers/codex-adapter";
-import { createProviderAdapter } from "../providers/index";
-import { OpencodeAdapter } from "../providers/opencode-adapter";
-import { PiMonoAdapter } from "../providers/pi-mono-adapter";
+import {
+  ClaudeAdapter,
+  CodexAdapter,
+  createProviderAdapter,
+  OpencodeAdapter,
+  PiMonoAdapter,
+} from "@swarm/harness";
 
 describe("ProviderAdapter.formatCommand", () => {
   const claude = new ClaudeAdapter();

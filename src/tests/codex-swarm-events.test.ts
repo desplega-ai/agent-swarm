@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  type CodexSwarmEventHandlerOpts,
-  createCodexSwarmEventHandler,
-} from "../providers/codex-swarm-events";
-import type { ProviderEvent } from "../providers/types";
+import type { ProviderEvent } from "@swarm/harness";
+import { type CodexSwarmEventHandlerOpts, createCodexSwarmEventHandler } from "@swarm/harness";
 
 /**
  * Captured fetch invocation, recorded by the stub installed for each test.

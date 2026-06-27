@@ -3,7 +3,7 @@
 // but never propagated, so reasoning-model sessions silently under-billed.
 
 import { describe, expect, test } from "bun:test";
-import { computeCodexCostUsd } from "../../providers/codex-models";
+import { computeCodexCostUsd } from "@swarm/harness";
 
 describe("codex-models (Phase 6)", () => {
   test("known model still computes a non-zero cost from tokens", () => {

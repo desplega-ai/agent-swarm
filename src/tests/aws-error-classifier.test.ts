@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { classifyAwsSdkError } from "../utils/aws-error-classifier";
+import { classifyAwsSdkError } from "@swarm/harness";
 
 describe("classifyAwsSdkError — aws-auth", () => {
   test("ExpiredTokenException", () => {

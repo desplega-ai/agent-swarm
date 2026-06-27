@@ -10,8 +10,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PiMonoSession } from "../../providers/pi-mono-adapter";
-import type { ProviderEvent, ProviderSessionConfig } from "../../providers/types";
+import type { ProviderEvent, ProviderSessionConfig } from "@swarm/harness";
+import { PiMonoSession } from "@swarm/harness";
 
 /**
  * Build a hand-rolled fake `AgentSession` that exercises the pi-mono-adapter

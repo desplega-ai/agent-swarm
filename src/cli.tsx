@@ -455,7 +455,7 @@ function ClaudeRunner({ msg, headless, additionalArgs }: ClaudeRunnerProps) {
   const { exit } = useApp();
 
   useEffect(() => {
-    import("./claude.ts")
+    import("@swarm/harness")
       .then(({ runClaude }) =>
         runClaude({
           msg,

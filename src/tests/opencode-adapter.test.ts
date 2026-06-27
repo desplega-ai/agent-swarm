@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
-import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
+import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "@swarm/harness";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ async function driveSession(
   }));
 
   // Dynamic import ensures the mock is applied
-  const { OpencodeAdapter } = await import("../providers/opencode-adapter");
+  const { OpencodeAdapter } = await import("@swarm/harness");
   const adapter = new OpencodeAdapter();
   const session = await adapter.createSession(cfg);
   session.onEvent((e) => emitted.push(e));
@@ -129,7 +129,7 @@ async function inspectSessionBeforeIdle(
     },
   }));
 
-  const { OpencodeAdapter } = await import("../providers/opencode-adapter");
+  const { OpencodeAdapter } = await import("@swarm/harness");
   const adapter = new OpencodeAdapter();
   const session = await adapter.createSession(cfg);
   session.onEvent(() => {});
@@ -258,7 +258,7 @@ describe("OpencodeSession — SSE→ProviderEvent mapping", () => {
     }));
 
     const { OpencodeAdapter, _setOpenRouterModelCacheRefreshForTests } = await import(
-      "../providers/opencode-adapter"
+      "@swarm/harness"
     );
     _setOpenRouterModelCacheRefreshForTests(
       async (opencodeConfig, configFilePath, dataHomePath) => {
@@ -783,13 +783,13 @@ describe("OpencodeAdapter — context-mode plugin wiring (phase 4)", () => {
   test("resolveContextModePluginPath returns the override path when it exists", async () => {
     writeFileSync(fakePluginPath, "// test plugin\n");
     process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
-    const { resolveContextModePluginPath } = await import("../providers/opencode-adapter");
+    const { resolveContextModePluginPath } = await import("@swarm/harness");
     expect(resolveContextModePluginPath()).toBe(fakePluginPath);
   });
 
   test("resolveContextModePluginPath returns null when the override path is missing", async () => {
     process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = "/tmp/ctx-mode-does-not-exist.js";
-    const { resolveContextModePluginPath } = await import("../providers/opencode-adapter");
+    const { resolveContextModePluginPath } = await import("@swarm/harness");
     expect(resolveContextModePluginPath()).toBeNull();
   });
 

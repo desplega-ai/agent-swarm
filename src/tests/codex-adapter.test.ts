@@ -15,16 +15,21 @@ import type {
   ThreadEvent,
   ThreadItem,
 } from "@openai/codex-sdk";
-import type { SummarizeSessionForCodexDeps } from "../providers/codex-adapter";
-import { buildCodexConfig, CodexAdapter } from "../providers/codex-adapter";
-import { writeCodexAgentsMd } from "../providers/codex-agents-md";
+import type {
+  ProviderEvent,
+  ProviderResult,
+  ProviderSessionConfig,
+  SummarizeSessionForCodexDeps,
+} from "@swarm/harness";
 import {
+  buildCodexConfig,
   CODEX_DEFAULT_MODEL,
+  CodexAdapter,
   computeCodexCostUsd,
   getCodexContextWindow,
   resolveCodexModel,
-} from "../providers/codex-models";
-import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
+  writeCodexAgentsMd,
+} from "@swarm/harness";
 
 /**
  * Build a tiny fake `Thread` whose `runStreamed` returns a fixed sequence of

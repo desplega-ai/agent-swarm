@@ -19,8 +19,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { SummarizeSessionForPiDeps, SwarmHooksConfig } from "../providers/pi-mono-extension";
-import { summarizeSessionForPi } from "../providers/pi-mono-extension";
+import type { SummarizeSessionForPiDeps, SwarmHooksConfig } from "@swarm/harness";
+import { summarizeSessionForPi } from "@swarm/harness";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

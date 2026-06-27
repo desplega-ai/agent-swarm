@@ -11,7 +11,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Span } from "@opentelemetry/api";
-import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "../providers/otel-env";
+import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "@swarm/harness";
 
 const TRACE_ID = "af2c8371b1f4dcafc9ac8e2fae1ed712";
 const SPAN_ID = "adff4f24ca4f3c26";

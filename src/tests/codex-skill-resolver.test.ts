@@ -11,8 +11,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveCodexPrompt } from "../providers/codex-skill-resolver";
-import type { ProviderEvent } from "../providers/types";
+import type { ProviderEvent } from "@swarm/harness";
+import { resolveCodexPrompt } from "@swarm/harness";
 
 /** Create a fresh tmp skills dir for each test to avoid cross-test leakage. */
 let skillsDir: string;

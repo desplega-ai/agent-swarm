@@ -28,6 +28,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ProviderSessionConfig } from "@swarm/harness";
 import {
   ClaudeAdapter,
   parseClaudeBinary,
@@ -36,8 +37,7 @@ import {
   resolveClaudeBinary,
   resolveClaudeBinaryArgv,
   resolveClaudeBridgeEnabled,
-} from "../providers/claude-adapter";
-import type { ProviderSessionConfig } from "../providers/types";
+} from "@swarm/harness";
 
 const LEGACY_BRIDGE_COMPAT_BINARY = "shan" + "non";
 const LEGACY_BRIDGE_COMPAT_PACKAGE = `@dexh/${LEGACY_BRIDGE_COMPAT_BINARY}`;

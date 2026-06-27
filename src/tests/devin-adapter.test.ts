@@ -13,7 +13,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import type { ProviderEvent, ProviderSessionConfig } from "@swarm/harness";
 
 const TEST_PORT = 13051;
 const TEST_BASE_URL = `http://localhost:${TEST_PORT}`;
@@ -144,7 +144,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
 // Module imports (dynamic — after env setup)
 // ---------------------------------------------------------------------------
 
-let DevinAdapter: typeof import("../providers/devin-adapter").DevinAdapter;
+let DevinAdapter: typeof import("@swarm/harness").DevinAdapter;
 
 const logFiles: string[] = [];
 function testLogFile(): string {
@@ -198,7 +198,7 @@ beforeAll(async () => {
     server.listen(TEST_PORT, () => resolve());
   });
 
-  const mod = await import("../providers/devin-adapter");
+  const mod = await import("@swarm/harness");
   DevinAdapter = mod.DevinAdapter;
 });
 
@@ -253,7 +253,7 @@ async function runUntilSettled(
   opts: { timeout?: number } = {},
 ): Promise<{
   events: ProviderEvent[];
-  result: Awaited<ReturnType<import("../providers/types").ProviderSession["waitForCompletion"]>>;
+  result: Awaited<ReturnType<import("@swarm/harness").ProviderSession["waitForCompletion"]>>;
 }> {
   const session = await adapter.createSession(config);
   const events: ProviderEvent[] = [];

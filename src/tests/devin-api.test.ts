@@ -8,7 +8,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import * as devinApi from "../providers/devin-api";
+import * as devinApi from "@swarm/harness";
 
 const TEST_PORT = 13050;
 const TEST_BASE_URL = `http://localhost:${TEST_PORT}`;

@@ -15,8 +15,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as codexSdk from "@openai/codex-sdk";
 import { type Span, trace } from "@opentelemetry/api";
-import { CodexAdapter } from "../providers/codex-adapter";
-import type { ProviderSessionConfig } from "../providers/types";
+import type { ProviderSessionConfig } from "@swarm/harness";
+import { CodexAdapter } from "@swarm/harness";
 
 const TRACE_ID = "af2c8371b1f4dcafc9ac8e2fae1ed712";
 const SPAN_ID = "adff4f24ca4f3c26";

@@ -23,8 +23,8 @@
  * entrypoint hard-exits before the process can refresh.
  */
 
-import type { CredCheckOptions, CredStatus } from "../providers/types";
-import { checkProviderCredentials } from "./provider-credentials";
+import type { CredCheckOptions, CredStatus } from "@swarm/harness";
+import { checkProviderCredentials } from "@swarm/harness";
 
 /** Exit code distinct from generic failures so monitoring can distinguish
  * "config never arrived" from worker process crashes. Matches sysexits(3)'s

@@ -22,6 +22,20 @@ import {
   resolveHarnessProvider,
 } from "@swarm/credentials";
 import {
+  buildCredStatusReport,
+  buildLatestModelReport,
+  type CostData,
+  createProviderAdapter,
+  isBedrockSdkMode,
+  isCredCheckDisabled,
+  type ProviderEvent,
+  type ProviderResult,
+  type ProviderSession,
+  type ProviderSessionConfig,
+  reportCredStatus,
+  reportLatestModel,
+} from "@swarm/harness";
+import {
   type Attributes,
   initOtel,
   initTelemetry,
@@ -52,14 +66,6 @@ import {
 } from "@swarm/prompt-templates";
 import { type ProviderName, type RepoGuidelines, resolveTaskModelSelection } from "@swarm/types";
 import type { TemplateResponse } from "../../templates/schema.ts";
-import {
-  type CostData,
-  createProviderAdapter,
-  type ProviderEvent,
-  type ProviderResult,
-  type ProviderSession,
-  type ProviderSessionConfig,
-} from "../providers/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
@@ -69,14 +75,6 @@ import {
   syncProfileFilesToServer,
   writeIdentityBaselines,
 } from "./profile-sync.ts";
-import {
-  buildCredStatusReport,
-  buildLatestModelReport,
-  isBedrockSdkMode,
-  isCredCheckDisabled,
-  reportCredStatus,
-  reportLatestModel,
-} from "./provider-credentials.ts";
 import {
   type ResumeSessionCandidate,
   type ResumeSessionResolution,

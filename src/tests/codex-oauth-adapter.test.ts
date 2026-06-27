@@ -6,7 +6,7 @@
  *     runner-side credentialInfo tracking (exercised at the adapter boundary)
  */
 import { describe, expect, it } from "bun:test";
-import { checkCodexCredentials } from "../providers/codex-adapter.js";
+import { checkCodexCredentials } from "@swarm/harness";
 
 // ─── checkCodexCredentials pool detection ───────────────────────────────────
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { ProviderTraits } from "@swarm/harness";
 import { type BasePromptArgs, getBasePrompt } from "@swarm/prompt-templates";
-import type { ProviderTraits } from "../providers/types";
 
 /** Minimal valid args to reduce boilerplate */
 const minimalArgs: BasePromptArgs = {

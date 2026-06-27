@@ -16,6 +16,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { validateProviderCredentials } from "@swarm/harness";
 import type { AgentCredStatus } from "@swarm/types";
 import {
   closeDb,
@@ -30,7 +31,6 @@ import {
   updateAgentCredStatus,
 } from "../be/db";
 import { storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
-import { validateProviderCredentials } from "../commands/provider-credentials";
 import {
   _resetTestConnectionCache,
   buildStatusPayload,

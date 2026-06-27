@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { readPkgVersion } from "../providers/harness-version";
+import { readPkgVersion } from "@swarm/harness";
 
 describe("readPkgVersion", () => {
   test("reads pi version from the CLI before package.json probes", () => {

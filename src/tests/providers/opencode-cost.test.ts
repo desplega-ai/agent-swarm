@@ -8,8 +8,8 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
-import { OpencodeSession } from "../../providers/opencode-adapter";
-import type { ProviderEvent } from "../../providers/types";
+import type { ProviderEvent } from "@swarm/harness";
+import { OpencodeSession } from "@swarm/harness";
 
 function makeSession(): {
   session: OpencodeSession;
