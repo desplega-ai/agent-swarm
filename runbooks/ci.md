@@ -33,7 +33,7 @@ CI detects what changed and runs the matching jobs:
 
 | Job | Local equivalent (run from `ui/`) |
 |---|---|
-| **UI Lint and Type Check** | `pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b` |
+| **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b` |
 
 > **Note:** CI uses `tsc -b` (project-references build mode), **not** `tsc --noEmit`. Use `tsc -b` locally to match.
 
@@ -57,7 +57,7 @@ bun run docs:openapi    && git diff --quiet openapi.json docs-site/content/docs/
 docker build -f Dockerfile . && docker build -f Dockerfile.worker .
 
 # ui (only if you touched ui/)
-( cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b )
+( cd ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b )
 ```
 
 ## Why CI fails (in order of frequency)
@@ -72,9 +72,9 @@ docker build -f Dockerfile . && docker build -f Dockerfile.worker .
 
 ## Lockfile discipline
 
-CI uses `bun install --frozen-lockfile` (and `pnpm install --frozen-lockfile` for `ui/`). This means:
+CI uses `bun install --frozen-lockfile`. A single root install now covers `ui/`, `templates-ui/`, and `evals/` as Bun workspace members. This means:
 
-- **Adding/upgrading a dep:** run `bun install <pkg>` (or `pnpm add` in `ui/`), then commit BOTH `package.json` AND `bun.lock` (or `pnpm-lock.yaml`).
+- **Adding/upgrading a dep:** run `bun install <pkg>` (in the relevant workspace dir), then commit BOTH `package.json` AND the root `bun.lock`.
 - **Cloning fresh / switching branches:** run `bun install --frozen-lockfile` to mirror CI. If it errors, the lockfile is stale — `bun install` (without `--frozen-lockfile`) and commit the result.
 - **Never edit lockfiles by hand.**
 

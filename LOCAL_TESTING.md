@@ -136,8 +136,8 @@ Required headers on every call:
 Defaults: UI on `APP_URL` (port 5274), API on `http://localhost:3013` (overridable via `VITE_API_URL`).
 
 ```bash
-cd ui && pnpm run dev        # port 5274
-cd ui && pnpm run dev --port 5275   # if 5274 is taken
+cd ui && bun run dev        # port 5274
+cd ui && bun run dev --port 5275   # if 5274 is taken
 ```
 
 ### When you need to verify a UI change

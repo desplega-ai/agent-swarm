@@ -11,7 +11,15 @@ FROM ghcr.io/j178/prek:v${PREK_VERSION} AS prek
 # Stage 1: Build the binary
 FROM oven/bun:1.3.11 AS builder
 WORKDIR /build
-COPY package.json bun.lock* ./
+# Root package.json declares Bun workspaces (ui/templates-ui/evals); their manifests +
+# bunfig.toml (pins linker="hoisted"; the workspace default "isolated" would hide the
+# root's phantom transitive deps and break the compile) must be present for the frozen
+# install to resolve the workspace graph. Member deps land in the builder only; the final
+# image copies just the compiled binary, so image size is unaffected.
+COPY package.json bun.lock* bunfig.toml ./
+COPY ui/package.json ./ui/package.json
+COPY templates-ui/package.json ./templates-ui/package.json
+COPY evals/package.json ./evals/package.json
 RUN bun install --frozen-lockfile
 COPY src/ ./src/
 COPY templates/ ./templates/

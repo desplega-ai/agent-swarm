@@ -6,8 +6,8 @@ A React-based monitoring dashboard for Agent Swarm.
 
 ```bash
 cd ui
-pnpm install
-pnpm run dev
+bun install
+bun run dev
 ```
 
 The dashboard runs at `http://localhost:5173`. Make sure the API server is running (`bun run start:http` on port 3013).

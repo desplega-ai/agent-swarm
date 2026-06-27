@@ -217,7 +217,7 @@ Missing one? Ask the swarm to build it.
 Real-time monitoring of agents, tasks, and inter-agent chat. Use the hosted version at [app.agent-swarm.dev](https://app.agent-swarm.dev), or run locally:
 
 ```bash
-cd ui && pnpm install && pnpm run dev
+cd ui && bun install && bun run dev
 ```
 
 Opens at `http://localhost:5274`.

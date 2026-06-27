@@ -346,7 +346,7 @@ const FILE_INDEX_SNIPPETS: Record<string, { content: string; tags: string[] }> =
   },
   "runbooks/local-development.md": {
     content:
-      "Local dev setup: Bun + SQLite + portless. Default API_KEY=123123, MCP_BASE_URL=http://localhost:3013. `bun run start:http` for API, `pnpm dev` in ui for dashboard on :5274.",
+      "Local dev setup: Bun + SQLite + portless. Default API_KEY=123123, MCP_BASE_URL=http://localhost:3013. `bun run start:http` for API, `bun run dev` in ui for dashboard on :5274.",
     tags: ["docs", "local-dev"],
   },
   "CLAUDE.md": {

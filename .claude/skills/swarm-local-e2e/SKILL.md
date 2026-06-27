@@ -188,13 +188,13 @@ console.log('Unique sessionIds:', s1[0] !== s2[0]);  // Should be true
 Start the dashboard to visually verify tasks, logs, and agent status:
 
 ```bash
-cd ui && pnpm run dev &
+cd ui && bun run dev &
 # Defaults to port from APP_URL in .env (check with: grep APP_URL ../.env)
 ```
 
 If the UI port is taken by another worktree, start on an alternate:
 ```bash
-cd ui && pnpm run dev --port 5276
+cd ui && bun run dev --port 5276
 ```
 
 The UI connects to the API via `VITE_API_URL` (check `ui/.env` or defaults to `http://localhost:$PORT`).

@@ -41,9 +41,21 @@
   "config": {
     "name": "agent-swarm"
   },
+  "packageManager": "bun@1.3.11",
+  "workspaces": ["ui", "templates-ui", "evals"],
+  "overrides": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "trustedDependencies": ["esbuild", "unrs-resolver"],
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
     "build:cli": "bun run scripts/build-cli.ts",
+    "mono:build": "turbo run build",
+    "mono:test": "turbo run test",
+    "mono:lint": "turbo run lint",
+    "mono:typecheck": "turbo run typecheck",
+    "mono:dev": "turbo run dev",
     "prepack": "bun run build:cli",
     "tsc:check": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
@@ -99,7 +111,8 @@
     "@biomejs/biome": "^2.3.10",
     "@faker-js/faker": "^10.4.0",
     "@opencode-ai/plugin": "1.17.4",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "turbo": "^2.10.0"
   },
   "peerDependencies": {
     "typescript": "^5"

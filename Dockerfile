@@ -6,8 +6,16 @@ FROM oven/bun:latest AS builder
 
 WORKDIR /build
 
-# Copy package files first for better layer caching
-COPY package.json bun.lock* ./
+# Copy package files first for better layer caching. The root package.json now declares
+# Bun workspaces (ui/templates-ui/evals), so their manifests + bunfig.toml (which pins
+# linker="hoisted" — Bun defaults workspaces to "isolated", which would hide the root's
+# phantom transitive deps and break the compile) must be present for the frozen install
+# to resolve the workspace graph. Member deps land in the builder only; the final image
+# copies just the compiled binary, so image size is unaffected.
+COPY package.json bun.lock* bunfig.toml ./
+COPY ui/package.json ./ui/package.json
+COPY templates-ui/package.json ./templates-ui/package.json
+COPY evals/package.json ./evals/package.json
 RUN bun install --frozen-lockfile
 
 # Copy source files

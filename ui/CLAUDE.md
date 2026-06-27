@@ -8,12 +8,12 @@ React + Vite + shadcn/ui + Tailwind + AG Grid + react-query dashboard for the Ag
 
 | Command | What it does |
 |---|---|
-| `pnpm install` | Install dependencies |
-| `pnpm dev` | Dev server on http://localhost:5274 |
-| `pnpm build` | Production build |
-| `pnpm preview` | Preview production build |
-| `pnpm lint` / `pnpm lint:fix` | Biome check / auto-fix |
-| `pnpm exec tsc --noEmit` | Type check |
+| `bun install` | Install dependencies (run from repo root — `ui` is a Bun workspace member) |
+| `bun run dev` | Dev server on http://localhost:5274 |
+| `bun run build` | Production build |
+| `bun run preview` | Preview production build |
+| `bun run lint` / `bun run lint:fix` | Biome check / auto-fix |
+| `bunx tsc --noEmit` | Type check |
 
 Dev server proxies `/api/*` and `/health` to `http://localhost:3013`.
 
@@ -115,7 +115,7 @@ Brand-kit divergences are tracked in [`thoughts/taras/research/2026-05-06-design
 - **Never hardcode dark-mode colors** (no `bg-zinc-950`, `text-zinc-400`, etc.). Use CSS variable classes: `bg-background`, `bg-muted`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-accent`.
 - **Amber** is brand `--primary` — use it for interactive / active states only.
 - **Status colors come from named semantic tokens** — `bg-status-success`, `text-status-error`, `bg-status-active`, etc. — defined in `src/styles/globals.css` (light + dark). Action-type colors (workflow nodes) come from `bg-action-*` tokens. **Do not** use raw Tailwind palette literals (`bg-emerald-500`, `text-amber-400`, `border-red-500/30`, etc.) in app code. Translucent fills use the standard Tailwind opacity syntax: `bg-status-success/10`, `border-action-script/50`.
-- **Color literal lint gate.** `pnpm run check:tokens` (also runs in CI via `merge-gate.yml`'s `ui-lint` job) fails the build on any raw Tailwind color palette literal, `dark:` palette variant, arbitrary color literal (e.g. `bg-[#0d1117]`), or hardcoded hex in `src/`. To use a new color, add a token to `src/styles/globals.css`. Monaco editor themes are exempt and live in `src/lib/monaco-themes.ts`.
+- **Color literal lint gate.** `bun run check:tokens` (also runs in CI via `merge-gate.yml`'s `ui-lint` job) fails the build on any raw Tailwind color palette literal, `dark:` palette variant, arbitrary color literal (e.g. `bg-[#0d1117]`), or hardcoded hex in `src/`. To use a new color, add a token to `src/styles/globals.css`. Monaco editor themes are exempt and live in `src/lib/monaco-themes.ts`.
 - CSS variables defined in `src/styles/globals.css`; AG Grid themed via `src/styles/ag-grid.css`.
 - Use `cn()` from `@/lib/utils` for conditional class merging.
 
@@ -185,7 +185,7 @@ Use `<Streamdown>{text}</Streamdown>` from `streamdown` for **all** markdown ren
   - `devin`: provider-meta status / structured-output rows plus generic transcript messages; keep it on the generic path unless real fixtures prove a new adapter is needed.
 - Internal/helper rows should use the compact low-key system presentation. Do not render provider-prefixed labels like `Claude helper` / `Opencode unknown`; show the event name or useful content only.
 - Group Claude hook rows by `hook_event`, then by `hook_id`. Group continuous thinking-token rows into one helper line: live shimmer while running, otherwise `Thought for ...` with estimated thinking tokens.
-- Validate with `bun test src/tests/ui-logs-parser.test.ts`, `cd ui && pnpm exec tsc -b`, and `cd ui && pnpm lint`. When touching OpenCode or Pi behavior, also run the parser against a real exported fixture and confirm zero unexpected `unknown` rows, no rendered `server.*` events, and no orphaned tool pairs.
+- Validate with `bun test src/tests/ui-logs-parser.test.ts`, `cd ui && bunx tsc -b`, and `cd ui && bun run lint`. When touching OpenCode or Pi behavior, also run the parser against a real exported fixture and confirm zero unexpected `unknown` rows, no rendered `server.*` events, and no orphaned tool pairs.
 
 </important>
 

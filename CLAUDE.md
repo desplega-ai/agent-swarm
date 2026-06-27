@@ -262,7 +262,7 @@ Drift checks — run only if you touched the trigger files, MUST commit any rege
 
 - Edited `plugin/commands/*.md`? → `bun run build:pi-skills`
 - Edited an HTTP route OR bumped `package.json` `version`? → `bun run docs:openapi` (regenerates `openapi.json` AND `docs-site/content/docs/api-reference/**`)
-- Touched `ui/`? → `cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm exec tsc -b` (CI uses `tsc -b`, not `--noEmit`)
+- Touched `ui/`? → `cd ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (CI uses `tsc -b`, not `--noEmit`)
 - Touched `Dockerfile` / `Dockerfile.worker` / files they COPY? → `docker build -f <Dockerfile> .`
 
 Frontend (`ui/`, `templates-ui/`) PRs additionally require a `qa-use` session with screenshots.

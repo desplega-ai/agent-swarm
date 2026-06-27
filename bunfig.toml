@@ -1,3 +1,16 @@
+# Bun defaults the install linker to "isolated" once `workspaces` is present, but
+# "isolated" only exposes explicitly-declared deps. The root package (src/) imports
+# a few transitive/phantom deps (e.g. `typebox` via the pi packages, `@slack/web-api`
+# via `@slack/bolt`, `@types/node` via `bun-types`) that relied on the pre-workspace
+# "hoisted" layout. Pin "hoisted" so those phantom deps resolve at the root like before.
+# Note: this is NOT a byte-identical node_modules layout — adding the members re-resolves
+# a handful of root-hoisted versions within their semver ranges, but the src/ dependency
+# graph keeps its versions via nested copies, so the compiled API/worker binaries are
+# runtime-equivalent. (Migrating to "isolated" + declaring the phantom deps explicitly is
+# a deliberate follow-up, not part of the Phase 0 scaffold.)
+[install]
+linker = "hoisted"
+
 [test]
 coverage = false
 maxConcurrency = 1

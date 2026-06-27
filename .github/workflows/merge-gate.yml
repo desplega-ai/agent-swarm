@@ -117,10 +117,9 @@ jobs:
       - name: Run TypeScript type check
         run: bun run tsc:check
 
-      - name: Install evals dependencies
-        run: bun install --frozen-lockfile
-        working-directory: evals
-
+      # evals is now a Bun workspace member, so the root `bun install --frozen-lockfile`
+      # above already installs its deps into the shared hoisted node_modules. No separate
+      # `cd evals && bun install` is needed.
       - name: Type check evals
         run: bun run tsc:check
         working-directory: evals
@@ -270,33 +269,32 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ui
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
+          bun-version: latest
 
-      - name: Install pnpm
-        run: npm install -g pnpm
-
+      # ui is now a Bun workspace member; the root install hoists its deps. Run the
+      # ui-scoped scripts from the ui/ directory against that shared node_modules.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Check design tokens (no raw color literals)
-        run: pnpm run check:tokens
+        run: bun run check:tokens
+        working-directory: ui
 
       - name: Run Biome linter
-        run: pnpm lint
+        run: bun run lint
+        working-directory: ui
 
       - name: Run TypeScript type check
-        run: pnpm exec tsc -b
+        run: bunx tsc -b
+        working-directory: ui
 
   template-workflow-validation:
     name: Validate Workflow Templates

@@ -16,9 +16,9 @@ module.exports = {
     },
     {
       name: "swarm-ui",
-      script: "pnpm",
+      script: "bun",
       args: ["run", "dev"],
-      cwd: `${__dirname}/new-ui`,
+      cwd: `${__dirname}/ui`,
     },
     {
       name: "swarm-lead",
