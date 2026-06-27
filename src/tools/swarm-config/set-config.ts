@@ -1,11 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { maskSecrets, upsertSwarmConfig } from "@/be/db";
+import { getAgentById, maskSecrets, upsertSwarmConfig } from "@/be/db";
 import {
   isReservedConfigKey,
   reservedKeyError,
   validateConfigValue,
 } from "@/be/swarm-config-guard";
+import { CREDENTIAL_BINDINGS_CONFIG_KEY } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
 import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
 
@@ -91,6 +92,22 @@ export const registerSetConfigTool = (server: McpServer) => {
               message,
             },
           };
+        }
+
+        if (key.toUpperCase() === CREDENTIAL_BINDINGS_CONFIG_KEY) {
+          const agent = getAgentById(requestInfo.agentId);
+          if (!agent?.isLead) {
+            const message =
+              "Only the lead can manage SCRIPT_CREDENTIAL_BINDINGS. Use the credential-bindings tool.";
+            return {
+              content: [{ type: "text", text: message }],
+              structuredContent: {
+                yourAgentId: requestInfo.agentId,
+                success: false,
+                message,
+              },
+            };
+          }
         }
 
         const validationError = validateConfigValue(key, value);

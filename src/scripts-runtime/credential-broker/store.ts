@@ -28,11 +28,23 @@ function parseBindingsFromConfig(config: SwarmConfig): CredentialBinding[] {
   }
 
   try {
-    return normalizeCredentialBindingsDocument(raw).map((binding) => ({
-      ...binding,
-      scope: binding.scope ?? (config.scope as CredentialBinding["scope"]),
-      scopeId: binding.scopeId ?? config.scopeId ?? null,
-    }));
+    const rawBindings = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === "object" && Array.isArray((raw as { bindings?: unknown }).bindings)
+        ? (raw as { bindings: unknown[] }).bindings
+        : [];
+
+    return normalizeCredentialBindingsDocument(raw).map((binding, index) => {
+      const rawBinding = rawBindings[index];
+      const bindingProvidedScope =
+        rawBinding !== null && typeof rawBinding === "object" && Object.hasOwn(rawBinding, "scope");
+
+      return {
+        ...binding,
+        scope: bindingProvidedScope ? binding.scope : (config.scope as CredentialBinding["scope"]),
+        scopeId: binding.scopeId ?? config.scopeId ?? null,
+      };
+    });
   } catch {
     return [];
   }

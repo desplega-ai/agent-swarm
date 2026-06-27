@@ -10,13 +10,22 @@ const execFileAsync = promisify(execFile);
 
 let tempRoot = "";
 
+function gitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  delete env.GIT_PREFIX;
+  return env;
+}
+
 async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", ["-C", cwd, ...args]);
+  const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], { env: gitEnv() });
   return stdout;
 }
 
 async function gitRaw(args: string[]): Promise<void> {
-  await execFileAsync("git", args);
+  await execFileAsync("git", args, { env: gitEnv() });
 }
 
 async function commitAll(cwd: string, message: string): Promise<void> {

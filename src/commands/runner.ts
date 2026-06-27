@@ -171,7 +171,8 @@ export type SwarmAutostash = { ref: string; message: string };
 
 async function listSwarmAutostashes(clonePath: string, role: string): Promise<SwarmAutostash[]> {
   try {
-    const result = await Bun.$`cd ${clonePath} && git stash list --format=%gd%x09%s`.quiet();
+    const result =
+      await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} stash list --format=%gd%x09%s`.quiet();
     return result
       .text()
       .split("\n")
@@ -195,7 +196,8 @@ async function refreshExistingRepoForTask(
   role: string,
 ): Promise<string | null> {
   const { name, clonePath, defaultBranch } = repoConfig;
-  const statusResult = await Bun.$`cd ${clonePath} && git status --porcelain`.quiet();
+  const statusResult =
+    await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} status --porcelain`.quiet();
   const statusOutput = statusResult.text().trim();
   let stashMessage: string | null = null;
 
@@ -203,7 +205,7 @@ async function refreshExistingRepoForTask(
     stashMessage = `swarm-autostash ${defaultBranch} ${new Date().toISOString()}`;
     try {
       console.log(`[${role}] Auto-stashing pending work in ${name}: ${stashMessage}`);
-      await Bun.$`cd ${clonePath} && git stash push --include-untracked -m ${stashMessage}`.quiet();
+      await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} stash push --include-untracked -m ${stashMessage}`.quiet();
       console.log(`[${role}] Auto-stashed pending work in ${name}`);
     } catch (err) {
       const errorMsg = scrubSecrets((err as Error).message);
@@ -216,15 +218,15 @@ async function refreshExistingRepoForTask(
     console.log(`[${role}] Refreshing ${name} from origin/${defaultBranch}...`);
     const fetchSpec = `${defaultBranch}:refs/remotes/origin/${defaultBranch}`;
     const remoteRef = `refs/remotes/origin/${defaultBranch}`;
-    await Bun.$`cd ${clonePath} && git fetch origin ${fetchSpec}`.quiet();
-    await Bun.$`cd ${clonePath} && git merge --no-edit --no-stat ${remoteRef}`.quiet();
+    await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} fetch origin ${fetchSpec}`.quiet();
+    await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} merge --no-edit --no-stat ${remoteRef}`.quiet();
     console.log(`[${role}] Refreshed ${name}`);
     return null;
   } catch (err) {
     const errorMsg = scrubSecrets((err as Error).message);
     console.warn(`[${role}] Could not refresh ${name}: ${errorMsg}`);
     try {
-      await Bun.$`cd ${clonePath} && git merge --abort`.quiet();
+      await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} merge --abort`.quiet();
     } catch {
       // No merge in progress, or abort failed. The original refresh warning is
       // the actionable signal; repo setup remains best-effort.

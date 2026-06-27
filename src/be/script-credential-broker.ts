@@ -4,6 +4,7 @@ import {
   SwarmConfigCredentialBindingStore,
 } from "@/scripts-runtime/credential-broker";
 import type { EgressSecretEntry } from "@/scripts-runtime/executors/types";
+import { registerVolatileSecret } from "@/utils/secret-scrubber";
 import { getResolvedConfig, getSwarmConfigs } from "./db";
 
 export function buildScriptCredentialBindings(input: {
@@ -18,5 +19,9 @@ export function buildScriptCredentialBindings(input: {
     DEFAULT_CREDENTIAL_BINDINGS,
   );
 
-  return broker.resolveBindings({ agentId: input.agentId, repoId: input.repoId });
+  const bindings = broker.resolveBindings({ agentId: input.agentId, repoId: input.repoId });
+  for (const binding of bindings) {
+    registerVolatileSecret(binding.value, binding.configKey);
+  }
+  return bindings;
 }

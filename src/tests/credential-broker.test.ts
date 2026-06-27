@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { deleteSwarmConfig, upsertSwarmConfig } from "../be/db";
+import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import {
+  CREDENTIAL_BINDINGS_CONFIG_KEY,
   type CredentialBindingStore,
   CredentialBroker,
   DEFAULT_CREDENTIAL_BINDINGS,
@@ -7,11 +10,13 @@ import {
   SwarmConfigCredentialBindingStore,
 } from "../scripts-runtime/credential-broker";
 import type { SwarmConfig } from "../types";
+import { clearVolatileSecretsForTesting, scrubSecrets } from "../utils/secret-scrubber";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  clearVolatileSecretsForTesting();
 });
 
 function configRow(value: unknown): SwarmConfig {
@@ -27,6 +32,18 @@ function configRow(value: unknown): SwarmConfig {
     createdAt: "2026-06-26T00:00:00.000Z",
     lastUpdatedAt: "2026-06-26T00:00:00.000Z",
     encrypted: false,
+  };
+}
+
+function scopedConfigRow(
+  scope: "global" | "agent" | "repo",
+  scopeId: string | null,
+  value: unknown,
+): SwarmConfig {
+  return {
+    ...configRow(value),
+    scope,
+    scopeId,
   };
 }
 
@@ -80,6 +97,26 @@ describe("credential broker", () => {
     ]);
   });
 
+  test("falls back to the swarm_config row scope when a binding omits scope", () => {
+    const agentId = "22222222-2222-4222-8222-222222222222";
+    const store = new SwarmConfigCredentialBindingStore(() => [
+      scopedConfigRow("agent", agentId, {
+        bindings: [
+          {
+            configKey: "AGENT_VENDOR_KEY",
+            allowedHosts: ["api.vendor.test"],
+            headerTemplate: "Authorization: Bearer [REDACTED:AGENT_VENDOR_KEY]",
+          },
+        ],
+      }),
+    ]);
+
+    expect(store.listActiveBindings({ agentId })).toHaveLength(1);
+    expect(store.listActiveBindings({ agentId: "33333333-3333-4333-8333-333333333333" })).toEqual(
+      [],
+    );
+  });
+
   test("resolves seeded GITHUB_TOKEN binding", () => {
     const emptyStore: CredentialBindingStore = { listActiveBindings: () => [] };
     const broker = new CredentialBroker(
@@ -100,6 +137,40 @@ describe("credential broker", () => {
         value: "ghp_test",
       },
     ]);
+  });
+
+  test("registers resolved broker config values with the scrubber", () => {
+    const bindingsConfig = upsertSwarmConfig({
+      scope: "global",
+      key: CREDENTIAL_BINDINGS_CONFIG_KEY,
+      value: JSON.stringify({
+        bindings: [
+          {
+            configKey: "VENDOR_SPECIAL_API_KEY",
+            allowedHosts: ["api.vendor.test"],
+            headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_SPECIAL_API_KEY]",
+          },
+        ],
+      }),
+    });
+    const secretConfig = upsertSwarmConfig({
+      scope: "global",
+      key: "VENDOR_SPECIAL_API_KEY",
+      value: "not_a_standard_token_shape_12345",
+      isSecret: true,
+    });
+
+    try {
+      const bindings = buildScriptCredentialBindings({});
+
+      expect(bindings.some((binding) => binding.configKey === "VENDOR_SPECIAL_API_KEY")).toBe(true);
+      expect(scrubSecrets("echo not_a_standard_token_shape_12345")).toBe(
+        "echo [REDACTED:VENDOR_SPECIAL_API_KEY]",
+      );
+    } finally {
+      deleteSwarmConfig(bindingsConfig.id);
+      deleteSwarmConfig(secretConfig.id);
+    }
   });
 
   test("substitutes placeholders for allowlisted hosts", async () => {

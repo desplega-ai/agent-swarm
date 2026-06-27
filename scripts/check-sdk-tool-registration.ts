@@ -25,6 +25,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   "send-whatsapp-message": "external messaging — not yet exposed to scripts",
   "reply-whatsapp-message": "external messaging — not yet exposed to scripts",
   "get-oauth-access-token": "credential management — security-sensitive, not for scripts",
+  "credential-bindings": "credential binding management — lead-only security control, not for scripts",
   "skill-install-remote": "admin-only remote skill management",
   "skill-sync-remote": "admin-only remote skill management",
   "swarm_x": "external command router — dispatches to third-party services",

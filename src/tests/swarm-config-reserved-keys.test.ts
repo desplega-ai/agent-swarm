@@ -3,6 +3,7 @@ import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
   closeDb,
+  createAgent,
   deleteSwarmConfig,
   getDb,
   getSwarmConfigById,
@@ -13,6 +14,7 @@ import {
 import { isReservedConfigKey, reservedKeyError } from "../be/swarm-config-guard";
 import { handleConfig } from "../http/config";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { CREDENTIAL_BINDINGS_CONFIG_KEY } from "../scripts-runtime/credential-broker";
 import { registerDeleteConfigTool } from "../tools/swarm-config/delete-config";
 import { registerListConfigTool } from "../tools/swarm-config/list-config";
 import { registerSetConfigTool } from "../tools/swarm-config/set-config";
@@ -261,6 +263,27 @@ describe("swarm-config reserved keys guard", () => {
       )) as { structuredContent: { success: boolean } };
 
       expect(result.structuredContent.success).toBe(true);
+    });
+
+    test("rejects SCRIPT_CREDENTIAL_BINDINGS from non-lead set-config callers", async () => {
+      const worker = createAgent({
+        name: "config-worker",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
+      const handler = mcpServer.handlers.get("set-config");
+      const result = (await handler!(
+        {
+          scope: "global",
+          key: CREDENTIAL_BINDINGS_CONFIG_KEY,
+          value: JSON.stringify({ bindings: [] }),
+        },
+        makeRequestInfo(worker.id),
+      )) as { structuredContent: { success: boolean; message: string } };
+
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toContain("Only the lead can manage");
     });
   });
 
