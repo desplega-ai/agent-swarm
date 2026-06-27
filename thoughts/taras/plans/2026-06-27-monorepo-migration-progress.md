@@ -17,7 +17,7 @@ the full suite green. Update #833's title/body from "Phase 0" → full migration
 |---|---|
 | 0 — Bun workspaces + Turbo scaffold | ✅ DONE (commit c074abc4) |
 | 1 — tsconfig bridge + ts-morph codemod + packages.map.json | ✅ DONE (verified: tsc 0, test 5439, docker, lint, turbo) |
-| 2 — Extract L0+L1 leaves | 🔄 DONE: types, otel, credentials, prompt-templates, artifacts. TODO: core-utils, ai-pricing, scripts, e2b-dispatch, swarm-templates, api-client |
+| 2 — Extract L0+L1 leaves | 🔄 DONE: types, otel, credentials, prompt-templates, artifacts, core-utils (04fee212), scripts (c2e3e23b), e2b-dispatch (a5a333e7). TODO: ai-pricing, swarm-templates, api-client |
 | 3 — Extract L2 (ai-llm [+raters hoist&fold], mcp-tool) | ⬜ |
 | 4 — Extract L3 (harness, storage [+test-preload pivot]) | ⬜ |
 | 5 — Extract L4+L5 (workflows, integrations [slack-first]) | ⬜ |
@@ -57,6 +57,16 @@ swarm-templates = 0). Plan: extract per-package, `--apply` the codemod, run tsc,
 collision-induced errors either rewrite those specific specifiers to a subpath (`@swarm/<pkg>/<subpath>`,
 needs a subpath export/path) or un-namespace by curating the barrel. Validate the codemod on `@swarm/types`
 (0 collisions) FIRST.
+
+## ⚠️ Barrel gotcha learned in Phase 2 (scripts) — applies to any pkg with a subprocess entrypoint
+Phase-1 `generate-barrels` does `export *` from EVERY mapped module. If a module has **throwing
+top-level side effects** (e.g. a sandbox-subprocess ENTRYPOINT that calls `requiredEnv(...)` at
+module scope), re-exporting it via the barrel makes EVERY consumer crash *at import* the moment the
+codemod points them at the bare `@swarm/<pkg>`. In scripts, `eval-harness.ts` + `extract-args-schema.ts`
+(both zero-export, spawned by path) had to be DROPPED from the barrel. Also: generator/CI scripts that
+only need a leaf symbol must import that module **directly** (not via the barrel) for the same eager-load
+reason — `bundle-script-types.ts` + `check-sdk-tool-registration.ts` import `sdk-allowlist` directly.
+Watch for this in harness/integrations/api-server (likely have similar by-path entrypoints).
 
 ## Map decisions flagged for re-check at extraction
 - `src/utils/crypto.ts` doesn't exist → `src/be/crypto/` (secrets cipher, DB-bound) assigned to storage.
