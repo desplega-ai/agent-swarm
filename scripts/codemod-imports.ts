@@ -150,10 +150,15 @@ for (const sf of project.getSourceFiles()) {
     if (!lit) continue;
     decls.push({ spec: lit.getLiteralValue(), set: (s) => lit.setLiteralValue(s), line: it.getStartLineNumber(), kind: "importtype" });
   }
-  // Dynamic `import("X")` CALL expressions — rewrite the specifier STRING only; the call
-  // stays dynamic (we never convert it to a static import — provider factory PR#452).
+  // Module-specifier CALL expressions — rewrite the specifier STRING only, node shape kept:
+  //   - dynamic `import("X")` (stays dynamic — provider factory PR#452)
+  //   - `require("X")` (CJS holdouts in a couple of db-queries)
+  //   - `mock.module("X", …)` (bun:test module mocks)
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    if (call.getExpression().getKind() !== SyntaxKind.ImportKeyword) continue;
+    const expr = call.getExpression();
+    const exprText = expr.getText();
+    const isCall = expr.getKind() === SyntaxKind.ImportKeyword || exprText === "require" || exprText === "mock.module";
+    if (!isCall) continue;
     const lit = call.getArguments()[0]?.asKind(SyntaxKind.StringLiteral);
     if (!lit) continue;
     decls.push({ spec: lit.getLiteralValue(), set: (s) => lit.setLiteralValue(s), line: call.getStartLineNumber(), kind: "dynamic" });
