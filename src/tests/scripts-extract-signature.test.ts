@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractScriptSignature } from "../scripts-runtime/extract-signature";
+import { extractScriptSignature } from "@swarm/scripts";
 
 describe("extractScriptSignature", () => {
   test("extracts arrow function destructured args and return type", () => {

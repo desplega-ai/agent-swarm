@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { SwarmConfigPayload } from "../scripts-runtime/executors/types";
-import { Redacted } from "../scripts-runtime/redacted";
-import { SwarmConfig } from "../scripts-runtime/swarm-config";
+import type { SwarmConfigPayload } from "@swarm/scripts";
+import { Redacted, SwarmConfig } from "@swarm/scripts";
 
 const payload: SwarmConfigPayload = {
   system: {

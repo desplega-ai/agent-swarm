@@ -1,5 +1,4 @@
-import { mcpToolNameForSdkMethod } from "../scripts-runtime/sdk-allowlist";
-import { stdlib } from "../scripts-runtime/stdlib";
+import { mcpToolNameForSdkMethod, stdlib } from "@swarm/scripts";
 
 type StepStatusResponse =
   | { stepKey: string; stepType: string; result: unknown }

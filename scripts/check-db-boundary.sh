@@ -6,7 +6,7 @@
 # API exclusively via HTTP.
 #
 # Worker-side paths:
-#   src/commands/  src/hooks/  src/providers/  src/prompts/  src/scripts-runtime/  src/cli.tsx  src/claude.ts
+#   src/commands/  src/hooks/  src/providers/  src/prompts/  packages/scripts/src/scripts-runtime/  src/cli.tsx  src/claude.ts
 #   plugin/opencode-plugins/  (runs inside the opencode subprocess in the worker)
 #
 # Forbidden patterns:
@@ -20,7 +20,7 @@ WORKER_PATHS=(
   src/hooks/
   src/providers/
   src/prompts/
-  src/scripts-runtime/
+  packages/scripts/src/scripts-runtime/
   src/utils/
   src/cli.tsx
   src/claude.ts

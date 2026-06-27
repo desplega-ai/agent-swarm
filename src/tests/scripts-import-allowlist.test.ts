@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { validateScriptImports } from "../scripts-runtime/import-allowlist";
+import { validateScriptImports } from "@swarm/scripts";
 
 describe("script import allowlist", () => {
   test("allows relative imports and runtime barrels", () => {

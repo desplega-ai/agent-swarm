@@ -9,8 +9,8 @@
 # `~/.config/agent-swarm/config.json` lookup) without hunting through 30+
 # call sites.
 #
-# Forbidden patterns (in src/, excluding the helper and tests; this includes
-# worker-side runtime code under src/scripts-runtime/):
+# Forbidden patterns (in src/ + packages/scripts/, excluding the helper and tests; this
+# includes worker-side runtime code under packages/scripts/src/scripts-runtime/):
 #   - process.env.API_KEY
 #   - process.env.AGENT_SWARM_API_KEY
 #
@@ -29,7 +29,7 @@ ALLOW_FILES=(
 # Scan production source only — exclude tests.
 MATCHES=$(grep -rn --include='*.ts' --include='*.tsx' \
   -E 'process\.env\.(AGENT_SWARM_)?API_KEY' \
-  src/ 2>/dev/null \
+  src/ packages/scripts/ 2>/dev/null \
   | grep -v '^src/tests/' \
   | grep -v '^src/utils/api-key\.ts:' \
   || true)

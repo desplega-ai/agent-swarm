@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { refreshSecretScrubberCache } from "@swarm/core-utils";
-import { runScript } from "../scripts-runtime/loader";
+import { runScript } from "@swarm/scripts";
 
 const savedEnv = { ...process.env };
 const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
@@ -209,7 +209,8 @@ describe("runScript", () => {
     const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${tmpdir}`;
     try {
-      const runtimeSrc = new URL("../scripts-runtime", import.meta.url).pathname;
+      const runtimeSrc = new URL("../../packages/scripts/src/scripts-runtime", import.meta.url)
+        .pathname;
       await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();
@@ -259,7 +260,8 @@ describe("runScript", () => {
     const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${tmpdir}`;
     try {
-      const runtimeSrc = new URL("../scripts-runtime", import.meta.url).pathname;
+      const runtimeSrc = new URL("../../packages/scripts/src/scripts-runtime", import.meta.url)
+        .pathname;
       await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();
@@ -292,7 +294,8 @@ describe("runScript", () => {
     const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${tmpdir}`;
     try {
-      const runtimeSrc = new URL("../scripts-runtime", import.meta.url).pathname;
+      const runtimeSrc = new URL("../../packages/scripts/src/scripts-runtime", import.meta.url)
+        .pathname;
       await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();

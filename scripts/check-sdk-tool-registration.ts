@@ -4,13 +4,15 @@
  * SDK_TOOL_NAME_MAP (exposed to swarm-scripts) or explicitly excluded below.
  *
  * When you add a new MCP tool, this script forces you to decide:
- *   1. Add it to SDK_TOOL_NAME_MAP in src/scripts-runtime/sdk-allowlist.ts, OR
+ *   1. Add it to SDK_TOOL_NAME_MAP in packages/scripts/src/scripts-runtime/sdk-allowlist.ts, OR
  *   2. Add it to EXCLUDED_TOOLS below with a reason.
  *
  * Modelled on scripts/check-db-boundary.sh.
  */
 
-import { SDK_TOOL_NAME_MAP } from "../src/scripts-runtime/sdk-allowlist";
+// Import the allowlist module DIRECTLY (not via the @swarm/scripts barrel): the barrel
+// re-exports eval-harness.ts, whose top-level code throws outside the sandbox subprocess.
+import { SDK_TOOL_NAME_MAP } from "../packages/scripts/src/scripts-runtime/sdk-allowlist";
 import { ALL_TOOLS } from "../src/tools/tool-config";
 
 // Tools intentionally NOT exposed to the scripts SDK.
@@ -56,7 +58,7 @@ if (unregistered.length > 0) {
     "The following tools are in ALL_TOOLS (src/tools/tool-config.ts) but are",
   );
   console.error(
-    "neither in SDK_TOOL_NAME_MAP (src/scripts-runtime/sdk-allowlist.ts)",
+    "neither in SDK_TOOL_NAME_MAP (packages/scripts/src/scripts-runtime/sdk-allowlist.ts)",
   );
   console.error(
     "nor in EXCLUDED_TOOLS (scripts/check-sdk-tool-registration.ts):\n",

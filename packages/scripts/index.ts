@@ -3,22 +3,36 @@
 // importable by package name before any files move. Regenerate after editing
 // packages.map.json:  bun scripts/generate-barrels.ts
 
-export * from "../../src/scripts-runtime/ctx";
-export * from "../../src/scripts-runtime/egress-secrets";
-export * from "../../src/scripts-runtime/eval-harness";
-export * from "../../src/scripts-runtime/executors/native";
-export * from "../../src/scripts-runtime/executors/registry";
-export * from "../../src/scripts-runtime/executors/types";
-export * from "../../src/scripts-runtime/extract-args-schema";
-export * from "../../src/scripts-runtime/extract-signature";
-export * from "../../src/scripts-runtime/import-allowlist";
-export * as ScriptsRuntimeLoader from "../../src/scripts-runtime/loader";
-export * from "../../src/scripts-runtime/redacted";
-export * from "../../src/scripts-runtime/sdk-allowlist";
-export * from "../../src/scripts-runtime/stdlib/fetch";
-export * from "../../src/scripts-runtime/stdlib/glob";
-export * from "../../src/scripts-runtime/stdlib/grep";
-export * as ScriptsRuntimeStdlibIndex from "../../src/scripts-runtime/stdlib/index";
-export * from "../../src/scripts-runtime/stdlib/table";
-export * from "../../src/scripts-runtime/swarm-config";
-export * from "../../src/scripts-runtime/swarm-sdk";
+export * from "./src/scripts-runtime/ctx";
+export * from "./src/scripts-runtime/egress-secrets";
+// eval-harness.ts is the sandbox-subprocess ENTRYPOINT (spawned by path, never imported):
+// it has zero exports and its top-level code calls requiredEnv("SWARM_SCRIPT_TMPDIR"),
+// which throws outside the subprocess. It must NOT be in the barrel — re-exporting it
+// would make every consumer of @swarm/scripts crash at import. (Phase-1 generate-barrels
+// included it blindly; excluded here.)
+export * from "./src/scripts-runtime/executors/native";
+export * from "./src/scripts-runtime/executors/registry";
+export * from "./src/scripts-runtime/executors/types";
+// extract-args-schema.ts is the other sandbox-subprocess ENTRYPOINT (spawned by path via
+// src/be/scripts/extract-schema.ts): zero exports, top-level reads SWARM_SCHEMA_* env and
+// exits if absent. Excluded from the barrel for the same reason as eval-harness.
+export * from "./src/scripts-runtime/extract-signature";
+export * from "./src/scripts-runtime/import-allowlist";
+export * as ScriptsRuntimeLoader from "./src/scripts-runtime/loader";
+// loader.ts is namespaced because its RunScriptInput/RunScriptOutput types collide with
+// executors/types. runScript itself is unique — expose it flat so http/scripts +
+// workflows/executors/swarm-script resolve it (the documented collision fix).
+export { runScript } from "./src/scripts-runtime/loader";
+export * from "./src/scripts-runtime/redacted";
+export * from "./src/scripts-runtime/sdk-allowlist";
+export * from "./src/scripts-runtime/stdlib/fetch";
+export * from "./src/scripts-runtime/stdlib/glob";
+export * from "./src/scripts-runtime/stdlib/grep";
+export * as ScriptsRuntimeStdlibIndex from "./src/scripts-runtime/stdlib/index";
+// stdlib/index.ts is namespaced because it re-exports fetch/glob/grep/table/Redacted
+// (which collide with the flat modules above). The `stdlib` object itself is unique —
+// expose it flat so script-workflows/workflow-ctx resolves it.
+export { stdlib } from "./src/scripts-runtime/stdlib/index";
+export * from "./src/scripts-runtime/stdlib/table";
+export * from "./src/scripts-runtime/swarm-config";
+export * from "./src/scripts-runtime/swarm-sdk";

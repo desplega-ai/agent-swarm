@@ -2,7 +2,10 @@
 import { closeDb } from "../src/be/db";
 import { SCRIPT_SDK_TYPES, SCRIPT_STDLIB_TYPES } from "../src/be/scripts/typecheck";
 import { createServer } from "../src/server";
-import { SDK_ALLOWLIST, mcpToolNameForSdkMethod } from "../src/scripts-runtime/sdk-allowlist";
+// Import the allowlist module DIRECTLY (not via the @swarm/scripts barrel): the barrel
+// re-exports eval-harness.ts, whose top-level code calls requiredEnv("SWARM_SCRIPT_TMPDIR")
+// and throws outside the sandbox subprocess. This generator only needs the SDK metadata.
+import { SDK_ALLOWLIST, mcpToolNameForSdkMethod } from "../packages/scripts/src/scripts-runtime/sdk-allowlist";
 
 type RegisteredTools = Record<string, unknown>;
 
@@ -18,13 +21,16 @@ async function main() {
     throw new Error(`SDK_ALLOWLIST points at missing MCP tools: ${missing.join(", ")}`);
   }
 
-  await Bun.$`mkdir -p src/scripts-runtime/types`;
+  await Bun.$`mkdir -p packages/scripts/src/scripts-runtime/types`;
   await Bun.write(
-    "src/scripts-runtime/types/swarm-sdk.d.ts",
+    "packages/scripts/src/scripts-runtime/types/swarm-sdk.d.ts",
     `declare module "swarm-sdk" {\n${SCRIPT_SDK_TYPES.replace(/^/gm, "  ")}\n}\n`,
   );
-  await Bun.write("src/scripts-runtime/types/stdlib.d.ts", SCRIPT_STDLIB_TYPES.trimStart());
-  await Bun.$`bunx biome format --write src/scripts-runtime/types/swarm-sdk.d.ts src/scripts-runtime/types/stdlib.d.ts`;
+  await Bun.write(
+    "packages/scripts/src/scripts-runtime/types/stdlib.d.ts",
+    SCRIPT_STDLIB_TYPES.trimStart(),
+  );
+  await Bun.$`bunx biome format --write packages/scripts/src/scripts-runtime/types/swarm-sdk.d.ts packages/scripts/src/scripts-runtime/types/stdlib.d.ts`;
 }
 
 main()

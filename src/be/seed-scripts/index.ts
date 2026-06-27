@@ -15,8 +15,7 @@
  * actually search for.
  */
 
-import { extractScriptSignature } from "../../scripts-runtime/extract-signature";
-import { validateScriptImports } from "../../scripts-runtime/import-allowlist";
+import { extractScriptSignature, validateScriptImports } from "@swarm/scripts";
 import { computeContentHash } from "../db";
 import { getScript, upsertScriptByName } from "../scripts/db";
 import { extractArgsJsonSchema } from "../scripts/extract-schema";

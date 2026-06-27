@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cp, mkdir, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { extractScriptSignature, validateScriptImports } from "@swarm/scripts";
 import { closeDb, initDb } from "../be/db";
 import { getScript, listScripts, upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
@@ -13,8 +14,6 @@ import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
 import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
 } from "../be/seed-scripts/catalog/ops-catalog-audit";
-import { extractScriptSignature } from "../scripts-runtime/extract-signature";
-import { validateScriptImports } from "../scripts-runtime/import-allowlist";
 
 const TEST_DB_PATH = "./test-seed-scripts.sqlite";
 

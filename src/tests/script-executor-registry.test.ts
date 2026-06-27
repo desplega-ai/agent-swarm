@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { NativeScriptExecutor } from "../scripts-runtime/executors/native";
-import { getScriptExecutor } from "../scripts-runtime/executors/registry";
+import { getScriptExecutor, NativeScriptExecutor } from "@swarm/scripts";
 
 describe("getScriptExecutor", () => {
   test("defaults to native", () => {

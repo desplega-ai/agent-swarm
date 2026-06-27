@@ -32,16 +32,16 @@ COPY tsconfig.json ./
 # spawned subprocesses — bun run /$bunfs/eval-harness.ts fails in the harness
 # subprocess. Pre-building to real .js files on disk fixes this.
 RUN mkdir -p scripts-runtime script-workflows-runtime && \
-    bun build ./src/scripts-runtime/eval-harness.ts \
+    bun build ./packages/scripts/src/scripts-runtime/eval-harness.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/eval-harness.bundle.js && \
     bun build ./src/script-workflows/harness.ts \
       --target bun --no-splitting \
       --outfile ./script-workflows-runtime/harness.bundle.js && \
-    bun build ./src/scripts-runtime/stdlib/index.ts \
+    bun build ./packages/scripts/src/scripts-runtime/stdlib/index.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/stdlib.bundle.js && \
-    bun build ./src/scripts-runtime/swarm-sdk.ts \
+    bun build ./packages/scripts/src/scripts-runtime/swarm-sdk.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/swarm-sdk.bundle.js && \
     bun build ./node_modules/zod/index.js \

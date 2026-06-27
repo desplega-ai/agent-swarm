@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { inspect } from "node:util";
-import { Redacted } from "../scripts-runtime/redacted";
+import { Redacted } from "@swarm/scripts";
 
 describe("Redacted", () => {
   test("stringification surfaces are redacted", () => {
