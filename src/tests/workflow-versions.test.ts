@@ -9,7 +9,7 @@ import {
   updateWorkflow,
 } from "@swarm/storage";
 import type { Workflow } from "@swarm/types";
-import { snapshotWorkflow } from "../workflows/version";
+import { snapshotWorkflow } from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-workflow-versions.sqlite";
 

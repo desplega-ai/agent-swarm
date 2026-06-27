@@ -6,10 +6,12 @@ import {
   getAgentMailInboxMapping,
   getAllAgents,
 } from "@swarm/storage";
-import { createIngressBuffer } from "../tasks/additive-ingress";
-import { agentmailContextKey } from "../tasks/context-key";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { workflowEventBus } from "../workflows/event-bus";
+import {
+  agentmailContextKey,
+  createIngressBuffer,
+  createTaskWithSiblingAwareness,
+  workflowEventBus,
+} from "@swarm/workflows";
 // Side-effect import: registers all AgentMail event templates in the in-memory registry
 import "./templates";
 import type { AgentMailMessage, AgentMailWebhookPayload } from "./types";

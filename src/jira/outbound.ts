@@ -1,5 +1,5 @@
 import { getTrackerSync, updateTrackerSync } from "@swarm/storage";
-import { workflowEventBus } from "../workflows/event-bus";
+import { workflowEventBus } from "@swarm/workflows";
 import { jiraFetch } from "./client";
 
 let subscribed = false;

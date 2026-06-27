@@ -9,16 +9,16 @@ import {
   initDb,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
-import { startWorkflowExecution } from "../workflows/engine";
-import { InProcessEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,
   type ExecutorDependencies,
+  ExecutorRegistry,
   type ExecutorResult,
-} from "../workflows/executors/base";
-import { ExecutorRegistry } from "../workflows/executors/registry";
-import { setupWorkflowResumeListener } from "../workflows/resume";
+  InProcessEventBus,
+  setupWorkflowResumeListener,
+  startWorkflowExecution,
+} from "@swarm/workflows";
+import { z } from "zod";
 
 const TEST_DB_PATH = "./test-workflow-hitl-routing.sqlite";
 

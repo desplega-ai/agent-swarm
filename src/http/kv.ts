@@ -11,8 +11,8 @@ import {
   upsertKv,
 } from "@swarm/storage";
 import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "@swarm/types";
+import { agentContextKey, pageContextKey } from "@swarm/workflows";
 import { z } from "zod";
-import { agentContextKey, pageContextKey } from "../tasks/context-key";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 

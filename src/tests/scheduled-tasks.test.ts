@@ -13,7 +13,7 @@ import {
   updateScheduledTask,
 } from "@swarm/storage";
 import type { ScheduledTask } from "@swarm/types";
-import { calculateNextRun, runScheduleNow } from "../scheduler";
+import { calculateNextRun, runScheduleNow } from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-scheduled-tasks.sqlite";
 

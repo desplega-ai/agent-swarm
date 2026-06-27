@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { WorkflowDefinition, WorkflowPatch } from "@swarm/types";
-import { applyDefinitionPatch } from "../workflows/definition";
+import { applyDefinitionPatch } from "@swarm/workflows";
 
 // ─── Helper ──────────────────────────────────────────────────
 

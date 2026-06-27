@@ -19,8 +19,7 @@ import {
   linkIdentity,
   upsertKv,
 } from "@swarm/storage";
-import { gitlabContextKey } from "../tasks/context-key";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { createTaskWithSiblingAwareness, gitlabContextKey } from "@swarm/workflows";
 import { GITLAB_BOT_NAME } from "./auth";
 import { addGitLabNoteReaction, addGitLabReaction } from "./reactions";
 import type { GitLabUser } from "./types";

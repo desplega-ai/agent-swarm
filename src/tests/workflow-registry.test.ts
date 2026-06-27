@@ -2,20 +2,18 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "@swarm/storage";
 import type { ExecutorMeta, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
-import {
-  findEntryNodes,
-  generateEdges,
-  getSuccessors,
-  validateDefinition,
-} from "../workflows/definition";
 import {
   BaseExecutor,
   type ExecutorDependencies,
   type ExecutorInput,
+  ExecutorRegistry,
   type ExecutorResult,
-} from "../workflows/executors/base";
-import { ExecutorRegistry } from "../workflows/executors/registry";
+  findEntryNodes,
+  generateEdges,
+  getSuccessors,
+  validateDefinition,
+} from "@swarm/workflows";
+import { z } from "zod";
 
 const TEST_DB_PATH = "./test-workflow-registry.sqlite";
 

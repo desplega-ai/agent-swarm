@@ -56,7 +56,7 @@ export class NotifyExecutor extends BaseExecutor<
         }
       }
       case "slack": {
-        const { getSlackApp } = await import("../../slack/app");
+        const { getSlackApp } = await import("@swarm/integrations");
         const app = getSlackApp();
         if (!app) {
           return {

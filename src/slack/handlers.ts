@@ -8,9 +8,11 @@ import {
   getMostRecentTaskInThread,
   getTasksByAgentId,
 } from "@swarm/storage";
-import { slackContextKey } from "../tasks/context-key";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { workflowEventBus } from "../workflows/event-bus";
+import {
+  createTaskWithSiblingAwareness,
+  slackContextKey,
+  workflowEventBus,
+} from "@swarm/workflows";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
 import { enrichSlackUserEmail, resolveSlackUserId } from "./enrich";
 import { wasEventSeen } from "./event-dedup";

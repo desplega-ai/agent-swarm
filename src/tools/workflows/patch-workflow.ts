@@ -3,9 +3,8 @@ import { createToolRegistrar } from "@swarm/mcp-tool";
 import { getWorkflow, resolveTaskAuditUserId, updateWorkflow } from "@swarm/storage";
 import type { WorkflowPatch } from "@swarm/types";
 import { WorkflowNodePatchSchema } from "@swarm/types";
+import { applyDefinitionPatch, snapshotWorkflow, validateDefinition } from "@swarm/workflows";
 import { z } from "zod";
-import { applyDefinitionPatch, validateDefinition } from "@/workflows/definition";
-import { snapshotWorkflow } from "@/workflows/version";
 
 export const registerPatchWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(

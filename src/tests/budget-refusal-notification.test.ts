@@ -23,8 +23,8 @@ import {
   getDb,
   initDb,
 } from "@swarm/storage";
+import { workflowEventBus } from "@swarm/workflows";
 import { handlePoll } from "../http/poll";
-import { workflowEventBus } from "../workflows/event-bus";
 
 const TEST_DB_PATH = "./test-budget-refusal-notification.sqlite";
 

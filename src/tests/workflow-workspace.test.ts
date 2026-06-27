@@ -12,8 +12,7 @@ import {
   updateWorkflow,
 } from "@swarm/storage";
 import { WorkflowSchema } from "@swarm/types";
-import { startWorkflowExecution } from "../workflows/engine";
-import { createExecutorRegistry } from "../workflows/executors/registry";
+import { createExecutorRegistry, startWorkflowExecution } from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-wf-workspace.sqlite";
 

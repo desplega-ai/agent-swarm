@@ -34,11 +34,11 @@ import type { AgentTask } from "@swarm/types";
 import {
   createRerouteDecisionTask,
   createResumeFollowUp,
+  getExecutorRegistry,
   getNextResumeGeneration,
   getResumeGeneration,
-} from "../tasks/worker-follow-up";
-import { getExecutorRegistry } from "../workflows";
-import { recoverIncompleteRuns } from "../workflows/recovery";
+  recoverIncompleteRuns,
+} from "@swarm/workflows";
 // Side-effect import: registers heartbeat event templates in the in-memory registry
 import "@swarm/prompt-templates";
 

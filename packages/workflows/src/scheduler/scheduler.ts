@@ -8,10 +8,10 @@ import {
 } from "@swarm/storage";
 import type { AgentTask, ScheduledTask } from "@swarm/types";
 import { CronExpressionParser } from "cron-parser";
-import { scheduleContextKey } from "@/tasks/context-key";
-import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
-import type { ExecutorRegistry } from "@/workflows/executors/registry";
-import { handleScheduleTrigger } from "@/workflows/triggers";
+import { scheduleContextKey } from "../tasks/context-key";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import type { ExecutorRegistry } from "../workflows/executors/registry";
+import { handleScheduleTrigger } from "../workflows/triggers";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let isProcessing = false;

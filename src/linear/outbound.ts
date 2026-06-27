@@ -1,6 +1,6 @@
 import { getTrackerSync, updateTrackerSync } from "@swarm/storage";
+import { workflowEventBus } from "@swarm/workflows";
 import { ensureToken } from "../oauth/ensure-token";
-import { workflowEventBus } from "../workflows/event-bus";
 import { getLinearClient, resetLinearClient } from "./client";
 import { endAgentSession, postAgentSessionAction, taskSessionMap } from "./sync";
 

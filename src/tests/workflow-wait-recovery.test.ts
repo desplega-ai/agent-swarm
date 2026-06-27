@@ -17,10 +17,8 @@ import {
   updateWorkflowRunStep,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { InProcessEventBus } from "../workflows/event-bus";
-import type { ExecutorDependencies } from "../workflows/executors/base";
-import { createExecutorRegistry } from "../workflows/executors/registry";
-import { recoverIncompleteRuns } from "../workflows/recovery";
+import type { ExecutorDependencies } from "@swarm/workflows";
+import { createExecutorRegistry, InProcessEventBus, recoverIncompleteRuns } from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-workflow-wait-recovery.sqlite";
 

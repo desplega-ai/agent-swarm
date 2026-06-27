@@ -9,14 +9,15 @@ import {
   initDb,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
-import { startWorkflowExecution, TriggerSchemaError } from "../workflows/engine";
 import {
   BaseExecutor,
   type ExecutorDependencies,
+  ExecutorRegistry,
   type ExecutorResult,
-} from "../workflows/executors/base";
-import { ExecutorRegistry } from "../workflows/executors/registry";
+  startWorkflowExecution,
+  TriggerSchemaError,
+} from "@swarm/workflows";
+import { z } from "zod";
 
 const TEST_DB_PATH = "./test-workflow-trigger-schema.sqlite";
 

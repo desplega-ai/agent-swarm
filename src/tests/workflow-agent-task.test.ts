@@ -9,8 +9,8 @@ import {
   initDb,
 } from "@swarm/storage";
 import type { ExecutorMeta } from "@swarm/types";
-import { AgentTaskExecutor } from "../workflows/executors/agent-task";
-import type { ExecutorDependencies } from "../workflows/executors/base";
+import type { ExecutorDependencies } from "@swarm/workflows";
+import { AgentTaskExecutor } from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-workflow-agent-task.sqlite";
 

@@ -1,6 +1,5 @@
 import { resolveTemplate } from "@swarm/prompt-templates";
-import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
-import { workflowEventBus } from "@/workflows/event-bus";
+import { createTaskWithSiblingAwareness, workflowEventBus } from "@swarm/workflows";
 import "@/tools/templates";
 import { findUserByExternalId, recordUnmappedIdentity } from "@swarm/storage";
 import { getKapsoNumberMapping, markKapsoMessageSeen } from "./config";

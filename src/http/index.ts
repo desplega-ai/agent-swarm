@@ -17,6 +17,7 @@ import {
   withSpanContext,
 } from "@swarm/otel";
 import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "@swarm/storage";
+import { initWorkflows } from "@swarm/workflows";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
 import { initGitHub } from "../github";
@@ -27,7 +28,6 @@ import { initLinear } from "../linear";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
-import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
@@ -373,7 +373,7 @@ async function shutdown() {
 
   // Stop scheduler (if enabled)
   if (hasCapability("scheduling")) {
-    const { stopScheduler } = await import("../scheduler");
+    const { stopScheduler } = await import("@swarm/workflows");
     stopScheduler();
   }
 
@@ -547,8 +547,8 @@ httpServer
 
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {
-      const { startScheduler } = await import("../scheduler");
-      const { getExecutorRegistry } = await import("../workflows");
+      const { startScheduler } = await import("@swarm/workflows");
+      const { getExecutorRegistry } = await import("@swarm/workflows");
       const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
       startScheduler(getExecutorRegistry(), intervalMs, {
         runId: globalState.__runId!,

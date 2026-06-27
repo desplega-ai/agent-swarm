@@ -9,7 +9,7 @@ import {
   getTaskById,
   initDb,
 } from "@swarm/storage";
-import { validateJsonSchema } from "../workflows/json-schema-validator";
+import { validateJsonSchema } from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-structured-output.sqlite";
 
@@ -231,7 +231,7 @@ describe("Resume — structured output JSON parsing", () => {
 
 describe("AgentTaskConfigSchema — outputSchema", () => {
   test("accepts outputSchema in config", async () => {
-    const { AgentTaskExecutor } = await import("../workflows/executors/agent-task");
+    const { AgentTaskExecutor } = await import("@swarm/workflows");
     const executor = new AgentTaskExecutor({
       db: {} as any,
       eventBus: { emit: () => {}, on: () => {}, off: () => {} },
@@ -254,7 +254,7 @@ describe("AgentTaskConfigSchema — outputSchema", () => {
   });
 
   test("accepts followUpConfig in config", async () => {
-    const { AgentTaskExecutor } = await import("../workflows/executors/agent-task");
+    const { AgentTaskExecutor } = await import("@swarm/workflows");
     const executor = new AgentTaskExecutor({
       db: {} as any,
       eventBus: { emit: () => {}, on: () => {}, off: () => {} },
@@ -280,7 +280,7 @@ describe("AgentTaskConfigSchema — outputSchema", () => {
 
 describe("Workflow agent-task creates task with outputSchema", () => {
   test("outputSchema flows from executor config to created task", async () => {
-    const { AgentTaskExecutor } = await import("../workflows/executors/agent-task");
+    const { AgentTaskExecutor } = await import("@swarm/workflows");
     const db = await import("@swarm/storage");
 
     const executor = new AgentTaskExecutor({
@@ -328,7 +328,7 @@ describe("Workflow agent-task creates task with outputSchema", () => {
   });
 
   test("followUpConfig flows from executor config to created task", async () => {
-    const { AgentTaskExecutor } = await import("../workflows/executors/agent-task");
+    const { AgentTaskExecutor } = await import("@swarm/workflows");
     const db = await import("@swarm/storage");
 
     const executor = new AgentTaskExecutor({

@@ -192,7 +192,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
 
       if (notification.channel === "slack") {
         try {
-          const { getSlackApp } = await import("../../slack/app");
+          const { getSlackApp } = await import("@swarm/integrations");
           const slackApp = getSlackApp();
           if (!slackApp) {
             console.warn("[HITL] Slack not initialized — cannot send notification");

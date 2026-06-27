@@ -11,13 +11,16 @@ import {
   initDb,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
+import type { ExecutorDependencies } from "@swarm/workflows";
+import {
+  _resetWaitBusSubscriptionsForTests,
+  createExecutorRegistry,
+  initWaitBusSubscriptions,
+  startWorkflowExecution,
+  workflowEventBus,
+} from "@swarm/workflows";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflowEvents } from "../http/workflow-events";
-import { startWorkflowExecution } from "../workflows/engine";
-import { workflowEventBus } from "../workflows/event-bus";
-import type { ExecutorDependencies } from "../workflows/executors/base";
-import { createExecutorRegistry } from "../workflows/executors/registry";
-import { _resetWaitBusSubscriptionsForTests, initWaitBusSubscriptions } from "../workflows/resume";
 
 const TEST_DB_PATH = "./test-workflow-wait-http.sqlite";
 const TEST_PORT = 13041;

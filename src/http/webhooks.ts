@@ -1,4 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  getExecutorRegistry,
+  handleWebhookTrigger,
+  verifyHmacSignature,
+  WebhookError,
+  workflowEventBus,
+} from "@swarm/workflows";
 import type { AgentMailWebhookPayload } from "../agentmail";
 import {
   handleMessageReceived,
@@ -50,9 +57,6 @@ import type { KapsoConfig } from "../integrations/kapso/config";
 import { getKapsoConfig } from "../integrations/kapso/config";
 import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
 import { routeKapsoInbound } from "../integrations/kapso/inbound";
-import { getExecutorRegistry } from "../workflows";
-import { workflowEventBus } from "../workflows/event-bus";
-import { handleWebhookTrigger, verifyHmacSignature, WebhookError } from "../workflows/triggers";
 import { route } from "./route-def";
 
 // ─── Route Definitions (documentation only — webhooks handle their own body parsing) ─

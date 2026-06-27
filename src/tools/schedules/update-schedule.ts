@@ -10,9 +10,9 @@ import {
   validateRecurringTiming,
 } from "@swarm/storage";
 import { ModelTierSchema, splitLegacyModelAlias } from "@swarm/types";
+import { calculateNextRun } from "@swarm/workflows";
 import { CronExpressionParser } from "cron-parser";
 import * as z from "zod";
-import { calculateNextRun } from "@/scheduler";
 
 export const updateScheduleInputSchema = z.object({
   scheduleId: z.string().uuid().optional().describe("Schedule ID to update"),

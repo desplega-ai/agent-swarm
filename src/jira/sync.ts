@@ -25,9 +25,8 @@ import {
   updateTrackerSyncSwarmId,
 } from "@swarm/storage";
 import { type Agent, isTerminalTaskStatus } from "@swarm/types";
+import { buildJiraContextKey, createTaskWithSiblingAwareness } from "@swarm/workflows";
 import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
-import { buildJiraContextKey } from "../tasks/context-key";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { extractMentions, extractText } from "./adf";
 import { getJiraMetadata } from "./metadata";
 // Side-effect import: registers all Jira event templates in the prompt registry

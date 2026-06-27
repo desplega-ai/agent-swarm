@@ -14,7 +14,7 @@ import {
   initDb,
   startTask,
 } from "@swarm/storage";
-import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
+import { createWorkerTaskFollowUp } from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-task-completion-idempotency.sqlite";
 

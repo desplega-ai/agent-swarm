@@ -12,7 +12,7 @@ import {
 } from "@swarm/storage";
 import type { AgentTask, ResumeReason, TaskAttachment } from "@swarm/types";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
-import "../tools/templates";
+import "@/tools/templates";
 
 /**
  * Liveness window (seconds) for considering a worker "online" enough to

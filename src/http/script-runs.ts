@@ -18,6 +18,7 @@ import {
   upsertScriptRunJournalStep,
 } from "@swarm/storage";
 import { ScriptRunStatusSchema, TERMINAL_SCRIPT_RUN_STATUSES } from "@swarm/types";
+import { executeRawLlm, RawLlmConfigSchema } from "@swarm/workflows";
 import { z } from "zod";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
@@ -26,7 +27,6 @@ import {
   startScriptRunProcess,
   terminateScriptRunProcess,
 } from "../script-workflows/supervisor";
-import { executeRawLlm, RawLlmConfigSchema } from "../workflows/executors/raw-llm";
 import { route } from "./route-def";
 import { deriveApiBaseUrl, json, jsonError } from "./utils";
 

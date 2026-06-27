@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
 import { getWorkflow } from "@swarm/storage";
+import { generateEdges } from "@swarm/workflows";
 import { z } from "zod";
-import { generateEdges } from "@/workflows/definition";
 
 export const registerGetWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(

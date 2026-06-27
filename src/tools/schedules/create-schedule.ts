@@ -7,9 +7,9 @@ import {
   resolveTaskAuditUserId,
 } from "@swarm/storage";
 import { ModelTierSchema, splitLegacyModelAlias } from "@swarm/types";
+import { calculateNextRun } from "@swarm/workflows";
 import { CronExpressionParser } from "cron-parser";
 import * as z from "zod";
-import { calculateNextRun } from "@/scheduler";
 
 export const createScheduleInputSchema = z.object({
   name: z.string().min(1).max(100).describe("Unique name for the schedule (e.g., 'daily-cleanup')"),

@@ -15,18 +15,20 @@ import {
   updateWorkflowRunStep,
 } from "@swarm/storage";
 import type { RetryPolicy, Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
-import { startWorkflowExecution } from "../workflows/engine";
-import { workflowEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,
+  calculateDelay,
   type ExecutorDependencies,
+  ExecutorRegistry,
   type ExecutorResult,
-} from "../workflows/executors/base";
-import { ExecutorRegistry } from "../workflows/executors/registry";
-import { recoverIncompleteRuns } from "../workflows/recovery";
-import { calculateDelay, startRetryPoller, stopRetryPoller } from "../workflows/retry-poller";
-import { interpolate } from "../workflows/template";
+  interpolate,
+  recoverIncompleteRuns,
+  startRetryPoller,
+  startWorkflowExecution,
+  stopRetryPoller,
+  workflowEventBus,
+} from "@swarm/workflows";
+import { z } from "zod";
 
 const TEST_DB_PATH = "./test-workflow-retry-v2.sqlite";
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { compileStringFilter, matchesFilter } from "../workflows/wait-filter";
+import { compileStringFilter, matchesFilter } from "@swarm/workflows";
 
 // ─── (a) Object form ────────────────────────────────────────
 

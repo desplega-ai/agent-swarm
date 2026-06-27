@@ -8,17 +8,18 @@ import {
   initDb,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
-import { startWorkflowExecution } from "../workflows/engine";
-import { workflowEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,
   type ExecutorDependencies,
+  ExecutorRegistry,
   type ExecutorResult,
-} from "../workflows/executors/base";
-import { ExecutorRegistry } from "../workflows/executors/registry";
-import { startRetryPoller, stopRetryPoller } from "../workflows/retry-poller";
-import { interpolate } from "../workflows/template";
+  interpolate,
+  startRetryPoller,
+  startWorkflowExecution,
+  stopRetryPoller,
+  workflowEventBus,
+} from "@swarm/workflows";
+import { z } from "zod";
 
 const TEST_DB_PATH = "./test-workflow-retry-validation.sqlite";
 

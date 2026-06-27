@@ -34,11 +34,14 @@ import {
   initDb,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { startWorkflowExecution } from "../workflows/engine";
-import { workflowEventBus } from "../workflows/event-bus";
-import type { ExecutorDependencies } from "../workflows/executors/base";
-import { createExecutorRegistry } from "../workflows/executors/registry";
-import { _resetWaitBusSubscriptionsForTests, initWaitBusSubscriptions } from "../workflows/resume";
+import type { ExecutorDependencies } from "@swarm/workflows";
+import {
+  _resetWaitBusSubscriptionsForTests,
+  createExecutorRegistry,
+  initWaitBusSubscriptions,
+  startWorkflowExecution,
+  workflowEventBus,
+} from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-workflow-wait-builtin-events.sqlite";
 

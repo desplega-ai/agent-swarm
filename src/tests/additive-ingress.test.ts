@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createIngressBuffer } from "../tasks/additive-ingress";
+import { createIngressBuffer } from "@swarm/workflows";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getWorkflowRun } from "@swarm/storage";
+import { workflowEventBus } from "@swarm/workflows";
 import { z } from "zod";
-import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

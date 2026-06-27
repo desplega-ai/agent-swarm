@@ -8,18 +8,22 @@ mock.module("../slack/app", () => ({
 }));
 
 import type { ExecutorMeta } from "@swarm/types";
-import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
-import { CodeMatchExecutor, CodeMatchOutputSchema } from "../workflows/executors/code-match";
-import { NotifyExecutor } from "../workflows/executors/notify";
+import type { ExecutorDependencies, ExecutorInput } from "@swarm/workflows";
 import {
+  CodeMatchExecutor,
+  CodeMatchOutputSchema,
+  createExecutorRegistry,
+  NotifyExecutor,
   PropertyMatchExecutor,
   PropertyMatchOutputSchema,
-} from "../workflows/executors/property-match";
-import { RawLlmExecutor } from "../workflows/executors/raw-llm";
-import { createExecutorRegistry } from "../workflows/executors/registry";
-import { ScriptExecutor, ScriptOutputSchema } from "../workflows/executors/script";
-import { ValidateExecutor, ValidateOutputSchema } from "../workflows/executors/validate";
-import { VcsExecutor, VcsOutputSchema } from "../workflows/executors/vcs";
+  RawLlmExecutor,
+  ScriptExecutor,
+  ScriptOutputSchema,
+  ValidateExecutor,
+  ValidateOutputSchema,
+  VcsExecutor,
+  VcsOutputSchema,
+} from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-workflow-executors.sqlite";
 

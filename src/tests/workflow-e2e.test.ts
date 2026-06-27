@@ -13,14 +13,16 @@ import {
   upsertScriptByName,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { startWorkflowExecution } from "../workflows/engine";
-import { InProcessEventBus } from "../workflows/event-bus";
-import { AgentTaskExecutor } from "../workflows/executors/agent-task";
-import type { ExecutorDependencies } from "../workflows/executors/base";
-import { ExecutorRegistry } from "../workflows/executors/registry";
-import { SwarmScriptExecutor } from "../workflows/executors/swarm-script";
-import { setupWorkflowResumeListener } from "../workflows/resume";
-import { interpolate } from "../workflows/template";
+import type { ExecutorDependencies } from "@swarm/workflows";
+import {
+  AgentTaskExecutor,
+  ExecutorRegistry,
+  InProcessEventBus,
+  interpolate,
+  SwarmScriptExecutor,
+  setupWorkflowResumeListener,
+  startWorkflowExecution,
+} from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-workflow-e2e.sqlite";
 const API_KEY = "test-workflow-e2e-key-1234567890";

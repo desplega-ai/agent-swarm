@@ -12,23 +12,21 @@ import {
   upsertScriptByName,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
-import { startWorkflowExecution } from "../workflows/engine";
-import { InProcessEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,
   type ExecutorDependencies,
+  ExecutorRegistry,
   type ExecutorResult,
-} from "../workflows/executors/base";
-import { ExecutorRegistry } from "../workflows/executors/registry";
-import {
+  InProcessEventBus,
+  interpolate,
   SWARM_SCRIPT_DEFAULT_TIMEOUT_MS,
   SWARM_SCRIPT_MAX_TIMEOUT_MS,
   SWARM_SCRIPT_MIN_TIMEOUT_MS,
   SwarmScriptConfigSchema,
   SwarmScriptExecutor,
-} from "../workflows/executors/swarm-script";
-import { interpolate } from "../workflows/template";
+  startWorkflowExecution,
+} from "@swarm/workflows";
+import { z } from "zod";
 
 const TEST_DB_PATH = "./test-workflow-swarm-script.sqlite";
 const API_KEY = "test-workflow-swarm-script-key-1234567890";

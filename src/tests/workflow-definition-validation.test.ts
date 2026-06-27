@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { WorkflowDefinition } from "@swarm/types";
-import { isUpstream, validateDefinition } from "../workflows/definition";
+import { isUpstream, validateDefinition } from "@swarm/workflows";
 
 // ─── Helper ──────────────────────────────────────────────────
 

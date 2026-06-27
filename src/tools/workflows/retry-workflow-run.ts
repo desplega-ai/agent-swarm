@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { getExecutorRegistry, retryFailedRun } from "@swarm/workflows";
 import { z } from "zod";
-import { getExecutorRegistry, retryFailedRun } from "@/workflows";
 
 export const registerRetryWorkflowRunTool = (server: McpServer) => {
   createToolRegistrar(server)(

@@ -11,7 +11,7 @@ import {
   scheduleContextKey,
   slackContextKey,
   workflowContextKey,
-} from "../tasks/context-key";
+} from "@swarm/workflows";
 
 describe("context-key builders", () => {
   test("slackContextKey builds expected format", () => {

@@ -7,8 +7,8 @@ import {
   initDb,
   updateTrackerSync,
 } from "@swarm/storage";
+import { workflowEventBus } from "@swarm/workflows";
 import { initJiraOutboundSync, teardownJiraOutboundSync } from "../jira/outbound";
-import { workflowEventBus } from "../workflows/event-bus";
 
 const TEST_DB_PATH = "./test-jira-outbound-sync.sqlite";
 

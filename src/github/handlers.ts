@@ -8,8 +8,7 @@ import {
   incrKv,
   upsertKv,
 } from "@swarm/storage";
-import { githubContextKey } from "../tasks/context-key";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { createTaskWithSiblingAwareness, githubContextKey } from "@swarm/workflows";
 import { getInstallationToken } from "./app";
 import {
   detectMention,

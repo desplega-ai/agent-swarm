@@ -12,11 +12,13 @@ import {
   initDb,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { startWorkflowExecution } from "../workflows/engine";
-import { InProcessEventBus } from "../workflows/event-bus";
-import type { ExecutorDependencies } from "../workflows/executors/base";
-import { createExecutorRegistry } from "../workflows/executors/registry";
-import { resumeWaitState } from "../workflows/resume";
+import type { ExecutorDependencies } from "@swarm/workflows";
+import {
+  createExecutorRegistry,
+  InProcessEventBus,
+  resumeWaitState,
+  startWorkflowExecution,
+} from "@swarm/workflows";
 
 const TEST_DB_PATH = "./test-workflow-wait-time.sqlite";
 

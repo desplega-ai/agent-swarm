@@ -18,8 +18,8 @@ import {
   supersedeTask,
   updateAgentStatus,
 } from "@swarm/storage";
+import { createResumeFollowUp } from "@swarm/workflows";
 import { buildResumeContextPreamble } from "../commands/context-preamble";
-import { createResumeFollowUp } from "../tasks/worker-follow-up";
 
 const TEST_DB_PATH = "./test-task-supersede-resume.sqlite";
 

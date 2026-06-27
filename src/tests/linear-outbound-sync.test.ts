@@ -7,9 +7,9 @@ import {
   initDb,
   updateTrackerSync,
 } from "@swarm/storage";
+import { workflowEventBus } from "@swarm/workflows";
 import { initLinearOutboundSync, teardownLinearOutboundSync } from "../linear/outbound";
 import { taskSessionMap } from "../linear/sync";
-import { workflowEventBus } from "../workflows/event-bus";
 
 const TEST_DB_PATH = "./test-linear-outbound-sync.sqlite";
 

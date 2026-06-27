@@ -34,9 +34,12 @@ import {
   ResumeReasonSchema,
   splitLegacyModelAlias,
 } from "@swarm/types";
+import {
+  createResumeFollowUp,
+  createTaskWithSiblingAwareness,
+  createWorkerTaskFollowUp,
+} from "@swarm/workflows";
 import { z } from "zod";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

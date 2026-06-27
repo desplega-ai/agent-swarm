@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createAdditiveBuffer } from "../tasks/additive-buffer";
+import { createAdditiveBuffer } from "@swarm/workflows";
 
 /**
  * Helper: wait for a timer-based flush. We use tight timeouts (10-30ms) so

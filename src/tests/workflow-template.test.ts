@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { deepInterpolate, interpolate } from "../workflows/template";
+import { deepInterpolate, interpolate } from "@swarm/workflows";
 
 // ─── interpolate() ──────────────────────────────────────────
 

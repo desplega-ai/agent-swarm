@@ -8,17 +8,17 @@ import {
   initDb,
 } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
-import { startWorkflowExecution } from "../workflows/engine";
-import { workflowEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,
   type ExecutorDependencies,
+  ExecutorRegistry,
   type ExecutorResult,
-} from "../workflows/executors/base";
-import { PropertyMatchExecutor } from "../workflows/executors/property-match";
-import { ExecutorRegistry } from "../workflows/executors/registry";
-import { interpolate } from "../workflows/template";
+  interpolate,
+  PropertyMatchExecutor,
+  startWorkflowExecution,
+  workflowEventBus,
+} from "@swarm/workflows";
+import { z } from "zod";
 
 const TEST_DB_PATH = "./test-workflow-validation-port-routing.sqlite";
 

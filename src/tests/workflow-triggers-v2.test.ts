@@ -10,11 +10,16 @@ import {
   upsertSwarmConfig,
 } from "@swarm/storage";
 import type { Workflow } from "@swarm/types";
+import {
+  BaseExecutor,
+  ExecutorRegistry,
+  type ExecutorResult,
+  handleWebhookTrigger,
+  startWorkflowExecution,
+  verifyHmacSignature,
+  WebhookError,
+} from "@swarm/workflows";
 import { z } from "zod";
-import { startWorkflowExecution } from "../workflows/engine";
-import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
-import { ExecutorRegistry } from "../workflows/executors/registry";
-import { handleWebhookTrigger, verifyHmacSignature, WebhookError } from "../workflows/triggers";
 
 const TEST_DB_PATH = "./test-workflow-triggers-v2.sqlite";
 

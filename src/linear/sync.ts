@@ -16,9 +16,8 @@ import {
   upsertKv,
 } from "@swarm/storage";
 import { isTerminalTaskStatus } from "@swarm/types";
+import { createTaskWithSiblingAwareness, linearContextKey } from "@swarm/workflows";
 import { ensureToken } from "../oauth/ensure-token";
-import { linearContextKey } from "../tasks/context-key";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import {
   buildSkipMessage,
   getLinearGateConfig,

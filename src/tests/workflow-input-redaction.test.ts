@@ -9,20 +9,18 @@ import {
   upsertSwarmConfig,
 } from "@swarm/storage";
 import type { WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
-import { startWorkflowExecution } from "../workflows/engine";
 import {
   BaseExecutor,
   type ExecutorDependencies,
+  ExecutorRegistry,
   type ExecutorResult,
-} from "../workflows/executors/base";
-import { ExecutorRegistry } from "../workflows/executors/registry";
-import {
   getSecretInputKeys,
   REDACTED_SECRET_VALUE,
   redactSecretsForStorage,
   resolveInputs,
-} from "../workflows/input";
+  startWorkflowExecution,
+} from "@swarm/workflows";
+import { z } from "zod";
 
 const TEST_DB_PATH = "./test-workflow-input-redaction.sqlite";
 

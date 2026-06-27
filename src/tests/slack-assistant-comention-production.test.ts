@@ -14,9 +14,9 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import * as dbModule from "@swarm/storage";
+import * as siblingAwarenessModule from "@swarm/workflows";
 import * as slackEnrichModule from "../slack/enrich";
 import * as slackEventDedupModule from "../slack/event-dedup";
-import * as siblingAwarenessModule from "../tasks/sibling-awareness";
 
 // ---------------------------------------------------------------------------
 // Production-handler spies.

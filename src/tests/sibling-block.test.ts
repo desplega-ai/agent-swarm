@@ -7,7 +7,7 @@ import {
   type SiblingTaskInfo,
   stripSiblingBlock,
   truncateForBlock,
-} from "../tasks/sibling-block";
+} from "@swarm/workflows";
 
 const NOW = Date.parse("2026-04-22T12:00:00.000Z");
 

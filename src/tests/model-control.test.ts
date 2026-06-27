@@ -18,7 +18,7 @@ import {
   resolveTaskModelSelection,
   splitLegacyModelAlias,
 } from "@swarm/types";
-import { runScheduleNow } from "../scheduler";
+import { runScheduleNow } from "@swarm/workflows";
 import { createScheduleInputSchema } from "../tools/schedules/create-schedule";
 import { updateScheduleInputSchema } from "../tools/schedules/update-schedule";
 import { sendTaskInputSchema } from "../tools/send-task";

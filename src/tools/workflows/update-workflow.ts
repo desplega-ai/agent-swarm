@@ -7,9 +7,8 @@ import {
   TriggerConfigSchema,
   WorkflowDefinitionSchema,
 } from "@swarm/types";
+import { snapshotWorkflow, validateDefinition } from "@swarm/workflows";
 import { z } from "zod";
-import { validateDefinition } from "@/workflows/definition";
-import { snapshotWorkflow } from "@/workflows/version";
 
 export const registerUpdateWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(

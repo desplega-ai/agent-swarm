@@ -19,9 +19,8 @@ import {
   updateTaskProgress,
 } from "@swarm/storage";
 import { AgentTaskSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@swarm/types";
+import { createWorkerTaskFollowUp, validateJsonSchema } from "@swarm/workflows";
 import * as z from "zod";
-import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
-import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
 // schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the

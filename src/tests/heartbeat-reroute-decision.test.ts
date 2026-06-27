@@ -30,17 +30,17 @@ import {
   supersedeTask,
 } from "@swarm/storage";
 import {
+  CRASH_RECOVERY_PIN_TAG,
+  createRerouteDecisionTask,
+  createResumeFollowUp,
+  RESUME_GENERATION_TAG_PREFIX,
+} from "@swarm/workflows";
+import {
   codeLevelTriage,
   HEARTBEAT_RESUME_PIN_GRACE_MIN,
   MAX_RESUME_GENERATIONS,
   RESUME_BUDGET_EXHAUSTED_REASON,
 } from "../heartbeat/heartbeat";
-import {
-  CRASH_RECOVERY_PIN_TAG,
-  createRerouteDecisionTask,
-  createResumeFollowUp,
-  RESUME_GENERATION_TAG_PREFIX,
-} from "../tasks/worker-follow-up";
 import { registerSendTaskTool } from "../tools/send-task";
 // Side-effect import: registers task lifecycle templates (incl. task.reroute.decision).
 import "../tools/templates";
