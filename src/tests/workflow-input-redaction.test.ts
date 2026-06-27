@@ -1,7 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import type { WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
 import {
   closeDb,
   createWorkflow,
@@ -9,7 +7,9 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
   upsertSwarmConfig,
-} from "../be/db";
+} from "@swarm/storage";
+import type { WorkflowDefinition } from "@swarm/types";
+import { z } from "zod";
 import { startWorkflowExecution } from "../workflows/engine";
 import {
   BaseExecutor,
@@ -195,7 +195,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
 
     const registry = new ExecutorRegistry();
     const deps: ExecutorDependencies = {
-      db: {} as typeof import("../be/db"),
+      db: {} as typeof import("@swarm/storage"),
       eventBus: { emit: () => {}, on: () => {}, off: () => {} },
       interpolate: (t: string) => t,
     };

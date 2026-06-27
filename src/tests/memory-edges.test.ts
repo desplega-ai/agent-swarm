@@ -24,11 +24,16 @@ import {
   REFERENCES_SOURCE_MAX_LENGTH,
   sanitizeReferencesSource,
 } from "@swarm/ai-llm";
+import {
+  applyRating,
+  closeDb,
+  createAgent,
+  getDb,
+  initDb,
+  listEdgesForAgent,
+  SqliteMemoryStore,
+} from "@swarm/storage";
 import type { Subprocess } from "bun";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { listEdgesForAgent } from "../be/memory/edges-store";
-import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
-import { applyRating } from "../be/memory/raters/store";
 import { registerMemoryRateTool } from "../tools/memory-rate";
 
 const TEST_PORT = 19127;

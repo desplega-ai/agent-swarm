@@ -13,7 +13,7 @@ import {
   getUnassignedTasksCount,
   initDb,
   updateAgentStatus,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-runner-polling.sqlite";
 const TEST_PORT = 13013;

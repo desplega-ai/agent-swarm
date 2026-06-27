@@ -24,7 +24,7 @@ import {
   getContextSnapshotsByTaskId,
   getContextSummaryByTaskId,
   initDb,
-} from "../../be/db";
+} from "@swarm/storage";
 import { handleContext } from "../../http/context";
 import { handleCore } from "../../http/core";
 import { getPathSegments, parseQueryParams } from "../../http/utils";

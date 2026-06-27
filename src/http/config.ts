@@ -5,7 +5,6 @@ import {
   reservedKeyError,
   validateConfigValue,
 } from "@swarm/core-utils";
-import { z } from "zod";
 import {
   deleteSwarmConfig,
   getResolvedConfig,
@@ -14,7 +13,8 @@ import {
   getSwarmConfigs,
   maskSecrets,
   upsertSwarmConfig,
-} from "../be/db";
+} from "@swarm/storage";
+import { z } from "zod";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";

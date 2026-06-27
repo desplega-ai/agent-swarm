@@ -31,7 +31,7 @@ import {
   initDb,
   startTask,
   upsertSwarmConfig,
-} from "../be/db";
+} from "@swarm/storage";
 import { registerStoreProgressTool } from "../tools/store-progress";
 
 const TEST_DB_PATH = "./test-store-progress-attachments-handler.sqlite";

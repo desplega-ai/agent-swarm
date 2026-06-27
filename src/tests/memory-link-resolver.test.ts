@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveLinks } from "../be/memory/link-resolver";
+import { resolveLinks } from "@swarm/storage";
 
 describe("resolveLinks", () => {
   test("extracts wikilinks from content", () => {

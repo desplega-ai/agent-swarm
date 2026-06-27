@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
 import {
   closeDb,
   createWorkflow,
@@ -9,7 +7,9 @@ import {
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
+import { z } from "zod";
 import { startWorkflowExecution, walkGraph } from "../workflows/engine";
 import {
   BaseExecutor,
@@ -85,7 +85,7 @@ class CorruptOutputExecutor extends BaseExecutor<
 // ─── Mock Dependencies ───────────────────────────────────────
 
 const mockDeps: ExecutorDependencies = {
-  db: {} as typeof import("../be/db"),
+  db: {} as typeof import("@swarm/storage"),
   eventBus: { emit: () => {}, on: () => {}, off: () => {} },
   interpolate: (t: string) => t,
 };
@@ -529,7 +529,7 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
       expect(step1).toBeDefined();
 
       // Import updateWorkflowRunStep to corrupt the output
-      const { updateWorkflowRunStep } = await import("../be/db");
+      const { updateWorkflowRunStep } = await import("@swarm/storage");
       updateWorkflowRunStep(step1!.id, {
         output: "not-a-valid-object" as unknown,
       });

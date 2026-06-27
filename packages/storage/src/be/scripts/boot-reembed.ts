@@ -8,7 +8,7 @@
  */
 
 import type { ScriptScope } from "@swarm/types";
-import { getDb } from "@/be/db";
+import { getDb } from "../db";
 import { embeddingProvider, embedScript } from "./embeddings";
 
 type ScriptRow = {

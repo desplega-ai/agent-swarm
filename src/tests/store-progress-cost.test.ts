@@ -9,7 +9,7 @@ import {
   getSessionCostsByTaskId,
   initDb,
   updateTaskProgress,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-store-progress-cost.sqlite";
 

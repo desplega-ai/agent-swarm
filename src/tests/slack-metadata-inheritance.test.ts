@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-slack-metadata-inheritance.sqlite";
 

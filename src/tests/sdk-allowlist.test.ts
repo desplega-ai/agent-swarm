@@ -9,7 +9,7 @@ import {
   mcpToolNameForSdkMethod,
   SDK_ALLOWLIST,
 } from "@swarm/scripts";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, initDb } from "@swarm/storage";
 import { handleMcpBridge } from "../http/mcp-bridge";
 import { createServer } from "../server";
 

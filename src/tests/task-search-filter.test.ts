@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, createTask, getAllTasks, getTasksCount, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTask,
+  getAllTasks,
+  getTasksCount,
+  initDb,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-task-search-filter.sqlite";
 

@@ -5,7 +5,6 @@ import {
   getTemplateDefinition,
   resolveTemplate,
 } from "@swarm/prompt-templates";
-import { z } from "zod";
 import {
   checkoutPromptTemplate,
   deletePromptTemplate,
@@ -15,7 +14,8 @@ import {
   resetPromptTemplateToDefault,
   resolvePromptTemplate,
   upsertPromptTemplate,
-} from "../be/db";
+} from "@swarm/storage";
+import { z } from "zod";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

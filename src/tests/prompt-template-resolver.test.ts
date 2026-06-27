@@ -7,8 +7,13 @@ import {
   registerTemplate,
   resolveTemplate,
 } from "@swarm/prompt-templates";
-import { closeDb, getPromptTemplates, initDb, upsertPromptTemplate } from "../be/db";
-import { seedDefaultTemplates } from "../be/seed-prompt-templates";
+import {
+  closeDb,
+  getPromptTemplates,
+  initDb,
+  seedDefaultTemplates,
+  upsertPromptTemplate,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-prompt-resolver.sqlite";
 

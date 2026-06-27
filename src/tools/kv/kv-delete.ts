@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { deleteKv, getAgentById } from "@swarm/storage";
 import { KvKeySchema, KvNamespaceSchema } from "@swarm/types";
 import * as z from "zod";
-import { deleteKv, getAgentById } from "@/be/db";
 import { resolveNamespace } from "./resolve-namespace";
 
 function authError(namespace: string, info: { agentId: string | undefined }): string | null {

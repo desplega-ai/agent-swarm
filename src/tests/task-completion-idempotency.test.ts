@@ -13,7 +13,7 @@ import {
   getTaskById,
   initDb,
   startTask,
-} from "../be/db";
+} from "@swarm/storage";
 import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 
 const TEST_DB_PATH = "./test-task-completion-idempotency.sqlite";

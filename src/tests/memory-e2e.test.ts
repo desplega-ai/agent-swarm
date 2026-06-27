@@ -1,8 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
-import { rerank } from "../be/memory/reranker";
+import { closeDb, createAgent, getDb, initDb, rerank, SqliteMemoryStore } from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-memory-e2e.sqlite";
 

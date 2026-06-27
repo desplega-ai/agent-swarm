@@ -1,5 +1,4 @@
-import { getDb } from "../be/db";
-import { getOAuthApp } from "../be/db-queries/oauth";
+import { getDb, getOAuthApp } from "@swarm/storage";
 import type { JiraOAuthAppMetadata } from "./types";
 
 /**

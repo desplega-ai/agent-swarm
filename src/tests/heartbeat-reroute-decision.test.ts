@@ -18,16 +18,17 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  createTrackerSync,
   failPendingResumeIfUnclaimed,
   getChildTasks,
   getDb,
   getLeadAgent,
   getTaskById,
+  getTrackerSync,
   initDb,
   startTask,
   supersedeTask,
-} from "../be/db";
-import { createTrackerSync, getTrackerSync } from "../be/db-queries/tracker";
+} from "@swarm/storage";
 import {
   codeLevelTriage,
   HEARTBEAT_RESUME_PIN_GRACE_MIN,

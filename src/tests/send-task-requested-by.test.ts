@@ -9,7 +9,7 @@ import {
   createUser,
   getTaskById,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
 import { registerSendTaskTool } from "../tools/send-task";
 
 const TEST_DB_PATH = "./test-send-task-requested-by.sqlite";

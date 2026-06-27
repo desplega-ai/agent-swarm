@@ -1,5 +1,5 @@
 import { ensure } from "@desplega.ai/business-use";
-import { getDb } from "@/be/db";
+import { getDb } from "../../db";
 
 /**
  * Retrieval-bridge helper — appends `memory_retrieval` audit rows so

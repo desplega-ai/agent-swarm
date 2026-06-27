@@ -13,7 +13,7 @@
  * Regression for task 4ae1f3b5 — "<@U0831BS93V1> Are you here?" spawned an unwanted task.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import * as dbModule from "../be/db";
+import * as dbModule from "@swarm/storage";
 import * as slackEnrichModule from "../slack/enrich";
 import * as slackEventDedupModule from "../slack/event-dedup";
 import * as siblingAwarenessModule from "../tasks/sibling-awareness";

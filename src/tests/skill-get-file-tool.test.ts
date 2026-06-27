@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createSkill, initDb, upsertSkillFile } from "../be/db";
+import { closeDb, createSkill, initDb, upsertSkillFile } from "@swarm/storage";
 import { registerSkillGetFileTool } from "../tools/skills/skill-get-file";
 
 const TEST_DB_PATH = `./test-skill-get-file-tool-${process.pid}.sqlite`;

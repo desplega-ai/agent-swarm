@@ -11,7 +11,7 @@ import {
   getDb,
   initDb,
   updateTaskClaudeSessionId,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-task-lifecycle-telemetry.sqlite";
 const WORKER_ID = "bbbb0000-0000-4000-8000-000000000002";

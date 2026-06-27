@@ -7,8 +7,8 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { closeDb, getMetricVersions, initDb } from "@swarm/storage";
 import type { Metric } from "@swarm/types";
-import { closeDb, getMetricVersions, initDb } from "../be/db";
 import { handleMetrics } from "../http/metrics";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 

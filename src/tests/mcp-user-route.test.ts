@@ -7,8 +7,17 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { closeDb, createTaskExtended, createUser, getDb, getTaskById, initDb } from "../be/db";
-import { type IdentityActor, mintToken, revokeToken } from "../be/users";
+import {
+  closeDb,
+  createTaskExtended,
+  createUser,
+  getDb,
+  getTaskById,
+  type IdentityActor,
+  initDb,
+  mintToken,
+  revokeToken,
+} from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handleMcp } from "../http/mcp";
 import { handleMcpUser } from "../http/mcp-user";

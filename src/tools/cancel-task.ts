@@ -1,16 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { assertOwnsTask, createToolRegistrar, ownerCtx, type ToolCtx } from "@swarm/mcp-tool";
-import type { AgentTask } from "@swarm/types";
-import { AgentTaskSchema } from "@swarm/types";
-import * as z from "zod";
 import {
   cancelTask,
   getAgentById,
   getDb,
   getTaskById,
   updateAgentStatusFromCapacity,
-} from "@/be/db";
+} from "@swarm/storage";
+import type { AgentTask } from "@swarm/types";
+import { AgentTaskSchema } from "@swarm/types";
+import * as z from "zod";
 
 export const cancelTaskInputSchema = z.object({
   taskId: z.uuid().describe("The ID of the task to cancel."),

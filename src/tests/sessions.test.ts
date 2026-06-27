@@ -8,7 +8,7 @@ import {
   getRootTaskChain,
   initDb,
   listRecentSessions,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-sessions.sqlite";
 

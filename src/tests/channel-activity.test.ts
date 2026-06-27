@@ -38,7 +38,7 @@ import {
   getChannelActivityCursor,
   initDb,
   upsertChannelActivityCursor,
-} from "../be/db";
+} from "@swarm/storage";
 import { fetchChannelActivity } from "../slack/channel-activity";
 
 const TEST_DB_PATH = `./test-channel-activity-${process.pid}.sqlite`;

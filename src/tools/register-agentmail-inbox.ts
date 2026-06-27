@@ -1,13 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
-import * as z from "zod";
 import {
   createAgentMailInboxMapping,
   deleteAgentMailInboxMapping,
   getAgentById,
   getAgentMailInboxMapping,
   getAgentMailInboxMappingsByAgent,
-} from "@/be/db";
+} from "@swarm/storage";
+import * as z from "zod";
 
 export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
   createToolRegistrar(server)(

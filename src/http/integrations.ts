@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import Anthropic from "@anthropic-ai/sdk";
+import { getResolvedConfig } from "@swarm/storage";
 import { z } from "zod";
-import { getResolvedConfig } from "../be/db";
 import { route } from "./route-def";
 import { json } from "./utils";
 

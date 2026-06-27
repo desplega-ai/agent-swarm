@@ -16,8 +16,16 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, createUser, deleteKv, getDb, getKv, initDb } from "../be/db";
-import { linkIdentity } from "../be/users";
+import {
+  closeDb,
+  createAgent,
+  createUser,
+  deleteKv,
+  getDb,
+  getKv,
+  initDb,
+  linkIdentity,
+} from "@swarm/storage";
 import {
   handleComment,
   handleIssue,

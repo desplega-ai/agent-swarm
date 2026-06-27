@@ -4,7 +4,7 @@ import {
   isMcpTokenExpiringSoon,
   type McpOAuthToken,
   markMcpOAuthTokenStatus,
-} from "../be/db-queries/mcp-oauth";
+} from "@swarm/storage";
 import { computeExpiresAt, refreshMcpToken } from "./mcp-wrapper";
 
 /**

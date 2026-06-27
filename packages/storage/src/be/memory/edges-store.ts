@@ -10,7 +10,7 @@
  *
  * Server-side only.
  */
-import { getDb } from "@/be/db";
+import { getDb } from "../db";
 
 const USEFULNESS_FLOOR = 1.0;
 const USEFULNESS_CEILING = 2.0;

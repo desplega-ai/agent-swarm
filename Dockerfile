@@ -95,8 +95,9 @@ RUN chmod +x /usr/local/bin/agent-swarm-api
 # Copy package.json for version info
 COPY package.json ./
 
-# Copy migration SQL files (compiled binary can't read from /$bunfs virtual filesystem)
-COPY src/be/migrations/*.sql /app/migrations/
+# Copy migration SQL files (compiled binary can't read from /$bunfs virtual filesystem).
+# Migrations moved to @swarm/storage in the monorepo split.
+COPY packages/storage/src/be/migrations/*.sql /app/migrations/
 
 # Copy vendored models.dev pricing snapshot so the compiled binary can seed
 # pricing rows from a real filesystem path at runtime. The snapshot now lives in

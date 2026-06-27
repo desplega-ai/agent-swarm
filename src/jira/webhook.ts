@@ -13,7 +13,7 @@
  */
 
 import { createHash, timingSafeEqual } from "node:crypto";
-import { hasTrackerDelivery, markTrackerDelivery } from "../be/db-queries/tracker";
+import { hasTrackerDelivery, markTrackerDelivery } from "@swarm/storage";
 import { handleCommentEvent, handleIssueDeleteEvent, handleIssueEvent } from "./sync";
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { typecheckScript } from "../be/scripts/typecheck";
+import { typecheckScript } from "@swarm/storage";
 
 describe("typecheckScript", () => {
   test("accepts ES2022 globals: JSON, Math, Date, Number, String, Error, isFinite, encodeURIComponent, parseInt, parseFloat", () => {

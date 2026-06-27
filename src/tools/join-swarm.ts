@@ -5,9 +5,9 @@ import {
   generateDefaultIdentityMd,
   generateDefaultSoulMd,
 } from "@swarm/prompt-templates";
+import { createAgent, getAllAgents, getDb, updateAgentProfile } from "@swarm/storage";
 import { AgentSchema } from "@swarm/types";
 import * as z from "zod";
-import { createAgent, getAllAgents, getDb, updateAgentProfile } from "@/be/db";
 
 export const registerJoinSwarmTool = (server: McpServer) => {
   createToolRegistrar(server)(

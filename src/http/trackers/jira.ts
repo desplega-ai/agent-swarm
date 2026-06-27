@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { deleteOAuthTokens, getOAuthTokens } from "@swarm/storage";
 import { z } from "zod";
-import { deleteOAuthTokens, getOAuthTokens } from "../../be/db-queries/oauth";
 import { isJiraEnabled } from "../../jira/app";
 import { clearJiraMetadata, getJiraMetadata } from "../../jira/metadata";
 import { getJiraAuthorizationUrl, handleJiraCallback } from "../../jira/oauth";

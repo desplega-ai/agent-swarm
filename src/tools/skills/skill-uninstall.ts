@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { getAgentById, uninstallSkill } from "@swarm/storage";
 import * as z from "zod";
-import { getAgentById, uninstallSkill } from "@/be/db";
 
 export const registerSkillUninstallTool = (server: McpServer) => {
   createToolRegistrar(server)(

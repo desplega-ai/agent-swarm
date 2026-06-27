@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
-import { closeDb, createAgent, getAgentById, initDb, updateAgentProfile } from "../be/db";
+import { closeDb, createAgent, getAgentById, initDb, updateAgentProfile } from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-update-profile-api.sqlite";
 const TEST_PORT = 13020;

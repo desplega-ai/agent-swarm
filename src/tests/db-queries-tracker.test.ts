@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
 import {
+  closeDb,
   createTrackerAgentMapping,
   createTrackerSync,
   deleteTrackerAgentMapping,
@@ -12,8 +12,9 @@ import {
   getTrackerAgentMappingByExternalUser,
   getTrackerSync,
   getTrackerSyncByExternalId,
+  initDb,
   updateTrackerSync,
-} from "../be/db-queries/tracker";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-db-queries-tracker.sqlite";
 

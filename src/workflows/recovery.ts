@@ -9,7 +9,7 @@ import {
   resolveApprovalRequest,
   updateWorkflowRun,
   updateWorkflowRunStep,
-} from "../be/db";
+} from "@swarm/storage";
 import { checkpointStep } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";

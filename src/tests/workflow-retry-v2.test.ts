@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import type { RetryPolicy, Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
 import {
   closeDb,
   createWorkflow,
@@ -15,7 +13,9 @@ import {
   initDb,
   updateWorkflowRun,
   updateWorkflowRunStep,
-} from "../be/db";
+} from "@swarm/storage";
+import type { RetryPolicy, Workflow, WorkflowDefinition } from "@swarm/types";
+import { z } from "zod";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import {
@@ -92,10 +92,10 @@ class NotifyStubExecutor extends BaseExecutor<
 
 // ─── Mock Dependencies ───────────────────────────────────────
 
-import * as db from "../be/db";
+import * as db from "@swarm/storage";
 
 const mockDeps: ExecutorDependencies = {
-  db: db as typeof import("../be/db"),
+  db: db as typeof import("@swarm/storage"),
   eventBus: workflowEventBus,
   interpolate: (template, ctx) => interpolate(template, ctx).result,
 };

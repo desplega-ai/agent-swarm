@@ -17,7 +17,7 @@ export { handleScheduleTrigger, handleWebhookTrigger } from "./triggers";
 export { snapshotWorkflow } from "./version";
 export { startWaitPoller, stopWaitPoller } from "./wait-poller";
 
-import * as db from "../be/db";
+import * as db from "@swarm/storage";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
 import { createExecutorRegistry } from "./executors/registry";

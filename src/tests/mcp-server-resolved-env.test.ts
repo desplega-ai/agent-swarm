@@ -7,7 +7,7 @@ import {
   getResolvedConfig,
   initDb,
   upsertSwarmConfig,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-mcp-server-resolved-env.sqlite";
 

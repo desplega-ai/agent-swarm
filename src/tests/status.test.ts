@@ -17,7 +17,6 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateProviderCredentials } from "@swarm/harness";
-import type { AgentCredStatus } from "@swarm/types";
 import {
   closeDb,
   createAgent,
@@ -27,10 +26,12 @@ import {
   hasFirstCompletedTask,
   initDb,
   setAgentHarnessProvider,
+  storeOAuthTokens,
   updateAgentActivity,
   updateAgentCredStatus,
-} from "../be/db";
-import { storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
+  upsertOAuthApp,
+} from "@swarm/storage";
+import type { AgentCredStatus } from "@swarm/types";
 import {
   _resetTestConnectionCache,
   buildStatusPayload,

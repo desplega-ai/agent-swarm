@@ -11,8 +11,13 @@ import {
   registerScriptSearchTool,
   registerScriptUpsertTool,
 } from "@swarm/mcp-tool";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+import {
+  closeDb,
+  createAgent,
+  getDb,
+  initDb,
+  setScriptEmbeddingProviderForTests,
+} from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";

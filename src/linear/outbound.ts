@@ -1,4 +1,4 @@
-import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
+import { getTrackerSync, updateTrackerSync } from "@swarm/storage";
 import { ensureToken } from "../oauth/ensure-token";
 import { workflowEventBus } from "../workflows/event-bus";
 import { getLinearClient, resetLinearClient } from "./client";

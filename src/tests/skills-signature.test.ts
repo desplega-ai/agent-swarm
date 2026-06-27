@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
+  computeAgentSkillsSignature,
   createAgent,
   createSkill,
   initDb,
@@ -9,8 +10,7 @@ import {
   toggleAgentSkill,
   uninstallSkill,
   updateSkill,
-} from "../be/db";
-import { computeAgentSkillsSignature } from "../be/skill-sync";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = `./test-skills-signature-${process.pid}.sqlite`;
 

@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
-import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { closeDb, initDb, upsertOAuthApp } from "@swarm/storage";
 import {
   _clearPendingStates,
   _getPendingState,

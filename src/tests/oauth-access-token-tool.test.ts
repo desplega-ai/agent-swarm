@@ -5,13 +5,14 @@ import {
   refreshSecretScrubberCache,
   scrubSecrets,
 } from "@swarm/core-utils";
-import { closeDb, initDb } from "../be/db";
 import {
+  closeDb,
   deleteOAuthTokens,
   getOAuthTokens,
+  initDb,
   storeOAuthTokens,
   upsertOAuthApp,
-} from "../be/db-queries/oauth";
+} from "@swarm/storage";
 import { resolveOAuthAccessToken } from "../tools/oauth-access-token";
 
 const TEST_DB_PATH = "./test-oauth-access-token-tool.sqlite";

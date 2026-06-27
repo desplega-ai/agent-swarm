@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, initDb } from "@swarm/storage";
 
 // Mock slack/app to avoid dynamic import issues in parallel test execution
 mock.module("../slack/app", () => ({
@@ -34,7 +34,7 @@ const mockDeps: ExecutorDependencies = {
       postedMessages.push({ channelId, content });
       return msg;
     },
-  } as unknown as typeof import("../be/db"),
+  } as unknown as typeof import("@swarm/storage"),
   eventBus: { emit: () => {}, on: () => {}, off: () => {} },
   interpolate: (template: string, ctx: Record<string, unknown>) => {
     return template.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {

@@ -1,5 +1,4 @@
 import { resolveTemplate } from "@swarm/prompt-templates";
-import type { AgentTask } from "@swarm/types";
 import {
   assignUnassignedTaskPending,
   backfillSupersedeTaskResumeTaskId,
@@ -27,10 +26,11 @@ import {
   releaseStaleMentionProcessing,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
+  repointTrackerSyncBySwarmId,
   supersedeTask,
   updateAgentStatus,
-} from "../be/db";
-import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+} from "@swarm/storage";
+import type { AgentTask } from "@swarm/types";
 import {
   createRerouteDecisionTask,
   createResumeFollowUp,

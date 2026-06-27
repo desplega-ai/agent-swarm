@@ -13,19 +13,17 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  createTrackerSync,
   getChildTasks,
   getDb,
   getLogsByTaskId,
   getTaskById,
+  getTrackerSync,
+  getTrackerSyncByExternalId,
   initDb,
   insertActiveSession,
   startTask,
-} from "../be/db";
-import {
-  createTrackerSync,
-  getTrackerSync,
-  getTrackerSyncByExternalId,
-} from "../be/db-queries/tracker";
+} from "@swarm/storage";
 import {
   codeLevelTriage,
   MAX_RESUME_GENERATIONS,

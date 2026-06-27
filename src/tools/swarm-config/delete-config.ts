@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { deleteSwarmConfig, getSwarmConfigLookupById } from "@swarm/storage";
 import * as z from "zod";
-import { deleteSwarmConfig, getSwarmConfigLookupById } from "@/be/db";
 
 export const registerDeleteConfigTool = (server: McpServer) => {
   createToolRegistrar(server)(

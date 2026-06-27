@@ -8,7 +8,7 @@ import {
   getInProgressSlackTasks,
   getMostRecentTaskInThread,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
 import { routeMessage } from "../slack/router";
 
 const TEST_DB_PATH = "./test-slack-thread-followups.sqlite";

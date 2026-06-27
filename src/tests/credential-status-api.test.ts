@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
-import { closeDb, createAgent, initDb } from "../be/db";
+import { closeDb, createAgent, initDb } from "@swarm/storage";
 import { handleAgentsRest } from "../http/agents";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 

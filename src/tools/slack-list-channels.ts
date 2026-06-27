@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { getAgentById } from "@swarm/storage";
 import * as z from "zod";
-import { getAgentById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
 
 const SlackChannelSchema = z.object({

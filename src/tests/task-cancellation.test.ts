@@ -13,7 +13,7 @@ import {
   initDb,
   startTask,
   updateAgentStatusFromCapacity,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-task-cancellation.sqlite";
 const TEST_PORT = 13016;

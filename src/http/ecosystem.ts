@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { getServicesByAgentId } from "../be/db";
+import { getServicesByAgentId } from "@swarm/storage";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

@@ -7,7 +7,7 @@ import {
   getTaskById,
   initDb,
   updateTaskProgress,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-progress-dedup.sqlite";
 

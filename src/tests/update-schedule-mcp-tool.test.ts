@@ -11,7 +11,13 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { closeDb, createAgent, createScheduledTask, getScheduledTaskById, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createScheduledTask,
+  getScheduledTaskById,
+  initDb,
+} from "@swarm/storage";
 import { registerUpdateScheduleTool } from "../tools/schedules/update-schedule";
 
 const TEST_DB_PATH = "./test-update-schedule-mcp-tool.sqlite";

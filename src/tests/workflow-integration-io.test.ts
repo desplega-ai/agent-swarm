@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
 import {
   closeDb,
   createWorkflow,
@@ -9,7 +7,9 @@ import {
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
+import { z } from "zod";
 import { validateDefinition } from "../workflows/definition";
 import { startWorkflowExecution, TriggerSchemaError } from "../workflows/engine";
 import {
@@ -110,7 +110,7 @@ class PassthroughExecutor extends BaseExecutor<
 // ─── Mock Dependencies ───────────────────────────────────────
 
 const mockDeps: ExecutorDependencies = {
-  db: {} as typeof import("../be/db"),
+  db: {} as typeof import("@swarm/storage"),
   eventBus: { emit: () => {}, on: () => {}, off: () => {} },
   interpolate: (t: string) => t,
 };

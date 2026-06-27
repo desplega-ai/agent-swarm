@@ -1,16 +1,21 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { RatingEvent } from "@swarm/ai-llm";
-import { closeDb, createAgent, createSessionLogs, getDb, initDb } from "../be/db";
-import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
-import { ImplicitCitationRater } from "../be/memory/raters/implicit-citation";
 import {
+  applyRating,
+  closeDb,
+  createAgent,
+  createSessionLogs,
+  getDb,
   getRaterWeightMultiplier,
   getRegisteredRaters,
+  getRetrievalsForTask,
+  ImplicitCitationRater,
+  initDb,
+  recordRetrievals,
   SERVER_RATERS,
-} from "../be/memory/raters/registry";
-import { getRetrievalsForTask, recordRetrievals } from "../be/memory/raters/retrieval";
-import { applyRating } from "../be/memory/raters/store";
+  SqliteMemoryStore,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-memory-rater-implicit-citation.sqlite";
 

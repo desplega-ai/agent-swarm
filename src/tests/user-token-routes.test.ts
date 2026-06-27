@@ -6,8 +6,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createUser, getDb, initDb } from "../be/db";
-import { fingerprintApiKey } from "../be/users";
+import { closeDb, createUser, fingerprintApiKey, getDb, initDb } from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";

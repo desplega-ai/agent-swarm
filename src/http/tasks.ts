@@ -2,18 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
 import { getRequestAuth } from "@swarm/core-utils";
 import {
-  type AgentTaskSource,
-  AgentTaskSourceSchema,
-  type AgentTaskStatus,
-  AgentTaskStatusSchema,
-  isTerminalTaskStatus,
-  ModelTierSchema,
-  ProviderNameSchema,
-  ResumeReasonSchema,
-  splitLegacyModelAlias,
-} from "@swarm/types";
-import { z } from "zod";
-import {
   backfillSupersedeTaskResumeTaskId,
   cancelTask,
   completeTask,
@@ -34,7 +22,19 @@ import {
   updateTaskClaudeSessionId,
   updateTaskProgress,
   updateTaskVcs,
-} from "../be/db";
+} from "@swarm/storage";
+import {
+  type AgentTaskSource,
+  AgentTaskSourceSchema,
+  type AgentTaskStatus,
+  AgentTaskStatusSchema,
+  isTerminalTaskStatus,
+  ModelTierSchema,
+  ProviderNameSchema,
+  ResumeReasonSchema,
+  splitLegacyModelAlias,
+} from "@swarm/types";
+import { z } from "zod";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { route } from "./route-def";

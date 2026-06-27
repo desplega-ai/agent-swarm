@@ -1,6 +1,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { closeDb } from "@swarm/storage";
 import { createServer } from "@/server";
-import { closeDb } from "./be/db";
 
 async function main() {
   const server = createServer();

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, getSwarmConfigs, initDb, upsertSwarmConfig } from "../be/db";
+import { closeDb, getDb, getSwarmConfigs, initDb, upsertSwarmConfig } from "@swarm/storage";
 
 // Phase 3 of the swarm-config encryption plan adds an `encrypted` column to
 // the `swarm_config` table via migration 038. This test uses a file-backed DB

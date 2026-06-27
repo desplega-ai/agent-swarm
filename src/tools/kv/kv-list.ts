@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { countKv, listKv } from "@swarm/storage";
 import { KvEntrySchema, KvNamespaceSchema } from "@swarm/types";
 import * as z from "zod";
-import { countKv, listKv } from "@/be/db";
 import { resolveNamespace } from "./resolve-namespace";
 
 const MAX_KV_LIST_LIMIT = 1000;

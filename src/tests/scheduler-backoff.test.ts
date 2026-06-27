@@ -6,7 +6,7 @@ import {
   getScheduledTaskById,
   initDb,
   updateScheduledTask,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-scheduler-backoff.sqlite";
 

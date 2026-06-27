@@ -11,7 +11,7 @@ import {
   KvTypeCollisionError,
   listKv,
   upsertKv,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-kv-storage.sqlite";
 

@@ -4,7 +4,7 @@ import {
   REFERENCES_SOURCE_MAX_LENGTH,
   sanitizeReferencesSource,
 } from "@swarm/ai-llm";
-import { getDb } from "@/be/db";
+import { getDb } from "../../db";
 
 /**
  * Single chokepoint for posterior updates and audit-log writes.

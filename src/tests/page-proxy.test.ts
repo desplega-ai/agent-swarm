@@ -12,8 +12,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import { signPageSession } from "@swarm/storage";
 import type { Subprocess } from "bun";
-import { signPageSession } from "../utils/page-session";
 
 const TEST_PORT = 19877;
 const TEST_DB_PATH = `/tmp/test-page-proxy-${Date.now()}.sqlite`;

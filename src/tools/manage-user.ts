@@ -1,21 +1,19 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
-import * as z from "zod";
 import {
   createUser,
   deleteUser,
   getAgentById,
   getAllUsers,
   getUserById,
-  updateUser,
-} from "@/be/db";
-import {
   getUserIdentities,
   type IdentityActor,
   linkIdentity,
   recordIdentityEvent,
   unlinkIdentity,
-} from "@/be/users";
+  updateUser,
+} from "@swarm/storage";
+import * as z from "zod";
 
 /**
  * `manage-user` — Q18 break-and-migrate shape:

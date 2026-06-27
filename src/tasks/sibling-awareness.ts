@@ -11,13 +11,13 @@
  * `src/scheduler/`, `src/http/`, `src/tools/`. Workers don't call this.
  */
 
-import type { AgentTask } from "@swarm/types";
 import {
   type CreateTaskOptions,
   createTaskExtended,
   getAgentById,
   getInProgressTasksByContextKey,
-} from "../be/db";
+} from "@swarm/storage";
+import type { AgentTask } from "@swarm/types";
 import {
   pickResumeParent,
   prependSiblingBlock,

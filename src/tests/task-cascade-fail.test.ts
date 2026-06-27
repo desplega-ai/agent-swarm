@@ -14,7 +14,7 @@ import {
   initDb,
   startTask,
   supersedeTask,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-task-cascade-fail.sqlite";
 

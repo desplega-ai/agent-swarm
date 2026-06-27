@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, createScheduledTask, initDb } from "../be/db";
+import { closeDb, createScheduledTask, initDb } from "@swarm/storage";
 import { calculateNextRun } from "./scheduler";
 
 const TEST_DB_PATH = "./test-scheduler.sqlite";

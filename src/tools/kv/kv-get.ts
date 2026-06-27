@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { getKv } from "@swarm/storage";
 import { KvEntrySchema, KvKeySchema, KvNamespaceSchema } from "@swarm/types";
 import * as z from "zod";
-import { getKv } from "@/be/db";
 import { resolveNamespace } from "./resolve-namespace";
 
 export const registerKvGetTool = (server: McpServer) => {

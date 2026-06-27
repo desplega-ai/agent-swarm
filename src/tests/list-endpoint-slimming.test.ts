@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import type { Page, Workflow } from "@swarm/types";
 import {
   closeDb,
   createAgent,
@@ -17,7 +16,8 @@ import {
   listRecentSessions,
   listWorkflows,
   updateAgentProfile,
-} from "../be/db";
+} from "@swarm/storage";
+import type { Page, Workflow } from "@swarm/types";
 
 const TEST_DB_PATH = "./test-list-endpoint-slimming.sqlite";
 

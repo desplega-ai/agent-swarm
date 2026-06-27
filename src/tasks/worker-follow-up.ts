@@ -1,5 +1,4 @@
 import { resolveTemplate } from "@swarm/prompt-templates";
-import type { AgentTask, ResumeReason, TaskAttachment } from "@swarm/types";
 import {
   createTaskExtended,
   getActiveTaskCount,
@@ -9,8 +8,9 @@ import {
   getTaskAttachments,
   getTaskById,
   hasNonTerminalRerouteDecisionChild,
-} from "../be/db";
-import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+  repointTrackerSyncBySwarmId,
+} from "@swarm/storage";
+import type { AgentTask, ResumeReason, TaskAttachment } from "@swarm/types";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
 

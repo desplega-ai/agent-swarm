@@ -9,7 +9,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handleKv } from "../http/kv";
 import { getPathSegments, parseQueryParams } from "../http/utils";

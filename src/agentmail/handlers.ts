@@ -1,11 +1,11 @@
 import { resolveTemplate } from "@swarm/prompt-templates";
 import {
+  findOrCreateUserByEmail,
   findTaskByAgentMailThread,
   getAgentById,
   getAgentMailInboxMapping,
   getAllAgents,
-} from "../be/db";
-import { findOrCreateUserByEmail } from "../be/users";
+} from "@swarm/storage";
 import { createIngressBuffer } from "../tasks/additive-ingress";
 import { agentmailContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";

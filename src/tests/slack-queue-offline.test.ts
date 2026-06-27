@@ -8,7 +8,7 @@ import {
   getTasksByAgentId,
   getTasksByStatus,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
 import { extractTaskFromMessage, routeMessage } from "../slack/router";
 
 const TEST_DB_PATH = "./test-slack-queue-offline.sqlite";

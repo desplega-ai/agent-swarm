@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, completeTask, createAgent, createTaskExtended, initDb } from "../be/db";
+import { closeDb, completeTask, createAgent, createTaskExtended, initDb } from "@swarm/storage";
 import { slackContextKey } from "../tasks/context-key";
 import { applySiblingAwareness } from "../tasks/sibling-awareness";
 

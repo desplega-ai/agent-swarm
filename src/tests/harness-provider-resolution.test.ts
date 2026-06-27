@@ -23,7 +23,7 @@ import {
   getResolvedConfig,
   initDb,
   upsertSwarmConfig,
-} from "../be/db";
+} from "@swarm/storage";
 import { handleConfig } from "../http/config";
 
 const TEST_DB_PATH = "./test-harness-provider-resolution.sqlite";

@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { unlink } from "node:fs/promises";
-import { WorkflowSchema } from "@swarm/types";
-import * as db from "../be/db";
+import * as db from "@swarm/storage";
 import {
   closeDb,
   createAgent,
@@ -11,7 +10,8 @@ import {
   initDb,
   listWorkflows,
   updateWorkflow,
-} from "../be/db";
+} from "@swarm/storage";
+import { WorkflowSchema } from "@swarm/types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { createExecutorRegistry } from "../workflows/executors/registry";
 

@@ -1,13 +1,18 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, completeTask, createAgent, getDb, getTaskById, initDb } from "../be/db";
-import { upsertOAuthApp } from "../be/db-queries/oauth";
 import {
+  closeDb,
+  completeTask,
+  createAgent,
   createTrackerSync,
   createTrackerSyncIfAbsent,
+  getDb,
+  getTaskById,
   getTrackerSyncByExternalId,
+  initDb,
   updateTrackerSync,
-} from "../be/db-queries/tracker";
+  upsertOAuthApp,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-jira-sync.sqlite";
 const BOT_ACCOUNT_ID = "bot-account-12345";

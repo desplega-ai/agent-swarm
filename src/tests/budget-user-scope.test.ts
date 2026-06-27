@@ -7,8 +7,9 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { __resetKillSwitchWarnedForTests, canClaim } from "../be/budget-admission";
 import {
+  __resetKillSwitchWarnedForTests,
+  canClaim,
   closeDb,
   createAgent,
   createSessionCost,
@@ -17,10 +18,11 @@ import {
   getDailySpendForUser,
   getDb,
   getTaskById,
+  type IdentityActor,
   initDb,
+  mintToken,
   upsertBudget,
-} from "../be/db";
-import { type IdentityActor, mintToken } from "../be/users";
+} from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handleMcpUser } from "../http/mcp-user";
 import { handlePoll } from "../http/poll";

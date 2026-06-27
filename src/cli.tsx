@@ -683,7 +683,7 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
     printHelp("scripts");
     process.exit(scriptsArgs[0] === "reembed" || args.showHelp ? 0 : 1);
   }
-  const { runScriptsMaintenanceCommand } = await import("./be/scripts/maintenance");
+  const { runScriptsMaintenanceCommand } = await import("@swarm/storage");
   await runScriptsMaintenanceCommand(scriptsArgs);
   console.log("Scripts re-embedded.");
 } else if (args.command === "codex-login") {

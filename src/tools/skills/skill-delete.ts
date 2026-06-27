@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { deleteSkill, getAgentById, getSkillById } from "@swarm/storage";
 import * as z from "zod";
-import { deleteSkill, getAgentById, getSkillById } from "@/be/db";
 
 const SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE =
   "This skill is system-managed and cannot be edited from the UI; it is re-seeded on each start. Fork it under a new name to customize.";

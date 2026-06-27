@@ -10,7 +10,7 @@ import {
   getSwarmConfigs,
   initDb,
   upsertSwarmConfig,
-} from "../be/db";
+} from "@swarm/storage";
 import { handleConfig } from "../http/config";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerDeleteConfigTool } from "../tools/swarm-config/delete-config";

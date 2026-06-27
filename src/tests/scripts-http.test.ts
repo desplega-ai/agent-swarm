@@ -3,9 +3,15 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { refreshSecretScrubberCache } from "@swarm/core-utils";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { getScript, listScripts } from "../be/scripts/db";
-import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+import {
+  closeDb,
+  createAgent,
+  getDb,
+  getScript,
+  initDb,
+  listScripts,
+  setScriptEmbeddingProviderForTests,
+} from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";

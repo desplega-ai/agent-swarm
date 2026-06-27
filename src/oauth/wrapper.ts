@@ -1,5 +1,5 @@
+import { storeOAuthTokens, updateOAuthTokensAfterRefresh } from "@swarm/storage";
 import * as oauth from "oauth4webapi";
-import { storeOAuthTokens, updateOAuthTokensAfterRefresh } from "../be/db-queries/oauth";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

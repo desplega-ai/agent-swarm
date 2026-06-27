@@ -7,12 +7,13 @@ import {
   createUser,
   deleteKv,
   findTaskByVcs,
+  findUserByExternalId,
   getDb,
   getKv,
   getTaskById,
   initDb,
-} from "../be/db";
-import { findUserByExternalId, linkIdentity } from "../be/users";
+  linkIdentity,
+} from "@swarm/storage";
 import { GITLAB_BOT_NAME } from "../gitlab/auth";
 import { handleIssue, handleMergeRequest, handleNote, handlePipeline } from "../gitlab/handlers";
 import type { IssueEvent, MergeRequestEvent, NoteEvent, PipelineEvent } from "../gitlab/types";

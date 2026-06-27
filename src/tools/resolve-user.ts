@@ -1,7 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import {
+  findUserByEmail,
+  findUserByExternalId,
+  findUserById,
+  getUserIdentities,
+} from "@swarm/storage";
 import * as z from "zod";
-import { findUserByEmail, findUserByExternalId, findUserById, getUserIdentities } from "@/be/users";
 
 /**
  * `resolve-user` — Q18 break-and-migrate shape:

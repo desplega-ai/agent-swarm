@@ -1,4 +1,4 @@
-import { getAgentById, getAgentWorkingOnThread, getAllAgents } from "../be/db";
+import { getAgentById, getAgentWorkingOnThread, getAllAgents } from "@swarm/storage";
 import type { AgentMatch } from "./types";
 
 export interface ThreadContext {

@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import pkg from "../../package.json";
 import {
   closeDb,
   createAgent,
@@ -9,7 +8,8 @@ import {
   getDb,
   getTaskById,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
+import pkg from "../../package.json";
 
 const TEST_DB_PATH = "./test-task-swarm-version.sqlite";
 

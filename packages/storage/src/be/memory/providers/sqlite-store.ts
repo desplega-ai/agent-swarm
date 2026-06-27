@@ -1,6 +1,6 @@
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@swarm/types";
-import { getDb, isSqliteVecAvailable } from "@/be/db";
-import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
+import { getDb, isSqliteVecAvailable } from "../../db";
+import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "../../embedding";
 import {
   EMBEDDING_DIMENSIONS,
   MIN_SIMILARITY,

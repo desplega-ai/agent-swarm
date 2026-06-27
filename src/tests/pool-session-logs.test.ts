@@ -10,7 +10,7 @@ import {
   initDb,
   insertActiveSession,
   reassociateSessionLogs,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-pool-session-logs.sqlite";
 

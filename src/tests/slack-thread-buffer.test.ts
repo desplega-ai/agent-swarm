@@ -6,7 +6,7 @@ import {
   createTaskExtended,
   getLatestActiveTaskInThread,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
 import {
   bufferThreadMessage,
   getBufferMessageCount,

@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { listTaskTemplates } from "@swarm/storage";
 import { TaskTemplateKindSchema } from "@swarm/types";
 import { z } from "zod";
-import { listTaskTemplates } from "../be/db";
 import { route } from "./route-def";
 import { json } from "./utils";
 

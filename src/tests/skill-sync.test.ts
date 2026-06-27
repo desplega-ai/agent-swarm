@@ -3,8 +3,15 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { closeDb, createAgent, createSkill, initDb, installSkill, upsertSkillFile } from "../be/db";
-import { syncSkillsToFilesystem } from "../be/skill-sync";
+import {
+  closeDb,
+  createAgent,
+  createSkill,
+  initDb,
+  installSkill,
+  syncSkillsToFilesystem,
+  upsertSkillFile,
+} from "@swarm/storage";
 
 const SWARM_MARKER = ".swarm-managed";
 

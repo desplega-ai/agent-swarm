@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { MemoryCandidate } from "@swarm/storage";
 import {
   accessBoost,
   computeScore,
@@ -6,8 +7,7 @@ import {
   rerank,
   sourceQuality,
   usefulness,
-} from "../be/memory/reranker";
-import type { MemoryCandidate } from "../be/memory/types";
+} from "@swarm/storage";
 
 function makeCandidate(
   overrides: Partial<MemoryCandidate> & { similarity: number },

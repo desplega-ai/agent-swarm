@@ -15,7 +15,7 @@ import {
   setSlackMessageTracking,
   startTask,
   updateTaskProgress,
-} from "../be/db";
+} from "@swarm/storage";
 import {
   _getLastRenderedTree,
   _getTaskMessages,
@@ -796,7 +796,7 @@ describe("DM unification — postInitialDMTreeMessage", () => {
     startTask(task.id);
 
     // Re-fetch the task to get in_progress status
-    const { getTaskById } = await import("../be/db");
+    const { getTaskById } = await import("@swarm/storage");
     const freshTask = getTaskById(task.id)!;
 
     const messageTs = await _postInitialDMTreeMessage(freshTask);
@@ -818,7 +818,7 @@ describe("DM unification — postInitialDMTreeMessage", () => {
       slackUserId: "U_DM2",
     });
 
-    const { getTaskById } = await import("../be/db");
+    const { getTaskById } = await import("@swarm/storage");
     const freshTask = getTaskById(task.id)!;
 
     const messageTs = await _postInitialDMTreeMessage(freshTask);

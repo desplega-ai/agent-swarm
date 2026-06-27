@@ -11,8 +11,15 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
 import { setRequestAuth } from "@swarm/core-utils";
-import { resolveHttpAuditUserId, resolveTaskAuditUserId } from "../be/audit-user";
-import { closeDb, createAgent, createTaskExtended, createUser, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  initDb,
+  resolveHttpAuditUserId,
+  resolveTaskAuditUserId,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-audit-user.sqlite";
 

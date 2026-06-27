@@ -6,20 +6,18 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  createTrackerSync,
   failTask,
   getDb,
   getLogsByTaskId,
   getTaskById,
+  getTrackerSync,
+  getTrackerSyncByExternalId,
   initDb,
   startTask,
   supersedeTask,
   updateAgentStatus,
-} from "../be/db";
-import {
-  createTrackerSync,
-  getTrackerSync,
-  getTrackerSyncByExternalId,
-} from "../be/db-queries/tracker";
+} from "@swarm/storage";
 import { buildResumeContextPreamble } from "../commands/context-preamble";
 import { createResumeFollowUp } from "../tasks/worker-follow-up";
 

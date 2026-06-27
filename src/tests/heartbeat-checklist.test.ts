@@ -8,7 +8,7 @@ import {
   initDb,
   startTask,
   updateAgentProfile,
-} from "../be/db";
+} from "@swarm/storage";
 import {
   checkHeartbeatChecklist,
   createBootTriageTask,

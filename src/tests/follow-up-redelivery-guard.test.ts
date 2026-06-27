@@ -12,7 +12,7 @@ import {
   getDb,
   getTaskById,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-follow-up-redelivery-guard.sqlite";
 

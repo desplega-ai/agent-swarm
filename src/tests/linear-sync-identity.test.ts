@@ -5,14 +5,15 @@ import {
   closeDb,
   createUser,
   deleteKv,
+  findUserByExternalId,
   getDb,
   getKv,
   getTaskById,
+  getTrackerSyncByExternalId,
   initDb,
+  linkIdentity,
   upsertKv,
-} from "../be/db";
-import { getTrackerSyncByExternalId } from "../be/db-queries/tracker";
-import { findUserByExternalId, linkIdentity } from "../be/users";
+} from "@swarm/storage";
 import { handleAgentSessionEvent, handleAgentSessionPrompted } from "../linear/sync";
 import { _clearRecentDeliveries } from "../linear/webhook";
 
@@ -70,7 +71,7 @@ beforeAll(async () => {
   }
   initDb(TEST_DB_PATH);
   // Linear sync needs a lead agent to be present (it uses findLeadAgent()).
-  const { createAgent } = await import("../be/db");
+  const { createAgent } = await import("@swarm/storage");
   createAgent({ name: "TestLead", isLead: true, status: "idle" });
 });
 
@@ -287,10 +288,10 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
   // Helper: seed a completed task + tracker_sync so the prompted handler
   // falls through to the follow-up branch where identity extraction runs.
   async function seedCompletedTask(issueId: string, identifier: string): Promise<void> {
-    const { createTaskExtended } = await import("../be/db");
+    const { createTaskExtended } = await import("@swarm/storage");
     const t = createTaskExtended("Seeded prior", { source: "linear", taskType: "linear-issue" });
     getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(t.id);
-    const { createTrackerSync } = await import("../be/db-queries/tracker");
+    const { createTrackerSync } = await import("@swarm/storage");
     createTrackerSync({
       provider: "linear",
       entityType: "task",

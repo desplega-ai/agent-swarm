@@ -15,7 +15,7 @@ import {
   markKeyRateLimited,
   recordKeyRateLimitWindows,
   recordKeyUsage,
-} from "../be/db";
+} from "@swarm/storage";
 
 // ─── Credential Selection Unit Tests ────────────────────────────────────────
 

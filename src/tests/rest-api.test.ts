@@ -11,7 +11,7 @@ import {
   initDb,
   insertTaskAttachment,
   updateAgentStatus,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-rest-api.sqlite";
 const TEST_PORT = 13015;

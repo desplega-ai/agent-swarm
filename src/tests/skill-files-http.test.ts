@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, createSkill, getDb, initDb } from "../be/db";
+import { closeDb, createSkill, getDb, initDb } from "@swarm/storage";
 import { handleSkills } from "../http/skills";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 

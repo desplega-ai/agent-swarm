@@ -1,13 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import {
+  CANDIDATE_SET_MULTIPLIER,
+  getAgentById,
+  getEmbeddingProvider,
+  getMemoryStore,
+  recordRetrievals,
+  rerank,
+} from "@swarm/storage";
 import type { AgentMemorySource } from "@swarm/types";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@swarm/types";
 import * as z from "zod";
-import { getAgentById } from "@/be/db";
-import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
-import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
-import { recordRetrievals } from "@/be/memory/raters/retrieval";
-import { rerank } from "@/be/memory/reranker";
 
 const NUDGE_ELIGIBLE_SOURCES: ReadonlySet<AgentMemorySource> = new Set(["manual", "file_index"]);
 

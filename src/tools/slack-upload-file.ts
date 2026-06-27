@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { getAgentById, getInboxMessageById, getTaskById } from "@swarm/storage";
 import * as z from "zod";
-import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
 import { MAX_FILE_SIZE, uploadFile } from "@/slack/files";
 

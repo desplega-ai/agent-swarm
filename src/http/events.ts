@@ -1,17 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
+  createEvent,
+  createEventsBatch,
+  getEventCountsFiltered,
+  getEventsFiltered,
+} from "@swarm/storage";
+import {
   EventCategorySchema,
   EventNameSchema,
   EventSourceSchema,
   EventStatusSchema,
 } from "@swarm/types";
 import { z } from "zod";
-import {
-  createEvent,
-  createEventsBatch,
-  getEventCountsFiltered,
-  getEventsFiltered,
-} from "../be/events";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

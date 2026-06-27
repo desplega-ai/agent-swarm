@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { closeDb } from "../src/be/db";
-import { SCRIPT_SDK_TYPES, SCRIPT_STDLIB_TYPES } from "../src/be/scripts/typecheck";
+import { closeDb } from "@swarm/storage";
+import { SCRIPT_SDK_TYPES, SCRIPT_STDLIB_TYPES } from "@swarm/storage";
 import { createServer } from "../src/server";
 // Import the allowlist module DIRECTLY (not via the @swarm/scripts barrel): the barrel
 // re-exports eval-harness.ts, whose top-level code calls requiredEnv("SWARM_SCRIPT_TMPDIR")

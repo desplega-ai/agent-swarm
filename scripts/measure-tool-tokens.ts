@@ -8,7 +8,7 @@
  * Usage: bun scripts/measure-tool-tokens.ts
  */
 
-import { closeDb, initDb } from "../src/be/db";
+import { closeDb, initDb } from "@swarm/storage";
 import { createServer } from "../src/server";
 import { CORE_TOOLS, DEFERRED_TOOLS } from "@swarm/mcp-tool";
 

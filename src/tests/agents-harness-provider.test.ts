@@ -24,7 +24,7 @@ import {
   getSwarmConfigs,
   initDb,
   setAgentHarnessProvider,
-} from "../be/db";
+} from "@swarm/storage";
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
 
 const TEST_DB_PATH = "./test-agents-harness-provider.sqlite";

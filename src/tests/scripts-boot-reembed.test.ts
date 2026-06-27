@@ -1,11 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
-import { serializeEmbedding } from "../be/embedding";
-import type { EmbeddingProvider } from "../be/memory/types";
-import { runBootReembedScripts } from "../be/scripts/boot-reembed";
-import { upsertScriptByName } from "../be/scripts/db";
-import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+import type { EmbeddingProvider } from "@swarm/storage";
+import {
+  closeDb,
+  getDb,
+  initDb,
+  runBootReembedScripts,
+  serializeEmbedding,
+  setScriptEmbeddingProviderForTests,
+  upsertScriptByName,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-scripts-boot-reembed.sqlite";
 

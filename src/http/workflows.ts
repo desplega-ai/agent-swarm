@@ -1,17 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getRequestAuth } from "@swarm/core-utils";
 import {
-  CooldownConfigSchema,
-  InputValueSchema,
-  TriggerConfigSchema,
-  WorkflowDefinitionSchema,
-  WorkflowNodePatchSchema,
-  WorkflowPatchSchema,
-  WorkflowRunStatusSchema,
-} from "@swarm/types";
-import { z } from "zod";
-import { resolveHttpAuditUserId } from "../be/audit-user";
-import {
   createWorkflow,
   deleteWorkflow,
   getWorkflow,
@@ -21,8 +10,19 @@ import {
   getWorkflowVersions,
   listWorkflowRuns,
   listWorkflows,
+  resolveHttpAuditUserId,
   updateWorkflow,
-} from "../be/db";
+} from "@swarm/storage";
+import {
+  CooldownConfigSchema,
+  InputValueSchema,
+  TriggerConfigSchema,
+  WorkflowDefinitionSchema,
+  WorkflowNodePatchSchema,
+  WorkflowPatchSchema,
+  WorkflowRunStatusSchema,
+} from "@swarm/types";
+import { z } from "zod";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { applyDefinitionPatch, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";

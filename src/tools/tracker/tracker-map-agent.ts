@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { createTrackerAgentMapping } from "@swarm/storage";
 import * as z from "zod";
-import { createTrackerAgentMapping } from "@/be/db-queries/tracker";
 
 export const registerTrackerMapAgentTool = (server: McpServer) => {
   createToolRegistrar(server)(

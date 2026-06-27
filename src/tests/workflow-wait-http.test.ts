@@ -1,8 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
-import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import * as db from "../be/db";
+import * as db from "@swarm/storage";
 import {
   closeDb,
   createWorkflow,
@@ -10,7 +9,8 @@ import {
   getWaitStateByStepId,
   getWorkflowRunStepsByRunId,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflowEvents } from "../http/workflow-events";
 import { startWorkflowExecution } from "../workflows/engine";
@@ -23,7 +23,7 @@ const TEST_DB_PATH = "./test-workflow-wait-http.sqlite";
 const TEST_PORT = 13041;
 
 const deps: ExecutorDependencies = {
-  db: db as typeof import("../be/db"),
+  db: db as typeof import("@swarm/storage"),
   eventBus: workflowEventBus,
   interpolate: (t: string) => t,
 };

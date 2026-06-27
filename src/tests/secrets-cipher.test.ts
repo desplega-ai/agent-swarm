@@ -1,12 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { randomBytes } from "node:crypto";
-import {
-  AES_KEY_BYTES,
-  decryptSecret,
-  encryptSecret,
-  IV_BYTES,
-  TAG_BYTES,
-} from "../be/crypto/secrets-cipher";
+import { AES_KEY_BYTES, decryptSecret, encryptSecret, IV_BYTES, TAG_BYTES } from "@swarm/storage";
 
 function freshKey(): Buffer {
   return randomBytes(AES_KEY_BYTES);

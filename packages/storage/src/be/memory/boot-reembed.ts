@@ -7,7 +7,7 @@
  * call OpenAI, so the backfill runs at startup instead.
  */
 
-import { getDb } from "@/be/db";
+import { getDb } from "../db";
 import { EMBEDDING_DIMENSIONS } from "./constants";
 import { getEmbeddingProvider, getMemoryStore } from "./index";
 

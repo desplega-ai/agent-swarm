@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
-import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { closeDb, getDb, initDb, upsertOAuthApp } from "@swarm/storage";
 import { getJiraMetadata, updateJiraMetadata } from "../jira/metadata";
 
 const TEST_DB_PATH = "./test-jira-webhook-lifecycle.sqlite";

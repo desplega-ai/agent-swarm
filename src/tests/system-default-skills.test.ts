@@ -8,10 +8,11 @@ import {
   getDb,
   getSystemDefaultSkills,
   initDb,
+  loadSeedSkills,
+  runSeeder,
+  skillsSeeder,
   toggleAgentSkill,
-} from "../be/db";
-import { runSeeder } from "../be/seed";
-import { loadSeedSkills, skillsSeeder } from "../be/seed-skills";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = `./test-system-default-skills-${process.pid}.sqlite`;
 

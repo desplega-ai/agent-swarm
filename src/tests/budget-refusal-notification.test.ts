@@ -22,7 +22,7 @@ import {
   getBudgetRefusalNotification,
   getDb,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
 import { handlePoll } from "../http/poll";
 import { workflowEventBus } from "../workflows/event-bus";
 

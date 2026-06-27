@@ -1,8 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
+import {
+  closeDb,
+  createAgent,
+  createScheduledTask,
+  getScheduledTasks,
+  initDb,
+} from "@swarm/storage";
 import type { ScheduledTask } from "@swarm/types";
-import { closeDb, createAgent, createScheduledTask, getScheduledTasks, initDb } from "../be/db";
 
 const TEST_DB_PATH = "./test-scheduled-tasks-api.sqlite";
 const TEST_PORT = 13020;

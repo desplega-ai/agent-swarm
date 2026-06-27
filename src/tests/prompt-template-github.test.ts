@@ -5,7 +5,7 @@ import {
   getTemplateDefinition,
   resolveTemplate,
 } from "@swarm/prompt-templates";
-import { closeDb, initDb, upsertPromptTemplate } from "../be/db";
+import { closeDb, initDb, upsertPromptTemplate } from "@swarm/storage";
 // Side-effect import: registers all GitHub templates
 import "../github/templates";
 

@@ -9,13 +9,11 @@ import {
   failTask,
   getAgentById,
   initDb,
-} from "../be/db";
-import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
-import {
   isAutomaticOrRecurringTaskCompletion,
   isScheduledTaskCompletion,
+  SqliteMemoryStore,
   shouldPersistTaskCompletionMemory,
-} from "../memory/automatic-task-gate";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-self-improvement.sqlite";
 

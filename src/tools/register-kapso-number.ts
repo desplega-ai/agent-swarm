@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getPublicMcpBaseUrl } from "@swarm/core-utils";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { getAgentById, getLeadAgent } from "@swarm/storage";
 import * as z from "zod";
-import { getAgentById, getLeadAgent } from "@/be/db";
 import { registerKapsoWebhook } from "@/integrations/kapso/client";
 import {
   deleteKapsoNumberMapping,

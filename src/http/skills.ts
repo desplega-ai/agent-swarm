@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { parseSkillContent } from "@swarm/core-utils";
-import { z } from "zod";
 import {
+  computeAgentSkillsSignature,
   createSkill,
   deleteSkill,
   deleteSkillFile,
@@ -12,12 +12,13 @@ import {
   listSkillFileManifest,
   listSkills,
   searchSkills,
+  syncSkillsToFilesystem,
   uninstallSkill,
   updateSkill,
   upsertSkillFile,
   upsertSkillFiles,
-} from "../be/db";
-import { computeAgentSkillsSignature, syncSkillsToFilesystem } from "../be/skill-sync";
+} from "@swarm/storage";
+import { z } from "zod";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

@@ -199,7 +199,7 @@ export async function deleteJiraWebhook(webhookId: number): Promise<void> {
 async function overwriteWebhookIds(
   next: Array<{ id: number; expiresAt: string; jql: string }>,
 ): Promise<void> {
-  const { getDb } = await import("../be/db");
+  const { getDb } = await import("@swarm/storage");
   const db = getDb();
   const txn = db.transaction(() => {
     const row = db.query("SELECT metadata FROM oauth_apps WHERE provider = 'jira'").get() as {

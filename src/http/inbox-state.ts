@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { listInboxState, upsertInboxState } from "@swarm/storage";
 import { InboxItemStatusSchema, InboxItemTypeSchema } from "@swarm/types";
 import { z } from "zod";
-import { listInboxState, upsertInboxState } from "../be/db";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

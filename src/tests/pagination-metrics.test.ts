@@ -15,7 +15,7 @@ import {
   getTasksCount,
   initDb,
   insertActiveSession,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-pagination-metrics.sqlite";
 

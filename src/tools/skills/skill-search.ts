@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { searchSkills } from "@swarm/storage";
 import * as z from "zod";
-import { searchSkills } from "@/be/db";
 
 export const registerSkillSearchTool = (server: McpServer) => {
   createToolRegistrar(server)(

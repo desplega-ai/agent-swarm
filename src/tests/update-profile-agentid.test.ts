@@ -8,7 +8,7 @@ import {
   initDb,
   updateAgentName,
   updateAgentProfile,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-update-profile-agentid.sqlite";
 

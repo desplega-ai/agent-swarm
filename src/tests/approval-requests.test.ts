@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
-import type { ExecutorMeta } from "@swarm/types";
 import {
   closeDb,
   createAgent,
@@ -16,7 +15,8 @@ import {
   resolveApprovalRequest,
   startTask,
   updateApprovalRequestNotifications,
-} from "../be/db";
+} from "@swarm/storage";
+import type { ExecutorMeta } from "@swarm/types";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
 import { HumanInTheLoopExecutor } from "../workflows/executors/human-in-the-loop";
 
@@ -535,7 +535,7 @@ describe("Approval Requests", () => {
       db: {
         createApprovalRequest,
         getApprovalRequestByStepId,
-      } as unknown as typeof import("../be/db"),
+      } as unknown as typeof import("@swarm/storage"),
       eventBus: { emit: () => {}, on: () => {}, off: () => {} },
       interpolate: (template: string) => template,
     };

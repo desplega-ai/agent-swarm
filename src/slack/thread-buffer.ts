@@ -1,4 +1,8 @@
-import { getLatestActiveTaskInThread, getLeadAgent, getMostRecentTaskInThread } from "../be/db";
+import {
+  getLatestActiveTaskInThread,
+  getLeadAgent,
+  getMostRecentTaskInThread,
+} from "@swarm/storage";
 import { createAdditiveBuffer } from "../tasks/additive-buffer";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";

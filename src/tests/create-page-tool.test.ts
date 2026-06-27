@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, getPageBySlug, getPageVersions, initDb } from "../be/db";
+import { closeDb, getPageBySlug, getPageVersions, initDb } from "@swarm/storage";
 import { registerCreatePageTool } from "../tools/create-page";
 
 const TEST_DB_PATH = "./test-create-page-tool.sqlite";

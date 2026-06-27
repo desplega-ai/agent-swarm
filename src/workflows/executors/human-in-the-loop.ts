@@ -170,7 +170,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
   private async dispatchNotifications(
     requestId: string,
     config: z.infer<typeof HITLConfigSchema>,
-    db: typeof import("../../be/db"),
+    db: typeof import("@swarm/storage"),
   ): Promise<void> {
     if (!config.notifications?.length) return;
 

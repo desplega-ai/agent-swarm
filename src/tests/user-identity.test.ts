@@ -6,28 +6,26 @@ import {
   createTaskExtended,
   createUser,
   deleteUser,
-  getAllUsers,
-  getDb,
-  getTaskById,
-  getUserById,
-  initDb,
-  updateUser,
-} from "../be/db";
-import {
   findOrCreateUserByEmail,
   findUserByEmail,
   findUserByExternalId,
   findUserById,
   fingerprintApiKey,
+  getAllUsers,
+  getDb,
+  getTaskById,
+  getUserById,
   getUserIdentities,
   type IdentityActor,
+  initDb,
   linkIdentity,
   mintToken,
   recordIdentityEvent,
   resolveUserByToken,
   revokeToken,
   unlinkIdentity,
-} from "../be/users";
+  updateUser,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-user-identity.sqlite";
 

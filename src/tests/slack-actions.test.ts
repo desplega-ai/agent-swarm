@@ -8,7 +8,7 @@ import {
   getLeadAgent,
   getTaskById,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
 import { buildCancelledBlocks, getTaskLink } from "../slack/blocks";
 
 const TEST_DB_PATH = "./test-slack-actions.sqlite";

@@ -9,7 +9,7 @@ import {
   getDb,
   getTaskById,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
 import { cancelTaskHandler } from "../tools/cancel-task";
 import { getTaskDetailsHandler } from "../tools/get-task-details";
 import { taskActionHandler } from "../tools/task-action";

@@ -1,8 +1,14 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { ModelsDevCache } from "@swarm/ai-pricing";
-import { closeDb, getActivePricingRow, getDb, getLogsByEventType, initDb } from "../be/db";
-import { refreshPricingFromModelsDev } from "../be/pricing-refresh";
+import {
+  closeDb,
+  getActivePricingRow,
+  getDb,
+  getLogsByEventType,
+  initDb,
+  refreshPricingFromModelsDev,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-pricing-refresh.sqlite";
 

@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
-import type { SessionCost } from "@swarm/types";
 import {
   closeDb,
   createAgent,
@@ -14,7 +13,8 @@ import {
   getSessionCostsByTaskId,
   getSessionCostsFiltered,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
+import type { SessionCost } from "@swarm/types";
 
 const TEST_DB_PATH = "./test-session-costs.sqlite";
 const TEST_PORT = 13016;

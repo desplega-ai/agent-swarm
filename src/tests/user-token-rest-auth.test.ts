@@ -6,8 +6,16 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createUser, getDb, initDb } from "../be/db";
-import { type IdentityActor, mintToken, revokeToken } from "../be/users";
+import {
+  closeDb,
+  createAgent,
+  createUser,
+  getDb,
+  type IdentityActor,
+  initDb,
+  mintToken,
+  revokeToken,
+} from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";

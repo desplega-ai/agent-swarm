@@ -5,10 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import {
   __resetEncryptionKeyForTests,
+  AES_KEY_BYTES,
   getEncryptionKey,
   resolveEncryptionKey,
-} from "../be/crypto/key-bootstrap";
-import { AES_KEY_BYTES } from "../be/crypto/secrets-cipher";
+} from "@swarm/storage";
 
 const ENV_KEY = "SECRETS_ENCRYPTION_KEY";
 const ENV_KEY_FILE = "SECRETS_ENCRYPTION_KEY_FILE";

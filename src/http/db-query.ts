@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { getDb } from "@swarm/storage";
 import { z } from "zod";
-import { getDb } from "../be/db";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

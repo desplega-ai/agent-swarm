@@ -1,5 +1,5 @@
 import type { App } from "@slack/bolt";
-import { cancelTask, getAgentById, getLeadAgent, getTaskById } from "../be/db";
+import { cancelTask, getAgentById, getLeadAgent, getTaskById } from "@swarm/storage";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";

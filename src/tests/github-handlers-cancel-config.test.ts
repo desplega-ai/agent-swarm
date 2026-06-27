@@ -21,7 +21,7 @@ import {
   getTaskById,
   initDb,
   upsertSwarmConfig,
-} from "../be/db";
+} from "@swarm/storage";
 import { handleIssue, handlePullRequest } from "../github/handlers";
 import { GITHUB_BOT_NAME } from "../github/mentions";
 import type { IssueEvent, PullRequestEvent } from "../github/types";

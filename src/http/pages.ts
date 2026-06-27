@@ -1,13 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getAppUrl, getPublicMcpBaseUrl } from "@swarm/core-utils";
 import {
-  type Page,
-  PageAuthModeSchema,
-  PageContentTypeSchema,
-  type PageSummary,
-} from "@swarm/types";
-import { z } from "zod";
-import {
   countAllPages,
   countPagesByAgent,
   createPage,
@@ -15,12 +8,19 @@ import {
   getPage,
   getPageVersion,
   getPageVersions,
+  issuePageSessionCookie,
   listAllPages,
   listPagesByAgent,
+  snapshotPage,
   updatePage,
-} from "../be/db";
-import { snapshotPage } from "../pages/version";
-import { issuePageSessionCookie } from "../utils/page-session";
+} from "@swarm/storage";
+import {
+  type Page,
+  PageAuthModeSchema,
+  PageContentTypeSchema,
+  type PageSummary,
+} from "@swarm/types";
+import { z } from "zod";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 

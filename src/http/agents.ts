@@ -2,13 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
 import { telemetry } from "@swarm/otel";
 import {
-  AgentCredStatusSchema,
-  AgentLatestModelSchema,
-  type ProviderName,
-  ProviderNameSchema,
-} from "@swarm/types";
-import { z } from "zod";
-import {
   createAgent,
   getAgentById,
   getAgentWithTasks,
@@ -27,7 +20,14 @@ import {
   updateAgentProvider,
   updateAgentStatus,
   upsertSwarmConfig,
-} from "../be/db";
+} from "@swarm/storage";
+import {
+  AgentCredStatusSchema,
+  AgentLatestModelSchema,
+  type ProviderName,
+  ProviderNameSchema,
+} from "@swarm/types";
+import { z } from "zod";
 import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
 

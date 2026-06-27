@@ -13,7 +13,7 @@
  * Server-side only. Route handlers should call these functions instead of
  * preparing SQL directly so the query is reusable and typed in one place.
  */
-import { getDb } from "@/be/db";
+import { getDb } from "../db";
 
 /** Max chars of `agent_memory.content` returned in retrieval listings. */
 const RETRIEVAL_CONTENT_SNIPPET_CHARS = 500;

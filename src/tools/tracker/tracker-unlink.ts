@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { deleteTrackerSync } from "@swarm/storage";
 import * as z from "zod";
-import { deleteTrackerSync } from "@/be/db-queries/tracker";
 
 export const registerTrackerUnlinkTool = (server: McpServer) => {
   createToolRegistrar(server)(

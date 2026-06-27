@@ -1,5 +1,5 @@
 import type { App } from "@slack/bolt";
-import { getAllAgents, getAllTasks } from "../be/db";
+import { getAllAgents, getAllTasks } from "@swarm/storage";
 
 export function registerCommandHandler(app: App): void {
   app.command("/agent-swarm-status", async ({ ack, respond }) => {

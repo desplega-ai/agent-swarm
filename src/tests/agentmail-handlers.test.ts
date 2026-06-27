@@ -1,17 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { handleMessageReceived } from "../agentmail/handlers";
-import type { AgentMailWebhookPayload } from "../agentmail/types";
 import {
   closeDb,
   createAgent,
   createUser,
+  findUserByEmail,
   getAllUsers,
   getDb,
   getTaskById,
   initDb,
-} from "../be/db";
-import { findUserByEmail } from "../be/users";
+} from "@swarm/storage";
+import { handleMessageReceived } from "../agentmail/handlers";
+import type { AgentMailWebhookPayload } from "../agentmail/types";
 
 const TEST_DB_PATH = "./test-agentmail-handlers.sqlite";
 

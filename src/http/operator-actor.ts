@@ -16,7 +16,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getApiKey, getRequestAuth } from "@swarm/core-utils";
-import { fingerprintApiKey, type IdentityActor } from "../be/users";
+import { fingerprintApiKey, type IdentityActor } from "@swarm/storage";
 import { jsonError } from "./utils";
 
 /**

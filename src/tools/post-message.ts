@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { getChannelById, getChannelByName, postMessage, updateReadState } from "@swarm/storage";
 import { ChannelMessageSchema } from "@swarm/types";
 import * as z from "zod";
-import { getChannelById, getChannelByName, postMessage, updateReadState } from "@/be/db";
 
 export const registerPostMessageTool = (server: McpServer) => {
   createToolRegistrar(server)(

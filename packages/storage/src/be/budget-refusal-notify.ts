@@ -140,7 +140,7 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
 
   // 2. Workflow event bus emit — every refusal, not just the first per day.
   try {
-    import("../workflows/event-bus").then(({ workflowEventBus }) => {
+    import("@/workflows/event-bus").then(({ workflowEventBus }) => {
       workflowEventBus.emit("task.budget_refused", {
         taskId: ctx.task.id,
         agentId: ctx.agentId,

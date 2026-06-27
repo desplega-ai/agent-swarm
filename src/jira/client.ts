@@ -1,4 +1,4 @@
-import { getOAuthTokens } from "../be/db-queries/oauth";
+import { getOAuthTokens } from "@swarm/storage";
 import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
 import { getJiraMetadata } from "./metadata";
 

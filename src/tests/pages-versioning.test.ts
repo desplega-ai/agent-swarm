@@ -21,8 +21,8 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { closeDb, initDb } from "@swarm/storage";
 import type { PageVersion } from "@swarm/types";
-import { closeDb, initDb } from "../be/db";
 import { handlePages } from "../http/pages";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 

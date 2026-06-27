@@ -1,15 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
-import { getOAuthApp, storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
 import {
+  closeDb,
   createTrackerAgentMapping,
   createTrackerSync,
   deleteTrackerSync,
   getAllTrackerAgentMappings,
   getAllTrackerSyncs,
+  getOAuthApp,
   getTrackerSync,
-} from "../be/db-queries/tracker";
+  initDb,
+  storeOAuthTokens,
+  upsertOAuthApp,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-tracker-tools.sqlite";
 

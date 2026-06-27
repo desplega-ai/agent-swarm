@@ -10,7 +10,7 @@ import {
   getSwarmRepos,
   initDb,
   updateSwarmRepo,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-swarm-repos.sqlite";
 

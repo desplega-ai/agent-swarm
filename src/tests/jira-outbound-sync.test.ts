@@ -1,7 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
-import { createTrackerSync, getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
+import {
+  closeDb,
+  createTrackerSync,
+  getTrackerSync,
+  initDb,
+  updateTrackerSync,
+} from "@swarm/storage";
 import { initJiraOutboundSync, teardownJiraOutboundSync } from "../jira/outbound";
 import { workflowEventBus } from "../workflows/event-bus";
 

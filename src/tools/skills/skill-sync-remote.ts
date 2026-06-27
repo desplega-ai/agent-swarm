@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseSkillContent } from "@swarm/core-utils";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { getSkillById, listSkills, updateSkill } from "@swarm/storage";
 import * as z from "zod";
-import { getSkillById, listSkills, updateSkill } from "@/be/db";
 
 function contentHash(content: string): string {
   const hash = new Bun.CryptoHasher("sha256").update(content).digest("hex");

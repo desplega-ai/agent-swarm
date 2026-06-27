@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb } from "../be/db";
+import { closeDb } from "@swarm/storage";
 import { createServer } from "../server";
 
 const TEST_DB_PATH = "./test-mcp-tools.sqlite";

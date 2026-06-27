@@ -1,8 +1,16 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { closeDb, createAgent, createUser, getKv, getTaskById, initDb } from "../be/db";
-import { findUserByExternalId, linkIdentity } from "../be/users";
+import {
+  closeDb,
+  createAgent,
+  createUser,
+  findUserByExternalId,
+  getKv,
+  getTaskById,
+  initDb,
+  linkIdentity,
+} from "@swarm/storage";
 import { handleWebhooks } from "../http/webhooks";
 import { putKapsoNumberMapping } from "../integrations/kapso/config";
 import { routeKapsoInbound } from "../integrations/kapso/inbound";

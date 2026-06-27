@@ -1,7 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import * as db from "../be/db";
+import * as db from "@swarm/storage";
 import {
   closeDb,
   createWorkflow,
@@ -11,7 +10,8 @@ import {
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";
@@ -25,7 +25,7 @@ import {
 const TEST_DB_PATH = "./test-workflow-wait-event.sqlite";
 
 const deps: ExecutorDependencies = {
-  db: db as typeof import("../be/db"),
+  db: db as typeof import("@swarm/storage"),
   eventBus: workflowEventBus,
   interpolate: (t: string) => t,
 };

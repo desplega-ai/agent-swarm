@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { createTrackerSync } from "@swarm/storage";
 import * as z from "zod";
-import { createTrackerSync } from "@/be/db-queries/tracker";
 
 export const registerTrackerLinkTaskTool = (server: McpServer) => {
   createToolRegistrar(server)(

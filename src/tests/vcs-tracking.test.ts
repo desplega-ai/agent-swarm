@@ -12,7 +12,7 @@ import {
   startTask,
   supersedeTask,
   updateTaskVcs,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-vcs-tracking.sqlite";
 

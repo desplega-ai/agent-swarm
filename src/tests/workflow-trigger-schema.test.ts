@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
 import {
   closeDb,
   createWorkflow,
@@ -9,7 +7,9 @@ import {
   getWorkflow,
   getWorkflowRun,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
+import { z } from "zod";
 import { startWorkflowExecution, TriggerSchemaError } from "../workflows/engine";
 import {
   BaseExecutor,
@@ -41,7 +41,7 @@ class EchoExecutor extends BaseExecutor<typeof EchoExecutor.schema, typeof EchoE
 // ─── Mock Dependencies ───────────────────────────────────────
 
 const mockDeps: ExecutorDependencies = {
-  db: {} as typeof import("../be/db"),
+  db: {} as typeof import("@swarm/storage"),
   eventBus: { emit: () => {}, on: () => {}, off: () => {} },
   interpolate: (t: string) => t,
 };

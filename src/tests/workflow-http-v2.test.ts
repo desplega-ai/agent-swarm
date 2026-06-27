@@ -7,6 +7,13 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import {
+  closeDb,
+  createWorkflowRun,
+  createWorkflowRunStep,
+  getWorkflowVersions,
+  initDb,
+} from "@swarm/storage";
 import type {
   Workflow,
   WorkflowDefinition,
@@ -16,13 +23,6 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "@swarm/types";
-import {
-  closeDb,
-  createWorkflowRun,
-  createWorkflowRunStep,
-  getWorkflowVersions,
-  initDb,
-} from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
 import { initWorkflows, stopRetryPoller } from "../workflows";

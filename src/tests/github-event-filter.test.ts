@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, initDb } from "../be/db";
+import { closeDb, createAgent, initDb } from "@swarm/storage";
 import {
   handleCheckRun,
   handleCheckSuite,

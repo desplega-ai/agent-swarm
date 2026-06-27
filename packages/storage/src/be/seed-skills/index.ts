@@ -9,50 +9,50 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import artifactsConfig from "../../../templates/skills/artifacts/config.json" with { type: "text" };
-import artifactsContent from "../../../templates/skills/artifacts/content.md" with { type: "text" };
-import attioInteractionConfig from "../../../templates/skills/attio-interaction/config.json" with {
+import artifactsConfig from "../../../../../templates/skills/artifacts/config.json" with { type: "text" };
+import artifactsContent from "../../../../../templates/skills/artifacts/content.md" with { type: "text" };
+import attioInteractionConfig from "../../../../../templates/skills/attio-interaction/config.json" with {
   type: "text",
 };
-import attioInteractionContent from "../../../templates/skills/attio-interaction/content.md" with {
+import attioInteractionContent from "../../../../../templates/skills/attio-interaction/content.md" with {
   type: "text",
 };
-import kvStorageConfig from "../../../templates/skills/kv-storage/config.json" with {
+import kvStorageConfig from "../../../../../templates/skills/kv-storage/config.json" with {
   type: "text",
 };
-import kvStorageContent from "../../../templates/skills/kv-storage/content.md" with {
+import kvStorageContent from "../../../../../templates/skills/kv-storage/content.md" with {
   type: "text",
 };
-import pagesConfig from "../../../templates/skills/pages/config.json" with { type: "text" };
-import pagesContent from "../../../templates/skills/pages/content.md" with { type: "text" };
-import scriptWorkflowsConfig from "../../../templates/skills/script-workflows/config.json" with {
+import pagesConfig from "../../../../../templates/skills/pages/config.json" with { type: "text" };
+import pagesContent from "../../../../../templates/skills/pages/content.md" with { type: "text" };
+import scriptWorkflowsConfig from "../../../../../templates/skills/script-workflows/config.json" with {
   type: "text",
 };
-import scriptWorkflowsContent from "../../../templates/skills/script-workflows/content.md" with {
+import scriptWorkflowsContent from "../../../../../templates/skills/script-workflows/content.md" with {
   type: "text",
 };
-import swarmScriptsConfig from "../../../templates/skills/swarm-scripts/config.json" with {
+import swarmScriptsConfig from "../../../../../templates/skills/swarm-scripts/config.json" with {
   type: "text",
 };
-import swarmScriptsContent from "../../../templates/skills/swarm-scripts/content.md" with {
+import swarmScriptsContent from "../../../../../templates/skills/swarm-scripts/content.md" with {
   type: "text",
 };
-import tasteMinimalistSkillConfig from "../../../templates/skills/taste-minimalist-skill/config.json" with {
+import tasteMinimalistSkillConfig from "../../../../../templates/skills/taste-minimalist-skill/config.json" with {
   type: "text",
 };
-import tasteMinimalistSkillContent from "../../../templates/skills/taste-minimalist-skill/content.md" with {
+import tasteMinimalistSkillContent from "../../../../../templates/skills/taste-minimalist-skill/content.md" with {
   type: "text",
 };
-import workflowIterateConfig from "../../../templates/skills/workflow-iterate/config.json" with {
+import workflowIterateConfig from "../../../../../templates/skills/workflow-iterate/config.json" with {
   type: "text",
 };
-import workflowIterateContent from "../../../templates/skills/workflow-iterate/content.md" with {
+import workflowIterateContent from "../../../../../templates/skills/workflow-iterate/content.md" with {
   type: "text",
 };
-import workflowStructuredOutputConfig from "../../../templates/skills/workflow-structured-output/config.json" with {
+import workflowStructuredOutputConfig from "../../../../../templates/skills/workflow-structured-output/config.json" with {
   type: "text",
 };
-import workflowStructuredOutputContent from "../../../templates/skills/workflow-structured-output/content.md" with {
+import workflowStructuredOutputContent from "../../../../../templates/skills/workflow-structured-output/content.md" with {
   type: "text",
 };
 import { computeContentHash, createSkill, getSkillByName, updateSkill } from "../db";

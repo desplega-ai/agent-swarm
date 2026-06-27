@@ -11,7 +11,7 @@ const TIMEOUT_MS = 5_000;
 
 function extractorPath(): string {
   return new URL(
-    "../../../packages/scripts/src/scripts-runtime/extract-args-schema.ts",
+    "../../../../../packages/scripts/src/scripts-runtime/extract-args-schema.ts",
     import.meta.url,
   ).pathname;
 }

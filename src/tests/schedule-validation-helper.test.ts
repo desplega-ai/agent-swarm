@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/validate";
+import { mergeScheduleTiming, validateRecurringTiming } from "@swarm/storage";
 
 describe("mergeScheduleTiming", () => {
   test("explicit null overrides existing", () => {

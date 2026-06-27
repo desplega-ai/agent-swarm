@@ -1,4 +1,4 @@
-import { getDueWaitStates } from "../be/db";
+import { getDueWaitStates } from "@swarm/storage";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resumeWaitState } from "./resume";
 

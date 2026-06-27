@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { closeDb, initDb } from "../be/db";
-import { EMBEDDING_DIMENSIONS } from "../be/memory/constants";
+import { closeDb, EMBEDDING_DIMENSIONS, initDb } from "@swarm/storage";
 import { handleMemory } from "../http/memory";
 import { getPathSegments } from "../http/utils";
 

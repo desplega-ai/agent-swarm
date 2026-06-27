@@ -19,8 +19,14 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, getDb, getKv, initDb } from "../be/db";
-import { findUserByExternalId, getUserIdentities } from "../be/users";
+import {
+  closeDb,
+  findUserByExternalId,
+  getDb,
+  getKv,
+  getUserIdentities,
+  initDb,
+} from "@swarm/storage";
 import { enrichSlackUserEmail, resolveSlackUserId } from "../slack/enrich";
 
 const TEST_DB_PATH = "./test-slack-identity-resolution.sqlite";

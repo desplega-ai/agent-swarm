@@ -23,10 +23,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "@swarm/artifacts";
 import { getAppUrl, getConfiguredAppUrls, scrubSecrets } from "@swarm/core-utils";
+import {
+  extractAndVerifyCookie,
+  getPage,
+  incrementPageViewCount,
+  issuePageSessionCookie,
+} from "@swarm/storage";
 import type { Page } from "@swarm/types";
 import { z } from "zod";
-import { getPage, incrementPageViewCount } from "../be/db";
-import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
 import { route } from "./route-def";
 
 // ─── Route definitions (registered with auth: { apiKey: false }) ────────────

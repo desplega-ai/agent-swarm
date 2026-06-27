@@ -1,8 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
-import type { ChannelMessage } from "@swarm/types";
-import { ChannelMessageSchema } from "@swarm/types";
-import * as z from "zod";
 import {
   getAllChannels,
   getChannelById,
@@ -12,7 +9,10 @@ import {
   getUnreadMessages,
   releaseMentionProcessing,
   updateReadState,
-} from "@/be/db";
+} from "@swarm/storage";
+import type { ChannelMessage } from "@swarm/types";
+import { ChannelMessageSchema } from "@swarm/types";
+import * as z from "zod";
 
 export const registerReadMessagesTool = (server: McpServer) => {
   createToolRegistrar(server)(

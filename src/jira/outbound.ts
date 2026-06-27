@@ -1,4 +1,4 @@
-import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
+import { getTrackerSync, updateTrackerSync } from "@swarm/storage";
 import { workflowEventBus } from "../workflows/event-bus";
 import { jiraFetch } from "./client";
 

@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, initDb } from "../be/db";
 import {
+  closeDb,
+  createAgent,
   createEvent,
   createEventsBatch,
   getAllEvents,
@@ -14,7 +15,8 @@ import {
   getEventsBySessionId,
   getEventsByTaskId,
   getEventsFiltered,
-} from "../be/events";
+  initDb,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-events-db.sqlite";
 

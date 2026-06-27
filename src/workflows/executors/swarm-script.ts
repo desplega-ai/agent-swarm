@@ -1,7 +1,7 @@
 import { DEFAULT_SCRIPT_RESOURCES, runScript } from "@swarm/scripts";
+import { getScript, getScriptVersion } from "@swarm/storage";
 import type { ExecutorMeta } from "@swarm/types";
 import { z } from "zod";
-import { getScript, getScriptVersion } from "../../be/scripts/db";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 export const SWARM_SCRIPT_DEFAULT_TIMEOUT_MS = DEFAULT_SCRIPT_RESOURCES.wallClockMs;

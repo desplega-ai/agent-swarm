@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { AttachmentInputSchema, TaskAttachmentSchema } from "@swarm/types";
 import {
   closeDb,
   createAgent,
@@ -9,7 +8,8 @@ import {
   getTaskAttachments,
   initDb,
   insertTaskAttachment,
-} from "../be/db";
+} from "@swarm/storage";
+import { AttachmentInputSchema, TaskAttachmentSchema } from "@swarm/types";
 
 const TEST_DB_PATH = "./test-store-progress-attachments.sqlite";
 

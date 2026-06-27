@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { rm, unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { refreshSecretScrubberCache } from "@swarm/core-utils";
-import { closeDb, createAgent, getDb, initDb, listScriptRunJournalSteps } from "../be/db";
+import { closeDb, createAgent, getDb, initDb, listScriptRunJournalSteps } from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";

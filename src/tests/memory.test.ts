@@ -1,9 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { chunkContent } from "../be/chunking";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "../be/embedding";
-import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import {
+  chunkContent,
+  closeDb,
+  cosineSimilarity,
+  createAgent,
+  deserializeEmbedding,
+  getDb,
+  initDb,
+  SqliteMemoryStore,
+  serializeEmbedding,
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-memory.sqlite";
 

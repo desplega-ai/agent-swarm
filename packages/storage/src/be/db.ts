@@ -113,7 +113,7 @@ import {
   type ModelTier,
   parseModelTier,
 } from "@swarm/types";
-import pkg from "../../package.json";
+import pkg from "../../../../package.json";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
 import { runMigrations } from "./migrations/runner";
 import { seedDefaultTemplates } from "./seed-prompt-templates";
@@ -2194,7 +2194,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
       });
     } catch {}
     try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+      import("@/workflows/event-bus").then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.completed", {
           taskId: id,
           output,
@@ -2247,7 +2247,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
       });
     } catch {}
     try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+      import("@/workflows/event-bus").then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.failed", {
           taskId: id,
           failureReason: reason,
@@ -2308,7 +2308,7 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
       });
     } catch {}
     try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+      import("@/workflows/event-bus").then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.cancelled", {
           taskId: id,
           agentId: row.agentId,
@@ -2390,7 +2390,7 @@ export function supersedeTask(
       });
     } catch {}
     try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+      import("@/workflows/event-bus").then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.superseded", {
           taskId: id,
           reason: args.reason,
@@ -2630,7 +2630,7 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
       });
     } catch {}
     try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+      import("@/workflows/event-bus").then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.progress", {
           taskId: id,
           progress: scrubbedProgress,
@@ -3305,7 +3305,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   );
 
   try {
-    import("../workflows/event-bus").then(({ workflowEventBus }) => {
+    import("@/workflows/event-bus").then(({ workflowEventBus }) => {
       workflowEventBus.emit("task.created", {
         taskId: row.id,
         task: row.task,

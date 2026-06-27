@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { AgentTaskSchema } from "@swarm/types";
 import {
   closeDb,
   createAgent,
@@ -10,7 +9,8 @@ import {
   initDb,
   pauseTask,
   startTask,
-} from "../be/db";
+} from "@swarm/storage";
+import { AgentTaskSchema } from "@swarm/types";
 
 const TEST_DB_PATH = "./test-task-working-dir.sqlite";
 

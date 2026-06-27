@@ -10,8 +10,7 @@ import {
   test,
 } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
-import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { closeDb, getDb, initDb, upsertOAuthApp } from "@swarm/storage";
 import { getJiraMetadata } from "../jira/metadata";
 import * as wrapperModule from "../oauth/wrapper";
 

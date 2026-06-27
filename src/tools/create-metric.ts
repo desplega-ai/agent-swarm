@@ -1,11 +1,17 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getAppUrl } from "@swarm/core-utils";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import {
+  createMetric,
+  getMetric,
+  getMetricBySlug,
+  getMetricVersions,
+  snapshotMetric,
+  updateMetric,
+} from "@swarm/storage";
 import { MetricDefinitionSchema } from "@swarm/types";
 import * as z from "zod";
-import { createMetric, getMetric, getMetricBySlug, getMetricVersions, updateMetric } from "@/be/db";
 import { assertSelectOnlyQuery } from "@/http/db-query";
-import { snapshotMetric } from "@/metrics/version";
 
 function slugify(input: string): string {
   const slug = input

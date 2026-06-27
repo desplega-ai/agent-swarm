@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { z } from "zod";
 import {
   closeDb,
   createWorkflow,
@@ -9,7 +7,9 @@ import {
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
+import { z } from "zod";
 import { shouldSkipCooldown } from "../workflows/cooldown";
 import { findReadyNodes, startWorkflowExecution, walkGraph } from "../workflows/engine";
 import {
@@ -180,7 +180,7 @@ class ValidatePassExecutor extends BaseExecutor<
 // ─── Mock Dependencies ───────────────────────────────────────
 
 const mockDeps: ExecutorDependencies = {
-  db: {} as typeof import("../be/db"),
+  db: {} as typeof import("@swarm/storage"),
   eventBus: { emit: () => {}, on: () => {}, off: () => {} },
   interpolate: (t: string) => t,
 };
@@ -593,7 +593,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
 
   describe("Cooldown", () => {
     test("shouldSkipCooldown returns true within cooldown window", async () => {
-      const { createWorkflowRun, updateWorkflowRun } = await import("../be/db");
+      const { createWorkflowRun, updateWorkflowRun } = await import("@swarm/storage");
       const def: WorkflowDefinition = {
         nodes: [{ id: "a", type: "echo", config: {} }],
       };

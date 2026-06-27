@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getAgentById, getLatestContextVersion, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  getAgentById,
+  getLatestContextVersion,
+  initDb,
+} from "@swarm/storage";
 import { registerUpdateProfileTool } from "../tools/update-profile";
 
 const TEST_DB_PATH = "./test-update-profile-auth.sqlite";

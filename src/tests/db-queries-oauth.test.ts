@@ -1,17 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
 import {
   acquireOAuthRefreshLock,
+  closeDb,
   deleteOAuthTokens,
   getOAuthApp,
   getOAuthTokens,
+  initDb,
   isTokenExpiringSoon,
   releaseOAuthRefreshLock,
   storeOAuthTokens,
   updateOAuthTokensAfterRefresh,
   upsertOAuthApp,
-} from "../be/db-queries/oauth";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-db-queries-oauth.sqlite";
 

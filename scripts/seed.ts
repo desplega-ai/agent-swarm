@@ -19,7 +19,7 @@
 import { Database } from "bun:sqlite";
 import { faker } from "@faker-js/faker";
 import { dirname, resolve } from "node:path";
-import { runMigrations } from "../src/be/migrations/runner";
+import { runMigrations } from "@swarm/storage";
 
 // Deterministic seed for reproducible output
 faker.seed(42);

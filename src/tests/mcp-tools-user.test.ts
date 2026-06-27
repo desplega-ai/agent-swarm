@@ -2,8 +2,16 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { closeDb, createAgent, createUser, getDb, initDb } from "../be/db";
-import { getUserIdentities, type IdentityActor, linkIdentity } from "../be/users";
+import {
+  closeDb,
+  createAgent,
+  createUser,
+  getDb,
+  getUserIdentities,
+  type IdentityActor,
+  initDb,
+  linkIdentity,
+} from "@swarm/storage";
 import { registerManageUserTool } from "../tools/manage-user";
 import { registerResolveUserTool, resolveUserInputSchema } from "../tools/resolve-user";
 

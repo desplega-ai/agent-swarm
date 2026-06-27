@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { refreshSecretScrubberCache } from "@swarm/core-utils";
-import { closeDb, createAgent, getDb, initDb, updateScriptRun } from "../be/db";
+import { closeDb, createAgent, getDb, initDb, updateScriptRun } from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";

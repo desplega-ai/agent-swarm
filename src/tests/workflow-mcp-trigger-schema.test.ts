@@ -8,8 +8,8 @@ import {
   type ServerResponse,
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { closeDb, deleteWorkflow, getWorkflow, initDb } from "@swarm/storage";
 import type { Workflow, WorkflowDefinition } from "@swarm/types";
-import { closeDb, deleteWorkflow, getWorkflow, initDb } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
 import { registerCreateWorkflowTool } from "../tools/workflows/create-workflow";

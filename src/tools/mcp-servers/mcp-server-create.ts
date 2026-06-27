@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { createMcpServer, getAgentById, installMcpServer } from "@swarm/storage";
 import * as z from "zod";
-import { createMcpServer, getAgentById, installMcpServer } from "@/be/db";
 
 export const registerMcpServerCreateTool = (server: McpServer) => {
   createToolRegistrar(server)(

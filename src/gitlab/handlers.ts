@@ -9,8 +9,16 @@
  */
 
 import { resolveTemplate } from "@swarm/prompt-templates";
-import { failTask, findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
-import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
+import {
+  failTask,
+  findOrCreateUserByEmail,
+  findTaskByVcs,
+  findUserByExternalId,
+  getAllAgents,
+  incrKv,
+  linkIdentity,
+  upsertKv,
+} from "@swarm/storage";
 import { gitlabContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { GITLAB_BOT_NAME } from "./auth";

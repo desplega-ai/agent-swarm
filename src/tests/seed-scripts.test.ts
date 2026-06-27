@@ -3,17 +3,26 @@ import { cp, mkdir, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { extractScriptSignature, validateScriptImports } from "@swarm/scripts";
-import { closeDb, initDb } from "../be/db";
-import { getScript, listScripts, upsertScriptByName } from "../be/scripts/db";
-import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
-import { typecheckScript } from "../be/scripts/typecheck";
-import { runSeeder } from "../be/seed";
-import { SEED_SCRIPTS, scriptsSeeder } from "../be/seed-scripts";
-import bootTriage from "../be/seed-scripts/catalog/boot-triage";
-import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
+import {
+  closeDb,
+  getScript,
+  initDb,
+  listScripts,
+  runSeeder,
+  SEED_SCRIPTS,
+  scriptsSeeder,
+  setScriptEmbeddingProviderForTests,
+  typecheckScript,
+  upsertScriptByName,
+} from "@swarm/storage";
+// The seed-scripts catalog files are text-imported by seed-scripts/index.ts, so they are
+// deliberately NOT re-exported from the "@swarm/storage" barrel (a module re-export would
+// poison the text load). Import them directly via relative paths into the moved package.
+import bootTriage from "../../packages/storage/src/be/seed-scripts/catalog/boot-triage";
+import compoundInsights from "../../packages/storage/src/be/seed-scripts/catalog/compound-insights";
 import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
-} from "../be/seed-scripts/catalog/ops-catalog-audit";
+} from "../../packages/storage/src/be/seed-scripts/catalog/ops-catalog-audit";
 
 const TEST_DB_PATH = "./test-seed-scripts.sqlite";
 
@@ -66,7 +75,7 @@ describe("seed-scripts catalog", () => {
   });
 
   test("inline catalog files stay in sync with their runtime files", async () => {
-    const catalogDir = join(import.meta.dir, "../be/seed-scripts/catalog");
+    const catalogDir = join(import.meta.dir, "../../packages/storage/src/be/seed-scripts/catalog");
     const inlineFiles = ["boot-triage", "catalog-report", "compound-insights", "ops-catalog-audit"];
 
     for (const name of inlineFiles) {

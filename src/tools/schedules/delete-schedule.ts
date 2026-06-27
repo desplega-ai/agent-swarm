@@ -1,12 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
-import * as z from "zod";
 import {
   deleteScheduledTask,
   getAgentById,
   getScheduledTaskById,
   getScheduledTaskByName,
-} from "@/be/db";
+} from "@swarm/storage";
+import * as z from "zod";
 
 export const registerDeleteScheduleTool = (server: McpServer) => {
   createToolRegistrar(server)(

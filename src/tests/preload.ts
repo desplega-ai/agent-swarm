@@ -1,4 +1,8 @@
-import { closeDb, getDb, initDb } from "../be/db";
+// Import the DB handle from the lightweight "@swarm/storage/db" subpath, NOT the bare
+// "@swarm/storage" barrel — the barrel eager-loads the entire storage module graph (seed
+// runners, memory stores, embeddings, …) which is unnecessary (and heavy) for building the
+// per-worker migration template the preload needs.
+import { closeDb, getDb, initDb } from "@swarm/storage/db";
 
 const testTemplateGlobals = globalThis as typeof globalThis & {
   __testMigrationTemplate?: Uint8Array;

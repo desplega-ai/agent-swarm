@@ -1,5 +1,4 @@
-import { upsertKv } from "../be/db";
-import { getOAuthApp } from "../be/db-queries/oauth";
+import { getOAuthApp, upsertKv } from "@swarm/storage";
 import { buildAuthorizationUrl, exchangeCode, type OAuthProviderConfig } from "../oauth/wrapper";
 
 /** kv namespace for the Linear bot's appUserId (Q21.C). Keyed by workspace ID. */

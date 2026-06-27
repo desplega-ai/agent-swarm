@@ -1,4 +1,4 @@
-import { deleteKv, getKv, getSwarmConfigs, upsertKv } from "@/be/db";
+import { deleteKv, getKv, getSwarmConfigs, upsertKv } from "@swarm/storage";
 
 /**
  * Native Kapso/WhatsApp integration — shared server-side config + mapping store.

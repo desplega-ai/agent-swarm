@@ -6,7 +6,7 @@ import {
   getTemplateDefinition,
   resolveTemplate,
 } from "@swarm/prompt-templates";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, initDb } from "@swarm/storage";
 
 // Side-effect import: register session + system templates
 import "@swarm/prompt-templates";

@@ -1,6 +1,6 @@
 import { Assistant } from "@slack/bolt";
 import { resolveTemplate } from "@swarm/prompt-templates";
-import { getAgentWorkingOnThread, getLeadAgent, getMostRecentTaskInThread } from "../be/db";
+import { getAgentWorkingOnThread, getLeadAgent, getMostRecentTaskInThread } from "@swarm/storage";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { resolveSlackUserId } from "./enrich";

@@ -2,8 +2,7 @@ import { resolveTemplate } from "@swarm/prompt-templates";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import { workflowEventBus } from "@/workflows/event-bus";
 import "@/tools/templates";
-import { recordUnmappedIdentity } from "@/be/unmapped-identities";
-import { findUserByExternalId } from "@/be/users";
+import { findUserByExternalId, recordUnmappedIdentity } from "@swarm/storage";
 import { getKapsoNumberMapping, markKapsoMessageSeen } from "./config";
 
 const KAPSO_IDENTITY_KIND = "kapso";

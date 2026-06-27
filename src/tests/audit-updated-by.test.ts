@@ -13,7 +13,6 @@ import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { setRequestAuth } from "@swarm/core-utils";
-import { resolveHttpAuditUserId, resolveTaskAuditUserId } from "../be/audit-user";
 import {
   closeDb,
   createAgent,
@@ -24,9 +23,11 @@ import {
   getScheduledTaskById,
   getWorkflow,
   initDb,
+  resolveHttpAuditUserId,
+  resolveTaskAuditUserId,
   updateScheduledTask,
   updateWorkflow,
-} from "../be/db";
+} from "@swarm/storage";
 import { handleSchedules } from "../http/schedules";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";

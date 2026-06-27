@@ -1,8 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
-import { runMigrations } from "../be/migrations/runner";
+import { closeDb, initDb, runMigrations } from "@swarm/storage";
 
 const INCOMPLETE_DB_PATH = "./test-migration-incomplete.sqlite";
 const FRESH_DB_PATH = "./test-migration-fresh.sqlite";

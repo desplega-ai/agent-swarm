@@ -12,9 +12,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import { closeDb, createAgent, getDb, initDb, SqliteMemoryStore } from "@swarm/storage";
 import type { Subprocess } from "bun";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 
 const TEST_PORT = 19111;
 const TEST_DB_PATH = `/tmp/test-memory-rate-${Date.now()}.sqlite`;

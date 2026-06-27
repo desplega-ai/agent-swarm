@@ -7,7 +7,7 @@ import {
   getLeadAgent,
   getMostRecentTaskInThread,
   getTasksByAgentId,
-} from "../be/db";
+} from "@swarm/storage";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { deleteChannel, getAgentById, getChannelById, getChannelByName } from "@swarm/storage";
 import * as z from "zod";
-import { deleteChannel, getAgentById, getChannelById, getChannelByName } from "@/be/db";
 
 const GENERAL_CHANNEL_ID = "00000000-0000-4000-8000-000000000001";
 

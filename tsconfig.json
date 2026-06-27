@@ -32,6 +32,7 @@
       "@swarm/mcp-tool": ["packages/mcp-tool/index.ts"],
       "@swarm/harness": ["packages/harness/index.ts"],
       "@swarm/storage": ["packages/storage/index.ts"],
+      "@swarm/storage/db": ["packages/storage/src/be/db.ts"],
       "@swarm/workflows": ["packages/workflows/index.ts"],
       "@swarm/integrations": ["packages/integrations/index.ts"],
       "@swarm/api-server": ["packages/api-server/index.ts"]

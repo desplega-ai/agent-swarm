@@ -18,7 +18,7 @@ import {
   getLogsByEventType,
   initDb,
   recordBudgetRefusalNotification,
-} from "../be/db";
+} from "@swarm/storage";
 import { handleBudgets } from "../http/budgets";
 import { handleCore } from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";

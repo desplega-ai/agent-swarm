@@ -1,5 +1,5 @@
 import { getPublicMcpBaseUrl } from "@swarm/core-utils";
-import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { upsertOAuthApp } from "@swarm/storage";
 import { initJiraOutboundSync, teardownJiraOutboundSync } from "./outbound";
 // Side-effect import: registers all Jira event templates in the in-memory
 // registry at module load time (mirrors `src/linear/templates.ts`).

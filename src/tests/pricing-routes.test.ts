@@ -13,7 +13,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { CODEX_MODEL_PRICING } from "@swarm/harness";
-import { closeDb, getDb, getLogsByEventType, initDb } from "../be/db";
+import { closeDb, getDb, getLogsByEventType, initDb } from "@swarm/storage";
 import { handleCore } from "../http/core";
 import { handlePricing } from "../http/pricing";
 import { getPathSegments, parseQueryParams } from "../http/utils";

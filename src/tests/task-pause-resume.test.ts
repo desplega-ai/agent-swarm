@@ -14,7 +14,7 @@ import {
   resumeTask,
   startTask,
   updateAgentStatusFromCapacity,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-task-pause-resume.sqlite";
 const TEST_PORT = 13017;

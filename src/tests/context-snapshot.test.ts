@@ -8,7 +8,7 @@ import {
   getContextSnapshotsByTaskId,
   getContextSummaryByTaskId,
   initDb,
-} from "../be/db";
+} from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-context-snapshot.sqlite";
 

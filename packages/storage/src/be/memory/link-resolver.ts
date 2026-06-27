@@ -5,7 +5,7 @@
  * PR references, agent-UI URLs) and resolves them to typed `memory_link` rows.
  * Phase 1: capture layer only — no traversal tools, no reranker integration.
  */
-import { getDb } from "@/be/db";
+import { getDb } from "../db";
 
 export type LinkType =
   | "wikilink"

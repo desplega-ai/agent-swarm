@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import type { HttpRequestAuth } from "@swarm/core-utils";
+import { fingerprintApiKey, resolveUserByToken } from "@swarm/storage";
 import type { User } from "@swarm/types";
-import { fingerprintApiKey, resolveUserByToken } from "../be/users";
 
 function extractBearer(req: IncomingMessage): string | null {
   const raw = req.headers.authorization;

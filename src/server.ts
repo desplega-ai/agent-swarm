@@ -7,10 +7,8 @@ import {
   registerScriptSearchTool,
   registerScriptUpsertTool,
 } from "@swarm/mcp-tool";
+import { initDb, seedPricingFromModelsDev, startPricingRefreshLoop } from "@swarm/storage";
 import pkg from "../package.json";
-import { initDb } from "./be/db";
-import { startPricingRefreshLoop } from "./be/pricing-refresh";
-import { seedPricingFromModelsDev } from "./be/seed-pricing";
 import { registerGithubTaskReactions } from "./github/task-reactions";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";

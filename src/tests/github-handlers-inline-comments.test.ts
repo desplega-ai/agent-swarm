@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { getTemplateDefinition } from "@swarm/prompt-templates";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDb, initDb } from "@swarm/storage";
 import { handleComment, handlePullRequestReview } from "../github/handlers";
 import { GITHUB_BOT_NAME } from "../github/mentions";
 import type { CommentEvent, PullRequestReviewEvent } from "../github/types";

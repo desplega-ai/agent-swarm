@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolveTemplate } from "@swarm/prompt-templates";
-import { z } from "zod";
 import {
   createApprovalRequest,
   createTaskExtended,
@@ -8,7 +7,8 @@ import {
   getTaskById,
   listApprovalRequests,
   resolveApprovalRequest,
-} from "../be/db";
+} from "@swarm/storage";
+import { z } from "zod";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";

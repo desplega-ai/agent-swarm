@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { parseCookieHeader, signPageSession, verifyPageSession } from "../utils/page-session";
+import { parseCookieHeader, signPageSession, verifyPageSession } from "@swarm/storage";
 
 const ORIGINAL_SECRET = process.env.PAGE_SESSION_SECRET;
 const ORIGINAL_API_KEY = process.env.API_KEY;

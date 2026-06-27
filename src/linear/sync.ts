@@ -1,14 +1,21 @@
 import { resolveTemplate } from "@swarm/prompt-templates";
-import { isTerminalTaskStatus } from "@swarm/types";
-import { cancelTask, getAllAgents, getKv, getTaskById, incrKv, upsertKv } from "../be/db";
-import { getOAuthTokens } from "../be/db-queries/oauth";
 import {
+  cancelTask,
   createTrackerSync,
   deleteTrackerSync,
+  findOrCreateUserByEmail,
+  findUserByExternalId,
+  getAllAgents,
+  getKv,
+  getOAuthTokens,
+  getTaskById,
   getTrackerSyncByExternalId,
+  incrKv,
+  linkIdentity,
   updateTrackerSync,
-} from "../be/db-queries/tracker";
-import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
+  upsertKv,
+} from "@swarm/storage";
+import { isTerminalTaskStatus } from "@swarm/types";
 import { ensureToken } from "../oauth/ensure-token";
 import { linearContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";

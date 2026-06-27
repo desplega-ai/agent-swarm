@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
+import { closeDb, createAgent, getDb, initDb } from "@swarm/storage";
 import type { AgentMemory } from "@swarm/types";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
 
 const memoryId = randomUUID();
 const agentId = randomUUID();
@@ -28,7 +28,7 @@ const memory: AgentMemory = {
   updatedAt: new Date("2026-06-14T00:00:00.000Z").toISOString(),
 };
 
-mock.module("../be/memory", () => ({
+mock.module("@swarm/storage", () => ({
   getEmbeddingProvider: () => ({
     name: "test-embedding",
     dimensions: 3,

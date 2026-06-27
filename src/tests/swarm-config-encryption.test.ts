@@ -3,8 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { __resetEncryptionKeyForTests, resolveEncryptionKey } from "../be/crypto";
 import {
+  __resetEncryptionKeyForTests,
   autoEncryptLegacyPlaintextSecrets,
   closeDb,
   deleteSwarmConfig,
@@ -13,8 +13,9 @@ import {
   getSwarmConfigById,
   initDb,
   maskSecrets,
+  resolveEncryptionKey,
   upsertSwarmConfig,
-} from "../be/db";
+} from "@swarm/storage";
 
 // Fixture keys. The default fixture key is set in src/tests/preload.ts so the
 // template fast-path works. Tests that need raw SQL tampering use a file-backed

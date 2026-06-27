@@ -1,5 +1,5 @@
 import { LinearClient } from "@linear/sdk";
-import { getOAuthTokens } from "../be/db-queries/oauth";
+import { getOAuthTokens } from "@swarm/storage";
 
 let linearClient: LinearClient | null = null;
 

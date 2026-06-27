@@ -1,4 +1,4 @@
-import { getOAuthApp } from "../be/db-queries/oauth";
+import { getOAuthApp } from "@swarm/storage";
 import { buildAuthorizationUrl, exchangeCode, type OAuthProviderConfig } from "../oauth/wrapper";
 import { updateJiraMetadata } from "./metadata";
 import type { JiraAccessibleResource } from "./types";

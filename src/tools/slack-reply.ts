@@ -1,13 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
-import * as z from "zod";
 import {
   getAgentById,
   getInboxMessageById,
   getTaskById,
   markInboxMessageResponded,
   markTaskSlackReplySent,
-} from "@/be/db";
+} from "@swarm/storage";
+import * as z from "zod";
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
 import { markdownToSlack } from "@/slack/responses";

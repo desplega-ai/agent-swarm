@@ -5,7 +5,7 @@ import type { WorkflowEventBus } from "../event-bus";
 // ─── Dependencies ──────────────────────────────────────────
 
 export interface ExecutorDependencies {
-  db: typeof import("../../be/db");
+  db: typeof import("@swarm/storage");
   eventBus: WorkflowEventBus;
   interpolate: (template: string, ctx: Record<string, unknown>) => string;
 }

@@ -1,5 +1,4 @@
 import { telemetry } from "@swarm/otel";
-import type { Workflow, WorkflowDefinition, WorkflowNode } from "@swarm/types";
 import {
   createWorkflowRun,
   createWorkflowRunStep,
@@ -11,7 +10,8 @@ import {
   getWorkflowRunStepsByRunId,
   updateWorkflowRun,
   updateWorkflowRunStep,
-} from "../be/db";
+} from "@swarm/storage";
+import type { Workflow, WorkflowDefinition, WorkflowNode } from "@swarm/types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";

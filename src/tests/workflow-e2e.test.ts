@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import type { Workflow, WorkflowDefinition } from "@swarm/types";
 import {
   closeDb,
   createAgent,
@@ -10,9 +9,10 @@ import {
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
-} from "../be/db";
-import { upsertScriptByName } from "../be/scripts/db";
-import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+  setScriptEmbeddingProviderForTests,
+  upsertScriptByName,
+} from "@swarm/storage";
+import type { Workflow, WorkflowDefinition } from "@swarm/types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
@@ -99,7 +99,7 @@ beforeAll(async () => {
   agentId = agent.id;
 
   eventBus = new InProcessEventBus();
-  const db = await import("../be/db");
+  const db = await import("@swarm/storage");
   const deps: ExecutorDependencies = {
     db,
     eventBus,

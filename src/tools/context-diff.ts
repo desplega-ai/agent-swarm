@@ -2,8 +2,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createToolRegistrar } from "@swarm/mcp-tool";
+import { getAgentById, getContextVersion } from "@swarm/storage";
 import * as z from "zod";
-import { getAgentById, getContextVersion } from "@/be/db";
 
 async function computeDiff(oldContent: string, newContent: string): Promise<string> {
   const tmpDir = tmpdir();

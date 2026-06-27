@@ -10,13 +10,15 @@ import {
   test,
 } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
-import { upsertOAuthApp } from "../be/db-queries/oauth";
 import {
+  closeDb,
   createTrackerSync,
+  getDb,
   hasTrackerDelivery,
+  initDb,
   markTrackerDelivery,
-} from "../be/db-queries/tracker";
+  upsertOAuthApp,
+} from "@swarm/storage";
 import * as syncModule from "../jira/sync";
 
 const TEST_DB_PATH = "./test-jira-webhook.sqlite";

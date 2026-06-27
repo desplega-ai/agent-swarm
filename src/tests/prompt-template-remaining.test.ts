@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { getAllTemplateDefinitions, resolveTemplate } from "@swarm/prompt-templates";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, initDb } from "@swarm/storage";
 
 // Side-effect imports: register all templates from each source
 import "../gitlab/templates";

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, getDb, initDb } from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-migration-063.sqlite";
 

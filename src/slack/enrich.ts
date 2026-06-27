@@ -22,14 +22,15 @@
  */
 
 import type { WebClient } from "@slack/web-api";
-import { getKv, upsertKv } from "../be/db";
-import { recordUnmappedIdentity } from "../be/unmapped-identities";
 import {
   findOrCreateUserByEmail,
   findUserByExternalId,
+  getKv,
   type IdentityActor,
   linkIdentity,
-} from "../be/users";
+  recordUnmappedIdentity,
+  upsertKv,
+} from "@swarm/storage";
 
 const ENRICHMENT_NAMESPACE = "integration:user-enrichment:slack";
 const ENRICHMENT_TTL_MS = 24 * 60 * 60 * 1000; // 24h

@@ -16,9 +16,9 @@ import {
   withRemoteContext,
   withSpanContext,
 } from "@swarm/otel";
+import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "@swarm/storage";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
-import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
@@ -462,9 +462,9 @@ try {
 // here surfaces the count in the boot log and makes the API ready to recompute
 // USD before the first POST /api/session-costs lands.
 try {
-  const { seedPricingFromModelsDev } = await import("../be/seed-pricing");
+  const { seedPricingFromModelsDev } = await import("@swarm/storage");
   seedPricingFromModelsDev();
-  const { startPricingRefreshLoop } = await import("../be/pricing-refresh");
+  const { startPricingRefreshLoop } = await import("@swarm/storage");
   startPricingRefreshLoop();
 } catch (err) {
   console.error("[startup] Failed to seed pricing rows:", err);
@@ -477,7 +477,7 @@ try {
 // post-listen backfill so boot doesn't block on embedding provider calls.
 // See src/be/seed for the framework.
 try {
-  const { runAllSeeders } = await import("../be/seed");
+  const { runAllSeeders } = await import("@swarm/storage");
   await runAllSeeders({ scriptEmbeddingMode: "skip" });
 } catch (err) {
   console.error("[startup] Failed to seed built-in entities:", err);
@@ -577,7 +577,7 @@ httpServer
     // Background backfill: re-embed any agent_memory rows with wrong-dimension
     // embeddings (e.g. 1536d instead of 512d). Non-blocking, idempotent, no-op
     // when the DB is clean. See src/be/memory/boot-reembed.ts.
-    import("../be/memory/boot-reembed")
+    import("@swarm/storage")
       .then(({ runBootReembed }) => runBootReembed())
       .catch((err) => {
         console.error("[boot-reembed] startup backfill failed (non-fatal):", err);
@@ -586,7 +586,7 @@ httpServer
     // Background backfill: embed any scripts that were seeded without embeddings
     // (scriptEmbeddingMode: "skip" during boot). Non-blocking, idempotent, no-op
     // when every non-scratch script already has an embedding.
-    import("../be/scripts/boot-reembed")
+    import("@swarm/storage")
       .then(({ runBootReembedScripts }) => runBootReembedScripts())
       .catch((err) => {
         console.error("[boot-reembed-scripts] startup backfill failed (non-fatal):", err);
@@ -595,7 +595,7 @@ httpServer
     // One-time scrub: retroactively redact any session_logs rows containing
     // sensitive patterns that pre-date the defense-in-depth scrub layer.
     // Idempotent, tracked via seed_state.
-    import("../be/boot-scrub-logs")
+    import("@swarm/storage")
       .then(({ runBootScrubLogs }) => runBootScrubLogs())
       .catch((err) => {
         console.error("[boot-scrub-logs] startup scrub failed (non-fatal):", err);

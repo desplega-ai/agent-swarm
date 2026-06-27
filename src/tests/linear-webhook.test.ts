@@ -2,8 +2,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { createHmac } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { getTemplateDefinition } from "@swarm/prompt-templates";
-import { closeDb, createTaskExtended, getTaskById, initDb } from "../be/db";
-import { createTrackerSync, getTrackerSyncByExternalId } from "../be/db-queries/tracker";
+import {
+  closeDb,
+  createTaskExtended,
+  createTrackerSync,
+  getTaskById,
+  getTrackerSyncByExternalId,
+  initDb,
+} from "@swarm/storage";
 import {
   buildSkipMessage,
   DEFAULT_ALLOWED_STATE_TYPES,
@@ -248,7 +254,7 @@ describe("handleAgentSessionEvent", () => {
       source: "linear",
       taskType: "linear-issue",
     });
-    const { getDb } = await import("../be/db");
+    const { getDb } = await import("@swarm/storage");
     getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(originalTask.id);
 
     createTrackerSync({
@@ -298,7 +304,7 @@ describe("handleAgentSessionEvent", () => {
       source: "linear",
       taskType: "linear-issue",
     });
-    const { getDb } = await import("../be/db");
+    const { getDb } = await import("@swarm/storage");
     getDb().query("UPDATE agent_tasks SET status = 'failed' WHERE id = ?").run(originalTask.id);
 
     createTrackerSync({
@@ -490,7 +496,7 @@ describe("handleIssueDelete", () => {
       source: "linear",
     });
     // Manually complete the task to test guard
-    const { getDb } = await import("../be/db");
+    const { getDb } = await import("@swarm/storage");
     getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(task.id);
 
     createTrackerSync({

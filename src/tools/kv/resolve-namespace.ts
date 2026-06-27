@@ -1,5 +1,5 @@
 import type { RequestInfo } from "@swarm/mcp-tool";
-import { getTaskById } from "@/be/db";
+import { getTaskById } from "@swarm/storage";
 import { agentContextKey } from "@/tasks/context-key";
 
 /**
