@@ -1,13 +1,13 @@
 ---
 title: Telemetry
-description: What telemetry Agent Swarm collects, how it's anonymized, and how to opt out — lifecycle event tracking for server starts, task creation, worker status, and integration usage without PII collection
+description: What telemetry Agent Swarm collects, how it's anonymized, and how to opt out — lifecycle, session-cost, workflow, schedule, and compaction event tracking without PII collection
 ---
 
 Agent Swarm includes optional, anonymized telemetry to help the maintainers understand usage patterns and improve the product. Telemetry is **enabled by default** and can be disabled at any time.
 
 ## What is collected
 
-Telemetry tracks high-level lifecycle events — no task content, prompts, outputs, or personally identifiable information is ever sent.
+Telemetry tracks high-level lifecycle and operational events — no task content, prompts, outputs, stderr payloads, or personally identifiable information is ever sent.
 
 | Event | When it fires | Properties |
 |---|---|---|
@@ -18,8 +18,17 @@ Telemetry tracks high-level lifecycle events — no task content, prompts, outpu
 | `task.completed` | A task finishes successfully | agentId, durationMs |
 | `task.failed` | A task fails | agentId, durationMs |
 | `task.cancelled` | A task is cancelled | source, agentId, previousStatus, durationMs |
+| `task.session_completed` | A provider session exits for a task | agentId, provider, model, harnessVariant, harnessVersion, exitCode, isError, durationMs |
 | `session.started` | A worker session begins | agentId, taskId |
-| `session.ended` | A worker session ends | agentId, taskId |
+| `session.ended` | A worker session ends | agentId, taskId, durationMs, tasksProcessed |
+| `session.cost` | A provider reports token/cost usage | agentId, provider, model, inputTokens, outputTokens, cache/read-write token counters, durationMs, totalCostUsd, isError |
+| `session.failure` | A provider session ends with an error | agentId, provider, model, errorCategory, durationMs, wasRateLimited |
+| `schedule.executed` | A schedule run completes | scheduleType, triggeredWorkflows, wasRecovered |
+| `schedule.error` | A schedule run errors | scheduleType, triggeredWorkflows, wasRecovered, consecutiveErrors |
+| `workflow.started` / `workflow.completed` / `workflow.failed` | Workflow lifecycle transitions | runId, workflowId, durationMs, executor metadata |
+| `compaction.triggered` | A harness emits a compaction event | compactTrigger, preCompactTokens, contextTotalTokens |
+
+The exact shape can expand over time as new lifecycle milestones are instrumented, but the contract stays the same: anonymous operational metadata only.
 
 Every event also includes:
 - A timestamp (`occurred_at`)
