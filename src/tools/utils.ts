@@ -12,8 +12,8 @@ import type {
   ServerRequest,
   ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
+import { scrubSecrets } from "@swarm/core-utils";
 import { withSpan } from "@swarm/otel";
-import { scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
 

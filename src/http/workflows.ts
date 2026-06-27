@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { getRequestAuth } from "@swarm/core-utils";
 import {
   CooldownConfigSchema,
   InputValueSchema,
@@ -22,7 +23,6 @@ import {
   listWorkflows,
   updateWorkflow,
 } from "../be/db";
-import { getRequestAuth } from "../utils/request-auth-context";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { applyDefinitionPatch, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";

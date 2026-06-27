@@ -1,6 +1,5 @@
 import { resolve } from "node:path";
-import { getApiKey } from "../utils/api-key";
-import { isSensitiveKey, scrubSecrets } from "../utils/secret-scrubber";
+import { getApiKey, isSensitiveKey, scrubSecrets } from "@swarm/core-utils";
 
 export type EnvMap = Record<string, string>;
 

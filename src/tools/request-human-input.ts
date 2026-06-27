@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getAppUrl } from "@swarm/core-utils";
 import * as z from "zod";
 import { createApprovalRequest, getAgentCurrentTask } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { getAppUrl } from "@/utils/constants";
 
 const QuestionSchema = z.object({
   id: z.string().describe("Unique ID for the question (used as key in responses)"),

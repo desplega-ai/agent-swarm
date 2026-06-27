@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
+import { checkToolLoop, clearToolHistory } from "@swarm/core-utils";
 
 const SESSION_KEY = "test-session-loop-detection";
 

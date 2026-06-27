@@ -1,6 +1,6 @@
+import { getApiKey } from "@swarm/core-utils";
 import type { ScriptRun } from "@swarm/types";
 import { getRunningScriptRuns, getScriptRun, updateScriptRun } from "../be/db";
-import { getApiKey } from "../utils/api-key";
 import {
   localProcessScriptExecutor,
   type ScriptExecutionHandle,

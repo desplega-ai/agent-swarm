@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { scrubObject, scrubSecrets } from "@swarm/core-utils";
 import {
   type ScriptDetail,
   ScriptFsModeSchema,
@@ -24,7 +25,6 @@ import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
 import { SCRIPT_SDK_TYPES, SCRIPT_STDLIB_TYPES, typecheckScript } from "../be/scripts/typecheck";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { runScript } from "../scripts-runtime/loader";
-import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

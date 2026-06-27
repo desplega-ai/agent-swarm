@@ -1,9 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getApiKey, getMcpBaseUrl } from "@swarm/core-utils";
 import * as z from "zod";
 import { REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "@/be/memory/raters/types";
 import { createToolRegistrar } from "@/tools/utils";
-import { getApiKey } from "@/utils/api-key";
-import { getMcpBaseUrl } from "@/utils/constants";
 
 /**
  * Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-5.md §1

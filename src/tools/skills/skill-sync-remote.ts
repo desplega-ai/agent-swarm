@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { parseSkillContent } from "@swarm/core-utils";
 import * as z from "zod";
 import { getSkillById, listSkills, updateSkill } from "@/be/db";
-import { parseSkillContent } from "@/be/skill-parser";
 import { createToolRegistrar } from "@/tools/utils";
 
 function contentHash(content: string): string {

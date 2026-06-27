@@ -6,6 +6,7 @@ import {
 } from "node:http";
 import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { getApiKey, getMcpBaseUrl, scrubSecrets } from "@swarm/core-utils";
 import {
   initOtel,
   initTelemetry,
@@ -26,9 +27,6 @@ import { initLinear } from "../linear";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
-import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
-import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";

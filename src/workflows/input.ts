@@ -1,5 +1,5 @@
+import { isSensitiveKey } from "@swarm/core-utils";
 import { getSwarmConfigs } from "../be/db";
-import { isSensitiveKey } from "../utils/secret-scrubber";
 
 /**
  * Resolve workflow input values.

@@ -1,5 +1,4 @@
-import { getApiKey } from "../utils/api-key";
-import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { getApiKey, scrubObject, scrubSecrets } from "@swarm/core-utils";
 import { buildEgressSecrets } from "./egress-secrets";
 import { getScriptExecutor } from "./executors/registry";
 import {

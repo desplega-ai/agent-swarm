@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { detectVcsProvider } from "../vcs";
+import { detectVcsProvider } from "@swarm/core-utils";
 
 describe("detectVcsProvider", () => {
   test("detects github.com URLs", () => {

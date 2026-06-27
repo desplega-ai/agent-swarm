@@ -1,7 +1,6 @@
 import { createArtifactServer } from "@swarm/artifacts";
+import { getApiKey, getMcpBaseUrl } from "@swarm/core-utils";
 import { Hono } from "hono";
-import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
 
 interface ArtifactArgs {
   additionalArgs: string[];

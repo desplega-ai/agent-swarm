@@ -15,7 +15,7 @@
  * Both functions are async because `crypto.subtle.sign` is async.
  */
 import { timingSafeEqual } from "node:crypto";
-import { getApiKey } from "./api-key";
+import { getApiKey } from "@swarm/core-utils";
 
 export interface PageSessionPayload {
   pageId: string;

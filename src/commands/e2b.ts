@@ -1,4 +1,5 @@
 import { dirname, resolve } from "node:path";
+import { getAppUrl } from "@swarm/core-utils";
 import { render } from "ink";
 import { createElement } from "react";
 import {
@@ -34,7 +35,6 @@ import {
   selectEnv,
   splitKeys,
 } from "../e2b/env";
-import { getAppUrl } from "../utils/constants";
 import {
   DEFAULT_STACK_TIMEOUT_SEC,
   DEFAULT_STACK_WORKERS,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseSkillContent } from "../be/skill-parser";
+import { parseSkillContent } from "@swarm/core-utils";
 
 // ─── Valid Parsing ──────────────────────────────────────────────────────────
 

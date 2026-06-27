@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { normalizeDate, normalizeDateRequired } from "../be/date-utils";
+import { normalizeDate, normalizeDateRequired } from "@swarm/core-utils";
 
 describe("normalizeDate", () => {
   it("returns null for null input", () => {

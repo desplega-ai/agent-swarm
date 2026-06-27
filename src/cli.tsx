@@ -2,11 +2,11 @@
 import "./utils/internal-ai/register-bedrock.ts";
 
 import { Spinner } from "@inkjs/ui";
+import { getApiKey, setApiKey } from "@swarm/core-utils";
 import { Box, render, Text, useApp } from "ink";
 import type { ComponentType } from "react";
 import { createElement, useEffect, useState } from "react";
 import pkg from "../package.json";
-import { getApiKey, setApiKey } from "./utils/api-key.ts";
 
 // Get CLI name from bin field (assumes single key)
 const binName = Object.keys(pkg.bin)[0];

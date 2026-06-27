@@ -40,7 +40,7 @@
  *   everything for safety.
  */
 
-import { checkToolLoop } from "../hooks/tool-loop-detection";
+import { checkToolLoop } from "@swarm/core-utils";
 import type { ProviderEvent } from "./types";
 
 /** Throttle windows (ms) keyed by action name. Exported for unit assertions. */

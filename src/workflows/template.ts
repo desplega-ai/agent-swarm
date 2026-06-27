@@ -10,4 +10,4 @@ export {
   deepInterpolate,
   type InterpolateResult,
   interpolate,
-} from "@/utils/template";
+} from "@swarm/core-utils";

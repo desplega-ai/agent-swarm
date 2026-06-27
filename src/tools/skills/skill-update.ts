@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { parseSkillContent } from "@swarm/core-utils";
 import * as z from "zod";
 import { getAgentById, getSkillById, updateSkill } from "@/be/db";
-import { parseSkillContent } from "@/be/skill-parser";
 import { createToolRegistrar } from "@/tools/utils";
 
 const SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE =

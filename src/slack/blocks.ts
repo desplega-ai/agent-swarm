@@ -5,8 +5,8 @@
  * across responses.ts, handlers.ts, thread-buffer.ts).
  */
 
+import { buildAgentFsLiveUrl, getAppUrl } from "@swarm/core-utils";
 import type { AgentTaskStatus, TaskAttachment } from "@swarm/types";
-import { buildAgentFsLiveUrl, getAppUrl } from "../utils/constants";
 
 // Slack limits section text to 3000 chars; we use 2900 for safety.
 export const MAX_SECTION_LENGTH = 2900;

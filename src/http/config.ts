@@ -1,4 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  isReservedConfigKey,
+  registerVolatileSecret,
+  reservedKeyError,
+  validateConfigValue,
+} from "@swarm/core-utils";
 import { z } from "zod";
 import {
   deleteSwarmConfig,
@@ -9,12 +15,6 @@ import {
   maskSecrets,
   upsertSwarmConfig,
 } from "../be/db";
-import {
-  isReservedConfigKey,
-  reservedKeyError,
-  validateConfigValue,
-} from "../be/swarm-config-guard";
-import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";

@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
+import { getRequestAuth } from "@swarm/core-utils";
 import {
   type AgentTaskSource,
   AgentTaskSourceSchema,
@@ -36,7 +37,6 @@ import {
 } from "../be/db";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
-import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

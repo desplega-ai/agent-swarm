@@ -1,4 +1,4 @@
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { scrubSecrets } from "@swarm/core-utils";
 import {
   DEFAULT_COMPOSIO_BASE_URL,
   executeComposioRequest,

@@ -57,15 +57,14 @@ import type {
   BetaManagedAgentsSessionEvent as SessionEvent,
 } from "@anthropic-ai/sdk/resources/beta/sessions";
 import type { SkillCreateResponse as Skill } from "@anthropic-ai/sdk/resources/beta/skills";
-
-import { checkToolLoop } from "../hooks/tool-loop-detection";
 import {
   CONTEXT_FORMULA,
+  checkToolLoop,
   clampContextPercent,
   computeContextUsedUnified,
   getContextWindowSize,
-} from "../utils/context-window";
-import { scrubSecrets } from "../utils/secret-scrubber";
+  scrubSecrets,
+} from "@swarm/core-utils";
 import { computeClaudeManagedCostUsd } from "./claude-managed-models";
 import { getRuntimeFeePerHour } from "./claude-managed-pricing";
 import { createClaudeManagedSwarmEventHandler } from "./claude-managed-swarm-events";

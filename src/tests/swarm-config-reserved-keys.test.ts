@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
+import { isReservedConfigKey, reservedKeyError } from "@swarm/core-utils";
 import {
   closeDb,
   deleteSwarmConfig,
@@ -10,7 +11,6 @@ import {
   initDb,
   upsertSwarmConfig,
 } from "../be/db";
-import { isReservedConfigKey, reservedKeyError } from "../be/swarm-config-guard";
 import { handleConfig } from "../http/config";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerDeleteConfigTool } from "../tools/swarm-config/delete-config";

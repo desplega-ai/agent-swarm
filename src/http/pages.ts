@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { getAppUrl, getPublicMcpBaseUrl } from "@swarm/core-utils";
 import {
   type Page,
   PageAuthModeSchema,
@@ -19,7 +20,6 @@ import {
   updatePage,
 } from "../be/db";
 import { snapshotPage } from "../pages/version";
-import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { issuePageSessionCookie } from "../utils/page-session";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";

@@ -1,4 +1,4 @@
-import { getPublicMcpBaseUrl } from "../utils/constants";
+import { getPublicMcpBaseUrl } from "@swarm/core-utils";
 import { jiraFetch } from "./client";
 import { getJiraMetadata, updateJiraMetadata } from "./metadata";
 

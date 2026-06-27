@@ -11,7 +11,7 @@
  * resumes (see swarm memory sigterm-143-resumed-session-context-saturation-2026-05-13).
  */
 
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { scrubSecrets } from "@swarm/core-utils";
 
 export const CONTEXT_PREAMBLE_MAX_TOKENS = Number(
   process.env.CONTEXT_PREAMBLE_MAX_TOKENS || "2000",

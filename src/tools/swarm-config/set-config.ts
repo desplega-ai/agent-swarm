@@ -1,12 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { isReservedConfigKey, reservedKeyError, validateConfigValue } from "@swarm/core-utils";
 import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@swarm/types";
 import * as z from "zod";
 import { maskSecrets, upsertSwarmConfig } from "@/be/db";
-import {
-  isReservedConfigKey,
-  reservedKeyError,
-  validateConfigValue,
-} from "@/be/swarm-config-guard";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerSetConfigTool = (server: McpServer) => {

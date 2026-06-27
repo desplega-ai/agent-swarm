@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { scrubSecrets } from "@swarm/core-utils";
 import { getActiveTaskCount } from "../be/db";
-import { scrubSecrets } from "../utils/secret-scrubber";
 
 export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
   // Echo the request Origin (rather than emitting `*`) so credentialed fetches

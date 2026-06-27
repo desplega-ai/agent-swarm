@@ -1,7 +1,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { getApiKey, getMcpBaseUrl } from "@swarm/core-utils";
 import * as z from "zod";
-import { getApiKey } from "@/utils/api-key";
-import { getMcpBaseUrl } from "@/utils/constants";
 import type { RequestInfo } from "./utils";
 
 export const SCRIPT_TRANSPORT_ERROR =

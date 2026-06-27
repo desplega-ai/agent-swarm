@@ -1,4 +1,12 @@
 import { Database } from "bun:sqlite";
+import {
+  getCurrentRequestUserId,
+  isReservedConfigKey,
+  normalizeDate,
+  normalizeDateRequired,
+  reservedKeyError,
+  scrubSecrets,
+} from "@swarm/core-utils";
 import { deriveProviderFromKeyType, parseProviderMeta } from "@swarm/credentials";
 import type { RateLimitWindowTelemetry } from "@swarm/otel";
 import { telemetry } from "@swarm/otel";
@@ -106,13 +114,9 @@ import {
   parseModelTier,
 } from "@swarm/types";
 import pkg from "../../package.json";
-import { getCurrentRequestUserId } from "../utils/request-auth-context";
-import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
-import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
 import { seedDefaultTemplates } from "./seed-prompt-templates";
-import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
 
 let db: Database | null = null;

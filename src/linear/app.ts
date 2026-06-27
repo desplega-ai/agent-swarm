@@ -1,5 +1,5 @@
+import { getPublicMcpBaseUrl } from "@swarm/core-utils";
 import { upsertOAuthApp } from "../be/db-queries/oauth";
-import { getPublicMcpBaseUrl } from "../utils/constants";
 import { initLinearOutboundSync, teardownLinearOutboundSync } from "./outbound";
 
 let initialized = false;

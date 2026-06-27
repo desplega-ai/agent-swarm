@@ -10,11 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  type SkillFsEntry,
-  SWARM_MARKER_FILE,
-  writeSkillsToFilesystem,
-} from "../utils/skill-fs-writer";
+import { type SkillFsEntry, SWARM_MARKER_FILE, writeSkillsToFilesystem } from "@swarm/core-utils";
 
 const FAKE_HOME = join(tmpdir(), `skill-fs-writer-test-${process.pid}`);
 

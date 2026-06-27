@@ -12,6 +12,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { setRequestAuth } from "@swarm/core-utils";
 import { resolveHttpAuditUserId, resolveTaskAuditUserId } from "../be/audit-user";
 import {
   closeDb,
@@ -33,7 +34,6 @@ import { registerUpdateScheduleTool } from "../tools/schedules/update-schedule";
 import { registerPatchWorkflowTool } from "../tools/workflows/patch-workflow";
 import { registerPatchWorkflowNodeTool } from "../tools/workflows/patch-workflow-node";
 import { registerUpdateWorkflowTool } from "../tools/workflows/update-workflow";
-import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = "./test-audit-updated-by.sqlite";
 

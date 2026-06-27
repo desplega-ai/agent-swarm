@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { Spinner, TextInput } from "@inkjs/ui";
+import { getApiKey } from "@swarm/core-utils";
 import { Box, Text, useApp } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getApiKey } from "../utils/api-key.ts";
 import {
   createDefaultMcpJson,
   createDefaultSettingsLocal,

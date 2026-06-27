@@ -17,8 +17,7 @@
 //   - the structured log payload passes through `scrubSecrets` at egress.
 
 import { describe, expect, mock, test } from "bun:test";
-import { BUDGET_BACKOFF_CAP_MS, computeBudgetBackoffMs } from "../utils/budget-backoff";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { BUDGET_BACKOFF_CAP_MS, computeBudgetBackoffMs, scrubSecrets } from "@swarm/core-utils";
 
 // ─── computeBudgetBackoffMs ────────────────────────────────────────────────
 

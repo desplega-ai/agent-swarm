@@ -3,19 +3,19 @@
 // importable by package name before any files move. Regenerate after editing
 // packages.map.json:  bun scripts/generate-barrels.ts
 
-export * from "../../src/be/date-utils";
-export * from "../../src/be/skill-parser";
-export * from "../../src/be/swarm-config-guard";
-export * from "../../src/hooks/tool-loop-detection";
-export * from "../../src/utils/api-key";
-export * from "../../src/utils/budget-backoff";
-export * from "../../src/utils/constants";
-export * from "../../src/utils/context-window";
-export * from "../../src/utils/pretty-print";
-export * from "../../src/utils/request-auth-context";
-export * from "../../src/utils/secret-scrubber";
-export * from "../../src/utils/skill-fs-writer";
-export * from "../../src/utils/skills-refresh";
-export * from "../../src/utils/template";
-export * from "../../src/vcs/index";
-export * as VcsTypes from "../../src/vcs/types";
+export * from "./src/be/date-utils";
+export * from "./src/be/skill-parser";
+export * from "./src/be/swarm-config-guard";
+export * from "./src/hooks/tool-loop-detection";
+export * from "./src/utils/api-key";
+export * from "./src/utils/budget-backoff";
+export * from "./src/utils/constants";
+export * from "./src/utils/context-window";
+export * from "./src/utils/pretty-print";
+export * from "./src/utils/request-auth-context";
+export * from "./src/utils/secret-scrubber";
+export * from "./src/utils/skill-fs-writer";
+export * from "./src/utils/skills-refresh";
+export * from "./src/utils/template";
+export * from "./src/vcs/index";
+export * as VcsTypes from "./src/vcs/types";

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { refreshSecretScrubberCache } from "@swarm/core-utils";
 import { runScript } from "../scripts-runtime/loader";
-import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const savedEnv = { ...process.env };
 const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };

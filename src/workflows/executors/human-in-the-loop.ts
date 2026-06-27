@@ -1,6 +1,6 @@
+import { getAppUrl } from "@swarm/core-utils";
 import type { ExecutorMeta } from "@swarm/types";
 import { z } from "zod";
-import { getAppUrl } from "../../utils/constants";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { getAppUrl } from "@swarm/core-utils";
 import { ScriptRunStatusSchema, TERMINAL_SCRIPT_RUN_STATUSES } from "@swarm/types";
 import { z } from "zod";
 import {
@@ -25,7 +26,6 @@ import {
   startScriptRunProcess,
   terminateScriptRunProcess,
 } from "../script-workflows/supervisor";
-import { getAppUrl } from "../utils/constants";
 import { executeRawLlm, RawLlmConfigSchema } from "../workflows/executors/raw-llm";
 import { route } from "./route-def";
 import { deriveApiBaseUrl, json, jsonError } from "./utils";

@@ -5,7 +5,7 @@ import {
   computeContextUsed,
   computeContextUsedUnified,
   getContextWindowSize,
-} from "../utils/context-window";
+} from "@swarm/core-utils";
 
 describe("getContextWindowSize", () => {
   test("returns 1M for fable and mythos models", () => {

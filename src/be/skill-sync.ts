@@ -15,7 +15,7 @@ import {
   type SkillHarnessTarget,
   type SkillSyncResult,
   writeSkillsToFilesystem,
-} from "../utils/skill-fs-writer";
+} from "@swarm/core-utils";
 import { getAgentSkills, getSkillFiles } from "./db";
 
 export type { SkillSyncResult };

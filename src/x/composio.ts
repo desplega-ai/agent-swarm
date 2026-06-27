@@ -1,4 +1,4 @@
-import { registerVolatileSecret, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { registerVolatileSecret, scrubObject, scrubSecrets } from "@swarm/core-utils";
 
 export const DEFAULT_COMPOSIO_BASE_URL = "https://backend.composio.dev/api/v3.1";
 export const COMPOSIO_HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;

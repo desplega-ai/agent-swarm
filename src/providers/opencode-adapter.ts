@@ -12,14 +12,14 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessage, Config, Event as OpencodeEvent } from "@opencode-ai/sdk";
 import { createOpencode } from "@opencode-ai/sdk";
-import { validateOpencodeCredentials } from "@swarm/credentials";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
   getContextWindowSize,
-} from "../utils/context-window";
+  scrubSecrets,
+} from "@swarm/core-utils";
+import { validateOpencodeCredentials } from "@swarm/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
-import { scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { readPkgVersion } from "./harness-version";

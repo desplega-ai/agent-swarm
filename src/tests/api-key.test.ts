@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getApiKey, setApiKey } from "../utils/api-key";
+import { getApiKey, setApiKey } from "@swarm/core-utils";
 
 describe("getApiKey", () => {
   test("returns empty string when neither var is set", () => {

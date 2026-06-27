@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { interpolate } from "@swarm/core-utils";
 import {
   getAllTemplateDefinitions,
   getTemplateDefinition,
@@ -15,7 +16,6 @@ import {
   resolvePromptTemplate,
   upsertPromptTemplate,
 } from "../be/db";
-import { interpolate } from "../utils/template";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

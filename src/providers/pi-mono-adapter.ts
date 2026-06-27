@@ -27,9 +27,9 @@ import {
   ModelRegistry,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { scrubSecrets } from "@swarm/core-utils";
 import { type TSchema, Type } from "typebox";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
-import { scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient } from "./pi-mono-mcp-client";

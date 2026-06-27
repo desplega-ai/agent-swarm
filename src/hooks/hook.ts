@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { checkToolLoop, clearToolHistory, getApiKey, getMcpBaseUrl } from "@swarm/core-utils";
 import type { Agent } from "@swarm/types";
 import pkg from "../../package.json";
 import {
@@ -11,10 +12,7 @@ import {
   type RetrievalRow,
 } from "../be/memory/raters/llm";
 import { contentSha256, readIdentityBaselines } from "../commands/profile-sync";
-import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
-import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 

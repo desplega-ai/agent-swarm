@@ -10,6 +10,7 @@
 
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { scrubSecrets } from "@swarm/core-utils";
 import { PricingProviderSchema, PricingRowSchema, PricingTokenClassSchema } from "@swarm/types";
 import { z } from "zod";
 import {
@@ -20,7 +21,6 @@ import {
   getPricingRows,
   insertPricingRow,
 } from "../be/db";
-import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

@@ -27,7 +27,7 @@
  * but it must be VISIBLE.
  */
 
-import { scrubSecrets } from "../utils/secret-scrubber.ts";
+import { scrubSecrets } from "@swarm/core-utils";
 
 export const SOUL_MD_PATH = "/workspace/SOUL.md";
 export const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";

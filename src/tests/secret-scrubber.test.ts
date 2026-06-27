@@ -5,7 +5,7 @@ import {
   registerVolatileSecret,
   scrubObject,
   scrubSecrets,
-} from "../utils/secret-scrubber";
+} from "@swarm/core-utils";
 
 // Snapshot/restore process.env between tests so env-derived cache entries
 // don't leak across cases.

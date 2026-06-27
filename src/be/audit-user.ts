@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { getRequestAuth } from "../utils/request-auth-context";
+import { getRequestAuth } from "@swarm/core-utils";
 import { getTaskById } from "./db";
 
 /**

@@ -11,8 +11,8 @@
 
 import { exec } from "node:child_process";
 import { emitKeypressEvents } from "node:readline";
+import { getApiKey } from "@swarm/core-utils";
 import { loadAllCodexOAuthSlots, loginCodexOAuth, storeCodexOAuth } from "@swarm/credentials";
-import { getApiKey } from "../utils/api-key";
 
 type PromptTextFn = (label: string, defaultValue: string) => Promise<string>;
 type PromptSecretFn = (label: string, defaultValue: string, helpText?: string) => Promise<string>;

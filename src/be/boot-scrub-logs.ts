@@ -14,7 +14,7 @@
  * startup/liveness probes stay responsive.
  */
 
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { scrubSecrets } from "@swarm/core-utils";
 import { getDb } from "./db";
 
 const SCRUB_KEY = "boot-scrub-logs-v2";

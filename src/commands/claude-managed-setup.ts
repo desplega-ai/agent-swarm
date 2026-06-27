@@ -33,7 +33,7 @@ import type { BetaEnvironment } from "@anthropic-ai/sdk/resources/beta/environme
 import type { SkillCreateResponse } from "@anthropic-ai/sdk/resources/beta/skills";
 import { toFile } from "@anthropic-ai/sdk/uploads";
 
-import { getApiKey } from "../utils/api-key";
+import { getApiKey } from "@swarm/core-utils";
 import { promptHiddenInput } from "./codex-login.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { scrubObject } from "../utils/secret-scrubber";
+import { scrubObject } from "@swarm/core-utils";
 import { Redacted } from "./redacted";
 import { isSdkToolAllowed, mcpToolNameForSdkMethod } from "./sdk-allowlist";
 import type { SwarmConfig } from "./swarm-config";

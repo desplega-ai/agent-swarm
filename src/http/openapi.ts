@@ -3,8 +3,8 @@ import {
   OpenAPIRegistry,
   OpenApiGeneratorV31,
 } from "@asteasolutions/zod-to-openapi";
+import { getPublicMcpBaseUrl } from "@swarm/core-utils";
 import { z } from "zod";
-import { getPublicMcpBaseUrl } from "../utils/constants";
 import { routeRegistry } from "./route-def";
 
 extendZodWithOpenApi(z);

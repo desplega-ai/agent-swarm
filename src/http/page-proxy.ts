@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { getApiKey } from "@swarm/core-utils";
 import { getPage } from "../be/db";
-import { getApiKey } from "../utils/api-key";
 import { extractAndVerifyCookie } from "../utils/page-session";
 import { route } from "./route-def";
 import { jsonError } from "./utils";

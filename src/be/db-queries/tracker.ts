@@ -1,5 +1,5 @@
+import { normalizeDateRequired } from "@swarm/core-utils";
 import type { TrackerAgentMapping, TrackerSync } from "@swarm/types";
-import { normalizeDateRequired } from "../date-utils";
 import { getDb } from "../db";
 
 function normalizeTrackerSync(row: TrackerSync): TrackerSync {

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { getAppUrl, getPublicMcpBaseUrl } from "@swarm/core-utils";
 import { z } from "zod";
 import { getMcpServerById } from "../be/db";
 import type { McpOAuthToken } from "../be/db-queries/mcp-oauth";
@@ -24,7 +25,6 @@ import {
   registerClient,
   revokeMcpToken,
 } from "../oauth/mcp-wrapper";
-import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
