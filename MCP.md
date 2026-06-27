@@ -320,6 +320,7 @@ Update a repo's configuration including guidelines (PR checks, merge policy, rev
 | `clonePath` | `string` | No | - | New clone path. |
 | `defaultBranch` | `string` | No | - | New default branch. |
 | `autoClone` | `boolean` | No | - | Whether to auto-clone. |
+| `hooks` | `object \| null` | No | - | Hook install config. Set `{ enabled: true }` to opt into best-effort worker git-hook installation. |
 
 ### list-prompt-templates
 
@@ -1460,4 +1461,3 @@ Delete an MCP server definition. Only the owning agent or lead can delete.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | ID of the MCP server to delete |
-

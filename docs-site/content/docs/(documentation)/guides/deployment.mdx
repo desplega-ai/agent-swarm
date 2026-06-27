@@ -401,17 +401,19 @@ docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.178`
-- `PI_CODING_AGENT_VERSION=0.79.4`
-- `CODEX_VERSION=0.140.0`
-- `OPENCODE_VERSION=1.17.7`
-- `OPENCODE_SDK_VERSION=1.17.7`
+- `CLAUDE_CODE_VERSION=2.1.187`
+- `PI_CODING_AGENT_VERSION=0.80.2`
+- `CODEX_VERSION=0.142.0`
+- `OPENCODE_VERSION=1.17.9`
+- `OPENCODE_SDK_VERSION=1.17.9`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
 The worker image also includes PostgreSQL 16 server binaries for local test setups. Nothing auto-starts unless you set `SWARM_DEP_POSTGRES_ENABLED=true`; in that case the entrypoint runs [`scripts/init-local-postgres.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-postgres.sh), which initializes a local cluster on `localhost:5433` by default. Override with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB` as needed.
 
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
+
+The worker image also bundles `/usr/local/bin/install-repo-hooks.sh`. If a registered repo is configured with `hooks: { enabled: true }`, the runner calls that helper after clone/refresh so git hooks are installed automatically inside the worker checkout.
 
 ### Run
 

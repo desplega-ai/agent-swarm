@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { RepoGuidelinesSchema, SwarmRepoSchema } from "@swarm/types";
+import { RepoGuidelinesSchema, RepoHooksSchema, SwarmRepoSchema } from "@swarm/types";
 import { z } from "zod";
 import {
   createSwarmRepo,
@@ -56,6 +56,7 @@ const createRepo = route({
     clonePath: z.string().optional(),
     defaultBranch: z.string().optional(),
     autoClone: z.boolean().optional(),
+    hooks: RepoHooksSchema.optional(),
     guidelines: RepoGuidelinesSchema.nullable().optional(),
   }),
   responses: {
@@ -78,6 +79,7 @@ const updateRepo = route({
     clonePath: z.string().optional(),
     defaultBranch: z.string().optional(),
     autoClone: z.boolean().optional(),
+    hooks: RepoHooksSchema.nullable().optional(),
     guidelines: RepoGuidelinesSchema.nullable().optional(),
   }),
   responses: {
@@ -141,6 +143,7 @@ export async function handleRepos(
         clonePath: parsed.body.clonePath,
         defaultBranch: parsed.body.defaultBranch,
         autoClone: parsed.body.autoClone,
+        hooks: parsed.body.hooks,
         guidelines: parsed.body.guidelines,
       });
       json(res, repo, 201);
@@ -165,6 +168,7 @@ export async function handleRepos(
         clonePath: parsed.body.clonePath,
         defaultBranch: parsed.body.defaultBranch,
         autoClone: parsed.body.autoClone,
+        hooks: parsed.body.hooks,
         guidelines: parsed.body.guidelines,
       });
       if (!updated) {

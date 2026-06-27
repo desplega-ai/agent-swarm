@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.103.0] - 2026-06-27
+
+### Added
+- **Workers can now opt into per-repo git-hook bootstrap** (#828) — repo records accept `hooks: { enabled: true }`, the worker image bundles `install-repo-hooks.sh`, and runners invoke it after clone/refresh so repository-local hooks can be installed automatically.
+- **Telemetry now covers deeper runtime lifecycle signals** (#826) — workers and schedulers emit session-cost, compaction, workflow, schedule, and provider-session completion/failure events in addition to the existing task lifecycle baseline.
+- **A Code Health Reports community template now ships with the repo** (#823) — operators get a seeded community-report template out of the box instead of having to author the first version from scratch.
+
+### Fixed
+- **Runner startup no longer risks a `runningTask` TDZ during `session_init`** (#827) — provider sessions can initialize without tripping an internal runner crash during early event handling.
+- **Provider stderr now persists in streamed session logs** (#824) — raw stderr events are buffered and flushed alongside normal provider log lines so debugging data is retained in task/session logs.
+- **Codex edit bursts no longer trip false-positive loop detection as easily** (#821) — low-cardinality `Edit`/`Write`/`Delete` file-change batches now require a higher repeat threshold before the hook blocks the session.
+- **Auto-cloned repos now hard-sync clean default branches before task execution** (#825) — worker checkouts recover more reliably from stale local branch state when reusing clean auto-cloned repositories.
+
 ## [1.102.0] - 2026-06-26
 
 ### Added

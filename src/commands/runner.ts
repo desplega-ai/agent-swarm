@@ -135,6 +135,7 @@ async function fetchRepoConfig(
   name: string;
   clonePath: string;
   defaultBranch: string;
+  hooks?: { enabled: boolean } | null;
   guidelines?: RepoGuidelines | null;
 } | null> {
   try {
@@ -149,6 +150,7 @@ async function fetchRepoConfig(
         name: string;
         clonePath: string;
         defaultBranch: string;
+        hooks?: { enabled: boolean } | null;
         guidelines?: RepoGuidelines | null;
       }>;
     };
@@ -239,12 +241,40 @@ async function refreshExistingRepoForTask(
   }
 }
 
+function getInstallRepoHooksScriptPath(): string {
+  const imagePath = "/usr/local/bin/install-repo-hooks.sh";
+  if (existsSync(imagePath)) return imagePath;
+  return `${process.cwd()}/scripts/install-repo-hooks.sh`;
+}
+
+async function installRepoHooksForTask(
+  repoConfig: { name: string; clonePath: string; hooks?: { enabled: boolean } | null },
+  role: string,
+): Promise<void> {
+  if (repoConfig.hooks?.enabled !== true) return;
+
+  try {
+    const scriptPath = getInstallRepoHooksScriptPath();
+    await Bun.$`bash ${scriptPath} ${repoConfig.clonePath} ${repoConfig.name}`;
+    console.log(`[${role}] Installed git hooks for ${repoConfig.name}`);
+  } catch (err) {
+    const errorMsg = scrubSecrets((err as Error).message);
+    console.warn(`[${role}] Could not install git hooks for ${repoConfig.name}: ${errorMsg}`);
+  }
+}
+
 /**
  * Ensure a repo is cloned and up-to-date for a task.
  * Returns { clonePath, claudeMd, warning }.
  */
 export async function ensureRepoForTask(
-  repoConfig: { url: string; name: string; clonePath: string; defaultBranch: string },
+  repoConfig: {
+    url: string;
+    name: string;
+    clonePath: string;
+    defaultBranch: string;
+    hooks?: { enabled: boolean } | null;
+  },
   role: string,
 ): Promise<{
   clonePath: string;
@@ -278,6 +308,8 @@ export async function ensureRepoForTask(
       console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
       warning = await refreshExistingRepoForTask({ name, clonePath, defaultBranch }, role);
     }
+
+    await installRepoHooksForTask(repoConfig, role);
 
     const claudeMd = await readClaudeMd(clonePath, role);
     const autoStashes = await listSwarmAutostashes(clonePath, role);
@@ -2826,6 +2858,9 @@ async function spawnProviderProcess(
   const eventFlushTimer = setInterval(flushEvents, EVENT_FLUSH_INTERVAL_MS);
   const sessionStartTime = Date.now();
   let providerSessionId = session.sessionId;
+  let pendingHarnessVariant: string | undefined;
+  let pendingHarnessVariantMeta: Record<string, unknown> | undefined;
+  let runningTaskForSessionInit: RunningTask | undefined;
   const activeToolSpans = new Map<
     string,
     {
@@ -2875,8 +2910,12 @@ async function spawnProviderProcess(
       switch (event.type) {
         case "session_init":
           providerSessionId = event.sessionId;
-          runningTask.harnessVariant = event.harnessVariant;
-          runningTask.harnessVariantMeta = event.harnessVariantMeta;
+          pendingHarnessVariant = event.harnessVariant;
+          pendingHarnessVariantMeta = event.harnessVariantMeta;
+          if (runningTaskForSessionInit) {
+            runningTaskForSessionInit.harnessVariant = event.harnessVariant;
+            runningTaskForSessionInit.harnessVariantMeta = event.harnessVariantMeta;
+          }
           sessionSpan.setAttributes({
             "agentswarm.provider.session_id": providerSessionId,
             "agentswarm.provider.name": event.provider,
@@ -3364,6 +3403,13 @@ async function spawnProviderProcess(
     hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
     model: model || undefined,
   };
+  runningTaskForSessionInit = runningTask;
+  if (pendingHarnessVariant !== undefined) {
+    runningTask.harnessVariant = pendingHarnessVariant;
+  }
+  if (pendingHarnessVariantMeta !== undefined) {
+    runningTask.harnessVariantMeta = pendingHarnessVariantMeta;
+  }
 
   // Non-blocking completion tracking
   promise
@@ -4614,7 +4660,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           const effectiveConfig = repoConfig ?? {
             url: task.vcsRepo,
             name: task.vcsRepo.split("/").pop() || task.vcsRepo,
-            clonePath: `/workspace/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
+            clonePath: `/workspace/personal/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
             defaultBranch: "main",
           };
           const repoContext = await ensureRepoForTask(effectiveConfig, role);
@@ -5005,7 +5051,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           const effectiveConfig = repoConfig ?? {
             url: taskVcsRepo,
             name: taskVcsRepo.split("/").pop() || taskVcsRepo,
-            clonePath: `/workspace/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
+            clonePath: `/workspace/personal/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
             defaultBranch: "main",
           };
           const repoResult = await ensureRepoForTask(effectiveConfig, role);

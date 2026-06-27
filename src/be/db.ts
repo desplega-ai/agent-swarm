@@ -6225,6 +6225,7 @@ type SwarmRepoRow = {
   clonePath: string;
   defaultBranch: string;
   autoClone: number; // SQLite boolean
+  hooks: string | null;
   guidelines: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -6238,6 +6239,7 @@ function rowToSwarmRepo(row: SwarmRepoRow): SwarmRepo {
     clonePath: row.clonePath,
     defaultBranch: row.defaultBranch,
     autoClone: row.autoClone === 1,
+    hooks: row.hooks ? JSON.parse(row.hooks) : { enabled: false },
     guidelines: row.guidelines ? JSON.parse(row.guidelines) : null,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -6293,20 +6295,22 @@ export function createSwarmRepo(data: {
   clonePath?: string;
   defaultBranch?: string;
   autoClone?: boolean;
+  hooks?: { enabled: boolean };
   guidelines?: RepoGuidelines | null;
 }): SwarmRepo {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const clonePath = data.clonePath || `/workspace/repos/${data.name}`;
+  const clonePath = data.clonePath || `/workspace/personal/repos/${data.name}`;
+  const hooksJson = JSON.stringify(data.hooks ?? { enabled: true });
   const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
   const row = getDb()
     .prepare<
       SwarmRepoRow,
-      [string, string, string, string, string, number, string | null, string, string]
+      [string, string, string, string, string, number, string | null, string | null, string, string]
     >(
-      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, guidelines, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, hooks, guidelines, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -6315,6 +6319,7 @@ export function createSwarmRepo(data: {
       clonePath,
       data.defaultBranch ?? "main",
       data.autoClone !== false ? 1 : 0,
+      hooksJson,
       guidelinesJson,
       now,
       now,
@@ -6332,6 +6337,7 @@ export function updateSwarmRepo(
     clonePath: string;
     defaultBranch: string;
     autoClone: boolean;
+    hooks: { enabled: boolean } | null;
     guidelines: RepoGuidelines | null;
   }>,
 ): SwarmRepo | null {
@@ -6348,6 +6354,10 @@ export function updateSwarmRepo(
   if (updates.autoClone !== undefined) {
     setClauses.push("autoClone = ?");
     params.push(updates.autoClone ? 1 : 0);
+  }
+  if (updates.hooks !== undefined) {
+    setClauses.push("hooks = ?");
+    params.push(updates.hooks ? JSON.stringify(updates.hooks) : null);
   }
   if (updates.guidelines !== undefined) {
     setClauses.push("guidelines = ?");

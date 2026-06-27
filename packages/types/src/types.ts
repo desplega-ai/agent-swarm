@@ -1109,6 +1109,12 @@ export const RepoGuidelinesSchema = z.object({
 
 export type RepoGuidelines = z.infer<typeof RepoGuidelinesSchema>;
 
+export const RepoHooksSchema = z.object({
+  enabled: z.boolean().default(false),
+});
+
+export type RepoHooks = z.infer<typeof RepoHooksSchema>;
+
 export const SwarmRepoSchema = z.object({
   id: z.string().uuid(),
   url: z.string().min(1),
@@ -1116,6 +1122,7 @@ export const SwarmRepoSchema = z.object({
   clonePath: z.string().min(1),
   defaultBranch: z.string().default("main"),
   autoClone: z.boolean().default(true),
+  hooks: RepoHooksSchema.optional().default({ enabled: false }),
   guidelines: RepoGuidelinesSchema.nullable().optional(),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
