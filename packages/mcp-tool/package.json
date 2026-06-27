@@ -1,0 +1,7 @@
+{
+  "name": "@swarm/mcp-tool",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.ts"
+}

@@ -42,7 +42,7 @@
     "name": "agent-swarm"
   },
   "packageManager": "bun@1.3.11",
-  "workspaces": ["ui", "templates-ui", "evals"],
+  "workspaces": ["packages/*", "ui", "templates-ui", "evals"],
   "overrides": {
     "react": "19.2.3",
     "react-dom": "19.2.3"
@@ -112,6 +112,7 @@
     "@faker-js/faker": "^10.4.0",
     "@opencode-ai/plugin": "1.17.4",
     "@types/bun": "latest",
+    "ts-morph": "^28.0.0",
     "turbo": "^2.10.0"
   },
   "peerDependencies": {

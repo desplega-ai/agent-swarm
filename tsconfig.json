@@ -16,7 +16,25 @@
     // Path aliases
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@swarm/types": ["packages/types/index.ts"],
+      "@swarm/core-utils": ["packages/core-utils/index.ts"],
+      "@swarm/otel": ["packages/otel/index.ts"],
+      "@swarm/ai-pricing": ["packages/ai-pricing/index.ts"],
+      "@swarm/credentials": ["packages/credentials/index.ts"],
+      "@swarm/prompt-templates": ["packages/prompt-templates/index.ts"],
+      "@swarm/artifacts": ["packages/artifacts/index.ts"],
+      "@swarm/scripts": ["packages/scripts/index.ts"],
+      "@swarm/api-client": ["packages/api-client/index.ts"],
+      "@swarm/e2b-dispatch": ["packages/e2b-dispatch/index.ts"],
+      "@swarm/swarm-templates": ["packages/swarm-templates/index.ts"],
+      "@swarm/ai-llm": ["packages/ai-llm/index.ts"],
+      "@swarm/mcp-tool": ["packages/mcp-tool/index.ts"],
+      "@swarm/harness": ["packages/harness/index.ts"],
+      "@swarm/storage": ["packages/storage/index.ts"],
+      "@swarm/workflows": ["packages/workflows/index.ts"],
+      "@swarm/integrations": ["packages/integrations/index.ts"],
+      "@swarm/api-server": ["packages/api-server/index.ts"]
     },
     "verbatimModuleSyntax": true,
     "noEmit": true,

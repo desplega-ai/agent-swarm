@@ -1,0 +1,147 @@
+{
+  "@swarm/types": {
+    "layer": 0,
+    "sources": ["src/types.ts", "src/tracker/types.ts"],
+    "notes": "model-tiers was merged into src/types.ts in PR#820; src/model-tiers.ts no longer exists."
+  },
+  "@swarm/core-utils": {
+    "layer": 0,
+    "sources": [
+      "src/utils/api-key.ts",
+      "src/utils/secret-scrubber.ts",
+      "src/utils/constants.ts",
+      "src/utils/context-window.ts",
+      "src/utils/template.ts",
+      "src/utils/budget-backoff.ts",
+      "src/utils/pretty-print.ts",
+      "src/utils/request-auth-context.ts",
+      "src/utils/skill-fs-writer.ts",
+      "src/utils/skills-refresh.ts",
+      "src/be/date-utils.ts",
+      "src/be/swarm-config-guard.ts",
+      "src/be/skill-parser.ts",
+      "src/hooks/tool-loop-detection.ts",
+      "src/vcs/"
+    ],
+    "notes": "§3.2 lists src/utils/crypto.ts which does NOT exist (secrets crypto lives at src/be/crypto/ -> @swarm/storage). budget-backoff/pretty-print/request-auth-context/skill-fs-writer/skills-refresh are NOT individually placed by §3.2; bucketed here (cross-cutting DB-free leaf utils) for the Phase-1 bridge, revisit at extraction."
+  },
+  "@swarm/otel": {
+    "layer": 0,
+    "sources": ["src/otel.ts", "src/otel-impl.ts", "src/telemetry.ts", "src/utils/error-tracker.ts"]
+  },
+  "@swarm/ai-pricing": {
+    "layer": 1,
+    "sources": ["src/be/modelsdev-cache.ts", "src/be/modelsdev-cache.json", "src/be/pricing-normalize.ts"],
+    "notes": "src/be/seed-pricing.ts is SPLIT in Phase 2 (pure row-builder -> ai-pricing, DB writer -> storage). For Phase 1 it stays in src/ and is owned by @swarm/storage (via the src/be/ dir entry)."
+  },
+  "@swarm/credentials": {
+    "layer": 1,
+    "sources": [
+      "src/providers/codex-oauth/",
+      "src/utils/credentials.ts",
+      "src/utils/harness-provider.ts",
+      "src/utils/provider-metadata.ts"
+    ],
+    "notes": "§3.2 lists src/providers/harness-provider.ts and src/providers/provider-metadata.ts, but both actually live under src/utils/."
+  },
+  "@swarm/prompt-templates": {
+    "layer": 1,
+    "sources": ["src/prompts/", "src/heartbeat/templates.ts"]
+  },
+  "@swarm/artifacts": {
+    "layer": 1,
+    "sources": ["src/artifact-sdk/"]
+  },
+  "@swarm/scripts": {
+    "layer": 1,
+    "sources": ["src/scripts-runtime/"]
+  },
+  "@swarm/api-client": {
+    "layer": 1,
+    "sources": [],
+    "notes": "NET-NEW. Generated from openapi.json / the route registry in a later phase; no src/ sources in Phase 1. Placeholder barrel exports nothing."
+  },
+  "@swarm/e2b-dispatch": {
+    "layer": 1,
+    "sources": ["src/e2b/dispatch.ts", "src/e2b/env.ts"]
+  },
+  "@swarm/swarm-templates": {
+    "layer": 1,
+    "sources": ["templates/schema.ts", "templates/"],
+    "notes": "templates/ holds JSON data + schema.ts. Schema TYPES (TemplateConfig/TemplateResponse) fold into @swarm/types at extraction; only .ts is re-exported in the barrel."
+  },
+  "@swarm/ai-llm": {
+    "layer": 2,
+    "sources": ["src/utils/internal-ai/"],
+    "notes": "Raters hoist (wip/raters-hoist-deferred) + folding be/memory/raters/types.ts is a Phase-3 step; not applied in Phase 1 (no file moves). be/memory/raters/* stays in @swarm/storage."
+  },
+  "@swarm/mcp-tool": {
+    "layer": 2,
+    "sources": [
+      "src/tools/utils.ts",
+      "src/tools/task-tool-ctx.ts",
+      "src/tools/tool-config.ts",
+      "src/tools/script-common.ts",
+      "src/tools/script-delete.ts",
+      "src/tools/script-query-types.ts",
+      "src/tools/script-run.ts",
+      "src/tools/script-runs.ts",
+      "src/tools/script-search.ts",
+      "src/tools/script-upsert.ts"
+    ]
+  },
+  "@swarm/harness": {
+    "layer": 3,
+    "sources": [
+      "src/providers/",
+      "src/claude.ts",
+      "src/commands/provider-credentials.ts",
+      "src/utils/aws-error-classifier.ts",
+      "src/utils/mcp-server-fetcher.ts"
+    ],
+    "notes": "Owns all of src/providers/ EXCEPT codex-oauth/ (-> @swarm/credentials, wins by longest-prefix). aws-error-classifier/mcp-server-fetcher are NOT placed by §3.2; assigned here because providers (harness) are their only consumers."
+  },
+  "@swarm/storage": {
+    "layer": 3,
+    "sources": [
+      "src/be/",
+      "src/pages/",
+      "src/metrics/",
+      "src/memory/",
+      "src/utils/page-session.ts"
+    ],
+    "notes": "THE DB owner. Owns all of src/be/ EXCEPT the carve-outs to core-utils (date-utils, swarm-config-guard, skill-parser) and ai-pricing (modelsdev-cache.ts/.json, pricing-normalize). Includes src/be/seed-pricing.ts for Phase 1 (split deferred). src/memory/ (top-level, automatic-task-gate.ts) is NOT placed by §3.2; assigned here as memory-domain server code."
+  },
+  "@swarm/workflows": {
+    "layer": 4,
+    "sources": ["src/workflows/", "src/tasks/", "src/scheduler/"]
+  },
+  "@swarm/integrations": {
+    "layer": 5,
+    "sources": [
+      "src/slack/",
+      "src/github/",
+      "src/gitlab/",
+      "src/jira/",
+      "src/linear/",
+      "src/agentmail/",
+      "src/integrations/",
+      "src/oauth/",
+      "src/x/",
+      "src/x402/"
+    ]
+  },
+  "@swarm/api-server": {
+    "layer": 6,
+    "sources": [
+      "src/server.ts",
+      "src/server-user.ts",
+      "src/server-runtime-counters.ts",
+      "src/http/",
+      "src/tools/",
+      "src/heartbeat/",
+      "src/script-workflows/"
+    ],
+    "notes": "Owns all of src/tools/ EXCEPT the mcp-tool carve-outs (utils/task-tool-ctx/tool-config/script-*), and all of src/heartbeat/ EXCEPT templates.ts (-> @swarm/prompt-templates). src/server-runtime-counters.ts is NOT placed by §3.2; assigned here as server runtime code. script-workflows/ pure-exec split into @swarm/scripts is a later-phase refactor."
+  }
+}

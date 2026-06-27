@@ -14,6 +14,10 @@ COPY package.json bun.lock* bunfig.toml ./
 COPY ui/package.json ./ui/package.json
 COPY templates-ui/package.json ./templates-ui/package.json
 COPY evals/package.json ./evals/package.json
+# packages/* are Bun workspace members (Phase 1 bridge shims) — their manifests must be
+# present for the frozen install to resolve the workspace graph. The whole dir is tiny
+# (barrels + manifests, no node_modules); src/ is the real compile input, copied below.
+COPY packages ./packages
 RUN bun install --frozen-lockfile
 COPY src/ ./src/
 COPY templates/ ./templates/
