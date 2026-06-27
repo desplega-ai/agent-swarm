@@ -51,8 +51,8 @@ export interface SwarmConfig {
 
 export interface SwarmSdk {
   // --- memory ---
-  memory_search(args: { query: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string }): Promise<unknown>;
-  memory_get(args: { memoryId: string }): Promise<unknown>;
+  memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string }): Promise<unknown>;
+  memory_get(args: { memoryId: string; intent: string }): Promise<unknown>;
   memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
   // --- tasks ---
   task_list(args?: Record<string, unknown>): Promise<unknown>;
@@ -149,7 +149,7 @@ export interface SwarmSdk {
   workflow_patch(args: Record<string, unknown>): Promise<unknown>;
   workflow_patchNode(args: Record<string, unknown>): Promise<unknown>;
   workflow_delete(args: { id: string }): Promise<unknown>;
-  workflow_trigger(args: { id: string; input?: Record<string, unknown> }): Promise<unknown>;
+  workflow_trigger(args: { id: string; triggerData?: Record<string, unknown> }): Promise<unknown>;
   workflow_retryRun(args: { id: string }): Promise<unknown>;
   workflow_cancelRun(args: { id: string }): Promise<unknown>;
 
@@ -176,6 +176,7 @@ export interface SwarmSdk {
   // --- skills ---
   skill_list(args?: { scope?: string; scopeId?: string; includeBuiltin?: boolean }): Promise<unknown>;
   skill_get(args: { id: string }): Promise<unknown>;
+  skill_getFile(args: { skillId: string; path: string }): Promise<unknown>;
   skill_search(args: { query: string; limit?: number }): Promise<unknown>;
   skill_create(args: Record<string, unknown>): Promise<unknown>;
   skill_update(args: Record<string, unknown>): Promise<unknown>;

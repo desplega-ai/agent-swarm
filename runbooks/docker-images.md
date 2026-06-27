@@ -128,29 +128,6 @@ docker manifest inspect ghcr.io/desplega-ai/agent-swarm-worker:latest --verbose 
 
 Compressed pull size ≈ 35–45 % of uncompressed on-disk size.
 
-## CI image size tracking
-
-`.github/workflows/docker-image-size.yml` measures the API image (`Dockerfile`) and worker image (`Dockerfile.worker`) on PRs and on `main`.
-
-PR runs build both the PR head and the PR base SHA in the same job, then post or update one sticky PR comment. The comment includes compressed and uncompressed rows for both images:
-
-- **Compressed pull estimate:** `docker save <image> | gzip -n -c | wc -c`. This is deterministic for the local build output and tracks the pull-time signal Taras cares about, without needing to push temporary PR images to a registry.
-- **Uncompressed image size:** `docker image inspect --format '{{.Size}}' <image>`.
-
-The notable-bump threshold is configured through workflow env:
-
-| Env | Default | Meaning |
-|---|---:|---|
-| `IMAGE_SIZE_THRESHOLD_PERCENT` | `10` | Percent growth threshold for compressed size |
-| `IMAGE_SIZE_THRESHOLD_MB` | `50` | Absolute growth threshold for compressed size |
-| `IMAGE_SIZE_PING_USER` | `@tarasyarema` | User mentioned when a threshold is crossed |
-
-A PR is flagged when compressed size growth for either image is at least the larger of those two thresholds. Below that, the sticky comment stays informational and does not mention anyone.
-
-Pushes to `main` append one JSONL record to `.github/image-size-history.jsonl` and auto-commit it back to `main`. This keeps the "over time" record in git with no extra service or secret. The first line is a bootstrap marker; real records contain `measuredAt`, `sha`, and per-image byte counts.
-
-Expected added CI time: about two extra API builds plus two worker builds on Docker-touching PRs. With warm GitHub Actions buildx cache scopes (`image-size-api`, `image-size-worker`), the base-branch build should mostly hit cache and the marginal cost should usually be a few minutes; worker cold-cache runs can be substantially longer.
-
 ## When to bump the image
 
 `Dockerfile.worker` rebuilds happen via `bun run docker:build:worker` locally, and on every push to `main` via `.github/workflows/docker-and-deploy.yml`. After local changes:

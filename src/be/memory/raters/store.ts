@@ -31,6 +31,7 @@ export type ApplyRatingResult = {
 
 export type ApplyRatingContext = {
   taskId?: string;
+  contextKey?: string;
 };
 
 export class ExplicitSelfDuplicateError extends Error {
@@ -100,8 +101,8 @@ export function applyRating(
   );
   const insertRating = db.prepare(
     `INSERT INTO memory_rating
-       (id, memoryId, taskId, source, signal, weight, reasoning, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, memoryId, taskId, source, signal, weight, reasoning, createdAt, contextKey)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   // Step-6 §3 — UPSERT the edge with the SAME deltas as the memory row.
   // The `- 1.0` corrections in DO UPDATE undo the default-prior offset that
@@ -141,6 +142,7 @@ export function applyRating(
           event.weight,
           event.reasoning ?? null,
           new Date().toISOString(),
+          ctx.contextKey ?? null,
         );
       } catch (err) {
         // Partial unique index on (taskId, memoryId) WHERE source='explicit-self'

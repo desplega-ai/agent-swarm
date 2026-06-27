@@ -11,7 +11,8 @@ Hub for everything test-shaped in this repo. The canonical, up-to-date testing r
 | Drafting a plan with verification / E2E / QA steps | [LOCAL_TESTING.md](../LOCAL_TESTING.md) — copy command forms verbatim, don't paraphrase |
 | Preparing a frontend PR (`ui/`, `templates-ui/`) | qa-use session + screenshots required (merge gate). Per-package conventions in `ui/CLAUDE.md` |
 | Modifying memory-system code | [memory-system.md](./memory-system.md) — runs all four memory test files |
-| Testing Slack integration end-to-end | Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send via `slack_send_message` MCP tool to trigger task-assignment flow |
+| Testing Slack integration / driving the **LOCAL** dev swarm | Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send via `slack_send_message` MCP tool to trigger task-assignment flow |
+| Sending a task to the **PRODUCTION / deployed** swarm | Use the swarm-user MCP `mcp__agent-swarm-user__send-task` (creates an unassigned task in the production pool; read back with `mcp__agent-swarm-user__get-tasks`). **Not** the dev Slack channel. MCP may not be enabled every session — check for `mcp__agent-swarm-user__*` first |
 | Picking which qa-use slash command | `/qa-use:test-run` (run), `/qa-use:verify` (feature works), `/qa-use:explore` (open page) |
 
 ## Hard rules

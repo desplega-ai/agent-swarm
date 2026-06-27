@@ -641,6 +641,7 @@ if [ -n "$AGENT_ID" ]; then
                 REPO_NAME=$(echo "$repo" | jq -r '.name')
                 REPO_BRANCH=$(echo "$repo" | jq -r '.defaultBranch // "main"')
                 REPO_DIR=$(echo "$repo" | jq -r '.clonePath')
+                REPO_HOOKS_ENABLED=$(echo "$repo" | jq -r '.hooks.enabled // false')
 
                 # Ensure parent directory exists and is owned by worker so the
                 # gosu-dropped clone/pull below can write into it. Lenient chown
@@ -652,11 +653,30 @@ if [ -n "$AGENT_ID" ]; then
                 # — otherwise the runner (post-gosu) hits "dubious ownership".
                 # gosu inherits env, so GH_TOKEN/GITHUB_TOKEN propagate to gh.
                 if [ -d "${REPO_DIR}/.git" ]; then
-                    echo "  Pulling ${REPO_NAME} (${REPO_BRANCH}) at ${REPO_DIR}..."
-                    gosu worker bash -c "cd '$REPO_DIR' && git pull origin '$REPO_BRANCH' --ff-only" || echo "  Warning: Could not pull ${REPO_NAME}"
+                    echo "  Syncing ${REPO_NAME} (${REPO_BRANCH}) at ${REPO_DIR}..."
+                    # Auto-cloned default branches are disposable tracking checkouts.
+                    # Keep feature branches and dirty worktrees untouched; clean default
+                    # branches are reset to origin so local swarm-autostash commits do
+                    # not permanently block startup updates.
+                    gosu worker bash -c "cd '$REPO_DIR' && \
+                        CURRENT_BRANCH=\$(git branch --show-current) && \
+                        if [ \"\$CURRENT_BRANCH\" != '$REPO_BRANCH' ]; then \
+                            echo '    Skipping sync: checked out on' \"\$CURRENT_BRANCH\"; \
+                            exit 0; \
+                        fi && \
+                        if ! git diff --quiet || ! git diff --cached --quiet; then \
+                            echo '    Skipping sync: worktree has local changes'; \
+                            exit 0; \
+                        fi && \
+                        git fetch origin '$REPO_BRANCH' --prune && \
+                        git reset --hard 'origin/$REPO_BRANCH'" || echo "  Warning: Could not sync ${REPO_NAME}"
                 else
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
                     gosu worker bash -c "gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" || echo "  Warning: Could not clone ${REPO_NAME}"
+                fi
+
+                if [ "$REPO_HOOKS_ENABLED" = "true" ] && [ -d "${REPO_DIR}/.git" ]; then
+                    gosu worker /usr/local/bin/install-repo-hooks.sh "$REPO_DIR" "$REPO_NAME" || echo "  Warning: Could not install git hooks for ${REPO_NAME}"
                 fi
             done
         else

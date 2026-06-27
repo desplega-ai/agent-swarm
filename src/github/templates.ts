@@ -350,7 +350,7 @@ registerTemplate({
   defaultBody: `PR: {{pr_title}}
 Reviewer: {{sender_login}}
 Repo: {{repo_full_name}}
-URL: {{review_url}}{{review_body_section}}
+URL: {{review_url}}{{review_body_section}}{{inline_comments_section}}
 
 ---
 {{related_task_section}}{{@template[common.delegation_instruction]}}
@@ -363,7 +363,11 @@ URL: {{review_url}}{{review_body_section}}
     { name: "sender_login", description: "Reviewer login" },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "review_url", description: "Review HTML URL" },
-    { name: "review_body_section", description: "Review comment section or empty string" },
+    { name: "review_body_section", description: "Review overall body section or empty string" },
+    {
+      name: "inline_comments_section",
+      description: "Formatted inline review comments section or empty string",
+    },
     { name: "related_task_section", description: "Related task info or empty string" },
     { name: "review_suggestions", description: "Context-appropriate review suggestion" },
   ],

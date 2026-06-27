@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { CronExpressionParser } from "cron-parser";
 import { z } from "zod";
+import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
   createScheduledTask,
   deleteScheduledTask,
@@ -12,8 +13,8 @@ import {
   updateScheduledTask,
 } from "../be/db";
 import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/validate";
-import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
 import { calculateNextRun, createStandaloneScheduleTask } from "../scheduler/scheduler";
+import { ModelTierSchema, splitLegacyModelAlias } from "../types";
 import { getExecutorRegistry } from "../workflows";
 import { handleScheduleTrigger } from "../workflows/triggers";
 import { route } from "./route-def";
@@ -157,7 +158,7 @@ export async function handleSchedules(
   res: ServerResponse,
   pathSegments: string[],
   queryParams: URLSearchParams,
-  _myAgentId: string | undefined,
+  myAgentId: string | undefined,
 ): Promise<boolean> {
   if (listSchedules.match(req.method, pathSegments)) {
     const parsed = await listSchedules.parse(req, res, pathSegments, queryParams);
@@ -273,6 +274,7 @@ export async function handleSchedules(
         timezone: body.timezone,
         ...splitLegacyModelAlias({ model: body.model, modelTier: body.modelTier }),
         scheduleType: body.scheduleType,
+        createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
       });
 
       json(res, schedule, 201);
@@ -477,6 +479,8 @@ export async function handleSchedules(
       }
     }
 
+    const updatedBy = resolveHttpAuditUserId(req, myAgentId);
+    if (updatedBy !== null) body.updatedBy = updatedBy;
     const schedule = updateScheduledTask(parsed.params.id, body);
     json(res, schedule);
     return true;

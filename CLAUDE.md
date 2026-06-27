@@ -25,6 +25,7 @@ templates-ui/          # Templates registry (Next.js)
 templates/             # Official + community template data
 docs-site/             # Fumadocs site (MDX)
 runbooks/              # Operational runbooks (local dev, etc.)
+evals/                 # Eval harness: scenario x harness-config matrix on E2B (own package; see evals/README.md)
 ```
 
 ## Architecture invariants
@@ -234,9 +235,12 @@ Hard rules:
 
 </important>
 
-<important if="you are testing Slack integration manually or via E2E">
+<important if="you are sending a task to the swarm, or testing Slack integration manually or via E2E">
 
-Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send `slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")` via the Slack MCP tool to trigger the bot handler → task-assignment flow.
+**Reaching the swarm depends on the target:**
+
+- **LOCAL / dev agent-swarm (Slack):** Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send `slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")` via the Slack MCP tool to trigger the bot handler → task-assignment flow.
+- **PRODUCTION / deployed swarm (MCP):** use the swarm-user MCP `mcp__agent-swarm-user__send-task` (creates an unassigned task in the production pool; read results with `mcp__agent-swarm-user__get-tasks`). Do **NOT** use the dev Slack channel for production swarm work. The MCP may not be enabled in every session — check for `mcp__agent-swarm-user__*` first.
 
 </important>
 
@@ -285,9 +289,21 @@ Same-PR doc-update rule: update [docs-site/.../guides/cost-and-context-computati
 
 </important>
 
+<important if="you are creating or modifying eval scenarios, rubrics, or fixtures (evals/scenarios/*, evals/scenarios/fixtures/*)">
+
+Full rulebook: [evals/SCENARIO-AUTHORING.md](./evals/SCENARIO-AUTHORING.md). Non-negotiables: **deterministic-first** (a judge is the last resort and never the tier discriminator); **never penalize MANDATORY behavior** (audit every negative check — can a correct run trip it?); **grade artifacts the MODEL controls** (child tasks, merged report — NOT config/timing-dependent system emissions); **de-risk pilot before building an axis** (prove discrimination on ONE dimension × TWO tiers, ~$4, read the dimension gap + whether its CI excludes 0). Validate with `cd evals && bun src/cli.ts registry` + a rubric unit test against a synthetic JudgeContext; the deployed swarm proposes (never runs E2B itself — it costs money).
+
+</important>
+
+<important if="you are modifying heartbeat, crash-recovery, or task-assignment/routing logic (src/heartbeat/*, src/tasks/worker-follow-up.ts resume/remediation, the pool/claim path in src/http/poll.ts + src/be/db.ts, or any stall/liveness/reaper threshold)">
+
+[runbooks/heartbeat-crash-recovery.md](./runbooks/heartbeat-crash-recovery.md) is the canonical flow reference — the heartbeat sweep, the stalled-task classifier, and the crash-recovery routing heuristic, with mermaid diagrams + pseudocode. It stores **only the current behavior (no history)**. Update it in the **same PR** whenever you change any of this logic so the diagrams/pseudocode stay true.
+
+</important>
+
 ## Related
 
-- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts
+- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference

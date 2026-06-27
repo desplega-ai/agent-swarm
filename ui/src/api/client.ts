@@ -745,6 +745,7 @@ class ApiClient {
     clonePath?: string;
     defaultBranch?: string;
     autoClone?: boolean;
+    hooks?: import("./types").RepoHooks;
   }): Promise<SwarmRepo> {
     const url = `${this.getBaseUrl()}/api/repos`;
     const res = await fetch(url, {
@@ -767,6 +768,7 @@ class ApiClient {
       clonePath: string;
       defaultBranch: string;
       autoClone: boolean;
+      hooks: import("./types").RepoHooks | null;
       guidelines: import("./types").RepoGuidelines | null;
     }>,
   ): Promise<SwarmRepo> {

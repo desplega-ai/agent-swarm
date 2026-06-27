@@ -1,5 +1,13 @@
-# Pre-push hooks matching CI merge gate checks
-# See .github/workflows/merge-gate.yml
+# Pre-push hooks matching CI merge gate checks.
+# See .github/workflows/merge-gate.yml — the `detect-changes` job gates each
+# downstream job behind a per-domain path filter. The `files` regexes below
+# mirror those filters so a push only runs a hook when files it actually
+# validates changed. Meta-only pushes (workflows, docs, runbooks, this config)
+# match nothing and run no hooks — same as CI skipping every gated job.
+#
+# Mechanics: with `always_run` unset (default false) + `pass_filenames = false`,
+# prek runs the whole-project entry once, but only if a pushed file matches
+# `files`. Do NOT use `always_run = true` here — it bypasses the file gate.
 default_install_hook_types = ["pre-push"]
 
 [[repos]]
@@ -10,7 +18,8 @@ id = "biome-lint"
 name = "Biome lint"
 language = "system"
 entry = "bun run lint"
-always_run = true
+# CI "lint" domain: biome runs on src/ + evals/; config + lockfile + tsconfig.
+files = '^(src/|evals/|package\.json$|bun\.lock|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
 fail_fast = true
@@ -20,7 +29,8 @@ id = "typecheck"
 name = "TypeScript type check"
 language = "system"
 entry = "bun run tsc:check"
-always_run = true
+# Same CI "lint" domain (tsc:check is bundled in the lint-and-typecheck job).
+files = '^(src/|evals/|package\.json$|bun\.lock|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
 fail_fast = true
@@ -30,7 +40,8 @@ id = "test"
 name = "Unit tests"
 language = "system"
 entry = "bun test"
-always_run = true
+# CI "test" domain: src/ + scripts tests import + lockfile/tsconfig.
+files = '^(src/|scripts/|package\.json$|bun\.lock|tsconfig\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
 
@@ -39,7 +50,8 @@ id = "db-boundary"
 name = "Worker/API DB boundary check"
 language = "system"
 entry = "bash scripts/check-db-boundary.sh"
-always_run = true
+# Validates src/ import boundaries; also re-run if the check script itself changes.
+files = '^(src/|scripts/check-db-boundary\.sh$)'
 pass_filenames = false
 stages = ["pre-push"]
 fail_fast = true
@@ -49,7 +61,8 @@ id = "pi-skills-freshness"
 name = "Pi-skills freshness check"
 language = "system"
 entry = "bash -c 'bun run build:pi-skills && test -z \"$(git diff --name-only plugin/pi-skills/)\"'"
-always_run = true
+# CI "pi_skills" domain: generator inputs + generated outputs.
+files = '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)'
 pass_filenames = false
 stages = ["pre-push"]
 

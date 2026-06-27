@@ -1,10 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { chunkContent } from "../be/chunking";
-import { getTaskById } from "../be/db";
+import { getDb, getTaskById } from "../be/db";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
+import { storeLinks } from "../be/memory/link-resolver";
 import { recordRetrievals } from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
 import {
@@ -37,6 +38,7 @@ const indexMemory = route({
     sourcePath: z.string().optional(),
     tags: z.array(z.string()).optional(),
     persistMemory: z.boolean().optional(),
+    contextKey: z.string().optional(),
   }),
   responses: {
     202: { description: "Content queued for embedding" },
@@ -53,6 +55,13 @@ const searchMemory = route({
   auth: { apiKey: true, agentId: true },
   body: z.object({
     query: z.string().min(1),
+    intent: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Why you are searching. Required for agent recall-edge tracking; omit for UI browse/search calls.",
+      ),
     limit: z.number().int().min(1).max(20).default(5),
     scope: z.enum(["agent", "swarm", "all"]).default("all"),
     source: z.enum(["manual", "file_index", "session_summary", "task_completion"]).optional(),
@@ -149,6 +158,15 @@ const getMemoryById = route({
   tags: ["Memory"],
   auth: { apiKey: true, agentId: true },
   params: z.object({ id: z.string().uuid() }),
+  query: z.object({
+    intent: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Why you are retrieving this memory. Required for agent recall-edge tracking; omit for UI browse calls.",
+      ),
+  }),
   responses: {
     200: { description: "Memory details" },
     404: { description: "Memory not found" },
@@ -266,8 +284,18 @@ export async function handleMemory(
     const parsed = await indexMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    const { agentId, content, name, scope, source, sourceTaskId, sourcePath, tags, persistMemory } =
-      parsed.body;
+    const {
+      agentId,
+      content,
+      name,
+      scope,
+      source,
+      sourceTaskId,
+      sourcePath,
+      tags,
+      persistMemory,
+      contextKey,
+    } = parsed.body;
 
     if (source === "session_summary" && sourceTaskId) {
       const sourceTask = getTaskById(sourceTaskId);
@@ -296,6 +324,13 @@ export async function handleMemory(
       store.deleteBySourcePath(sourcePath, agentId);
     }
 
+    // Derive contextKey from body or X-Context-Key header
+    const headerContextKey = req.headers["x-context-key"];
+    const resolvedContextKey =
+      contextKey ??
+      (Array.isArray(headerContextKey) ? headerContextKey[0] : headerContextKey) ??
+      undefined;
+
     // Atomic batch insert — all chunks or none
     const memories = store.storeBatch(
       contentChunks.map((chunk) => ({
@@ -309,8 +344,23 @@ export async function handleMemory(
         chunkIndex: chunk.chunkIndex,
         totalChunks: chunk.totalChunks,
         tags: tags || [],
+        contextKey: resolvedContextKey ?? null,
       })),
     );
+
+    // Resolve and store deterministic links (wikilinks, PR refs, agent-fs paths)
+    if (agentId) {
+      for (const memory of memories) {
+        try {
+          storeLinks(memory.id, agentId, memory.content);
+        } catch (err) {
+          console.error(
+            `[memory] Link resolution failed for ${memory.id}:`,
+            (err as Error).message,
+          );
+        }
+      }
+    }
 
     // Async batch embed (fire and forget)
     (async () => {
@@ -339,7 +389,7 @@ export async function handleMemory(
     const parsed = await searchMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    const { query, limit, scope, source } = parsed.body;
+    const { query, intent, limit, scope, source } = parsed.body;
 
     try {
       const provider = getEmbeddingProvider();
@@ -369,12 +419,16 @@ export async function handleMemory(
       const sourceTaskId = Array.isArray(sourceTaskIdHeader)
         ? sourceTaskIdHeader[0]
         : sourceTaskIdHeader;
-      if (sourceTaskId) {
+      const contextKeyHeader = req.headers["x-context-key"];
+      const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
+      if (sourceTaskId && intent) {
         try {
           recordRetrievals(
             sourceTaskId,
             myAgentId,
             ranked.map((r) => ({ memoryId: r.id, similarity: r.similarity })),
+            undefined,
+            { intent, contextKey, eventType: "search" },
           );
         } catch (err) {
           console.error("[memory-search] recordRetrievals failed:", (err as Error).message);
@@ -620,7 +674,11 @@ export async function handleMemory(
           reasoning: e.reasoning,
           ...(e.referencesSource !== undefined ? { referencesSource: e.referencesSource } : {}),
         }));
-        const result = applyRating(ratingEvents, { taskId });
+        const rateContextKeyHeader = req.headers["x-context-key"];
+        const rateContextKey = Array.isArray(rateContextKeyHeader)
+          ? rateContextKeyHeader[0]
+          : rateContextKeyHeader;
+        const result = applyRating(ratingEvents, { taskId, contextKey: rateContextKey });
         applied += result.applied;
         for (const r of result.rejected) {
           rejected.push({ memoryId: r.event.memoryId, reason: r.reason });
@@ -671,13 +729,35 @@ export async function handleMemory(
   }
 
   if (getMemoryById.match(req.method, pathSegments)) {
-    const parsed = await getMemoryById.parse(req, res, pathSegments, new URLSearchParams());
+    const queryParams = parseQueryParams(req.url || "");
+    const parsed = await getMemoryById.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
     const memory = getMemoryStore().get(parsed.params.id);
     if (!memory) {
       jsonError(res, "Memory not found", 404);
       return true;
+    }
+
+    const { intent } = parsed.query;
+    const sourceTaskIdHeader = req.headers["x-source-task-id"];
+    const sourceTaskId = Array.isArray(sourceTaskIdHeader)
+      ? sourceTaskIdHeader[0]
+      : sourceTaskIdHeader;
+    const contextKeyHeader = req.headers["x-context-key"];
+    const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
+    if (sourceTaskId && myAgentId && intent) {
+      try {
+        recordRetrievals(
+          sourceTaskId,
+          myAgentId,
+          [{ memoryId: memory.id, similarity: 1.0 }],
+          undefined,
+          { intent, contextKey, eventType: "get" },
+        );
+      } catch (err) {
+        console.error("[memory-get] recordRetrievals failed:", (err as Error).message);
+      }
     }
 
     json(res, { memory });
@@ -692,6 +772,23 @@ export async function handleMemory(
 const MEMORY_GC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 let memoryGcTimer: ReturnType<typeof setInterval> | null = null;
 
+const SEARCH_RETRIEVAL_TTL_DAYS = 90;
+
+function purgeStaleSearchRetrievals(): number {
+  try {
+    const cutoff = new Date(
+      Date.now() - SEARCH_RETRIEVAL_TTL_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const result = getDb()
+      .prepare("DELETE FROM memory_retrieval WHERE eventType = 'search' AND retrievedAt < ?")
+      .run(cutoff);
+    return result.changes;
+  } catch (err) {
+    console.error("[memory-gc] Search retrieval purge failed:", (err as Error).message);
+    return 0;
+  }
+}
+
 export function startMemoryGc(intervalMs = MEMORY_GC_INTERVAL_MS): void {
   if (memoryGcTimer) return;
 
@@ -700,6 +797,12 @@ export function startMemoryGc(intervalMs = MEMORY_GC_INTERVAL_MS): void {
     const purged = getMemoryStore().purgeExpired();
     if (purged > 0) {
       console.log(`[memory-gc] Initial purge removed ${purged} expired memory row(s)`);
+    }
+    const searchPurged = purgeStaleSearchRetrievals();
+    if (searchPurged > 0) {
+      console.log(
+        `[memory-gc] Initial purge removed ${searchPurged} stale search retrieval row(s)`,
+      );
     }
   } catch (err) {
     console.error("[memory-gc] Initial purge failed:", err);
@@ -710,6 +813,12 @@ export function startMemoryGc(intervalMs = MEMORY_GC_INTERVAL_MS): void {
       const purged = getMemoryStore().purgeExpired();
       if (purged > 0) {
         console.log(`[memory-gc] Periodic purge removed ${purged} expired memory row(s)`);
+      }
+      const searchPurged = purgeStaleSearchRetrievals();
+      if (searchPurged > 0) {
+        console.log(
+          `[memory-gc] Periodic purge removed ${searchPurged} stale search retrieval row(s)`,
+        );
       }
     } catch (err) {
       console.error("[memory-gc] Periodic purge failed:", err);

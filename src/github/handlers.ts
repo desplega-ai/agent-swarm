@@ -3,6 +3,7 @@ import { findUserByExternalId } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { githubContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { getInstallationToken } from "./app";
 import {
   detectMention,
   extractMentionContext,
@@ -936,6 +937,69 @@ export async function handleComment(
   return { created: true, taskId: task.id };
 }
 
+interface ReviewInlineComment {
+  id: number;
+  path: string;
+  line: number | null;
+  body: string;
+  html_url: string;
+  diff_hunk: string;
+}
+
+function parseNextPageLink(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+  const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+  return match ? (match[1] ?? null) : null;
+}
+
+async function fetchReviewComments(
+  repo: string,
+  prNumber: number,
+  reviewId: number,
+  installationId: number,
+): Promise<ReviewInlineComment[]> {
+  const token = await getInstallationToken(installationId);
+  if (!token) {
+    return [];
+  }
+  const headers = {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${token}`,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const allComments: ReviewInlineComment[] = [];
+  let url: string | null =
+    `https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments?per_page=100`;
+  try {
+    while (url) {
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        console.error(`[GitHub] Failed to fetch review inline comments: ${response.status}`);
+        return allComments;
+      }
+      const page = (await response.json()) as ReviewInlineComment[];
+      if (Array.isArray(page)) {
+        allComments.push(...page);
+      }
+      url = parseNextPageLink(response.headers.get("link"));
+    }
+    return allComments;
+  } catch (error) {
+    console.error("[GitHub] Error fetching review inline comments:", error);
+    return allComments;
+  }
+}
+
+function buildInlineCommentsSection(comments: ReviewInlineComment[]): string {
+  if (comments.length === 0) return "";
+  const items = comments.map((c) => {
+    const loc = c.line ? `${c.path}:${c.line}` : c.path;
+    const hunk = c.diff_hunk ? `\n\`\`\`diff\n${c.diff_hunk.slice(0, 300)}\n\`\`\`` : "";
+    return `- **${loc}**${hunk}\n  > ${c.body}`;
+  });
+  return `\n\n## Inline review comments (${comments.length})\n\n${items.join("\n\n")}`;
+}
+
 /**
  * Handle pull_request_review events (submitted, edited, dismissed)
  *
@@ -963,15 +1027,21 @@ export async function handlePullRequestReview(
     return { created: false };
   }
 
-  // Skip "commented" reviews that are empty - these are often just line comments
-  // without an overall review body
-  if (review.state === "commented" && !review.body) {
+  // Deduplicate before making any API calls
+  const eventKey = `pr-review:${repository.full_name}:${pr.number}:${review.id}`;
+  if (isDuplicate(eventKey)) {
     return { created: false };
   }
 
-  // Deduplicate
-  const eventKey = `pr-review:${repository.full_name}:${pr.number}:${review.id}`;
-  if (isDuplicate(eventKey)) {
+  // Fetch inline comments now so we can decide whether to skip and include them in the task.
+  // Returns [] when no installation credentials are available (graceful degradation).
+  const inlineComments = installation?.id
+    ? await fetchReviewComments(repository.full_name, pr.number, review.id, installation.id)
+    : [];
+
+  // Skip "commented" reviews only when there is neither an overall body nor any inline
+  // comments — a body-less review with inline comments carries real reviewer feedback.
+  if (review.state === "commented" && !review.body && inlineComments.length === 0) {
     return { created: false };
   }
 
@@ -992,15 +1062,21 @@ export async function handlePullRequestReview(
 
   // Build task description
   const reviewBodySection = review.body ? `\n\nReview Comment:\n${review.body}` : "";
+  const inlineCommentsSection = buildInlineCommentsSection(inlineComments);
   const relatedTaskSection = existingTask
     ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n`
     : "";
-  const reviewSuggestions =
+
+  const hasInlineComments = inlineComments.length > 0;
+  const baseReviewSuggestion =
     review.state === "approved"
       ? "💡 Suggested: Merge the PR or wait for additional reviews"
       : review.state === "changes_requested"
         ? "💡 Suggested: Address the requested changes and update the PR"
         : "💡 Suggested: Review the feedback and respond if needed";
+  const reviewSuggestions = hasInlineComments
+    ? `${baseReviewSuggestion}\n💬 Address EVERY inline comment. After pushing fixes, reply to and resolve each inline review thread on GitHub so the reviewer sees visible confirmation.`
+    : baseReviewSuggestion;
 
   const result = resolveTemplate(
     "github.pull_request.review_submitted",
@@ -1013,6 +1089,7 @@ export async function handlePullRequestReview(
       repo_full_name: repository.full_name,
       review_url: review.html_url,
       review_body_section: reviewBodySection,
+      inline_comments_section: inlineCommentsSection,
       related_task_section: relatedTaskSection,
       review_suggestions: reviewSuggestions,
     },

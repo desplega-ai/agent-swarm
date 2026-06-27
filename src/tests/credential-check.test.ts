@@ -868,7 +868,7 @@ describe("AgentCredStatusSchema round-trip with bedrock block", () => {
 
 describe("runBedrockSdkProbeAndEnumerate — intersection logic", () => {
   test("includes inference-profile ids; drops non-ACTIVE and non-drivable ids", async () => {
-    const { getModels } = await import("@earendil-works/pi-ai");
+    const { getBuiltinModels: getModels } = await import("@earendil-works/pi-ai/providers/all");
     const drivable = getModels("amazon-bedrock");
     const isProfile = (id: string) => /^(us|eu|apac|au|global)\./.test(id);
     const baseModel = drivable.find((m) => !isProfile(m.id));

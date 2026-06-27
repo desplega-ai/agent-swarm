@@ -56,7 +56,11 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     case "memory_get": {
       const memoryId = typeof body.memoryId === "string" ? body.memoryId : undefined;
       if (!memoryId) throw new Error("memory_get requires string `memoryId`");
-      return { method: "GET", path: `/api/memory/${encodeURIComponent(memoryId)}` };
+      const getIntent = typeof body.intent === "string" ? body.intent : "script-sdk";
+      return {
+        method: "GET",
+        path: `/api/memory/${encodeURIComponent(memoryId)}?intent=${encodeURIComponent(getIntent)}`,
+      };
     }
     case "memory_rate": {
       const event = {

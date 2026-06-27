@@ -2,6 +2,12 @@
 # Runs Claude in headless loop mode as a worker agent
 # Multi-stage build: compiles to standalone binary with full dev environment
 
+ARG PREK_VERSION=0.4.5
+
+# Official prek docs recommend copying the pinned binary from its distroless
+# image into Debian-based images.
+FROM ghcr.io/j178/prek:v${PREK_VERSION} AS prek
+
 # Stage 1: Build the binary
 FROM oven/bun:1.3.11 AS builder
 WORKDIR /build
@@ -96,7 +102,7 @@ RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/in
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.170
+ARG CLAUDE_CODE_VERSION=2.1.187
 RUN sudo npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # Verify claude binary is findable after install
 RUN which claude && claude --version
@@ -106,7 +112,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=0.79.1
+ARG PI_CODING_AGENT_VERSION=0.80.2
 RUN sudo npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
     && mkdir -p /home/worker/.pi/agent
 ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
@@ -114,7 +120,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match @openai/codex-sdk in package.json — enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.139.0
+ARG CODEX_VERSION=0.142.0
 RUN sudo npm install -g @openai/codex@${CODEX_VERSION}
 RUN which codex && codex --version
 
@@ -155,10 +161,10 @@ RUN codex plugin marketplace add mksglu/context-mode || true \
 # The installer drops the binary at ~/.opencode/bin/opencode and only modifies
 # ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
 # update, so we extend ENV PATH explicitly.
-ARG OPENCODE_VERSION=1.16.2
+ARG OPENCODE_VERSION=1.17.9
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
 ENV PATH="/home/worker/.opencode/bin:$PATH"
-ARG OPENCODE_SDK_VERSION=1.16.2
+ARG OPENCODE_SDK_VERSION=1.17.9
 RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
 
 # Install context-mode CLI globally (context-window compression tools for all
@@ -169,6 +175,9 @@ RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
 # CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
 ARG CONTEXT_MODE_VERSION=1.0.151
 RUN sudo npm install -g context-mode@${CONTEXT_MODE_VERSION}
+
+# Install prek for opt-in worker repo hook setup.
+COPY --from=prek /prek /usr/local/bin/prek
 
 # Install Claude marketplace plugins (build-time cache)
 RUN mkdir -p /home/worker/.claude \
@@ -238,7 +247,7 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
     "@desplega.ai/wts": "0.2.3",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/qa-use": "2.19.0",
-    "@desplega.ai/claude-bridge": "0.1.12",
+    "@desplega.ai/claude-bridge": "0.2.2",
     "@desplega.ai/agent-fs": "0.9.0"
   },
   "overrides": {
@@ -291,6 +300,10 @@ RUN chmod +x /usr/local/bin/init-local-postgres.sh
 # Optional helper to start local Redis (not invoked automatically)
 COPY scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 RUN chmod +x /usr/local/bin/init-local-redis.sh
+
+# Best-effort repo hook installer used after opt-in worker repo clones.
+COPY scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+RUN chmod +x /usr/local/bin/install-repo-hooks.sh
 
 # Copy commands (changes on code change — keep late)
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/

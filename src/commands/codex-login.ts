@@ -182,7 +182,7 @@ Usage:
 Options:
   --api-url <url>    Swarm API URL (default: MCP_BASE_URL or http://localhost:3013)
   --api-key <key>    Swarm API key (default: API_KEY or 123123)
-  --slot <n>         Credential pool slot (0-9, default: next free slot)
+  --slot <n>         Credential pool slot (0-100, default: next free slot)
   -h, --help         Show this help
 
 Without flags, the command prompts interactively for the target API URL and
@@ -198,7 +198,7 @@ Deployed Codex workers automatically restore these credentials at boot.
 `);
 }
 
-const MAX_SLOT = 9;
+const MAX_SLOT = 100;
 
 export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}): Promise<void> {
   const resolveConfig = deps.resolveConfig ?? resolveCodexLoginConfig;

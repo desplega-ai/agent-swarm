@@ -13,6 +13,7 @@ channel_activity_cursors
 channel_read_state
 context_versions
 events
+memory_link
 memory_rating
 memory_retrieval
 oauth_apps

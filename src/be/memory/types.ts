@@ -52,6 +52,7 @@ export interface MemoryInput {
   chunkIndex?: number;
   totalChunks?: number;
   tags?: string[];
+  contextKey?: string | null;
 }
 
 export interface MemoryCandidate extends AgentMemory {

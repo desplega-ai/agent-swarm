@@ -145,8 +145,16 @@ export const SDK_ALLOWLIST = Object.keys(SDK_TOOL_NAME_MAP) as Array<
   keyof typeof SDK_TOOL_NAME_MAP
 >;
 
+/** Set of MCP tool names (values of SDK_TOOL_NAME_MAP) that scripts may call via the bridge. */
+const MCP_TOOL_NAMES: ReadonlySet<string> = new Set<string>(Object.values(SDK_TOOL_NAME_MAP));
+
 export function isSdkToolAllowed(name: string): boolean {
   return (SDK_ALLOWLIST as readonly string[]).includes(name);
+}
+
+/** True if `mcpToolName` (e.g. "trigger-workflow") corresponds to an allowlisted SDK method. */
+export function isMcpToolAllowedForScripts(mcpToolName: string): boolean {
+  return MCP_TOOL_NAMES.has(mcpToolName);
 }
 
 export function mcpToolNameForSdkMethod(name: string): string {

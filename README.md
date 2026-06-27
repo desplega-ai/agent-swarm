@@ -127,6 +127,7 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 - **Workflow engine with Human-in-the-Loop** — DAG-based automation with approval gates, retries, and structured I/O. [Workflows →](https://docs.agent-swarm.dev/docs/concepts/workflows)
 - **Scheduled & recurring tasks** — cron-based automation for standing work. [Scheduling →](https://docs.agent-swarm.dev/docs/concepts/scheduling)
 - **Durable script workflows** — launch background script runs, inspect their journals, and track them from the dashboard when a one-shot `script-run` is too small. [Guide →](https://docs.agent-swarm.dev/docs/guides/script-workflow-runs)
+- **E2B-backed eval harness** — run a scenario × harness-config matrix against real swarm stacks, capture transcripts/artifacts, and grade outcomes with deterministic checks plus LLM or agentic judges. [Guide →](https://docs.agent-swarm.dev/docs/guides/evals-harness)
 - **Harness & LLM agnostic** — run with Claude Code, Claude Bridge, OpenAI Codex, pi-mono (Anthropic, OpenRouter, or Amazon Bedrock), Devin, Claude Managed Agents, raw LLMs, or opencode. Tasks, schedules, and workflow agent-task nodes can use portable `modelTier` intent (`smol`, `regular`, `smart`, `ultra`) and resolve it per worker/provider at run time. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
 - **Follow-up continuity across all harnesses** — child tasks inherit a bounded prior-task context preamble built from the task chain, so continuity survives restarts and works the same across every provider. [Task lifecycle →](https://docs.agent-swarm.dev/docs/concepts/task-lifecycle)
 - **Skills & MCP servers** — reusable procedural knowledge, bundled skill reference files, and per-agent MCP servers with scope cascade. [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools)
@@ -146,6 +147,7 @@ The fastest way is the onboarding wizard — it collects credentials, picks pres
 
 ```bash
 bunx @desplega.ai/agent-swarm onboard
+npx @desplega.ai/agent-swarm onboard
 ```
 
 Prefer manual setup? Clone and run with Docker Compose:
@@ -164,7 +166,7 @@ The API runs on port `3013`, with interactive docs at `http://localhost:3013/doc
 <summary><strong>Other setups</strong></summary>
 
 - **Local API + Docker workers** — run the API on your host, workers in Docker. See [Getting Started](https://docs.agent-swarm.dev/docs/getting-started).
-- **Claude Code as the lead agent** — `bunx @desplega.ai/agent-swarm connect`, then tell Claude Code to register as the lead.
+- **Claude Code as the lead agent** — `bunx @desplega.ai/agent-swarm connect` (or `npx @desplega.ai/agent-swarm connect`), then tell Claude Code to register as the lead.
 
 </details>
 
@@ -220,6 +222,7 @@ Opens at `http://localhost:5274`.
 
 ```bash
 bunx @desplega.ai/agent-swarm <command>
+npx @desplega.ai/agent-swarm <command>
 ```
 
 | Command | Description |

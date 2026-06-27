@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow, updateWorkflow } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import type { WorkflowPatch } from "@/types";
@@ -108,11 +109,16 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
 
         const version = snapshotWorkflow(id, requestInfo.agentId);
 
+        const updatedBy =
+          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
         const updateArgs: Parameters<typeof updateWorkflow>[1] = {
           definition: patchResult.definition,
         };
         if (triggerSchema !== undefined) {
           updateArgs.triggerSchema = triggerSchema;
+        }
+        if (updatedBy !== undefined) {
+          updateArgs.updatedBy = updatedBy;
         }
         const workflow = updateWorkflow(id, updateArgs);
         if (!workflow) {

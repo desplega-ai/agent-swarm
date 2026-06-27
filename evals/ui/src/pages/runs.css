@@ -1,0 +1,244 @@
+/* runs list page + new-run dialog (WP-RUNS) */
+
+.runs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.runs-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* right side of the head row: ⛶/⊟ table-mode toggle + "+ New Run" (v5 §4) */
+.runs-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* wide-mode Configs column hover: the run's configs as a stacked ConfigChip list */
+.runs-configs-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.runs-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.runs-empty p {
+  margin: 0;
+}
+
+/* row 1 of the left-panel toolbar: multi-select filters (item 9);
+   row 2 is the DataTable's own stacked full-width search */
+.runs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+/* ---- detail pane ---- */
+
+.run-detail > * + * {
+  margin-top: 12px;
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.detail-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.detail-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.matrix-scroll {
+  overflow-x: auto;
+}
+
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.breakdown-grid .panel {
+  margin-top: 0;
+}
+
+/* ---- new-run dialog ---- */
+
+/*
+ * Item 6 — no horizontal scrollbar, root-cause fixes:
+ * the old CSS tooltip (`.tooltip::after`, opacity 0 but always laid out, width:
+ * max-content) used to stick out past the dialog's content box from the chips near
+ * the right edge, engaging the modal dialog's UA `overflow: auto`. Tooltips are
+ * portal-based now; the rules below remove the remaining fixed-width overflow risks
+ * so `overflow-x` can never engage again.
+ */
+
+.new-run-dialog {
+  /* fixed 560px was wider than small viewports — never exceed the dialog max-width */
+  width: min(560px, calc(100vw - 32px));
+}
+
+.dialog-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.form-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.form-row-2 {
+  display: grid;
+  /* minmax(0, 1fr): plain 1fr's min-content floor lets wide inputs blow the row out */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.form-row-2 input {
+  width: 100%;
+  min-width: 0;
+}
+
+.form-error {
+  color: var(--red);
+  font-size: 12px;
+  margin: 8px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* resolved judge-model preview (item 18) */
+.judge-preview {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+/* judge-model fuzzy dropdown */
+
+.model-select input {
+  width: 100%;
+  font-family: var(--font-mono);
+}
+
+/*
+ * Item 1 (v4) — the menu is position: fixed with inline viewport coords from JS,
+ * so it can never engage the dialog's scrollbars. It stays inside the dialog
+ * subtree (NOT portaled to document.body): the modal's top layer paints above —
+ * and inerts — everything outside it.
+ */
+.model-menu {
+  position: fixed;
+  z-index: 40;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden; /* long unbroken model ids must ellipsize, not scroll */
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.model-option {
+  display: grid;
+  /* minmax(0, 1fr): unbroken model ids would otherwise widen the track past the menu */
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.model-option:last-child {
+  border-bottom: none;
+}
+
+.model-option:hover,
+.model-option:focus-visible {
+  background: var(--panel-2);
+}
+
+.model-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-id {
+  grid-column: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-meta {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

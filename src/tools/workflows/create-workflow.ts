@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createWorkflow } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import {
@@ -106,6 +107,9 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           };
         }
 
+        const createdBy =
+          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
+
         const workflow = createWorkflow({
           name,
           description,
@@ -117,6 +121,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           vcsRepo,
           triggerSchema,
           createdByAgentId: requestInfo.agentId,
+          createdBy,
         });
         return {
           content: [

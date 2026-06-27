@@ -372,4 +372,141 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(updatedParent?.status).toBe("failed");
     expect(updatedParent?.failureReason).toBe("superseded_workflow_task");
   });
+
+  // --------------------------------------------------------------------------
+  // Phase 1 (DES-523) — same-agent pin
+  //
+  // crash_recovery resumes pin to the original (stable-ID) agent instead of the
+  // role-blind unassigned pool, even when the agent's `lastActivityAt` is stale
+  // (the >30s "fresh" gate is dropped for crash_recovery). The retained
+  // `offline` gate still routes genuinely-gone (gracefully-closed) agents to the
+  // pool.
+  // --------------------------------------------------------------------------
+
+  test("Phase 1: recoverable-but-stale agent → resume is PINNED (agentId=original, pending), not pooled", async () => {
+    const agent = createAgent({ name: "stale-recoverable", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Work to resume on the same agent", { agentId: agent.id });
+    startTask(parent.id);
+
+    // Force the default single-slot capacity so the capacity-ordering invariant
+    // below is unambiguous.
+    getDb().run("UPDATE agents SET maxTasks = 1 WHERE id = ?", [agent.id]);
+
+    // Stale on BOTH axes: the task hasn't updated in 10 min (past the no-session
+    // threshold) AND the agent's lastActivityAt is 10 min old (far past
+    // WORKER_LIVENESS_WINDOW_SECONDS = 30s). Under the old `fresh` gate this
+    // resume would have been released to the unassigned pool; the pin must now
+    // hold regardless of staleness because the agent ID is stable across restart.
+    const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    getDb().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [oldTime, agent.id]);
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.autoResumedTasks.length).toBe(1);
+    expect(findings.pinnedResumes.length).toBe(1);
+    expect(findings.pinnedResumes[0]!.agentId).toBe(agent.id);
+
+    const children = getChildTasks(parent.id);
+    expect(children.length).toBe(1);
+    const resume = children[0]!;
+    expect(resume.taskType).toBe("resume");
+    // The pin: assigned to the ORIGINAL agent and therefore `pending` (NOT
+    // `unassigned`). createTaskExtended derives `pending` from a set agentId.
+    expect(resume.agentId).toBe(agent.id);
+    expect(resume.status).toBe("pending");
+    expect(findings.pinnedResumes[0]!.taskId).toBe(resume.id);
+
+    // Capacity-ordering invariant: maxTasks=1 and the agent held the parent
+    // `in_progress`. The pin succeeds ONLY because remediateCrashedWorkerTask
+    // supersedes the parent (freeing the single in_progress slot) BEFORE
+    // createResumeFollowUp runs its `activeCount < maxTasks` check. A reversed
+    // order would see activeCount=1 >= 1, skip the pin, and fall back to the
+    // pool — the exact bug this fix closes.
+  });
+
+  test("Phase 1: Case B (stale session heartbeat) also pins the resume to the original agent", async () => {
+    const agent = createAgent({ name: "crashed-stale", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Crashed worker work (Case B)", { agentId: agent.id });
+    startTask(parent.id);
+
+    insertActiveSession({ agentId: agent.id, taskId: parent.id, triggerType: "task_assigned" });
+
+    const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+      oldTime,
+      parent.id,
+    ]);
+    getDb().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [oldTime, agent.id]);
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.pinnedResumes.length).toBe(1);
+    expect(findings.pinnedResumes[0]!.agentId).toBe(agent.id);
+
+    const resume = getChildTasks(parent.id)[0]!;
+    expect(resume.taskType).toBe("resume");
+    expect(resume.agentId).toBe(agent.id);
+    expect(resume.status).toBe("pending");
+  });
+
+  test("Phase 1: offline (gracefully-closed) agent → resume is NOT pinned, falls back to the pool", async () => {
+    const agent = createAgent({ name: "gone-worker", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Work whose agent is gone", { agentId: agent.id });
+    startTask(parent.id);
+
+    const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    // Genuinely gone: a graceful close set the agent offline. The retained
+    // `offline` gate must keep this routing to the pool. (The Phase 3 reaper
+    // does NOT act here — it acts only on pinned, still-pending resumes.)
+    getDb().run("UPDATE agents SET status = 'offline' WHERE id = ?", [agent.id]);
+
+    const findings = await codeLevelTriage();
+
+    // The crash path created the resume but did NOT pin it — the retained
+    // `offline` gate routed it to the unassigned pool instead.
+    expect(findings.autoResumedTasks.length).toBe(1);
+    expect(findings.pinnedResumes.length).toBe(0);
+
+    const resume = getChildTasks(parent.id)[0]!;
+    expect(resume.taskType).toBe("resume");
+    // NOTE: we deliberately do NOT assert the resume's final agentId/status. The
+    // resume is created `unassigned`, but `autoAssignPoolTasks` runs later in the
+    // same sweep and may legitimately assign the pool task to an idle worker
+    // (existing, intended pool behavior, untouched by Phase 1). The Phase-1
+    // contract here is only that the crash path itself did not pin it.
+  });
+
+  test("Phase 1: a pinned pending resume is invisible to the stall detector — re-sweep creates no 2nd resume", async () => {
+    const agent = createAgent({ name: "stale-recoverable-2", isLead: false, status: "busy" });
+    const parent = createTaskExtended("Work pinned then left unclaimed", { agentId: agent.id });
+    startTask(parent.id);
+
+    const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    getDb().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [oldTime, agent.id]);
+
+    // First sweep pins the resume to the agent.
+    const first = await codeLevelTriage();
+    expect(first.pinnedResumes.length).toBe(1);
+    const resumeId = first.autoResumedTasks[0]!.resumeTaskId;
+    expect(getTaskById(resumeId)?.status).toBe("pending");
+    expect(getTaskById(resumeId)?.agentId).toBe(agent.id);
+
+    // Age the pinned resume well past the stall threshold. It is `pending`, not
+    // `in_progress`, so getStalledInProgressTasks cannot see it — no loop, no
+    // second resume, and the agent's still-stale activity does not matter.
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, resumeId]);
+
+    const second = await codeLevelTriage();
+    expect(second.autoResumedTasks.length).toBe(0);
+    expect(second.pinnedResumes.length).toBe(0);
+
+    const children = getChildTasks(parent.id);
+    expect(children.length).toBe(1);
+    expect(children[0]!.id).toBe(resumeId);
+    expect(getTaskById(resumeId)?.status).toBe("pending");
+  });
 });

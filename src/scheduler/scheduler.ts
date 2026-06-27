@@ -3,6 +3,7 @@ import { CronExpressionParser } from "cron-parser";
 import { getDb, getDueScheduledTasks, getScheduledTaskById, updateScheduledTask } from "@/be/db";
 import { scheduleContextKey } from "@/tasks/context-key";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
+import { telemetry } from "@/telemetry";
 import type { AgentTask, ScheduledTask } from "@/types";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
@@ -48,9 +49,9 @@ async function recoverMissedSchedules(): Promise<void> {
         `(was due ${Math.round(missedBy / 1000)}s ago)`,
     );
 
+    let triggeredWorkflows = false;
     try {
       // Check if any workflows are linked to this schedule
-      let triggeredWorkflows = false;
       if (executorRegistry) {
         const runIds = await handleScheduleTrigger(schedule.id, schedule, executorRegistry);
         if (runIds.length > 0) {
@@ -88,7 +89,18 @@ async function recoverMissedSchedules(): Promise<void> {
       if (schedule.scheduleType === "one_time") {
         console.log(`[Scheduler] One-time schedule "${schedule.name}" recovered and auto-disabled`);
       }
+      telemetry.schedule("executed", {
+        scheduleType: schedule.scheduleType,
+        triggeredWorkflows,
+        wasRecovered: true,
+      });
     } catch (err) {
+      telemetry.schedule("error", {
+        scheduleType: schedule.scheduleType,
+        triggeredWorkflows,
+        wasRecovered: true,
+        consecutiveErrors: schedule.consecutiveErrors ?? 0,
+      });
       console.error(`[Scheduler] Error recovering "${schedule.name}":`, err);
     }
   }
@@ -142,9 +154,9 @@ function getBackoffMs(consecutiveErrors: number): number {
  * Tracks consecutive errors and applies exponential backoff on failure.
  */
 async function executeSchedule(schedule: ScheduledTask): Promise<void> {
+  let triggeredWorkflows = false;
   try {
     // Check if any workflows are linked to this schedule
-    let triggeredWorkflows = false;
     if (executorRegistry) {
       const runIds = await handleScheduleTrigger(schedule.id, schedule, executorRegistry);
       if (runIds.length > 0) {
@@ -187,6 +199,11 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
       });
       console.log(`[Scheduler] Executed schedule "${schedule.name}", next run: ${nextRun}`);
     }
+    telemetry.schedule("executed", {
+      scheduleType: schedule.scheduleType,
+      triggeredWorkflows,
+      wasRecovered: false,
+    });
   } catch (err) {
     const errorCount = (schedule.consecutiveErrors ?? 0) + 1;
     const now = new Date();
@@ -228,6 +245,12 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
     }
 
     updateScheduledTask(schedule.id, updates);
+    telemetry.schedule("error", {
+      scheduleType: schedule.scheduleType,
+      triggeredWorkflows,
+      wasRecovered: false,
+      consecutiveErrors: errorCount,
+    });
   }
 }
 

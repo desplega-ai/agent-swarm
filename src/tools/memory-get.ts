@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getMemoryStore } from "@/be/memory";
+import { recordRetrievals } from "@/be/memory/raters/retrieval";
 import { createToolRegistrar } from "@/tools/utils";
 import type { AgentMemorySource } from "@/types";
 import { AgentMemorySchema } from "@/types";
@@ -18,6 +19,12 @@ export const registerMemoryGetTool = (server: McpServer) => {
 
       inputSchema: z.object({
         memoryId: z.uuid().describe("The ID of the memory to retrieve."),
+        intent: z
+          .string()
+          .min(1)
+          .describe(
+            "Why you are retrieving this memory. Required. E.g. 'need full details of the auth fix pattern'.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -27,7 +34,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
         rateHint: z.string().optional(),
       }),
     },
-    async ({ memoryId }, requestInfo, _meta) => {
+    async ({ memoryId, intent }, requestInfo, _meta) => {
       const memory = getMemoryStore().get(memoryId);
 
       if (!memory) {
@@ -39,6 +46,20 @@ export const registerMemoryGetTool = (server: McpServer) => {
             message: `Memory "${memoryId}" not found.`,
           },
         };
+      }
+
+      if (requestInfo.sourceTaskId && requestInfo.agentId) {
+        try {
+          recordRetrievals(
+            requestInfo.sourceTaskId,
+            requestInfo.agentId,
+            [{ memoryId: memory.id, similarity: 1.0 }],
+            requestInfo.sessionId,
+            { intent, contextKey: requestInfo.contextKey, eventType: "get" },
+          );
+        } catch (err) {
+          console.error("[memory-get] recordRetrievals failed:", (err as Error).message);
+        }
       }
 
       const inTaskContext = !!requestInfo.sourceTaskId;

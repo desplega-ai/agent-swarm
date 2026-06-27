@@ -14,6 +14,7 @@ import {
   getTaskById,
 } from "../be/db";
 import { normalizeModelKey } from "../be/pricing-normalize";
+import { incrementServerSessionsProcessed } from "../server-runtime-counters";
 import type { SessionCost, SessionCostSource } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -290,6 +291,7 @@ export async function handleSessionData(
         isError: parsed.body.isError ?? false,
         costSource,
       });
+      incrementServerSessionsProcessed();
       json(res, { success: true, cost }, 201);
     } catch (error) {
       console.error("[HTTP] Failed to create session cost:", error);

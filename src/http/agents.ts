@@ -21,6 +21,7 @@ import {
   updateAgentStatus,
   upsertSwarmConfig,
 } from "../be/db";
+import { telemetry } from "../telemetry";
 import {
   AgentCredStatusSchema,
   AgentLatestModelSchema,
@@ -321,6 +322,12 @@ export async function handleAgentRegister(
 
       return { agent, created: true };
     })();
+
+    telemetry.agent("registered", {
+      role: parsed.body.role,
+      capabilities: parsed.body.capabilities ?? [],
+      isReconnect: !result.created,
+    });
 
     if (result.created) {
       ensure({

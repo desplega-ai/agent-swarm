@@ -1,0 +1,128 @@
+model	context_window	creator	aa_intelligence_index	blended_usd_per_1m	median_tokens_per_s	latency_first_chunk_s	total_response_s
+Claude Fable 5 (with fallback)	1M	Anthropic	65	7.70	62	109.12	117.15
+Claude Opus 4.8 (max)	1M	Anthropic	61	3.85	58	26.84	35.52
+GPT-5.5 (xhigh)	922k	OpenAI	60	4.35	51	99.08	108.95
+GPT-5.5 (high)	922k	OpenAI	59	4.35	53	25.18	34.64
+Claude Opus 4.7 (max)	1M	Anthropic	57	3.85	47	16.24	26.80
+Gemini 3.1 Pro Preview	1M	Google	57	1.74	125	25.81	29.80
+GPT-5.5 (medium)	922k	OpenAI	57	4.35	48	10.40	20.75
+Qwen3.7 Max	1M	Alibaba	57	1.43	158	2.46	20.91
+Gemini 3.5 Flash	1M	Google	55	1.31	158	21.46	24.63
+Gemini 3.5 Flash (medium)	1M	Google	55	1.31	156	17.96	21.17
+MiniMax-M3	1M	MiniMax	55	0.22	55	3.55	48.93
+Kimi K2.6	256k	Kimi	54	0.70	44	2.31	115.47
+MiMo-V2.5-Pro	1M	Xiaomi	54	0.18	41	3.31	64.99
+GPT-5.3 Codex (xhigh)	400k	OpenAI	54	1.87	73	92.53	99.38
+Qwen3.7 Plus	1M	Alibaba	53	0.25	53	2.12	49.20
+Grok 4.3 (high)	1M	xAI	53	0.64	151	16.83	20.14
+Muse Spark	262k	Meta	52	--	--	--	--
+Claude Opus 4.7 (Non-reasoning, high)	1M	Anthropic	52	3.85	41	0.98	13.25
+Claude Sonnet 4.6 (max)	1M	Anthropic	52	2.31	50	114.23	124.16
+DeepSeek V4 Pro (Max)	1M	DeepSeek	52	0.18	60	1.76	82.68
+GLM-5.1	200k	Z AI	51	0.90	69	1.54	63.93
+GPT-5.5 (low)	922k	OpenAI	51	4.35	47	2.08	12.70
+Qwen3.6 Plus	1M	Alibaba	50	0.43	52	3.02	119.87
+DeepSeek V4 Pro (High)	1M	DeepSeek	50	0.18	66	1.83	39.66
+MiniMax-M2.7	205k	MiniMax	50	0.22	35	2.21	86.52
+MiMo-V2.5	1M	Xiaomi	49	0.06	73	3.19	37.22
+GPT-5.4 mini (xhigh)	400k	OpenAI	49	0.65	152	7.76	11.05
+Grok 4.3 (medium)	1M	xAI	49	0.64	144	9.33	12.81
+Nemotron 3 Ultra	262k	NVIDIA	48	0.58	190	1.11	15.70
+GLM-5-Turbo	200k	Z AI	47	--	--	--	--
+DeepSeek V4 Flash (Max)	1M	DeepSeek	47	0.06	96	1.22	65.17
+DeepSeek V4 Flash (High)	1M	DeepSeek	46	0.08	--	--	--
+Qwen3.6 27B	262k	Alibaba	46	0.90	57	3.98	112.98
+Qwen3.5 397B A17B	262k	Alibaba	45	0.90	53	2.43	72.60
+MiMo-V2-Omni-0327	256k	Xiaomi	45	0.34	82	3.27	33.85
+Claude Sonnet 4.6 (Non-reasoning)	1M	Anthropic	44	2.31	43	1.40	13.14
+GPT-5.4 nano (xhigh)	400k	OpenAI	44	0.18	153	4.06	7.32
+Grok 4.3 (low)	1M	xAI	44	0.64	134	3.98	7.71
+GLM-5.1 (variant 2)	200k	Z AI	44	0.90	62	1.73	9.80
+Qwen3.6 35B A3B	262k	Alibaba	43	0.37	172	2.38	36.55
+MiMo-V2-Omni	256k	Xiaomi	43	0.00	76	3.56	36.62
+Gemini 3.5 Flash (minimal)	1M	Google	43	1.31	154	0.91	4.16
+Kimi K2.6 (variant 2)	256k	Kimi	43	0.70	36	2.31	16.30
+GLM 5V Turbo	200k	Z AI	43	--	--	--	--
+Claude Sonnet 4.6 (Non-reasoning, Low Effort)	1M	Anthropic	43	2.31	42	1.43	13.23
+Step 3.7 Flash	256k	StepFun	43	0.18	381	0.94	7.50
+Hy3-preview	256k	Tencent	42	0.10	108	4.46	27.70
+GPT-5.5 Instant (May 2026)	400k	OpenAI	42	4.35	--	--	--
+Qwen3.5 122B A10B	262k	Alibaba	42	0.68	139	2.47	20.44
+MiMo-V2-Flash (Feb 2026)	256k	Xiaomi	41	0.06	151	1.94	18.48
+GPT-5.5 (Non-reasoning)	922k	OpenAI	41	4.35	47	0.98	11.62
+Qwen3.5 397B A17B (variant 2)	262k	Alibaba	40	0.90	54	2.43	11.76
+DeepSeek V4 Pro	1M	DeepSeek	39	0.18	61	1.70	9.94
+Mistral Medium 3.5	256k	Mistral	39	2.10	64	2.07	41.34
+Gemma 4 31B	256k	Google	39	0.00	35	1.10	64.09
+Qwen3.5 Omni Plus	256k	Alibaba	39	0.84	54	2.47	11.79
+Step 3.5 Flash 2603	256k	StepFun	38	0.06	207	1.14	13.23
+Ring-2.6-1T	262k	InclusionAI	38	0.52	121	3.28	23.94
+o3	200k	OpenAI	38	1.55	96	7.38	12.58
+GPT-5.4 nano	400k	OpenAI	38	0.18	156	6.30	9.50
+GPT-5.4 mini (medium)	400k	OpenAI	38	0.65	159	7.85	10.99
+Command A+	192k	Cohere	37	0.00	194	0.40	13.30
+Qwen3.6 27B (variant 2)	262k	Alibaba	37	0.90	56	4.01	12.92
+Claude 4.5 Haiku	200k	Anthropic	37	0.77	95	21.83	27.07
+DeepSeek V4 Flash	1M	DeepSeek	36	0.06	97	1.38	6.54
+JT-35B-Flash	256k	China Mobile	36	--	--	--	--
+NVIDIA Nemotron 3 Super	1M	NVIDIA	36	0.28	160	1.69	17.30
+Qwen3.5 122B A10B (variant 2)	262k	Alibaba	36	0.68	161	2.41	5.51
+Nova 2.0 Pro Preview (medium)	256k	Amazon	36	1.47	123	13.52	33.83
+MiMo-V2.5-Pro (variant 2)	1M	Xiaomi	36	0.58	46	3.57	14.40
+Gemini 2.5 Pro	1M	Google	35	1.34	137	24.25	27.91
+Nova 2.0 Lite (high)	1M	Amazon	35*	0.52	132	20.38	39.28
+Hy3-preview (variant 2)	256k	Tencent	34	0.10	96	4.44	9.64
+Ling-2.6-1T	262k	InclusionAI	34	0.52	--	--	--
+Doubao Seed Code	256k	ByteDance Seed	34	--	--	--	--
+Gemini 3.1 Flash-Lite	1M	Google	34	0.22	277	5.35	7.15
+gpt-oss-120b (high)	131k	OpenAI	33	0.20	335	0.92	8.38
+Mercury 2	128k	Inception	33	0.14	745	3.84	4.52
+Qwen3.5 9B	262k	Alibaba	32	0.11	68	1.72	38.42
+Gemma 4 31B (variant 2)	256k	Google	32	0.17	31	2.28	18.15
+K-EXAONE	256k	LG AI Research	32	--	--	--	--
+Nova 2.0 Pro Preview (low)	256k	Amazon	32	2.13	123	10.19	30.55
+Trinity Large Thinking	512k	Arcee AI	32	0.24	211	1.25	13.08
+Qwen3.6 35B A3B (variant 2)	262k	Alibaba	32	0.56	189	2.35	4.99
+Gemma 4 26B A4B	256k	Google	31	0.14	--	--	--
+Claude 4.5 Haiku (variant 2)	200k	Anthropic	31	0.77	89	0.90	6.53
+Grok 4.3 (Non-reasoning)	1M	xAI	31	0.64	146	0.65	4.08
+Qwen3.5 35B A3B	262k	Alibaba	31	0.42	187	2.22	4.90
+MiMo-V2-Flash	256k	Xiaomi	30	0.12	147	1.97	5.38
+EXAONE 4.5 33B	262k	LG AI Research	30	--	--	--	--
+Nova 2.0 Lite (medium)	1M	Amazon	30	0.52	123	22.67	42.96
+HyperNova 60B 2605	131k	Multiverse Computing	29	0.05	342	0.72	8.02
+Gemma 4 12B	256k	Google	29	0.12	122	2.05	22.49
+ERNIE 5.0 Thinking Preview	128k	Baidu	29	--	--	--	--
+Nemotron Cascade 2 30B A3B	1M	NVIDIA	28	--	--	--	--
+Qwen3 Coder Next	256k	Alibaba	28	0.43	79	1.71	8.02
+Nova 2.0 Omni (medium)	1M	Amazon	28	0.52	--	--	--
+Mistral Small 4	256k	Mistral	28	0.20	169	0.68	15.52
+North Mini Code	256k	Cohere	28	0.00	185	0.31	13.83
+Qwen3.5 9B (variant 2)	262k	Alibaba	27	--	--	--	--
+Magistral Medium 1.2	128k	Mistral	27	2.30	40	1.72	64.43
+Gemma 4 26B A4B (variant 2)	256k	Google	27	0.16	51	1.60	11.46
+Qwen3.5 4B	262k	Alibaba	27	0.04	191	0.46	13.56
+Qwen3 Next 80B A3B	262k	Alibaba	27	1.05	167	2.14	17.09
+Ling 2.6 Flash	262k	InclusionAI	26	0.06	--	--	--
+Solar Pro 3	128k	Upstage	26	--	--	--	--
+Qwen3.5 Omni Flash	256k	Alibaba	26	0.17	231	1.90	4.06
+JT-MINI	128k	China Mobile	25	--	--	--	--
+Nova 2.0 Lite (low)	1M	Amazon	25	0.52	129	12.27	31.63
+gpt-oss-20B (high)	131k	OpenAI	24	0.07	217	0.79	12.31
+gpt-oss-120b (low)	131k	OpenAI	24	0.20	332	0.93	8.45
+GPT-5.4 nano (variant 2)	400k	OpenAI	24	0.18	143	0.68	4.18
+NVIDIA Nemotron 3 Nano	1M	NVIDIA	24	0.07	103	1.69	26.01
+LongCat Flash Lite	256k	LongCat	24	0.00	--	--	--
+K-EXAONE (variant 2)	256k	LG AI Research	23	--	--	--	--
+GPT-5.4 mini	400k	OpenAI	23	0.65	158	0.67	3.84
+Nova 2.0 Omni (low)	1M	Amazon	23	0.52	--	--	--
+Nova 2.0 Pro Preview	256k	Amazon	23	2.13	114	1.16	5.56
+Mi:dm K 2.5 Pro	128k	Korea Telecom	23	--	--	--	--
+Mistral Large 3	256k	Mistral	23	0.60	52	1.06	10.75
+Qwen3.5 4B (variant 2)	262k	Alibaba	23	0.04	191	0.47	3.09
+INTELLECT-3	131k	Prime Intellect	22	--	--	--	--
+Devstral 2	256k	Mistral	22	0.00	49	1.37	11.49
+Solar Open 100B	128k	Upstage	22	--	--	--	--
+Nemotron 3 Nano Omni 30B A3B Reasoning	256k	NVIDIA	21	0.10	301	1.05	9.35
+gpt-oss-20B (low)	131k	OpenAI	21	0.07	223	0.84	12.04
+Qwen3 Next 80B A3B (variant 2)	262k	Alibaba	20	0.65	139	2.35	5.95

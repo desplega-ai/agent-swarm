@@ -188,6 +188,37 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
     expect(rows.map((r) => r.memoryId).sort()).toEqual([m1.id, m2.id].sort());
   });
 
+  test("recordRetrievals groups rows from one call and stamps result rank", () => {
+    const first = makeMemory("retrieval-group-first");
+    const second = makeMemory("retrieval-group-second");
+    const third = makeMemory("retrieval-group-third");
+
+    recordRetrievals(taskId, agentId, [
+      { memoryId: first.id, similarity: 0.9 },
+      { memoryId: second.id, similarity: 0.8 },
+    ]);
+    recordRetrievals(taskId, agentId, [{ memoryId: third.id, similarity: 0.7 }]);
+
+    const rows = getDb()
+      .prepare<{ memoryId: string; retrievalId: string | null; rank: number | null }, [string]>(
+        "SELECT memoryId, retrievalId, rank FROM memory_retrieval WHERE taskId = ?",
+      )
+      .all(taskId);
+
+    expect(rows).toHaveLength(3);
+    const byMemoryId = new Map(rows.map((row) => [row.memoryId, row]));
+    const firstRow = byMemoryId.get(first.id)!;
+    const secondRow = byMemoryId.get(second.id)!;
+    const thirdRow = byMemoryId.get(third.id)!;
+    expect(firstRow.retrievalId).toBeTruthy();
+    expect(secondRow.retrievalId).toBe(firstRow.retrievalId);
+    expect(firstRow.rank).toBe(0);
+    expect(secondRow.rank).toBe(1);
+    expect(thirdRow.retrievalId).toBeTruthy();
+    expect(thirdRow.retrievalId).not.toBe(firstRow.retrievalId);
+    expect(thirdRow.rank).toBe(0);
+  });
+
   test("recordRetrievals is a no-op when taskId is undefined", () => {
     const m = makeMemory("no-task");
     recordRetrievals(undefined, agentId, [{ memoryId: m.id, similarity: 0.9 }]);

@@ -1,9 +1,8 @@
 import { Database } from "bun:sqlite";
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
-import { addEyesReactionOnTaskStart } from "../github/task-reactions";
-import { type ModelTier, parseModelTier } from "../model-tiers";
 import { configureDbResolver } from "../prompts/resolver";
+import { telemetry } from "../telemetry";
 import type {
   ActiveSession,
   Agent,
@@ -100,7 +99,12 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "../types";
-import { FollowUpConfigSchema, isTerminalTaskStatus } from "../types";
+import {
+  FollowUpConfigSchema,
+  isTerminalTaskStatus,
+  type ModelTier,
+  parseModelTier,
+} from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
@@ -110,9 +114,39 @@ import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
 import { seedDefaultTemplates } from "./seed-prompt-templates";
 import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
+import { emitTaskStarted } from "./task-lifecycle-events";
 
 let db: Database | null = null;
 let sqliteVecAvailable = false;
+
+type TaskTelemetryProps = Parameters<typeof telemetry.taskEvent>[1];
+type TaskTelemetryContext = {
+  provider?: ProviderName;
+  harnessVariant?: string;
+  harnessVersion?: string;
+};
+
+function emitTaskLifecycleTelemetryAfterCommit(
+  event: string,
+  props: TaskTelemetryProps,
+  verify?: (task: AgentTask | null) => boolean,
+): void {
+  queueMicrotask(() => {
+    if (verify && !verify(getTaskById(props.taskId))) return;
+    telemetry.taskEvent(event, props);
+  });
+}
+
+function taskContextForTelemetry(task: AgentTask): TaskTelemetryContext {
+  const harnessVersion = task.harnessVariantMeta?.version;
+  const context: TaskTelemetryContext = {};
+  if (task.provider) context.provider = task.provider;
+  if (task.harnessVariant) context.harnessVariant = task.harnessVariant;
+  if (typeof harnessVersion === "string" || typeof harnessVersion === "number") {
+    context.harnessVersion = String(harnessVersion);
+  }
+  return context;
+}
 
 export function isSqliteVecAvailable(): boolean {
   return sqliteVecAvailable;
@@ -739,8 +773,13 @@ export function getAllAgents(opts?: { slim?: boolean }): Agent[] {
 }
 
 export function getLeadAgent(): Agent | null {
-  const agents = getAllAgents();
-  return agents.find((a) => a.isLead) ?? null;
+  const leads = getAllAgents().filter((a) => a.isLead);
+  // Prefer a usable (non-offline) lead so callers route to one that can actually
+  // poll — e.g. an old offline lead must not shadow a live replacement. Falls
+  // back to any lead (incl. offline) so existing "is there a lead at all?"
+  // semantics are preserved; callers that require a live lead must check
+  // `status` themselves (see escalateUnreclaimedResumes).
+  return leads.find((a) => a.status !== "offline") ?? leads[0] ?? null;
 }
 
 export function updateAgentStatus(id: string, status: AgentStatus): Agent | null {
@@ -1356,9 +1395,9 @@ export function startTask(taskId: string): AgentTask | null {
     } catch {}
   }
   const result = row ? rowToAgentTask(row) : null;
-  // Fire-and-forget: add eyes reaction for GitHub-sourced tasks
+  // Fire-and-forget: notify lifecycle subscribers (e.g. GitHub eyes reaction)
   if (result && oldTask.status !== "in_progress") {
-    addEyesReactionOnTaskStart(result).catch(() => {});
+    emitTaskStarted(result);
   }
   return result;
 }
@@ -1423,6 +1462,31 @@ export function hasNonTerminalResumeChild(parentId: string): boolean {
       `SELECT 1 FROM agent_tasks
        WHERE parentTaskId = ?
          AND taskType = 'resume'
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       LIMIT 1`,
+    )
+    .get(parentId);
+  return row !== undefined && row !== null;
+}
+
+/**
+ * True when a non-terminal `reroute-decision` child exists for `parentId`.
+ *
+ * Mirrors {@link hasNonTerminalResumeChild} but filters on
+ * `taskType = 'reroute-decision'` — the Lead-owned re-delegation decision
+ * created when a pinned crash-recovery resume is never reclaimed (DES-523).
+ * Makes escalation idempotent: a later heartbeat sweep must not create a second
+ * decision for the same original task. We filter on the taskType marker
+ * specifically (not any child) so ordinary delegation / completion follow-up
+ * children of the original cannot suppress a needed decision, and nothing else
+ * is mistaken for one.
+ */
+export function hasNonTerminalRerouteDecisionChild(parentId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM agent_tasks
+       WHERE parentTaskId = ?
+         AND taskType = 'reroute-decision'
          AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        LIMIT 1`,
     )
@@ -2105,6 +2169,18 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   }
 
   if (row && oldTask) {
+    emitTaskLifecycleTelemetryAfterCommit(
+      "completed",
+      {
+        taskId: id,
+        source: oldTask.source,
+        ...taskContextForTelemetry(oldTask),
+        agentId: row.agentId ?? undefined,
+        durationMs: row.createdAt ? Date.now() - new Date(row.createdAt).getTime() : undefined,
+      },
+      (task) => task?.status === "completed",
+    );
+
     try {
       createLogEntry({
         eventType: "task_status_change",
@@ -2145,6 +2221,18 @@ export function failTask(id: string, reason: string): AgentTask | null {
   const scrubbedReason = scrubSecrets(reason);
   const row = taskQueries.setFailure().get(scrubbedReason, finishedAt, id);
   if (row && oldTask) {
+    emitTaskLifecycleTelemetryAfterCommit(
+      "failed",
+      {
+        taskId: id,
+        source: oldTask.source,
+        ...taskContextForTelemetry(oldTask),
+        agentId: row.agentId ?? undefined,
+        durationMs: row.createdAt ? Date.now() - new Date(row.createdAt).getTime() : undefined,
+      },
+      (task) => task?.status === "failed",
+    );
+
     try {
       createLogEntry({
         eventType: "task_status_change",
@@ -2192,6 +2280,20 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
   const row = taskQueries.setCancelled().get(cancelReason, finishedAt, id);
 
   if (row && oldTask) {
+    emitTaskLifecycleTelemetryAfterCommit(
+      "cancelled",
+      {
+        taskId: id,
+        source: oldTask.source,
+        agentId: oldTask.agentId ?? undefined,
+        previousStatus: oldTask.status,
+        durationMs: oldTask.createdAt
+          ? Date.now() - new Date(oldTask.createdAt).getTime()
+          : undefined,
+      },
+      (task) => task?.status === "cancelled",
+    );
+
     try {
       createLogEntry({
         eventType: "task_status_change",
@@ -2259,6 +2361,21 @@ export function supersedeTask(
     .get(finishedAt, id);
 
   if (row && oldTask) {
+    emitTaskLifecycleTelemetryAfterCommit(
+      "superseded",
+      {
+        taskId: id,
+        source: oldTask.source,
+        ...taskContextForTelemetry(oldTask),
+        agentId: row.agentId ?? undefined,
+        reason: args.reason,
+        durationMs: oldTask.createdAt
+          ? Date.now() - new Date(oldTask.createdAt).getTime()
+          : undefined,
+      },
+      (task) => task?.status === "superseded",
+    );
+
     try {
       createLogEntry({
         eventType: "task_superseded",
@@ -2901,6 +3018,14 @@ export interface CreateTaskOptions {
    * a schema'd task should be defensive about JSON parsing.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * When a `parentTaskId` is set, the child inherits the parent's `outputSchema`
+   * by default. Set this to `false` to opt out — used by control-plane children
+   * (e.g. the Lead `reroute-decision` task) that must inherit Slack/VCS context
+   * from the parent but must NOT be forced to satisfy the original work's output
+   * contract on completion (which would block the control task — DES-523).
+   */
+  inheritParentOutputSchema?: boolean;
   followUpConfig?: FollowUpConfig;
   requestedByUserId?: string;
   contextKey?: string;
@@ -3053,8 +3178,15 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
 
       // Contract (schema validation) — `store-progress` validates completion
       // output against `outputSchema`, runner injects structured-output
-      // instructions only when it's present.
-      if (parent.outputSchema && !options.outputSchema) {
+      // instructions only when it's present. Opt-out via
+      // `inheritParentOutputSchema: false` for control-plane children (e.g. the
+      // Lead reroute-decision) that must not be held to the original work's
+      // output contract.
+      if (
+        parent.outputSchema &&
+        !options.outputSchema &&
+        options.inheritParentOutputSchema !== false
+      ) {
         options.outputSchema = parent.outputSchema;
       }
 
@@ -3157,6 +3289,18 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     });
   } catch {}
 
+  emitTaskLifecycleTelemetryAfterCommit(
+    "created",
+    {
+      taskId: row.id,
+      source: row.source,
+      ...taskContextForTelemetry(rowToAgentTask(row)),
+      hasParent: !!row.parentTaskId,
+      priority: row.priority,
+    },
+    (task) => task !== null,
+  );
+
   try {
     import("../workflows/event-bus").then(({ workflowEventBus }) => {
       workflowEventBus.emit("task.created", {
@@ -3200,9 +3344,9 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
   }
 
   const result = row ? rowToAgentTask(row) : null;
-  // Fire-and-forget: add eyes reaction for GitHub-sourced tasks
+  // Fire-and-forget: notify lifecycle subscribers (e.g. GitHub eyes reaction)
   if (result) {
-    addEyesReactionOnTaskStart(result).catch(() => {});
+    emitTaskStarted(result);
   }
   return result;
 }
@@ -5308,6 +5452,8 @@ type ScheduledTaskRow = {
   scheduleType: string;
   createdAt: string;
   lastUpdatedAt: string;
+  created_by: string | null;
+  updated_by: string | null;
 };
 
 // ── List-endpoint slimming helpers ──────────────────────────────────────────
@@ -5350,6 +5496,8 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     scheduleType: row.scheduleType as "recurring" | "one_time",
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
+    createdBy: row.created_by ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
   };
 }
 
@@ -5443,6 +5591,7 @@ export interface CreateScheduledTaskData {
   model?: string;
   modelTier?: ModelTier;
   scheduleType?: "recurring" | "one_time";
+  createdBy?: string;
 }
 
 export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTask {
@@ -5454,8 +5603,9 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       `INSERT INTO scheduled_tasks (
         id, name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, timezone, model, modelTier, scheduleType, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        createdByAgentId, timezone, model, modelTier, scheduleType, createdAt, lastUpdatedAt,
+        created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -5477,6 +5627,8 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       data.scheduleType ?? "recurring",
       now,
       now,
+      data.createdBy ?? null,
+      data.createdBy ?? null,
     );
 
   if (!row) throw new Error("Failed to create scheduled task");
@@ -5504,6 +5656,7 @@ export interface UpdateScheduledTaskData {
   modelTier?: ModelTier | null;
   scheduleType?: "recurring" | "one_time";
   lastUpdatedAt?: string;
+  updatedBy?: string;
 }
 
 export function updateScheduledTask(
@@ -5588,6 +5741,10 @@ export function updateScheduledTask(
   if (data.scheduleType !== undefined) {
     updates.push("scheduleType = ?");
     params.push(data.scheduleType);
+  }
+  if (data.updatedBy !== undefined) {
+    updates.push("updated_by = ?");
+    params.push(data.updatedBy);
   }
 
   if (updates.length === 0) {
@@ -6065,6 +6222,7 @@ type SwarmRepoRow = {
   clonePath: string;
   defaultBranch: string;
   autoClone: number; // SQLite boolean
+  hooks: string | null;
   guidelines: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -6078,6 +6236,7 @@ function rowToSwarmRepo(row: SwarmRepoRow): SwarmRepo {
     clonePath: row.clonePath,
     defaultBranch: row.defaultBranch,
     autoClone: row.autoClone === 1,
+    hooks: row.hooks ? JSON.parse(row.hooks) : { enabled: false },
     guidelines: row.guidelines ? JSON.parse(row.guidelines) : null,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -6133,20 +6292,22 @@ export function createSwarmRepo(data: {
   clonePath?: string;
   defaultBranch?: string;
   autoClone?: boolean;
+  hooks?: { enabled: boolean };
   guidelines?: RepoGuidelines | null;
 }): SwarmRepo {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const clonePath = data.clonePath || `/workspace/repos/${data.name}`;
+  const clonePath = data.clonePath || `/workspace/personal/repos/${data.name}`;
+  const hooksJson = JSON.stringify(data.hooks ?? { enabled: true });
   const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
   const row = getDb()
     .prepare<
       SwarmRepoRow,
-      [string, string, string, string, string, number, string | null, string, string]
+      [string, string, string, string, string, number, string | null, string | null, string, string]
     >(
-      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, guidelines, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, hooks, guidelines, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -6155,6 +6316,7 @@ export function createSwarmRepo(data: {
       clonePath,
       data.defaultBranch ?? "main",
       data.autoClone !== false ? 1 : 0,
+      hooksJson,
       guidelinesJson,
       now,
       now,
@@ -6172,6 +6334,7 @@ export function updateSwarmRepo(
     clonePath: string;
     defaultBranch: string;
     autoClone: boolean;
+    hooks: { enabled: boolean } | null;
     guidelines: RepoGuidelines | null;
   }>,
 ): SwarmRepo | null {
@@ -6188,6 +6351,10 @@ export function updateSwarmRepo(
   if (updates.autoClone !== undefined) {
     setClauses.push("autoClone = ?");
     params.push(updates.autoClone ? 1 : 0);
+  }
+  if (updates.hooks !== undefined) {
+    setClauses.push("hooks = ?");
+    params.push(updates.hooks ? JSON.stringify(updates.hooks) : null);
   }
   if (updates.guidelines !== undefined) {
     setClauses.push("guidelines = ?");
@@ -6447,6 +6614,88 @@ export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentT
 }
 
 /**
+ * Genuine same-agent crash-recovery PINS (tagged `crash-recovery-pin`, DES-523
+ * Phase 1) that are still `pending` `graceMin` minutes after creation — the
+ * heartbeat reaper escalates these to a Lead reroute-decision.
+ *
+ * Three scoping clauses, each load-bearing:
+ *  - `tags LIKE '%"crash-recovery-pin"%'` — restricts to resumes actually pinned
+ *    to their original agent on the crash path. Without it, a *pooled* resume
+ *    that `autoAssignPoolTasks` flips to `pending` earlier in the SAME sweep
+ *    (keeping its old `createdAt`) would be reaped and cancelled before the
+ *    assigned worker polls; it also keeps `context_limits` / `manual_supersede`
+ *    pins from being escalated under a `crash_recovery` label. (Literal must
+ *    match `CRASH_RECOVERY_PIN_TAG` in src/tasks/worker-follow-up.ts.)
+ *  - `status = 'pending'` — the "currently unreclaimed" discriminator: when the
+ *    agent reclaims via the normal poll path, `startTask` flips the row to
+ *    `in_progress` and it drops out of this set. (A reclaimed resume whose
+ *    session later orphans can be flipped back to `pending` by
+ *    `resetOrphanedInProgressTasksForAgent`, re-entering this set on a later
+ *    sweep — re-escalating genuinely re-stalled work, which is fine.) We do NOT
+ *    gate on `lastActivityAt` — it is stale for a returned-but-idle agent.
+ *  - `createdAt < cutoff` — `createdAt` is the resume's creation = crash-DETECTION
+ *    time, so the grace window is measured from detection.
+ *
+ * Keys only on reboot-durable columns, so a pending pin survives a server reboot
+ * and is caught on the first post-reboot sweep.
+ */
+export function getStalePinnedResumes(graceMin: number): AgentTask[] {
+  const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE taskType = 'resume' AND status = 'pending'
+         AND tags LIKE '%"crash-recovery-pin"%'
+         AND createdAt < ?
+       ORDER BY createdAt ASC`,
+    )
+    .all(cutoff)
+    .map(rowToAgentTask);
+}
+
+/**
+ * Atomically terminalize a pinned resume ONLY if it is still `pending`, in one
+ * `UPDATE … RETURNING`. Returns the row when the transition fired, or `null`
+ * when it did not (the agent reclaimed it in the gap → `startTask` already
+ * flipped it to `in_progress`). The heartbeat reaper escalates to the Lead ONLY
+ * when this returns a row, closing the TOCTOU window between reading the resume
+ * as `pending` and writing.
+ *
+ * Deliberately NOT `failTask`: `failTask`'s backing SQL is keyed on `id` with no
+ * status precondition, so it would terminalize an `in_progress` resume the
+ * worker just started. The `AND status = 'pending'` here is the guard.
+ */
+export function failPendingResumeIfUnclaimed(
+  taskId: string,
+  status: "cancelled" | "failed",
+  failureReason: string,
+): AgentTask | null {
+  const now = new Date().toISOString();
+  const scrubbedReason = scrubSecrets(failureReason);
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string, string, string]>(
+      `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
+       WHERE id = ? AND status = 'pending' RETURNING *`,
+    )
+    .get(status, scrubbedReason, now, now, taskId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        agentId: row.agentId ?? undefined,
+        oldValue: "pending",
+        newValue: status,
+        metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
  * Get idle, non-lead, non-offline agents that have capacity for more tasks.
  * Used by the heartbeat for auto-assignment of pool tasks.
  */
@@ -6536,6 +6785,8 @@ type WorkflowRow = {
   createdByAgentId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
+  created_by: string | null;
+  updated_by: string | null;
 };
 
 function rowToWorkflow(row: WorkflowRow): Workflow {
@@ -6556,6 +6807,8 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     createdByAgentId: row.createdByAgentId ?? undefined,
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
+    createdBy: row.created_by ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
   };
 }
 
@@ -6570,6 +6823,7 @@ export function createWorkflow(data: {
   dir?: string;
   vcsRepo?: string;
   createdByAgentId?: string;
+  createdBy?: string;
 }): Workflow {
   const id = crypto.randomUUID();
   const row = getDb()
@@ -6587,10 +6841,12 @@ export function createWorkflow(data: {
         string | null,
         string | null,
         string | null,
+        string | null,
+        string | null,
       ]
     >(
-      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -6604,6 +6860,8 @@ export function createWorkflow(data: {
       data.dir ?? null,
       data.vcsRepo ?? null,
       data.createdByAgentId ?? null,
+      data.createdBy ?? null,
+      data.createdBy ?? null,
     );
   if (!row) throw new Error("Failed to create workflow");
   return rowToWorkflow(row);
@@ -6679,6 +6937,7 @@ export function updateWorkflow(
     triggerSchema?: Record<string, unknown> | null;
     dir?: string | null;
     vcsRepo?: string | null;
+    updatedBy?: string;
   },
 ): Workflow | null {
   const updates: string[] = [];
@@ -6722,6 +6981,10 @@ export function updateWorkflow(
   if (data.vcsRepo !== undefined) {
     updates.push("vcs_repo = ?");
     params.push(data.vcsRepo ?? null);
+  }
+  if (data.updatedBy !== undefined) {
+    updates.push("updated_by = ?");
+    params.push(data.updatedBy);
   }
   if (updates.length === 0) return getWorkflow(id);
   updates.push("lastUpdatedAt = ?");
@@ -6823,6 +7086,22 @@ export function getWorkflowRun(id: string): WorkflowRun | null {
   return row ? rowToWorkflowRun(row) : null;
 }
 
+function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
+  if (run.status !== "completed" && run.status !== "failed") return;
+
+  queueMicrotask(() => {
+    const latest = getWorkflowRun(run.id);
+    if (!latest || latest.status !== run.status) return;
+    const steps = getWorkflowRunStepsByRunId(run.id);
+    telemetry.workflow(run.status, {
+      workflowId: run.workflowId,
+      durationMs: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : undefined,
+      stepsCompleted: steps.filter((step) => step.status === "completed").length,
+      stepsFailed: steps.filter((step) => step.status === "failed").length,
+    });
+  });
+}
+
 export function updateWorkflowRun(
   id: string,
   data: {
@@ -6859,7 +7138,12 @@ export function updateWorkflowRun(
       `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
     )
     .get(...params);
-  return row ? rowToWorkflowRun(row) : null;
+  if (!row) return null;
+  const run = rowToWorkflowRun(row);
+  if (data.status === "completed" || data.status === "failed") {
+    emitWorkflowTerminalTelemetry(run);
+  }
+  return run;
 }
 
 export function listWorkflowRuns(workflowId: string): WorkflowRun[] {

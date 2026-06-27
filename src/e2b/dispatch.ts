@@ -361,6 +361,11 @@ export async function startDetachedProcess(opts: StartDetachedOptions): Promise<
     cwd: opts.cwd ?? "/",
     envs: opts.env,
     background: true,
+    // CRITICAL: the SDK's default `timeoutMs` is 60s and applies to background
+    // commands too — envd kills the whole tracked tree (entrypoint + children)
+    // when it expires, silently stopping the worker runner ~60s after boot.
+    // 0 disables the limit; sandbox lifetime is governed by its own TTL.
+    timeoutMs: 0,
   });
 
   // Early liveness poll: give the entrypoint a moment to fault, then check the

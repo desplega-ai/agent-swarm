@@ -66,7 +66,7 @@ jobs:
           }
 
           # lint + tsc:check: biome runs on src/, tsc covers src/ (scripts excluded in tsconfig).
-          LINT=$(match '^(src/|package\.json$|bun\.lock|tsconfig\.json$|biome\.json$)')
+          LINT=$(match '^(src/|evals/|package\.json$|bun\.lock|tsconfig\.json$|biome\.json$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig.
           TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|tsconfig\.json$)')
@@ -117,6 +117,24 @@ jobs:
       - name: Run TypeScript type check
         run: bun run tsc:check
 
+      - name: Install evals dependencies
+        run: bun install --frozen-lockfile
+        working-directory: evals
+
+      - name: Type check evals
+        run: bun run tsc:check
+        working-directory: evals
+
+      - name: Test evals
+        # evals is its own bun package; these are pure unit tests (scoring,
+        # registry, normalize, scenario structure) — no E2B/network, ~0.5s.
+        run: bun test
+        working-directory: evals
+
+      - name: Build evals UI
+        run: bun run ui:build
+        working-directory: evals
+
       - name: Check worker/API DB boundary
         run: bash scripts/check-db-boundary.sh
 
@@ -148,6 +166,9 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run tests
+        # evals/ is excluded from the root run via bunfig.toml pathIgnorePatterns
+        # (it's a separate bun package with its own deps + its own CI test step in
+        # the lint-and-typecheck job).
         run: bun test
 
   pi-skills-freshness:

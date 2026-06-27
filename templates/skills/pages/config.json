@@ -4,8 +4,8 @@
   "displayName": "Pages",
   "slug": "pages",
   "title": "Pages",
-  "description": "Publish human-readable task outputs as shareable pages.",
-  "version": "1.0.0",
+  "description": "Publish human-readable task outputs as shareable pages with minimalist taste-skill style as the universal baseline and report density layered on top.",
+  "version": "1.1.1",
   "category": "skills",
   "placeholders": [],
   "runAllSeedersCandidate": true,
@@ -13,7 +13,8 @@
   "tags": [
     "pages",
     "reporting",
-    "artifacts"
+    "artifacts",
+    "taste-skill"
   ],
   "must": true
 }

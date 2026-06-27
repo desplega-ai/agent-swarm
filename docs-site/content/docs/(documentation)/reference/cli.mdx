@@ -1,6 +1,6 @@
 ---
 title: CLI Reference
-description: Complete CLI reference for managing agents, tasks, and swarm configuration from the terminal — install via bunx, manage worktrees, run agent commands, and configure your swarm without the dashboard UI
+description: Complete CLI reference for managing agents, tasks, and swarm configuration from the terminal — install via bunx or npx, manage worktrees, run agent commands, and configure your swarm without the dashboard UI
 ---
 
 Agent Swarm provides a CLI for managing the swarm, running agents, and development.
@@ -8,8 +8,9 @@ Agent Swarm provides a CLI for managing the swarm, running agents, and developme
 ## Installation
 
 ```bash
-# Run directly with bunx
+# Run directly with bunx or npx
 bunx @desplega.ai/agent-swarm <command>
+npx @desplega.ai/agent-swarm <command>
 
 # Or install globally
 bun install -g @desplega.ai/agent-swarm
@@ -24,6 +25,7 @@ Set up a new swarm from scratch using Docker Compose. The interactive wizard col
 
 ```bash
 bunx @desplega.ai/agent-swarm onboard
+npx @desplega.ai/agent-swarm onboard
 bunx @desplega.ai/agent-swarm onboard --dry-run
 bunx @desplega.ai/agent-swarm onboard --yes --preset=dev
 ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=solo
@@ -41,6 +43,7 @@ Connect this project to an existing swarm. Creates `.mcp.json` and `.claude/sett
 
 ```bash
 bunx @desplega.ai/agent-swarm connect
+npx @desplega.ai/agent-swarm connect
 bunx @desplega.ai/agent-swarm connect --dry-run
 bunx @desplega.ai/agent-swarm connect -y
 ```
@@ -57,6 +60,7 @@ Start the API + MCP HTTP server.
 
 ```bash
 bunx @desplega.ai/agent-swarm api
+npx @desplega.ai/agent-swarm api
 bunx @desplega.ai/agent-swarm api --port 8080 --key my-secret
 bunx @desplega.ai/agent-swarm api --db /data/swarm.sqlite
 ```
@@ -117,6 +121,7 @@ Authenticate Codex via ChatGPT OAuth (browser or manual paste). Prompts interact
 
 ```bash
 bunx @desplega.ai/agent-swarm codex-login
+npx @desplega.ai/agent-swarm codex-login
 bunx @desplega.ai/agent-swarm codex-login --api-url https://swarm.example.com
 ```
 
@@ -124,6 +129,7 @@ bunx @desplega.ai/agent-swarm codex-login --api-url https://swarm.example.com
 |--------|-------------|
 | `--api-url <url>` | Swarm API URL (default: `MCP_BASE_URL` or `http://localhost:3013`) |
 | `--api-key <key>` | Swarm API key (default: `API_KEY` or `123123`) |
+| `--slot <n>` | Store the OAuth credential in a specific pool slot (`0-100`) instead of auto-picking the next free slot |
 
 See [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth) for the full ChatGPT OAuth flow.
 
@@ -133,6 +139,7 @@ Bootstrap [Anthropic Managed Agents](/docs/guides/harness-configuration#claude-m
 
 ```bash
 bunx @desplega.ai/agent-swarm claude-managed-setup
+npx @desplega.ai/agent-swarm claude-managed-setup
 bunx @desplega.ai/agent-swarm claude-managed-setup --force
 bunx @desplega.ai/agent-swarm claude-managed-setup --api-url https://swarm.example.com
 ```
@@ -149,6 +156,7 @@ Build Agent Swarm E2B templates and launch or manage grouped E2B swarms on deman
 
 ```bash
 bunx @desplega.ai/agent-swarm e2b build-template --role worker
+npx @desplega.ai/agent-swarm e2b build-template --role worker
 bunx @desplega.ai/agent-swarm e2b start-worker --api-url https://swarm.example.com --api-key "$SWARM_API_KEY"
 bunx @desplega.ai/agent-swarm e2b start-stack --yes --swarm demo --workers 2 --api-key "$SWARM_API_KEY"
 bunx @desplega.ai/agent-swarm e2b swarms info demo
@@ -207,6 +215,7 @@ Show the documentation URL. All pages are also available in markdown format by a
 
 ```bash
 bunx @desplega.ai/agent-swarm docs
+npx @desplega.ai/agent-swarm docs
 bunx @desplega.ai/agent-swarm docs --open
 ```
 

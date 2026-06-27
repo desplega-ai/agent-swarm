@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { resolveHttpAuditUserId } from "../be/audit-user";
 import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
@@ -306,6 +307,8 @@ export async function handleScripts(
       return true;
     }
 
+    const createdBy = resolveHttpAuditUserId(req, agent.id);
+
     const existingAgentScript =
       parsed.body.scope === "global"
         ? getScript({ name: parsed.body.name, scope: "agent", scopeId: agent.id })
@@ -324,6 +327,7 @@ export async function handleScripts(
       agentId: agent.id,
       isScratch: false,
       typeChecked: true,
+      createdBy,
     });
 
     if (parsed.body.scope === "global" && !result.contentDeduped) {

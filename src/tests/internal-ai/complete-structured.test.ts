@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Type } from "typebox";
 import { z } from "zod";
-import { completeStructured } from "../../utils/internal-ai/complete-structured.js";
+import {
+  completeStructured,
+  defaultSpawnClaudeCli,
+} from "../../utils/internal-ai/complete-structured.js";
 import type { ResolvedCredential } from "../../utils/internal-ai/credentials.js";
 
 const ResultZodSchema = z.object({
@@ -272,5 +275,35 @@ describe("completeStructured", () => {
         l.includes("internal-ai: kind=openrouter") && l.includes("callerTag=session-summary:test"),
     );
     expect(match).toBeDefined();
+  });
+});
+
+describe("defaultSpawnClaudeCli", () => {
+  test("sets SKIP_SESSION_SUMMARY=1 in the child env (Stop-hook recursion guard)", async () => {
+    // Without this guard, the spawned `claude -p` summarizer session fires the
+    // same global Stop hook on exit, which spawns another summarizer claude,
+    // recursively — observed OOM-wedging 8GB E2B worker sandboxes.
+    const fakeBinary = `/tmp/fake-claude-${Date.now()}-${Math.random().toString(36).slice(2)}.sh`;
+    await Bun.write(
+      fakeBinary,
+      '#!/usr/bin/env bash\ncat >/dev/null\nprintf \'{"result":"SKIP_SESSION_SUMMARY=%s"}\' "$SKIP_SESSION_SUMMARY"\n',
+    );
+    const savedBinary = process.env.CLAUDE_BINARY;
+    const savedSkip = process.env.SKIP_SESSION_SUMMARY;
+    const savedBridge = process.env.SWARM_USE_CLAUDE_BRIDGE;
+    process.env.CLAUDE_BINARY = `bash ${fakeBinary}`;
+    // Ensure a false-pass via inheritance is impossible.
+    delete process.env.SKIP_SESSION_SUMMARY;
+    delete process.env.SWARM_USE_CLAUDE_BRIDGE;
+    try {
+      const out = await defaultSpawnClaudeCli("prompt", "haiku");
+      expect(out).toBe("SKIP_SESSION_SUMMARY=1");
+    } finally {
+      if (savedBinary === undefined) delete process.env.CLAUDE_BINARY;
+      else process.env.CLAUDE_BINARY = savedBinary;
+      if (savedSkip !== undefined) process.env.SKIP_SESSION_SUMMARY = savedSkip;
+      if (savedBridge !== undefined) process.env.SWARM_USE_CLAUDE_BRIDGE = savedBridge;
+      await Bun.$`rm -f ${fakeBinary}`.quiet();
+    }
   });
 });

@@ -24,26 +24,35 @@ export type RetrievalRecord = {
   similarity: number;
 };
 
+export type RetrievalExtras = {
+  intent?: string;
+  contextKey?: string;
+  eventType?: "search" | "get";
+};
+
 export function recordRetrievals(
   taskId: string | undefined,
   agentId: string,
   results: RetrievalRecord[],
   sessionId?: string,
+  extras?: RetrievalExtras,
 ): void {
   if (!taskId || results.length === 0) return;
 
   const db = getDb();
   const insert = db.prepare(
     `INSERT INTO memory_retrieval
-       (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, contextKey, intent, eventType, retrievalId, rank)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const now = new Date().toISOString();
+  const retrievalId = crypto.randomUUID();
+  const contextKey = extras?.contextKey ?? null;
+  const intent = extras?.intent ?? null;
+  const eventType = extras?.eventType ?? "search";
 
-  // Single transaction: even on a 100-row paginated search this is one
-  // commit, not N. No-op when results is empty.
   db.transaction(() => {
-    for (const r of results) {
+    for (const [rank, r] of results.entries()) {
       insert.run(
         crypto.randomUUID(),
         taskId,
@@ -52,6 +61,11 @@ export function recordRetrievals(
         r.memoryId,
         r.similarity,
         now,
+        contextKey,
+        intent,
+        eventType,
+        retrievalId,
+        rank,
       );
     }
   })();

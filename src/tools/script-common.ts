@@ -46,13 +46,17 @@ export async function proxyScriptsApi(args: {
   if (!args.requestInfo.agentId) return toolError(SCRIPT_TRANSPORT_ERROR);
 
   const apiKey = getApiKey();
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    "X-Agent-ID": args.requestInfo.agentId,
+    "Content-Type": "application/json",
+  };
+  if (args.requestInfo.sourceTaskId) {
+    headers["X-Source-Task-Id"] = args.requestInfo.sourceTaskId;
+  }
   const res = await fetch(`${apiBaseUrl()}${args.path}`, {
     method: args.method,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "X-Agent-ID": args.requestInfo.agentId,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: args.body === undefined ? undefined : JSON.stringify(args.body),
   });
 

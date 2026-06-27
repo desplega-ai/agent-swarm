@@ -1,0 +1,261 @@
+/* WP-AUI — analytics page (v5 spec §3 + v7 spec §6.2/§7.3). Shared tokens/classes
+   live in styles.css; chart styles live in components/charts/charts.css. */
+
+/* v7.6 §C3: page header (title + global filter bar) sticks right below the
+   app header. z-index 15 < .app-header's 20; opaque page bg so scrolled panels
+   never bleed through. The padding/margin pair keeps the original offsets. */
+.an-head {
+  position: sticky;
+  top: var(--app-header-h, 41px);
+  z-index: 15;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  margin: -8px 0 4px;
+}
+
+.an-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.an-meta {
+  font-size: 12px;
+}
+
+.an-head .btn {
+  margin-left: auto;
+}
+
+/* ---- global filter bar (v7.6 §C3) ---- */
+
+.an-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.an-filter-clear {
+  background: none;
+  border: none;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.an-filter-clear:hover {
+  background: color-mix(in oklab, var(--accent), transparent 88%);
+}
+
+/* trends scenario option entries (C5 — config entries reuse ConfigChip) */
+.an-opt-id {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.an-error {
+  color: var(--red);
+  white-space: pre-wrap;
+}
+
+/* ---- section header: question title + right-aligned controls ---- */
+
+.an-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.an-panel-head .panel-title {
+  margin: 0;
+}
+
+.an-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.an-seg-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ---- highlights row (v7 §7.3 — à la artificialanalysis.ai) ---- */
+
+.an-highlights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.an-highlights .panel {
+  margin: 0;
+  min-width: 0;
+}
+
+/* round 9 item 5: identical card heights — the grid row already stretches all
+   three panels; the flex column pins title/sub to the top and pushes the chart
+   to the bottom so the bars share one baseline regardless of text wrapping. */
+.an-highlight {
+  display: flex;
+  flex-direction: column;
+}
+
+.an-highlight .chart {
+  margin-top: auto;
+}
+
+@media (max-width: 900px) {
+  .an-highlights {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.an-highlight-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.an-highlight-sub {
+  font-size: 11px;
+  margin: 2px 0 8px;
+}
+
+/* ---- harness / vendor rollup table ---- */
+
+.an-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- segmented metric control ---- */
+
+.an-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.an-seg button {
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  padding: 3px 10px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.an-seg button:first-child {
+  border-left: none;
+}
+
+.an-seg button:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.an-seg button.active {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent), transparent 88%);
+}
+
+.an-seg button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* ---- trends footer: runs plotted + version-change events ---- */
+
+.an-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+
+.an-event {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.an-event-kind {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.an-event-kind.api {
+  color: var(--blue);
+}
+
+.an-event-kind.worker {
+  color: var(--orange);
+}
+
+.an-event-change {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ---- cost matrix ---- */
+
+.an-heat-scroll {
+  overflow-x: auto;
+}
+
+.an-summary {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.an-strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+/* ---- models ---- */
+
+.an-models-chart {
+  margin-bottom: 12px;
+}
+
+.an-providers {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

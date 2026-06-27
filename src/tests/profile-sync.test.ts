@@ -3,9 +3,12 @@ import {
   buildIdentityPayload,
   CLAUDE_MD_PATH,
   collectProfilePayloads,
+  contentSha256,
   extractSetupScriptContent,
   type FileReader,
+  IDENTITY_BASELINES_PATH,
   IDENTITY_MD_PATH,
+  type IdentityBaselines,
   postProfileUpdate,
   resolveClaudeMdPath,
   SETUP_SCRIPT_PATH,
@@ -278,5 +281,188 @@ describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
       warnSpy.mockRestore();
       errSpy.mockRestore();
     }
+  });
+});
+
+// ── Baseline comparison tests ─────────────────────────────────────────────
+// These test the fix for Lead's update-profile edits getting clobbered by
+// the worker's session-end sync. When a file's content hash matches the
+// baseline recorded at session start, it means the agent didn't modify it,
+// so session_sync skips it to preserve any DB-side edits made by Lead.
+
+describe("buildIdentityPayload (baseline comparison)", () => {
+  const baselines: IdentityBaselines = {
+    soulMd: contentSha256(LONG),
+    identityMd: contentSha256(LONG),
+    toolsMd: contentSha256("original tools"),
+    heartbeatMd: contentSha256("original heartbeat"),
+  };
+
+  test("skips files whose hash matches the baseline (unchanged during session)", () => {
+    const payload = buildIdentityPayload(
+      {
+        soulMd: LONG,
+        identityMd: LONG,
+        toolsMd: "original tools",
+        heartbeatMd: "original heartbeat",
+      },
+      baselines,
+    );
+    expect(payload).toEqual({});
+  });
+
+  test("includes files whose content differs from the baseline (modified during session)", () => {
+    const modifiedSoul = `${LONG} — agent added this`;
+    const payload = buildIdentityPayload(
+      {
+        soulMd: modifiedSoul,
+        identityMd: LONG, // unchanged
+        toolsMd: "modified tools",
+        heartbeatMd: "original heartbeat", // unchanged
+      },
+      baselines,
+    );
+    expect(payload.soulMd).toBe(modifiedSoul);
+    expect(payload.identityMd).toBeUndefined();
+    expect(payload.toolsMd).toBe("modified tools");
+    expect(payload.heartbeatMd).toBeUndefined();
+  });
+
+  test("without baselines (null), all files sync as before (backwards compat)", () => {
+    const payload = buildIdentityPayload(
+      { soulMd: LONG, identityMd: LONG, toolsMd: "tools" },
+      null,
+    );
+    expect(payload.soulMd).toBe(LONG);
+    expect(payload.identityMd).toBe(LONG);
+    expect(payload.toolsMd).toBe("tools");
+  });
+
+  test("without baselines (undefined), all files sync as before (backwards compat)", () => {
+    const payload = buildIdentityPayload({ soulMd: LONG, identityMd: LONG }, undefined);
+    expect(payload.soulMd).toBe(LONG);
+    expect(payload.identityMd).toBe(LONG);
+  });
+
+  test("a field missing from baselines is still synced (partial baseline)", () => {
+    const partial: IdentityBaselines = { soulMd: contentSha256(LONG) };
+    const payload = buildIdentityPayload({ soulMd: LONG, identityMd: LONG }, partial);
+    expect(payload.soulMd).toBeUndefined(); // matches baseline → skipped
+    expect(payload.identityMd).toBe(LONG); // no baseline → synced
+  });
+});
+
+describe("collectProfilePayloads (baseline integration)", () => {
+  const reader = (files: Record<string, string>): FileReader => {
+    return async (path: string) => files[path];
+  };
+
+  test("session_sync skips unchanged identity files when baselines exist", async () => {
+    const identityContent = LONG;
+    const toolsContent = "original tools";
+    const modifiedToolsContent = "modified tools";
+
+    const baselines: IdentityBaselines = {
+      soulMd: contentSha256(identityContent),
+      identityMd: contentSha256(identityContent),
+      toolsMd: contentSha256(toolsContent),
+    };
+
+    const files = reader({
+      [SOUL_MD_PATH]: identityContent,
+      [IDENTITY_MD_PATH]: identityContent,
+      [TOOLS_MD_PATH]: modifiedToolsContent,
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(baselines),
+    });
+
+    const payloads = await collectProfilePayloads(["identity"], "session_sync", files);
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.body.toolsMd).toBe(modifiedToolsContent);
+    expect(payloads[0]?.body.soulMd).toBeUndefined();
+    expect(payloads[0]?.body.identityMd).toBeUndefined();
+  });
+
+  test("self_edit bypasses baselines (agent explicitly changed the file)", async () => {
+    const identityContent = LONG;
+
+    const files = reader({
+      [SOUL_MD_PATH]: identityContent,
+      [IDENTITY_MD_PATH]: identityContent,
+      [TOOLS_MD_PATH]: "tools",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({
+        soulMd: contentSha256(identityContent),
+        identityMd: contentSha256(identityContent),
+        toolsMd: contentSha256("tools"),
+      }),
+    });
+
+    const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
+    expect(payloads).toHaveLength(1);
+    // self_edit should include ALL files regardless of baselines
+    expect(payloads[0]?.body.soulMd).toBe(identityContent);
+    expect(payloads[0]?.body.identityMd).toBe(identityContent);
+    expect(payloads[0]?.body.toolsMd).toBe("tools");
+  });
+
+  test("session_sync skips unchanged CLAUDE.md when baseline matches", async () => {
+    const claudeContent = "original claude md";
+    const baselines: IdentityBaselines = { claudeMd: contentSha256(claudeContent) };
+
+    const files = reader({
+      [CLAUDE_MD_PATH]: claudeContent,
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(baselines),
+    });
+
+    const payloads = await collectProfilePayloads(["claude"], "session_sync", files);
+    expect(payloads).toEqual([]);
+  });
+
+  test("session_sync syncs modified CLAUDE.md even when baselines exist", async () => {
+    const baselines: IdentityBaselines = { claudeMd: contentSha256("original") };
+
+    const files = reader({
+      [CLAUDE_MD_PATH]: "modified claude md",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(baselines),
+    });
+
+    const payloads = await collectProfilePayloads(["claude"], "session_sync", files);
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.body.claudeMd).toBe("modified claude md");
+  });
+
+  test("session_sync proceeds normally when baselines file is missing", async () => {
+    const files = reader({
+      [TOOLS_MD_PATH]: "tools content",
+      // No IDENTITY_BASELINES_PATH → baselines will be null → no skipping
+    });
+
+    const payloads = await collectProfilePayloads(["identity"], "session_sync", files);
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.body.toolsMd).toBe("tools content");
+  });
+
+  test("all identity files unchanged → no identity payload at all", async () => {
+    const baselines: IdentityBaselines = {
+      soulMd: contentSha256(LONG),
+      identityMd: contentSha256(LONG),
+      toolsMd: contentSha256("tools"),
+      heartbeatMd: contentSha256("heartbeat"),
+    };
+
+    const files = reader({
+      [SOUL_MD_PATH]: LONG,
+      [IDENTITY_MD_PATH]: LONG,
+      [TOOLS_MD_PATH]: "tools",
+      "/workspace/HEARTBEAT.md": "heartbeat",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(baselines),
+    });
+
+    const payloads = await collectProfilePayloads(
+      ["identity", "claude", "setup"],
+      "session_sync",
+      files,
+    );
+    // No identity payload (all skipped), no claude or setup (files missing)
+    expect(payloads).toEqual([]);
   });
 });

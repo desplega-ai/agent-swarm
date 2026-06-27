@@ -3,14 +3,9 @@ import "./utils/internal-ai/register-bedrock.ts";
 
 import { Spinner } from "@inkjs/ui";
 import { Box, render, Text, useApp } from "ink";
-import { useEffect, useState } from "react";
+import type { ComponentType } from "react";
+import { createElement, useEffect, useState } from "react";
 import pkg from "../package.json";
-import { runClaude } from "./claude.ts";
-import { runHook } from "./commands/hook.ts";
-import { runLead } from "./commands/lead.ts";
-import { Onboard } from "./commands/onboard.tsx";
-import { Setup as Connect } from "./commands/setup.tsx";
-import { runWorker } from "./commands/worker.ts";
 import { getApiKey, setApiKey } from "./utils/api-key.ts";
 
 // Get CLI name from bin field (assumes single key)
@@ -460,11 +455,14 @@ function ClaudeRunner({ msg, headless, additionalArgs }: ClaudeRunnerProps) {
   const { exit } = useApp();
 
   useEffect(() => {
-    runClaude({
-      msg,
-      headless,
-      additionalArgs,
-    })
+    import("./claude.ts")
+      .then(({ runClaude }) =>
+        runClaude({
+          msg,
+          headless,
+          additionalArgs,
+        }),
+      )
       .then(() => exit())
       .catch((err) => exit(err));
   }, [msg, headless, additionalArgs, exit]);
@@ -490,17 +488,21 @@ function WorkerRunner({
   const { exit } = useApp();
 
   useEffect(() => {
-    runWorker({
-      prompt: prompt || undefined,
-      yolo,
-      systemPrompt: systemPrompt || undefined,
-      systemPromptFile: systemPromptFile || undefined,
-      additionalArgs,
-      logsDir: "./logs",
-    }).catch((err) => {
-      console.error("[error] Worker encountered an error:", err);
-      exit(err);
-    });
+    import("./commands/worker.ts")
+      .then(({ runWorker }) =>
+        runWorker({
+          prompt: prompt || undefined,
+          yolo,
+          systemPrompt: systemPrompt || undefined,
+          systemPromptFile: systemPromptFile || undefined,
+          additionalArgs,
+          logsDir: "./logs",
+        }),
+      )
+      .catch((err) => {
+        console.error("[error] Worker encountered an error:", err);
+        exit(err);
+      });
     // Note: runWorker runs indefinitely, so we don't call exit() on success
   }, [prompt, yolo, systemPrompt, systemPromptFile, additionalArgs, exit]);
 
@@ -511,22 +513,64 @@ function LeadRunner({ prompt, yolo, systemPrompt, systemPromptFile, additionalAr
   const { exit } = useApp();
 
   useEffect(() => {
-    runLead({
-      prompt: prompt || undefined,
-      yolo,
-      systemPrompt: systemPrompt || undefined,
-      systemPromptFile: systemPromptFile || undefined,
-      additionalArgs,
-      logsDir: "./logs",
-    }).catch((err) => {
-      console.error("[error] Lead encountered an error:", err);
-      exit(err);
-    });
+    import("./commands/lead.ts")
+      .then(({ runLead }) =>
+        runLead({
+          prompt: prompt || undefined,
+          yolo,
+          systemPrompt: systemPrompt || undefined,
+          systemPromptFile: systemPromptFile || undefined,
+          additionalArgs,
+          logsDir: "./logs",
+        }),
+      )
+      .catch((err) => {
+        console.error("[error] Lead encountered an error:", err);
+        exit(err);
+      });
     // Note: runLead runs indefinitely, so we don't call exit() on success
   }, [prompt, yolo, systemPrompt, systemPromptFile, additionalArgs, exit]);
 
   return null;
 }
+
+function LazyComponent<TProps extends object>({
+  load,
+  props,
+}: {
+  load: () => Promise<ComponentType<TProps>>;
+  props: TProps;
+}) {
+  const { exit } = useApp();
+  const [Component, setComponent] = useState<ComponentType<TProps> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    load()
+      .then((loaded) => {
+        if (!cancelled) setComponent(() => loaded);
+      })
+      .catch((err) => exit(err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [load, exit]);
+
+  if (!Component) {
+    return (
+      <Box padding={1}>
+        <Spinner label="Loading..." />
+      </Box>
+    );
+  }
+
+  return createElement(Component, props);
+}
+
+const loadOnboard = () => import("./commands/onboard.tsx").then(({ Onboard }) => Onboard);
+const loadConnect = () => import("./commands/setup.tsx").then(({ Setup }) => Setup);
 
 function UnknownCommand({ command }: { command: string }) {
   const { exit } = useApp();
@@ -561,9 +605,11 @@ function App({ args }: { args: ParsedArgs }) {
 
   switch (command) {
     case "onboard":
-      return <Onboard dryRun={dryRun} yes={yes} preset={preset || undefined} />;
+      return (
+        <LazyComponent load={loadOnboard} props={{ dryRun, yes, preset: preset || undefined }} />
+      );
     case "connect":
-      return <Connect dryRun={dryRun} restore={restore} yes={yes} />;
+      return <LazyComponent load={loadConnect} props={{ dryRun, restore, yes }} />;
     case "api":
       return <McpServer port={port} apiKey={key} dbPath={args.dbPath} />;
     case "claude":
@@ -616,7 +662,8 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   }
   process.exit(0);
 } else if (args.command === "hook") {
-  runHook();
+  const { runHook } = await import("./commands/hook.ts");
+  await runHook();
 } else if (args.command === "artifact") {
   // Pass all args after "artifact" directly
   const artifactArgs = process.argv.slice(process.argv.indexOf("artifact") + 1);

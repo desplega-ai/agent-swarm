@@ -519,9 +519,9 @@ export class CodexSession implements ProviderSession {
     return this.completionPromise;
   }
 
-  async abort(): Promise<void> {
+  async abort(reason?: string): Promise<void> {
     this.aborted = true;
-    this.abortController?.abort();
+    this.abortController?.abort(reason ?? "cancelled");
   }
 
   private emit(event: ProviderEvent): void {
@@ -992,6 +992,14 @@ export class CodexSession implements ProviderSession {
       } catch (err) {
         // AbortError from the SDK propagates here when signal.abort() fires.
         if (this.aborted || (err instanceof Error && err.name === "AbortError")) {
+          // Prefer the abort reason from the signal (set by the caller of
+          // abort()) — this distinguishes tool-loop aborts from cancel-poll
+          // and graceful-shutdown aborts that all used to produce a bare
+          // "cancelled" failureReason.
+          const abortReason =
+            typeof this.abortController?.signal.reason === "string"
+              ? this.abortController.signal.reason
+              : "cancelled";
           const cost = this.buildCostData(this.lastUsage, true);
           this.emit({ type: "result", cost, isError: true, errorCategory: "cancelled" });
           this.settle({
@@ -999,7 +1007,7 @@ export class CodexSession implements ProviderSession {
             sessionId: this._sessionId,
             cost,
             isError: true,
-            failureReason: "cancelled",
+            failureReason: abortReason,
           });
           return;
         }

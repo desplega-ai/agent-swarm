@@ -259,10 +259,11 @@ export class SqliteMemoryStore implements MemoryStore {
           string | null,
           number,
           string | null,
+          string | null,
         ]
       >(
-        `INSERT INTO agent_memory (id, agentId, scope, name, content, summary, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, accessedAt, expiresAt, accessCount, embeddingModel)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        `INSERT INTO agent_memory (id, agentId, scope, name, content, summary, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, accessedAt, expiresAt, accessCount, embeddingModel, contextKey)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       )
       .get(
         id,
@@ -282,6 +283,7 @@ export class SqliteMemoryStore implements MemoryStore {
         expiresAt,
         0,
         null,
+        input.contextKey ?? null,
       );
 
     if (!row) throw new Error("Failed to create memory");

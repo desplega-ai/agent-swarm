@@ -1,9 +1,8 @@
 import { z } from "zod";
-import { ModelTierSchema, splitLegacyModelAlias } from "../../model-tiers";
 import { workflowContextKey } from "../../tasks/context-key";
 import { withSiblingAwareness } from "../../tasks/sibling-awareness";
 import type { ExecutorMeta } from "../../types";
-import { FollowUpConfigSchema } from "../../types";
+import { FollowUpConfigSchema, ModelTierSchema, splitLegacyModelAlias } from "../../types";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 

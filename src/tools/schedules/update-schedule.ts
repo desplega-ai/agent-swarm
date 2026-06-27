@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CronExpressionParser } from "cron-parser";
 import * as z from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import {
   getAgentById,
   getScheduledTaskById,
@@ -10,7 +11,7 @@ import {
 import { mergeScheduleTiming, validateRecurringTiming } from "@/be/schedules/validate";
 import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar } from "@/tools/utils";
-import { ModelTierSchema, splitLegacyModelAlias } from "../../model-tiers";
+import { ModelTierSchema, splitLegacyModelAlias } from "../../types";
 
 export const updateScheduleInputSchema = z.object({
   scheduleId: z.string().uuid().optional().describe("Schedule ID to update"),
@@ -285,7 +286,9 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           }
         }
 
-        const updated = updateScheduledTask(schedule.id, updateData);
+        const updatedBy =
+          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
+        const updated = updateScheduledTask(schedule.id, { ...updateData, updatedBy });
 
         if (!updated) {
           return {

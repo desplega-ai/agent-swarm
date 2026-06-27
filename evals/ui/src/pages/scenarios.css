@@ -1,0 +1,416 @@
+/* WP-SCEN7 — scenarios list + detail (v7 §3 two-column layout, clamp, exec
+   overflow; §5.2 unregistered fallback; §9.4 member chips). Shared
+   tokens/classes live in styles.css. */
+
+.sc-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sc-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sc-judges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* judge-kind glyph (llm ✶ / agentic ✶✶) — tooltip carries the label */
+.sc-judge {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  letter-spacing: -0.08em;
+  cursor: default;
+}
+
+.sc-error {
+  color: var(--red);
+  white-space: pre-wrap;
+}
+
+.sc-loading {
+  margin-top: 8px;
+}
+
+/* §5.2 — unregistered-scenario fallback note */
+.sc-unregistered {
+  color: var(--dim);
+  font-size: 12.5px;
+}
+
+/* ---- §3 two-column definition layout ---- */
+
+.sc-def {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 2fr;
+  gap: 12px 22px;
+  align-items: start;
+}
+
+/* min-width: 0 lets overflow-x scroll regions work inside grid tracks */
+.sc-def > * {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .sc-def {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* left column — facts */
+
+.sc-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sc-fact-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+  margin-bottom: 3px;
+}
+
+.sc-fact-value {
+  font-size: 12.5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sc-judge-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sc-judge-fact {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.sc-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+}
+
+.sc-check {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+  overflow-wrap: anywhere;
+}
+
+/* v8.0 OutcomeSpec v2 — weighted dimensions + pass/fail gates */
+.sc-dims {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.sc-dim {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: 11px;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.sc-dim-name {
+  font-weight: 600;
+}
+
+.sc-dim-weight {
+  font-family: var(--font-mono);
+  color: var(--dim);
+}
+
+.sc-dim-src {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+}
+
+.sc-dim-src-judge {
+  color: var(--accent);
+}
+
+.sc-gate {
+  border-color: var(--accent);
+}
+
+.sc-seed {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* §9.4 — roster member chips (workerSpecs / lead) */
+
+.sc-members {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 5px;
+  align-items: flex-start;
+}
+
+.sc-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: 11px;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.sc-member-role {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+}
+
+.sc-member-role-lead {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.sc-member-template {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.sc-member-name {
+  font-weight: 600;
+}
+
+/* §9.4 frozen class — member config/model override badge, styled distinctly */
+.sc-member-override {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in oklab, var(--accent), transparent 45%);
+  background: color-mix(in oklab, var(--accent), transparent 88%);
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+/* right column — prose blocks */
+
+.sc-prose {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sc-block-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.sc-block-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+}
+
+.sc-block-meta {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* §3 frozen clamp classes — auto-expanded prose, clamped beyond 320px */
+
+.sc-clamp {
+  position: relative;
+  max-height: 320px;
+  overflow: hidden;
+}
+
+.sc-clamp.expanded {
+  max-height: none;
+  overflow: visible;
+}
+
+/* bottom fade — only while actually clamped */
+.sc-clamp.clampable:not(.expanded)::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 44px;
+  background: linear-gradient(to bottom, transparent, var(--panel));
+  pointer-events: none;
+}
+
+.sc-clamp-toggle {
+  margin-top: 6px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.sc-clamp-toggle:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.sc-clamp-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* tasks */
+
+.sc-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sc-task {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.sc-task-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sc-task-idx {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.sc-task-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.sc-task-worker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--dim);
+}
+
+.sc-task-worker-lead {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent), transparent 45%);
+  background: color-mix(in oklab, var(--accent), transparent 88%);
+  font-weight: 700;
+}
+
+.sc-task-deps {
+  font-size: 11px;
+}
+
+.sc-task-desc {
+  margin-top: 4px;
+  color: var(--dim);
+}
+
+/* §3 frozen — task-description code blocks must never overflow the panel */
+.sc-prose .md-code {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* §3 frozen — seed exec commands: horizontal scroll, never overflow */
+
+.sc-exec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sc-exec pre {
+  overflow-x: auto;
+  white-space: pre;
+  max-width: 100%;
+  margin: 0;
+  padding: 7px 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* collapsed Raw JSON toggle at the bottom of the Definition panel */
+
+.sc-raw {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.sc-raw-summary {
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+  user-select: none;
+  width: fit-content;
+}
+
+.sc-raw-summary:hover {
+  color: var(--text);
+}
+
+.sc-raw-body {
+  margin-top: 8px;
+}

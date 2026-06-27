@@ -8,7 +8,10 @@
 
 import { existsSync, lstatSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { getModel, getModels } from "@earendil-works/pi-ai";
+import {
+  getBuiltinModel as getModel,
+  getBuiltinModels as getModels,
+} from "@earendil-works/pi-ai/providers/all";
 import type {
   AgentSessionEvent,
   CreateAgentSessionOptions,

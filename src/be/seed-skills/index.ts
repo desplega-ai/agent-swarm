@@ -37,6 +37,12 @@ import swarmScriptsConfig from "../../../templates/skills/swarm-scripts/config.j
 import swarmScriptsContent from "../../../templates/skills/swarm-scripts/content.md" with {
   type: "text",
 };
+import tasteMinimalistSkillConfig from "../../../templates/skills/taste-minimalist-skill/config.json" with {
+  type: "text",
+};
+import tasteMinimalistSkillContent from "../../../templates/skills/taste-minimalist-skill/content.md" with {
+  type: "text",
+};
 import workflowIterateConfig from "../../../templates/skills/workflow-iterate/config.json" with {
   type: "text",
 };
@@ -73,6 +79,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: pagesConfig, body: pagesContent },
   { config: scriptWorkflowsConfig, body: scriptWorkflowsContent },
   { config: swarmScriptsConfig, body: swarmScriptsContent },
+  { config: tasteMinimalistSkillConfig, body: tasteMinimalistSkillContent },
   { config: workflowIterateConfig, body: workflowIterateContent },
   { config: workflowStructuredOutputConfig, body: workflowStructuredOutputContent },
 ];

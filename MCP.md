@@ -320,6 +320,7 @@ Update a repo's configuration including guidelines (PR checks, merge policy, rev
 | `clonePath` | `string` | No | - | New clone path. |
 | `defaultBranch` | `string` | No | - | New default branch. |
 | `autoClone` | `boolean` | No | - | Whether to auto-clone. |
+| `hooks` | `object \| null` | No | - | Hook install config. Set `{ enabled: true }` to opt into best-effort worker git-hook installation. |
 
 ### list-prompt-templates
 
@@ -818,6 +819,7 @@ Search your accumulated memories using natural language. Returns summaries with 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | `string` | Yes | - | Natural language search query. |
+| `intent` | `string` | Yes | - | Why you are searching for this memory. Required. E.g. 'looking for auth pattern to fix login bug'. |
 | `scope` | `all \| agent \| swarm` | No | "all" | Search scope: 'all' (own + swarm), 'agent' (own only), 'swarm' (shared only). |
 | `limit` | `number` | No | 10 | Max results to return. |
 
@@ -830,6 +832,7 @@ Retrieve the full content of a specific memory by its ID. Use memory-search to f
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `memoryId` | `uuid` | Yes | - | The ID of the memory to retrieve. |
+| `intent` | `string` | Yes | - | Why you are retrieving this memory. Required. E.g. 'need full details of the auth fix pattern'. |
 
 ### memory-delete
 
@@ -1458,4 +1461,3 @@ Delete an MCP server definition. Only the owning agent or lead can delete.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | ID of the MCP server to delete |
-

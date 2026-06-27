@@ -460,8 +460,10 @@ describe("Heartbeat Triage", () => {
 
       await codeLevelTriage();
 
-      // Agent should be set to idle since the parent task is terminal (superseded)
-      // and the resume follow-up was routed to the unassigned pool (worker is "dead").
+      // Agent goes idle: the parent task is terminal (superseded) and the
+      // crash_recovery resume is now PINNED back to this agent as `pending`
+      // (DES-523 same-agent pin). `pending` does not count toward in_progress
+      // capacity, so getActiveTaskCount drops to 0 and the agent flips to idle.
       const agents = getDb().query("SELECT status FROM agents WHERE id = ?").get(agent.id) as {
         status: string;
       };

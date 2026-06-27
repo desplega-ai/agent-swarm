@@ -16,7 +16,8 @@
  */
 
 import type { ToolCall } from "@earendil-works/pi-ai";
-import { complete, getModel } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
+import { getBuiltinModel as getModel } from "@earendil-works/pi-ai/providers/all";
 import type { TSchema } from "typebox";
 import { z } from "zod";
 import { type ResolvedCredential, resolveCredential } from "./credentials.js";
@@ -78,7 +79,8 @@ function stripJsonFences(raw: string): string {
   return fenced?.[1] ? fenced[1].trim() : trimmed;
 }
 
-async function defaultSpawnClaudeCli(
+/** Exported for tests only — production callers go through `completeStructured`. */
+export async function defaultSpawnClaudeCli(
   prompt: string,
   model: string,
   signal?: AbortSignal,
@@ -105,6 +107,14 @@ async function defaultSpawnClaudeCli(
   if (!env.CLAUDE_CODE_OAUTH_TOKEN && env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN) {
     env.CLAUDE_CODE_OAUTH_TOKEN = env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN;
   }
+  // Recursion guard: this shellout is itself a full claude session — on exit it
+  // fires the same global Stop hook, whose session-summary path would spawn
+  // another `claude -p`, recursively (each level holds a ~0.5-1GB node process;
+  // observed OOM-wedging 8GB E2B worker sandboxes within ~90s, leaving 10+
+  // near-identical summarizer transcripts in ~/.claude/projects). The hook's
+  // `runStopHookSessionSummary` honors this flag — same convention as the
+  // `claude -p` shellout in `src/be/memory/raters/llm-client.ts`.
+  env.SKIP_SESSION_SUMMARY = "1";
   const proc = Bun.spawn({
     cmd,
     env,

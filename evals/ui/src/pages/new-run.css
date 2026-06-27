@@ -1,0 +1,269 @@
+/*
+ * New-run dialog — config multi-select picker (v6 F6, §11).
+ * ALL ConfigMultiSelect styles live here, imported by NewRunDialog.tsx.
+ * runs.css is shared with RunsPage (edited concurrently by the parallel
+ * workflow) and is deliberately NOT touched.
+ */
+
+.cms {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---- trigger row: search input + Defaults quick-chip + count badge ---- */
+
+.cms-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cms-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.cms-defaults {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cms-defaults:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cms-count {
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * ---- dropdown ----
+ * position: fixed with inline viewport coords from JS (same pattern as the
+ * judge model-select's .model-menu) — it can never engage the dialog's
+ * scrollbars, and it stays inside the dialog subtree so the modal top layer
+ * doesn't inert it.
+ */
+
+.cms-menu {
+  position: fixed;
+  z-index: 40;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden; /* long unbroken model names ellipsize, not scroll */
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  padding: 2px 0;
+}
+
+.cms-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.cms-group + .cms-group {
+  border-top: 1px solid var(--border);
+}
+
+.cms-group-header {
+  position: sticky; /* keep the group's select-all reachable while scrolling its rows */
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  background: var(--panel);
+}
+
+.cms-group-toggle {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cms-group-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cms-group-count {
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.cms-group-all {
+  accent-color: var(--accent);
+  margin: 0;
+  cursor: pointer;
+}
+
+.cms-chevron {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.cms-chevron:hover {
+  color: var(--text);
+}
+
+.cms-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 24px; /* indent under the group header */
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cms-row:hover {
+  background: var(--panel-2);
+}
+
+.cms-row:has(input:checked) {
+  background: color-mix(in oklab, var(--accent), transparent 92%);
+}
+
+.cms-row input {
+  accent-color: var(--accent);
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* The ConfigChip's Tooltip wrapper must shrink so the chip name ellipsizes. */
+.cms-row > .tooltip {
+  min-width: 0;
+}
+
+/* v7.6 §C5: dim raw config id after the pretty chip (judge model-menu
+   convention) — right-aligned, ellipsized, hidden from the chip's own hover. */
+.cms-row-id {
+  margin-left: auto;
+  flex-shrink: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- selected chips under the trigger (always-visible selection record) ---- */
+
+.cms-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cms-selected-empty {
+  font-size: 12px;
+}
+
+.cms-selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: 12px;
+}
+
+.cms-chip-x {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.cms-chip-x:hover {
+  color: var(--red);
+}
+
+/*
+ * ---- v7.7 item 1: one-click preset buttons ----
+ * Row above the ConfigMultiSelect; pill style mirrors .cms-defaults (the
+ * frozen "Defaults" chip these buttons share their replace semantics with).
+ */
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.preset-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Disabled = empty catalog intersection. pointer-events: none lets the
+   wrapping Tooltip span keep receiving hover for the explanatory tip. */
+.preset-btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ---- preset hover card (rendered inside the portal .tip-box) ---- */
+
+.preset-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.preset-tip-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}

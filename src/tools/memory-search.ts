@@ -26,6 +26,12 @@ export const registerMemorySearchTool = (server: McpServer) => {
 
       inputSchema: z.object({
         query: z.string().min(1).describe("Natural language search query."),
+        intent: z
+          .string()
+          .min(1)
+          .describe(
+            "Why you are searching for this memory. Required. E.g. 'looking for auth pattern to fix login bug'.",
+          ),
         scope: z
           .enum(["all", "agent", "swarm"])
           .default("all")
@@ -56,7 +62,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         _ratingNudge: z.string().optional(),
       }),
     },
-    async ({ query, scope, limit, source }, requestInfo, _meta) => {
+    async ({ query, intent, scope, limit, source }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: "Agent ID required for memory search." }],
@@ -97,6 +103,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
               requestInfo.agentId,
               ranked.map((r) => ({ memoryId: r.id, similarity: r.similarity })),
               requestInfo.sessionId,
+              { intent, contextKey: requestInfo.contextKey, eventType: "search" },
             );
           } catch (err) {
             console.error("[memory-search] recordRetrievals failed:", (err as Error).message);

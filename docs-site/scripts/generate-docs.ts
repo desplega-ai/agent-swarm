@@ -134,6 +134,8 @@ const tagDescriptions: Record<string, string> = {
   "Repos": "Register code repositories and configure VCS integration for automated task triggers",
   "Schedules": "Create and manage scheduled tasks — run agents on cron expressions or one-time delays",
   "Scripts": "Author, search, and run reusable TypeScript scripts — a shared automation catalog callable across swarm agents and workflows",
+  "Script Runs":
+    "Inspect durable script workflow runs, review journal entries, and monitor swarm-script, raw-LLM, and agent-task execution status through the Script Runs API",
   "Session Data": "Access session-level data including token counts, costs, and context window metrics",
   "Sessions": "Inspect task sessions — list recent root tasks and retrieve the full descendant task chain for a session",
   "Skills": "Install, publish, and manage skills — reusable agent behaviors and tool sets",

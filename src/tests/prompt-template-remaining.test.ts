@@ -102,11 +102,12 @@ describe("template registration — all sources", () => {
     expect(eventTypes).toContain("heartbeat.checklist");
   });
 
-  test("Task lifecycle templates are registered (2 task_lifecycle)", () => {
+  test("Task lifecycle templates are registered (3 task_lifecycle)", () => {
     const all = getAllTemplateDefinitions();
     const eventTypes = all.map((d) => d.eventType);
     expect(eventTypes).toContain("task.worker.completed");
     expect(eventTypes).toContain("task.worker.failed");
+    expect(eventTypes).toContain("task.reroute.decision");
   });
 
   test("Runner trigger templates are registered (7 task_lifecycle)", () => {

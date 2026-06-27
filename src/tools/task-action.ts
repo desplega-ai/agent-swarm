@@ -27,8 +27,12 @@ import {
 } from "@/be/db";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema, BudgetRefusalCauseSchema } from "@/types";
-import { ModelTierSchema, splitLegacyModelAlias } from "../model-tiers";
+import {
+  AgentTaskSchema,
+  BudgetRefusalCauseSchema,
+  ModelTierSchema,
+  splitLegacyModelAlias,
+} from "@/types";
 
 export const TaskActionSchema = z.enum([
   "create",

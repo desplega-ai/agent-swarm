@@ -5,11 +5,16 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { resolveSlackUserId } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
+import { hasOtherUserMention } from "./router";
 import { bufferThreadMessage } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
 
 const additiveSlack = process.env.ADDITIVE_SLACK === "true";
+
+// Cache the bot's own Slack user ID so we can suppress messages that @-mention
+// a different agent (e.g. Devin) rather than our bot.
+let cachedBotUserId: string | null = null;
 
 export function createAssistant(): Assistant {
   return new Assistant({
@@ -71,6 +76,29 @@ export function createAssistant(): Assistant {
         const channelId = message.channel;
         const messageText = (msg.text as string) || "";
         const userId = (msg.user as string) || "";
+
+        // Resolve the bot's own Slack user ID (cached after first call) so we can
+        // check whether this message is actually addressed to us.
+        if (!cachedBotUserId) {
+          try {
+            const authResult = await client.auth.test();
+            cachedBotUserId = (authResult.user_id as string) ?? null;
+          } catch (e) {
+            console.warn("[Slack] assistant: auth.test() failed — skipping bot-mention check", e);
+          }
+        }
+
+        // If the message @-mentions someone OTHER than our bot and does NOT mention
+        // our bot, it is addressed to a different agent/user — do not spawn a task.
+        if (cachedBotUserId) {
+          const botMentioned = messageText.includes(`<@${cachedBotUserId}>`);
+          if (!botMentioned && hasOtherUserMention(messageText, cachedBotUserId)) {
+            console.log(
+              `[Slack] assistant: skipping message in ${channelId}/${threadTs} — mentions another user, not us`,
+            );
+            return;
+          }
+        }
 
         // Resolve canonical user identity via the shared cascade. On no-email,
         // the cascade records the user in the kv unmapped tracker; this handler

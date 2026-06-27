@@ -1,0 +1,639 @@
+/* Transcript renderer (WP-TRANSCRIPT) — message bubbles, tool cards, meta lines. */
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  /* v7.6 §B1: the tabs↔content gap lives HERE (not on .rd-tab-content) so the
+     sticky stack's containing block starts at the very top of the scrollport —
+     a padded scroll container would hold the bar 10px down (transparent strip
+     above it showing scrolled rows). The stickybar pulls itself over this
+     padding with a negative margin and repaints it opaquely. */
+  padding-top: 10px;
+}
+
+.t-caption {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.t-caption-sep {
+  color: var(--border);
+}
+
+.t-live {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.t-unparsed {
+  color: var(--red);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
+.t-empty {
+  color: var(--dim);
+  padding: 16px 8px;
+  text-align: center;
+}
+
+.t-footer {
+  padding: 6px 2px;
+}
+
+.t-flat {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.t-divider {
+  color: var(--dim);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-align: center;
+  padding: 4px 0;
+}
+
+/* ---- message bubbles ---- */
+
+.t-msg {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.t-assistant {
+  background: var(--panel-2);
+  border-left: 2px solid var(--accent);
+}
+
+.t-user {
+  background: color-mix(in oklab, var(--blue), transparent 93%);
+  border-left: 2px solid color-mix(in oklab, var(--blue), transparent 40%);
+}
+
+.t-system {
+  background: transparent;
+  border-style: dashed;
+  color: var(--dim);
+}
+
+.t-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.t-glyph {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.t-glyph-assistant {
+  color: var(--accent);
+}
+
+.t-glyph-user {
+  color: var(--blue);
+}
+
+.t-glyph-system {
+  color: var(--dim);
+}
+
+.t-time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.t-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+/* Sans body; pre-wrap only for plain (non-markdown) text — item 8. */
+.t-text {
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.t-text-plain {
+  white-space: pre-wrap;
+}
+
+.t-text .md {
+  font-size: 12.5px;
+}
+
+/* ---- thinking ---- */
+
+.t-thinking-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+}
+
+.t-thinking {
+  color: var(--dim);
+  font-style: italic;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}
+
+/* ---- tool cards ---- */
+
+.t-tool {
+  font-family: var(--font-mono);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.t-tool-error {
+  border-color: color-mix(in oklab, var(--red), transparent 50%);
+  background: color-mix(in oklab, var(--red), transparent 94%);
+}
+
+.t-tool-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.t-tool-name {
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+  max-width: 55%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.t-tool-error .t-tool-name {
+  color: var(--red);
+}
+
+/* Single-line dim arg preview after the tool name (item 8). */
+.t-tool-preview {
+  flex: 1;
+  min-width: 0;
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.t-tool-args {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.t-tool-result {
+  border-top: 1px dashed var(--border);
+  padding-top: 4px;
+  font-size: 11.5px;
+}
+
+.t-result-head {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+
+.t-tool-result pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.t-tool-result.error {
+  color: var(--red);
+}
+
+/* ---- raw fallback rows (item 15 — nothing silently dropped) ---- */
+
+.t-raw {
+  font-family: var(--font-mono);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.t-raw-head {
+  /* no text-transform — the cli value is an identifier and must stay verbatim */
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+}
+
+.t-raw pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11.5px;
+  color: var(--dim);
+  max-height: 240px;
+  overflow: auto;
+}
+
+/* ---- provider meta ---- */
+
+.t-meta,
+.t-meta-group {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+  padding-left: 2px;
+}
+
+.t-meta-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.t-meta .jv,
+.t-meta-group .jv {
+  margin: 2px 0 2px 16px;
+}
+
+/* ---- sticky header (v7.5 item 4 + v7.6 §B1) ----
+   The scroll container is .rd-tab-content (overflow-y: auto, run-details.css);
+   .transcript itself has no overflow, so position: sticky on this wrapper pins
+   it to the tab-content scrollport. One sticky STACK: the bar owns the Live
+   pulse + caption + task pills together. Opaque panel bg so rows scroll
+   underneath; negative margins + matching padding swallow both the
+   .transcript padding-top above (v7.6 §B1 — no transparent strip over the
+   pinned bar) and the 8px flex gap below (rows would peek through otherwise).
+   z-index sits above every message-row/timestamp paint order inside the
+   scrollport; .rd-right isolates this stacking context (run-details.css) so
+   it can never escape above the page-level .rd-top header. */
+.tr-stickybar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  /* v7.7 item 7: ONE row — caption left, task pills right (pills wrap within
+     their own cluster when cramped), expand-all toggle at the far end. */
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  background: var(--panel);
+  padding-top: 10px;
+  margin-top: -10px;
+  padding-bottom: 8px;
+  margin-bottom: -8px;
+}
+
+.tr-stickybar > .t-caption {
+  flex: 1 1 auto;
+}
+
+/* The pill row's old bottom border now closes the whole single-row bar. */
+.tr-stickybar.has-tabs {
+  border-bottom: 1px solid var(--border);
+}
+
+/* v7.7 item 6: expand/collapse-all for tool outputs (far right of the bar). */
+.t-bulk {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ---- per-task sub-tabs (v7 §1 — only when rows span >1 task) ---- */
+
+.t-tasktabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.t-tasktab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.t-tasktab:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.t-tasktab.selected {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.t-tasktab-glyph {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.t-tasktab-title {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* v7.7 item 7: inline pill economics (cost · duration · tokens) — compact and
+   always dim so the metrics read as a footnote next to the label, even on the
+   selected (accent) pill. */
+.t-tasktab-meta {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  letter-spacing: -0.2px;
+  color: var(--dim);
+  opacity: 0.9;
+  margin-left: 1px;
+}
+
+/* Dim footnote inside the chip hover cards (DAG-lifetime / totals caveats). */
+.t-chip-note {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--dim);
+}
+
+/* ---- round-10 item 2: executing-member attribution (crown + harness + name).
+   Shared by the left-bar task rows (RunDetailsPage) and the sub-tab outcome
+   header — renders ONLY when the agentId ↔ roster join resolved. ---- */
+
+.tm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--dim);
+  cursor: default;
+}
+
+.tm-chip:hover {
+  color: var(--text);
+}
+
+.tm-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The lead's crown — accent, matching the dashboard's h-3 w-3 text-primary
+   lucide Crown (agent-node.tsx convention). */
+.tm-crown {
+  flex: none;
+  display: block;
+  color: var(--accent);
+}
+
+/* Hover-card title with inline crown/harness icons. */
+.tm-card-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* §12.3 override marker inside the member hover card. */
+.tm-override {
+  color: var(--orange);
+}
+
+/* Member value row inside a task pill's hover card. */
+.tm-member-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* Outcome-header placement: after the cost (which owns margin-left: auto),
+   clamped so a long member name never crowds the status. */
+.t-taskhead-member {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 40%;
+}
+
+/* ---- selected sub-tab outcome block (v7.5 items 2/6 + v7.7 item 8) ----
+   Sticky wrapper pins the card flush under the single-row sticky bar
+   (--tr-bar-h is measured by Transcript via ResizeObserver — the bar's height
+   varies with pill wrap). Opaque panel paint + the same gap-swallowing
+   negative margin trick as .tr-stickybar, so scrolled rows never peek through
+   the flex gap below the pinned card. z-index sits under the bar (30). */
+
+.t-taskhead-sticky {
+  position: sticky;
+  top: var(--tr-bar-h, 46px);
+  z-index: 29;
+  background: var(--panel);
+  padding-bottom: 8px;
+  margin-bottom: -8px;
+}
+
+.t-taskhead {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+}
+
+/* Item 8: status-toned card treatment — opaque mixes (the card is sticky). */
+.t-taskhead.card-green {
+  border-left-color: var(--green);
+  background: color-mix(in oklab, var(--green) 7%, var(--panel-2));
+}
+
+.t-taskhead.card-red {
+  border-left-color: var(--red);
+  background: color-mix(in oklab, var(--red) 7%, var(--panel-2));
+}
+
+.t-taskhead.card-accent {
+  border-left-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 7%, var(--panel-2));
+}
+
+.t-taskhead.card-dim {
+  border-left-color: var(--dim);
+}
+
+.t-taskhead-chevron {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  flex: none;
+}
+
+.t-taskhead-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.t-taskhead-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.t-taskhead-cost {
+  margin-left: auto;
+}
+
+.t-taskhead-detail {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 6px 8px;
+  font-size: 11.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.t-taskhead-detail pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.t-taskhead-detail.error {
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  color: var(--red);
+}
+
+/* Cascade-skipped reads distinctly from a real error (v6 §9 semantics). */
+.t-taskhead-detail.skip {
+  border-style: dashed;
+  color: var(--dim);
+}
+
+/* ---- shared small toggle ---- */
+
+.t-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--dim);
+  cursor: pointer;
+  text-align: left;
+  width: fit-content;
+}
+
+.t-toggle:hover {
+  color: var(--text);
+}
+
+.t-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- live follow button (v7.7 item 6) ----
+   Zero-height sticky wrapper at the end of the flow: the pill pins 10px above
+   the scrollport bottom while disengaged, floating over the streaming rows
+   (translateY lifts it out of the zero-height box). */
+
+.t-follow-wrap {
+  position: sticky;
+  bottom: 10px;
+  z-index: 25;
+  height: 0;
+  display: flex;
+  justify-content: center;
+  overflow: visible;
+}
+
+.t-follow {
+  transform: translateY(-100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--panel-2);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 30%);
+}
+
+.t-follow:hover {
+  background: color-mix(in oklab, var(--accent) 12%, var(--panel-2));
+}

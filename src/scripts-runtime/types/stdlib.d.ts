@@ -50,11 +50,12 @@ declare module "swarm-sdk" {
     // --- memory ---
     memory_search(args: {
       query: string;
+      intent: string;
       scope?: "all" | "agent" | "swarm";
       limit?: number;
       source?: string;
     }): Promise<unknown>;
-    memory_get(args: { memoryId: string }): Promise<unknown>;
+    memory_get(args: { memoryId: string; intent: string }): Promise<unknown>;
     memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
     // --- tasks ---
     task_list(args?: Record<string, unknown>): Promise<unknown>;
@@ -242,7 +243,7 @@ declare module "swarm-sdk" {
     workflow_patch(args: Record<string, unknown>): Promise<unknown>;
     workflow_patchNode(args: Record<string, unknown>): Promise<unknown>;
     workflow_delete(args: { id: string }): Promise<unknown>;
-    workflow_trigger(args: { id: string; input?: Record<string, unknown> }): Promise<unknown>;
+    workflow_trigger(args: { id: string; triggerData?: Record<string, unknown> }): Promise<unknown>;
     workflow_retryRun(args: { id: string }): Promise<unknown>;
     workflow_cancelRun(args: { id: string }): Promise<unknown>;
 

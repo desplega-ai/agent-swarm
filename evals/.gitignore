@@ -1,0 +1,4 @@
+evals.db
+evals.db-shm
+evals.db-wal
+evals-replica.db*

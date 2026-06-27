@@ -1,42 +1,46 @@
 import { ensureTokenOrThrow } from "./ensure-token";
 
-// Tick every 50 minutes with a 65-minute "expiring soon" buffer.
-//
-// Atlassian (and Linear) issue 1h access tokens. With this cadence the DB row
-// is always rotated before its current access token expires, so anything that
-// reads oauth_tokens.accessToken directly without going through jiraFetch /
-// linear-outbound (e.g. agents using the read-only db-query MCP) sees a
-// not-yet-expired token. The 65-min buffer is wider than the access-token
-// lifetime, so isTokenExpiringSoon always returns true and every tick rotates.
-//
-// Touching the row this often also serves the original "keep the refresh
-// token alive" goal — Atlassian expires inactive refresh tokens after 90 days,
-// and Linear's behavior is similar; refreshing every 50 min trivially keeps
-// both providers active.
-const KEEPALIVE_INTERVAL_MS = 50 * 60 * 1000;
-const KEEPALIVE_BUFFER_MS = 65 * 60 * 1000;
-const SLACK_ALERTS_CHANNEL = process.env.SLACK_ALERTS_CHANNEL || "C08JCRURPBV";
+// Keep refresh tokens warm without constantly rotating strict-rotation
+// providers. Reactive callers still refresh access tokens before API use.
+const KEEPALIVE_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const KEEPALIVE_BUFFER_MS = 10 * 60 * 1000;
+const STARTUP_KEEPALIVE_DELAY_MS = 10_000;
 
 const KEEPALIVE_PROVIDERS = ["linear", "jira"] as const;
 
 let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+let startupKeepaliveTimeout: ReturnType<typeof setTimeout> | null = null;
+let inflightKeepalive: Promise<void> | null = null;
+
+function scheduleKeepaliveRun(trigger: "startup" | "interval" | "manual"): Promise<void> {
+  if (inflightKeepalive) {
+    console.log(`[OAuth Keepalive] ${trigger} tick skipped; previous run still in flight`);
+    return inflightKeepalive;
+  }
+
+  inflightKeepalive = runKeepalive(trigger).finally(() => {
+    inflightKeepalive = null;
+  });
+  return inflightKeepalive;
+}
 
 /**
  * Proactively refresh OAuth tokens on a schedule.
  *
  * Two purposes, both served by the same tick:
  *
- *  1. Access-token freshness in the DB. Anything that reads
- *     `oauth_tokens.accessToken` directly (db-query MCP, future MCP servers,
- *     `tracker-status`) needs a not-yet-expired value. The 50-min cadence
- *     keeps the row ahead of the 1h access-token lifetime.
- *  2. Refresh-token liveness. Atlassian rotates refresh tokens and expires
+ *  1. Refresh-token liveness. Atlassian rotates refresh tokens and expires
  *     them after ~90 days of inactivity, so silent gaps in usage would kill
- *     the integration. Refreshing on every tick keeps the refresh token
- *     active and surfaces a dead one as a Slack alert instead of a runtime
- *     401 in the middle of an agent task.
+ *     the integration. The 12h cadence keeps the refresh token active without
+ *     rotating it dozens of times per day.
+ *  2. Loud failure on boot and during scheduled checks. A dead token surfaces
+ *     as structured logs plus a Slack alert instead of silently retrying.
+ *
+ * Access-token freshness is handled reactively by ensureToken callers before
+ * Jira/Linear API use.
  */
-async function runKeepalive(): Promise<void> {
+async function runKeepalive(trigger: "startup" | "interval" | "manual" = "manual"): Promise<void> {
+  console.log(`[OAuth Keepalive] Running ${trigger} token refresh check`);
   for (const provider of KEEPALIVE_PROVIDERS) {
     console.log(`[OAuth Keepalive] Running scheduled token refresh for ${provider}...`);
     try {
@@ -53,6 +57,12 @@ async function runKeepalive(): Promise<void> {
 }
 
 async function notifySlack(text: string): Promise<void> {
+  const channel = process.env.SLACK_ALERTS_CHANNEL;
+  if (!channel) {
+    console.warn("[OAuth Keepalive] SLACK_ALERTS_CHANNEL not set; skipping alert");
+    return;
+  }
+
   try {
     const { getSlackApp } = await import("../slack/app");
     const app = getSlackApp();
@@ -61,13 +71,21 @@ async function notifySlack(text: string): Promise<void> {
       return;
     }
     await app.client.chat.postMessage({
-      channel: SLACK_ALERTS_CHANNEL,
+      channel,
       text,
     });
-    console.log("[OAuth Keepalive] Slack notification sent");
+    console.log(`[OAuth Keepalive] Slack notification sent to ${channel}`);
   } catch (slackErr) {
+    const code =
+      typeof slackErr === "object" && slackErr !== null && "code" in slackErr
+        ? ` code=${String(slackErr.code)}`
+        : "";
+    const data =
+      typeof slackErr === "object" && slackErr !== null && "data" in slackErr
+        ? ` data=${JSON.stringify(slackErr.data)}`
+        : "";
     console.error(
-      "[OAuth Keepalive] Failed to send Slack notification:",
+      `[OAuth Keepalive] Failed to send Slack notification to ${channel}${code}${data}:`,
       slackErr instanceof Error ? slackErr.message : slackErr,
     );
   }
@@ -87,21 +105,45 @@ export function startOAuthKeepalive(): void {
     `[OAuth Keepalive] Starting (interval ${Math.round(KEEPALIVE_INTERVAL_MS / 60_000)}min, buffer ${Math.round(KEEPALIVE_BUFFER_MS / 60_000)}min)`,
   );
 
-  // Run once after a short delay (let server finish startup)
-  setTimeout(() => runKeepalive(), 10_000);
+  // Run once after a short delay (let server finish startup).
+  startupKeepaliveTimeout = setTimeout(() => {
+    startupKeepaliveTimeout = null;
+    scheduleKeepaliveRun("startup");
+  }, STARTUP_KEEPALIVE_DELAY_MS);
 
   keepaliveInterval = setInterval(() => {
-    runKeepalive();
+    scheduleKeepaliveRun("interval");
   }, KEEPALIVE_INTERVAL_MS);
 }
 
 /**
- * Stop the OAuth keepalive timer.
+ * Stop the OAuth keepalive timer and wait for any in-flight refresh to persist.
  */
-export function stopOAuthKeepalive(): void {
+export async function stopOAuthKeepalive(): Promise<void> {
+  if (startupKeepaliveTimeout) {
+    clearTimeout(startupKeepaliveTimeout);
+    startupKeepaliveTimeout = null;
+  }
+
   if (keepaliveInterval) {
     clearInterval(keepaliveInterval);
     keepaliveInterval = null;
     console.log("[OAuth Keepalive] Stopped");
   }
+
+  if (inflightKeepalive) {
+    console.log("[OAuth Keepalive] Waiting for in-flight token refresh before shutdown");
+    await inflightKeepalive;
+  }
 }
+
+// ─── Test helpers (exported for unit tests only) ─────────────────────────────
+
+export const _test = {
+  KEEPALIVE_INTERVAL_MS,
+  KEEPALIVE_BUFFER_MS,
+  STARTUP_KEEPALIVE_DELAY_MS,
+  notifySlack,
+  runKeepalive: scheduleKeepaliveRun,
+  getInflightKeepalive: () => inflightKeepalive,
+};

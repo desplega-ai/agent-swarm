@@ -1,0 +1,262 @@
+/* ---- hand-rolled SVG charts (v5 spec §2) — theme-aware via CSS variables ---- */
+
+.chart {
+  position: relative;
+  width: 100%;
+}
+
+.chart svg {
+  display: block;
+  /* round-9 §4 (clipping audit): never clip chart text at the svg box —
+     margins are sized so nothing *should* escape; this is the safety net. */
+  overflow: visible;
+}
+
+.chart-empty {
+  color: var(--dim);
+  text-align: center;
+  padding: 24px 8px;
+  font-size: 12.5px;
+}
+
+.chart-grid-line {
+  stroke: var(--border);
+}
+
+.chart-axis-line {
+  stroke: var(--border);
+}
+
+.chart-tick {
+  fill: var(--dim);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.chart-marker-line {
+  stroke-dasharray: 4 3;
+  opacity: 0.8;
+}
+
+.chart-marker-label {
+  font-size: 9px;
+  font-family: var(--font-mono);
+}
+
+.chart-crosshair {
+  stroke: var(--dim);
+  stroke-dasharray: 2 2;
+}
+
+.chart-hover-rect {
+  fill: transparent;
+}
+
+/* in-container hover tooltip (charts never live inside dialogs) */
+.chart-tip {
+  position: absolute;
+  z-index: 30;
+  pointer-events: none;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 30%);
+  /* round-9 §4: wrap instead of overflowing past the chart edge (replaces the
+     old hardcoded-width position clamp; charts also flip the tip side). */
+  max-width: 280px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.chart-tip-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.chart-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chart-tip-value {
+  font-family: var(--font-mono);
+  margin-left: auto;
+  padding-left: 10px;
+}
+
+/* a lone value row (mini-bar hover card) stays left-aligned under the title */
+.chart-tip-row .chart-tip-value:only-child {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.chart-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* bar chart text */
+
+.chart-bar-label {
+  fill: var(--dim);
+  font-size: 10.5px;
+  font-family: var(--font-sans);
+}
+
+.chart-bar-value {
+  fill: var(--text);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+}
+
+.chart-bar-null {
+  fill: var(--dim);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+}
+
+/* ---- heat table (matrix with color-scaled cells) ---- */
+
+table.heat {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+table.heat th {
+  padding: 4px 8px;
+  text-align: left;
+  font-weight: 500;
+  color: var(--dim);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+table.heat thead th {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+table.heat td.heat-cell {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  text-align: right;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  min-width: 70px;
+}
+
+table.heat td.heat-cell.empty {
+  color: var(--dim);
+  text-align: center;
+}
+
+/* v7.6 §C2: first (row-name) column sticky on horizontal scroll. Opaque panel
+   background + an inset right hairline (collapsed borders don't travel with
+   sticky cells); z-index above the value cells, corner one higher still. */
+table.heat th.heat-rowhead,
+table.heat th.heat-corner {
+  position: sticky;
+  left: 0;
+  background: var(--panel);
+  box-shadow: inset -1px 0 0 var(--border);
+}
+
+table.heat th.heat-rowhead {
+  z-index: 1;
+}
+
+table.heat th.heat-corner {
+  z-index: 2;
+}
+
+/* ---- scatter chart (v7 spec §C2) ---- */
+
+/* round-8 spec §C4: clearly visible green/red tints + larger corner captions */
+.chart-quadrant {
+  fill: color-mix(in srgb, var(--green) 12%, transparent);
+}
+
+.chart-quadrant.worst {
+  fill: color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+.chart-quadrant-label {
+  fill: var(--green);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.chart-quadrant-label.worst {
+  fill: var(--red);
+}
+
+.chart-axis-label {
+  fill: var(--dim);
+  font-size: 10.5px;
+}
+
+.chart-scatter-dot {
+  stroke: var(--panel);
+  stroke-width: 1;
+  opacity: 0.9;
+}
+
+.chart-scatter-dot.hover {
+  opacity: 1;
+  stroke: var(--text);
+}
+
+.chart-scatter-label {
+  fill: var(--dim);
+  font-size: 9.5px;
+  font-family: var(--font-mono);
+}
+
+/* ---- highlights mini bars (v7 spec §C3) ---- */
+
+.chart-minibar {
+  opacity: 0.92;
+}
+
+/* round-9 §5: visible per-bar hover state (brighter fill + outline) */
+.chart-minibar.hover {
+  opacity: 1;
+  stroke: var(--text);
+  stroke-width: 1;
+}
+
+.chart-minibar-value {
+  fill: var(--text);
+  font-size: 9.5px;
+  font-family: var(--font-mono);
+}
+
+.chart-minibar-label {
+  fill: var(--dim);
+  font-size: 9px;
+  font-family: var(--font-mono);
+}

@@ -490,8 +490,11 @@ export function registerMessageHandler(app: App): void {
     // Detect assistant thread context — file_share messages in DM assistant threads
     // bypass the assistant handler and land here instead. Treat them as implicit mentions
     // so they route to the lead agent rather than being silently dropped.
+    // Guard: suppress implicit mention when the message @-mentions someone else but NOT us —
+    // those messages are addressed to a different agent/user (e.g. Devin) and must not spawn.
     const isAssistantThread = !!msg.assistant_thread;
-    const isImplicitMention = isAssistantThread && !botMentioned;
+    const isImplicitMention =
+      isAssistantThread && !botMentioned && !hasOtherUserMention(effectiveText, botUserId);
 
     // ADDITIVE_SLACK: Check for !now command in threads
     const additiveSlack = process.env.ADDITIVE_SLACK === "true";

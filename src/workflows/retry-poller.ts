@@ -8,9 +8,8 @@ import {
 import type { RetryPolicy } from "../types";
 import { checkpointStep, checkpointStepFailure } from "./checkpoint";
 import { getSuccessors } from "./definition";
-import { walkGraph } from "./engine";
+import { interpolateNodeConfig, walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
-import { deepInterpolate } from "./template";
 import { runStepValidation } from "./validation";
 
 let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -62,7 +61,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           const ctx = (run.context ?? {}) as Record<string, unknown>;
 
           // Deep-interpolate config
-          const { value: interpolatedValue } = deepInterpolate(node.config, ctx);
+          const { value: interpolatedValue } = interpolateNodeConfig(node, ctx);
           const interpolatedConfig = interpolatedValue as Record<string, unknown>;
 
           // Get executor and re-run

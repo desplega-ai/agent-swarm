@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.98.0",
+    "version": "1.103.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -4248,6 +4248,9 @@
                   },
                   "persistMemory": {
                     "type": "boolean"
+                  },
+                  "contextKey": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -4290,6 +4293,11 @@
                   "query": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "intent": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Why you are searching. Required for agent recall-edge tracking; omit for UI browse/search calls."
                   },
                   "limit": {
                     "type": "integer",
@@ -4516,6 +4524,17 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Why you are retrieving this memory. Required for agent recall-edge tracking; omit for UI browse calls."
+            },
+            "required": false,
+            "description": "Why you are retrieving this memory. Required for agent recall-edge tracking; omit for UI browse calls.",
+            "name": "intent",
+            "in": "query"
           }
         ],
         "responses": {
@@ -6292,6 +6311,18 @@
                       "type": "boolean",
                       "default": true
                     },
+                    "hooks": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "default": {
+                        "enabled": false
+                      }
+                    },
                     "guidelines": {
                       "type": [
                         "object",
@@ -6408,6 +6439,18 @@
                   "autoClone": {
                     "type": "boolean"
                   },
+                  "hooks": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean",
+                        "default": false
+                      }
+                    }
+                  },
                   "guidelines": {
                     "type": [
                       "object",
@@ -6480,6 +6523,18 @@
                     "autoClone": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "hooks": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "default": {
+                        "enabled": false
+                      }
                     },
                     "guidelines": {
                       "type": [
@@ -6705,6 +6760,18 @@
                             "type": "boolean",
                             "default": true
                           },
+                          "hooks": {
+                            "type": "object",
+                            "properties": {
+                              "enabled": {
+                                "type": "boolean",
+                                "default": false
+                              }
+                            },
+                            "default": {
+                              "enabled": false
+                            }
+                          },
                           "guidelines": {
                             "type": [
                               "object",
@@ -6800,6 +6867,15 @@
                   "autoClone": {
                     "type": "boolean"
                   },
+                  "hooks": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean",
+                        "default": false
+                      }
+                    }
+                  },
                   "guidelines": {
                     "type": [
                       "object",
@@ -6876,6 +6952,18 @@
                     "autoClone": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "hooks": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "default": {
+                        "enabled": false
+                      }
                     },
                     "guidelines": {
                       "type": [

@@ -54,4 +54,6 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run tests
+        # evals/ excluded from the root run via bunfig.toml pathIgnorePatterns
+        # (separate bun package with its own deps + CI test step).
         run: bun test --timeout 10000

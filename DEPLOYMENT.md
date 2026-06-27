@@ -182,23 +182,25 @@ docker build -f Dockerfile.worker -t agent-swarm-worker .
 # Or using npm script
 bun run docker:build:worker
 
-# Override the pinned Claude Code version (default: 2.1.170)
+# Override the pinned Claude Code version (default: 2.1.178)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.170`
-- `PI_CODING_AGENT_VERSION=0.79.1`
-- `CODEX_VERSION=0.139.0`
-- `OPENCODE_VERSION=1.16.2`
-- `OPENCODE_SDK_VERSION=1.16.2`
+- `CLAUDE_CODE_VERSION=2.1.187`
+- `PI_CODING_AGENT_VERSION=0.80.2`
+- `CODEX_VERSION=0.142.0`
+- `OPENCODE_VERSION=1.17.9`
+- `OPENCODE_SDK_VERSION=1.17.9`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
 The worker image now also ships PostgreSQL 16 server binaries (`initdb`, `pg_ctl`, `psql`, `pg_stat_statements`) for local backend or integration-style test setups. They stay dormant unless you opt in with `SWARM_DEP_POSTGRES_ENABLED=true`, which runs [`scripts/init-local-postgres.sh`](./scripts/init-local-postgres.sh) from the entrypoint. The helper defaults to `localhost:5433` and can be tuned with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB`.
 
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
+
+Workers also ship a best-effort `install-repo-hooks.sh` helper at `/usr/local/bin/install-repo-hooks.sh`. When a repo is registered with `hooks: { enabled: true }`, the runner invokes that helper after cloning or refreshing the repo so repository-local git hooks can be bootstrapped automatically inside the worker checkout.
 
 ### Run
 
@@ -478,7 +480,7 @@ Codex workers support three auth paths:
 
 1. `OPENAI_API_KEY`
 2. Pre-seeded `~/.codex/auth.json`
-3. ChatGPT OAuth stored in the swarm config store as `codex_oauth`
+3. ChatGPT OAuth stored in the swarm config store as pooled `codex_oauth_<slot>` entries
 
 For Docker Compose deployments, the ChatGPT OAuth flow happens on your laptop, not inside the worker container:
 
@@ -486,7 +488,7 @@ For Docker Compose deployments, the ChatGPT OAuth flow happens on your laptop, n
 bun run src/cli.tsx codex-login --api-url https://your-swarm.example.com --api-key <api-key>
 ```
 
-That command completes the browser OAuth flow locally and stores the credential in the swarm API config store. Then restart codex workers. On boot, `docker-entrypoint.sh` fetches `codex_oauth` from the API and writes `/home/worker/.codex/auth.json` automatically.
+That command completes the browser OAuth flow locally and stores the credential in the swarm API config store. The default behavior picks the next free pool slot (`codex_oauth_0`, `codex_oauth_1`, ...), and you can pin a specific slot with `--slot <n>` for any integer from `0` through `100`. Then restart codex workers. On boot, `docker-entrypoint.sh` enumerates the stored `codex_oauth_<slot>` entries from the API and writes the selected credential to `/home/worker/.codex/auth.json` automatically.
 
 Worker requirements for this path:
 

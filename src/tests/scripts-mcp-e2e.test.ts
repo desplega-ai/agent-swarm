@@ -330,7 +330,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     const tools = buildToolServer();
     const source = `
       import type { ScriptContext, SwarmSdk } from "swarm-sdk";
-      const compileOnly = (swarm: SwarmSdk) => swarm.memory_search({ query: "foo" });
+      const compileOnly = (swarm: SwarmSdk) => swarm.memory_search({ query: "foo", intent: "test" });
       export default async (_args: unknown, ctx: ScriptContext) => {
         void compileOnly;
         return { hasMemorySearch: typeof ctx.swarm.memory_search === "function" };

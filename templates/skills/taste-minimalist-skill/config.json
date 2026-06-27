@@ -1,0 +1,19 @@
+{
+  "kind": "skill",
+  "name": "taste-minimalist-skill",
+  "displayName": "Taste Minimalist Skill",
+  "slug": "taste-minimalist-skill",
+  "title": "Taste Minimalist Skill",
+  "description": "Editorial minimalist page design guidance from tasteskill.dev: warm monochrome, strong typography, restrained surfaces.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": false,
+  "tags": [
+    "pages",
+    "design",
+    "taste-skill"
+  ],
+  "must": false
+}

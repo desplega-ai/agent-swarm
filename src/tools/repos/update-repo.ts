@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { updateSwarmRepo } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { RepoGuidelinesSchema, SwarmRepoSchema } from "@/types";
+import { RepoGuidelinesSchema, RepoHooksSchema, SwarmRepoSchema } from "@/types";
 
 export const registerUpdateRepoTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -20,6 +20,11 @@ export const registerUpdateRepoTool = (server: McpServer) => {
         clonePath: z.string().optional().describe("New clone path."),
         defaultBranch: z.string().optional().describe("New default branch."),
         autoClone: z.boolean().optional().describe("Whether to auto-clone."),
+        hooks: RepoHooksSchema.nullable()
+          .optional()
+          .describe(
+            "Repository hook install config. Set { enabled: true } to opt into best-effort worker hook installation, or null to disable.",
+          ),
         guidelines: RepoGuidelinesSchema.nullable()
           .optional()
           .describe(

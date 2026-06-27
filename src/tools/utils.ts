@@ -21,11 +21,13 @@ export type RequestInfo = {
   sessionId: string | undefined;
   agentId: string | undefined;
   sourceTaskId: string | undefined;
+  contextKey: string | undefined;
 };
 
 export const getRequestInfo = (req: Meta): RequestInfo => {
   const agentIdHeader = req.requestInfo?.headers?.["x-agent-id"];
   const sourceTaskIdHeader = req.requestInfo?.headers?.["x-source-task-id"];
+  const contextKeyHeader = req.requestInfo?.headers?.["x-context-key"];
 
   let agentId: string | undefined;
   if (Array.isArray(agentIdHeader)) {
@@ -41,10 +43,18 @@ export const getRequestInfo = (req: Meta): RequestInfo => {
     sourceTaskId = sourceTaskIdHeader;
   }
 
+  let contextKey: string | undefined;
+  if (Array.isArray(contextKeyHeader)) {
+    contextKey = contextKeyHeader?.[0];
+  } else if (typeof contextKeyHeader === "string") {
+    contextKey = contextKeyHeader;
+  }
+
   return {
     sessionId: req.sessionId || undefined,
     agentId,
     sourceTaskId,
+    contextKey,
   };
 };
 

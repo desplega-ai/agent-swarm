@@ -34,6 +34,42 @@ export const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
 export const TOOLS_MD_PATH = "/workspace/TOOLS.md";
 export const HEARTBEAT_MD_PATH = "/workspace/HEARTBEAT.md";
 export const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
+
+// ──────────────────────────────────────────────────────────────────────────
+// Identity-file baseline hashes — prevents session-end sync from clobbering
+// DB-side edits made by Lead (via update-profile) during a running session.
+//
+// Flow:
+//   1. Runner writes DB content → /workspace/*.md at session start.
+//   2. Runner records SHA-256 hashes of the written content (the "baselines").
+//   3. At session end, sync compares current file hash against its baseline.
+//      - Hash matches → file untouched by the agent → skip sync (preserves
+//        any DB-side edits Lead made during the session).
+//      - Hash differs → agent modified the file → sync it back to DB.
+// ──────────────────────────────────────────────────────────────────────────
+export const IDENTITY_BASELINES_PATH = "/tmp/identity-baselines.json";
+
+export type IdentityBaselines = Record<string, string>;
+
+export function contentSha256(content: string): string {
+  return new Bun.CryptoHasher("sha256").update(content).digest("hex");
+}
+
+export async function writeIdentityBaselines(baselines: IdentityBaselines): Promise<void> {
+  await Bun.write(IDENTITY_BASELINES_PATH, JSON.stringify(baselines));
+}
+
+export async function readIdentityBaselines(
+  readFile: FileReader = readFileIfExists,
+): Promise<IdentityBaselines | null> {
+  try {
+    const raw = await readFile(IDENTITY_BASELINES_PATH);
+    if (!raw) return null;
+    return JSON.parse(raw) as IdentityBaselines;
+  } catch {
+    return null;
+  }
+}
 /**
  * Claude Code's personal-file CLAUDE.md path. This is what the Claude plugin
  * Stop hook reads and owns — the runner only uses it as a backstop for an
@@ -135,18 +171,27 @@ export function extractSetupScriptContent(raw: string): string | null {
  * the trim / max-length guards and the SOUL/IDENTITY min-length guard. Returns
  * an empty object when nothing is syncable (callers should skip the POST).
  * `undefined` inputs mean the file was absent.
+ *
+ * When `baselines` is provided, skips any field whose content hash matches the
+ * baseline (i.e. the file was not modified during the session). This prevents
+ * session-end sync from clobbering DB-side edits made by Lead.
  */
-export function buildIdentityPayload(files: {
-  soulMd?: string;
-  identityMd?: string;
-  toolsMd?: string;
-  heartbeatMd?: string;
-}): Record<string, string> {
+export function buildIdentityPayload(
+  files: {
+    soulMd?: string;
+    identityMd?: string;
+    toolsMd?: string;
+    heartbeatMd?: string;
+  },
+  baselines?: IdentityBaselines | null,
+): Record<string, string> {
   const updates: Record<string, string> = {};
 
   if (files.soulMd !== undefined) {
     const content = files.soulMd;
-    if (content.trim() && content.length <= MAX_FILE_LENGTH) {
+    if (baselines?.soulMd && contentSha256(content) === baselines.soulMd) {
+      // File unchanged during session — skip to preserve Lead's DB edits
+    } else if (content.trim() && content.length <= MAX_FILE_LENGTH) {
       if (content.length < IDENTITY_FILE_MIN_LENGTH) {
         console.error(
           `[profile-sync] Skipping SOUL.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
@@ -159,7 +204,9 @@ export function buildIdentityPayload(files: {
 
   if (files.identityMd !== undefined) {
     const content = files.identityMd;
-    if (content.trim() && content.length <= MAX_FILE_LENGTH) {
+    if (baselines?.identityMd && contentSha256(content) === baselines.identityMd) {
+      // File unchanged during session — skip to preserve Lead's DB edits
+    } else if (content.trim() && content.length <= MAX_FILE_LENGTH) {
       if (content.length < IDENTITY_FILE_MIN_LENGTH) {
         console.error(
           `[profile-sync] Skipping IDENTITY.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
@@ -172,14 +219,18 @@ export function buildIdentityPayload(files: {
 
   if (files.toolsMd !== undefined) {
     const content = files.toolsMd;
-    if (content.trim() && content.length <= MAX_FILE_LENGTH) {
+    if (baselines?.toolsMd && contentSha256(content) === baselines.toolsMd) {
+      // File unchanged during session — skip
+    } else if (content.trim() && content.length <= MAX_FILE_LENGTH) {
       updates.toolsMd = content;
     }
   }
 
   if (files.heartbeatMd !== undefined) {
     const content = files.heartbeatMd;
-    if (content.length <= MAX_FILE_LENGTH) {
+    if (baselines?.heartbeatMd && contentSha256(content) === baselines.heartbeatMd) {
+      // File unchanged during session — skip
+    } else if (content.length <= MAX_FILE_LENGTH) {
       updates.heartbeatMd = content;
     }
   }
@@ -205,6 +256,12 @@ async function readFileIfExists(path: string): Promise<string | undefined> {
  * Collect the profile-update POST bodies to send. Each entry is one POST.
  * `fields` selects which groups to include. The file reader is injectable so
  * the field-selection / guard logic can be unit-tested without touching the FS.
+ *
+ * When `changeSource` is `"session_sync"`, loads baseline hashes written at
+ * session start and skips identity fields whose content hasn't changed — this
+ * prevents blind-overwriting DB-side edits made by Lead during the session.
+ * On-edit syncs (`"self_edit"`) bypass baselines entirely since the agent
+ * explicitly changed the file and the new content should propagate.
  */
 export async function collectProfilePayloads(
   fields: ProfileSyncField[],
@@ -214,13 +271,18 @@ export async function collectProfilePayloads(
 ): Promise<ProfilePayload[]> {
   const payloads: ProfilePayload[] = [];
 
+  const baselines = changeSource === "session_sync" ? await readIdentityBaselines(readFile) : null;
+
   if (fields.includes("identity")) {
-    const updates = buildIdentityPayload({
-      soulMd: await readFile(SOUL_MD_PATH),
-      identityMd: await readFile(IDENTITY_MD_PATH),
-      toolsMd: await readFile(TOOLS_MD_PATH),
-      heartbeatMd: await readFile(HEARTBEAT_MD_PATH),
-    });
+    const updates = buildIdentityPayload(
+      {
+        soulMd: await readFile(SOUL_MD_PATH),
+        identityMd: await readFile(IDENTITY_MD_PATH),
+        toolsMd: await readFile(TOOLS_MD_PATH),
+        heartbeatMd: await readFile(HEARTBEAT_MD_PATH),
+      },
+      baselines,
+    );
     if (Object.keys(updates).length > 0) {
       payloads.push({ label: "identity", body: { ...updates, changeSource } });
     }
@@ -229,7 +291,11 @@ export async function collectProfilePayloads(
   if (fields.includes("claude")) {
     const raw = await readFile(claudeMdPath);
     if (raw?.trim() && raw.length <= MAX_FILE_LENGTH) {
-      payloads.push({ label: "claude", body: { claudeMd: raw, changeSource } });
+      if (baselines?.claudeMd && contentSha256(raw) === baselines.claudeMd) {
+        // CLAUDE.md unchanged during session — skip to preserve Lead's DB edits
+      } else {
+        payloads.push({ label: "claude", body: { claudeMd: raw, changeSource } });
+      }
     }
   }
 

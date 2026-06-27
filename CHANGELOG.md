@@ -6,6 +6,93 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.103.0] - 2026-06-27
+
+### Added
+- **Workers can now opt into per-repo git-hook bootstrap** (#828) — repo records accept `hooks: { enabled: true }`, the worker image bundles `install-repo-hooks.sh`, and runners invoke it after clone/refresh so repository-local hooks can be installed automatically.
+- **Telemetry now covers deeper runtime lifecycle signals** (#826) — workers and schedulers emit session-cost, compaction, workflow, schedule, and provider-session completion/failure events in addition to the existing task lifecycle baseline.
+- **A Code Health Reports community template now ships with the repo** (#823) — operators get a seeded community-report template out of the box instead of having to author the first version from scratch.
+
+### Fixed
+- **Runner startup no longer risks a `runningTask` TDZ during `session_init`** (#827) — provider sessions can initialize without tripping an internal runner crash during early event handling.
+- **Provider stderr now persists in streamed session logs** (#824) — raw stderr events are buffered and flushed alongside normal provider log lines so debugging data is retained in task/session logs.
+- **Codex edit bursts no longer trip false-positive loop detection as easily** (#821) — low-cardinality `Edit`/`Write`/`Delete` file-change batches now require a higher repeat threshold before the hook blocks the session.
+- **Auto-cloned repos now hard-sync clean default branches before task execution** (#825) — worker checkouts recover more reliably from stale local branch state when reusing clean auto-cloned repositories.
+
+## [1.102.0] - 2026-06-26
+
+### Added
+- **Scripts, workflows, and schedules now record canonical user audit attribution** (#810) — create and update flows now populate `created_by` / `updated_by` when a trusted human requester exists, covering MCP and HTTP paths while leaving pure automation writes nullable.
+- **A new `taste-minimalist-skill` now ships in the default page-design seed set** (#816) — page-generation templates now include a reusable minimalist taste baseline plus the bundled license artifact for seeded skills.
+
+### Changed
+- **GitHub Pages docs now ship a first-class landing page and landing-site styling** (#814, #815) — the synced README site now has branded layout/CSS, icons, and a Pages publishing flow that matches the main landing experience more closely.
+
+### Fixed
+- **Audit-user resolution for script/workflow/schedule writes is now server-trusted instead of header-spoofable** (#810) — `X-Source-Task-Id` only contributes a requester when the named task belongs to the calling agent, and authenticated HTTP users take precedence for audit stamping.
+
+## [1.101.1] - 2026-06-25
+
+### Changed
+- **Worker-image harness pins refreshed** (#809) — `Dockerfile.worker` now ships Claude Code `2.1.187`, Codex `0.142.0`, OpenCode `1.17.9`, and pi `0.80.2`, plus the corresponding `pi-ai` `0.80` API migration updates.
+
+### Fixed
+- **Published CLI package now works cleanly through `npx`** (#804) — the npm package now ships a built `dist/cli.js` entrypoint with a Node shebang, so `npx @desplega.ai/agent-swarm ...` runs the same commands without requiring Bun to execute the published bin.
+- **Slack message extraction now keeps all text layers instead of truncating at the first summary** (#807) — `extractSlackMessageText()` now combines top-level text, legacy attachment bodies/fields/actions, and Block Kit content with exact-match dedup, so alert-style Slack threads preserve the real diagnostic payload for agents.
+
+## [1.101.0] - 2026-06-22
+
+### Added
+- **`codex-login` accepts credential slots above 9** (#802) — the slot ceiling (`MAX_SLOT`) was raised from 9 to 31, so operators can register more than 10 Codex OAuth credentials in the sandbox pool. The rest of the stack (storage-key regex, runner enumeration, api-keys endpoint) was already unbounded; this removes the only enforced limit.
+
+### Fixed
+- **`swarm-script` workflow nodes can trigger workflows (and other fall-through MCP tools) again** (#801) — `trigger-workflow` was returning a 403 because `mcp-bridge.ts` checked the MCP tool name against the SDK method-name set. A new `isMcpToolAllowedForScripts()` check matches against MCP names, also unblocking `slack_post`, `page_create`, `schedule_*`, and other previously-403ing tools. A latent arg-name drift (`workflow_trigger` typed as `{ id; input? }` while the tool reads `triggerData`) was fixed and the generated SDK type defs regenerated.
+
+## [1.100.4] - 2026-06-20
+
+### Fixed
+- **`swarm-script` workflow args now preserve exact-token JSON types without leaking cross-scope values** (#798, #799) — `config.args` entries written as a single token such as `{{input.payload}}` now keep native object/array/number/boolean shapes instead of stringifying them, while mixed strings still interpolate as strings and raw token resolution stays scoped to the node's local interpolation context during retries and fan-out.
+
+## [1.100.3] - 2026-06-19
+
+### Added
+- **Memory retrieval rows now carry grouping metadata** (#780) — `memory_retrieval` records now capture a stable `retrievalId` plus per-result rank so downstream raters and analytics can group one search/get fan-out into a coherent retrieval event.
+
+### Changed
+- **Crash-recovery resumes pin to their own agent instead of the role-blind pool** (DES-523) — when the heartbeat detects a crashed worker, the `resume` task is now assigned back to the original (stable-ID) agent and reclaimed when it restarts, instead of being released to the unassigned pool where a wrong-specialization worker could grab it. A pin that is never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default 10 min) is escalated to a Lead-owned `task.reroute.decision` follow-up, which re-delegates the work via `send-task` with an explicit agent (never re-pooled). The crash path no longer touches the unassigned pool. Set `HEARTBEAT_PIN_CRASH_RESUME=0` to restore the previous pool-fallback behavior, or `HEARTBEAT_RESUME_PIN_GRACE_MIN=0` to disable the escalation reaper.
+
+### Fixed
+- **Slack auto-join now preserves the info-failure fallback while still blocking external Slack Connect channels** (#790, #792) — public internal channels still auto-join on demand, but external/shared channels now return an explicit invite-required error and a `conversations.info` failure no longer disables the original join-and-retry fallback.
+- **Assistant-side Slack co-mentions no longer spawn accidental tasks** (#784) — assistant-thread messages that only mention another user are ignored unless they also mention the swarm bot, preventing side conversations from triggering lead work.
+- **GitHub review tasks now include inline review comments instead of dropping body-less reviews** (#788) — submitted PR reviews fetch and append inline comments with file/line context, and large review bundles are paginated so all comments reach the worker task.
+- **Claude Bridge only activates with OAuth and now preserves transcript-backed metrics again** (#789) — `SWARM_USE_CLAUDE_BRIDGE=true` now requires `CLAUDE_CODE_OAUTH_TOKEN` (otherwise the adapter falls back to stock `claude`), and the worker image pins `@desplega.ai/claude-bridge` `0.2.2` so Claude's transcript stays enabled for cost/token/event reconstruction.
+
+## [1.100.0] - 2026-06-17
+
+### Added
+- **Configurable wall-clock timeout for `swarm-script` workflow nodes** (#776) — workflow authors can now set `config.timeoutMs` between 1s and 60s, with schema validation plus runtime enforcement aligned to the scripts-runtime wall-clock budget and CPU-time ceiling.
+
+### Changed
+- **Worker-image harness pins refreshed** (#772) — `Dockerfile.worker` now ships Claude Code `2.1.178`, pi-mono `0.79.4`, Codex CLI / SDK `0.140.0`, and opencode / `@opencode-ai/sdk` `1.17.7`.
+
+### Fixed
+- **OAuth keepalive refresh is awaited during shutdown** (#774) — shutdown now waits for the keepalive refresh path to finish so Jira webhook lifecycle cleanup and related finalization work do not race process exit, and the Slack alert path now requires an explicitly configured channel.
+- **Task lifecycle telemetry emits the missing transition events again** (#773) — lifecycle updates now record the missing telemetry edge so downstream observability and reporting stay aligned with real task state changes.
+
+## [1.99.0] - 2026-06-15
+
+### Added
+- **Memory recall-edge capture layer (Phase 1)** (#767) — `memory-search` and `memory-get` now require an explicit `intent`, retrieval events are recorded for both search and get flows, and the memory subsystem can resolve typed links to external artifacts such as GitHub PRs and agent-fs paths.
+- **E2B-backed eval harness sub-project** (#737) — the new `evals/` package runs scenario × harness-config matrices against real swarm stacks, stores results in a Turso-backed libsql replica, captures transcripts and artifacts, and grades attempts with deterministic checks plus optional LLM or agentic judges.
+
+## [1.98.1] - 2026-06-14
+
+### Changed
+- **Worker image now pins opencode CLI and SDK `1.17.4`** (#761) — the default worker build picks up the upstream opencode fixes for tool-result passthrough, better session recovery after context overflow, MCP abort handling, and clearer surfacing of content-filtered responses.
+
+### Fixed
+- **Session-end profile sync no longer overwrites lead-side profile edits** (#763) — local-harness sessions now record baseline hashes for `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `HEARTBEAT.md`, and `CLAUDE.md` at start-up, then skip unchanged files during the final FS → DB sync so `update-profile` changes made by the lead survive until the agent actually edits those files.
+
 ## [1.96.0] - 2026-06-12
 
 ### Added

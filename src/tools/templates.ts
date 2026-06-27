@@ -160,3 +160,64 @@ Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
   ],
   category: "task_lifecycle",
 });
+
+// ============================================================================
+// Reroute-decision follow-up (Lead-routed crash-recovery, DES-523)
+//
+// Created by the heartbeat's stale-resume reaper when a crash-recovery resume
+// was pinned to its original agent but never reclaimed within the grace window
+// (the agent that looked recoverable never returned). Hands the Lead a DECISION
+// task — not the raw work — telling it to re-delegate via `send-task` with an
+// EXPLICIT agentId. The crashed agent's identity is provided as routing context
+// only; the Lead picks who takes over. This work never falls back to the pool.
+// ============================================================================
+
+registerTemplate({
+  eventType: "task.reroute.decision",
+  header: "",
+  defaultBody: `Reroute decision: a crashed worker's task needs a new owner.
+
+Crashed agent: {{original_agent_name}}
+Identity / specialization: {{original_agent_identity}}
+Original task ID: {{original_task_id}}
+Trigger: {{reason}}
+Task: "{{task_desc}}"
+
+Resume generation: {{generation_next}} of {{max_generations}} (max).{{artifacts_block}}
+
+## Your job
+
+The worker that was handling this task crashed and did not come back within the grace window, so its pinned resume was never reclaimed. Pick an agent to take this work over and RE-DELEGATE it — do NOT execute it yourself, and do NOT leave routing to the default.
+
+Use the crashed agent's identity above as context for who was on it and what kind of work it is. You may re-delegate to the same kind of agent, a peer, or whoever you judge appropriate — the choice is yours, but you MUST choose explicitly.
+
+Dispatch via \`send-task\` with ALL of:
+- an explicit \`agentId\` (the chosen worker) — REQUIRED. If you omit it, \`send-task\` auto-routes to the original task's agent, which is the dead worker, and the work re-strands.
+- \`taskType: "resume"\`
+- the tag \`resume-generation:{{generation_next}}\`
+- \`parentTaskId: {{original_task_id}}\`
+- do NOT inherit the original task's \`model\` (the new worker runs on its own).
+
+This work will NOT fall back to the unassigned pool — you are the only re-delegation path.`,
+  variables: [
+    { name: "original_agent_name", description: "Name or ID prefix of the crashed agent" },
+    {
+      name: "original_agent_identity",
+      description:
+        "Identity/specialization slice of the crashed agent (from identityMd), or a placeholder when none is recorded",
+    },
+    { name: "original_task_id", description: "ID of the superseded original task" },
+    { name: "reason", description: "Reroute trigger reason (e.g. crash_recovery)" },
+    { name: "task_desc", description: "Original task description (truncated to 200 chars)" },
+    {
+      name: "generation_next",
+      description: "Next resume generation number (must be set on the dispatched resume)",
+    },
+    { name: "max_generations", description: "Maximum resume generations before budget exhaustion" },
+    {
+      name: "artifacts_block",
+      description: "Formatted attachment list from the original task, or empty string",
+    },
+  ],
+  category: "task_lifecycle",
+});

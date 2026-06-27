@@ -1,0 +1,248 @@
+---
+title: Code Health
+description: Run recurring Code Maat + D3.js code-health reports for any Git repository. The swarm installs the runner, refreshes the report weekly by default, and updates one stable Page URL in place.
+---
+
+<JsonLd
+  data={{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "Run recurring Code Maat and D3 code-health reports with an agent swarm",
+    description:
+      "How to bootstrap a recurring Code Maat + D3.js report for any Git repository, publish it as a stable Page, and refresh it on a weekly schedule.",
+    step: [
+      { "@type": "HowToStep", name: "Choose repository and scope", text: "Pick a repo URL, branch, report slug, and path scope such as src or packages/core/src." },
+      { "@type": "HowToStep", name: "Install the community template", text: "Copy run.sh, report.mjs, and lead-prompt.md from templates/community/code-health-reports into a workspace outside the target repository." },
+      { "@type": "HowToStep", name: "Run once manually", text: "The runner installs Java, Node, Lizard, and the Code Maat standalone JAR when missing, then generates CSV metrics and a static D3 report." },
+      { "@type": "HowToStep", name: "Publish a stable report Page", text: "Create the Page once from latest.html, save the Page ID, and update that same Page on every refresh." },
+      { "@type": "HowToStep", name: "Schedule weekly refreshes", text: "Use the weekly-code-health-reports schedule template. The default cron is 0 21 * * 0 in UTC." }
+    ]
+  }}
+/>
+
+This is the Code Health home for recurring repository analysis. The main flow is the **reports-on-autopilot** path for Code Maat + D3.js; the alerting-specific playbook is now focused on [Observability Alert Management](/docs/playbooks/code-health-alert-management).
+
+<Mermaid chart={`flowchart LR
+  LP["Lead prompt<br/>repo + branch + scope"] --> WR["Worker workspace<br/>/workspace/code-maat"]
+  WR --> CM["Code Maat<br/>history CSVs"]
+  WR --> LZ["Lizard<br/>complexity CSV"]
+  CM --> RP["report.mjs<br/>join + score"]
+  LZ --> RP
+  RP --> PG["Stable Page<br/>D3 report"]
+  SCH["Cron<br/>0 21 * * 0"] --> WR
+  SCH --> PG
+`} />
+
+## What it does
+
+The swarm creates a stable code-health report page for one repository:
+
+- **Hotspots** — files with high change frequency and complexity.
+- **Temporal coupling** — files that tend to change together.
+- **Code age** — how recently scoped files changed.
+- **Ownership** — who has historically contributed the most to each file.
+- **Weekly refresh** — the same Page URL updates in place, so links remain stable.
+
+The first run installs or downloads what it needs. You do not pre-install Code Maat or D3.
+
+## Agents
+
+- **[Lead](https://templates.agent-swarm.dev/official/lead)** — collects the repository URL, branch, path scope, report slug, cadence, and stable Page behavior; creates or configures the weekly schedule.
+- **[Coder](https://templates.agent-swarm.dev/official/coder)** — installs the runner, runs the first report, fixes local runner/report-generator issues, and updates the stable Page.
+- **[Reviewer](https://templates.agent-swarm.dev/official/reviewer)** — optional, used when a runner change needs a PR before the scheduled job can keep running cleanly.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **[Pages](/docs/concepts)** — hosts the generated static report HTML at a stable URL.
+- **`store-progress`** — records the stable Page URL, analyzed commit, report workspace, and any dependency/chart-rendering issue.
+- **`slack-reply`** — posts the report URL and weekly-refresh status back to the requesting thread.
+
+### Community template
+
+- **[`templates/community/code-health-reports`](https://github.com/desplega-ai/agent-swarm/tree/main/templates/community/code-health-reports)** — the reusable package with:
+  - `PLAYBOOK.md` — the full drop-in playbook.
+  - `run.sh` — parameterized runner.
+  - `report.mjs` — static report generator.
+  - `lead-prompt.md` — copy-paste kickoff prompt for a Lead agent.
+
+### Third-party tools
+
+- **[Code Maat](https://github.com/adamtornhill/code-maat)** — Adam Tornhill's command-line tool for mining version-control history.
+- **[D3.js](https://d3js.org)** — browser-side charts. Generated reports load D3 v7 from jsDelivr at render time; there is no front-end build step.
+- **[Lizard](https://github.com/terryyin/lizard)** — cyclomatic complexity analyzer used to add a complexity axis to history metrics.
+- **Java runtime** — required by the Code Maat standalone Clojure JAR.
+
+## Workflows / Schedules
+
+- **[`weekly-code-health-reports`](https://templates.agent-swarm.dev/schedules/weekly-code-health-reports)** — weekly by default. Installs or updates the runner workspace, executes the Code Maat + Lizard analysis, generates `latest.html` and `latest.json`, updates the same stable Page ID, then verifies the D3 charts render.
+
+<Callout type="info">
+Small static-scan companion: `weekly-code-health` runs knip + desloppify and routes the top concerns into focused follow-up work.
+</Callout>
+
+Default cadence:
+
+```yaml
+cron: "0 21 * * 0"
+timezone: "UTC"
+```
+
+That means weekly on Sunday at 21:00 UTC. Change the `cron` field to adjust the refresh time, and change `timezone` if you want the cron interpreted in another zone:
+
+```yaml
+# Every Monday at 09:00 Europe/Madrid
+cron: "0 9 * * 1"
+timezone: "Europe/Madrid"
+```
+
+The cadence is separate from page identity. Changing the cron only changes when the report refreshes. Keep updating the same stable Page ID in place.
+
+## Template install shape
+
+Use a workspace outside the target repository so report artifacts and downloaded tools do not pollute the codebase:
+
+```bash
+mkdir -p /workspace/code-maat
+cp templates/community/code-health-reports/run.sh /workspace/code-maat/
+cp templates/community/code-health-reports/report.mjs /workspace/code-maat/
+cp templates/community/code-health-reports/lead-prompt.md /workspace/code-maat/
+chmod +x /workspace/code-maat/run.sh
+```
+
+Parameterize each run with environment variables:
+
+```bash
+BASE_DIR=/workspace/code-maat \
+REPO_NAME=my-repo \
+REPO_URL=https://github.com/OWNER/REPO.git \
+BRANCH=main \
+SCOPE_PATH=src \
+bash /workspace/code-maat/run.sh
+```
+
+The runner creates this shape:
+
+```text
+/workspace/code-maat/
+  run.sh
+  report.mjs
+  lead-prompt.md
+  code-maat.jar
+  repos/
+    <repo-name>/
+  out/
+    <repo-name>/
+      <YYYY-MM-DD>/
+        revisions.csv
+        coupling.csv
+        age.csv
+        authors.csv
+        entity-ownership.csv
+        main-dev.csv
+        abs-churn.csv
+        entity-churn.csv
+        lizard-functions.csv
+        summary.json
+        report.html
+      latest.json
+      latest.html
+      latest-pointer.json
+```
+
+## Runner behavior
+
+`run.sh` does the following:
+
+- Installs `default-jre-headless` if `java` is missing.
+- Installs `nodejs` if `node` is missing.
+- Installs Python and `lizard` if Lizard is missing.
+- Downloads Code Maat v1.0.4 standalone JAR into `BASE_DIR` if missing.
+- Clones the target repository into a scratch directory.
+- Disables the scratch clone push URL so the scheduled job cannot push accidentally.
+- Generates Code Maat CSVs and a Lizard CSV.
+- Runs `report.mjs`.
+- Copies the latest artifacts to stable `latest.html`, `latest.json`, and `latest-pointer.json` paths.
+
+It generates the git log with:
+
+```bash
+git -C "$REPO_DIR" log --all --numstat --date=short --pretty=format:'--%h--%ad--%aN' --no-renames -- "$SCOPE_PATH"
+```
+
+It runs these Code Maat analyses:
+
+```text
+summary
+revisions
+coupling
+age
+authors
+entity-ownership
+entity-effort
+main-dev
+main-dev-by-revs
+abs-churn
+author-churn
+entity-churn
+```
+
+Then it runs Lizard over the scoped path and writes the static D3 report.
+
+## Report generator
+
+`report.mjs` parses the Code Maat and Lizard CSVs, joins historical metrics to current file LOC, computes a hotspot score, and embeds the final data in a static HTML file.
+
+The generator interface:
+
+```bash
+node /workspace/code-maat/report.mjs \
+  /workspace/code-maat/out/<repo-name>/<YYYY-MM-DD> \
+  /workspace/code-maat/repos/<repo-name> \
+  <repo-name> \
+  <YYYY-MM-DD> \
+  <SCOPE_PATH>
+```
+
+The default hotspot score is:
+
+```text
+risk score = revisions * log2(total cyclomatic complexity + 1)
+```
+
+The generated report includes:
+
+- Hotspot bubble chart.
+- Change-frequency x complexity scatter.
+- Top hotspot table.
+- Temporal coupling table.
+- Code age distribution.
+- D3 v7 loaded from CDN at view time.
+
+## Patterns used
+
+- [**No-op When Nothing Changed**](/docs/playbooks/patterns/no-op-workflows) — keep the schedule quiet if a run determines there is no meaningful new report to publish.
+- [**HITL Gates**](/docs/playbooks/patterns/hitl-gates) — use a human approval gate before widening scope, changing cadence, or turning report findings into repair PRs.
+
+## Tips for new swarm users
+
+- **Start with `src`.** It avoids docs, package metadata, generated files, and examples. For monorepos, use a narrower scope such as `apps/web/src` or `packages/core/src`.
+- **Keep the workspace outside the target repo.** `/workspace/code-maat` keeps reports and downloaded tools out of commits.
+- **Save the Page ID immediately.** The value of this report is the stable URL. Create once, then update in place.
+- **Use a code-capable worker.** Scheduled jobs sometimes need to repair the runner when upstream dependencies, branch names, or page APIs change.
+- **Treat the report as a map, not a verdict.** Hotspots identify where to inspect first; they do not automatically mean a file is bad.
+- **Do not vendor Code Maat casually.** This template downloads it at runtime so adopters avoid accidentally redistributing a GPLv3 JAR in their own bundle.
+
+## References
+
+- [D3.js](https://d3js.org): JavaScript library used for the browser-side charts.
+- [D3 getting started](https://d3js.org/getting-started): D3 documentation for loading and using the library.
+- [Code Maat](https://github.com/adamtornhill/code-maat): Adam Tornhill's version-control mining tool used for revisions, coupling, age, and ownership metrics.
+- [Code Maat analyses API index](https://cljdoc.org/d/code-maat/code-maat/1.0.1/api/code-maat.analysis): reference list for Code Maat analyses.
+- [Code Maat distribution notes](https://adamtornhill.com/code/maatdistro.htm): upstream distribution page for standalone Code Maat usage.
+- [Adam Tornhill](https://www.adamtornhill.com): creator of Code Maat and author of the behavioral-code-analysis framing used here.
+- [Your Code as a Crime Scene](https://pragprog.com/titles/atcrime/your-code-as-a-crime-scene/): Adam Tornhill's book on hotspots, temporal coupling, code age, and social code analysis.
+- [Maat D3 scripts](https://github.com/adamtornhill/maat-scripts): Adam Tornhill's D3 visualization scripts for Code Maat data, including the canonical enclosure diagram lineage.
+- [Lizard](https://github.com/terryyin/lizard): complexity analyzer used here to add per-file cyclomatic complexity.
+- [Code Maat GPLv3 license](https://github.com/adamtornhill/code-maat): Code Maat is GPLv3. This template does not vendor or redistribute Code Maat. It downloads the upstream standalone JAR at runtime on first run. If you choose to distribute the JAR yourself, follow GPLv3 distribution obligations, including source and license notice requirements.

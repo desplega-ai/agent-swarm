@@ -1,0 +1,1329 @@
+/* Run details page — page-specific classes only; shared ones live in styles.css. */
+
+/* Fixed header (item 17): the meta panel sticks just below the ~43px app header. */
+.rd-top {
+  position: sticky;
+  top: 42px;
+  z-index: 10;
+}
+
+.rd-top .meta-grid {
+  margin-top: 10px;
+}
+
+.rd-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rd-back {
+  color: var(--dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.rd-back:hover {
+  color: var(--text);
+}
+
+.rd-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.rd-spacer {
+  flex: 1;
+}
+
+.rd-load-error {
+  color: var(--red);
+  font-size: 12.5px;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.rd-body {
+  margin-top: 16px;
+}
+
+/* Left and right columns scroll independently below the fixed header (item 17).
+   v7.6 §B1 advisory: --rd-top-h is the MEASURED .rd-top height (ResizeObserver
+   in RunDetailsPage sets it on .rd-body) — the columns always fit the viewport
+   below the sticky header, so the right-panel sticky stack stays in view even
+   when .rd-top outgrows the old fixed-240px assumption (cell band, errors).
+   42px app header + 16px .rd-body margin + 16px bottom gap = 74px; the 166px
+   fallback reproduces the historical 240px before the first measurement. */
+.rd-body > .scroll-col,
+.rd-body > .rd-right {
+  --scroll-col-max: calc(100vh - 74px - var(--rd-top-h, 166px));
+}
+
+/* Item 5 (v4 §8): the tab bar lives OUTSIDE the scroll container, pinned at the
+   very top of the right pane. The pane itself never scrolls (overflow hidden);
+   only .rd-tab-content does — scrolled content can never bleed above the tabs.
+   v7.6 §B1: position + z-index make the pane its own stacking context, so the
+   transcript stickybar's raised z-index (transcript.css) stays contained and
+   can never paint above the page-level .rd-top sticky header (z-index 10). */
+.rd-right {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: var(--scroll-col-max);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rd-right > .tabs {
+  flex: none;
+  margin-bottom: 0;
+  background: var(--panel);
+}
+
+/* v7.6 §B1: NO padding-top here — a padded scroll container would hold the
+   transcript stickybar 10px below the scrollport top (sticky can't leave its
+   containing block), leaving a transparent strip where scrolled rows bleed
+   through. The 10px tabs↔content gap moved into .transcript / .rd-tab-pad. */
+.rd-tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Restores the tabs↔content spacing for the non-transcript tabs (the
+   transcript carries its own — see .transcript in transcript.css). */
+.rd-tab-pad {
+  padding-top: 10px;
+}
+
+/* Checks-tab label (item 11): one ✶ per judge, colored by verdict. */
+.rd-tab-judges {
+  margin-left: 5px;
+  letter-spacing: 2px;
+}
+
+/* Checks-tab tri-state icon (v7.7 item 9): ✓ all pass / ✗ any fail / ! pending. */
+.rd-tab-checkstate {
+  margin-right: 5px;
+}
+
+.rd-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.rd-matrix-wrap {
+  overflow-x: auto;
+}
+
+.rd-stage {
+  padding: 6px 0;
+  color: var(--dim);
+}
+
+/* ---- attempt picker ---- */
+
+.rd-attempt-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.rd-att-btn {
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rd-att-btn.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rd-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--dim);
+}
+
+.rd-dot.green {
+  background: var(--green);
+}
+
+.rd-dot.red {
+  background: var(--red);
+}
+
+.rd-dot.accent {
+  background: var(--accent);
+}
+
+.rd-dot.neutral {
+  background: var(--text);
+}
+
+/* ---- cell summary band (v7 §2.2 — rendered only when attemptsPerCell > 1) ---- */
+
+.rd-cellsum {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.rd-cellsum-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.rd-cellsum-toggle:hover {
+  color: var(--accent);
+}
+
+.rd-cellsum-table {
+  margin-top: 6px;
+  max-height: 230px;
+  overflow-y: auto;
+}
+
+.rd-cellsum-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.6fr) repeat(6, minmax(62px, 1fr));
+  gap: 8px;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.rd-cellsum-row > span:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+a.rd-cellsum-row:hover {
+  background: var(--panel-2);
+}
+
+.rd-cellsum-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.rd-cellsum-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- attempt summary ---- */
+
+.rd-attempt-id {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.rd-tasks {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Item 1 (fallback chips): long task ids truncate instead of overflowing. */
+.rd-tasks > .chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- left-panel task rows (v7.5 items 1/2/5/6) ---- */
+
+.rd-taskrows {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.rd-taskrows-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+
+/* Seed segregation: the toggle that reveals the scenario's seeded reference-data
+   tasks (kept out of the way — they are not run activity). */
+.rd-taskrows-seed-toggle {
+  align-self: flex-start;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--dim);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.rd-taskrows-seed-toggle:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.rd-taskrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.rd-taskrow:hover {
+  background: var(--panel-2);
+}
+
+.rd-taskrow-glyph {
+  flex: none;
+  min-width: 14px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: default;
+}
+
+/* The label's Tooltip wrapper is the flex child — it must be shrinkable
+   (min-width: 0) for the button's ellipsis to engage (item 1). */
+.rd-taskrow > .tooltip.block {
+  flex: 1;
+  min-width: 0;
+}
+
+.rd-taskrow-label {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rd-taskrow-label:hover {
+  color: var(--accent);
+}
+
+.rd-taskrow.skipped .rd-taskrow-label {
+  color: var(--dim);
+}
+
+.rd-taskrow-title {
+  color: var(--dim);
+}
+
+/* Item 5: dependency indicator — distinct (orange) on cascade-skipped rows. */
+.rd-taskrow-dep {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+  cursor: default;
+}
+
+.rd-taskrow.skipped .rd-taskrow-dep {
+  color: var(--orange);
+}
+
+/* Item 6: per-task cost ("—" when null). */
+.rd-taskrow-cost {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.rd-taskrow-cost.dim {
+  color: var(--dim);
+}
+
+/* v7.6 §B2: per-task token total — compact like the cost, breakdown on hover
+   (mirrors the attempt Tokens row); dim "—" when not captured (live source). */
+.rd-taskrow-tokens {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--dim);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.rd-taskrow-tokens.dim {
+  color: var(--dim);
+  opacity: 0.6;
+}
+
+.rd-taskrow-toggle {
+  flex: none;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font: inherit;
+  font-size: 10px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.rd-taskrow-toggle:hover {
+  color: var(--text);
+}
+
+/* Round-10 item 2: executing-member chip on a task row (crown for the lead,
+   harness icon, name) — the name ellipsizes via .tm-name (transcript.css);
+   clamped so it never starves the clickable task label. */
+.rd-taskrow-member {
+  flex: none;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 34%;
+}
+
+/* Item 2: expanded outcome/error detail under a task row. */
+.rd-task-detail {
+  margin: 2px 0 6px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* v7.6 §B2: per-block copy affordance — hover-revealed button in the top-right
+   corner of each outcome/error block (copies the FULL stored text). */
+.rd-task-blockwrap {
+  position: relative;
+  min-width: 0;
+}
+
+.rd-task-blockwrap > .rd-task-copy {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.rd-task-blockwrap:hover > .rd-task-copy,
+.rd-task-blockwrap > .rd-task-copy:focus-visible,
+.rd-task-blockwrap > .rd-task-copy.copied {
+  opacity: 1;
+}
+
+.rd-task-copy {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rd-task-copy:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.rd-task-copy.copied {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.rd-task-outcome,
+.rd-task-error,
+.rd-task-skip {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rd-task-outcome {
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.rd-task-error {
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  color: var(--red);
+}
+
+/* Cascade-skipped reads distinctly from a real error (v6 §9 semantics). */
+.rd-task-skip {
+  border: 1px dashed var(--border);
+  color: var(--dim);
+}
+
+/* Clamp + expand — the .sc-clamp pattern under rd- names (scenarios.css is
+   read-only); threshold lives in TASK_CLAMP_MAX_PX (RunDetailsPage.tsx). */
+.rd-clamp {
+  position: relative;
+  max-height: 160px;
+  overflow: hidden;
+}
+
+.rd-clamp.expanded {
+  max-height: none;
+  overflow: visible;
+}
+
+/* bottom fade — only while actually clamped */
+.rd-clamp.clampable:not(.expanded)::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 34px;
+  background: linear-gradient(to bottom, transparent, var(--panel));
+  pointer-events: none;
+}
+
+.rd-clamp-toggle {
+  margin-top: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.rd-clamp-toggle:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.rd-clamp-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.rd-attempt-error {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border-radius: 6px;
+  color: var(--red);
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.rd-not-captured {
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* attempt token totals (v7 §11.2) */
+.rd-tokens {
+  overflow-wrap: anywhere;
+}
+
+.rd-tokens .dim {
+  font-size: 10.5px;
+}
+
+/* ---- timings waterfall (item 7) ---- */
+
+.wf {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 2px;
+}
+
+.wf-axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 72px 4px 132px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.wf-row {
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr) 64px;
+  gap: 8px;
+  align-items: center;
+  padding: 1px 0;
+  border-radius: 4px;
+}
+
+.wf-row:hover {
+  background: var(--panel-2);
+}
+
+.wf-row:hover .wf-bar {
+  filter: brightness(1.3);
+}
+
+.wf-label {
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-row.sub .wf-label {
+  padding-left: 14px;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.wf-row > .tooltip {
+  width: 100%;
+  min-width: 0;
+}
+
+.wf-track {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 14px;
+  background: color-mix(in oklab, var(--border), transparent 55%);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.wf-bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 3px;
+  border-radius: 2px;
+  transition: filter 0.12s ease;
+}
+
+.wf-row.sub .wf-bar {
+  opacity: 0.55;
+}
+
+.wf-na {
+  color: var(--dim);
+  font-style: italic;
+  font-size: 11px;
+}
+
+.wf-dur {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.wf-foot {
+  margin: 6px 0 0 132px;
+  font-size: 11px;
+}
+
+/* live waterfall (item 6): the growing bar pulses — the SINGLE animated element;
+   the duration cell is ticking text (Elapsed), not an animation. */
+.wf-row.live .wf-label {
+  color: var(--accent);
+}
+
+.wf-row.live .wf-dur {
+  color: var(--accent);
+}
+
+/* ---- workers & sandboxes (v7 §10.3 / §12.6) ---- */
+
+/* Member section titles carry agent names — keep them verbatim, not uppercased. */
+.rd-member-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.rd-member-name {
+  font-size: 11.5px;
+  color: var(--text);
+  /* Item 1 audit: free-form agent names must not overflow the left panel. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Round-10 item 2: the badge is AUGMENTED with the crown glyph (inline-flex
+   aligns crown + text); class, text, and Tooltip are all preserved. */
+.rd-member-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 1.6;
+  cursor: default;
+}
+
+.rd-member-template {
+  font-size: 10px;
+  font-weight: 400;
+  cursor: default;
+}
+
+.rd-member-role {
+  font-weight: 400;
+  font-size: 10px;
+}
+
+/* §10.3: agent status at roster-capture time. */
+.rd-member-status {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dim);
+  cursor: default;
+}
+
+/* §12.6: explicit marker when a member overrode the matrix cell's config. */
+.rd-member-override {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--orange);
+  border: 1px dashed color-mix(in srgb, var(--orange) 60%, transparent);
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 1.6;
+  cursor: help;
+}
+
+.rd-member-config {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.rd-member-tokens {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.rd-member-tasks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Item 1: long task ids ellipsize inside the left panel — the portal tooltip
+   carries the full id. (.tooltip already has min-width: 0 / max-width: 100%.) */
+.rd-task-chip {
+  cursor: pointer;
+  color: var(--text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rd-task-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rd-member-caps {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- sandbox ---- */
+
+.rd-copy {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.rd-copy:hover {
+  border-color: var(--accent);
+}
+
+.rd-copy code {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* ---- checks & judgments tab (item 9: expandable table) ---- */
+
+.rd-checks {
+  display: flex;
+  flex-direction: column;
+}
+
+.rd-judgment-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rd-judgment-kind {
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: default;
+}
+
+/* v8.0 OutcomeSpec v2: per-judgment dimension cell + the breakdown summary band */
+.rd-judgment-dim {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rd-judgment-weight {
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.rd-dim-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border-radius: 6px;
+}
+
+.rd-dim-summary-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rd-dim-summary-title {
+  font-weight: 600;
+  font-size: 12px;
+  /* reset the <button> back to the prior <span> look; it now clears the focus */
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.rd-dim-summary-title:hover {
+  text-decoration: underline;
+}
+
+.rd-dim-summary-agg {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  cursor: default;
+}
+
+.rd-dim-summary-focus {
+  font-size: 11px;
+}
+
+.rd-dim-summary-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rd-dim-summary-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 7px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+}
+
+.rd-dim-summary-chip:hover {
+  border-color: var(--accent);
+}
+
+.rd-dim-summary-chip.focused {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
+.rd-dim-summary-chip-name {
+  font-weight: 600;
+}
+
+.rd-dim-summary-chip-weight {
+  color: var(--dim);
+  font-family: var(--font-mono);
+}
+
+.rd-dim-summary-chip-score {
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+/* expanded judgment row: reasoning + full trace + raw toggle */
+.rd-judgment-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px 6px;
+}
+
+.rd-judgment-ms {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.rd-judgment-reason {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.rd-judgment-trace {
+  margin-top: 8px;
+}
+
+.rd-judgment-raw-toggle {
+  margin-top: 6px;
+}
+
+.rd-judgment-raw {
+  margin-top: 6px;
+}
+
+.rd-raw {
+  margin-top: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* ---- judge traces (v3 — step timeline, reasoning prominent) ---- */
+
+.jt {
+  min-width: 0;
+  font-size: 12px;
+}
+
+/* live stream view: each trace is its own card under .rd-checks */
+.jt.jt-card {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border-left: 3px solid var(--dim);
+  border-radius: 0 6px 6px 0;
+}
+
+.jt.jt-running {
+  border-left-color: var(--accent);
+}
+
+.jt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.jt-kind {
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: default;
+}
+
+.jt-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.jt-spacer {
+  flex: 1;
+}
+
+.jt-badge {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--dim);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.jt-error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border-radius: 6px;
+  color: var(--red);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.jt-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.jt-step {
+  min-width: 0;
+  font-size: 12px;
+}
+
+/* reasoning blocks — PROMINENT (accent border, tinted, full-width text) */
+.jt-step.jt-reasoning {
+  border-left: 3px solid var(--accent);
+  background: color-mix(in oklab, var(--accent), transparent 94%);
+  border-radius: 0 6px 6px 0;
+  padding: 7px 10px;
+}
+
+.jt-reasoning-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+}
+
+.jt-step-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 5px;
+  flex-wrap: wrap;
+}
+
+.jt-step-meta .cost-badge {
+  font-size: 10.5px;
+}
+
+/* tool call/result pairs — compact cards */
+.jt-step.jt-tool {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--panel);
+}
+
+.jt-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.jt-tool-glyph {
+  color: var(--dim);
+  line-height: 1;
+  cursor: default;
+}
+
+.jt-tool-name {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.jt-tool-head > .tooltip {
+  flex: 1;
+  min-width: 0;
+}
+
+.jt-args {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.jt-output {
+  margin-top: 4px;
+}
+
+.jt-output-body {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+/* deterministic check rows */
+.jt-step.jt-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 0;
+  min-width: 0;
+}
+
+.jt-check-name {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.jt-check-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+
+/* error steps */
+.jt-step.jt-error-step {
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border-radius: 6px;
+  color: var(--red);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.jt-live-row {
+  padding: 4px 0;
+}
+
+/* ---- logs tab (items 10 + 14) ---- */
+
+.rd-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rd-log-sources {
+  display: flex;
+  gap: 6px;
+}
+
+.rd-log-src {
+  padding: 2px 10px;
+  font-size: 11.5px;
+}
+
+.rd-log-src.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rd-log-body {
+  overflow-y: auto;
+  max-height: calc(100vh - 430px);
+  min-height: 160px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.rd-log-row {
+  display: grid;
+  grid-template-columns: 58px 14px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 1px 0;
+  border-radius: 3px;
+}
+
+.rd-log-row:hover {
+  background: var(--panel-2);
+}
+
+.rd-log-ts {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.rd-log-glyph {
+  text-align: center;
+  color: var(--dim);
+  line-height: 1.5;
+  cursor: default;
+}
+
+.rd-log-glyph.level-warn {
+  color: var(--orange);
+}
+
+.rd-log-glyph.level-error {
+  color: var(--red);
+}
+
+/* one log line — single-line ellipsis, click to expand to pre-wrap */
+.rd-log-msg {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rd-log-msg.expanded {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rd-log-row.level-warn .rd-log-msg {
+  color: var(--orange);
+}
+
+.rd-log-row.level-error .rd-log-msg {
+  color: var(--red);
+}
+
+/* ---- assets tab ---- */
+
+.rd-kind-glyph {
+  font-size: 13px;
+  line-height: 1;
+  cursor: default;
+}
+
+.rd-asset-actions {
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .rd-body {
+    grid-template-columns: 1fr;
+  }
+
+  .rd-body > .scroll-col,
+  .rd-right {
+    max-height: none;
+  }
+
+  .rd-top {
+    position: static;
+  }
+}

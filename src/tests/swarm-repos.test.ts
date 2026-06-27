@@ -47,9 +47,10 @@ describe("Swarm Repos", () => {
       expect(repo.id).toBeDefined();
       expect(repo.url).toBe("https://github.com/desplega-ai/agent-swarm");
       expect(repo.name).toBe("agent-swarm");
-      expect(repo.clonePath).toBe("/workspace/repos/agent-swarm");
+      expect(repo.clonePath).toBe("/workspace/personal/repos/agent-swarm");
       expect(repo.defaultBranch).toBe("main");
       expect(repo.autoClone).toBe(true);
+      expect(repo.hooks).toEqual({ enabled: true });
       expect(repo.createdAt).toBeDefined();
       expect(repo.lastUpdatedAt).toBeDefined();
     });
@@ -61,11 +62,23 @@ describe("Swarm Repos", () => {
         clonePath: "/workspace/custom/other",
         defaultBranch: "develop",
         autoClone: false,
+        hooks: { enabled: true },
       });
 
       expect(repo.clonePath).toBe("/workspace/custom/other");
       expect(repo.defaultBranch).toBe("develop");
       expect(repo.autoClone).toBe(false);
+      expect(repo.hooks).toEqual({ enabled: true });
+    });
+
+    test("should create a repo with explicitly disabled hooks", () => {
+      const repo = createSwarmRepo({
+        url: "https://github.com/desplega-ai/disabled-hooks-repo",
+        name: "disabled-hooks-repo",
+        hooks: { enabled: false },
+      });
+
+      expect(repo.hooks).toEqual({ enabled: false });
     });
 
     test("should list repos", () => {
@@ -122,12 +135,22 @@ describe("Swarm Repos", () => {
       const updated = updateSwarmRepo(repo!.id, {
         defaultBranch: "develop",
         autoClone: false,
+        hooks: { enabled: true },
       });
 
       expect(updated).not.toBeNull();
       expect(updated?.defaultBranch).toBe("develop");
       expect(updated?.autoClone).toBe(false);
+      expect(updated?.hooks).toEqual({ enabled: true });
       expect(updated?.lastUpdatedAt).not.toBe(repo?.lastUpdatedAt);
+    });
+
+    test("should disable hooks by clearing hooks config", () => {
+      const repo = getSwarmRepoByName("agent-swarm");
+      expect(repo?.hooks).toEqual({ enabled: true });
+
+      const updated = updateSwarmRepo(repo!.id, { hooks: null });
+      expect(updated?.hooks).toEqual({ enabled: false });
     });
 
     test("should update repo name and clonePath", () => {
@@ -265,7 +288,7 @@ describe("Swarm Repos", () => {
         createSwarmRepo({
           url: "https://github.com/desplega-ai/unique-url-2",
           name: "unique-name",
-          clonePath: "/workspace/repos/agent-swarm",
+          clonePath: "/workspace/personal/repos/agent-swarm",
         }),
       ).toThrow();
     });

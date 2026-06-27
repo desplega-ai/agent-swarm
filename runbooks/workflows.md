@@ -89,8 +89,11 @@ There are two script-oriented workflow nodes:
 - `pinHash`: optional script content hash. When set, execution uses the matching `script_versions` row instead of the latest live source.
 - `args`: optional JSON object passed to the script as its first argument. Values support normal workflow interpolation.
 - `fsMode`: optional, defaults to `none`. `workspace-rw` is reserved for v2 worker-side execution and fails in v1 with a clear workflow-node error.
+- `timeoutMs`: optional wall-clock timeout in milliseconds. Defaults to `30000` (30s), accepts integers from `1000` through `60000`, and applies both to the workflow step timeout and the scripts-runtime `wallClockMs` resource budget.
 
 Agent-scoped lookup uses the workflow's `createdByAgentId`. If a workflow has no creator, `trigger.agentId` is accepted as a fallback; otherwise only global scripts can be resolved.
+
+`timeoutMs` controls elapsed wall-clock time, not CPU time. The scripts runtime also applies its resource caps: the default wall-clock budget is 30s, and the subprocess has a 60s CPU-time ulimit. Raising `timeoutMs` above 30s gives I/O-bound or waiting scripts more elapsed time, but CPU-bound scripts can still be terminated by the 60s CPU ulimit before the wall-clock timeout fires. The schema caps `timeoutMs` at 60s so workflows cannot request more elapsed time than the current CPU ceiling can coherently support.
 
 Example:
 
@@ -102,6 +105,7 @@ Example:
     scriptName: parse-linear-issue
     args: { issue: "{{issue}}" }
     pinHash: "b7a0..."
+    timeoutMs: 45000
 ```
 
 Downstream nodes read the executor output from the node ID. The script's return value is under `result`, so an `inputs` mapping usually points at `parse.result.someField`.

@@ -113,7 +113,9 @@ export async function handleWebhookTrigger(
   // string so non-JSON webhooks don't break.
   const triggerData = parseTriggerPayload(payload);
 
-  const runId = await startWorkflowExecution(workflow, triggerData, registry);
+  const runId = await startWorkflowExecution(workflow, triggerData, registry, {
+    triggerType: "event",
+  });
   return { runId };
 }
 
@@ -152,7 +154,9 @@ export async function handleScheduleTrigger(
       scheduleName: schedule.name,
       firedAt: new Date().toISOString(),
     };
-    const runId = await startWorkflowExecution(workflow, triggerData, registry);
+    const runId = await startWorkflowExecution(workflow, triggerData, registry, {
+      triggerType: "schedule",
+    });
     runIds.push(runId);
     console.log(
       `[Triggers] Schedule "${schedule.name}" triggered workflow "${workflow.name}" (run: ${runId})`,

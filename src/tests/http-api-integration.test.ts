@@ -1187,6 +1187,10 @@ describe("Repos", () => {
     expect(status).toBe(201);
     expect(body.id).toBeDefined();
     expect(body.name).toBe("test-repo");
+    expect(body.clonePath).toBe("/workspace/personal/repos/test-repo");
+    expect(body.defaultBranch).toBe("main");
+    expect(body.autoClone).toBe(true);
+    expect(body.hooks).toEqual({ enabled: true });
     ids.repo = body.id;
   });
 

@@ -92,6 +92,7 @@ export interface ProviderSessionConfig {
   apiKey: string;
   cwd: string;
   vcsRepo?: string;
+  contextKey?: string;
   /**
    * @deprecated Never set by the runner — native session resume was removed in
    * the 2026-05-28 plan. Adapters log + ignore any stray value. Follow-up
@@ -117,7 +118,7 @@ export interface ProviderSession {
   readonly sessionId: string | undefined;
   onEvent(listener: (event: ProviderEvent) => void): void;
   waitForCompletion(): Promise<ProviderResult>;
-  abort(): Promise<void>;
+  abort(reason?: string): Promise<void>;
 }
 
 /** Result returned when a provider session completes. */
