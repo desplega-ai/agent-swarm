@@ -18,7 +18,7 @@ the full suite green. Update #833's title/body from "Phase 0" → full migration
 | 0 — Bun workspaces + Turbo scaffold | ✅ DONE (commit c074abc4) |
 | 1 — tsconfig bridge + ts-morph codemod + packages.map.json | ✅ DONE (verified: tsc 0, test 5439, docker, lint, turbo) |
 | 2 — Extract L0+L1 leaves | 🔄 DONE (9): types, otel, credentials, prompt-templates, artifacts, core-utils, scripts, e2b-dispatch, ai-pricing (204c11e9). DEFERRED: swarm-templates (touches templates-ui Next app prebuild + folds schema types into @swarm/types — do with app split), api-client (NET-NEW generated from openapi + CI gate — additive, not on critical path) |
-| 3 — Extract L2 (ai-llm [+raters hoist&fold], mcp-tool) | ⬜ |
+| 3 — Extract L2 (ai-llm [+raters hoist&fold], mcp-tool) | ✅ DONE: ai-llm (0391056c, cycle-break #2 — grep be/ empty), mcp-tool (ae35a5b8) |
 | 4 — Extract L3 (harness, storage [+test-preload pivot]) | ⬜ |
 | 5 — Extract L4+L5 (workflows, integrations [slack-first]) | ⬜ |
 | 6 — api-server + apps split + CI/Docker/openapi cutover + createServer side-effect extraction + dependency-cruiser | ⬜ |
@@ -73,8 +73,50 @@ Watch for this in harness/integrations/api-server (likely have similar by-path e
 - `harness-provider.ts` / `provider-metadata.ts` live under `src/utils/` (not `src/providers/`) → credentials.
 - core-utils picked up budget-backoff/pretty-print/request-auth-context/skill-fs-writer/skills-refresh; harness picked up aws-error-classifier/mcp-server-fetcher; storage picked up src/memory/automatic-task-gate.ts — all by importer analysis (in map `notes`).
 
-## Next action
-Phase 2: extract leaves L0+L1, simplest first. Order: types → e2b-dispatch → otel → ai-pricing →
-prompt-templates → credentials → artifacts → core-utils → scripts → swarm-templates → api-client(generated).
-Per package: `bun scripts/codemod-imports.ts --apply --package @swarm/<pkg>`, move src files into
-`packages/<pkg>/src/`, update barrel to local, delete src originals, fix collision errors, run FULL gate, commit.
+## STATE AT CHECKPOINT (2026-06-27): 11 packages extracted + bridge, all on #833, pushed
+Done: bridge(Phase1) + types, otel, credentials, prompt-templates, artifacts, core-utils, scripts,
+e2b-dispatch, ai-pricing (Phase2) + ai-llm, mcp-tool (Phase3). Every commit green: tsc 0 / lint 0 /
+test 5439 / boundaries / both docker images. Remaining: harness, storage (Phase4), workflows,
+integrations (Phase5), api-server + apps split + cutover (Phase6), swarm-templates + api-client (deferred).
+
+## PROVEN per-package recipe (use for every remaining package)
+1. `bun scripts/codemod-imports.ts --apply --package @swarm/<pkg>`  (BEFORE moving — resolves vs live src/)
+2. `bun run lint:fix`  (biome re-sorts imports — REQUIRED or lint fails)
+3. `bun tsc --noEmit` → 0  (consumers resolve via barrel→old src location)
+4. `git mv` source files src/… → packages/<pkg>/src/…  (preserve subdir structure; per packages.map.json)
+5. Repoint barrel packages/<pkg>/index.ts → ./src/… (keep any `export * as <Ns>` namespacing)
+6. rmdir emptied src/ dirs
+7. `bun tsc --noEmit` → 0. Fix: (a) COLLISIONS — a consumer importing a namespaced symbol fails;
+   expose it flat in the barrel (`export { X } from "./src/…"`) or repoint the one consumer. (b)
+   external importers in evals/ (codemod doesn't scope evals/) — repoint by hand to @swarm/<pkg>.
+   (c) barrel must NOT `export *` a module with THROWING top-level side effects (subprocess
+   entrypoints) — drop it from the barrel (scripts lesson).
+8. FULL gate: tsc 0 · lint 0 · `bun test`=5439/0 · db/api-key/audit/sdk checks · (docker periodically).
+9. Commit green: `refactor(monorepo): Phase N — extract @swarm/<pkg> (L#)`. Push periodically.
+
+## ⚠️ Phase 4 = harness + storage — HIGHEST RISK (do with FRESH context, careful)
+- **harness** (L3): the dynamic-import provider factory `src/providers/index.ts` (load-bearing PR#452 — codemod
+  already preserves `import()`, only rewrites the string) + 6 adapters + contract files + `src/claude.ts` +
+  `src/commands/provider-credentials.ts`. Map has the file list. Providers use `.js` imports heavily — codemod
+  now handles `.js`→.ts. Add a smoke test that harness's module graph excludes the 6 adapter SDKs until
+  `createProviderAdapter()` runs.
+- **storage** (L3, LARGEST, the DB owner): move db.ts, migrations/ (+.sql), db-queries/, events/users/audit,
+  task-lifecycle-events.ts, DB memory stores + chunking/embedding/reranker (folds memory-core), seed-pricing.ts
+  WRITER (the pure builder already moved to ai-pricing Phase2 — split seed-pricing.ts now), pricing-refresh.ts,
+  be/scripts/, be/seed-skills, src/pages/ + src/metrics/ (folds swarm-pages), src/utils/page-session.ts.
+  - **THE TEST-PRELOAD PIVOT (plan §10 risk #2 — the dangerous bit):** `src/tests/preload.ts` (+ bunfig.toml
+    preload) import `initDb/getDb/closeDb` from `../be/db`. The package index MUST export
+    `initDb/getDb/closeDb/serialize`. Repoint the preload to `@swarm/storage` and SMOKE-TEST the preload in
+    ISOLATION (`bun --preload ./src/tests/preload.ts -e "1"`) BEFORE running the 218-DB-importing-file suite —
+    a missing export breaks the ENTIRE suite at preload.
+  - Verify `grep -rn 'github|slack|linear|jira' packages/storage/src` is empty (be→github already inverted PR#822).
+  - Fresh-DB migration smoke: `rm -f agent-swarm-db.sqlite && bun run start:http`.
+  - DB-bound: barrels here have 27 collisions — expect collision fixes. `bunfig.toml` preload path moves with it.
+
+## Phase 5 (workflows [engine+swarm+scheduler+tasks], integrations [slack-first, one subdir at a time])
+## Phase 6 (api-server + apps split + createServer side-effect→apps/api bootstrap + CI/Docker/openapi cutover +
+##   .dependency-cruiser.cjs DAG + rewrite check-db-boundary WORKER_PATHS to package dirs + api-client generate)
+See plan-of-record §8 Phase 4/5/6 for the exact file lists + verification.
+
+## DEFERRED (do alongside Phase 6 app split): swarm-templates (templates-ui Next prebuild→workspace dep +
+## fold TemplateConfig/TemplateResponse into @swarm/types), api-client (NET-NEW: generate from openapi + CI gate).
