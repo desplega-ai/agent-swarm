@@ -19,13 +19,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  buildRatingsFromLlm,
+  REFERENCES_SOURCE_MAX_LENGTH,
+  sanitizeReferencesSource,
+} from "@swarm/ai-llm";
 import type { Subprocess } from "bun";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import { listEdgesForAgent } from "../be/memory/edges-store";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
-import { buildRatingsFromLlm } from "../be/memory/raters/llm";
 import { applyRating } from "../be/memory/raters/store";
-import { REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "../be/memory/raters/types";
 import { registerMemoryRateTool } from "../tools/memory-rate";
 
 const TEST_PORT = 19127;

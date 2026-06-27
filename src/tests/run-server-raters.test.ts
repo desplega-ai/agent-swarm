@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { MemoryRater, RatingContext, RatingEvent } from "@swarm/ai-llm";
 import { runServerRaters } from "../be/memory/raters/run-server-raters";
 import type { ApplyRatingResult } from "../be/memory/raters/store";
-import type { MemoryRater, RatingContext, RatingEvent } from "../be/memory/raters/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure unit tests for `runServerRaters` — the orchestration extracted from the

@@ -1,4 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  type RatingEvent,
+  REFERENCES_SOURCE_MAX_LENGTH,
+  sanitizeReferencesSource,
+} from "@swarm/ai-llm";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@swarm/types";
 import { z } from "zod";
 import { chunkContent } from "../be/chunking";
@@ -9,11 +14,6 @@ import { listEdgesForAgent } from "../be/memory/edges-store";
 import { storeLinks } from "../be/memory/link-resolver";
 import { recordRetrievals } from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
-import {
-  type RatingEvent,
-  REFERENCES_SOURCE_MAX_LENGTH,
-  sanitizeReferencesSource,
-} from "../be/memory/raters/types";
 import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";

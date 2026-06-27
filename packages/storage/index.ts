@@ -26,15 +26,14 @@ export * from "../../src/be/memory/providers/openai-embedding";
 export * from "../../src/be/memory/providers/sqlite-store";
 export * from "../../src/be/memory/raters/explicit-self";
 export * from "../../src/be/memory/raters/implicit-citation";
-export * from "../../src/be/memory/raters/llm-client";
-export * from "../../src/be/memory/raters/llm-summarizer";
-export * from "../../src/be/memory/raters/llm";
+// llm-client / llm-summarizer / llm / types hoisted into @swarm/ai-llm (cycle-break #2,
+// Phase 3) — they moved out of be/memory/raters/ into src/utils/internal-ai/raters/.
+// The remaining DB-backed raters import the folded types/llm via @swarm/ai-llm.
 export * from "../../src/be/memory/raters/noop";
 export * from "../../src/be/memory/raters/registry";
 export * from "../../src/be/memory/raters/retrieval";
 export * from "../../src/be/memory/raters/run-server-raters";
 export * from "../../src/be/memory/raters/store";
-export * from "../../src/be/memory/raters/types";
 export * from "../../src/be/memory/reranker";
 export * from "../../src/be/memory/retrieval-store";
 export * from "../../src/be/memory/types";

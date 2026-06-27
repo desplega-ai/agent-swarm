@@ -6,11 +6,7 @@
  * Used by `memory-rater-llm.test.ts` (this step) and reused by the cross-
  * cutting e2e in step-7. Keep it dependency-free and side-effect-free.
  */
-import type {
-  LlmRaterClient,
-  LlmRaterInput,
-  LlmRaterResult,
-} from "../../be/memory/raters/llm-client";
+import type { LlmRaterClient, LlmRaterInput, LlmRaterResult } from "@swarm/ai-llm";
 
 export type MockResultMap = Record<string, LlmRaterResult | null>;
 

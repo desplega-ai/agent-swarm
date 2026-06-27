@@ -1,10 +1,10 @@
+import type { MemoryRater, RatingEvent } from "@swarm/ai-llm";
 import {
   getRaterWeightMultiplier as defaultGetRaterWeightMultiplier,
   getRegisteredRaters as defaultGetRegisteredRaters,
   SERVER_RATERS,
 } from "./registry";
 import { type ApplyRatingResult, applyRating as defaultApplyRating } from "./store";
-import type { MemoryRater, RatingEvent } from "./types";
 
 /**
  * Inputs for `runServerRaters`. The caller is responsible for fetching

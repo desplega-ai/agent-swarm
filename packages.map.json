@@ -73,7 +73,7 @@
   "@swarm/ai-llm": {
     "layer": 2,
     "sources": ["src/utils/internal-ai/"],
-    "notes": "Raters hoist (wip/raters-hoist-deferred) + folding be/memory/raters/types.ts is a Phase-3 step; not applied in Phase 1 (no file moves). be/memory/raters/* stays in @swarm/storage."
+    "notes": "Phase-3: the deferred raters hoist + types fold (cycle-break #2) is APPLIED. The 4 worker-safe rater files (llm/llm-client/llm-summarizer/types) were git-mv'd from src/be/memory/raters/ into src/utils/internal-ai/raters/ (covered by this dir entry), killing the utils->be edge. The other raters (explicit-self/implicit-citation/noop/registry/retrieval/run-server-raters/store) stay in @swarm/storage and now import the folded types/llm via @swarm/ai-llm (storage->ai-llm, downward)."
   },
   "@swarm/mcp-tool": {
     "layer": 2,

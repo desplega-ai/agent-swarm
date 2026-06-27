@@ -1,4 +1,4 @@
-import type { MemoryRater, RatingContext, RatingEvent } from "./types";
+import type { MemoryRater, RatingContext, RatingEvent } from "@swarm/ai-llm";
 
 /**
  * Implicit-citation rater — pure ID-grep over `evidence`.

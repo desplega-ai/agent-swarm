@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  type ResolveCredentialOptions,
-  resolveCredential,
-} from "../../utils/internal-ai/credentials.js";
+import { type ResolveCredentialOptions, resolveCredential } from "@swarm/ai-llm";
 
 /**
  * Helper: build a minimal `ResolveCredentialOptions` with injectable hooks so

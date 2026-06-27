@@ -15,7 +15,7 @@ import {
   MEMORY_RATER_SCHEMA_NAME,
   runMemoryRater,
   tryParseLooseJson,
-} from "../be/memory/raters/llm-summarizer";
+} from "@swarm/ai-llm";
 
 function makeOpenRouterResponse(content: string, init: ResponseInit = { status: 200 }): Response {
   return new Response(

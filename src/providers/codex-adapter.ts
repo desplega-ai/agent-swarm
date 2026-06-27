@@ -67,6 +67,12 @@ import {
   type WebSearchItem,
 } from "@openai/codex-sdk";
 import {
+  buildRatingsFromLlm,
+  fetchRetrievalsForTask,
+  postRatings,
+  summarizeSession as runSummarize,
+} from "@swarm/ai-llm";
+import {
   CONTEXT_FORMULA,
   clampContextPercent,
   computeContextUsedUnified,
@@ -75,8 +81,6 @@ import {
 } from "@swarm/core-utils";
 import { credentialsToAuthJson, getValidCodexOAuth } from "@swarm/credentials";
 import { SessionErrorTracker } from "@swarm/otel";
-import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
-import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md";
 import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from "./codex-models";
 import { resolveCodexPrompt } from "./codex-skill-resolver";

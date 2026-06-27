@@ -1,4 +1,4 @@
-import type { MemoryRater, RatingEvent } from "./types";
+import type { MemoryRater, RatingEvent } from "@swarm/ai-llm";
 
 /**
  * Default rater. Emits no events, makes no DB calls. Selected when

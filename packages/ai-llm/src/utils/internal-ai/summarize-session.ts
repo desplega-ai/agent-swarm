@@ -20,7 +20,7 @@ import {
   buildSummaryWithRatingsPrompt,
   type RetrievalRow,
   SummaryWithRatingsSchema,
-} from "../../be/memory/raters/llm.js";
+} from "./raters/llm.js";
 import { completeStructured } from "./complete-structured.js";
 import type { ResolvedCredential } from "./credentials.js";
 

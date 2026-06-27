@@ -1,8 +1,8 @@
+import type { MemoryRater } from "@swarm/ai-llm";
+import { LlmRater } from "@swarm/ai-llm";
 import { ExplicitSelfRatingRater } from "./explicit-self";
 import { ImplicitCitationRater } from "./implicit-citation";
-import { LlmRater } from "./llm";
 import { NoopRater } from "./noop";
-import type { MemoryRater } from "./types";
 
 /**
  * Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-1.md §4

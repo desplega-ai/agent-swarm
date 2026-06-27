@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "@swarm/ai-llm";
 import { getApiKey, getMcpBaseUrl } from "@swarm/core-utils";
 import * as z from "zod";
-import { REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "@/be/memory/raters/types";
 import { createToolRegistrar } from "@/tools/utils";
 
 /**

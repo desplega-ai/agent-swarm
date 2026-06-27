@@ -34,11 +34,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import { buildRatingsFromLlm } from "@swarm/ai-llm";
 import type { Subprocess } from "bun";
 import { closeDb, createAgent, createSessionLogs, getDb, initDb } from "../be/db";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { ImplicitCitationRater } from "../be/memory/raters/implicit-citation";
-import { buildRatingsFromLlm } from "../be/memory/raters/llm";
 import { recordRetrievals } from "../be/memory/raters/retrieval";
 import { runServerRaters } from "../be/memory/raters/run-server-raters";
 import { applyRating } from "../be/memory/raters/store";

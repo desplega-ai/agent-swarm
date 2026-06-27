@@ -1,3 +1,3 @@
-import "./utils/internal-ai/register-bedrock.ts";
+import "@swarm/ai-llm";
 
 import "./http/index";

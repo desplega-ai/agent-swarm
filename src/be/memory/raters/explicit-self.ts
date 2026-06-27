@@ -1,4 +1,4 @@
-import type { MemoryRater, RatingEvent } from "./types";
+import type { MemoryRater, RatingEvent } from "@swarm/ai-llm";
 
 /**
  * Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-5.md §3

@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import "./utils/internal-ai/register-bedrock.ts";
+import "@swarm/ai-llm";
 
 import { Spinner } from "@inkjs/ui";
 import { getApiKey, setApiKey } from "@swarm/core-utils";

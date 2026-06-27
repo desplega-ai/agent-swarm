@@ -7,9 +7,13 @@
  */
 
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import {
+  buildRatingsFromLlm,
+  fetchRetrievalsForTask,
+  postRatings,
+  summarizeSession as runSummarize,
+} from "@swarm/ai-llm";
 import { checkToolLoop, clearToolHistory } from "@swarm/core-utils";
-import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
-import { summarizeSession as runSummarize } from "../utils/internal-ai";
 
 export interface SwarmHooksConfig {
   apiUrl: string;

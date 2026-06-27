@@ -113,7 +113,7 @@ export async function defaultSpawnClaudeCli(
   // observed OOM-wedging 8GB E2B worker sandboxes within ~90s, leaving 10+
   // near-identical summarizer transcripts in ~/.claude/projects). The hook's
   // `runStopHookSessionSummary` honors this flag — same convention as the
-  // `claude -p` shellout in `src/be/memory/raters/llm-client.ts`.
+  // `claude -p` shellout in `src/utils/internal-ai/raters/llm-client.ts`.
   env.SKIP_SESSION_SUMMARY = "1";
   const proc = Bun.spawn({
     cmd,

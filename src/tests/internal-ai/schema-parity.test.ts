@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { SummaryWithRatingsSchema, summaryToolSchema } from "@swarm/ai-llm";
 import { Value } from "typebox/value";
-import { SummaryWithRatingsSchema } from "../../be/memory/raters/llm.js";
-import { summaryToolSchema } from "../../utils/internal-ai/summarize-session.js";
 
 /**
  * 10 valid + 10 invalid fixtures. Both validators (zod via `safeParse`,

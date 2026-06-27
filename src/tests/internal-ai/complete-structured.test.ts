@@ -1,11 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import type { ResolvedCredential } from "@swarm/ai-llm";
+import { completeStructured, defaultSpawnClaudeCli } from "@swarm/ai-llm";
 import { Type } from "typebox";
 import { z } from "zod";
-import {
-  completeStructured,
-  defaultSpawnClaudeCli,
-} from "../../utils/internal-ai/complete-structured.js";
-import type { ResolvedCredential } from "../../utils/internal-ai/credentials.js";
 
 const ResultZodSchema = z.object({
   summary: z.string(),

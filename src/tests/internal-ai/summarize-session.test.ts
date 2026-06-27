@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { SummaryWithRatingsSchema } from "@swarm/ai-llm";
+import { summarizeSession } from "@swarm/ai-llm";
 import type { z } from "zod";
-import type { SummaryWithRatingsSchema } from "../../be/memory/raters/llm.js";
-import { summarizeSession } from "../../utils/internal-ai/summarize-session.js";
 
 const LONG_TRANSCRIPT = `User: please refactor X
 Assistant: I'll start with reading the file.
