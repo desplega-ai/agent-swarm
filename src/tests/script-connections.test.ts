@@ -47,6 +47,42 @@ const openapiSpec = JSON.stringify({
         },
       },
     },
+    "/repos": {
+      post: {
+        operationId: "createRepo",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["name"],
+                properties: {
+                  name: { type: "string" },
+                  private: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "created repo",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["full_name"],
+                  properties: {
+                    full_name: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 });
 
@@ -146,14 +182,45 @@ describe("script connections", () => {
           path: { owner: "desplega-ai", repo: "agent-swarm" },
           query: { include: "stats" },
         });
+        const created = await ctx.api.vendorApi.createRepo({
+          body: { name: "agent-swarm", private: false },
+        });
         const name: string = repo.full_name;
+        const createdName: string = created.full_name;
         const isPrivate: boolean | undefined = repo.private;
-        return { name, isPrivate };
+        return { name, createdName, isPrivate };
       };
       export default main;
     `;
 
     expect(typecheckScript(source)).toEqual({ ok: true });
+    const descriptor = getScriptApiConnectionDescriptors().find(
+      (candidate) => candidate.slug === "vendorApi",
+    );
+    const getRepo = descriptor?.operations.find((operation) => operation.name === "getRepo");
+    expect(getRepo?.parameters).toContainEqual({
+      name: "owner",
+      in: "path",
+      required: true,
+      schema: { type: "string" },
+    });
+    expect(getRepo?.responseSchema).toEqual({
+      type: "object",
+      required: ["full_name"],
+      properties: {
+        full_name: { type: "string" },
+        private: { type: "boolean" },
+      },
+    });
+    const createRepo = descriptor?.operations.find((operation) => operation.name === "createRepo");
+    expect(createRepo?.requestBodySchema).toEqual({
+      type: "object",
+      required: ["name"],
+      properties: {
+        name: { type: "string" },
+        private: { type: "boolean" },
+      },
+    });
   });
 
   test("ctx.api runtime emits plain fetch with credential placeholders", async () => {

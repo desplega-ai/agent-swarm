@@ -1,6 +1,8 @@
 import { getDb, getSwarmConfigs } from "@/be/db";
 import type {
   ScriptApiConnectionDescriptor,
+  ScriptApiJsonSchema,
+  ScriptApiJsonValue,
   ScriptApiOperationDescriptor,
 } from "@/scripts-runtime/api-types";
 import {
@@ -416,6 +418,30 @@ function schemaToTs(schema: unknown): string {
   return "JsonValue";
 }
 
+function toJsonValue(value: unknown): ScriptApiJsonValue | undefined {
+  if (value === null) return null;
+  if (["boolean", "number", "string"].includes(typeof value)) return value as ScriptApiJsonValue;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toJsonValue(item))
+      .filter((item): item is ScriptApiJsonValue => item !== undefined);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .map(([key, item]) => [key, toJsonValue(item)] as const)
+        .filter((entry): entry is readonly [string, ScriptApiJsonValue] => entry[1] !== undefined),
+    );
+  }
+  return undefined;
+}
+
+function jsonSchema(schema: unknown): ScriptApiJsonSchema {
+  if (typeof schema === "boolean") return schema;
+  const value = toJsonValue(schema);
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
 function methodName(operationId: string | undefined, method: string, path: string): string {
   if (operationId) return normalizeSlug(operationId);
   return normalizeSlug(`${method}_${path.replace(/[{}]/g, "").replace(/\//g, "_")}`);
@@ -465,6 +491,7 @@ function extractOperations(
             : "query") as "path" | "query" | "header",
           required: param.required === true,
           type: schemaToTs(param.schema),
+          schema: jsonSchema(param.schema),
         }));
       const requestBody =
         operation.requestBody && typeof operation.requestBody === "object"
@@ -474,6 +501,7 @@ function extractOperations(
         requestBody && typeof requestBody.content === "object"
           ? (requestBody.content as Record<string, { schema?: unknown }>)["application/json"]
           : undefined;
+      const requestBodySchema = jsonContent?.schema ? jsonSchema(jsonContent.schema) : undefined;
       const bodyType = jsonContent?.schema ? schemaToTs(jsonContent.schema) : "JsonValue";
       const responses =
         operation.responses && typeof operation.responses === "object"
@@ -493,6 +521,7 @@ function extractOperations(
       const responseType = responseContent?.schema
         ? schemaToTs(responseContent.schema)
         : "JsonValue";
+      const responseSchema = responseContent?.schema ? jsonSchema(responseContent.schema) : {};
       const paramsByPlace = (place: "path" | "query" | "header") =>
         parameters
           .filter((param) => param.in === place)
@@ -508,13 +537,16 @@ function extractOperations(
         name,
         method: method.toUpperCase(),
         path,
-        parameters: parameters.map(({ name, in: where, required }) => ({
+        parameters: parameters.map(({ name, in: where, required, schema }) => ({
           name,
           in: where,
           required,
+          schema,
         })),
         hasBody,
         successStatus,
+        requestBodySchema,
+        responseSchema,
         requestType: `${typeBase}Args`,
         responseType: `${typeBase}Response`,
       });

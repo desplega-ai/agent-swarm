@@ -1,9 +1,8 @@
-import type { ScriptApiConnectionDescriptor, ScriptApiOperationDescriptor } from "./api-types";
-
-type ApiRegistry = Record<
-  string,
-  Record<string, (args?: Record<string, unknown>) => Promise<unknown>>
->;
+import type {
+  ScriptApiConnectionDescriptor,
+  ScriptApiOperationDescriptor,
+  ScriptApiRegistryClient,
+} from "./api-types";
 
 function applyTemplate(template: string, _placeholder: string): [string, string] | null {
   const idx = template.indexOf("=");
@@ -47,10 +46,10 @@ function operationUrl(
 
 export function createApiRegistryClient(
   descriptors: ScriptApiConnectionDescriptor[] = [],
-): ApiRegistry {
-  const registry: ApiRegistry = {};
+): ScriptApiRegistryClient {
+  const registry: ScriptApiRegistryClient = {};
   for (const descriptor of descriptors) {
-    const client: ApiRegistry[string] = {};
+    const client: ScriptApiRegistryClient[string] = {};
     for (const operation of descriptor.operations) {
       client[operation.name] = async (rawArgs = {}) => {
         const args = rawArgs as Record<string, unknown>;

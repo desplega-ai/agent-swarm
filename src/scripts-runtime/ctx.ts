@@ -1,12 +1,12 @@
 import { createApiRegistryClient } from "./api-client";
-import type { ScriptApiConnectionDescriptor } from "./api-types";
+import type { ScriptApiConnectionDescriptor, ScriptApiRegistryClient } from "./api-types";
 import { stdlib } from "./stdlib";
 import type { SwarmConfig } from "./swarm-config";
 import { createSwarmSdk } from "./swarm-sdk";
 
 export type RuntimeCtx = {
   swarm: Record<string, unknown> & { config: SwarmConfig };
-  api: Record<string, unknown>;
+  api: ScriptApiRegistryClient;
   stdlib: typeof stdlib;
   logger: {
     log: (...args: unknown[]) => void;
