@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getSwarmConfigs, upsertSwarmConfig } from "@/be/db";
+import { scheduleIntegrationsReload } from "@/http/core";
 import {
   CREDENTIAL_BINDINGS_CONFIG_KEY,
   type CredentialBinding,
@@ -50,6 +51,7 @@ function writeGlobalBindings(bindings: CredentialBinding[]) {
     isSecret: false,
     description: "Lead-managed scripts-runtime credential broker bindings.",
   });
+  scheduleIntegrationsReload();
 }
 
 export const registerCredentialBindingsTool = (server: McpServer) => {

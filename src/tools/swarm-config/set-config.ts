@@ -6,6 +6,7 @@ import {
   reservedKeyError,
   validateConfigValue,
 } from "@/be/swarm-config-guard";
+import { scheduleIntegrationsReload } from "@/http/core";
 import { CREDENTIAL_BINDINGS_CONFIG_KEY } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
 import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
@@ -131,6 +132,10 @@ export const registerSetConfigTool = (server: McpServer) => {
           envPath,
           description,
         });
+
+        if (scope === "global") {
+          scheduleIntegrationsReload();
+        }
 
         const [masked] = maskSecrets([config]);
 

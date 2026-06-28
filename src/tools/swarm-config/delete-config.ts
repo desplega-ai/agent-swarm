@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deleteSwarmConfig, getSwarmConfigLookupById } from "@/be/db";
+import { scheduleIntegrationsReload } from "@/http/core";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerDeleteConfigTool = (server: McpServer) => {
@@ -56,6 +57,10 @@ export const registerDeleteConfigTool = (server: McpServer) => {
               message: `Failed to delete config entry "${id}".`,
             },
           };
+        }
+
+        if (existing.scope === "global") {
+          scheduleIntegrationsReload();
         }
 
         return {
