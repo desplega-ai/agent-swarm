@@ -21,7 +21,18 @@ the full suite green. Update #833's title/body from "Phase 0" → full migration
 | 3 — Extract L2 (ai-llm [+raters hoist&fold], mcp-tool) | ✅ DONE: ai-llm (0391056c, cycle-break #2 — grep be/ empty), mcp-tool (ae35a5b8) |
 | 4 — Extract L3 (harness, storage [+test-preload pivot]) | ✅ DONE: harness (eae401d0), **storage (b5c4af0e)** — the keystone. src/be/ GONE. Preload pivot via @swarm/storage/db subpath; barrel text-import fixed; 176 files moved; fresh-DB boot 96 migrations; test 5444. main MERGED in (31acccbc). |
 | 5 — Extract L4+L5 (workflows, integrations) | ✅ DONE: workflows (117166c0, L4), integrations (eb138d4c, L5 — one-shot, not slack-first). test 5444/0, boundaries, fresh-DB boot clean |
-| 6 — api-server + apps split + CI/Docker/openapi cutover + createServer side-effect extraction + dependency-cruiser | ⬜ |
+| 6 — api-server + apps split | 🔄 api-server DONE (bd2d027b, last package). **APPS SPLIT DONE (8f2b2d91): apps/cli + apps/api created, src/ now ONLY tests/.** Both docker images build, openapi clean, test 5444. DEFERRED below. |
+
+## ✅ STRUCTURE ACHIEVED (8f2b2d91, pushed, 29 commits ahead of main):
+## `packages/` (16 real + swarm-templates/api-client shims) · `apps/{api,cli}` · `src/` = ONLY `tests/` (co-located per plan).
+## Every commit green: tsc 0 · lint 0 · test 5444/0 · all boundaries · openapi byte-identical · BOTH docker images · build:cli · fresh-DB boot.
+
+## REMAINING (deferred — lower-risk / needs coordination):
+- **ui/ templates-ui/ evals/ docs-site/ → apps/{ui,templates-ui,evals,docs}**: file moves + workspace/CI/bunfig/.dockerignore updates + the ui modelsdev symlink depth + evals e2b-dispatch import + evals CI working-dir. **⚠️ Vercel risk**: ui/templates-ui Vercel projects' Root Directory expects ./ui, ./templates-ui — moving to apps/ needs Vercel settings coordination with Taras (don't blind-move). docs-site is standalone pnpm/Vercel.
+- **createServer side-effect extraction**: initDb/seedPricing/startPricingRefreshLoop OUT of packages/api-server/src/server.ts createServer() INTO apps/api/src/http.ts bootstrap; keep createServer pure. (Behavior unchanged today since http.ts→createServer still inits.)
+- **Publish-identity move**: root package.json stays @desplega.ai/agent-swarm; plan moves it to apps/cli. Deferred (root-as-published works).
+- **dependency-cruiser .cjs DAG** (replaces grep boundary checks); **swarm-templates** (templates-ui prebuild→workspace dep + fold schema types into @swarm/types); **api-client** (generate from openapi + CI gate).
+- Stale doc hint strings: `bun run src/cli.tsx claude-managed-setup` in packages/{api-server,harness}; docs-site x402-payments.mdx `bun src/x402/cli.ts`.
 
 ## Invariants to keep green after EVERY step
 `bun run tsc:check` · `bun run lint` · `bun test` (5439) · `check-db-boundary.sh` · `check-api-key-boundary.sh` ·
