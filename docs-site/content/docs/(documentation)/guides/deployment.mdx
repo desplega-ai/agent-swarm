@@ -413,7 +413,7 @@ The worker image also includes PostgreSQL 16 server binaries for local test setu
 
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
-The worker image also bundles `/usr/local/bin/install-repo-hooks.sh`. If a registered repo is configured with `hooks: { enabled: true }`, the runner calls that helper after clone/refresh so git hooks are installed automatically inside the worker checkout.
+The worker image also bundles `/usr/local/bin/install-repo-hooks.sh`. If a registered repo is configured with `hooks: { enabled: true }`, the runner calls that helper after clone/refresh so git hooks are installed automatically inside the worker checkout. The helper detects both `.pre-commit-config.yaml` and `prek.toml` before it runs `prek install`.
 
 ### Run
 

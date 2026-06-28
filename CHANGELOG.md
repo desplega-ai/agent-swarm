@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.103.1] - 2026-06-28
+
+### Fixed
+- **Worker hook bootstrap now detects `prek.toml` repos before installing shims** (#832) — `install-repo-hooks.sh` now treats `prek.toml` the same way as `.pre-commit-config.yaml`, so repos that use Prek's TOML config get `prek install` during worker clone/refresh.
+
 ## [1.103.0] - 2026-06-27
 
 ### Added
