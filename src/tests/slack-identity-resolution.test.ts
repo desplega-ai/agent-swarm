@@ -19,6 +19,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
+import { enrichSlackUserEmail, resolveSlackUserId } from "@swarm/integrations";
 import {
   closeDb,
   findUserByExternalId,
@@ -27,7 +28,6 @@ import {
   getUserIdentities,
   initDb,
 } from "@swarm/storage";
-import { enrichSlackUserEmail, resolveSlackUserId } from "../slack/enrich";
 
 const TEST_DB_PATH = "./test-slack-identity-resolution.sqlite";
 

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { getJiraMetadata, updateJiraMetadata } from "@swarm/integrations";
 import { closeDb, getDb, initDb, upsertOAuthApp } from "@swarm/storage";
-import { getJiraMetadata, updateJiraMetadata } from "../jira/metadata";
 
 const TEST_DB_PATH = "./test-jira-metadata.sqlite";
 

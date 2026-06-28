@@ -9,7 +9,7 @@ import {
   refreshMcpToken,
   registerClient,
   revokeMcpToken,
-} from "../oauth/mcp-wrapper";
+} from "@swarm/integrations";
 
 // ─── SSRF guard ──────────────────────────────────────────────────────────────
 

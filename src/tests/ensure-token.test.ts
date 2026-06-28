@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { ensureToken, ensureTokenOrThrow } from "@swarm/integrations";
 import {
   closeDb,
   deleteOAuthTokens,
@@ -8,7 +9,6 @@ import {
   storeOAuthTokens,
   upsertOAuthApp,
 } from "@swarm/storage";
-import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
 
 const TEST_DB_PATH = "./test-ensure-token.sqlite";
 

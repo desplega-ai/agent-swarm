@@ -1,5 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getAppUrl, getPublicMcpBaseUrl } from "@swarm/core-utils";
+import {
+  assertUrlSafe,
+  buildAuthorizeUrl,
+  computeExpiresAt,
+  discoverAuthorizationServerMetadata,
+  discoverProtectedResourceMetadata,
+  ensureMcpToken,
+  exchangeCodeForTokens,
+  refreshMcpToken,
+  registerClient,
+  revokeMcpToken,
+} from "@swarm/integrations";
 import type { McpOAuthToken } from "@swarm/storage";
 import {
   applyMcpOAuthRefresh,
@@ -13,18 +25,6 @@ import {
   upsertMcpOAuthToken,
 } from "@swarm/storage";
 import { z } from "zod";
-import { ensureMcpToken } from "../oauth/ensure-mcp-token";
-import {
-  assertUrlSafe,
-  buildAuthorizeUrl,
-  computeExpiresAt,
-  discoverAuthorizationServerMetadata,
-  discoverProtectedResourceMetadata,
-  exchangeCodeForTokens,
-  refreshMcpToken,
-  registerClient,
-  revokeMcpToken,
-} from "../oauth/mcp-wrapper";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

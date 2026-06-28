@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SpendingTracker } from "../x402/spending-tracker.ts";
+import { SpendingTracker } from "@swarm/integrations";
 
 describe("SpendingTracker", () => {
   describe("checkSpendingLimit", () => {

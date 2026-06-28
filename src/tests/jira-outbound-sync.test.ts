@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { initJiraOutboundSync, teardownJiraOutboundSync } from "@swarm/integrations";
 import {
   closeDb,
   createTrackerSync,
@@ -8,7 +9,6 @@ import {
   updateTrackerSync,
 } from "@swarm/storage";
 import { workflowEventBus } from "@swarm/workflows";
-import { initJiraOutboundSync, teardownJiraOutboundSync } from "../jira/outbound";
 
 const TEST_DB_PATH = "./test-jira-outbound-sync.sqlite";
 
@@ -21,7 +21,7 @@ const mockJiraFetch = mock(
     ) as Promise<Response>,
 );
 
-mock.module("../jira/client", () => ({
+mock.module("@swarm/integrations", () => ({
   jiraFetch: mockJiraFetch,
   // The outbound module only imports `jiraFetch`; stub the others for
   // robustness in case the module surface grows.

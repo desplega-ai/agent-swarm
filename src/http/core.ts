@@ -1,6 +1,18 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { refreshSecretScrubberCache, setRequestAuth } from "@swarm/core-utils";
 import {
+  initAgentMail,
+  initGitHub,
+  initJira,
+  initLinear,
+  resetAgentMail,
+  resetGitHub,
+  resetJira,
+  resetLinear,
+  startSlackApp,
+  stopSlackApp,
+} from "@swarm/integrations";
+import {
   getAgentById,
   getDb,
   getInboxSummary,
@@ -11,11 +23,6 @@ import {
   updateAgentStatus,
 } from "@swarm/storage";
 import type { AgentStatus } from "@swarm/types";
-import { initAgentMail, resetAgentMail } from "../agentmail";
-import { initGitHub, resetGitHub } from "../github";
-import { initJira, resetJira } from "../jira";
-import { initLinear, resetLinear } from "../linear";
-import { startSlackApp, stopSlackApp } from "../slack";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { isPublicRoute } from "./route-def";

@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  markKapsoMessageRead,
-  sendKapsoReaction,
-  sendKapsoText,
-} from "../integrations/kapso/client";
+import { markKapsoMessageRead, sendKapsoReaction, sendKapsoText } from "@swarm/integrations";
 
 const originalFetch = globalThis.fetch;
 

@@ -4,7 +4,7 @@ import {
   executeComposioRequest,
   formatComposioResultForCli,
   parseComposioArgs,
-} from "../x/composio";
+} from "@swarm/integrations";
 
 interface XCommandDeps {
   env?: Record<string, string | undefined>;
@@ -14,7 +14,7 @@ interface XCommandDeps {
   log?: (message: string) => void;
 }
 
-export { parseComposioArgs } from "../x/composio";
+export { parseComposioArgs } from "@swarm/integrations";
 
 export async function runXCommand(argv: string[], deps: XCommandDeps = {}): Promise<void> {
   const [target, ...rest] = argv;

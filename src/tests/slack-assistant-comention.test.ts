@@ -9,7 +9,7 @@
  * (Devin) triggered an unwanted swarm task.
  */
 import { describe, expect, test } from "bun:test";
-import { hasOtherUserMention } from "../slack/router";
+import { hasOtherUserMention } from "@swarm/integrations";
 
 const BOT_USER_ID = "U0ASK3PCZ4P"; // our bot
 const DEVIN_USER_ID = "U0831BS93V1"; // another agent

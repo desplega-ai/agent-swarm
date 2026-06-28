@@ -1,16 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, initDb } from "@swarm/storage";
-import {
-  handleCheckRun,
-  handleCheckSuite,
-  handleComment,
-  handleIssue,
-  handlePullRequest,
-  handlePullRequestReview,
-  handleWorkflowRun,
-} from "../github/handlers";
-import { GITHUB_BOT_NAME } from "../github/mentions";
 import type {
   CheckRunEvent,
   CheckSuiteEvent,
@@ -19,7 +8,18 @@ import type {
   PullRequestEvent,
   PullRequestReviewEvent,
   WorkflowRunEvent,
-} from "../github/types";
+} from "@swarm/integrations";
+import {
+  GITHUB_BOT_NAME,
+  handleCheckRun,
+  handleCheckSuite,
+  handleComment,
+  handleIssue,
+  handlePullRequest,
+  handlePullRequestReview,
+  handleWorkflowRun,
+} from "@swarm/integrations";
+import { closeDb, createAgent, initDb } from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-github-event-filter.sqlite";
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractSlackMessageText } from "../slack/message-text";
+import { extractSlackMessageText } from "@swarm/integrations";
 
 describe("extractSlackMessageText", () => {
   test("returns top-level text when present", () => {

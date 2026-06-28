@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { buildCompletedBlocks, formatAttachmentsBlockForSlack } from "@swarm/integrations";
 import type { TaskAttachment } from "@swarm/types";
-import { buildCompletedBlocks, formatAttachmentsBlockForSlack } from "../slack/blocks";
 
 // Slack block types are open unions — the builder returns `any`; we read it
 // as `any` in the test to inspect the runtime shape.

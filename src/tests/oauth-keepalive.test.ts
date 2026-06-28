@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+// `_test` is a colliding export name (keepalive + jira/webhook-lifecycle), so it
+// is omitted from the flat @swarm/integrations barrel — import keepalive directly.
+import { _test, stopOAuthKeepalive } from "@swarm/integrations/src/oauth/keepalive";
 import {
   closeDb,
   deleteOAuthTokens,
@@ -8,7 +11,6 @@ import {
   storeOAuthTokens,
   upsertOAuthApp,
 } from "@swarm/storage";
-import { _test, stopOAuthKeepalive } from "../oauth/keepalive";
 
 const TEST_DB_PATH = "./test-oauth-keepalive.sqlite";
 

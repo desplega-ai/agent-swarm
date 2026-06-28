@@ -8,7 +8,7 @@ const mockAddPullReviewCommentReaction = mock(() => Promise.resolve(true));
 const mockAddGraphQLReaction = mock(() => Promise.resolve(true));
 const mockAddIssueReaction = mock(() => Promise.resolve(true));
 
-mock.module("../github/reactions", () => ({
+mock.module("@swarm/integrations", () => ({
   addReaction: mockAddReaction,
   addPullReviewCommentReaction: mockAddPullReviewCommentReaction,
   addGraphQLReaction: mockAddGraphQLReaction,
@@ -16,7 +16,7 @@ mock.module("../github/reactions", () => ({
 }));
 
 // Import after mocking
-const { addEyesReactionOnTaskStart } = await import("../github/task-reactions");
+const { addEyesReactionOnTaskStart } = await import("@swarm/integrations");
 
 // ── Helpers ──
 

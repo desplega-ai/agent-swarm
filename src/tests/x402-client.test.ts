@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createX402Client } from "../x402/client.ts";
+import { createX402Client } from "@swarm/integrations";
 
 // A valid test private key (DO NOT use in production — this is a well-known throwaway key)
 const TEST_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";

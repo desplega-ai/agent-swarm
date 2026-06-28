@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb, upsertOAuthApp } from "@swarm/storage";
 import {
   _clearPendingStates,
   _getPendingState,
   buildAuthorizationUrl,
   exchangeCode,
   type OAuthProviderConfig,
-} from "../oauth/wrapper";
+} from "@swarm/integrations";
+import { closeDb, initDb, upsertOAuthApp } from "@swarm/storage";
 
 const TEST_DB_PATH = "./test-oauth-wrapper.sqlite";
 

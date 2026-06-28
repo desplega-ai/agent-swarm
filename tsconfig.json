@@ -35,6 +35,7 @@
       "@swarm/storage/db": ["packages/storage/src/be/db.ts"],
       "@swarm/workflows": ["packages/workflows/index.ts"],
       "@swarm/integrations": ["packages/integrations/index.ts"],
+      "@swarm/integrations/gitlab": ["packages/integrations/gitlab.ts"],
       "@swarm/api-server": ["packages/api-server/index.ts"]
     },
     "verbatimModuleSyntax": true,

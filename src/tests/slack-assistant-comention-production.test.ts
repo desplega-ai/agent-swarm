@@ -13,10 +13,10 @@
  * Regression for task 4ae1f3b5 — "<@U0831BS93V1> Are you here?" spawned an unwanted task.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import * as slackEnrichModule from "@swarm/integrations";
+import * as slackEventDedupModule from "@swarm/integrations";
 import * as dbModule from "@swarm/storage";
 import * as siblingAwarenessModule from "@swarm/workflows";
-import * as slackEnrichModule from "../slack/enrich";
-import * as slackEventDedupModule from "../slack/event-dedup";
 
 // ---------------------------------------------------------------------------
 // Production-handler spies.
@@ -26,8 +26,8 @@ import * as slackEventDedupModule from "../slack/event-dedup";
 // regression test on the real production handlers without leaking fake modules.
 // ---------------------------------------------------------------------------
 
-let createAssistantFn: typeof import("../slack/assistant").createAssistant;
-let registerMessageHandlerFn: typeof import("../slack/handlers").registerMessageHandler;
+let createAssistantFn: typeof import("@swarm/integrations").createAssistant;
+let registerMessageHandlerFn: typeof import("@swarm/integrations").registerMessageHandler;
 
 let createTaskWithSiblingAwarenessSpy: any;
 let getAgentWorkingOnThreadSpy: any;
@@ -90,8 +90,8 @@ beforeAll(async () => {
 
   installSpyImplementations();
 
-  ({ createAssistant: createAssistantFn } = await import("../slack/assistant"));
-  ({ registerMessageHandler: registerMessageHandlerFn } = await import("../slack/handlers"));
+  ({ createAssistant: createAssistantFn } = await import("@swarm/integrations"));
+  ({ registerMessageHandler: registerMessageHandlerFn } = await import("@swarm/integrations"));
 });
 
 beforeEach(() => {

@@ -1,14 +1,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { deleteOAuthTokens, getOAuthTokens } from "@swarm/storage";
-import { z } from "zod";
-import { isLinearEnabled } from "../../linear/app";
 import {
+  ensureTokenOrThrow,
   getLinearAuthorizationUrl,
   handleLinearCallback,
+  handleLinearWebhook,
+  isLinearEnabled,
   revokeLinearToken,
-} from "../../linear/oauth";
-import { handleLinearWebhook } from "../../linear/webhook";
-import { ensureTokenOrThrow } from "../../oauth/ensure-token";
+} from "@swarm/integrations";
+import { deleteOAuthTokens, getOAuthTokens } from "@swarm/storage";
+import { z } from "zod";
 import { route } from "../route-def";
 import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 

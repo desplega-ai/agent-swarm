@@ -49,7 +49,7 @@ afterAll(async () => {
 // Import sync handlers AFTER seeding so module-level side effects (template
 // registration) see a healthy DB.
 const { _setBotAccountIdForTesting, handleCommentEvent, handleIssueEvent } = await import(
-  "../jira/sync"
+  "@swarm/integrations"
 );
 const { getTemplateDefinition } = await import("@swarm/prompt-templates");
 
@@ -60,7 +60,7 @@ beforeEach(async () => {
   _setBotAccountIdForTesting(BOT_ACCOUNT_ID);
   // Re-register Jira templates if a parallel test file has cleared the registry.
   if (!getTemplateDefinition("jira.issue.assigned")) {
-    await import(`../jira/templates?t=${Date.now()}`);
+    await import(`@swarm/integrations/src/jira/templates?t=${Date.now()}`);
   }
 });
 

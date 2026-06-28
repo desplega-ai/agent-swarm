@@ -8,6 +8,15 @@ import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getApiKey, getMcpBaseUrl, scrubSecrets } from "@swarm/core-utils";
 import {
+  initAgentMail,
+  initGitHub,
+  initGitLab,
+  initJira,
+  initLinear,
+  startSlackApp,
+  stopSlackApp,
+} from "@swarm/integrations";
+import {
   initOtel,
   initTelemetry,
   isPollTracingEnabled,
@@ -19,15 +28,9 @@ import {
 import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "@swarm/storage";
 import { initWorkflows } from "@swarm/workflows";
 import { getEnabledCapabilities, hasCapability } from "@/server";
-import { initAgentMail } from "../agentmail";
-import { initGitHub } from "../github";
-import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
-import { initJira } from "../jira";
-import { initLinear } from "../linear";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
-import { startSlackApp, stopSlackApp } from "../slack";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
@@ -388,7 +391,7 @@ async function shutdown() {
 
   // Stop OAuth keepalive
   if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
-    const { stopOAuthKeepalive } = await import("../oauth/keepalive");
+    const { stopOAuthKeepalive } = await import("@swarm/integrations");
     await stopOAuthKeepalive();
   }
 
@@ -564,7 +567,7 @@ httpServer
 
     // Start OAuth token keepalive (proactive refresh to prevent expiry)
     if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
-      const { startOAuthKeepalive } = await import("../oauth/keepalive");
+      const { startOAuthKeepalive } = await import("@swarm/integrations");
       startOAuthKeepalive();
     }
 

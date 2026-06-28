@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { GITHUB_EVENT_LABELS, isSwarmLabel } from "../github/mentions";
+import { GITHUB_EVENT_LABELS, isSwarmLabel } from "@swarm/integrations";
 
 describe("isSwarmLabel", () => {
   test("default label 'swarm-review' matches", () => {

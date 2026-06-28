@@ -4,13 +4,13 @@ import { getAllTemplateDefinitions, resolveTemplate } from "@swarm/prompt-templa
 import { closeDb, initDb } from "@swarm/storage";
 
 // Side-effect imports: register all templates from each source
-import "../gitlab/templates";
-import "../agentmail/templates";
-import "../linear/templates";
+import "@swarm/integrations";
+import "@swarm/integrations";
+import "@swarm/integrations";
 import "@swarm/prompt-templates";
 import "../tools/templates";
 import "../commands/templates";
-import "../slack/templates";
+import "@swarm/integrations";
 import "@swarm/prompt-templates";
 
 const TEST_DB_PATH = "./test-prompt-remaining.sqlite";
@@ -25,13 +25,13 @@ async function ensureTemplatesRegistered(): Promise<void> {
   // clearTemplateDefinitions() in beforeEach/beforeAll, and since Bun shares
   // module state across parallel test files, a single-template check is racy.
   const ts = Date.now();
-  await import(`../gitlab/templates?t=${ts}`);
-  await import(`../agentmail/templates?t=${ts}`);
-  await import(`../linear/templates?t=${ts}`);
+  await import(`@swarm/integrations/src/gitlab/templates?t=${ts}`);
+  await import(`@swarm/integrations/src/agentmail/templates?t=${ts}`);
+  await import(`@swarm/integrations/src/linear/templates?t=${ts}`);
   await import(`@swarm/prompt-templates/src/heartbeat/templates?t=${ts}`);
   await import(`../tools/templates?t=${ts}`);
   await import(`../commands/templates?t=${ts}`);
-  await import(`../slack/templates?t=${ts}`);
+  await import(`@swarm/integrations/src/slack/templates?t=${ts}`);
   await import(`@swarm/prompt-templates/src/prompts/session-templates?t=${ts}`);
 }
 

@@ -1,9 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
+import { initAgentMail, initGitHub, resetAgentMail, resetGitHub } from "@swarm/integrations";
 import { closeDb, deleteSwarmConfig, getDb, initDb, upsertSwarmConfig } from "@swarm/storage";
-import { initAgentMail, resetAgentMail } from "../agentmail";
-import { initGitHub, resetGitHub } from "../github";
 import {
   _autoReloadStatsForTests,
   _resetAutoReloadForTests,

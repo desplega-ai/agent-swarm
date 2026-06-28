@@ -7,7 +7,7 @@ import {
   isGitLabEnabled,
   resetGitLab,
   verifyGitLabWebhook,
-} from "../gitlab/auth";
+} from "@swarm/integrations";
 
 describe("GitLab auth", () => {
   afterEach(() => {

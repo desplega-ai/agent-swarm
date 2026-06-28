@@ -1,6 +1,21 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import {
+  _clearRecentDeliveries,
+  buildSkipMessage,
+  DEFAULT_ALLOWED_STATE_TYPES,
+  DEFAULT_SWARM_READY_LABEL,
+  getLinearGateConfig,
+  handleAgentSessionEvent,
+  handleIssueDelete,
+  handleIssueUpdate,
+  handleLinearWebhook,
+  mapLinearStatusToSwarm,
+  SWARM_READY_LABEL,
+  shouldCreateTaskFromLinearEvent,
+  verifyLinearWebhook,
+} from "@swarm/integrations";
 import { getTemplateDefinition } from "@swarm/prompt-templates";
 import {
   closeDb,
@@ -10,25 +25,6 @@ import {
   getTrackerSyncByExternalId,
   initDb,
 } from "@swarm/storage";
-import {
-  buildSkipMessage,
-  DEFAULT_ALLOWED_STATE_TYPES,
-  DEFAULT_SWARM_READY_LABEL,
-  getLinearGateConfig,
-  SWARM_READY_LABEL,
-  shouldCreateTaskFromLinearEvent,
-} from "../linear/gate";
-import {
-  handleAgentSessionEvent,
-  handleIssueDelete,
-  handleIssueUpdate,
-  mapLinearStatusToSwarm,
-} from "../linear/sync";
-import {
-  _clearRecentDeliveries,
-  handleLinearWebhook,
-  verifyLinearWebhook,
-} from "../linear/webhook";
 
 const TEST_DB_PATH = "./test-linear-webhook.sqlite";
 const TEST_SECRET = "test-webhook-secret-123";
@@ -54,7 +50,7 @@ beforeEach(async () => {
   _clearRecentDeliveries();
   // Re-register Linear templates if cleared by parallel test files
   if (!getTemplateDefinition("linear.issue.assigned")) {
-    await import(`../linear/templates?t=${Date.now()}`);
+    await import(`@swarm/integrations/src/linear/templates?t=${Date.now()}`);
   }
 });
 

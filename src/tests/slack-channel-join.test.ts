@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { WebClient } from "@slack/web-api";
-import { withAutoJoin } from "../slack/channel-join";
+import { withAutoJoin } from "@swarm/integrations";
 
 // Mirrors the shape @slack/web-api's platformErrorFromResult produces:
 // message = "An API error occurred: <code>", data.error = "<code>"

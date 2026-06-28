@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerGithubTaskReactions } from "@swarm/integrations";
 import {
   registerScriptDeleteTool,
   registerScriptQueryTypesTool,
@@ -9,7 +10,6 @@ import {
 } from "@swarm/mcp-tool";
 import { initDb, seedPricingFromModelsDev, startPricingRefreshLoop } from "@swarm/storage";
 import pkg from "../package.json";
-import { registerGithubTaskReactions } from "./github/task-reactions";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";

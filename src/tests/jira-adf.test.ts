@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractMentions, extractText } from "../jira/adf";
+import { extractMentions, extractText } from "@swarm/integrations";
 
 describe("jira/adf — extractText", () => {
   test("returns empty string for non-node input", () => {

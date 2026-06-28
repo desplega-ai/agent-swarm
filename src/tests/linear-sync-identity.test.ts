@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import {
+  _clearRecentDeliveries,
+  handleAgentSessionEvent,
+  handleAgentSessionPrompted,
+} from "@swarm/integrations";
 import { getTemplateDefinition } from "@swarm/prompt-templates";
 import {
   closeDb,
@@ -14,8 +19,6 @@ import {
   linkIdentity,
   upsertKv,
 } from "@swarm/storage";
-import { handleAgentSessionEvent, handleAgentSessionPrompted } from "../linear/sync";
-import { _clearRecentDeliveries } from "../linear/webhook";
 
 const TEST_DB_PATH = "./test-linear-sync-identity.sqlite";
 const UNMAPPED_NAMESPACE = "integration:unmapped:linear";
@@ -85,7 +88,7 @@ afterAll(async () => {
 beforeEach(async () => {
   _clearRecentDeliveries();
   if (!getTemplateDefinition("linear.issue.assigned")) {
-    await import(`../linear/templates?t=${Date.now()}`);
+    await import(`@swarm/integrations/src/linear/templates?t=${Date.now()}`);
   }
   // Reset identity-relevant rows between tests so each case starts clean.
   // Order matters — agent_tasks has FK on users.id via requestedByUserId.

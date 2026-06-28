@@ -1,11 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  downloadFile,
+  extractSlackMessageText,
+  getSlackApp,
+  withAutoJoin,
+} from "@swarm/integrations";
 import { createToolRegistrar } from "@swarm/mcp-tool";
 import { getAgentById, getInboxMessageById, getTaskById } from "@swarm/storage";
 import * as z from "zod";
-import { getSlackApp } from "@/slack/app";
-import { withAutoJoin } from "@/slack/channel-join";
-import { downloadFile } from "@/slack/files";
-import { extractSlackMessageText } from "@/slack/message-text";
 
 /**
  * Default download directory for auto-downloaded Slack files (inside MCP container).

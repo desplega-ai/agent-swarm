@@ -16,6 +16,19 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type {
+  CommentEvent,
+  IssueEvent,
+  PullRequestEvent,
+  PullRequestReviewEvent,
+} from "@swarm/integrations";
+import {
+  GITHUB_BOT_NAME,
+  handleComment,
+  handleIssue,
+  handlePullRequest,
+  handlePullRequestReview,
+} from "@swarm/integrations";
 import {
   closeDb,
   createAgent,
@@ -26,19 +39,6 @@ import {
   initDb,
   linkIdentity,
 } from "@swarm/storage";
-import {
-  handleComment,
-  handleIssue,
-  handlePullRequest,
-  handlePullRequestReview,
-} from "../github/handlers";
-import { GITHUB_BOT_NAME } from "../github/mentions";
-import type {
-  CommentEvent,
-  IssueEvent,
-  PullRequestEvent,
-  PullRequestReviewEvent,
-} from "../github/types";
 
 const TEST_DB_PATH = "./test-github-handlers.sqlite";
 const UNMAPPED_NAMESPACE = "integration:unmapped:github";
@@ -306,7 +306,7 @@ describe("no github email enrichment", () => {
   test("handlers module exports no `enrichUserFromIntegration`-style helper", async () => {
     // Q17.A — there is intentionally NO email auto-link cascade for GitHub.
     // Confirm the module surface stays clean.
-    const mod = await import("../github/handlers");
+    const mod = await import("@swarm/integrations");
     const exported = Object.keys(mod);
     expect(exported.some((name) => /enrich.*github/i.test(name))).toBe(false);
     expect(exported.some((name) => /github.*enrich/i.test(name))).toBe(false);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isInboxAllowed, isSenderAllowed } from "../agentmail/handlers";
+import { isInboxAllowed, isSenderAllowed } from "@swarm/integrations";
 
 describe("isInboxAllowed", () => {
   test("allows all when filter is undefined", () => {

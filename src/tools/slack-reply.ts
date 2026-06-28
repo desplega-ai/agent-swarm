@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getSlackApp, markdownToSlack, withAutoJoin } from "@swarm/integrations";
 import { createToolRegistrar } from "@swarm/mcp-tool";
 import {
   getAgentById,
@@ -8,9 +9,6 @@ import {
   markTaskSlackReplySent,
 } from "@swarm/storage";
 import * as z from "zod";
-import { getSlackApp } from "@/slack/app";
-import { withAutoJoin } from "@/slack/channel-join";
-import { markdownToSlack } from "@/slack/responses";
 
 export const registerSlackReplyTool = (server: McpServer) => {
   createToolRegistrar(server)(

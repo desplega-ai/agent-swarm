@@ -1,6 +1,20 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
+  _getLastRenderedTree,
+  _getTaskMessages,
+  _getTaskToTree,
+  _getTreeLastUpdateTime,
+  _getTreeMessages,
+  _isDMChannel,
+  _postInitialDMTreeMessage,
+  buildTreeNodes,
+  processTreeMessages,
+  registerTreeMessage,
+  startTaskWatcher,
+  stopTaskWatcher,
+} from "@swarm/integrations";
+import {
   cancelTask,
   closeDb,
   completeTask,
@@ -16,20 +30,6 @@ import {
   startTask,
   updateTaskProgress,
 } from "@swarm/storage";
-import {
-  _getLastRenderedTree,
-  _getTaskMessages,
-  _getTaskToTree,
-  _getTreeLastUpdateTime,
-  _getTreeMessages,
-  _isDMChannel,
-  _postInitialDMTreeMessage,
-  buildTreeNodes,
-  processTreeMessages,
-  registerTreeMessage,
-  startTaskWatcher,
-  stopTaskWatcher,
-} from "../slack/watcher";
 
 const TEST_DB_PATH = "./test-slack-watcher.sqlite";
 
@@ -493,7 +493,7 @@ const mockChatUpdate = mock(() => Promise.resolve({ ok: true }));
 const mockChatPostMessage = mock(() => Promise.resolve({ ok: true, ts: "mock.dm.tree.000001" }));
 const mockSetStatus = mock(() => Promise.resolve({ ok: true }));
 
-mock.module("../slack/app", () => ({
+mock.module("@swarm/integrations", () => ({
   getSlackApp: () => ({
     client: {
       chat: {

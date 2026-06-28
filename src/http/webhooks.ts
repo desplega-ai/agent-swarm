@@ -1,45 +1,43 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  getExecutorRegistry,
-  handleWebhookTrigger,
-  verifyHmacSignature,
-  WebhookError,
-  workflowEventBus,
-} from "@swarm/workflows";
-import type { AgentMailWebhookPayload } from "../agentmail";
-import {
-  handleMessageReceived,
-  isAgentMailEnabled,
-  isInboxAllowed,
-  isSenderAllowed,
-  verifyAgentMailWebhook,
-} from "../agentmail";
 import type {
+  AgentMailWebhookPayload,
   CheckRunEvent,
   CheckSuiteEvent,
   CommentEvent,
   IssueEvent,
+  KapsoConfig,
+  KapsoWebhookPayload,
   PullRequestEvent,
   PullRequestReviewEvent,
   WorkflowRunEvent,
-} from "../github";
+} from "@swarm/integrations";
 import {
+  getKapsoConfig,
   handleCheckRun,
   handleCheckSuite,
   handleComment,
   handleIssue,
+  handleMessageReceived,
   handlePullRequest,
   handlePullRequestReview,
   handleWorkflowRun,
+  isAgentMailEnabled,
   isGitHubEnabled,
+  isInboxAllowed,
+  isSenderAllowed,
+  type KapsoMessageActionResult,
+  markKapsoMessageRead,
+  routeKapsoInbound,
+  sendKapsoReaction,
+  verifyAgentMailWebhook,
   verifyWebhookSignature,
-} from "../github";
+} from "@swarm/integrations";
 import type {
   IssueEvent as GitLabIssueEvent,
   MergeRequestEvent,
   NoteEvent,
   PipelineEvent,
-} from "../gitlab";
+} from "@swarm/integrations/gitlab";
 import {
   handleIssue as handleGitLabIssue,
   handleMergeRequest,
@@ -47,16 +45,14 @@ import {
   handlePipeline,
   isGitLabEnabled,
   verifyGitLabWebhook,
-} from "../gitlab";
+} from "@swarm/integrations/gitlab";
 import {
-  type KapsoMessageActionResult,
-  markKapsoMessageRead,
-  sendKapsoReaction,
-} from "../integrations/kapso/client";
-import type { KapsoConfig } from "../integrations/kapso/config";
-import { getKapsoConfig } from "../integrations/kapso/config";
-import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
-import { routeKapsoInbound } from "../integrations/kapso/inbound";
+  getExecutorRegistry,
+  handleWebhookTrigger,
+  verifyHmacSignature,
+  WebhookError,
+  workflowEventBus,
+} from "@swarm/workflows";
 import { route } from "./route-def";
 
 // ─── Route Definitions (documentation only — webhooks handle their own body parsing) ─

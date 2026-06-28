@@ -1,18 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
+  bufferThreadMessage,
+  getBufferMessageCount,
+  instantFlush,
+  isThreadBuffered,
+} from "@swarm/integrations";
+import {
   closeDb,
   createAgent,
   createTaskExtended,
   getLatestActiveTaskInThread,
   initDb,
 } from "@swarm/storage";
-import {
-  bufferThreadMessage,
-  getBufferMessageCount,
-  instantFlush,
-  isThreadBuffered,
-} from "../slack/thread-buffer";
 
 const TEST_DB_PATH = "./test-slack-thread-buffer.sqlite";
 

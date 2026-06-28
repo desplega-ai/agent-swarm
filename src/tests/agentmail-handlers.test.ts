@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
+import type { AgentMailWebhookPayload } from "@swarm/integrations";
+import { handleMessageReceived } from "@swarm/integrations";
 import {
   closeDb,
   createAgent,
@@ -10,8 +12,6 @@ import {
   getTaskById,
   initDb,
 } from "@swarm/storage";
-import { handleMessageReceived } from "../agentmail/handlers";
-import type { AgentMailWebhookPayload } from "../agentmail/types";
 
 const TEST_DB_PATH = "./test-agentmail-handlers.sqlite";
 

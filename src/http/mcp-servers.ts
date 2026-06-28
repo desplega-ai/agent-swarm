@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ensureMcpToken } from "@swarm/integrations";
 import {
   createMcpServer,
   deleteMcpServer,
@@ -11,7 +12,6 @@ import {
   updateMcpServer,
 } from "@swarm/storage";
 import { z } from "zod";
-import { ensureMcpToken } from "../oauth/ensure-mcp-token";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

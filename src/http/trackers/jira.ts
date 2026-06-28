@@ -1,12 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  clearJiraMetadata,
+  deleteJiraWebhook,
+  ensureTokenOrThrow,
+  getJiraAuthorizationUrl,
+  getJiraMetadata,
+  handleJiraCallback,
+  handleJiraWebhook,
+  isJiraEnabled,
+  registerJiraWebhook,
+} from "@swarm/integrations";
 import { deleteOAuthTokens, getOAuthTokens } from "@swarm/storage";
 import { z } from "zod";
-import { isJiraEnabled } from "../../jira/app";
-import { clearJiraMetadata, getJiraMetadata } from "../../jira/metadata";
-import { getJiraAuthorizationUrl, handleJiraCallback } from "../../jira/oauth";
-import { handleJiraWebhook } from "../../jira/webhook";
-import { deleteJiraWebhook, registerJiraWebhook } from "../../jira/webhook-lifecycle";
-import { ensureTokenOrThrow } from "../../oauth/ensure-token";
 import { route } from "../route-def";
 import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 

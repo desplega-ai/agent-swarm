@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "@swarm/storage";
 
 // Mock slack/app to avoid dynamic import issues in parallel test execution
-mock.module("../slack/app", () => ({
+mock.module("@swarm/integrations", () => ({
   getSlackApp: () => null,
 }));
 

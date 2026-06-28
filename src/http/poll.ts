@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
+import { fetchChannelActivity } from "@swarm/integrations";
 import { telemetry } from "@swarm/otel";
 import {
   type BudgetRefusalContext,
@@ -23,7 +24,6 @@ import {
   upsertChannelActivityCursor,
 } from "@swarm/storage";
 import { z } from "zod";
-import { fetchChannelActivity } from "../slack/channel-activity";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

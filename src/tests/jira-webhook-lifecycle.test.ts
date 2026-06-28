@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { getJiraMetadata, updateJiraMetadata } from "@swarm/integrations";
 import { closeDb, getDb, initDb, upsertOAuthApp } from "@swarm/storage";
-import { getJiraMetadata, updateJiraMetadata } from "../jira/metadata";
 
 const TEST_DB_PATH = "./test-jira-webhook-lifecycle.sqlite";
 const originalSlackAlertsChannel = process.env.SLACK_ALERTS_CHANNEL;
@@ -21,7 +21,7 @@ const jiraFetchMock = mock(
       new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
     ) as Promise<Response>,
 );
-mock.module("../jira/client", () => ({
+mock.module("@swarm/integrations", () => ({
   jiraFetch: jiraFetchMock,
   getJiraAccessToken: () => Promise.resolve("access-1"),
   getJiraCloudId: () => "cloud-1",
@@ -53,9 +53,7 @@ afterAll(async () => {
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
-const { _test, refreshJiraWebhooks, registerJiraWebhook } = await import(
-  "../jira/webhook-lifecycle"
-);
+const { _test, refreshJiraWebhooks, registerJiraWebhook } = await import("@swarm/integrations");
 
 beforeEach(() => {
   jiraFetchMock.mockClear();

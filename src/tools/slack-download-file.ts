@@ -1,9 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { DEFAULT_DOWNLOAD_DIR, downloadFile, getFileInfo, getSlackApp } from "@swarm/integrations";
 import { createToolRegistrar } from "@swarm/mcp-tool";
 import { getAgentById } from "@swarm/storage";
 import * as z from "zod";
-import { getSlackApp } from "@/slack/app";
-import { DEFAULT_DOWNLOAD_DIR, downloadFile, getFileInfo } from "@/slack/files";
 
 export const registerSlackDownloadFileTool = (server: McpServer) => {
   createToolRegistrar(server)(

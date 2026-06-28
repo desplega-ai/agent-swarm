@@ -7,12 +7,12 @@ import {
 } from "@swarm/prompt-templates";
 import { closeDb, initDb, upsertPromptTemplate } from "@swarm/storage";
 // Side-effect import: registers all GitHub templates
-import "../github/templates";
+import "@swarm/integrations";
 
 async function ensureTemplatesRegistered(): Promise<void> {
   if (getTemplateDefinition("github.pull_request.assigned")) return;
   const ts = Date.now();
-  await import(`../github/templates?t=${ts}`);
+  await import(`@swarm/integrations/src/github/templates?t=${ts}`);
 }
 
 const TEST_DB_PATH = "./test-prompt-github.sqlite";
