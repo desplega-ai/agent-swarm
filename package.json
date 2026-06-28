@@ -141,6 +141,7 @@
     "ink": "^6.5.1",
     "oauth4webapi": "^3.8.5",
     "openai": "^6.22.0",
+    "playwright": "^1.61.1",
     "react": "^19.2.3",
     "react-devtools-core": "^7.0.1",
     "sqlite-vec": "^0.1.9",

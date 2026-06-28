@@ -23,7 +23,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { closeDb, initDb } from "../be/db";
-import { handlePages } from "../http/pages";
+import { handlePages, setPagePdfRendererForTest } from "../http/pages";
 import { handlePagesPublic } from "../http/pages-public";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { signPageSession } from "../utils/page-session";
@@ -72,6 +72,7 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
   });
 
   afterAll(async () => {
+    setPagePdfRendererForTest(null);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -178,6 +179,28 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
     const id = await createAuthedPage("json-no-cookie");
     const res = await fetch(`${BASE}/p/${id}.json`);
     expect(res.status).toBe(401);
+  });
+
+  test("GET /api/pages/:id/export.pdf returns generated PDF with title filename", async () => {
+    const id = await createAuthedPage("pdf-export", "<!doctype html><body><h1>full</h1></body>");
+    setPagePdfRendererForTest(async (page) => {
+      expect(page.id).toBe(id);
+      expect(page.title).toBe("Authed pdf-export");
+      return Buffer.from("%PDF-1.7\n% test pdf\n");
+    });
+    try {
+      const res = await fetch(`${BASE}/api/pages/${id}/export.pdf`, {
+        headers: { "X-Agent-ID": agentId },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/pdf");
+      expect(res.headers.get("content-disposition")).toBe(
+        'attachment; filename="authed-pdf-export.pdf"',
+      );
+      expect(await res.text()).toBe("%PDF-1.7\n% test pdf\n");
+    } finally {
+      setPagePdfRendererForTest(null);
+    }
   });
 
   test("expired cookie → 401 (HMAC actually verified, not just presence)", async () => {
