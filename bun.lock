@@ -31,7 +31,7 @@
         "@x402/evm": "^2.5.0",
         "@x402/fetch": "^2.5.0",
         "ai": "^6.0.116",
-        "chromium-bidi": "^16.0.1",
+        "chromium-bidi": "15.0.0",
         "cron-parser": "^5.4.0",
         "date-fns": "^4.1.0",
         "e2b": "2.26.0",
@@ -498,7 +498,7 @@
 
     "chownr": ["chownr@3.0.0", "", {}, "sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g=="],
 
-    "chromium-bidi": ["chromium-bidi@16.0.1", "", { "dependencies": { "mitt": "^3.0.1", "zod": "^3.24.1" }, "peerDependencies": { "devtools-protocol": "*" } }, "sha512-J63PGu/9PpeCwLIcKYyzWP6yaVL5pxuBc0shlYCYM8BaAkmlwiQboXO1iNbOgSDbVklEyYFfNEcHD8oOAWacUA=="],
+    "chromium-bidi": ["chromium-bidi@15.0.0", "", { "dependencies": { "mitt": "^3.0.1", "zod": "^3.24.1" }, "peerDependencies": { "devtools-protocol": "*" } }, "sha512-ESWZM1u85CoeSozBXXG9M73S5tH0EjkqnFJoQ6F3MHs2YGe0CLVMaRvhGxetLP6w4GVR59+/cpWvDLUpLvJXLQ=="],
 
     "cjs-module-lexer": ["cjs-module-lexer@2.2.0", "", {}, "sha512-4bHTS2YuzUvtoLjdy+98ykbNB5jS0+07EvFNXerqZQJ89F7DI6ET7OQo/HJuW6K0aVsKA9hj9/RVb2kQVOrPDQ=="],
 
