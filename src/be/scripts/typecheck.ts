@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getScriptApiTypes } from "@/be/script-connections";
 
 /**
  * Structured diagnostic record returned to API callers when typecheck fails.
@@ -272,6 +273,7 @@ export interface ScriptContext {
   run?: ScriptRunContext;
   step?: ScriptWorkflowSteps;
   swarm: SwarmSdk & { config: SwarmConfig };
+  api: ScriptApiRegistry;
   stdlib: ScriptStdlib;
   logger: ScriptLogger;
 }
@@ -279,6 +281,10 @@ export interface ScriptContext {
 // biome-ignore lint/suspicious/noExplicitAny: scripts may narrow their args type at the entrypoint.
 export type ScriptMain = (args: any, ctx: ScriptContext) => unknown | Promise<unknown>;
 `;
+
+export function scriptSdkTypesWithGeneratedApis(apiTypes = getScriptApiTypes()): string {
+  return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n`;
+}
 
 export const SCRIPT_STDLIB_TYPES = `
 declare module "stdlib" {
@@ -775,7 +781,10 @@ function toStructured(diag: ts.Diagnostic): ScriptDiagnostic {
   };
 }
 
-export function typecheckScript(source: string): ScriptTypecheckResult {
+export function typecheckScript(
+  source: string,
+  context: { agentId?: string; repoId?: string } = {},
+): ScriptTypecheckResult {
   const options: ts.CompilerOptions = {
     allowImportingTsExtensions: true,
     lib: ["lib.es2022.d.ts"],
@@ -788,9 +797,10 @@ export function typecheckScript(source: string): ScriptTypecheckResult {
     types: [],
   };
 
+  const sdkTypes = scriptSdkTypesWithGeneratedApis(getScriptApiTypes(context));
   const files = new Map<string, string>([
     [USER_FILE, source],
-    [SDK_FILE, SCRIPT_SDK_TYPES],
+    [SDK_FILE, sdkTypes],
     [STDLIB_FILE, SCRIPT_STDLIB_TYPES],
     [RUNTIME_GLOBALS_FILE, SCRIPT_RUNTIME_GLOBALS],
     [

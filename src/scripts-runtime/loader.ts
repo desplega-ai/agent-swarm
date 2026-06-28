@@ -1,5 +1,6 @@
 import { getApiKey } from "../utils/api-key";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import type { ScriptApiConnectionDescriptor } from "./api-types";
 import { buildEgressSecrets } from "./egress-secrets";
 import { getScriptExecutor } from "./executors/registry";
 import {
@@ -23,6 +24,7 @@ export type RunScriptInput = {
   resources?: Partial<ScriptResourcePolicy>;
   userConfig?: Record<string, { value: string; isSecret: boolean }>;
   egressSecrets?: EgressSecretEntry[];
+  apiConnections?: ScriptApiConnectionDescriptor[];
 };
 
 export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr"> & {
@@ -48,6 +50,7 @@ function buildConfigPayload(input: RunScriptInput): SwarmConfigPayload {
     },
     user: input.userConfig ?? {},
     egressSecrets: input.egressSecrets ?? buildEgressSecrets(),
+    apiConnections: input.apiConnections ?? [],
   };
 }
 

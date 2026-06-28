@@ -1,12 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, getSwarmConfigs, upsertSwarmConfig } from "@/be/db";
-import { scheduleIntegrationsReload } from "@/http/core";
+import { getAgentById } from "@/be/db";
 import {
-  CREDENTIAL_BINDINGS_CONFIG_KEY,
-  type CredentialBinding,
+  disableCredentialBinding,
+  importLegacyCredentialBindings,
+  listRelationalCredentialBindings,
+  upsertCredentialBinding,
+} from "@/be/script-connections";
+import {
   CredentialBindingSchema,
-  normalizeCredentialBindingsDocument,
   placeholderForConfigKey,
 } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
@@ -19,7 +21,10 @@ const credentialBindingsOutputSchema = z.object({
 });
 
 const credentialBindingsInputSchema = z.object({
-  action: z.enum(["list", "upsert", "disable"]).describe("List, add/update, or disable a binding."),
+  action: z
+    .enum(["list", "upsert", "disable", "import-legacy"])
+    .describe("List, add/update, disable, or import legacy JSON bindings."),
+  id: z.string().uuid().optional(),
   configKey: z.string().min(1).max(255).optional(),
   allowedHosts: z.array(z.string().min(1)).min(1).optional(),
   headerTemplate: z.string().min(1).optional(),
@@ -27,32 +32,6 @@ const credentialBindingsInputSchema = z.object({
   scope: z.enum(["global", "agent", "repo"]).default("global").optional(),
   scopeId: z.string().uuid().nullable().optional(),
 });
-
-function bindingIdentity(binding: Pick<CredentialBinding, "configKey" | "scope" | "scopeId">) {
-  return `${binding.scope}:${binding.scopeId ?? ""}:${binding.configKey}`;
-}
-
-function readGlobalBindings(): CredentialBinding[] {
-  const row = getSwarmConfigs({ scope: "global", key: CREDENTIAL_BINDINGS_CONFIG_KEY })[0];
-  if (!row) return [];
-
-  try {
-    return normalizeCredentialBindingsDocument(JSON.parse(row.value));
-  } catch {
-    return [];
-  }
-}
-
-function writeGlobalBindings(bindings: CredentialBinding[]) {
-  upsertSwarmConfig({
-    scope: "global",
-    key: CREDENTIAL_BINDINGS_CONFIG_KEY,
-    value: JSON.stringify({ bindings }, null, 2),
-    isSecret: false,
-    description: "Lead-managed scripts-runtime credential broker bindings.",
-  });
-  scheduleIntegrationsReload();
-}
 
 export const registerCredentialBindingsTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -90,7 +69,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         };
       }
 
-      const bindings = readGlobalBindings();
+      const bindings = listRelationalCredentialBindings({ includeInactive: true });
 
       if (args.action === "list") {
         return {
@@ -115,13 +94,53 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         };
       }
 
+      if (args.action === "import-legacy") {
+        const imported = importLegacyCredentialBindings();
+        const nextBindings = listRelationalCredentialBindings({ includeInactive: true });
+        return {
+          content: [{ type: "text", text: `Imported ${imported} legacy credential binding(s).` }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: true,
+            message: `Imported ${imported} legacy credential binding(s).`,
+            bindings: nextBindings,
+          },
+        };
+      }
+
+      if (args.action === "disable") {
+        const disabled = args.id ? disableCredentialBinding(args.id, requestInfo.agentId) : null;
+        if (!disabled) {
+          return {
+            content: [{ type: "text", text: "Credential binding id not found." }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "Credential binding id not found.",
+              bindings,
+            },
+          };
+        }
+
+        const nextBindings = listRelationalCredentialBindings({ includeInactive: true });
+        return {
+          content: [{ type: "text", text: `Credential binding ${disabled.configKey} disabled.` }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: true,
+            message: `Credential binding ${disabled.configKey} disabled.`,
+            bindings: nextBindings,
+          },
+        };
+      }
+
       if (!args.configKey) {
         return {
-          content: [{ type: "text", text: "configKey is required for upsert and disable." }],
+          content: [{ type: "text", text: "configKey is required for upsert." }],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "configKey is required for upsert and disable.",
+            message: "configKey is required for upsert.",
             bindings,
           },
         };
@@ -136,38 +155,6 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
             yourAgentId: requestInfo.agentId,
             success: false,
             message: `scopeId is required for ${scope} bindings.`,
-            bindings,
-          },
-        };
-      }
-
-      const targetIdentity = bindingIdentity({ configKey: args.configKey, scope, scopeId });
-      const existingIndex = bindings.findIndex(
-        (binding) => bindingIdentity(binding) === targetIdentity,
-      );
-
-      if (args.action === "disable") {
-        const existing = bindings[existingIndex];
-        if (!existing) {
-          return {
-            content: [{ type: "text", text: `Credential binding ${args.configKey} not found.` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Credential binding ${args.configKey} not found.`,
-              bindings,
-            },
-          };
-        }
-
-        bindings[existingIndex] = { ...existing, active: false };
-        writeGlobalBindings(bindings);
-        return {
-          content: [{ type: "text", text: `Credential binding ${args.configKey} disabled.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Credential binding ${args.configKey} disabled.`,
             bindings,
           },
         };
@@ -225,9 +212,17 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         active: true,
       });
 
-      if (existingIndex >= 0) bindings[existingIndex] = nextBinding;
-      else bindings.push(nextBinding);
-      writeGlobalBindings(bindings);
+      upsertCredentialBinding({
+        id: args.id,
+        configKey: nextBinding.configKey,
+        allowedHosts: nextBinding.allowedHosts,
+        headerTemplate: nextBinding.headerTemplate,
+        queryTemplate: nextBinding.queryTemplate,
+        scope: nextBinding.scope,
+        scopeId: nextBinding.scopeId ?? null,
+        active: true,
+      });
+      const nextBindings = listRelationalCredentialBindings({ includeInactive: true });
 
       return {
         content: [{ type: "text", text: `Credential binding ${args.configKey} saved.` }],
@@ -235,7 +230,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           yourAgentId: requestInfo.agentId,
           success: true,
           message: `Credential binding ${args.configKey} saved.`,
-          bindings,
+          bindings: nextBindings,
         },
       };
     },

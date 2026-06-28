@@ -72,6 +72,7 @@ export const DEFERRED_TOOLS = new Set([
   "list-config",
   "delete-config",
   "credential-bindings",
+  "script-connections",
 
   // Memory (1)
   "memory-edit",

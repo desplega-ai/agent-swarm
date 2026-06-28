@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 import { closeDb } from "../src/be/db";
-import { SCRIPT_SDK_TYPES, SCRIPT_STDLIB_TYPES } from "../src/be/scripts/typecheck";
+import {
+  SCRIPT_STDLIB_TYPES,
+  scriptSdkTypesWithGeneratedApis,
+} from "../src/be/scripts/typecheck";
 import { createServer } from "../src/server";
 import { SDK_ALLOWLIST, mcpToolNameForSdkMethod } from "../src/scripts-runtime/sdk-allowlist";
 
@@ -21,7 +24,7 @@ async function main() {
   await Bun.$`mkdir -p src/scripts-runtime/types`;
   await Bun.write(
     "src/scripts-runtime/types/swarm-sdk.d.ts",
-    `declare module "swarm-sdk" {\n${SCRIPT_SDK_TYPES.replace(/^/gm, "  ")}\n}\n`,
+    `declare module "swarm-sdk" {\n${scriptSdkTypesWithGeneratedApis().replace(/^/gm, "  ")}\n}\n`,
   );
   await Bun.write("src/scripts-runtime/types/stdlib.d.ts", SCRIPT_STDLIB_TYPES.trimStart());
   await Bun.$`bunx biome format --write src/scripts-runtime/types/swarm-sdk.d.ts src/scripts-runtime/types/stdlib.d.ts`;
