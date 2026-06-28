@@ -1146,6 +1146,7 @@ export const AgentMemorySchema = z.object({
   id: z.string().uuid(),
   agentId: z.string().uuid().nullable(),
   scope: AgentMemoryScopeSchema,
+  key: z.string().nullable().optional(),
   name: z.string().min(1).max(500),
   content: z.string(),
   summary: z.string().nullable(),
@@ -1156,10 +1157,13 @@ export const AgentMemorySchema = z.object({
   totalChunks: z.number().int().min(1).default(1),
   tags: z.array(z.string()),
   createdAt: z.string(),
+  updatedAt: z.string().nullable().optional(),
   accessedAt: z.string(),
   expiresAt: z.string().nullable().optional(),
   accessCount: z.number().int().min(0).default(0).optional(),
   embeddingModel: z.string().nullable().optional(),
+  contentHash: z.string().nullable().optional(),
+  version: z.number().int().min(1).default(1).optional(),
 });
 
 export type AgentMemoryScope = z.infer<typeof AgentMemoryScopeSchema>;

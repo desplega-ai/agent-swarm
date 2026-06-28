@@ -21,6 +21,7 @@ export interface MemoryStore {
   get(id: string): AgentMemory | null;
   peek(id: string): AgentMemory | null;
   search(embedding: Float32Array, agentId: string, options: MemorySearchOptions): MemoryCandidate[];
+  edit(input: MemoryEditInput): MemoryEditResult;
   list(agentId: string, options: MemoryListOptions): AgentMemory[];
   count(agentId: string, options: MemoryListOptions): number;
   isSourceProtected(source: AgentMemorySource): boolean;
@@ -53,6 +54,8 @@ export interface MemoryInput {
   totalChunks?: number;
   tags?: string[];
   contextKey?: string | null;
+  intent?: string | null;
+  key?: string | null;
 }
 
 export interface MemoryCandidate extends AgentMemory {
@@ -61,6 +64,10 @@ export interface MemoryCandidate extends AgentMemory {
   rawSimilarity?: number;
   /** Final composite score after reranking (recency × source × usefulness × access). */
   compositeScore?: number;
+  /** Search arm that surfaced the candidate. Memory `source` remains manual/file_index/etc. */
+  retrievalSource?: MemoryRetrievalSource;
+  /** True when `similarity` already includes source-aware recency decay. */
+  recencyDecayApplied?: boolean;
   accessCount: number;
   expiresAt: string | null;
   embeddingModel: string | null;
@@ -69,12 +76,51 @@ export interface MemoryCandidate extends AgentMemory {
   beta: number;
 }
 
+export type MemoryRetrievalSource = "vec" | "fts" | "hybrid" | "fallback";
+
 export interface MemorySearchOptions {
   scope?: "agent" | "swarm" | "all";
   limit?: number;
   source?: AgentMemorySource;
   isLead?: boolean;
   includeExpired?: boolean;
+  queryText?: string;
+}
+
+/**
+ * Memory edit modes:
+ *
+ * - **replace**: Overwrites the entire memory content with the new `content` field.
+ *   Use when you want to rewrite the memory from scratch. Requires `content`.
+ *
+ * - **exact**: Performs a surgical find-and-replace within the existing content.
+ *   Finds the first (and only) occurrence of `oldString` and replaces it with
+ *   `newString`. Fails if `oldString` is not found or appears more than once
+ *   (ambiguous). Use when you want to update a specific section without
+ *   touching the rest.
+ */
+export type MemoryEditMode = "replace" | "exact";
+
+export interface MemoryEditInput {
+  id?: string;
+  key?: string;
+  scope?: AgentMemoryScope;
+  agentId?: string | null;
+  mode: MemoryEditMode;
+  content?: string;
+  oldString?: string;
+  newString?: string;
+  intent: string;
+  expectedVersion?: number;
+  changedByAgentId?: string | null;
+}
+
+export interface MemoryEditResult {
+  memory: AgentMemory;
+  changed: boolean;
+  previousVersion: number;
+  version: number;
+  contentHash: string;
 }
 
 export interface MemoryListOptions {

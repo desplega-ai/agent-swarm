@@ -73,6 +73,9 @@ export const DEFERRED_TOOLS = new Set([
   "delete-config",
   "credential-bindings",
 
+  // Memory (1)
+  "memory-edit",
+
   // Repos (2)
   "get-repos",
   "update-repo",

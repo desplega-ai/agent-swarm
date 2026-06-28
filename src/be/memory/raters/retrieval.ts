@@ -22,6 +22,7 @@ import { getDb } from "@/be/db";
 export type RetrievalRecord = {
   memoryId: string;
   similarity: number;
+  retrievalSource?: "vec" | "fts" | "hybrid" | "fallback";
 };
 
 export type RetrievalExtras = {
@@ -42,8 +43,8 @@ export function recordRetrievals(
   const db = getDb();
   const insert = db.prepare(
     `INSERT INTO memory_retrieval
-       (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, contextKey, intent, eventType, retrievalId, rank)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, contextKey, intent, eventType, retrievalId, rank, retrievalSource)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const now = new Date().toISOString();
   const retrievalId = crypto.randomUUID();
@@ -66,6 +67,7 @@ export function recordRetrievals(
         eventType,
         retrievalId,
         rank,
+        r.retrievalSource ?? null,
       );
     }
   })();

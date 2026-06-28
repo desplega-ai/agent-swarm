@@ -4341,6 +4341,89 @@
         }
       }
     },
+    "/api/memory/edit": {
+      "post": {
+        "summary": "Edit a single memory in place while preserving its ID and usefulness posterior. Modes: 'replace' overwrites entire content; 'exact' performs surgical find-and-replace of oldString→newString (fails if missing or ambiguous)",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "memoryId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "agent",
+                      "swarm"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "replace",
+                      "exact"
+                    ],
+                    "default": "replace"
+                  },
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "oldString": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "newString": {
+                    "type": "string"
+                  },
+                  "intent": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "intent"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memory edited"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Memory not found"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
+      }
+    },
     "/api/memory/re-embed": {
       "post": {
         "summary": "Re-embed all memories using the current embedding provider",

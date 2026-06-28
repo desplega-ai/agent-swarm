@@ -164,6 +164,17 @@ declare module "swarm-sdk" {
 
     // --- write: memory ---
     memory_delete(args: { id: string }): Promise<unknown>;
+    memory_edit(args: {
+      memoryId?: string;
+      key?: string;
+      scope?: "agent" | "swarm";
+      mode?: "replace" | "exact";
+      content?: string;
+      oldString?: string;
+      newString?: string;
+      intent: string;
+      expectedVersion?: number;
+    }): Promise<unknown>;
     inject_learning(args: {
       content: string;
       name?: string;

@@ -43,6 +43,7 @@ import {
 } from "./tools/mcp-servers";
 // Memory capability
 import { registerMemoryDeleteTool } from "./tools/memory-delete";
+import { registerMemoryEditTool } from "./tools/memory-edit";
 import { registerMemoryGetTool } from "./tools/memory-get";
 import { registerMemoryRateTool } from "./tools/memory-rate";
 import { registerMemorySearchTool } from "./tools/memory-search";
@@ -305,6 +306,7 @@ export function createServer() {
   if (hasCapability("memory")) {
     registerMemorySearchTool(server);
     registerMemoryGetTool(server);
+    registerMemoryEditTool(server);
     registerMemoryDeleteTool(server);
     registerMemoryRateTool(server);
     registerInjectLearningTool(server);

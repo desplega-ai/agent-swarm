@@ -72,6 +72,33 @@ const searchMemory = route({
   },
 });
 
+const editMemory = route({
+  method: "post",
+  path: "/api/memory/edit",
+  pattern: ["api", "memory", "edit"],
+  summary:
+    "Edit a single memory in place while preserving its ID and usefulness posterior. Modes: 'replace' overwrites entire content; 'exact' performs surgical find-and-replace of oldString→newString (fails if missing or ambiguous)",
+  tags: ["Memory"],
+  auth: { apiKey: true, agentId: true },
+  body: z.object({
+    memoryId: z.string().uuid().optional(),
+    key: z.string().min(1).optional(),
+    scope: AgentMemoryScopeSchema.optional(),
+    mode: z.enum(["replace", "exact"]).default("replace"),
+    content: z.string().min(1).optional(),
+    oldString: z.string().min(1).optional(),
+    newString: z.string().optional(),
+    intent: z.string().min(1),
+    expectedVersion: z.number().int().min(1).optional(),
+  }),
+  responses: {
+    200: { description: "Memory edited" },
+    400: { description: "Validation error" },
+    404: { description: "Memory not found" },
+    409: { description: "Version conflict" },
+  },
+});
+
 const reEmbedMemory = route({
   method: "post",
   path: "/api/memory/re-embed",
@@ -319,7 +346,39 @@ export async function handleMemory(
     const store = getMemoryStore();
     const provider = getEmbeddingProvider();
 
-    // Dedup — delete old chunks for this source path
+    if (sourcePath && agentId && contentChunks.length === 1) {
+      const existing = store
+        .list(agentId, {
+          scope,
+          limit: 2,
+          ownerAgentId: agentId,
+          sourcePath,
+        })
+        .filter((memory) => memory.sourcePath === sourcePath);
+      if (existing.length === 1 && existing[0]?.totalChunks === 1) {
+        const result = store.edit({
+          id: existing[0].id,
+          mode: "replace",
+          content: contentChunks[0]!.content,
+          intent: "re-index memory source path",
+          changedByAgentId: agentId,
+        });
+        const embedding = await provider.embed(contentChunks[0]!.content);
+        if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
+        try {
+          storeLinks(result.memory.id, agentId, result.memory.content);
+        } catch (err) {
+          console.error(
+            `[memory] Link resolution failed for ${result.memory.id}:`,
+            (err as Error).message,
+          );
+        }
+        json(res, { queued: false, memoryIds: [result.memory.id], edited: result.changed }, 202);
+        return true;
+      }
+    }
+
+    // Dedup multi-chunk or ambiguous source paths via the existing lossy path.
     if (sourcePath && agentId) {
       store.deleteBySourcePath(sourcePath, agentId);
     }
@@ -345,6 +404,8 @@ export async function handleMemory(
         totalChunks: chunk.totalChunks,
         tags: tags || [],
         contextKey: resolvedContextKey ?? null,
+        intent: "index memory content",
+        key: sourcePath || null,
       })),
     );
 
@@ -396,17 +457,13 @@ export async function handleMemory(
       const store = getMemoryStore();
       const queryEmbedding = await provider.embed(query);
 
-      if (!queryEmbedding) {
-        json(res, { results: [] });
-        return true;
-      }
-
       const candidateLimit = Math.min(limit, 20) * CANDIDATE_SET_MULTIPLIER;
-      const candidates = store.search(queryEmbedding, myAgentId, {
+      const candidates = store.search(queryEmbedding ?? new Float32Array(0), myAgentId, {
         scope,
         limit: candidateLimit,
         source,
         isLead: false,
+        queryText: query,
       });
       const ranked = rerank(candidates, { limit: Math.min(limit, 20) });
 
@@ -426,7 +483,11 @@ export async function handleMemory(
           recordRetrievals(
             sourceTaskId,
             myAgentId,
-            ranked.map((r) => ({ memoryId: r.id, similarity: r.similarity })),
+            ranked.map((r) => ({
+              memoryId: r.id,
+              similarity: r.similarity,
+              retrievalSource: r.retrievalSource,
+            })),
             undefined,
             { intent, contextKey, eventType: "search" },
           );
@@ -443,6 +504,7 @@ export async function handleMemory(
           similarity: r.similarity,
           rawSimilarity: r.rawSimilarity,
           compositeScore: r.compositeScore,
+          retrievalSource: r.retrievalSource,
           source: r.source,
           scope: r.scope,
         })),
@@ -470,20 +532,16 @@ export async function handleMemory(
         const provider = getEmbeddingProvider();
         const queryEmbedding = await provider.embed(query.trim());
 
-        if (!queryEmbedding) {
-          json(res, { results: [], total: 0, limit: pageLimit, offset, mode: "semantic" });
-          return true;
-        }
-
         const candidateLimit = Math.min(
           4096,
           Math.max(offset + pageLimit, pageLimit) * CANDIDATE_SET_MULTIPLIER,
         );
-        let candidates = store.search(queryEmbedding, agentId ?? "", {
+        let candidates = store.search(queryEmbedding ?? new Float32Array(0), agentId ?? "", {
           scope,
           limit: candidateLimit,
           isLead: true,
           source,
+          queryText: query.trim(),
         });
         if (agentId) {
           candidates = candidates.filter((c) => c.agentId === agentId);
@@ -505,6 +563,7 @@ export async function handleMemory(
             similarity: r.similarity,
             rawSimilarity: r.rawSimilarity,
             compositeScore: r.compositeScore,
+            retrievalSource: r.retrievalSource,
             createdAt: r.createdAt,
             accessedAt: r.accessedAt,
             accessCount: r.accessCount ?? 0,
@@ -563,6 +622,60 @@ export async function handleMemory(
     } catch (err) {
       console.error("[memory-list] Error:", (err as Error).message);
       jsonError(res, "Memory list failed", 500);
+    }
+    return true;
+  }
+
+  if (editMemory.match(req.method, pathSegments)) {
+    if (!myAgentId) {
+      jsonError(res, "Missing X-Agent-ID header", 400);
+      return true;
+    }
+
+    const parsed = await editMemory.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
+
+    const { memoryId, key, scope, mode, content, oldString, newString, intent, expectedVersion } =
+      parsed.body;
+    if (!memoryId && !(key && scope)) {
+      jsonError(res, "memoryId or key+scope required", 400);
+      return true;
+    }
+
+    try {
+      const store = getMemoryStore();
+      const result = store.edit({
+        id: memoryId,
+        key,
+        scope,
+        agentId: myAgentId,
+        mode,
+        content,
+        oldString,
+        newString,
+        intent,
+        expectedVersion,
+        changedByAgentId: myAgentId,
+      });
+      if (result.changed) {
+        const provider = getEmbeddingProvider();
+        const embedding = await provider.embed(result.memory.content);
+        if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
+        try {
+          storeLinks(result.memory.id, myAgentId, result.memory.content);
+        } catch (err) {
+          console.error(
+            `[memory-edit] Link resolution failed for ${result.memory.id}:`,
+            (err as Error).message,
+          );
+        }
+      }
+      json(res, result);
+    } catch (err) {
+      const message = (err as Error).message;
+      if (message.includes("not found")) jsonError(res, message, 404);
+      else if (message.includes("conflict")) jsonError(res, message, 409);
+      else jsonError(res, message, 400);
     }
     return true;
   }
