@@ -87,6 +87,18 @@ export interface MemorySearchOptions {
   queryText?: string;
 }
 
+/**
+ * Memory edit modes:
+ *
+ * - **replace**: Overwrites the entire memory content with the new `content` field.
+ *   Use when you want to rewrite the memory from scratch. Requires `content`.
+ *
+ * - **exact**: Performs a surgical find-and-replace within the existing content.
+ *   Finds the first (and only) occurrence of `oldString` and replaces it with
+ *   `newString`. Fails if `oldString` is not found or appears more than once
+ *   (ambiguous). Use when you want to update a specific section without
+ *   touching the rest.
+ */
 export type MemoryEditMode = "replace" | "exact";
 
 export interface MemoryEditInput {

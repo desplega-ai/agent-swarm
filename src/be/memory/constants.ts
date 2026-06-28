@@ -59,6 +59,12 @@ export const ACCESS_BOOST_MAX_MULTIPLIER = numEnv("MEMORY_ACCESS_BOOST_MAX", 1.5
 export const ACCESS_BOOST_RECENCY_WINDOW_HOURS = numEnv("MEMORY_ACCESS_RECENCY_HOURS", 48);
 export const CANDIDATE_SET_MULTIPLIER = numEnv("MEMORY_CANDIDATE_MULTIPLIER", 3);
 
+// Feature flag: enable hybrid (FTS+vec) search. Off by default; set MEMORY_HYBRID_SEARCH=1 to enable.
+export function isHybridSearchEnabled(): boolean {
+  const val = process.env.MEMORY_HYBRID_SEARCH ?? "0";
+  return val === "1" || val.toLowerCase() === "true";
+}
+
 // Embedding defaults
 export const EMBEDDING_DIMENSIONS = numEnv("EMBEDDING_DIMENSIONS", 512);
 export const DEFAULT_EMBEDDING_DIMENSIONS = EMBEDDING_DIMENSIONS;

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { computeRrfScore, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 
 const TEST_DB_PATH = "./test-memory-hybrid.sqlite";
 const agentId = "aaaa0000-0000-4000-8000-000000000101";
@@ -12,10 +12,46 @@ function vector(value: number): Float32Array {
   return embedding;
 }
 
+describe("computeRrfScore", () => {
+  test("rank 0 with no decay produces max reciprocal score", () => {
+    const score = computeRrfScore(0, 1.0);
+    expect(score).toBeCloseTo(1 / 61, 6);
+  });
+
+  test("higher rank produces lower score", () => {
+    expect(computeRrfScore(0, 1.0)).toBeGreaterThan(computeRrfScore(5, 1.0));
+    expect(computeRrfScore(5, 1.0)).toBeGreaterThan(computeRrfScore(50, 1.0));
+  });
+
+  test("decay factor scales the score linearly", () => {
+    const full = computeRrfScore(3, 1.0);
+    const half = computeRrfScore(3, 0.5);
+    expect(half).toBeCloseTo(full * 0.5, 6);
+  });
+
+  test("custom k changes the smoothing constant", () => {
+    const defaultK = computeRrfScore(0, 1.0, 60);
+    const smallK = computeRrfScore(0, 1.0, 10);
+    expect(smallK).toBeGreaterThan(defaultK);
+    expect(smallK).toBeCloseTo(1 / 11, 6);
+  });
+
+  test("two arms sum to compound a memory that appears in both", () => {
+    const vecScore = computeRrfScore(0, 1.0);
+    const ftsScore = computeRrfScore(2, 1.0);
+    const compound = vecScore + ftsScore;
+    expect(compound).toBeGreaterThan(vecScore);
+    expect(compound).toBeGreaterThan(ftsScore);
+  });
+});
+
 describe("memory hybrid search", () => {
   let store: SqliteMemoryStore;
+  let prevHybridFlag: string | undefined;
 
   beforeAll(async () => {
+    prevHybridFlag = process.env.MEMORY_HYBRID_SEARCH;
+    process.env.MEMORY_HYBRID_SEARCH = "1";
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);
@@ -27,6 +63,8 @@ describe("memory hybrid search", () => {
   });
 
   afterAll(async () => {
+    if (prevHybridFlag === undefined) delete process.env.MEMORY_HYBRID_SEARCH;
+    else process.env.MEMORY_HYBRID_SEARCH = prevHybridFlag;
     closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {

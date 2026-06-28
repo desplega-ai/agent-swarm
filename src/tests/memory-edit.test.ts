@@ -1,10 +1,58 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { applyEditMode, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 
 const TEST_DB_PATH = "./test-memory-edit.sqlite";
 const agentId = "aaaa0000-0000-4000-8000-000000000201";
+
+describe("applyEditMode", () => {
+  test("replace mode returns new content", () => {
+    const result = applyEditMode("replace", "old body", { content: "new body" });
+    expect(result).toBe("new body");
+  });
+
+  test("replace mode throws without content", () => {
+    expect(() => applyEditMode("replace", "old body", {})).toThrow("replace mode requires content");
+  });
+
+  test("exact mode performs surgical replacement", () => {
+    const result = applyEditMode("exact", "hello world foo", {
+      oldString: "world",
+      newString: "earth",
+    });
+    expect(result).toBe("hello earth foo");
+  });
+
+  test("exact mode with empty newString deletes the substring", () => {
+    const result = applyEditMode("exact", "hello world", {
+      oldString: " world",
+      newString: "",
+    });
+    expect(result).toBe("hello");
+  });
+
+  test("exact mode throws when oldString is not found", () => {
+    expect(() =>
+      applyEditMode("exact", "hello world", { oldString: "missing", newString: "x" }),
+    ).toThrow("oldString not found");
+  });
+
+  test("exact mode throws when oldString is ambiguous", () => {
+    expect(() =>
+      applyEditMode("exact", "alpha beta alpha", { oldString: "alpha", newString: "x" }),
+    ).toThrow("oldString is ambiguous");
+  });
+
+  test("exact mode throws without required fields", () => {
+    expect(() => applyEditMode("exact", "content", { newString: "x" })).toThrow(
+      "exact mode requires oldString and newString",
+    );
+    expect(() => applyEditMode("exact", "content", { oldString: "c" })).toThrow(
+      "exact mode requires oldString and newString",
+    );
+  });
+});
 
 describe("memory editing", () => {
   let store: SqliteMemoryStore;

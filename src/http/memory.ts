@@ -76,7 +76,8 @@ const editMemory = route({
   method: "post",
   path: "/api/memory/edit",
   pattern: ["api", "memory", "edit"],
-  summary: "Edit a single memory in place while preserving its ID and usefulness posterior",
+  summary:
+    "Edit a single memory in place while preserving its ID and usefulness posterior. Modes: 'replace' overwrites entire content; 'exact' performs surgical find-and-replace of oldString→newString (fails if missing or ambiguous)",
   tags: ["Memory"],
   auth: { apiKey: true, agentId: true },
   body: z.object({
@@ -364,15 +365,13 @@ export async function handleMemory(
         });
         const embedding = await provider.embed(contentChunks[0]!.content);
         if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
-        if (agentId) {
-          try {
-            storeLinks(result.memory.id, agentId, result.memory.content);
-          } catch (err) {
-            console.error(
-              `[memory] Link resolution failed for ${result.memory.id}:`,
-              (err as Error).message,
-            );
-          }
+        try {
+          storeLinks(result.memory.id, agentId, result.memory.content);
+        } catch (err) {
+          console.error(
+            `[memory] Link resolution failed for ${result.memory.id}:`,
+            (err as Error).message,
+          );
         }
         json(res, { queued: false, memoryIds: [result.memory.id], edited: result.changed }, 202);
         return true;

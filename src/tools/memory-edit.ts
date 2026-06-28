@@ -11,17 +11,37 @@ export const registerMemoryEditTool = (server: McpServer) => {
     {
       title: "Edit a memory",
       description:
-        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history.",
+        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits.",
       annotations: { destructiveHint: true },
 
       inputSchema: z.object({
         memoryId: z.uuid().optional().describe("The memory ID to edit."),
         key: z.string().min(1).optional().describe("Structured key alternative to memoryId."),
         scope: AgentMemoryScopeSchema.optional().describe("Required when editing by key."),
-        mode: z.enum(["replace", "exact"]).default("replace"),
-        content: z.string().min(1).optional().describe("Replacement content for replace mode."),
-        oldString: z.string().min(1).optional().describe("Exact old string for exact mode."),
-        newString: z.string().optional().describe("Replacement string for exact mode."),
+        mode: z
+          .enum(["replace", "exact"])
+          .default("replace")
+          .describe(
+            "'replace' overwrites the entire memory content; 'exact' finds a unique substring (oldString) and replaces it with newString.",
+          ),
+        content: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Full replacement content. Required for 'replace' mode, ignored in 'exact'."),
+        oldString: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Substring to find in existing content. Required for 'exact' mode. Must appear exactly once.",
+          ),
+        newString: z
+          .string()
+          .optional()
+          .describe(
+            "Replacement for oldString. Required for 'exact' mode. Can be empty to delete.",
+          ),
         intent: z.string().min(1).describe("Why you are editing this memory."),
         expectedVersion: z.number().int().min(1).optional(),
       }),

@@ -4343,7 +4343,7 @@
     },
     "/api/memory/edit": {
       "post": {
-        "summary": "Edit a single memory in place while preserving its ID and usefulness posterior",
+        "summary": "Edit a single memory in place while preserving its ID and usefulness posterior. Modes: 'replace' overwrites entire content; 'exact' performs surgical find-and-replace of oldString→newString (fails if missing or ambiguous)",
         "tags": [
           "Memory"
         ],
