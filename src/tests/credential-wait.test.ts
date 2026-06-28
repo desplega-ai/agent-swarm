@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { awaitCredentials, BootMaxWaitExceededError } from "../commands/credential-wait";
+import {
+  awaitCredentials,
+  BootMaxWaitExceededError,
+} from "../../apps/cli/src/commands/credential-wait";
 
 /**
  * Capture-only logger so test output stays clean and we can assert on

@@ -9,7 +9,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { resolveStopHookTaskContext } from "../hooks/hook";
+import { resolveStopHookTaskContext } from "../../apps/cli/src/hooks/hook";
 
 describe("resolveStopHookTaskContext", () => {
   test("prefers AGENT_SWARM_TASK_ID env var when TASK_FILE is missing on disk", async () => {

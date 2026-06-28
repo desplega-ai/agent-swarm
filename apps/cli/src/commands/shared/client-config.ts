@@ -1,4 +1,4 @@
-import pkg from "../../../package.json";
+import pkg from "../../../../../package.json";
 
 const PKG_NAME = pkg.name;
 const SERVER_NAME = (pkg as { config?: { name?: string } }).config?.name ?? "agent-swarm";

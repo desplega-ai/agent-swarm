@@ -3,7 +3,7 @@ import { Select } from "@inkjs/ui";
 import { getApiKey } from "@swarm/core-utils";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
-import pkg from "../../package.json";
+import pkg from "../../../../package.json";
 import { buildOnboardDashboardUrl } from "./onboard/dashboard-url.ts";
 import { getAgentSummary, getPresetById, PRESETS } from "./onboard/presets.ts";
 import { CoreCredentialsStep } from "./onboard/steps/core-credentials.tsx";

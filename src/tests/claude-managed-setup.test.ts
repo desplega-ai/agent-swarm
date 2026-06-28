@@ -4,7 +4,7 @@ import {
   resolveClaudeManagedSetupConfig,
   runClaudeManagedSetup,
   runClaudeManagedSetupFlow,
-} from "../commands/claude-managed-setup";
+} from "../../apps/cli/src/commands/claude-managed-setup";
 
 /**
  * Mocked-fetch / mocked-Anthropic-SDK tests for `claude-managed-setup`.

@@ -111,7 +111,7 @@ beforeAll(async () => {
     } catch {}
   }
 
-  serverProc = Bun.spawn(["bun", "src/http.ts"], {
+  serverProc = Bun.spawn(["bun", "apps/api/src/http.ts"], {
     cwd: `${import.meta.dir}/../..`,
     env: {
       ...process.env,

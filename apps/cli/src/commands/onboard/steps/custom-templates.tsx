@@ -1,7 +1,7 @@
 import { Select } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import { useEffect, useRef, useState } from "react";
-import type { TemplateConfig } from "../../../../templates/schema.ts";
+import type { TemplateConfig } from "../../../../../../templates/schema.ts";
 import { fetchTemplateList } from "../templates.ts";
 import type { ServiceEntry, StepProps } from "../types.ts";
 

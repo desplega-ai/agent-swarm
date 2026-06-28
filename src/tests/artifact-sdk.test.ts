@@ -492,12 +492,12 @@ describe("artifact-sdk index exports", () => {
 
 describe("artifact CLI command", () => {
   test("runArtifact module exports correctly", async () => {
-    const mod = await import("../commands/artifact");
+    const mod = await import("../../apps/cli/src/commands/artifact");
     expect(typeof mod.runArtifact).toBe("function");
   });
 
   test("runArtifact with unknown subcommand calls printHelp (no crash)", async () => {
-    const { runArtifact } = await import("../commands/artifact");
+    const { runArtifact } = await import("../../apps/cli/src/commands/artifact");
     // "help" and unknown subcommands should just print help and return
     const consoleSpy = mock(() => {});
     const origLog = console.log;
@@ -516,7 +516,7 @@ describe("artifact CLI command", () => {
   });
 
   test("runArtifact with no subcommand defaults to help", async () => {
-    const { runArtifact } = await import("../commands/artifact");
+    const { runArtifact } = await import("../../apps/cli/src/commands/artifact");
     const consoleSpy = mock(() => {});
     const origLog = console.log;
     console.log = consoleSpy;
@@ -579,7 +579,7 @@ describe("artifact CLI command", () => {
       console.log = consoleSpy;
 
       try {
-        const { runArtifact } = await import("../commands/artifact");
+        const { runArtifact } = await import("../../apps/cli/src/commands/artifact");
         await runArtifact("list", { additionalArgs: [] });
 
         const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
@@ -612,7 +612,7 @@ describe("artifact CLI command", () => {
       console.log = consoleSpy;
 
       try {
-        const { runArtifact } = await import("../commands/artifact");
+        const { runArtifact } = await import("../../apps/cli/src/commands/artifact");
         await runArtifact("list", { additionalArgs: [] });
 
         const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
@@ -663,7 +663,7 @@ describe("artifact CLI command", () => {
       console.log = consoleSpy;
 
       try {
-        const { runArtifact } = await import("../commands/artifact");
+        const { runArtifact } = await import("../../apps/cli/src/commands/artifact");
         await runArtifact("list", { additionalArgs: [] });
 
         const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
@@ -719,7 +719,7 @@ describe("artifact CLI command", () => {
       console.log = consoleSpy;
 
       try {
-        const { runArtifact } = await import("../commands/artifact");
+        const { runArtifact } = await import("../../apps/cli/src/commands/artifact");
         await runArtifact("stop", { additionalArgs: ["my-report"] });
 
         expect(deletedServiceId).toBe("svc-to-delete");

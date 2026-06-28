@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { generateManifest } from "../commands/onboard/manifest.ts";
-import { INITIAL_STATE, type OnboardState } from "../commands/onboard/types.ts";
+import { generateManifest } from "../../apps/cli/src/commands/onboard/manifest.ts";
+import { INITIAL_STATE, type OnboardState } from "../../apps/cli/src/commands/onboard/types.ts";
 
 function makeState(overrides: Partial<OnboardState>): OnboardState {
   return { ...INITIAL_STATE, ...overrides };

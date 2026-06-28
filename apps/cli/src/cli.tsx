@@ -6,7 +6,7 @@ import { getApiKey, setApiKey } from "@swarm/core-utils";
 import { Box, render, Text, useApp } from "ink";
 import type { ComponentType } from "react";
 import { createElement, useEffect, useState } from "react";
-import pkg from "../package.json";
+import pkg from "../../../package.json";
 
 // Get CLI name from bin field (assumes single key)
 const binName = Object.keys(pkg.bin)[0];
@@ -403,7 +403,7 @@ function McpServer({ port, apiKey, dbPath }: { port: string; apiKey: string; dbP
       process.env.DATABASE_PATH = dbPath;
     }
 
-    import("./http.ts")
+    import("../../api/src/http.ts")
       .then(() => {
         setStatus("running");
       })

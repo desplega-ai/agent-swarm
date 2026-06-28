@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { parseComposioArgs, runComposioCommand, runXCommand } from "../commands/x";
+import { parseComposioArgs, runComposioCommand, runXCommand } from "../../apps/cli/src/commands/x";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

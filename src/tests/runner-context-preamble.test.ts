@@ -6,7 +6,7 @@ import {
   CONTEXT_PREAMBLE_MAX_TOKENS,
   fetchTaskContextForPreamble,
   type TaskContextForPreamble,
-} from "../commands/context-preamble";
+} from "../../apps/cli/src/commands/context-preamble";
 
 const TEST_PORT = 19091;
 const API_URL = `http://localhost:${TEST_PORT}`;

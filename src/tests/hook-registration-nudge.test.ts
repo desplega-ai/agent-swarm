@@ -10,7 +10,7 @@
  * is present (genuinely unregistered).
  */
 import { describe, expect, test } from "bun:test";
-import { shouldShowRegistrationNudge } from "../hooks/hook";
+import { shouldShowRegistrationNudge } from "../../apps/cli/src/hooks/hook";
 
 describe("shouldShowRegistrationNudge", () => {
   test("(a) pre-assigned agent (X-Agent-ID present) + null lookup on SessionStart → NO nudge", () => {

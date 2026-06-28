@@ -29,8 +29,8 @@ import {
   resolveIntegrationToggles,
   runE2BCommand,
   swarmGroupMembers,
-} from "../commands/e2b";
-import { buildOnboardDashboardUrl } from "../commands/onboard/dashboard-url";
+} from "../../apps/cli/src/commands/e2b";
+import { buildOnboardDashboardUrl } from "../../apps/cli/src/commands/onboard/dashboard-url";
 
 describe("E2B env helpers", () => {
   test("parses common dotenv forms", () => {

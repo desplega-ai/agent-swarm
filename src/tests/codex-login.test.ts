@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 
-import { resolveCodexLoginConfig, runCodexLogin } from "../commands/codex-login.js";
+import { resolveCodexLoginConfig, runCodexLogin } from "../../apps/cli/src/commands/codex-login.js";
 
 describe("resolveCodexLoginConfig", () => {
   it("uses defaults without prompts when not interactive", async () => {

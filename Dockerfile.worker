@@ -24,11 +24,14 @@ COPY evals/package.json ./evals/package.json
 # present for the frozen install to resolve the workspace graph. The whole dir is tiny
 # (barrels + manifests, no node_modules); src/ is the real compile input, copied below.
 COPY packages ./packages
+# apps/* (apps/cli, apps/api) are Bun workspace members — their manifests must be
+# present for the frozen install, and apps/cli/src/cli.tsx is the worker compile input.
+COPY apps ./apps
 RUN bun install --frozen-lockfile
 COPY src/ ./src/
 COPY templates/ ./templates/
 COPY tsconfig.json ./
-RUN bun build ./src/cli.tsx --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
+RUN bun build ./apps/cli/src/cli.tsx --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
 
 # Stage 2: Full development environment
 FROM ubuntu:24.04

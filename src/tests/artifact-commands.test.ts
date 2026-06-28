@@ -8,7 +8,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
-import { runArtifact } from "../commands/artifact";
+import { runArtifact } from "../../apps/cli/src/commands/artifact";
 
 const originalFetch = globalThis.fetch;
 const originalLog = console.log;

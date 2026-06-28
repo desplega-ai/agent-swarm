@@ -58,6 +58,14 @@
         "typescript": "^5",
       },
     },
+    "apps/api": {
+      "name": "@swarm/api-app",
+      "version": "0.0.0",
+    },
+    "apps/cli": {
+      "name": "@swarm/cli-app",
+      "version": "0.0.0",
+    },
     "evals": {
       "name": "@agent-swarm/evals",
       "version": "0.1.0",
@@ -1070,11 +1078,15 @@
 
     "@swarm/ai-pricing": ["@swarm/ai-pricing@workspace:packages/ai-pricing"],
 
+    "@swarm/api-app": ["@swarm/api-app@workspace:apps/api"],
+
     "@swarm/api-client": ["@swarm/api-client@workspace:packages/api-client"],
 
     "@swarm/api-server": ["@swarm/api-server@workspace:packages/api-server"],
 
     "@swarm/artifacts": ["@swarm/artifacts@workspace:packages/artifacts"],
+
+    "@swarm/cli-app": ["@swarm/cli-app@workspace:apps/cli"],
 
     "@swarm/core-utils": ["@swarm/core-utils@workspace:packages/core-utils"],
 

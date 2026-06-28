@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildRequesterProfilePrompt } from "../commands/runner";
+import { buildRequesterProfilePrompt } from "../../apps/cli/src/commands/runner";
 
 describe("runner requester profile prompt", () => {
   test("omits requester profile when no role or notes are set", async () => {

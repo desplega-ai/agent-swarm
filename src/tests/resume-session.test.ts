@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { RESUME_DEPRECATED_REASON, resolveResumeSession } from "../commands/resume-session";
+import {
+  RESUME_DEPRECATED_REASON,
+  resolveResumeSession,
+} from "../../apps/cli/src/commands/resume-session";
 
 // Native resume was deprecated in the 2026-05-28 plan. resolveResumeSession
 // is now an observability shim — it records the candidates that would have

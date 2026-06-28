@@ -66,7 +66,7 @@ import {
 } from "@swarm/prompt-templates";
 import { type ProviderName, type RepoGuidelines, resolveTaskModelSelection } from "@swarm/types";
 import { validateJsonSchema } from "@swarm/workflows";
-import type { TemplateResponse } from "../../templates/schema.ts";
+import type { TemplateResponse } from "../../../../templates/schema.ts";
 import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
 import {

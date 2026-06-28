@@ -19,8 +19,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { RunStopHookSessionSummaryDeps } from "../hooks/hook";
-import { runStopHookSessionSummary } from "../hooks/hook";
+import type { RunStopHookSessionSummaryDeps } from "../../apps/cli/src/hooks/hook";
+import { runStopHookSessionSummary } from "../../apps/cli/src/hooks/hook";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

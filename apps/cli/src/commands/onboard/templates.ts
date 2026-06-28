@@ -1,4 +1,4 @@
-import type { TemplateConfig } from "../../../templates/schema.ts";
+import type { TemplateConfig } from "../../../../../templates/schema.ts";
 
 const DEFAULT_REGISTRY_URL = "https://templates.agent-swarm.dev";
 

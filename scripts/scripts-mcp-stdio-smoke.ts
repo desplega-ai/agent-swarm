@@ -18,7 +18,7 @@ const expected = new Map([
 const dbPath = `/tmp/agent-swarm-mcp-stdio-smoke-${process.pid}.sqlite`;
 const transport = new StdioClientTransport({
   command: "bun",
-  args: ["src/stdio.ts"],
+  args: ["apps/cli/src/stdio.ts"],
   env: {
     ...process.env,
     DATABASE_PATH: dbPath,

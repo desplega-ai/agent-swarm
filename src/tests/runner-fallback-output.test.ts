@@ -7,7 +7,7 @@ import {
   ensureTaskFinished,
   getBridgeFailureDiagnostics,
   handleStructuredOutputFallback,
-} from "../commands/runner";
+} from "../../apps/cli/src/commands/runner";
 
 // Configurable mock responses per test
 let mockGetTask: Record<string, unknown> | null = null;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { humanizeToolName, toolCallToProgress } from "../commands/runner";
+import { humanizeToolName, toolCallToProgress } from "../../apps/cli/src/commands/runner";
 
 describe("toolCallToProgress", () => {
   // --- Core Claude Code tools ---

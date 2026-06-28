@@ -29,7 +29,7 @@ ALLOW_FILES=(
 # Scan production source only — exclude tests.
 MATCHES=$(grep -rn --include='*.ts' --include='*.tsx' \
   -E 'process\.env\.(AGENT_SWARM_)?API_KEY' \
-  src/ packages/scripts/ 2>/dev/null \
+  src/ apps/ packages/scripts/ 2>/dev/null \
   | grep -v '^src/tests/' \
   | grep -v '^src/utils/api-key\.ts:' \
   || true)

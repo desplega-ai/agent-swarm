@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { Attributes, AttributeValue, SwarmSpan } from "@swarm/otel";
-import { type ActiveToolSpanEntry, implicitCloseActiveToolSpans } from "../commands/runner";
+import {
+  type ActiveToolSpanEntry,
+  implicitCloseActiveToolSpans,
+} from "../../apps/cli/src/commands/runner";
 
 /**
  * Minimal recording SwarmSpan stub for asserting attributes/status/end calls.

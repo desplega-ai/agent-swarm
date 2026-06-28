@@ -5,9 +5,15 @@
 # must NEVER import database modules directly — workers communicate with the
 # API exclusively via HTTP.
 #
-# Worker-side paths:
-#   src/commands/  src/hooks/  src/providers/  src/prompts/  packages/scripts/src/scripts-runtime/  src/cli.tsx  src/claude.ts
+# Worker-side paths (post apps-split + package extraction):
+#   apps/cli/src/commands/  apps/cli/src/hooks/  apps/cli/src/cli.tsx
+#   packages/harness/src/providers/  packages/harness/src/claude.ts  packages/prompt-templates/
+#   packages/scripts/src/scripts-runtime/
 #   plugin/opencode-plugins/  (runs inside the opencode subprocess in the worker)
+#
+# NOTE: apps/cli/src/stdio.ts is intentionally NOT scanned — it is the stdio MCP
+# server transport (a server entry, peer of apps/api/src/http.ts), so it is
+# allowed to touch @swarm/storage (e.g. closeDb), unlike worker code.
 #
 # Forbidden patterns:
 #   - import/from be/db (direct DB module)
@@ -16,14 +22,13 @@
 set -euo pipefail
 
 WORKER_PATHS=(
-  src/commands/
-  src/hooks/
-  src/providers/
-  src/prompts/
+  apps/cli/src/commands/
+  apps/cli/src/hooks/
+  apps/cli/src/cli.tsx
+  packages/harness/src/providers/
+  packages/harness/src/claude.ts
+  packages/prompt-templates/
   packages/scripts/src/scripts-runtime/
-  src/utils/
-  src/cli.tsx
-  src/claude.ts
   plugin/opencode-plugins/
 )
 

@@ -20,6 +20,9 @@ COPY evals/package.json ./evals/package.json
 # present for the frozen install to resolve the workspace graph. The whole dir is tiny
 # (barrels + manifests, no node_modules); src/ is the real compile input, copied below.
 COPY packages ./packages
+# apps/* (apps/cli, apps/api) are Bun workspace members — their manifests must be
+# present for the frozen install, and apps/api/src/http.ts is the API compile input.
+COPY apps ./apps
 RUN bun install --frozen-lockfile
 
 # Copy source files
@@ -65,7 +68,7 @@ RUN mkdir -p script-types/node_modules && cd node_modules && \
       | tar -xf - -C /build/script-types/node_modules
 
 # Compile HTTP server to standalone binary
-RUN bun build ./src/http.ts --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
+RUN bun build ./apps/api/src/http.ts --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
 
 # Stage 2: Minimal runtime image
 FROM debian:bookworm-slim

@@ -11,7 +11,7 @@ import {
 } from "@swarm/ai-llm";
 import { checkToolLoop, clearToolHistory, getApiKey, getMcpBaseUrl } from "@swarm/core-utils";
 import type { Agent } from "@swarm/types";
-import pkg from "../../package.json";
+import pkg from "../../../../package.json";
 import { contentSha256, readIdentityBaselines } from "../commands/profile-sync";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";

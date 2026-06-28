@@ -100,7 +100,7 @@ beforeAll(async () => {
     await unlink(`${TEST_DB_PATH}-shm`);
   } catch {}
 
-  serverProc = Bun.spawn(["bun", "src/http.ts"], {
+  serverProc = Bun.spawn(["bun", "apps/api/src/http.ts"], {
     cwd: `${import.meta.dir}/../..`,
     env: {
       ...process.env,
@@ -1694,7 +1694,7 @@ describe("AgentMail Webhooks (with filters)", () => {
       await unlink(`${AGENTMAIL_DB}-shm`);
     } catch {}
 
-    agentmailProc = Bun.spawn(["bun", "src/http.ts"], {
+    agentmailProc = Bun.spawn(["bun", "apps/api/src/http.ts"], {
       cwd: `${import.meta.dir}/../..`,
       env: {
         ...process.env,

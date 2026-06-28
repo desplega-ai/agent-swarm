@@ -14,7 +14,10 @@ import { getPromptTemplates, resetPromptTemplateToDefault, upsertPromptTemplate 
 // handler imports, but runner/session templates are only loaded by the worker. Importing them
 // here ensures all templates are available for the render endpoint and seeded to the DB.
 import "@swarm/prompt-templates";
-import "@/commands/templates";
+// Runner/session templates are defined in worker (CLI app) command code. Reached by
+// relative path post apps-split (apps/cli has no package-export surface yet); extracting
+// these definitions into a package is a deferred follow-up.
+import "../../../../apps/cli/src/commands/templates";
 import "@swarm/api-server/src/tools/templates";
 
 /**
