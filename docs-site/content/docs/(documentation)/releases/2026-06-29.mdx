@@ -1,0 +1,51 @@
+---
+title: "Release Notes — Week of June 22-29, 2026"
+description: "Secure script integrations land this week, plus hybrid memory search and platform reliability upgrades."
+---
+
+## Highlights
+
+### Secure Script Integrations
+
+Scripts can now integrate with external APIs without exposing secrets in source code or runtime logs. This is the biggest unlock for agents writing automation this week.
+
+Two new primitives ship together:
+
+- **Typed API connection registry** (`56919945`) — Register connections with OpenAPI specs and get generated TypeScript types. Agents write `ctx.api.<slug>.getCustomers()` instead of hand-rolling fetch calls. Connections are scoped (global, agent, repo) and managed via the `script-connections` tool, so teams can share integrations without sharing raw keys. Generated types are verified at authoring time through a typecheck pass, catching mismatches before runtime.
+
+- **Credential broker with scoped bindings** (`3747d6a6`) — Secrets stay on the server. Scripts declare a credential binding (config key → allowed hosts) and the broker injects tokens at fetch time via header or query templates. Nothing leaks into source code, logs, or the KV store. The broker also blocks egress to unregistered hosts, giving operators a clear audit trail of which services each script can reach.
+
+### Agent Memory Upgrades
+
+Memory gets two overdue upgrades (`5235b58a`):
+
+- **Hybrid search** — Semantic + keyword retrieval with a new reranker gives agents dramatically better recall. A search for "how to fix login bug" now surfaces the actual Auth0 pattern you documented three weeks ago instead of the generic troubleshooting page. The retrieval store now tracks source attribution so operators can see where a memory came from and how it's been used over time.
+
+- **In-place memory editing** — Operators can now fix or update a memory without deleting and recreating it. Use `memory-edit` with either `replace` mode (full rewrite) or `exact` mode (surgical find-and-replace). Version history is preserved either way, and the new structured key + versioning system keeps schemas consistent across edits.
+
+### Platform Reliability
+
+A cluster of stability improvements makes the platform smoother to operate day-to-day:
+
+- **Opt-in repo hook installation** (`47186da6`) — Configure hooks per-repo from the UI instead of relying on automatic detection. Workers check the repo's hook config on session init and install only when explicitly enabled. This replaces the old best-effort auto-detect approach and gives operators full control over which repos run hooks.
+
+- **Live-reload env on MCP config mutations** (`7b0011ca`) — Changing an MCP server's env vars or credential bindings now takes effect without a restart, matching HTTP route behavior. No more "did you restart?" guessing when updating API keys or endpoint URLs.
+
+- **Runner TDZ fix** (`e31d55a6`) — Fixed a temporal dead zone bug in the runner's `session_init` that could cause startup failures under specific timing conditions. This was a sneaky one — the variable was referenced before initialization in an edge path that only triggered on certain container states.
+
+- **Worker hook config detection** (`e24d4efd`) — Workers now correctly detect hook configurations in `prek.toml` projects, closing a gap where project-level hook settings were silently ignored.
+
+## Improvements
+
+- **Telemetry docs** (`e143747b`) — Expanded documentation covering session cost tracking, workflow execution metrics, and schedule monitoring. Includes a new reference section on the `ai.telemetry` event schema so operators can build custom dashboards and alerts on top of agent activity data.
+
+- **Code Health Reports community playbook** — A new guide in the docs shows teams how to set up automated code health reporting with agent-swarm, from PR quality gates to weekly trend dashboards. Covers configuration, scheduling, and integrating reports with Slack notifications.
+
+- **Weekly harness dependency pin bumps** (`f193d00f`) — Routine maintenance keeping the runtime stable across Node, Bun, and Docker environments. Includes `bun.lock` and `package.json` updates.
+
+- **Docker image size optimizations** (`28f2a4b6`) — Trimmed the worker image footprint and added automated size tracking in CI with a JSONL history file so regressions are caught before they hit production.
+
+## Bug Fixes
+
+- Fixed `session_init` runningTask temporal dead zone in the runner that could cause session startup failures (`e31d55a6`)
+- Fixed worker `prek.toml` hook config not being detected when hook installation was enabled at the repo level (`e24d4efd`)
