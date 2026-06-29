@@ -138,20 +138,32 @@ export default async function bootTriage(args: any, ctx: any) {
     .filter((row) => !BENIGN_FAILURE_RE.test(String(row.failureReason || "")))
     .map(summarizeTask);
 
-  const stuckOfflineRows = await query(
+  // Catches in_progress tasks on offline agents OR tasks whose session is a
+  // pre-boot artifact (stale lastHeartbeatAt). The session check mirrors the
+  // heartbeat.ts runRebootSweep boot-epoch logic — a session that heartbeated
+  // after the stuckMinutes threshold is considered live.
+  const recentThreshold = new Date(nowMs - stuckMinutes * 60 * 1000).toISOString();
+  const stuckRows = await query(
     ctx,
     `SELECT t.id, t.task, t.status, t.taskType, t.agentId, a.name as agentName,
             t.scheduleId, t.parentTaskId, t.failureReason, t.createdAt, t.lastUpdatedAt
      FROM agent_tasks t
      JOIN agents a ON a.id = t.agentId
      WHERE t.status = 'in_progress'
-       AND a.status = 'offline'
        AND datetime(t.lastUpdatedAt) <= datetime(?, ?)
+       AND (
+         a.status = 'offline'
+         OR NOT EXISTS (
+           SELECT 1 FROM active_sessions s
+           WHERE s.taskId = t.id
+             AND datetime(s.lastHeartbeatAt) >= datetime(?)
+         )
+       )
      ORDER BY datetime(t.lastUpdatedAt) ASC
      LIMIT 50`,
-    [now.toISOString(), `-${stuckMinutes} minutes`],
+    [now.toISOString(), `-${stuckMinutes} minutes`, recentThreshold],
   );
-  const stuckInProgressOnOfflineAgents = stuckOfflineRows
+  const stuckInProgressOnOfflineAgents = stuckRows
     .filter((row) => !row.unavailable)
     .map(summarizeTask);
 

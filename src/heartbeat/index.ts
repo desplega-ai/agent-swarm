@@ -1,1 +1,7 @@
-export { getRebootAffectedTasks, runRebootSweep, startHeartbeat, stopHeartbeat } from "./heartbeat";
+export {
+  getBootEpochMs,
+  getRebootAffectedTasks,
+  runRebootSweep,
+  startHeartbeat,
+  stopHeartbeat,
+} from "./heartbeat";
