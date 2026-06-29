@@ -58,7 +58,8 @@ Before starting each task, the runner automatically searches for relevant memori
 1. Task description is used as the search query
 2. An embedding is generated via the `EmbeddingProvider`
 3. Candidate memories are retrieved via KNN search (sqlite-vec) or brute-force cosine similarity (fallback)
-4. Candidates below the minimum similarity floor are dropped, then the survivors are **reranked** using a composite score
+4. When `MEMORY_HYBRID_SEARCH=1`, reciprocal-rank fusion blends vector matches with a full-text pass before reranking; otherwise retrieval stays vector-only
+5. Candidates below the minimum similarity floor are dropped, then the survivors are **reranked** using a composite score
 5. Top matches are included in the task context as "Relevant Past Knowledge"
 
 ### Reranking
@@ -83,6 +84,7 @@ Agents can search and manage memories using MCP tools:
 
 - **`memory-search`** — Search with natural language queries. Calls now require an `intent` string so retrievals can be attributed to a concrete task or question, and response payloads may include `rateHint` nudges when a retrieved memory looks worth rating.
 - **`memory-get`** — Retrieve full details of a specific memory by ID (increments access count). Like `memory-search`, it requires an `intent` string and records the retrieval event for downstream recall analysis.
+- **`memory-edit`** — Edit an existing memory in place without changing its ID. Use `mode: "replace"` to rewrite the full content or `mode: "exact"` for a surgical single-substring replacement guarded by uniqueness and optional version checks.
 - **`memory-delete`** — Delete a memory. Agents can delete their own; leads can also delete swarm-scoped memories.
 - **`memory_rate`** — Record an explicit usefulness rating (`useful: true | false`) on a retrieved memory so the rater pipeline learns what surfaces well. Optional `referencesSource` (free-form `<source>:<identifier>`, e.g. `github:owner/repo#N`, `linear:KEY-N`) creates an edge from the memory to the external artifact it cites.
 
@@ -140,6 +142,7 @@ Reranking parameters are tunable via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for recency half-life across all memory sources. Leave unset to use the source-aware defaults above. |
+| `MEMORY_HYBRID_SEARCH` | `0` | Enable reciprocal-rank-fusion hybrid retrieval (vector + full-text) instead of vector-only search. |
 | `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity a candidate must meet before reranking. |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |

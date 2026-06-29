@@ -24,6 +24,7 @@
   - [get-config](#get-config)
   - [list-config](#list-config)
   - [delete-config](#delete-config)
+  - [credential-bindings](#credential-bindings)
   - [get-repos](#get-repos)
   - [update-repo](#update-repo)
   - [list-prompt-templates](#list-prompt-templates)
@@ -32,6 +33,7 @@
   - [delete-prompt-template](#delete-prompt-template)
   - [preview-prompt-template](#preview-prompt-template)
   - [script-search](#script-search)
+  - [script-connections](#script-connections)
   - [script-run](#script-run)
   - [script-upsert](#script-upsert)
   - [script-delete](#script-delete)
@@ -73,6 +75,7 @@
 - [Memory Tools](#memory-tools)
   - [memory-search](#memory-search)
   - [memory-get](#memory-get)
+  - [memory-edit](#memory-edit)
   - [memory-delete](#memory-delete)
   - [memory_rate](#memory_rate)
   - [inject-learning](#inject-learning)
@@ -296,6 +299,14 @@ Delete a swarm configuration entry by its ID. Use list-config to find config IDs
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | The config entry ID to delete. |
 
+### credential-bindings
+
+**Credential Bindings**
+
+Lead-only management for scripts-runtime credential broker bindings. Bindings map config keys to allowed egress hosts; scripts consume them only through fetch-layer placeholder substitution.
+
+*No parameters*
+
 ### get-repos
 
 **Get Repos**
@@ -320,7 +331,6 @@ Update a repo's configuration including guidelines (PR checks, merge policy, rev
 | `clonePath` | `string` | No | - | New clone path. |
 | `defaultBranch` | `string` | No | - | New default branch. |
 | `autoClone` | `boolean` | No | - | Whether to auto-clone. |
-| `hooks` | `object \| null` | No | - | Hook install config. Set `{ enabled: true }` to opt into best-effort worker git-hook installation. |
 
 ### list-prompt-templates
 
@@ -387,6 +397,14 @@ Dry-run render a prompt template with provided variables. Optionally supply a cu
 |-----------|------|----------|---------|-------------|
 | `query` | `string` | No | "" | Search query for reusable scripts. |
 | `limit` | `number` | No | 10 | Maximum results. |
+
+### script-connections
+
+**Script Connections**
+
+Lead-only registry management for scripts ctx.api/ctx.mcp connections. Phase 1 supports OpenAPI ctx.api connections with generated args and response types.
+
+*No parameters*
 
 ### script-run
 
@@ -833,6 +851,23 @@ Retrieve the full content of a specific memory by its ID. Use memory-search to f
 |-----------|------|----------|---------|-------------|
 | `memoryId` | `uuid` | Yes | - | The ID of the memory to retrieve. |
 | `intent` | `string` | Yes | - | Why you are retrieving this memory. Required. E.g. 'need full details of the auth fix pattern'. |
+
+### memory-edit
+
+**Edit a memory**
+
+Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `memoryId` | `uuid` | No | - | The memory ID to edit. |
+| `key` | `string` | No | - | Structured key alternative to memoryId. |
+| `mode` | `replace \| exact` | No | "replace" | 'replace' overwrites the entire memory content; 'exact' finds a unique substring (oldString) and replaces it with newString. |
+| `content` | `string` | No | - | Full replacement content. Required for 'replace' mode, ignored in 'exact'. |
+| `oldString` | `string` | No | - | Substring to find in existing content. Required for 'exact' mode. Must appear exactly once. |
+| `newString` | `string` | No | - | Replacement for oldString. Required for 'exact' mode. Can be empty to delete. |
+| `intent` | `string` | Yes | - | Why you are editing this memory. |
+| `expectedVersion` | `number` | No | - | - |
 
 ### memory-delete
 
@@ -1461,3 +1496,4 @@ Delete an MCP server definition. Only the owning agent or lead can delete.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | ID of the MCP server to delete |
+

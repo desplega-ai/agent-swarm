@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.104.0] - 2026-06-29
+
+### Added
+- **Scripts credential bindings now broker outbound auth without exposing raw secrets** (#830) — scripts can use allowlisted header or query placeholder substitution instead of embedding credentials in source or arguments.
+- **Scripts can now register typed OpenAPI connections** (#838) — lead-managed script connections generate `ctx.api.<slug>` clients and can attach approved credential bindings for authenticated API calls.
+- **Memory recall now supports hybrid retrieval plus in-place editing** (#829) — agents can enable reciprocal-rank-fusion memory search and correct an existing memory without losing its ID or history.
+
+### Changed
+- **Scripts credential bindings now live-reload on MCP config mutations** (#837) — global config edits made through MCP tools trigger the same integration reload path as the HTTP config route, so runtime flags and broker changes apply immediately.
+- **Worker-image harness pins refreshed** (#836) — the weekly Docker worker bump updates the bundled Claude Code, Codex, and OpenCode harness versions.
+
 ## [1.103.0] - 2026-06-27
 
 ### Added

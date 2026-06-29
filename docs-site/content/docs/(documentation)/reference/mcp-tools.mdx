@@ -160,6 +160,18 @@ Delete a configuration entry by its ID.
 |-----------|------|----------|-------------|
 | `id` | uuid | Yes | Config entry ID |
 
+### credential-bindings
+
+Lead-only management for scripts-runtime credential broker bindings. Use it to
+list, create, update, or disable `[REDACTED:CONFIG_KEY]` host-allowlisted
+substitution rules without exposing raw secrets to scripts.
+
+### script-connections
+
+Lead-only registry for typed script API connections. Phase 1 supports
+OpenAPI-backed `ctx.api.<slug>` clients plus optional linkage to a credential
+binding for authenticated requests.
+
 ## Slack Tools
 
 ### slack-reply
@@ -927,6 +939,23 @@ Retrieve full details of a specific memory.
 | `memoryId` | uuid | Yes | Memory ID |
 
 Like `memory-search`, `memory-get` may include a `rateHint` in task context for memories that are worth rating.
+
+### memory-edit
+
+Edit an existing memory in place while preserving its ID, rating history, and
+audit trail.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `memoryId` | uuid | No | Memory ID to edit |
+| `key` | string | No | Structured key alternative to `memoryId` |
+| `scope` | string | No | Required when editing by `key`; `agent` or `swarm` |
+| `mode` | string | No | `replace` (default) or `exact` |
+| `content` | string | No | Full replacement content for `replace` mode |
+| `oldString` | string | No | Unique substring to replace in `exact` mode |
+| `newString` | string | No | Replacement string for `exact` mode; may be empty |
+| `intent` | string | Yes | Why you are editing the memory |
+| `expectedVersion` | number | No | Optional optimistic-concurrency guard |
 
 ### memory-delete
 
