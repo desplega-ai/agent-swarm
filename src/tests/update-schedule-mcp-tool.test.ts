@@ -11,7 +11,15 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { closeDb, createAgent, createScheduledTask, getScheduledTaskById, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createScheduledTask,
+  getDb,
+  getScheduledTaskById,
+  initDb,
+} from "../be/db";
+import { registerDeleteScheduleTool } from "../tools/schedules/delete-schedule";
 import { registerUpdateScheduleTool } from "../tools/schedules/update-schedule";
 
 const TEST_DB_PATH = "./test-update-schedule-mcp-tool.sqlite";
@@ -23,7 +31,24 @@ type RegisteredTool = {
 function buildServer(): McpServer {
   const server = new McpServer({ name: "update-schedule-mcp-test", version: "1.0.0" });
   registerUpdateScheduleTool(server);
+  registerDeleteScheduleTool(server);
   return server;
+}
+
+function callTool(
+  server: McpServer,
+  toolName: string,
+  args: Record<string, unknown>,
+  callerAgentId: string,
+): Promise<CallToolResult> {
+  const tools = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
+    ._registeredTools;
+  const tool = tools[toolName];
+  if (!tool) throw new Error(`${toolName} not registered`);
+  return tool.handler(args, {
+    sessionId: "test-session",
+    requestInfo: { headers: { "x-agent-id": callerAgentId } },
+  });
 }
 
 function callUpdateSchedule(
@@ -31,14 +56,7 @@ function callUpdateSchedule(
   args: Record<string, unknown>,
   callerAgentId: string,
 ): Promise<CallToolResult> {
-  const tools = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
-    ._registeredTools;
-  const tool = tools["update-schedule"];
-  if (!tool) throw new Error("update-schedule not registered");
-  return tool.handler(args, {
-    sessionId: "test-session",
-    requestInfo: { headers: { "x-agent-id": callerAgentId } },
-  });
+  return callTool(server, "update-schedule", args, callerAgentId);
 }
 
 type ScheduleOutput = {
@@ -57,6 +75,7 @@ function structured(result: CallToolResult): ScheduleOutput {
 }
 
 let creatorId: string;
+let otherAgentId: string;
 
 beforeAll(async () => {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -70,7 +89,13 @@ beforeAll(async () => {
     isLead: false,
     status: "idle",
   });
+  const otherAgent = createAgent({
+    name: "update-schedule-mcp-other",
+    isLead: false,
+    status: "idle",
+  });
   creatorId = creator.id;
+  otherAgentId = otherAgent.id;
 });
 
 afterAll(async () => {
@@ -83,6 +108,60 @@ afterAll(async () => {
 });
 
 describe("update-schedule MCP tool", () => {
+  test("non-lead, non-creator agent can update a schedule", async () => {
+    const server = buildServer();
+    const schedule = createScheduledTask({
+      name: `mcp-noncreator-update-${Date.now()}`,
+      intervalMs: 60000,
+      taskTemplate: "owned by creator",
+      createdByAgentId: creatorId,
+      timezone: "UTC",
+    });
+
+    const result = await callUpdateSchedule(
+      server,
+      { scheduleId: schedule.id, intervalMs: 120000 },
+      otherAgentId,
+    );
+    const sc = structured(result);
+
+    expect(sc.success).toBe(true);
+    expect(sc.schedule?.intervalMs).toBe(120000);
+    expect(getScheduledTaskById(schedule.id)?.intervalMs).toBe(120000);
+  });
+
+  test("non-lead, non-creator agent can delete a schedule and writes an audit event", async () => {
+    const server = buildServer();
+    const schedule = createScheduledTask({
+      name: `mcp-noncreator-delete-${Date.now()}`,
+      intervalMs: 60000,
+      taskTemplate: "owned by creator",
+      createdByAgentId: creatorId,
+      timezone: "UTC",
+    });
+
+    const result = await callTool(
+      server,
+      "delete-schedule",
+      { scheduleId: schedule.id },
+      otherAgentId,
+    );
+    const sc = result.structuredContent as { success: boolean };
+
+    expect(sc.success).toBe(true);
+    expect(getScheduledTaskById(schedule.id)).toBeNull();
+    const event = getDb()
+      .prepare<{ data: string }, []>(
+        "SELECT data FROM events WHERE event = 'schedule.deleted' ORDER BY createdAt DESC LIMIT 1",
+      )
+      .get();
+    expect(JSON.parse(event!.data)).toMatchObject({
+      scheduleId: schedule.id,
+      deletedByAgentId: otherAgentId,
+      createdByAgentId: creatorId,
+    });
+  });
+
   test("regression: { cronExpression: null, intervalMs: null, enabled: false } returns success:false and leaves DB row unchanged", async () => {
     const server = buildServer();
     const schedule = createScheduledTask({

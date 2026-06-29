@@ -97,7 +97,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
             },
           };
         }
-        setScriptConnectionEnabled(args.id, false, requestInfo.agentId);
+        setScriptConnectionEnabled(args.id, false);
         const connections = listScriptConnections({ includeDisabled: true });
         return {
           content: [{ type: "text", text: "Script connection disabled." }],
@@ -132,7 +132,6 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           queryTemplate: args.queryTemplate,
           scope: args.scope ?? "global",
           scopeId: args.scope === "global" ? null : (args.scopeId ?? null),
-          userId: requestInfo.agentId,
         });
         credentialBindingId = binding.id;
       }
@@ -149,7 +148,6 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         credentialBindingId,
         openapiSpecJson: args.openapiSpecJson,
         enabled: args.enabled !== false,
-        userId: requestInfo.agentId,
       });
 
       const connections = listScriptConnections({ includeDisabled: true });

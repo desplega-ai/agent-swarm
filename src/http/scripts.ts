@@ -293,11 +293,6 @@ export async function handleScripts(
     const agent = requireAgent(res, agentId);
     if (!agent) return true;
 
-    if (parsed.body.scope === "global" && !agent.isLead) {
-      jsonError(res, "Global scripts require a lead agent", 403);
-      return true;
-    }
-
     const typecheck = typecheckScript(parsed.body.source, { agentId: agent.id });
     if (!typecheck.ok) {
       json(
@@ -599,11 +594,6 @@ export async function handleScripts(
     if (!parsed) return true;
     const agent = requireAgent(res, agentId);
     if (!agent) return true;
-
-    if (parsed.query.scope === "global" && !agent.isLead) {
-      jsonError(res, "Global scripts require a lead agent", 403);
-      return true;
-    }
 
     const deleted = deleteScript({
       name: parsed.params.name,

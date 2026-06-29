@@ -34,7 +34,7 @@ import {
   Minimize2,
   Printer,
 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -61,6 +61,13 @@ import { JsonPageRenderer } from "./json-page-renderer";
 function getAbsoluteApiUrl(): string {
   const config = getConfig();
   return (config.apiUrl || "http://localhost:3013").replace(/\/+$/, "");
+}
+
+const MISSING_PAGE_SESSION_ERROR =
+  "authed mode requires page-session cookie; POST /api/pages/:id/launch first";
+
+function getPageHtmlUrl(id: string): string {
+  return `${getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}`;
 }
 
 /**
@@ -146,18 +153,94 @@ function PageIframe({
 }
 
 function PublicHtmlFrame({ id, title, iframeRef }: FrameProps) {
-  const src = `${getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}`;
+  const src = getPageHtmlUrl(id);
   return <PageIframe src={src} title={title} iframeRef={iframeRef} />;
 }
 
+async function assertAuthedPageBodyReady(
+  id: string,
+  signal: AbortSignal,
+): Promise<"ready" | "missing-session"> {
+  const res = await fetch(getPageHtmlUrl(id), {
+    credentials: "include",
+    signal,
+  });
+
+  if (res.ok) return "ready";
+
+  let bodyText = "";
+  try {
+    bodyText = await res.text();
+  } catch {
+    /* ignore */
+  }
+
+  if (res.status === 401 && bodyText.includes(MISSING_PAGE_SESSION_ERROR)) {
+    return "missing-session";
+  }
+
+  throw new Error(`page body ${id}: ${res.status}`);
+}
+
 function AuthedHtmlFrame({ id, title, iframeRef }: FrameProps) {
-  // We've already launched once via `fetchPageMetadataWithLaunchRetry`'s
-  // 401 → launch → retry path; the cookie is set. Just render the iframe.
-  // (If the cookie was rejected by SameSite policy in dev, the iframe's
-  // /p/:id request will 401 inside the frame — the user sees the swarm's
-  // 401 error JSON, which is the same UX as a server-side denial.)
-  const src = `${getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}`;
-  return <PageIframe src={src} title={title} iframeRef={iframeRef} />;
+  const [frameState, setFrameState] = useState<
+    { status: "loading" } | { status: "ready"; src: string } | { status: "error"; message: string }
+  >({ status: "loading" });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+
+    async function prepareFrame() {
+      setFrameState({ status: "loading" });
+
+      try {
+        await api.launchPage(id);
+        let bodyStatus = await assertAuthedPageBodyReady(id, controller.signal);
+
+        if (bodyStatus === "missing-session") {
+          await api.launchPage(id);
+          bodyStatus = await assertAuthedPageBodyReady(id, controller.signal);
+        }
+
+        if (!active) return;
+
+        if (bodyStatus === "ready") {
+          setFrameState({ status: "ready", src: getPageHtmlUrl(id) });
+          return;
+        }
+
+        setFrameState({
+          status: "error",
+          message: "The authenticated page could not be prepared. Try refreshing the page.",
+        });
+      } catch (e) {
+        if (!active || (e instanceof DOMException && e.name === "AbortError")) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setFrameState({
+          status: "error",
+          message: `The authenticated page could not be prepared (${message}).`,
+        });
+      }
+    }
+
+    void prepareFrame();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [id]);
+
+  if (frameState.status === "loading") {
+    return <Skeleton className="h-[calc(100vh-6rem)] w-full rounded-md" />;
+  }
+
+  if (frameState.status === "error") {
+    return <ArtifactPageError message={frameState.message} />;
+  }
+
+  return <PageIframe src={frameState.src} title={title} iframeRef={iframeRef} />;
 }
 
 function PasswordHtmlFrame({ id, title, iframeRef }: FrameProps) {
@@ -170,9 +253,7 @@ function PasswordHtmlFrame({ id, title, iframeRef }: FrameProps) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const url = `${getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}?key=${encodeURIComponent(
-      password,
-    )}`;
+    const url = `${getPageHtmlUrl(id)}?key=${encodeURIComponent(password)}`;
     setIframeSrc(url);
   }
 

@@ -1,0 +1,232 @@
+---
+title: DORA Metrics
+description: Run recurring DORA metrics reports for any Git repository. The swarm computes exact deployment frequency and lead time from release tags, labels CFR and recovery time as proxy estimates, and updates one stable Page URL in place.
+---
+
+<JsonLd
+  data={{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "Run recurring DORA metrics reports with an agent swarm",
+    description:
+      "How to bootstrap a recurring DORA metrics report for a Git repository, publish it as a stable Page, and refresh it on a weekly schedule.",
+    step: [
+      { "@type": "HowToStep", name: "Confirm deployment signal", text: "Verify that the configured release tag pattern, such as v*, maps one-to-one to production deployments." },
+      { "@type": "HowToStep", name: "Install the community template", text: "Copy run.sh, report.mjs, and lead-prompt.md from templates/community/dora-metrics into a workspace outside the target repository." },
+      { "@type": "HowToStep", name: "Run once manually", text: "The runner clones the repo, disables push, fetches release tags, collects commit and optional PR metadata, then generates a static DORA report." },
+      { "@type": "HowToStep", name: "Publish a stable report Page", text: "Create the Page once from latest.html, save the Page ID, and update that same Page on every refresh." },
+      { "@type": "HowToStep", name: "Schedule weekly refreshes", text: "Use the weekly-dora-metrics schedule template. The default cron is 0 22 * * 0 in UTC." }
+    ]
+  }}
+/>
+
+This is the DORA Metrics home for recurring software-delivery performance reports. It mirrors the Code Health report pattern: a small runner, a static D3 report, and one stable Page URL that updates in place.
+
+<Mermaid chart={`flowchart LR
+  LP["Lead prompt<br/>repo + branch + tag pattern"] --> WR["Worker workspace<br/>/workspace/dora-metrics"]
+  WR --> GT["Git tags<br/>deployment events"]
+  WR --> GC["Git commits<br/>lead-time samples"]
+  WR --> PR["PR/commit titles<br/>proxy failure signals"]
+  GT --> RP["report.mjs<br/>DORA metrics"]
+  GC --> RP
+  PR --> RP
+  RP --> PG["Stable Page<br/>D3 report"]
+  SCH["Cron<br/>0 22 * * 0"] --> WR
+  SCH --> PG
+`} />
+
+## What it does
+
+The swarm creates a stable DORA report page for one repository:
+
+- **Deployment Frequency** — exact count and rate from release tags in the configured window.
+- **Lead Time for Changes** — exact median time from commit timestamp to the release tag that deployed it.
+- **Change Failure Rate** — proxy estimate from revert, rollback, hotfix, and fix-forward signals near releases.
+- **Failed Deployment Recovery Time** — proxy estimate from the failed-release tag to the fixing tag.
+- **Weekly refresh** — the same Page URL updates in place, so links remain stable.
+
+The exact/proxy distinction is mandatory. CFR and recovery time should not be presented as precise incident metrics unless you connect a formal incident source.
+
+## Agents
+
+- **[Lead](https://templates.agent-swarm.dev/official/lead)** — collects the repository URL, branch, release tag pattern, report slug, cadence, stable Page behavior, and deployment-signal assumption.
+- **[Coder](https://templates.agent-swarm.dev/official/coder)** — installs the runner, runs the first report, fixes local runner/report-generator issues, and updates the stable Page.
+- **[Reviewer](https://templates.agent-swarm.dev/official/reviewer)** — optional, used when a runner change needs a PR before the scheduled job can keep running cleanly.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **[Pages](/docs/concepts)** — hosts the generated static report HTML at a stable URL.
+- **`store-progress`** — records the stable Page URL, analyzed commit, report workspace, exact/proxy caveat, and any dependency/chart-rendering issue.
+- **`slack-reply`** — posts the report URL and weekly-refresh status back to the requesting thread.
+
+### Community template
+
+- **[`templates/community/dora-metrics`](https://github.com/desplega-ai/agent-swarm/tree/main/templates/community/dora-metrics)** — the reusable package with:
+  - `PLAYBOOK.md` — the full drop-in playbook.
+  - `run.sh` — parameterized runner.
+  - `report.mjs` — static report generator.
+  - `lead-prompt.md` — copy-paste kickoff prompt for a Lead agent.
+
+### Third-party tools
+
+- **Git** — release tags and commit timestamps are the exact data source for Deployment Frequency and Lead Time for Changes.
+- **[GitHub CLI](https://cli.github.com/manual/)** — optional PR metadata source used to enrich hotfix/revert proxy detection.
+- **jq** — required utility dependency for predictable JSON handling in the runner environment.
+- **[D3.js](https://d3js.org)** — browser-side charts. Generated reports load D3 v7 from jsDelivr at render time; there is no front-end build step.
+
+## Workflows / Schedules
+
+- **[`weekly-dora-metrics`](https://templates.agent-swarm.dev/schedules/weekly-dora-metrics)** — weekly by default. Installs or updates the runner workspace, executes the DORA analysis, generates `latest.html` and `latest.json`, updates the same stable Page ID, then verifies the D3 charts and exact/proxy labels render.
+
+Default cadence:
+
+```yaml
+cron: "0 22 * * 0"
+timezone: "UTC"
+```
+
+That means weekly on Sunday at 22:00 UTC. Change the `cron` field to adjust the refresh time, and change `timezone` if you want the cron interpreted in another zone:
+
+```yaml
+# Every Monday at 09:00 Europe/Madrid
+cron: "0 9 * * 1"
+timezone: "Europe/Madrid"
+```
+
+The cadence is separate from page identity. Changing the cron only changes when the report refreshes. Keep updating the same stable Page ID in place.
+
+## Template install shape
+
+Use a workspace outside the target repository so report artifacts do not pollute the codebase:
+
+```bash
+mkdir -p /workspace/dora-metrics
+cp templates/community/dora-metrics/run.sh /workspace/dora-metrics/
+cp templates/community/dora-metrics/report.mjs /workspace/dora-metrics/
+cp templates/community/dora-metrics/lead-prompt.md /workspace/dora-metrics/
+chmod +x /workspace/dora-metrics/run.sh
+```
+
+Parameterize each run with environment variables:
+
+```bash
+BASE_DIR=/workspace/dora-metrics \
+REPO_NAME=my-repo \
+REPO_URL=https://github.com/OWNER/REPO.git \
+BRANCH=main \
+TAG_PATTERN='v*' \
+WINDOW_DAYS=90 \
+bash /workspace/dora-metrics/run.sh
+```
+
+The runner creates this shape:
+
+```text
+/workspace/dora-metrics/
+  run.sh
+  report.mjs
+  lead-prompt.md
+  repos/
+    <repo-name>/
+  out/
+    <repo-name>/
+      <YYYY-MM-DD>/
+        tags.tsv
+        recent-commits.tsv
+        remediation-commits.tsv
+        prs.json
+        revision.txt
+        revision-summary.txt
+        summary.json
+        report.html
+      latest.json
+      latest.html
+      latest-pointer.json
+```
+
+## Runner behavior
+
+`run.sh` does the following:
+
+- Installs `git`, `jq`, and `nodejs` if missing.
+- Clones the target repository into a scratch directory.
+- Disables the scratch clone push URL so the scheduled job cannot push accidentally.
+- Fetches the configured branch and release tags matching `TAG_PATTERN`.
+- Writes release tag, recent commit, remediation commit, and optional PR metadata.
+- Runs `report.mjs`.
+- Copies the latest artifacts to stable `latest.html`, `latest.json`, and `latest-pointer.json` paths.
+
+It extracts release tags with:
+
+```bash
+git -C "$REPO_DIR" for-each-ref "refs/tags/$TAG_PATTERN" --sort=creatordate --format='%(refname:short)%09%(objectname)%09%(creatordate:iso-strict)%09%(creatordate:unix)'
+```
+
+It extracts remediation signals with:
+
+```bash
+git -C "$REPO_DIR" log "origin/$BRANCH" --since="$WINDOW_DAYS days ago" --grep='revert' --grep='rollback' --grep='hotfix' --grep='fix-forward' --regexp-ignore-case
+```
+
+When authenticated, it also asks `gh pr list` for merged PR titles so hotfix-style PRs can contribute to the proxy stability keys.
+
+## Report generator
+
+`report.mjs` parses the runner outputs, computes the four metrics, and embeds the final data in a static HTML file.
+
+The generator interface:
+
+```bash
+node /workspace/dora-metrics/report.mjs \
+  /workspace/dora-metrics/out/<repo-name>/<YYYY-MM-DD> \
+  /workspace/dora-metrics/repos/<repo-name> \
+  <repo-name> \
+  <YYYY-MM-DD> \
+  <BRANCH> \
+  <WINDOW_DAYS> \
+  <HOTFIX_WINDOW_HOURS> \
+  <TAG_PATTERN>
+```
+
+The generated report includes:
+
+- Four DORA metric cards.
+- `EXACT` / `PROXY` quality labels.
+- Deployment and lead-time charts.
+- Recent deployments table.
+- Proxy failure signal table.
+- D3 v7 loaded from CDN at view time.
+
+## Data-source reality check
+
+| Metric | Source | Quality | Caveat |
+|---|---|---|---|
+| Deployment Frequency | Release tags matching `TAG_PATTERN` | EXACT | Exact only when those tags are production deployments. |
+| Lead Time for Changes | Commit timestamp to containing release tag timestamp | EXACT | Uses non-merge commits included between adjacent release tags. |
+| Change Failure Rate | Releases paired to revert, rollback, hotfix, or fix-forward signals | PROXY | Can miss manual incidents and can include non-incident remediation work. |
+| Failed Deployment Recovery Time | Failed-release proxy tag to fixing tag | PROXY | Release-to-release gap is not the same as incident open-to-resolved time. |
+
+Use these proxy keys for trend watching and executive conversation starters. Use a formal incident tracker or production deployment event stream before treating CFR and recovery time as operational truth.
+
+## Patterns used
+
+- [**No-op When Nothing Changed**](/docs/playbooks/patterns/no-op-workflows) — keep the schedule quiet if a run determines there is no meaningful new report to publish.
+- [**HITL Gates**](/docs/playbooks/patterns/hitl-gates) — use a human approval gate before changing the deployment signal, widening scope, or treating proxy findings as incident facts.
+
+## Tips for new swarm users
+
+- **Confirm the deployment event first.** The default `v*` tag pattern is only correct for repositories where those tags mean production release.
+- **Keep the workspace outside the target repo.** `/workspace/dora-metrics` keeps reports and scratch clones out of commits.
+- **Save the Page ID immediately.** The value of this report is the stable URL. Create once, then update in place.
+- **Use a code-capable worker.** Scheduled jobs sometimes need to repair the runner when repo conventions, branch names, tag patterns, or page APIs change.
+- **Do not overclaim CFR or recovery time.** Until incident data exists, those are proxy estimates by design.
+
+## References
+
+- [DORA metrics guide](https://dora.dev/guides/dora-metrics/): official definitions for Deployment Frequency, Lead Time for Changes, Change Failure Rate, and Failed Deployment Recovery Time.
+- [2024 Accelerate State of DevOps Report](https://dora.dev/research/2024/dora-report/): 2024 performance bands and cluster-analysis context.
+- [DORA research program](https://dora.dev/research/): background on the annual DORA reports and metric evolution.
+- [GitHub CLI manual](https://cli.github.com/manual/): optional PR metadata source used to enrich hotfix/revert proxy detection.
+- [D3.js](https://d3js.org): JavaScript library used for the browser-side charts.

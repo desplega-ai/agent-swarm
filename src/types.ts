@@ -1001,6 +1001,8 @@ export const EventNameSchema = z.enum([
   "system.error",
   // Script catalog events
   "script.global_upsert",
+  // Schedule events
+  "schedule.deleted",
 ]);
 
 export const SwarmEventSchema = z.object({

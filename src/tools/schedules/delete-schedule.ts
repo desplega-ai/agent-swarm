@@ -6,6 +6,7 @@ import {
   getScheduledTaskById,
   getScheduledTaskByName,
 } from "@/be/db";
+import { createEvent } from "@/be/events";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerDeleteScheduleTool = (server: McpServer) => {
@@ -14,7 +15,7 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
     {
       title: "Delete Scheduled Task",
       description:
-        "Delete a scheduled task permanently. Only the creator or lead agent can delete schedules.",
+        "Delete a scheduled task permanently. Any registered agent can delete schedules.",
       annotations: { destructiveHint: true },
 
       inputSchema: z.object({
@@ -71,17 +72,13 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
         };
       }
 
-      // Check authorization (creator or lead)
       const caller = getAgentById(requestInfo.agentId);
-      const isCreator = schedule.createdByAgentId === requestInfo.agentId;
-      const isLead = caller?.isLead === true;
-
-      if (!isCreator && !isLead) {
+      if (!caller) {
         return {
-          content: [{ type: "text", text: "Only the creator or lead can delete this schedule." }],
+          content: [{ type: "text", text: "Agent not found." }],
           structuredContent: {
             success: false,
-            message: "Only the creator or lead can delete this schedule.",
+            message: "Agent not found.",
           },
         };
       }
@@ -98,6 +95,19 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
             },
           };
         }
+
+        createEvent({
+          category: "system",
+          event: "schedule.deleted",
+          source: "api",
+          agentId: requestInfo.agentId,
+          data: {
+            scheduleId: schedule.id,
+            name: schedule.name,
+            deletedByAgentId: requestInfo.agentId,
+            createdByAgentId: schedule.createdByAgentId,
+          },
+        });
 
         return {
           content: [{ type: "text", text: `Deleted schedule "${schedule.name}".` }],

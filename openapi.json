@@ -2980,7 +2980,8 @@
                       "system.boot",
                       "system.migration",
                       "system.error",
-                      "script.global_upsert"
+                      "script.global_upsert",
+                      "schedule.deleted"
                     ]
                   },
                   "status": {
@@ -3095,7 +3096,8 @@
                 "system.boot",
                 "system.migration",
                 "system.error",
-                "script.global_upsert"
+                "script.global_upsert",
+                "schedule.deleted"
               ]
             },
             "required": false,
@@ -3246,7 +3248,8 @@
                             "system.boot",
                             "system.migration",
                             "system.error",
-                            "script.global_upsert"
+                            "script.global_upsert",
+                            "schedule.deleted"
                           ]
                         },
                         "status": {

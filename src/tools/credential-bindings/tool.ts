@@ -109,7 +109,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
       }
 
       if (args.action === "disable") {
-        const disabled = args.id ? disableCredentialBinding(args.id, requestInfo.agentId) : null;
+        const disabled = args.id ? disableCredentialBinding(args.id) : null;
         if (!disabled) {
           return {
             content: [{ type: "text", text: "Credential binding id not found." }],

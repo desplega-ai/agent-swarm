@@ -316,18 +316,13 @@ describe("/api/scripts HTTP", () => {
     expect((await res.json()).error).toBe("typecheck_failed");
   });
 
-  test("global upsert is lead-only and writes audit events", async () => {
-    const denied = await upsert(
-      { name: "global-denied", scope: "global", source: validSource(2) },
+  test("non-lead agents can upsert and delete global scripts", async () => {
+    const allowed = await upsert(
+      { name: "global-worker-ok", scope: "global", source: validSource(2) },
       workerId,
     );
-    expect(denied.status).toBe(403);
-
-    const allowed = await upsert(
-      { name: "global-ok", scope: "global", source: validSource(2) },
-      leadId,
-    );
     expect(allowed.status).toBe(200);
+    expect(getScript({ name: "global-worker-ok", scope: "global", scopeId: null })).toBeTruthy();
 
     const event = getDb()
       .prepare<{ data: string }, []>(
@@ -335,7 +330,18 @@ describe("/api/scripts HTTP", () => {
       )
       .get();
     expect(event).toBeTruthy();
-    expect(JSON.parse(event!.data).isNew).toBe(true);
+    expect(JSON.parse(event!.data)).toMatchObject({
+      isNew: true,
+      changedByAgentId: workerId,
+    });
+
+    const del = await dispatch("/api/scripts/global-worker-ok?scope=global", {
+      method: "DELETE",
+      agentId: workerId,
+    });
+    expect(del.status).toBe(200);
+    expect(await del.json()).toEqual({ deleted: true });
+    expect(getScript({ name: "global-worker-ok", scope: "global", scopeId: null })).toBeNull();
   });
 
   test("global upsert promotion marks isPromotion when caller has agent script with same name", async () => {

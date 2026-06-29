@@ -1,0 +1,13 @@
+{
+  "kind": "schedule",
+  "name": "weekly-dora-metrics",
+  "displayName": "Weekly DORA Metrics",
+  "slug": "weekly-dora-metrics",
+  "title": "Weekly DORA Metrics",
+  "description": "Gallery entry point for the community DORA metrics report package. Run a weekly DORA report and update a stable page in place.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": ["REPO_URL", "BRANCH", "TAG_PATTERN", "REPORT_NAME", "PAGE_ID", "TIMEZONE"],
+  "runAllSeedersCandidate": false,
+  "tags": ["dora", "metrics", "engineering-productivity", "reporting", "community-template"]
+}

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { deleteSwarmConfig, getDb, upsertSwarmConfig } from "../be/db";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createAgent, deleteSwarmConfig, getDb, upsertSwarmConfig } from "../be/db";
 import {
   getScriptApiConnectionDescriptors,
   upsertCredentialBinding,
@@ -8,6 +9,7 @@ import {
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import { typecheckScript } from "../be/scripts/typecheck";
 import { runScript } from "../scripts-runtime/loader";
+import { registerScriptConnectionsTool } from "../tools/script-connections";
 
 const createdBindingIds: string[] = [];
 const createdConnectionIds: string[] = [];
@@ -15,6 +17,27 @@ const createdConfigIds: string[] = [];
 const originalFetch = globalThis.fetch;
 const savedEnv = { ...process.env };
 const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
+
+type RegisteredTool = {
+  handler: (args: unknown, extra: unknown) => Promise<unknown>;
+};
+
+function scriptConnectionsTool() {
+  const server = new McpServer({ name: "script-connections-test", version: "1.0.0" });
+  registerScriptConnectionsTool(server);
+  const registered = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
+    ._registeredTools;
+  const tool = registered["script-connections"];
+  if (!tool) throw new Error("script-connections tool not registered");
+  return tool;
+}
+
+function meta(agentId: string) {
+  return {
+    sessionId: "script-connections-test-session",
+    requestInfo: { headers: { "x-agent-id": agentId } },
+  };
+}
 
 const openapiSpec = JSON.stringify({
   openapi: "3.1.0",
@@ -221,6 +244,65 @@ describe("script connections", () => {
         private: { type: "boolean" },
       },
     });
+  });
+
+  test("script-connections tool registers OpenAPI connections from an agent header without FK failures", async () => {
+    const suffix = crypto.randomUUID().replace(/-/g, "");
+    const slug = `agentHeaderVendor${suffix}`;
+    const configKey = `AGENT_HEADER_VENDOR_KEY_${suffix}`;
+    const lead = createAgent({
+      name: `script-connections-lead-${crypto.randomUUID()}`,
+      isLead: true,
+      status: "idle",
+    });
+    const tool = scriptConnectionsTool();
+
+    const result = (await tool.handler(
+      {
+        action: "upsert-openapi",
+        slug,
+        displayName: "Agent Header Vendor",
+        baseUrl: "https://api.vendor.test",
+        allowedHosts: ["api.vendor.test"],
+        configKey,
+        openapiSpecJson: openapiSpec,
+      },
+      meta(lead.id),
+    )) as {
+      structuredContent: { success: boolean; message: string; connections: Array<{ id: string }> };
+    };
+
+    expect(result.structuredContent.success).toBe(true);
+
+    const db = getDb();
+    const connectionRow = db
+      .prepare<
+        {
+          id: string;
+          credential_binding_id: string | null;
+          created_by: string | null;
+          updated_by: string | null;
+        },
+        [string]
+      >(
+        "SELECT id, credential_binding_id, created_by, updated_by FROM script_connections WHERE slug = ?",
+      )
+      .get(slug);
+    expect(connectionRow).toBeDefined();
+    expect(connectionRow?.created_by).toBeNull();
+    expect(connectionRow?.updated_by).toBeNull();
+    createdConnectionIds.push(connectionRow!.id);
+
+    const bindingRow = db
+      .prepare<{ id: string; created_by: string | null; updated_by: string | null }, [string]>(
+        "SELECT id, created_by, updated_by FROM script_credential_bindings WHERE config_key = ?",
+      )
+      .get(configKey);
+    expect(bindingRow).toBeDefined();
+    expect(bindingRow?.id).toBe(connectionRow?.credential_binding_id);
+    expect(bindingRow?.created_by).toBeNull();
+    expect(bindingRow?.updated_by).toBeNull();
+    createdBindingIds.push(bindingRow!.id);
   });
 
   test("ctx.api runtime emits plain fetch with credential placeholders", async () => {

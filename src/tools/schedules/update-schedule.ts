@@ -51,8 +51,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
     {
       title: "Update Scheduled Task",
       annotations: { idempotentHint: true },
-      description:
-        "Update an existing scheduled task. Only the creator or lead agent can update schedules.",
+      description: "Update an existing scheduled task. Any registered agent can update schedules.",
       inputSchema: updateScheduleInputSchema,
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -132,17 +131,13 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         };
       }
 
-      // Check authorization (creator or lead)
       const caller = getAgentById(requestInfo.agentId);
-      const isCreator = schedule.createdByAgentId === requestInfo.agentId;
-      const isLead = caller?.isLead === true;
-
-      if (!isCreator && !isLead) {
+      if (!caller) {
         return {
-          content: [{ type: "text", text: "Only the creator or lead can update this schedule." }],
+          content: [{ type: "text", text: "Agent not found." }],
           structuredContent: {
             success: false,
-            message: "Only the creator or lead can update this schedule.",
+            message: "Agent not found.",
           },
         };
       }

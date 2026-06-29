@@ -451,8 +451,28 @@ function remediateCrashedWorkerTask(
 }
 
 /**
+ * Parse the API boot epoch from `globalThis.__runId` (format: `run_<epochMs>`).
+ * Returns the epoch in ms, or null if missing/unparseable.
+ */
+export function getBootEpochMs(): number | null {
+  const gs = globalThis as typeof globalThis & { __runId?: string };
+  const runId = gs.__runId;
+  if (!runId || typeof runId !== "string") return null;
+  const match = runId.match(/^run_(\d+)$/);
+  if (!match) return null;
+  const epoch = Number(match[1]);
+  return Number.isFinite(epoch) ? epoch : null;
+}
+
+// API and workers share the same host clock, so skew is minimal.
+// 5s tolerance errs toward NOT failing a borderline-live session.
+const BOOT_EPOCH_SKEW_MS = 5_000;
+
+/**
  * Aggressive sweep that runs once after server restart.
  * Ignores age thresholds — any in_progress task with no active session is auto-failed.
+ * A session is only considered "live" if it heartbeated AFTER the current API boot
+ * (concurrency-safe: workers with multiple tasks keep fresh heartbeats on live ones).
  * Creates exactly one retry task per failed task via parentTaskId.
  */
 export async function runRebootSweep(): Promise<void> {
@@ -474,6 +494,13 @@ export async function runRebootSweep(): Promise<void> {
     }
     const reason = "Auto-failed by reboot sweep: worker session not found after server restart";
 
+    const bootEpoch = getBootEpochMs();
+    if (bootEpoch === null) {
+      console.warn(
+        "[Heartbeat] Reboot sweep: could not parse boot epoch from __runId — falling back to legacy session-exists check",
+      );
+    }
+
     for (const task of allInProgress) {
       if (!task.agentId) {
         console.warn(
@@ -483,7 +510,21 @@ export async function runRebootSweep(): Promise<void> {
       }
 
       const session = getActiveSessionForTask(task.id);
-      if (session) continue; // Session exists — worker might still be alive, skip
+      if (session) {
+        if (bootEpoch === null) {
+          // Legacy fallback: session exists → skip (pre-fix behavior, never more aggressive)
+          continue;
+        }
+        const sessionLastSeen = new Date(session.lastHeartbeatAt).getTime();
+        if (sessionLastSeen >= bootEpoch - BOOT_EPOCH_SKEW_MS) {
+          // Heartbeated after (or within skew of) this boot → genuinely live, skip
+          continue;
+        }
+        // Pre-boot stale session → fall through to auto-fail + reboot-retry child
+      }
+
+      // Clean up pre-boot stale session before failing (if it existed)
+      if (session) deleteActiveSession(task.id);
 
       // Auto-fail the task
       const failed = failTask(task.id, reason);
