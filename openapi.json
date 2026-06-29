@@ -3449,6 +3449,315 @@
         }
       }
     },
+    "/api/fs/capabilities": {
+      "get": {
+        "summary": "Get active file-storage provider capabilities",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active provider capabilities"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/fs/tasks/{taskId}/files": {
+      "get": {
+        "summary": "List task file attachments",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task file attachments"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      },
+      "post": {
+        "summary": "Upload a binary task file attachment",
+        "description": "Accepts a raw binary request body. Pass the display/path name as the `name` query parameter.",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "name",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "intent",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "description",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "isPrimary",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Uploaded task attachment"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Caller cannot mutate this task"
+          },
+          "404": {
+            "description": "Task not found"
+          },
+          "413": {
+            "description": "Upload exceeds 50 MiB"
+          }
+        }
+      }
+    },
+    "/api/fs/tasks/{taskId}/files/{attachmentId}": {
+      "get": {
+        "summary": "Get task file attachment metadata",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "attachmentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task attachment metadata"
+          },
+          "404": {
+            "description": "Task or attachment not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a task file attachment",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "attachmentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Attachment deleted"
+          },
+          "403": {
+            "description": "Caller cannot mutate this task"
+          },
+          "404": {
+            "description": "Task or attachment not found"
+          }
+        }
+      }
+    },
+    "/api/fs/tasks/{taskId}/files/{attachmentId}/raw": {
+      "get": {
+        "summary": "Download raw task file bytes",
+        "description": "Streams raw bytes. File content is not secret-scrubbed.",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "attachmentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw file bytes"
+          },
+          "404": {
+            "description": "Task, attachment, or provider object not found"
+          }
+        }
+      }
+    },
+    "/api/fs/tasks/{taskId}/files/{attachmentId}/signed-url": {
+      "get": {
+        "summary": "Create a provider signed GET URL for a task file",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "attachmentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 3600
+            },
+            "required": false,
+            "name": "expiresIn",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signed URL"
+          },
+          "404": {
+            "description": "Task, attachment, or provider object not found"
+          },
+          "501": {
+            "description": "Active provider does not support signed URLs"
+          }
+        }
+      }
+    },
     "/api/heartbeat/sweep": {
       "post": {
         "summary": "Trigger an immediate heartbeat sweep",
@@ -11486,11 +11795,20 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "provider_id": {
+                          "type": "string"
+                        },
+                        "capabilities": {
+                          "type": "object",
+                          "additionalProperties": {}
                         }
                       },
                       "required": [
                         "configured",
-                        "base_url"
+                        "base_url",
+                        "provider_id",
+                        "capabilities"
                       ]
                     },
                     "health": {

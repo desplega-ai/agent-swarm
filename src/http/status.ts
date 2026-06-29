@@ -26,6 +26,7 @@ import {
   listAgentsWithCredStatusByProvider,
 } from "../be/db";
 import { getOAuthApp, getOAuthTokens } from "../be/db-queries/oauth";
+import { getFileStorageProvider } from "../fs/registry";
 import { type AgentCredStatus, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -107,6 +108,8 @@ export type StatusActivity = z.infer<typeof StatusActivitySchema>;
 export const StatusAgentFsSchema = z.object({
   configured: z.boolean(),
   base_url: z.string().nullable(),
+  provider_id: z.string(),
+  capabilities: z.record(z.string(), z.unknown()),
 });
 export type StatusAgentFs = z.infer<typeof StatusAgentFsSchema>;
 
@@ -575,9 +578,28 @@ export function buildStatusPayload(): StatusResponse {
     agent_fs: {
       configured: !!process.env.AGENT_FS_API_URL,
       base_url: process.env.AGENT_FS_API_URL ?? null,
+      ...getAgentFsStatusProvider(),
     },
     health: computeHealth(setup),
   };
+}
+
+function getAgentFsStatusProvider(): {
+  provider_id: string;
+  capabilities: Record<string, unknown>;
+} {
+  try {
+    const provider = getFileStorageProvider();
+    return {
+      provider_id: provider.id,
+      capabilities: provider.capabilities as Record<string, unknown>,
+    };
+  } catch {
+    return {
+      provider_id: "unavailable",
+      capabilities: {},
+    };
+  }
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────

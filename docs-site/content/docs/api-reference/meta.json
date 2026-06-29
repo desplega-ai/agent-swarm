@@ -14,6 +14,7 @@
     "ecosystem",
     "events",
     "external-apis",
+    "fs",
     "heartbeat",
     "inbox-state",
     "integrations",

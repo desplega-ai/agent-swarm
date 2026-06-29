@@ -1,0 +1,416 @@
+import { createHash } from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
+import {
+  deleteTaskAttachment,
+  getAgentById,
+  getTaskAttachments,
+  getTaskById,
+  insertTaskAttachment,
+} from "../be/db";
+import { type FileObject, FilesError, normalizeFilesError } from "../fs/provider";
+import { getFileStorageProvider } from "../fs/registry";
+import type { TaskAttachment } from "../types";
+import { getCurrentRequestAuth, getRequestAuth } from "../utils/request-auth-context";
+import { route } from "./route-def";
+import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
+
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+const taskParams = z.object({ taskId: z.uuid() });
+const attachmentParams = z.object({ taskId: z.uuid(), attachmentId: z.uuid() });
+
+const uploadQuery = z.object({
+  name: z.string().min(1),
+  intent: z.string().optional(),
+  description: z.string().optional(),
+  isPrimary: z.enum(["true", "false"]).optional(),
+});
+
+const signedUrlQuery = z.object({
+  expiresIn: z.coerce.number().int().positive().max(3600).optional(),
+});
+
+const capabilitiesRoute = route({
+  method: "get",
+  path: "/api/fs/capabilities",
+  pattern: ["api", "fs", "capabilities"],
+  summary: "Get active file-storage provider capabilities",
+  tags: ["FS"],
+  responses: {
+    200: { description: "Active provider capabilities" },
+    401: { description: "Unauthorized" },
+  },
+});
+
+const listTaskFilesRoute = route({
+  method: "get",
+  path: "/api/fs/tasks/{taskId}/files",
+  pattern: ["api", "fs", "tasks", null, "files"],
+  summary: "List task file attachments",
+  tags: ["FS"],
+  params: taskParams,
+  responses: {
+    200: { description: "Task file attachments" },
+    404: { description: "Task not found" },
+  },
+});
+
+const uploadTaskFileRoute = route({
+  method: "post",
+  path: "/api/fs/tasks/{taskId}/files",
+  pattern: ["api", "fs", "tasks", null, "files"],
+  summary: "Upload a binary task file attachment",
+  description:
+    "Accepts a raw binary request body. Pass the display/path name as the `name` query parameter.",
+  tags: ["FS"],
+  params: taskParams,
+  query: uploadQuery,
+  responses: {
+    201: { description: "Uploaded task attachment" },
+    400: { description: "Validation error" },
+    403: { description: "Caller cannot mutate this task" },
+    404: { description: "Task not found" },
+    413: { description: "Upload exceeds 50 MiB" },
+  },
+  auth: { apiKey: true, agentId: true },
+});
+
+const getTaskFileRoute = route({
+  method: "get",
+  path: "/api/fs/tasks/{taskId}/files/{attachmentId}",
+  pattern: ["api", "fs", "tasks", null, "files", null],
+  summary: "Get task file attachment metadata",
+  tags: ["FS"],
+  params: attachmentParams,
+  responses: {
+    200: { description: "Task attachment metadata" },
+    404: { description: "Task or attachment not found" },
+  },
+});
+
+const downloadTaskFileRoute = route({
+  method: "get",
+  path: "/api/fs/tasks/{taskId}/files/{attachmentId}/raw",
+  pattern: ["api", "fs", "tasks", null, "files", null, "raw"],
+  summary: "Download raw task file bytes",
+  description: "Streams raw bytes. File content is not secret-scrubbed.",
+  tags: ["FS"],
+  params: attachmentParams,
+  responses: {
+    200: { description: "Raw file bytes" },
+    404: { description: "Task, attachment, or provider object not found" },
+  },
+});
+
+const signedUrlTaskFileRoute = route({
+  method: "get",
+  path: "/api/fs/tasks/{taskId}/files/{attachmentId}/signed-url",
+  pattern: ["api", "fs", "tasks", null, "files", null, "signed-url"],
+  summary: "Create a provider signed GET URL for a task file",
+  tags: ["FS"],
+  params: attachmentParams,
+  query: signedUrlQuery,
+  responses: {
+    200: { description: "Signed URL" },
+    404: { description: "Task, attachment, or provider object not found" },
+    501: { description: "Active provider does not support signed URLs" },
+  },
+});
+
+const deleteTaskFileRoute = route({
+  method: "delete",
+  path: "/api/fs/tasks/{taskId}/files/{attachmentId}",
+  pattern: ["api", "fs", "tasks", null, "files", null],
+  summary: "Delete a task file attachment",
+  tags: ["FS"],
+  params: attachmentParams,
+  responses: {
+    204: { description: "Attachment deleted" },
+    403: { description: "Caller cannot mutate this task" },
+    404: { description: "Task or attachment not found" },
+  },
+  auth: { apiKey: true, agentId: true },
+});
+
+export async function handleFs(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathSegments: string[],
+  queryParams: URLSearchParams,
+  myAgentId?: string,
+): Promise<boolean> {
+  if (downloadTaskFileRoute.match(req.method, pathSegments)) {
+    const parsed = await downloadTaskFileRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const attachment = findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
+    if (!attachment) return true;
+    return sendDownload(res, attachment);
+  }
+
+  if (signedUrlTaskFileRoute.match(req.method, pathSegments)) {
+    const parsed = await signedUrlTaskFileRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const attachment = findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
+    if (!attachment) return true;
+    return sendSignedUrl(res, attachment, parsed.query.expiresIn);
+  }
+
+  if (getTaskFileRoute.match(req.method, pathSegments)) {
+    const parsed = await getTaskFileRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const attachment = findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
+    if (!attachment) return true;
+    json(res, attachment);
+    return true;
+  }
+
+  if (deleteTaskFileRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteTaskFileRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.taskId);
+    if (!task) return notFound(res, "Task not found");
+    if (!canMutateTask(task, myAgentId, req)) return forbidden(res);
+    const attachment = getTaskAttachments(task.id).find(
+      (item) => item.id === parsed.params.attachmentId,
+    );
+    if (!attachment) return notFound(res, "Attachment not found");
+    return sendDelete(res, attachment);
+  }
+
+  if (uploadTaskFileRoute.match(req.method, pathSegments)) {
+    if (enforceContentLengthCap(req, res, MAX_UPLOAD_BYTES) === BODY_TOO_LARGE) return true;
+    const parsed = await uploadTaskFileRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.taskId);
+    if (!task) return notFound(res, "Task not found");
+    if (!canMutateTask(task, myAgentId, req)) return forbidden(res);
+    return sendUpload(req, res, parsed.params.taskId, parsed.query, myAgentId ?? null);
+  }
+
+  if (listTaskFilesRoute.match(req.method, pathSegments)) {
+    const parsed = await listTaskFilesRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getTaskById(parsed.params.taskId)) return notFound(res, "Task not found");
+    json(res, { attachments: getTaskAttachments(parsed.params.taskId) });
+    return true;
+  }
+
+  if (capabilitiesRoute.match(req.method, pathSegments)) {
+    const provider = getFileStorageProvider();
+    json(res, { providerId: provider.id, capabilities: provider.capabilities });
+    return true;
+  }
+
+  return false;
+}
+
+async function sendUpload(
+  req: IncomingMessage,
+  res: ServerResponse,
+  taskId: string,
+  query: z.infer<typeof uploadQuery>,
+  agentId: string | null,
+): Promise<boolean> {
+  const body = await readRawBody(req, MAX_UPLOAD_BYTES);
+  if (body === BODY_TOO_LARGE) {
+    jsonError(res, `Payload too large (max ${MAX_UPLOAD_BYTES} bytes)`, 413);
+    return true;
+  }
+
+  const provider = getFileStorageProvider();
+  const contentType = singleHeader(req, "content-type") ?? "application/octet-stream";
+  const scope = { taskId, name: query.name };
+  let uploaded: FileObject;
+  try {
+    uploaded = await provider.upload(scope, body, {
+      contentType,
+      sizeBytes: body.byteLength,
+      message: `Upload ${query.name} for task ${taskId}`,
+    });
+  } catch (error) {
+    return sendProviderError(res, error);
+  }
+
+  try {
+    const auth = getCurrentRequestAuth();
+    const attachment = insertTaskAttachment({
+      taskId,
+      agentId,
+      name: query.name,
+      kind: provider.id === "agent-fs" ? "agent-fs" : "shared-fs",
+      path: uploaded.key,
+      providerId: provider.id,
+      providerKey: uploaded.key,
+      capabilities: {
+        ...provider.capabilities,
+        version: uploaded.version,
+        etag: uploaded.etag,
+      },
+      mimeType: uploaded.contentType ?? contentType,
+      sizeBytes: uploaded.sizeBytes ?? body.byteLength,
+      sha256: uploaded.sha256 ?? createHash("sha256").update(body).digest("hex"),
+      intent: query.intent,
+      description: query.description,
+      isPrimary: query.isPrimary === "true",
+      createdBy: auth?.kind === "user" ? auth.userId : undefined,
+    });
+    json(res, attachment, 201);
+  } catch (error) {
+    try {
+      await provider.delete(scope);
+    } catch (cleanupError) {
+      console.warn("[fs] upload metadata insert failed and blob cleanup failed", cleanupError);
+    }
+    throw error;
+  }
+  return true;
+}
+
+async function sendDownload(res: ServerResponse, attachment: TaskAttachment): Promise<boolean> {
+  const provider = getFileStorageProvider();
+  try {
+    const response = await provider.download(scopeFromAttachment(attachment));
+    const headers: Record<string, string> = {
+      "Content-Type":
+        response.headers.get("content-type") ?? attachment.mimeType ?? "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${attachment.name.replace(/"/g, "")}"`,
+    };
+    const length = response.headers.get("content-length") ?? attachment.sizeBytes?.toString();
+    if (length) headers["Content-Length"] = length;
+    const etag = response.headers.get("etag");
+    if (etag) headers.ETag = etag;
+    res.writeHead(200, headers);
+    res.end(Buffer.from(await response.arrayBuffer()));
+  } catch (error) {
+    return sendProviderError(res, error);
+  }
+  return true;
+}
+
+async function sendSignedUrl(
+  res: ServerResponse,
+  attachment: TaskAttachment,
+  expiresIn?: number,
+): Promise<boolean> {
+  const provider = getFileStorageProvider();
+  if (!provider.capabilities.signedUrl.supported) {
+    jsonError(res, "Active file provider does not support signed URLs", 501);
+    return true;
+  }
+  try {
+    const url = await provider.url(scopeFromAttachment(attachment), { expiresIn });
+    json(res, { url, expiresIn: Math.min(expiresIn ?? 3600, 3600) });
+  } catch (error) {
+    return sendProviderError(res, error);
+  }
+  return true;
+}
+
+async function sendDelete(res: ServerResponse, attachment: TaskAttachment): Promise<boolean> {
+  const provider = getFileStorageProvider();
+  try {
+    await provider.delete(scopeFromAttachment(attachment));
+  } catch (error) {
+    const normalized = normalizeFilesError(error);
+    if (normalized.code !== "NotFound") return sendProviderError(res, normalized);
+  }
+  deleteTaskAttachment(attachment.id);
+  res.writeHead(204);
+  res.end();
+  return true;
+}
+
+function scopeFromAttachment(attachment: TaskAttachment): { taskId: string; name: string } {
+  const prefix = `tasks/${encodeURIComponent(attachment.taskId)}/`;
+  const key = attachment.providerKey ?? attachment.path ?? "";
+  if (key.startsWith(prefix)) {
+    return {
+      taskId: attachment.taskId,
+      name: key
+        .slice(prefix.length)
+        .split("/")
+        .map((part) => decodeURIComponent(part))
+        .join("/"),
+    };
+  }
+  return { taskId: attachment.taskId, name: attachment.name };
+}
+
+function findAttachment(
+  taskId: string,
+  attachmentId: string,
+  res: ServerResponse,
+): TaskAttachment | null {
+  if (!getTaskById(taskId)) {
+    notFound(res, "Task not found");
+    return null;
+  }
+  const attachment = getTaskAttachments(taskId).find((item) => item.id === attachmentId);
+  if (!attachment) {
+    notFound(res, "Attachment not found");
+    return null;
+  }
+  return attachment;
+}
+
+function canMutateTask(
+  task: { agentId: string | null; creatorAgentId?: string },
+  myAgentId: string | undefined,
+  req: IncomingMessage,
+): boolean {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "user") return true;
+  if (!myAgentId) return false;
+  const agent = getAgentById(myAgentId);
+  if (agent?.isLead) return true;
+  return task.agentId === myAgentId || task.creatorAgentId === myAgentId;
+}
+
+async function readRawBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<Buffer | typeof BODY_TOO_LARGE> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.byteLength;
+    if (total > maxBytes) return BODY_TOO_LARGE;
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+function singleHeader(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
+function notFound(res: ServerResponse, message: string): true {
+  jsonError(res, message, 404);
+  return true;
+}
+
+function forbidden(res: ServerResponse): true {
+  jsonError(res, "Caller cannot mutate this task's files", 403);
+  return true;
+}
+
+function sendProviderError(res: ServerResponse, error: unknown): true {
+  const normalized = error instanceof FilesError ? error : normalizeFilesError(error);
+  const status =
+    normalized.code === "NotFound"
+      ? 404
+      : normalized.code === "Unauthorized"
+        ? 403
+        : normalized.code === "Conflict"
+          ? 409
+          : normalized.code === "ReadOnly"
+            ? 501
+            : normalized.status && normalized.status >= 400
+              ? normalized.status
+              : 500;
+  jsonError(res, normalized.message, status);
+  return true;
+}

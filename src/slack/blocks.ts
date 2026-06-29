@@ -6,7 +6,8 @@
  */
 
 import type { AgentTaskStatus, TaskAttachment } from "../types";
-import { buildAgentFsLiveUrl, getAppUrl } from "../utils/constants";
+import { getAppUrl } from "../utils/constants";
+import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 
 // Slack limits section text to 3000 chars; we use 2900 for safety.
 export const MAX_SECTION_LENGTH = 2900;
@@ -155,22 +156,7 @@ const SLACK_ATTACHMENTS_MAX = 20;
  * the link is at least copy-pasteable.
  */
 function resolveAttachmentDisplay(a: TaskAttachment): string {
-  switch (a.kind) {
-    case "url":
-      return a.url ?? "";
-    case "page":
-      return a.pageId ? `${getAppUrl()}/pages/${a.pageId}` : "page:";
-    case "agent-fs": {
-      const url = buildAgentFsLiveUrl({
-        path: a.path,
-        orgId: a.orgId,
-        driveId: a.driveId,
-      });
-      return url ?? `agent-fs:${a.path ?? ""}`;
-    }
-    case "shared-fs":
-      return `shared-fs:${a.path ?? ""}`;
-  }
+  return taskAttachmentDisplayUrl(a);
 }
 
 /**

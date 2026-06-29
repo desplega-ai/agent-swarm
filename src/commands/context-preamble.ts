@@ -11,7 +11,9 @@
  * resumes (see swarm memory sigterm-143-resumed-session-context-saturation-2026-05-13).
  */
 
+import type { TaskAttachment } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 
 export const CONTEXT_PREAMBLE_MAX_TOKENS = Number(
   process.env.CONTEXT_PREAMBLE_MAX_TOKENS || "2000",
@@ -84,17 +86,8 @@ export async function fetchTaskContextForPreamble(
 function formatAttachmentPointer(
   att: NonNullable<TaskContextForPreamble["attachments"]>[number],
 ): string {
-  if (att.kind === "agent-fs" && att.path) {
-    const liveHost = process.env.AGENT_FS_LIVE_URL ?? "https://live.agent-fs.dev";
-    if (att.orgId && att.driveId) {
-      return `${liveHost}/file/~/${att.orgId}/${att.driveId}/${att.path}`;
-    }
-    return att.path;
-  }
-  if (att.kind === "url" && att.url) return att.url;
-  if (att.kind === "page" && att.pageId) return `(page:${att.pageId})`;
-  if (att.kind === "shared-fs" && att.path) return att.path;
-  return "(no pointer)";
+  const pointer = taskAttachmentDisplayUrl(att as TaskAttachment);
+  return pointer || "(no pointer)";
 }
 
 /**

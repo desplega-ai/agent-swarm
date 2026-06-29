@@ -159,11 +159,27 @@ describe("formatAttachmentsBlockForSlack", () => {
     }
   });
 
-  test("shared-fs displays the path verbatim", () => {
-    const out = formatAttachmentsBlockForSlack([
-      mkAttachment({ kind: "shared-fs", name: "log", path: "/var/log/x.log" }),
-    ]);
-    expect(out).toContain("shared-fs:/var/log/x.log");
+  test("shared-fs displays a swarm raw download URL", () => {
+    const origAppUrl = process.env.APP_URL;
+    process.env.APP_URL = "https://app.example.test";
+    try {
+      const out = formatAttachmentsBlockForSlack([
+        mkAttachment({
+          id: "11111111-1111-1111-1111-111111111111",
+          taskId: "22222222-2222-2222-2222-222222222222",
+          kind: "shared-fs",
+          name: "log",
+          path: "/var/log/x.log",
+          providerId: "local-fs",
+        }),
+      ]);
+      expect(out).toContain(
+        "https://app.example.test/api/fs/tasks/22222222-2222-2222-2222-222222222222/files/11111111-1111-1111-1111-111111111111/raw",
+      );
+    } finally {
+      if (origAppUrl === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = origAppUrl;
+    }
   });
 
   test("caps at 20 lines but still prints the true count in the header", () => {
