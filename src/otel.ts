@@ -15,6 +15,10 @@ export type SwarmSpan = {
   end: () => void;
 };
 
+// eslint-disable-next-line import/no-duplicates -- type-only import, no side-effects
+import type { SessionCostMetric } from "./otel-impl";
+export type { SessionCostMetric };
+
 const enabled = Boolean(process.env.OTEL_EXPORTER_OTLP_ENDPOINT);
 
 const NOOP_SPAN: SwarmSpan = {
@@ -43,6 +47,7 @@ let realInjectTraceContext:
   | ((headers: Record<string, string>) => Record<string, string>)
   | undefined;
 let realShutdown: (() => Promise<void>) | undefined;
+let realRecordSessionCost: ((m: SessionCostMetric) => void) | undefined;
 
 export function isOtelEnabled(): boolean {
   return enabled;
@@ -66,6 +71,7 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
     realWithSpanContext = impl.withSpanContext;
     realInjectTraceContext = impl.injectTraceContext;
     realShutdown = impl.shutdown;
+    realRecordSessionCost = impl.recordSessionCost;
     console.log(`[OTel] enabled for ${impl.resolveServiceName(serviceRole)} (${serviceRole})`);
   } catch (error) {
     console.warn(`[OTel] disabled after initialization failure: ${error}`);
@@ -119,6 +125,11 @@ export async function shutdownOtel(): Promise<void> {
   await realShutdown();
 }
 
+export function recordSessionCost(m: SessionCostMetric): void {
+  if (!enabled || !realRecordSessionCost) return;
+  realRecordSessionCost(m);
+}
+
 export function _resetOtelForTests() {
   initialized = false;
   realWithSpan = undefined;
@@ -127,4 +138,5 @@ export function _resetOtelForTests() {
   realWithSpanContext = undefined;
   realInjectTraceContext = undefined;
   realShutdown = undefined;
+  realRecordSessionCost = undefined;
 }

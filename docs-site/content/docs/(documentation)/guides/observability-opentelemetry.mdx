@@ -360,7 +360,57 @@ With Codex's exporters enabled and the gate on, Codex's spans appear in the same
 
 ## Metrics
 
-Agent Swarm currently emits traces, not standalone OTLP metrics. In SigNoz, create useful operational metrics from trace aggregations:
+Agent Swarm emits both traces and OTLP metrics. The metric exporter runs on the same OTLP pipeline as traces (same `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS`), so no additional endpoint configuration is needed.
+
+### Session Cost and Token Counters
+
+Two cumulative counters are emitted by the API server each time a session-cost record is finalized (POST `/api/session-costs`). They cover every harness — `claude`, `claude-managed`, `codex`, `pi`, `opencode`, `devin`, `gemini` — with a single chokepoint.
+
+| Metric | Unit | Description |
+|--------|------|-------------|
+| `agentswarm.cost.usd` | `{usd}` | USD cost per finalized cost record. Not emitted for zero-cost sessions. |
+| `agentswarm.tokens` | `{token}` | Token count per finalized cost record, split by `token_type`. Not emitted for zero-count classes. |
+
+Both counters share the same set of low-cardinality attributes:
+
+| Attribute | Values | Description |
+|-----------|--------|-------------|
+| `harness` | `claude`, `codex`, `pi`, `opencode`, `devin`, `gemini`, `unknown` | Harness provider that produced the session. `unknown` when the request omits the `provider` field. |
+| `model` | model identifier | The model key sent by the adapter (e.g. `claude-sonnet-4-6`, `gpt-4o`). Stripped of routing prefixes by the pricing-normalize path. Scrubbed through the secret scrubber before export. |
+| `cost_source` | `harness`, `pricing-table`, `unpriced` | How the cost figure was derived. `harness` = adapter-reported; `pricing-table` = recomputed from seeded pricing rows; `unpriced` = provider/model pair has no pricing data. |
+| `is_error` | `true`, `false` | Whether the session ended with an error. |
+
+`agentswarm.tokens` additionally carries:
+
+| Attribute | Values | Description |
+|-----------|--------|-------------|
+| `token_type` | `input`, `output`, `cacheRead`, `cacheWrite`, `reasoning`, `thinking` | Token class. Only classes with a non-zero count are emitted. |
+
+### Metric Temporality
+
+Temporality is NOT hardcoded. Set the following for Datadog or any delta-preferred backend:
+
+```bash
+OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta
+```
+
+Omit it for backends (SigNoz, Prometheus) that prefer cumulative temporality (the SDK default).
+
+### Example Dashboard Panels
+
+| Panel | Metric query |
+|-------|-------------|
+| Total cost by harness | `sum(agentswarm.cost.usd)`, group by `harness` |
+| Cost by model | `sum(agentswarm.cost.usd)`, group by `model` |
+| Cost by pricing source | `sum(agentswarm.cost.usd)`, group by `cost_source` |
+| Input tokens by harness | `sum(agentswarm.tokens)` where `token_type = 'input'`, group by `harness` |
+| Output tokens by model | `sum(agentswarm.tokens)` where `token_type = 'output'`, group by `model` |
+| Cache efficiency | `sum(agentswarm.tokens)` where `token_type = 'cacheRead'` ÷ `token_type = 'input'` |
+| Error session cost | `sum(agentswarm.cost.usd)` where `is_error = true` |
+
+### Trace-derived Metrics
+
+In addition to the standalone counters above, SigNoz supports creating operational metrics from trace aggregations:
 
 | Metric | Query shape |
 |--------|-------------|
@@ -371,8 +421,8 @@ Agent Swarm currently emits traces, not standalone OTLP metrics. In SigNoz, crea
 | Worker session p95 duration | `p95(durationNano)` over `name = 'worker.session'` |
 | Tool call volume | `count()` over `name IN ('worker.tool', 'worker.mcp.tool')` plus `name LIKE 'mcp.tool %'` for server-side spans, grouped by `agentswarm.tool.name` or `mcp.tool.name` |
 | Slow tools | `p95(durationNano)` over tool spans, grouped by tool name |
-| Cost by model | `sum(agentswarm.cost.total_usd)` over session spans, grouped by `gen_ai.response.model` |
-| Token usage by model | `sum(gen_ai.usage.input_tokens)` and `sum(gen_ai.usage.output_tokens)`, grouped by model |
+| Cost by model (trace) | `sum(agentswarm.cost.total_usd)` over session spans, grouped by `gen_ai.response.model` |
+| Token usage by model (trace) | `sum(gen_ai.usage.input_tokens)` and `sum(gen_ai.usage.output_tokens)`, grouped by model |
 | Poll behavior | `count()` over `worker.poll`, grouped by `agentswarm.poll.result` |
 
 ## Useful SigNoz Queries
@@ -478,6 +528,8 @@ after the tool result returned). Adapter-emitted explicit `tool_end` spans
 
 ### Sessions with Cost Data
 
+Use the `agentswarm.cost.usd` OTLP metric counter for cost aggregations and dashboards. For per-span cost attribution in trace queries, filter on the `agentswarm.cost.total_usd` span attribute on `worker.session` spans:
+
 ```text
 service.name = 'agent-swarm'
 AND name = 'worker.session'
@@ -497,13 +549,16 @@ Start with these panels:
 
 | Panel | Signal |
 |-------|--------|
+| Cost by harness | `sum(agentswarm.cost.usd)` metric, grouped by `harness` |
+| Cost by model | `sum(agentswarm.cost.usd)` metric, grouped by `model` |
+| Token usage by type | `sum(agentswarm.tokens)` metric, grouped by `token_type` |
+| Cache efficiency | `sum(agentswarm.tokens)` where `token_type=cacheRead` ÷ `input` |
 | API request rate by route | Trace count over `agentswarm.component = 'api'`, grouped by span `name` |
 | API p95 latency by route | `p95(durationNano)` over `agentswarm.component = 'api'`, grouped by span `name` |
 | Worker sessions by harness | Trace count over `worker.session`, grouped by `agentswarm.harness_provider` |
 | Worker session duration | `p95(durationNano)` over `worker.session`, grouped by harness |
 | Tool calls by name | Trace count over tool spans, grouped by `agentswarm.tool.name` |
 | Slowest tools | `p95(durationNano)` over tool spans |
-| Cost by model | `sum(agentswarm.cost.total_usd)`, grouped by `gen_ai.response.model` |
 | Poll outcomes | Trace count over `worker.poll`, grouped by `agentswarm.poll.result` |
 | Errors by span name | Trace count where `hasError = true`, grouped by `name` |
 

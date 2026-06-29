@@ -1,11 +1,14 @@
 import {
+  type Counter,
   context,
+  metrics,
   propagation,
   ROOT_CONTEXT,
   type Span,
   SpanStatusCode,
   trace,
 } from "@opentelemetry/api";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import {
   hostDetector,
@@ -13,6 +16,7 @@ import {
   processDetector,
   resourceFromAttributes,
 } from "@opentelemetry/resources";
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import pkg from "../package.json";
@@ -23,9 +27,12 @@ type AttributeValue = string | number | boolean | string[] | number[] | boolean[
 type Attributes = Record<string, AttributeValue | undefined>;
 
 const TRACER_NAME = "agent-swarm";
+const METER_NAME = "agent-swarm";
 const RAW_SPAN = Symbol("agent-swarm.raw-span");
 
 let sdk: NodeSDK | undefined;
+let costCounter: Counter | undefined;
+let tokenCounter: Counter | undefined;
 
 function decodeResourceAttributeValue(value: string): string {
   try {
@@ -158,6 +165,14 @@ export async function boot(serviceRole: string): Promise<void> {
     // parsed `OTEL_RESOURCE_ATTRIBUTES`) then stays authoritative.
     resourceDetectors: [hostDetector, osDetector, processDetector],
     traceExporter: new OTLPTraceExporter(),
+    // Metrics: export on the same OTLP pipeline as traces so both signals share
+    // the same resource (service.name, agentswarm.service.role, etc.). Temporality
+    // is intentionally NOT hardcoded — operators should set
+    // OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta for Datadog.
+    metricReader: new PeriodicExportingMetricReader({
+      exporter: new OTLPMetricExporter(),
+      exportIntervalMillis: 60_000,
+    }),
   });
 
   sdk.start();
@@ -227,4 +242,62 @@ export async function withRemoteContext<T>(
 export function injectTraceContext(headers: Record<string, string>): Record<string, string> {
   propagation.inject(context.active(), headers);
   return headers;
+}
+
+export interface SessionCostMetric {
+  totalCostUsd: number;
+  harness: string;
+  model: string;
+  costSource: string;
+  isError: boolean;
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    reasoning: number;
+    thinking: number;
+  };
+}
+
+function ensureInstruments(): void {
+  if (costCounter) return;
+  const meter = metrics.getMeter(METER_NAME);
+  costCounter = meter.createCounter("agentswarm.cost.usd", {
+    description: "USD cost per finalized cost record",
+    unit: "{usd}",
+  });
+  tokenCounter = meter.createCounter("agentswarm.tokens", {
+    description: "Tokens per finalized cost record",
+    unit: "{token}",
+  });
+}
+
+export function recordSessionCost(m: SessionCostMetric): void {
+  ensureInstruments();
+  // Scrub all free-form string attributes before they reach the OTLP exporter.
+  // `model` comes from the /api/session-costs request body and may contain
+  // arbitrary operator-supplied text; scrubbing prevents accidental secret egress.
+  const attrs = {
+    harness: scrubSecrets(m.harness || "unknown"),
+    model: scrubSecrets(m.model || "unknown"),
+    cost_source: scrubSecrets(m.costSource || "unknown"),
+    is_error: m.isError,
+  };
+  if (Number.isFinite(m.totalCostUsd) && m.totalCostUsd > 0) {
+    costCounter!.add(m.totalCostUsd, attrs);
+  }
+  for (const [token_type, n] of Object.entries(m.tokens)) {
+    if (Number.isFinite(n) && n > 0) {
+      tokenCounter!.add(n, { ...attrs, token_type });
+    }
+  }
+}
+
+export function _injectCountersForTests(
+  cost: Counter | undefined,
+  token: Counter | undefined,
+): void {
+  costCounter = cost;
+  tokenCounter = token;
 }
