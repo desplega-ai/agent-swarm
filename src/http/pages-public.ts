@@ -151,6 +151,106 @@ function injectBrowserSdk(html: string): string {
 }
 
 /**
+ * Self-print snippet appended to the served document when the export button
+ * opens `/p/:id?print=1`. The page prints ITSELF in the user's own browser —
+ * no server-side headless browser. We wait for `load` + webfonts + a short
+ * tick so the Tailwind Play CDN JIT pass and font swap settle before the
+ * print dialog opens, otherwise the PDF can capture an unstyled flash.
+ */
+const PRINT_AUTOTRIGGER_SCRIPT = `<script>
+  (function () {
+    function print() { setTimeout(function () { window.print(); }, 400); }
+    window.addEventListener("load", function () {
+      var fonts = document.fonts;
+      if (fonts && fonts.ready && typeof fonts.ready.then === "function") {
+        fonts.ready.then(print, print);
+      } else {
+        print();
+      }
+    });
+  })();
+</script>`;
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
+}
+
+/**
+ * Standalone, self-contained HTML for printing a JSON page. JSON pages have no
+ * agent-authored HTML body (the SPA renders the tree), so `/p/:id` normally
+ * 302s to the SPA. For `?print=1` we serve this minimal light-themed document
+ * — pretty-printed JSON in a wrapping `<pre>` — and let the browser print it.
+ */
+function printableJsonPageHtml(page: Page): string {
+  let body = page.body;
+  try {
+    body = JSON.stringify(JSON.parse(page.body), null, 2);
+  } catch {
+    // Preserve the original body when the stored payload is not valid JSON.
+  }
+  const description = page.description
+    ? `<p class="description">${escapeHtml(page.description)}</p>`
+    : "";
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>${escapeHtml(page.title)}</title>
+    <style>
+      body {
+        color: #111827;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+        margin: 0;
+        padding: 24px;
+      }
+      h1 {
+        font-size: 24px;
+        line-height: 1.2;
+        margin: 0 0 8px;
+      }
+      .description {
+        color: #4b5563;
+        margin: 0 0 20px;
+      }
+      pre {
+        background: #f8fafc;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        color: #111827;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+        line-height: 1.45;
+        margin: 0;
+        overflow-wrap: anywhere;
+        padding: 16px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>${escapeHtml(page.title)}</h1>
+    ${description}
+    <pre>${escapeHtml(body)}</pre>
+    ${PRINT_AUTOTRIGGER_SCRIPT}
+  </body>
+</html>`;
+}
+
+/**
  * Trim `.json` off the last path segment, returning the bare id. Returns
  * `null` if the segment doesn't end in `.json` (caller should fall through
  * to the plain `/p/:id` matcher).
@@ -465,8 +565,28 @@ export async function handlePagesPublic(
     return true;
   }
 
+  // `?print=1` — the SPA's "Export PDF" button opens the page in a new tab
+  // with this flag so the page self-prints in the user's own browser (no
+  // server-side headless browser). HTML pages get the auto-print snippet
+  // appended; JSON pages — which normally 302 to the SPA — are served as a
+  // standalone printable document instead.
+  const wantsPrint = queryParams.get("print") === "1";
+
   // `/p/:id` — render either HTML directly or 302→SPA for JSON.
   if (page.contentType === "application/json") {
+    if (wantsPrint) {
+      const headers: Record<string, string> = {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": buildCsp(),
+        "X-Content-Type-Options": "nosniff",
+      };
+      if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+      res.writeHead(200, headers);
+      res.end(printableJsonPageHtml(page));
+      bumpViewCount(page.id);
+      return true;
+    }
     const headers: Record<string, string> = { Location: `${getAppBaseUrl()}/pages/${page.id}` };
     if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
     res.writeHead(302, headers);
@@ -477,8 +597,9 @@ export async function handlePagesPublic(
     return true;
   }
 
-  // text/html — inject SDK + serve.
-  const html = injectBrowserSdk(page.body);
+  // text/html — inject SDK + serve. Append the self-print snippet when the
+  // export button requested it.
+  const html = injectBrowserSdk(page.body) + (wantsPrint ? PRINT_AUTOTRIGGER_SCRIPT : "");
   const headers: Record<string, string> = {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",

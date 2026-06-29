@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
@@ -15,8 +14,8 @@ import {
 } from "../be/db";
 import { snapshotPage } from "../pages/version";
 import { type Page, PageAuthModeSchema, PageContentTypeSchema, type PageSummary } from "../types";
-import { getAppUrl, getMcpBaseUrl, getPublicMcpBaseUrl } from "../utils/constants";
-import { issuePageSessionCookie, signPageSession } from "../utils/page-session";
+import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
+import { issuePageSessionCookie } from "../utils/page-session";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
@@ -81,20 +80,6 @@ const getPageRoute = route({
   responses: {
     200: { description: "Page row" },
     404: { description: "Page not found" },
-  },
-});
-
-const exportPagePdfRoute = route({
-  method: "get",
-  path: "/api/pages/{id}/export.pdf",
-  pattern: ["api", "pages", null, "export.pdf"],
-  summary: "Export a page as a PDF",
-  tags: ["Pages"],
-  params: z.object({ id: z.string() }),
-  responses: {
-    200: { description: "PDF export" },
-    404: { description: "Page not found" },
-    500: { description: "PDF generation failed" },
   },
 });
 
@@ -334,180 +319,6 @@ function pageEditCounter(pageId: string): number {
   return versions.length > 0 ? versions[0]!.version + 1 : 1;
 }
 
-function pdfFilename(page: Page): string {
-  const base = (page.title || page.slug || page.id)
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return `${base || "page"}.pdf`;
-}
-
-function escapeHeaderValue(value: string): string {
-  return value.replace(/["\\\r\n]/g, "_");
-}
-
-function resolveChromiumExecutablePath(): string | undefined {
-  const configured = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
-  if (configured) return configured;
-  return ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"].find((path) =>
-    existsSync(path),
-  );
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      default:
-        return "&#39;";
-    }
-  });
-}
-
-function printableJsonPageHtml(page: Page): string {
-  let body = page.body;
-  try {
-    body = JSON.stringify(JSON.parse(page.body), null, 2);
-  } catch {
-    // Preserve the original body when the stored payload is not valid JSON.
-  }
-  const description = page.description
-    ? `<p class="description">${escapeHtml(page.description)}</p>`
-    : "";
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>${escapeHtml(page.title)}</title>
-    <style>
-      body {
-        color: #111827;
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        line-height: 1.5;
-        margin: 0;
-      }
-      h1 {
-        font-size: 24px;
-        line-height: 1.2;
-        margin: 0 0 8px;
-      }
-      .description {
-        color: #4b5563;
-        margin: 0 0 20px;
-      }
-      pre {
-        background: #f8fafc;
-        border: 1px solid #e5e7eb;
-        border-radius: 6px;
-        color: #111827;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 11px;
-        line-height: 1.45;
-        margin: 0;
-        overflow-wrap: anywhere;
-        padding: 16px;
-        white-space: pre-wrap;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>${escapeHtml(page.title)}</h1>
-    ${description}
-    <pre>${escapeHtml(body)}</pre>
-  </body>
-</html>`;
-}
-
-async function renderPagePdf(page: Page): Promise<Buffer> {
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({
-    executablePath: resolveChromiumExecutablePath(),
-    args: ["--no-sandbox", "--disable-dev-shm-usage"],
-  });
-
-  try {
-    const baseUrl = getMcpBaseUrl();
-    const sessionToken = await signPageSession({
-      pageId: page.id,
-      exp: Math.floor(Date.now() / 1000) + 10 * 60,
-    });
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 900 },
-      deviceScaleFactor: 1,
-    });
-    await context.addCookies([
-      {
-        name: "page_session",
-        value: sessionToken,
-        url: baseUrl,
-        httpOnly: true,
-        sameSite: "Lax",
-      },
-    ]);
-
-    const chromiumPage = await context.newPage();
-    if (page.contentType === "application/json") {
-      await chromiumPage.setContent(printableJsonPageHtml(page), {
-        waitUntil: "domcontentloaded",
-        timeout: 30_000,
-      });
-    } else {
-      const url = `${baseUrl}/p/${encodeURIComponent(page.id)}`;
-      await chromiumPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    }
-    await chromiumPage.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
-    await chromiumPage
-      .evaluate(async (title) => {
-        const doc = (
-          globalThis as unknown as {
-            document: {
-              title: string;
-              fonts?: { ready: Promise<unknown> };
-            };
-          }
-        ).document;
-        doc.title = title;
-        await doc.fonts?.ready;
-      }, page.title)
-      .catch(() => undefined);
-
-    const pdf = await chromiumPage.pdf({
-      format: "A4",
-      margin: {
-        top: "12mm",
-        right: "12mm",
-        bottom: "12mm",
-        left: "12mm",
-      },
-      printBackground: true,
-      preferCSSPageSize: true,
-      scale: 1,
-    });
-
-    await context.close();
-    return Buffer.from(pdf);
-  } finally {
-    await browser.close();
-  }
-}
-
-let pagePdfRenderer: (page: Page) => Promise<Buffer> = renderPagePdf;
-
-export function setPagePdfRendererForTest(
-  renderer: ((page: Page) => Promise<Buffer>) | null,
-): void {
-  pagePdfRenderer = renderer ?? renderPagePdf;
-}
-
 function isDevRequest(req: IncomingMessage): boolean {
   if (process.env.NODE_ENV === "production") return false;
   // We want `SameSite=Lax` only when the request itself comes from the same
@@ -677,32 +488,6 @@ export async function handlePages(
     }
     const versions = getPageVersions(parsed.params.id);
     json(res, { versions });
-    return true;
-  }
-
-  if (exportPagePdfRoute.match(req.method, pathSegments)) {
-    const parsed = await exportPagePdfRoute.parse(req, res, pathSegments, queryParams);
-    if (!parsed) return true;
-    const page = getPage(parsed.params.id);
-    if (!page) {
-      res.writeHead(404);
-      res.end();
-      return true;
-    }
-    try {
-      const pdf = await pagePdfRenderer(page);
-      res.writeHead(200, {
-        "Content-Type": "application/pdf",
-        "Content-Length": String(pdf.byteLength),
-        "Content-Disposition": `attachment; filename="${escapeHeaderValue(pdfFilename(page))}"`,
-        "Cache-Control": "no-store",
-      });
-      res.end(pdf);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[pages] PDF export failed for ${page.id}: ${message}`);
-      jsonError(res, "PDF export failed", 500);
-    }
     return true;
   }
 

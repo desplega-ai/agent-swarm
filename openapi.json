@@ -5155,40 +5155,6 @@
         }
       }
     },
-    "/api/pages/{id}/export.pdf": {
-      "get": {
-        "summary": "Export a page as a PDF",
-        "tags": [
-          "Pages"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "PDF export"
-          },
-          "404": {
-            "description": "Page not found"
-          },
-          "500": {
-            "description": "PDF generation failed"
-          }
-        }
-      }
-    },
     "/api/pages/{id}/launch": {
       "post": {
         "summary": "Launch a page session (issues HttpOnly cookie)",

@@ -62,7 +62,6 @@ FROM debian:bookworm-slim
 # python3 is required by the script-workflow executor's `python` runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    chromium \
     wget \
     curl \
     jq \
@@ -128,7 +127,6 @@ ENV SCRIPT_RUNTIME_DIR=/app/scripts-runtime
 ENV SCRIPT_WORKFLOW_RUNTIME_DIR=/app/script-workflows-runtime
 ENV TS_LIB_DIR=/app/typescript-lib
 ENV SCRIPT_TYPES_DIR=/app/script-types
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 VOLUME /app/data
 

@@ -2046,16 +2046,6 @@ class ApiClient {
     if (!res.ok) throw new Error(`launchPage ${id}: ${res.status}`);
   }
 
-  async exportPagePdf(id: string): Promise<Blob> {
-    const url = `${this.getAbsoluteApiUrl()}/api/pages/${encodeURIComponent(id)}/export.pdf`;
-    const res = await fetch(url, {
-      headers: this.getHeaders(),
-      credentials: "include",
-    });
-    if (!res.ok) throw new Error(`exportPagePdf ${id}: ${res.status}`);
-    return res.blob();
-  }
-
   /**
    * List DB-backed pages. Bearer-authed (uses the standard `getHeaders()`,
    * no cookie required). Supplying `agentId` narrows to a single creator —

@@ -28,11 +28,11 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
   Braces,
-  Download,
   ExternalLink,
   Lock,
   Maximize2,
   Minimize2,
+  Printer,
 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -61,16 +61,6 @@ import { JsonPageRenderer } from "./json-page-renderer";
 function getAbsoluteApiUrl(): string {
   const config = getConfig();
   return (config.apiUrl || "http://localhost:3013").replace(/\/+$/, "");
-}
-
-function pagePdfFilename(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return `${slug || "page"}.pdf`;
 }
 
 /**
@@ -248,7 +238,6 @@ export default function ArtifactPage() {
   const fullMode = searchParams.get("mode") === "full";
   const gate = useFeatureGate("1.79.0");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const { data, error, isLoading } = useQuery({
     queryKey: ["page-metadata", id],
@@ -263,51 +252,18 @@ export default function ArtifactPage() {
     retry: false,
   });
 
-  const isJson = data?.contentType === "application/json";
-
-  const handleExportPdf = useCallback(async () => {
-    if (!id || !data || isExportingPdf) return;
-    setIsExportingPdf(true);
-    let objectUrl: string | null = null;
-    try {
-      const blob = await api.exportPagePdf(id);
-      objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = pagePdfFilename(data.title);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } finally {
-      if (objectUrl) {
-        const urlToRevoke = objectUrl;
-        window.setTimeout(() => URL.revokeObjectURL(urlToRevoke), 1000);
-      }
-      setIsExportingPdf(false);
-    }
-  }, [data, id, isExportingPdf]);
-
-  const handleExportPdfWithFallback = useCallback(async () => {
-    try {
-      await handleExportPdf();
-    } catch {
-      if (isJson) {
-        window.print();
-        return;
-      }
-      const win = iframeRef.current?.contentWindow;
-      if (!win) {
-        window.print();
-        return;
-      }
-      try {
-        win.focus();
-        win.print();
-      } catch {
-        window.print();
-      }
-    }
-  }, [handleExportPdf, isJson]);
+  // Open the page in a new tab with `?print=1` so it self-prints in the
+  // user's own browser. The agent-authored HTML (or formatted JSON) prints —
+  // not the SPA chrome — and no server-side headless browser is involved. The
+  // server appends an auto-print snippet to the `?print=1` response, and the
+  // page-session cookie (minted during the metadata fetch) rides along on the
+  // top-level navigation so authed/password pages still resolve. Triggered
+  // synchronously from the click so the pop-up isn't blocked.
+  const handleExportPdf = useCallback(() => {
+    if (!id) return;
+    const url = `${getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}?print=1`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [id]);
 
   if (!gate.supported) {
     return (
@@ -382,12 +338,7 @@ export default function ArtifactPage() {
         title={data.title}
         description={data.description ?? undefined}
         action={
-          <PageHeaderActions
-            id={id}
-            authMode={data.authMode}
-            isExportingPdf={isExportingPdf}
-            onExportPdf={handleExportPdfWithFallback}
-          />
+          <PageHeaderActions id={id} authMode={data.authMode} onExportPdf={handleExportPdf} />
         }
       />
       <PageSlugLine id={id} />
@@ -424,12 +375,10 @@ function PageSlugLine({ id }: { id: string }) {
 function PageHeaderActions({
   id,
   authMode,
-  isExportingPdf,
   onExportPdf,
 }: {
   id: string;
   authMode: PageMetadata["authMode"];
-  isExportingPdf: boolean;
   onExportPdf: () => void;
 }) {
   const config = getConfig();
@@ -449,12 +398,11 @@ function PageHeaderActions({
       <Button
         variant="outline"
         size="sm"
-        title="Download a full-page PDF export"
+        title="Open a print-ready view and save as PDF"
         onClick={onExportPdf}
-        disabled={isExportingPdf}
       >
-        <Download className="size-3.5" />
-        {isExportingPdf ? "Exporting..." : "Export PDF"}
+        <Printer className="size-3.5" />
+        Export PDF
       </Button>
       <Button asChild variant="outline" size="sm" title="Maximize within the SPA">
         <Link to={`/pages/${id}?mode=full`}>

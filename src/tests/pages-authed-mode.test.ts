@@ -23,7 +23,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { closeDb, initDb } from "../be/db";
-import { handlePages, setPagePdfRendererForTest } from "../http/pages";
+import { handlePages } from "../http/pages";
 import { handlePagesPublic } from "../http/pages-public";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { signPageSession } from "../utils/page-session";
@@ -72,7 +72,6 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
   });
 
   afterAll(async () => {
-    setPagePdfRendererForTest(null);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -181,26 +180,54 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
     expect(res.status).toBe(401);
   });
 
-  test("GET /api/pages/:id/export.pdf returns generated PDF with title filename", async () => {
-    const id = await createAuthedPage("pdf-export", "<!doctype html><body><h1>full</h1></body>");
-    setPagePdfRendererForTest(async (page) => {
-      expect(page.id).toBe(id);
-      expect(page.title).toBe("Authed pdf-export");
-      return Buffer.from("%PDF-1.7\n% test pdf\n");
+  test("HTML page /p/:id?print=1 with cookie → 200 + self-print snippet", async () => {
+    const id = await createAuthedPage(
+      "html-print",
+      "<!doctype html><body><h1>printable</h1></body>",
+    );
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const cookie = await signPageSession({ pageId: id, exp });
+
+    const res = await fetch(`${BASE}/p/${id}?print=1`, {
+      headers: { Cookie: `page_session=${cookie}` },
     });
-    try {
-      const res = await fetch(`${BASE}/api/pages/${id}/export.pdf`, {
-        headers: { "X-Agent-ID": agentId },
-      });
-      expect(res.status).toBe(200);
-      expect(res.headers.get("content-type")).toBe("application/pdf");
-      expect(res.headers.get("content-disposition")).toBe(
-        'attachment; filename="authed-pdf-export.pdf"',
-      );
-      expect(await res.text()).toBe("%PDF-1.7\n% test pdf\n");
-    } finally {
-      setPagePdfRendererForTest(null);
-    }
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")?.toLowerCase()).toContain("text/html");
+    const text = await res.text();
+    expect(text).toContain("<h1>printable</h1>");
+    // Auto-print snippet appended so the page prints itself in the browser.
+    expect(text).toContain("window.print()");
+  });
+
+  test("JSON page /p/:id?print=1 with cookie → 200 standalone (no 302) + pretty JSON", async () => {
+    const post = await fetch(`${BASE}/api/pages`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        slug: "json-print",
+        title: "Authed json-print",
+        contentType: "application/json",
+        authMode: "authed",
+        body: JSON.stringify({ hello: "world", nested: { count: 1 } }),
+      }),
+    });
+    expect(post.status).toBe(201);
+    const { id } = (await post.json()) as { id: string };
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const cookie = await signPageSession({ pageId: id, exp });
+
+    const res = await fetch(`${BASE}/p/${id}?print=1`, {
+      headers: { Cookie: `page_session=${cookie}` },
+      redirect: "manual",
+    });
+    // Without `?print=1` a JSON page 302s to the SPA; the print view is served
+    // inline as standalone HTML instead.
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")?.toLowerCase()).toContain("text/html");
+    const text = await res.text();
+    // Pretty-printed (2-space indent) inside the printable <pre>.
+    expect(text).toContain("  &quot;hello&quot;: &quot;world&quot;");
+    expect(text).toContain("window.print()");
   });
 
   test("expired cookie → 401 (HMAC actually verified, not just presence)", async () => {
