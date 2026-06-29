@@ -21,6 +21,7 @@ import {
 } from "../be/db";
 import {
   codeLevelTriage,
+  getBootEpochMs,
   getRebootAffectedTasks,
   preflightGate,
   runHeartbeatSweep,
@@ -755,6 +756,244 @@ describe("Heartbeat Triage", () => {
       const retryTask = getTaskById(affected[0]!.retryTaskId!);
       expect(retryTask!.priority).toBe(90);
       expect(retryTask!.source).toBe("slack");
+    });
+  });
+
+  // ==========================================================================
+  // Reboot Sweep — boot-epoch-aware session staleness (concurrency-safe)
+  // ==========================================================================
+
+  describe("Reboot Sweep — boot-epoch session check", () => {
+    const gs = globalThis as typeof globalThis & { __runId?: string };
+
+    test("getBootEpochMs parses valid __runId", () => {
+      const original = gs.__runId;
+      gs.__runId = "run_1719640000000";
+      expect(getBootEpochMs()).toBe(1719640000000);
+      gs.__runId = original;
+    });
+
+    test("getBootEpochMs returns null for missing __runId", () => {
+      const original = gs.__runId;
+      delete gs.__runId;
+      expect(getBootEpochMs()).toBeNull();
+      gs.__runId = original;
+    });
+
+    test("getBootEpochMs returns null for unparseable __runId", () => {
+      const original = gs.__runId;
+      gs.__runId = "bad_format";
+      expect(getBootEpochMs()).toBeNull();
+      gs.__runId = original;
+    });
+
+    test("auto-fails task with pre-boot stale session and creates retry", async () => {
+      const bootTime = Date.now();
+      const original = gs.__runId;
+      gs.__runId = `run_${bootTime}`;
+
+      try {
+        const agent = createAgent({ name: "worker-preboot", isLead: false, status: "busy" });
+        const task = createTaskExtended("Task with stale session", { agentId: agent.id });
+        startTask(task.id);
+
+        const past = new Date(bootTime - 60_000).toISOString();
+        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+        // Session with pre-boot heartbeat (stale)
+        insertActiveSession({
+          agentId: agent.id,
+          taskId: task.id,
+          triggerType: "task_assigned",
+        });
+        const preBootHb = new Date(bootTime - 30_000).toISOString();
+        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+          preBootHb,
+          task.id,
+        ]);
+
+        await runRebootSweep();
+
+        const updated = getTaskById(task.id);
+        expect(updated?.status).toBe("failed");
+        expect(updated?.failureReason).toContain("reboot sweep");
+
+        // Stale session should be cleaned up
+        expect(getActiveSessionForTask(task.id)).toBeNull();
+
+        const affected = getRebootAffectedTasks();
+        expect(affected.length).toBe(1);
+        expect(affected[0]!.retryTaskId).not.toBeNull();
+      } finally {
+        gs.__runId = original;
+      }
+    });
+
+    test("skips task with post-boot fresh session", async () => {
+      const bootTime = Date.now() - 10_000; // booted 10s ago
+      const original = gs.__runId;
+      gs.__runId = `run_${bootTime}`;
+
+      try {
+        const agent = createAgent({ name: "worker-fresh", isLead: false, status: "busy" });
+        const task = createTaskExtended("Task with fresh session", { agentId: agent.id });
+        startTask(task.id);
+
+        const past = new Date(bootTime - 60_000).toISOString();
+        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+        // Session with post-boot heartbeat (fresh)
+        insertActiveSession({
+          agentId: agent.id,
+          taskId: task.id,
+          triggerType: "task_assigned",
+        });
+        const postBootHb = new Date(bootTime + 5_000).toISOString();
+        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+          postBootHb,
+          task.id,
+        ]);
+
+        await runRebootSweep();
+
+        // Task should NOT be failed
+        const updated = getTaskById(task.id);
+        expect(updated?.status).toBe("in_progress");
+
+        // No retries created
+        const retries = getDb()
+          .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+          .all(task.id);
+        expect(retries.length).toBe(0);
+      } finally {
+        gs.__runId = original;
+      }
+    });
+
+    test("concurrency: one worker, two tasks — only pre-boot one is failed", async () => {
+      const bootTime = Date.now();
+      const original = gs.__runId;
+      gs.__runId = `run_${bootTime}`;
+
+      try {
+        const agent = createAgent({ name: "worker-concurrent", isLead: false, status: "busy" });
+        const staleTask = createTaskExtended("Stale concurrent task", { agentId: agent.id });
+        const liveTask = createTaskExtended("Live concurrent task", { agentId: agent.id });
+        startTask(staleTask.id);
+        startTask(liveTask.id);
+
+        const past = new Date(bootTime - 60_000).toISOString();
+        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, staleTask.id]);
+        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, liveTask.id]);
+
+        // Stale task: session heartbeated before boot
+        insertActiveSession({
+          agentId: agent.id,
+          taskId: staleTask.id,
+          triggerType: "task_assigned",
+        });
+        const preBootHb = new Date(bootTime - 30_000).toISOString();
+        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+          preBootHb,
+          staleTask.id,
+        ]);
+
+        // Live task: session heartbeated after boot
+        insertActiveSession({
+          agentId: agent.id,
+          taskId: liveTask.id,
+          triggerType: "task_assigned",
+        });
+        const postBootHb = new Date(bootTime + 5_000).toISOString();
+        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+          postBootHb,
+          liveTask.id,
+        ]);
+
+        await runRebootSweep();
+
+        // Stale task should be failed
+        const updatedStale = getTaskById(staleTask.id);
+        expect(updatedStale?.status).toBe("failed");
+
+        // Live task should be untouched
+        const updatedLive = getTaskById(liveTask.id);
+        expect(updatedLive?.status).toBe("in_progress");
+
+        // Only one affected
+        const affected = getRebootAffectedTasks();
+        expect(affected.length).toBe(1);
+        expect(affected[0]!.original.id).toBe(staleTask.id);
+      } finally {
+        gs.__runId = original;
+      }
+    });
+
+    test("falls back to legacy skip-when-session-exists when __runId is missing", async () => {
+      const original = gs.__runId;
+      delete gs.__runId;
+
+      try {
+        const agent = createAgent({ name: "worker-legacy", isLead: false, status: "busy" });
+        const task = createTaskExtended("Task with session, no runId", { agentId: agent.id });
+        startTask(task.id);
+
+        const past = new Date(Date.now() - 60_000).toISOString();
+        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+        // Session exists but heartbeated long ago — should still be skipped in legacy mode
+        insertActiveSession({
+          agentId: agent.id,
+          taskId: task.id,
+          triggerType: "task_assigned",
+        });
+        const oldHb = new Date(Date.now() - 3_600_000).toISOString();
+        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+          oldHb,
+          task.id,
+        ]);
+
+        await runRebootSweep();
+
+        // Task should NOT be failed (legacy behavior: session exists → skip)
+        const updated = getTaskById(task.id);
+        expect(updated?.status).toBe("in_progress");
+      } finally {
+        gs.__runId = original;
+      }
+    });
+
+    test("falls back to legacy skip-when-session-exists when __runId is unparseable", async () => {
+      const original = gs.__runId;
+      gs.__runId = "invalid_format_xyz";
+
+      try {
+        const agent = createAgent({ name: "worker-bad-runid", isLead: false, status: "busy" });
+        const task = createTaskExtended("Task with session, bad runId", { agentId: agent.id });
+        startTask(task.id);
+
+        const past = new Date(Date.now() - 60_000).toISOString();
+        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+        insertActiveSession({
+          agentId: agent.id,
+          taskId: task.id,
+          triggerType: "task_assigned",
+        });
+        const oldHb = new Date(Date.now() - 3_600_000).toISOString();
+        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+          oldHb,
+          task.id,
+        ]);
+
+        await runRebootSweep();
+
+        // Task should NOT be failed (legacy behavior)
+        const updated = getTaskById(task.id);
+        expect(updated?.status).toBe("in_progress");
+      } finally {
+        gs.__runId = original;
+      }
     });
   });
 
