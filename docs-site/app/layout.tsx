@@ -4,15 +4,15 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 const docsOgImage =
-  "https://www.agent-swarm.dev/api/og?title=Agent+Swarm+Documentation&subtitle=Reference+guides%2C+architecture%2C+and+operating+manuals+for+multi-agent+AI+coding+teams.";
+  "https://www.agent-swarm.dev/api/og?title=Agent+Swarm+Documentation&subtitle=Reference+guides%2C+architecture%2C+and+operating+manuals+for+multi-agent+AI+coding+agent+swarms.";
 
 export const metadata: Metadata = {
   title: {
-    default: "Agent Swarm",
+    default: "Agent Swarm Documentation",
     template: "%s | Agent Swarm",
   },
   description:
-    "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
+    "Agent Swarm documentation for multi-agent orchestration, Claude Code, Codex, Gemini CLI, MCP tools, workflows, memory, and AI coding agent teams.",
   keywords: [
     "agent swarm",
     "documentation",
@@ -45,7 +45,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Agent Swarm Documentation",
     description:
-      "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
+      "Agent Swarm docs for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",
     url: "https://docs.agent-swarm.dev/docs",
     siteName: "Agent Swarm Docs",
     type: "website",
@@ -65,7 +65,7 @@ export const metadata: Metadata = {
     creator: "@desplegalabs",
     title: "Agent Swarm Documentation",
     description:
-      "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
+      "Agent Swarm docs for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",
     images: [docsOgImage],
   },
 };
@@ -103,7 +103,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                   "@type": "TechArticle",
                   name: "Agent Swarm Documentation",
                   description:
-                    "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
+                    "Agent Swarm documentation for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",
                   url: "https://docs.agent-swarm.dev",
                   image: docsOgImage,
                   mainEntity: {
