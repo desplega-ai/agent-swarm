@@ -318,11 +318,6 @@ export default function ArtifactPage() {
   const [searchParams] = useSearchParams();
   const fullMode = searchParams.get("mode") === "full";
   const gate = useFeatureGate("1.79.0");
-  // Iframe ref used by the "Export PDF" button to trigger the iframe's own
-  // `window.print()` — so the agent-authored content prints (not the SPA
-  // chrome). For JSON pages (no iframe) we fall back to `window.print()` on
-  // the SPA itself; JSON pages render their body in the SPA DOM, so this
-  // captures the JSON tree natively.
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const { data, error, isLoading } = useQuery({
@@ -338,28 +333,18 @@ export default function ArtifactPage() {
     retry: false,
   });
 
-  const isJson = data?.contentType === "application/json";
-
+  // Open the page in a new tab with `?print=1` so it self-prints in the
+  // user's own browser. The agent-authored HTML (or formatted JSON) prints —
+  // not the SPA chrome — and no server-side headless browser is involved. The
+  // server appends an auto-print snippet to the `?print=1` response, and the
+  // page-session cookie (minted during the metadata fetch) rides along on the
+  // top-level navigation so authed/password pages still resolve. Triggered
+  // synchronously from the click so the pop-up isn't blocked.
   const handleExportPdf = useCallback(() => {
-    if (isJson) {
-      // SPA-rendered content prints directly.
-      window.print();
-      return;
-    }
-    const win = iframeRef.current?.contentWindow;
-    if (win) {
-      try {
-        win.focus();
-        win.print();
-      } catch {
-        // Cross-origin or sandbox restriction — fall back to the SPA's
-        // own print dialog so the user still has SOME way to export.
-        window.print();
-      }
-    } else {
-      window.print();
-    }
-  }, [isJson]);
+    if (!id) return;
+    const url = `${getAbsoluteApiUrl()}/p/${encodeURIComponent(id)}?print=1`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [id]);
 
   if (!gate.supported) {
     return (
@@ -494,7 +479,7 @@ function PageHeaderActions({
       <Button
         variant="outline"
         size="sm"
-        title="Open the browser print dialog (use Save as PDF)"
+        title="Open a print-ready view and save as PDF"
         onClick={onExportPdf}
       >
         <Printer className="size-3.5" />

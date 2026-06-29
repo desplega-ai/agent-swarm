@@ -180,6 +180,56 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
     expect(res.status).toBe(401);
   });
 
+  test("HTML page /p/:id?print=1 with cookie → 200 + self-print snippet", async () => {
+    const id = await createAuthedPage(
+      "html-print",
+      "<!doctype html><body><h1>printable</h1></body>",
+    );
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const cookie = await signPageSession({ pageId: id, exp });
+
+    const res = await fetch(`${BASE}/p/${id}?print=1`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")?.toLowerCase()).toContain("text/html");
+    const text = await res.text();
+    expect(text).toContain("<h1>printable</h1>");
+    // Auto-print snippet appended so the page prints itself in the browser.
+    expect(text).toContain("window.print()");
+  });
+
+  test("JSON page /p/:id?print=1 with cookie → 200 standalone (no 302) + pretty JSON", async () => {
+    const post = await fetch(`${BASE}/api/pages`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        slug: "json-print",
+        title: "Authed json-print",
+        contentType: "application/json",
+        authMode: "authed",
+        body: JSON.stringify({ hello: "world", nested: { count: 1 } }),
+      }),
+    });
+    expect(post.status).toBe(201);
+    const { id } = (await post.json()) as { id: string };
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const cookie = await signPageSession({ pageId: id, exp });
+
+    const res = await fetch(`${BASE}/p/${id}?print=1`, {
+      headers: { Cookie: `page_session=${cookie}` },
+      redirect: "manual",
+    });
+    // Without `?print=1` a JSON page 302s to the SPA; the print view is served
+    // inline as standalone HTML instead.
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")?.toLowerCase()).toContain("text/html");
+    const text = await res.text();
+    // Pretty-printed (2-space indent) inside the printable <pre>.
+    expect(text).toContain("  &quot;hello&quot;: &quot;world&quot;");
+    expect(text).toContain("window.print()");
+  });
+
   test("expired cookie → 401 (HMAC actually verified, not just presence)", async () => {
     const id = await createAuthedPage("expired");
     const expired = await signPageSession({
