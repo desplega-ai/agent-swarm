@@ -15,8 +15,37 @@ import type {
   TranscriptResponse,
 } from "./types.ts";
 
+export const API_KEY_STORAGE_KEY = "evals-api-key";
+
+let onUnauthorized: (() => void) | null = null;
+
+export function getStoredApiKey(): string | null {
+  return localStorage.getItem(API_KEY_STORAGE_KEY);
+}
+
+export function setStoredApiKey(key: string): void {
+  localStorage.setItem(API_KEY_STORAGE_KEY, key);
+}
+
+export function clearStoredApiKey(): void {
+  localStorage.removeItem(API_KEY_STORAGE_KEY);
+}
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init);
+  const headers = new Headers(init?.headers);
+  const apiKey = getStoredApiKey();
+  if (apiKey && path.startsWith("/api/") && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${apiKey}`);
+  }
+  const res = await fetch(path, { ...init, headers });
+  if (res.status === 401) {
+    clearStoredApiKey();
+    onUnauthorized?.();
+  }
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {

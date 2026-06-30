@@ -39,13 +39,15 @@ import { type AnalyticsSourceRow, buildAnalytics } from "./analytics.ts";
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
+    headers: { "content-type": "application/json" },
   });
 }
 
 const UI_DIST = join(import.meta.dir, "../../ui/dist");
 
 const DEFAULT_JUDGE_MODEL = "deepseek/deepseek-v4-pro";
+const encoder = new TextEncoder();
+let warnedOpenApi = false;
 
 /** One JSONL line of a raw-session-logs artifact. Old artifacts lack id/createdAt. */
 interface RawSessionLogLine {
@@ -420,6 +422,35 @@ function serializeAttempt(attempt: AttemptRow): AttemptRow {
 /** Runs currently executing inside this server process (local-first trigger). */
 const activeRuns = new Map<string, AbortController>();
 
+export function resetActiveRunsForTests(): void {
+  for (const controller of activeRuns.values()) controller.abort();
+  activeRuns.clear();
+}
+
+export function addActiveRunForTests(runId: string): void {
+  activeRuns.set(runId, new AbortController());
+}
+
+export function getMaxConcurrentRuns(): number {
+  const raw = process.env.EVALS_MAX_CONCURRENT_RUNS;
+  if (raw === undefined || raw.trim() === "") return 1;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 1;
+}
+
+function concurrentRunsResponse(): Response | null {
+  const max = getMaxConcurrentRuns();
+  if (activeRuns.size < max) return null;
+  return json(
+    {
+      error: `max concurrent eval runs reached (${activeRuns.size}/${max}); wait for an active run to finish or raise EVALS_MAX_CONCURRENT_RUNS`,
+      activeRuns: activeRuns.size,
+      maxConcurrentRuns: max,
+    },
+    429,
+  );
+}
+
 function startRunExecution(db: ReturnType<typeof getDb>, runId: string): boolean {
   if (activeRuns.has(runId)) return false;
   const controller = new AbortController();
@@ -436,9 +467,40 @@ function startRunExecution(db: ReturnType<typeof getDb>, runId: string): boolean
   return true;
 }
 
+async function sha256(value: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
+}
+
+async function constantTimeEqual(a: string, b: string): Promise<boolean> {
+  const [left, right] = await Promise.all([sha256(a), sha256(b)]);
+  let diff = 0;
+  for (let i = 0; i < left.length; i++) diff |= (left[i] ?? 0) ^ (right[i] ?? 0);
+  return diff === 0;
+}
+
+async function isAuthorized(req: Request): Promise<boolean> {
+  const key = process.env.EVALS_API_KEY;
+  if (!key) return true;
+  const header = req.headers.get("authorization") ?? "";
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  if (!match) return false;
+  return constantTimeEqual(match[1] ?? "", key);
+}
+
+function unauthorized(): Response {
+  return json({ error: "missing or invalid EVALS_API_KEY bearer token" }, 401);
+}
+
+function warnIfApiOpen(): void {
+  if (process.env.EVALS_API_KEY || warnedOpenApi) return;
+  warnedOpenApi = true;
+  console.warn("WARNING: EVALS_API_KEY is unset; /api/* is open. Set it before deployment.");
+}
+
 export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801)) {
   await initDb();
   const db = getDb();
+  warnIfApiOpen();
 
   const server = Bun.serve({
     port,
@@ -451,8 +513,10 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
         }
         return new Response(index);
       },
+      "/health": () => json({ ok: true }),
       "/api/runs": {
-        GET: async () => {
+        GET: async (req) => {
+          if (!(await isAuthorized(req))) return unauthorized();
           const runs = await listRuns(db);
           const withSummaries = await Promise.all(
             runs.map(async (run) => {
@@ -467,6 +531,9 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
           return json(withSummaries);
         },
         POST: async (req) => {
+          if (!(await isAuthorized(req))) return unauthorized();
+          const capped = concurrentRunsResponse();
+          if (capped) return capped;
           const body = (await req.json().catch(() => null)) as {
             name?: string;
             scenarioIds?: string[];
@@ -501,6 +568,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
         },
       },
       "/api/runs/:id": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const run = await getRun(db, req.params.id);
         if (!run) return json({ error: "run not found" }, 404);
         const attempts = await listAttempts(db, run.id);
@@ -513,9 +581,12 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
       },
       "/api/runs/:id/resume": {
         POST: async (req) => {
+          if (!(await isAuthorized(req))) return unauthorized();
           const run = await getRun(db, req.params.id);
           if (!run) return json({ error: "run not found" }, 404);
           if (activeRuns.has(run.id)) return json({ error: "run is already executing" }, 409);
+          const capped = concurrentRunsResponse();
+          if (capped) return capped;
           await resetErrorAttempts(db, run.id);
           startRunExecution(db, run.id);
           return json({ runId: run.id, resumed: true }, 202);
@@ -523,6 +594,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
       },
       "/api/runs/:id/cancel": {
         POST: async (req) => {
+          if (!(await isAuthorized(req))) return unauthorized();
           const run = await getRun(db, req.params.id);
           if (!run) return json({ error: "run not found" }, 404);
           const controller = activeRuns.get(run.id);
@@ -533,6 +605,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
         },
       },
       "/api/attempts/:id": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const attempt = await getAttempt(db, req.params.id);
         if (!attempt) return json({ error: "attempt not found" }, 404);
         const [judgments, artifacts] = await Promise.all([
@@ -548,7 +621,10 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
        * Only meaningful while attempt.status === "judging"; finished attempts
        * use the persisted judgments instead.
        */
-      "/api/attempts/:id/judge-live": (req) => json(getJudgeLive(req.params.id)),
+      "/api/attempts/:id/judge-live": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
+        return json(getJudgeLive(req.params.id));
+      },
       /**
        * Live runner progress (v4 spec §3 — frozen contract). Registry-only,
        * in-process read: ALWAYS 200, no DB lookup — same philosophy as
@@ -556,8 +632,12 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
        * { active: false, startedAt: null, currentPhase: null,
        *   currentPhaseStartedAt: null, phases: {}, log: [] }.
        */
-      "/api/attempts/:id/progress": (req) => json(getAttemptProgress(req.params.id)),
+      "/api/attempts/:id/progress": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
+        return json(getAttemptProgress(req.params.id));
+      },
       "/api/attempts/:id/transcript": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const attempt = await getAttempt(db, req.params.id);
         if (!attempt) return json({ error: "attempt not found" }, 404);
         const harness = loadRegistry().configs.get(attempt.configId)?.provider ?? null;
@@ -632,6 +712,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
        * null sources with all-null fields — nothing in the DB is rewritten.
        */
       "/api/attempts/:id/tasks": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const attempt = await getAttempt(db, req.params.id);
         if (!attempt) return json({ error: "attempt not found" }, 404);
         const wantLive = new URL(req.url).searchParams.get("live") === "1";
@@ -661,7 +742,8 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
           }),
         );
       },
-      "/api/scenarios": () => {
+      "/api/scenarios": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const registry = loadRegistry();
         return json([...registry.scenarios.values()].map(serializeScenario));
       },
@@ -672,6 +754,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
        * stored id — registry-independent). Known ids keep the legacy shape.
        */
       "/api/scenarios/:id": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const registry = loadRegistry();
         const scenario = registry.scenarios.get(req.params.id);
         const recent = await listAttemptsByScenario(db, req.params.id);
@@ -681,7 +764,8 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
         }
         return json({ scenario: serializeScenario(scenario), recentAttempts });
       },
-      "/api/configs": () => {
+      "/api/configs": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const registry = loadRegistry();
         return json(
           [...registry.configs.values()].map((c) => ({
@@ -691,8 +775,12 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
         );
       },
       /** Quick-run config presets (v7.7 item 1) — static catalog data, validated by registry.test.ts. */
-      "/api/presets": () => json(CONFIG_PRESETS),
-      "/api/models": async () => {
+      "/api/presets": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
+        return json(CONFIG_PRESETS);
+      },
+      "/api/models": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const models = await listOpenrouterModels();
         // v7 §8: frozen claude alias map (fable → claude-fable-5, …) so the UI
         // resolves bare aliases stored on historical rows at display time.
@@ -710,6 +798,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
        * aggregates, no error); no params → the unfiltered v5 behavior.
        */
       "/api/analytics": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const params = new URL(req.url).searchParams;
         const filter: AnalyticsFilter = {
           harnesses: parseFilterCsv(params.get("harnesses")),
@@ -742,6 +831,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
         return json(buildAnalytics(rows, loadRegistry(), await getClaudeAliasMap(), filter));
       },
       "/api/artifacts/:id": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
         const artifact = await getArtifact(db, req.params.id);
         if (!artifact) return json({ error: "artifact not found" }, 404);
         const name = artifact.name ?? artifact.id;
@@ -772,6 +862,7 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
           if (await file.exists()) return new Response(file);
         }
       }
+      if (url.pathname.startsWith("/api/") && !(await isAuthorized(req))) return unauthorized();
       return json({ error: "not found" }, 404);
     },
   });
