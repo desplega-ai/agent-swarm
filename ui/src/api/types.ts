@@ -1088,6 +1088,27 @@ export interface ScriptsResponse {
   scripts: ScriptListItem[];
 }
 
+// External script APIs (POST /api/x/script/<id>) — mirrors ScriptApiRecord in src/types.ts.
+
+export type ScriptApiAuthMode = "none" | "bearer";
+
+export interface ScriptApiRecord {
+  id: string;
+  scriptId: string;
+  agentId: string;
+  authMode: ScriptApiAuthMode;
+  enabled: boolean;
+  label: string | null;
+  callCount: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+/** Returned by create / rotate — includes the plaintext bearer token (`null` for `none`). */
+export interface ScriptApiWithSecret extends ScriptApiRecord {
+  token: string | null;
+}
+
 // Prompt Templates
 
 export interface PromptTemplate {

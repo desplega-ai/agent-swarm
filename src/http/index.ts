@@ -86,6 +86,7 @@ import {
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflowEvents } from "./workflow-events";
 import { handleWorkflows } from "./workflows";
+import { handleX } from "./x";
 
 // Last-line-of-defense: never let a single bad request (e.g. a SQLITE_BUSY
 // thrown out of a transaction callback) kill the API process. Log and keep going.
@@ -304,6 +305,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptRuns(req, res, pathSegments, queryParams, myAgentId),
         () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
+        () => handleX(req, res, pathSegments),
         () => handleMcpBridge(req, res, pathSegments, queryParams, myAgentId),
         () => handleMcpServers(req, res, pathSegments, queryParams),
         () => handleMcpOAuth(req, res, pathSegments, queryParams),
