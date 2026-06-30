@@ -455,50 +455,9 @@ if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_ID" ]; then
     echo "[agent-fs] Already registered (API key present)"
   fi
 
-  # Lead-specific: create shared org
-  if [ "$AGENT_ROLE" = "lead" ] && [ -n "$AGENT_FS_API_KEY" ]; then
-    if [ -z "$AGENT_FS_SHARED_ORG_ID" ]; then
-      echo "[agent-fs] Lead: Creating shared org..."
-      AF_ORG_RESULT=$(curl -s -X POST "${AGENT_FS_API_URL}/orgs" \
-        -H "Authorization: Bearer ${AGENT_FS_API_KEY}" \
-        -H "Content-Type: application/json" \
-        -d '{"name": "swarm"}' 2>/dev/null) || true
-
-      AF_SHARED_ORG_ID=$(echo "$AF_ORG_RESULT" | jq -r '.orgId // .id // empty')
-
-      if [ -n "$AF_SHARED_ORG_ID" ]; then
-        echo "[agent-fs] Shared org created: $AF_SHARED_ORG_ID"
-        # Store as global config so all agents see it
-        curl -s -X PUT "${MCP_URL}/api/config" \
-          -H "Authorization: Bearer ${API_KEY}" \
-          -H "Content-Type: application/json" \
-          -d "{
-            \"scope\": \"global\",
-            \"key\": \"AGENT_FS_SHARED_ORG_ID\",
-            \"value\": \"${AF_SHARED_ORG_ID}\",
-            \"isSecret\": false,
-            \"description\": \"agent-fs shared org ID for the swarm\"
-          }" > /dev/null 2>&1 || true
-
-        export AGENT_FS_SHARED_ORG_ID="$AF_SHARED_ORG_ID"
-
-        # Create a one-time task for the lead to invite workers
-        echo "[agent-fs] Creating invitation task for lead..."
-        curl -s -X POST "${MCP_URL}/api/tasks" \
-          -H "Authorization: Bearer ${API_KEY}" \
-          -H "Content-Type: application/json" \
-          -d "{
-            \"task\": \"Invite workers to agent-fs shared org (${AF_SHARED_ORG_ID}). For each worker: check their AGENT_EMAIL config (or default to {agentId}@swarm.local), then run: agent-fs --org ${AF_SHARED_ORG_ID} org invite --email <worker-email> --role editor. Skip any already invited.\",
-            \"agentId\": \"${AGENT_ID}\",
-            \"source\": \"system\"
-          }" > /dev/null 2>&1 || true
-      else
-        echo "[agent-fs] Failed to create shared org: $(echo "$AF_ORG_RESULT" | jq -r '.error // .message // "unknown"')"
-      fi
-    else
-      echo "[agent-fs] Shared org already exists: $AGENT_FS_SHARED_ORG_ID"
-    fi
-  fi
+  # Shared org/drive provisioning is handled by the API-side TypeScript seeder.
+  # This worker branch intentionally only keeps per-agent registration for the
+  # native agent-fs CLI identity.
 fi
 # ---- End agent-fs registration ----
 
