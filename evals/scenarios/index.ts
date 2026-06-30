@@ -1,26 +1,25 @@
 import type { Scenario } from "../src/types.ts";
-import { bugLadder } from "./bug-ladder.ts";
+import { delegationChain } from "./delegation-chain.ts";
 import { delegationProbe } from "./delegation-probe.ts";
-import { distributedAudit } from "./distributed-audit.ts";
-import { memoryDistractor } from "./memory-distractor.ts";
-import { relayPipeline } from "./relay-pipeline.ts";
+import { scriptAuthoring } from "./script-authoring.ts";
 import { sqlAudit } from "./sql-audit.ts";
+import { structuredOutputAdherence } from "./structured-output-adherence.ts";
+import { toolRouting } from "./tool-routing.ts";
+import { workflowAuthoring } from "./workflow-authoring.ts";
 
-// v8.0 round-11 catalog (OutcomeSpec v2). The swarm-redesign prune (Plan A) cut
-// the four clearly-measured non-discriminators — memory-coordination,
-// failure-recovery, failure-recovery-mixed, and cross-worker-invent. A follow-up
-// scenario audit additionally killed plan-implement-review (expensive lead+2; only
-// a noisy weight-1 judge moved the aggregate) — leaving the scenarios that still
-// discriminate harness+model or swarm mechanics.
-// Historical runs referencing deleted ids keep rendering via stored ids (no
-// registry lookup) with the unregistered-scenario fallback on the detail route.
+// v9 orchestration-substrate catalog. These scenarios measure swarm mechanics the
+// harness uniquely exposes: workflows, scripts, delegation, tool routing, and
+// structured output. Keep delegation-probe as the gold-standard behavioral eval
+// and sql-audit as the cheap smoke. Saturated / zero-pilot legacy scenarios are
+// left in source for historical reference but are no longer active registry ids.
 export const scenarios: Scenario[] = [
   sqlAudit,
-  memoryDistractor,
-  bugLadder,
-  relayPipeline,
-  distributedAudit,
   delegationProbe,
+  workflowAuthoring,
+  scriptAuthoring,
+  delegationChain,
+  toolRouting,
+  structuredOutputAdherence,
 ];
 
 // Cheap smoke default for `--scenarios` when none are passed. sql-audit is the

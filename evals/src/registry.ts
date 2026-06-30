@@ -321,7 +321,13 @@ export interface SerializedScenario {
   workerSpecs: SerializedWorkerSpec[] | null;
   /** Null when the scenario defines no lead (v7 §12). */
   lead: SerializedWorkerSpec | null;
-  tasks: { title: string; description: string; worker: number | "lead"; dependsOn: number[] }[];
+  tasks: {
+    title: string;
+    description: string;
+    worker: number | "lead";
+    dependsOn: number[];
+    outputSchema?: Record<string, unknown>;
+  }[];
   seed: { exec: string[]; sqlDump: string | null; memories: string[] } | null;
   timeoutMs: number;
   /** v8.0 §5: cost budget (USD) for the deterministic efficiency dimension; null when unset. */
@@ -369,6 +375,7 @@ export function serializeScenario(s: Scenario): SerializedScenario {
       description: t.description,
       worker: t.worker ?? 0,
       dependsOn: t.dependsOn ?? [],
+      outputSchema: t.outputSchema,
     })),
     seed: hasSeed
       ? {

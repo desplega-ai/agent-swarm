@@ -1286,6 +1286,7 @@ async function runAttemptOnce(opts: {
         task: `${spec.title}\n\n${spec.description}`,
         ...(toLead ? {} : { agentId: w.agentId }),
         ...(deps.length > 0 ? { dependsOn: deps } : {}),
+        ...(spec.outputSchema ? { outputSchema: spec.outputSchema } : {}),
       });
       swarmIdByIndex[specIndex] = created.id;
       taskMemberIndex.set(created.id, w.index);

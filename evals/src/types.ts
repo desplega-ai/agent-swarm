@@ -97,6 +97,8 @@ export interface TaskSpec {
    * Absent/empty = no dependencies.
    */
   dependsOn?: number[];
+  /** Optional structured-output schema forwarded to the swarm task. */
+  outputSchema?: Record<string, unknown>;
 }
 
 export interface ScenarioSeed {
