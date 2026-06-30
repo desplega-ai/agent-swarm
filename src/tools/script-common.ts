@@ -37,7 +37,7 @@ function toolError(message: string, status = 400): CallToolResult {
 }
 
 export async function proxyScriptsApi(args: {
-  method: "GET" | "POST" | "DELETE";
+  method: "GET" | "POST" | "PATCH" | "DELETE";
   path: string;
   body?: unknown;
   requestInfo: RequestInfo;

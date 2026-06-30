@@ -27,6 +27,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   "get-oauth-access-token": "credential management — security-sensitive, not for scripts",
   "credential-bindings": "credential binding management — lead-only security control, not for scripts",
   "script-connections": "script connection registration — lead-only security control, not for scripts",
+  "script-apis": "external API endpoint management (bearer tokens) — security-sensitive, not for scripts to self-administer",
   "skill-install-remote": "admin-only remote skill management",
   "skill-sync-remote": "admin-only remote skill management",
   "swarm_x": "external command router — dispatches to third-party services",

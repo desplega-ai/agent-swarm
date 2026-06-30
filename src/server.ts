@@ -79,6 +79,7 @@ import {
   registerRunScheduleNowTool,
   registerUpdateScheduleTool,
 } from "./tools/schedules";
+import { registerScriptApisTool } from "./tools/script-apis";
 import { registerScriptConnectionsTool } from "./tools/script-connections";
 import { registerScriptDeleteTool } from "./tools/script-delete";
 import { registerScriptQueryTypesTool } from "./tools/script-query-types";
@@ -237,6 +238,7 @@ export function createServer() {
   // Reusable script catalog tools - always registered (HTTP MCP only in v1).
   registerScriptSearchTool(server);
   registerScriptConnectionsTool(server);
+  registerScriptApisTool(server);
   registerScriptRunTool(server);
   registerScriptUpsertTool(server);
   registerScriptDeleteTool(server);

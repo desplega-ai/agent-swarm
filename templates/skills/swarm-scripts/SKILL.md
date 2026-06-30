@@ -89,3 +89,7 @@ export default async function main(args: { taskId: string; items: string[] }, ct
 ```
 
 Do not assume the runtime can infer the current task.
+
+## Exposing Scripts as External APIs
+
+Named scripts can be exposed as public HTTP endpoints — `POST /api/x/script/<id>` — for callers outside the swarm. Manage endpoints from the script's **API** tab in the dashboard, or programmatically with the `script-apis` tool (`list`/`create`/`update`/`rotate`/`delete`). `list` masks bearer tokens by default; pass `includeSecrets: true` to reveal them. `create`/`rotate` always return the fresh plaintext token once.
