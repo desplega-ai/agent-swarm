@@ -13,6 +13,7 @@
     "debug",
     "ecosystem",
     "events",
+    "external-apis",
     "heartbeat",
     "inbox-state",
     "integrations",

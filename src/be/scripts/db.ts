@@ -1,4 +1,15 @@
-import type { ScriptFsMode, ScriptRecord, ScriptScope, ScriptVersionRecord } from "../../types";
+import type {
+  ScriptApiAuthMode,
+  ScriptApiRecord,
+  ScriptApiWithSecret,
+  ScriptFsMode,
+  ScriptRecord,
+  ScriptScope,
+  ScriptVersionRecord,
+} from "../../types";
+import { registerVolatileSecret } from "../../utils/secret-scrubber";
+import { generateBearerToken, generateShortId } from "../../utils/short-id";
+import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { computeContentHash, getDb } from "../db";
 import { embedScript } from "./embeddings";
 
@@ -450,4 +461,206 @@ export function deleteScript(args: ScriptIdentity): boolean {
 
   const result = getDb().run("DELETE FROM scripts WHERE id = ?", [existing.id]);
   return result.changes > 0;
+}
+
+// ─── External script APIs (script_apis) ──────────────────────────────────────
+
+type ScriptApiRow = {
+  id: string;
+  scriptId: string;
+  agentId: string;
+  authMode: ScriptApiAuthMode;
+  bearerTokenEncrypted: string | null;
+  enabled: number;
+  label: string | null;
+  callCount: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+/** Public-facing endpoint record incl. the encrypted token (server-side only). */
+export type ScriptApiInternal = ScriptApiRecord & { bearerTokenEncrypted: string | null };
+
+const SCRIPT_API_ID_LEN = 12;
+
+function rowToScriptApi(row: ScriptApiRow): ScriptApiRecord {
+  return {
+    id: row.id,
+    scriptId: row.scriptId,
+    agentId: row.agentId,
+    authMode: row.authMode,
+    enabled: row.enabled === 1,
+    label: row.label ?? null,
+    callCount: row.callCount,
+    lastUsedAt: row.lastUsedAt ?? null,
+    createdAt: row.createdAt,
+  };
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  return err instanceof Error && /UNIQUE constraint failed/i.test(err.message);
+}
+
+/**
+ * Create an external API endpoint for a script. For `authMode: 'bearer'` a
+ * high-entropy token is generated and stored AES-256-GCM-encrypted; the
+ * plaintext is returned ONCE (also revealable later via {@link getScriptApiSecret}).
+ */
+export function createScriptApi(args: {
+  scriptId: string;
+  agentId: string;
+  authMode: ScriptApiAuthMode;
+  label?: string | null;
+  createdBy?: string | null;
+}): ScriptApiWithSecret {
+  const now = new Date().toISOString();
+  const token = args.authMode === "bearer" ? generateBearerToken() : null;
+  const encrypted = token ? encryptSecret(token, getEncryptionKey()) : null;
+  const createdBy = args.createdBy ?? null;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const id = generateShortId(SCRIPT_API_ID_LEN);
+    try {
+      const row = getDb()
+        .prepare<
+          ScriptApiRow,
+          [
+            string,
+            string,
+            string,
+            ScriptApiAuthMode,
+            string | null,
+            string | null,
+            string,
+            string | null,
+            string | null,
+          ]
+        >(
+          `INSERT INTO script_apis
+             (id, scriptId, agentId, authMode, bearerTokenEncrypted, enabled, label,
+              callCount, lastUsedAt, createdAt, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, 1, ?, 0, NULL, ?, ?, ?)
+           RETURNING *`,
+        )
+        .get(
+          id,
+          args.scriptId,
+          args.agentId,
+          args.authMode,
+          encrypted,
+          args.label ?? null,
+          now,
+          createdBy,
+          createdBy,
+        );
+      if (!row) throw new Error("Failed to create script API endpoint");
+      if (token) registerVolatileSecret(token, `script-api:${id}`);
+      return { ...rowToScriptApi(row), token };
+    } catch (err) {
+      if (isUniqueConstraintError(err) && attempt < 4) continue;
+      throw err;
+    }
+  }
+  throw new Error("Failed to allocate a unique script API endpoint id");
+}
+
+export function listScriptApisForScript(scriptId: string): ScriptApiRecord[] {
+  return getDb()
+    .prepare<ScriptApiRow, [string]>(
+      "SELECT * FROM script_apis WHERE scriptId = ? ORDER BY createdAt DESC",
+    )
+    .all(scriptId)
+    .map(rowToScriptApi);
+}
+
+/** Look up an endpoint incl. its `enabled` flag and (encrypted) token — for the execution path. */
+export function getScriptApiById(id: string): ScriptApiInternal | null {
+  const row = getDb()
+    .prepare<ScriptApiRow, [string]>("SELECT * FROM script_apis WHERE id = ?")
+    .get(id);
+  if (!row) return null;
+  return { ...rowToScriptApi(row), bearerTokenEncrypted: row.bearerTokenEncrypted ?? null };
+}
+
+/**
+ * Decrypt and return the bearer token for an endpoint (or `null` if it has
+ * none). Registers the plaintext with the secret scrubber so it is redacted
+ * from any later log/telemetry egress — mirrors the config-reveal path.
+ */
+export function getScriptApiSecret(id: string): string | null {
+  const row = getDb()
+    .prepare<{ bearerTokenEncrypted: string | null }, [string]>(
+      "SELECT bearerTokenEncrypted FROM script_apis WHERE id = ?",
+    )
+    .get(id);
+  if (!row?.bearerTokenEncrypted) return null;
+  const token = decryptSecret(row.bearerTokenEncrypted, getEncryptionKey());
+  registerVolatileSecret(token, `script-api:${id}`);
+  return token;
+}
+
+export function updateScriptApi(
+  id: string,
+  args: { enabled?: boolean; label?: string | null; updatedBy?: string | null },
+): ScriptApiRecord | null {
+  const sets: string[] = [];
+  const vals: (string | number | null)[] = [];
+  if (args.enabled !== undefined) {
+    sets.push("enabled = ?");
+    vals.push(args.enabled ? 1 : 0);
+  }
+  if (args.label !== undefined) {
+    sets.push("label = ?");
+    vals.push(args.label);
+  }
+  if (args.updatedBy !== undefined) {
+    sets.push("updated_by = ?");
+    vals.push(args.updatedBy);
+  }
+  if (sets.length === 0) {
+    const row = getDb()
+      .prepare<ScriptApiRow, [string]>("SELECT * FROM script_apis WHERE id = ?")
+      .get(id);
+    return row ? rowToScriptApi(row) : null;
+  }
+  vals.push(id);
+  const row = getDb()
+    .prepare<ScriptApiRow, (string | number | null)[]>(
+      `UPDATE script_apis SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...vals);
+  return row ? rowToScriptApi(row) : null;
+}
+
+/** Rotate the bearer secret of a `bearer` endpoint. Returns `null` if the endpoint is missing or `authMode: 'none'`. */
+export function rotateScriptApiSecret(
+  id: string,
+  updatedBy?: string | null,
+): ScriptApiWithSecret | null {
+  const existing = getScriptApiById(id);
+  if (!existing || existing.authMode !== "bearer") return null;
+  const token = generateBearerToken();
+  const encrypted = encryptSecret(token, getEncryptionKey());
+  const row = getDb()
+    .prepare<ScriptApiRow, [string, string | null, string]>(
+      "UPDATE script_apis SET bearerTokenEncrypted = ?, updated_by = ? WHERE id = ? RETURNING *",
+    )
+    .get(encrypted, updatedBy ?? null, id);
+  if (!row) return null;
+  registerVolatileSecret(token, `script-api:${id}`);
+  return { ...rowToScriptApi(row), token };
+}
+
+export function deleteScriptApi(id: string): boolean {
+  return getDb().run("DELETE FROM script_apis WHERE id = ?", [id]).changes > 0;
+}
+
+/** Bump usage counters after an external invocation. Best-effort observability. */
+export function recordScriptApiUsage(id: string): void {
+  getDb().run("UPDATE script_apis SET callCount = callCount + 1, lastUsedAt = ? WHERE id = ?", [
+    new Date().toISOString(),
+    id,
+  ]);
 }

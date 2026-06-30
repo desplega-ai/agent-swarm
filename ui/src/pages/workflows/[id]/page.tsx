@@ -6,9 +6,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Copy,
-  Eye,
-  EyeOff,
   FolderGit2,
   GitBranch,
   Mail,
@@ -43,6 +40,7 @@ import type {
 } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
+import { CopyableField, CopyIconButton, SecretField } from "@/components/shared/copyable-fields";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -58,8 +56,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -67,13 +63,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useTheme } from "@/hooks/use-theme";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { getConfig } from "@/lib/config";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
-import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
+import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -1812,91 +1807,5 @@ function formatCooldown(c: CooldownConfig): string {
   return parts.length > 0 ? parts.join(" ") : "none";
 }
 
-function CopyIconButton({ value }: { value: string }) {
-  const { copied, copy } = useCopyToClipboard();
-  return (
-    <button
-      type="button"
-      onClick={() => copy(value)}
-      aria-label={copied ? "Copied" : "Copy code"}
-      title={copied ? "Copied" : "Copy code"}
-      className="rounded p-1 transition-colors focus:outline-none focus:ring-1 text-muted-foreground hover:text-foreground hover:bg-muted focus:ring-ring"
-    >
-      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-    </button>
-  );
-}
-
-function CopyableField({
-  label,
-  value,
-  mono = true,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  const { copied, copy } = useCopyToClipboard();
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground uppercase tracking-wide">{label}</Label>
-      <div className="flex items-center gap-2">
-        <Input
-          readOnly
-          value={value}
-          className={cn("h-9", mono && "font-mono text-xs")}
-          onFocus={(e) => e.currentTarget.select()}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={() => copy(value)}
-          aria-label={`Copy ${label}`}
-          className="shrink-0"
-        >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function SecretField({ label, value }: { label: string; value: string }) {
-  const [revealed, setRevealed] = useState(false);
-  const { copied, copy } = useCopyToClipboard();
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground uppercase tracking-wide">{label}</Label>
-      <div className="flex items-center gap-2">
-        <Input
-          readOnly
-          type={revealed ? "text" : "password"}
-          value={value}
-          className="h-9 font-mono text-xs"
-          onFocus={(e) => e.currentTarget.select()}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={() => setRevealed((v) => !v)}
-          aria-label={revealed ? "Hide secret" : "Reveal secret"}
-          className="shrink-0"
-        >
-          {revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={() => copy(value)}
-          aria-label={`Copy ${label}`}
-          className="shrink-0"
-        >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        </Button>
-      </div>
-    </div>
-  );
-}
+// CopyIconButton / CopyableField / SecretField now live in
+// @/components/shared/copyable-fields (shared with the script API tab).

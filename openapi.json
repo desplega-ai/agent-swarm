@@ -9725,6 +9725,286 @@
         }
       }
     },
+    "/api/scripts/{id}/apis": {
+      "post": {
+        "operationId": "scripts_api_create",
+        "summary": "Expose a script as an external HTTP API endpoint",
+        "description": "Returns the endpoint plus the plaintext bearer token (when authMode is 'bearer').",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "authMode": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "bearer"
+                    ],
+                    "default": "bearer"
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "agentId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Endpoint created"
+          },
+          "400": {
+            "description": "Validation error or script has no owning agent"
+          },
+          "404": {
+            "description": "Script not found"
+          }
+        }
+      },
+      "get": {
+        "operationId": "scripts_api_list",
+        "summary": "List external API endpoints for a script",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Endpoints (without secrets)"
+          },
+          "404": {
+            "description": "Script not found"
+          }
+        }
+      }
+    },
+    "/api/scripts/{id}/apis/{endpointId}/secret": {
+      "get": {
+        "operationId": "scripts_api_reveal_secret",
+        "summary": "Reveal an endpoint's bearer token",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "endpointId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Decrypted token (null when authMode is 'none')"
+          },
+          "404": {
+            "description": "Endpoint not found"
+          }
+        }
+      }
+    },
+    "/api/scripts/{id}/apis/{endpointId}": {
+      "patch": {
+        "operationId": "scripts_api_update",
+        "summary": "Enable/disable or relabel an external API endpoint",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "endpointId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated endpoint"
+          },
+          "404": {
+            "description": "Endpoint not found"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "scripts_api_delete",
+        "summary": "Delete an external API endpoint",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "endpointId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Endpoint not found"
+          }
+        }
+      }
+    },
+    "/api/scripts/{id}/apis/{endpointId}/rotate": {
+      "post": {
+        "operationId": "scripts_api_rotate",
+        "summary": "Rotate an endpoint's bearer token",
+        "tags": [
+          "Scripts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "endpointId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Endpoint with new plaintext token"
+          },
+          "400": {
+            "description": "Endpoint uses 'none' auth — nothing to rotate"
+          },
+          "404": {
+            "description": "Endpoint not found"
+          }
+        }
+      }
+    },
     "/api/mcp-bridge": {
       "post": {
         "summary": "Generic MCP tool proxy for the scripts SDK bridge",
@@ -14740,6 +15020,40 @@
           },
           "404": {
             "description": "Version not found"
+          }
+        }
+      }
+    },
+    "/api/x/script/{endpointId}": {
+      "post": {
+        "operationId": "x_script_run",
+        "summary": "Invoke an externally-exposed swarm script",
+        "description": "Runs the script bound to this endpoint and returns a JSON envelope `{ ok, result, error, durationMs }` (HTTP 200) once execution is reached. Auth/routing failures use 401 (bad/missing bearer) and 404 (unknown or disabled endpoint). Optional `X-Swarm-Timeout-Ms` header (default 60000, clamped 1000–300000) sets the wall-clock timeout.",
+        "tags": [
+          "External APIs"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "endpointId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Script executed — see `ok` in the envelope"
+          },
+          "401": {
+            "description": "Missing or invalid bearer token"
+          },
+          "404": {
+            "description": "Endpoint not found or disabled"
+          },
+          "501": {
+            "description": "workspace-rw scripts are not supported"
           }
         }
       }

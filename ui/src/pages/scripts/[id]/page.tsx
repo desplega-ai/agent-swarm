@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import { useScript, useScriptTypeDefs, useScriptVersions } from "@/api/hooks/use-scripts";
 import type { ScriptVersion } from "@/api/types";
+import { ScriptApiTab } from "@/components/scripts/script-api-tab";
 import { ScriptRunsGrid } from "@/components/scripts/script-runs-grid";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { DataGrid } from "@/components/shared/data-grid";
@@ -19,7 +20,7 @@ import { formatSmartTime } from "@/lib/utils";
 // Server cap on GET /api/script-runs.
 const RUNS_FETCH_LIMIT = 500;
 
-const TABS = ["source", "runs", "versions"] as const;
+const TABS = ["source", "runs", "versions", "api"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ScriptDetailPage() {
@@ -140,6 +141,7 @@ export default function ScriptDetailPage() {
           <TabsTrigger value="source">Source</TabsTrigger>
           <TabsTrigger value="runs">Runs</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
+          <TabsTrigger value="api">API</TabsTrigger>
         </TabsList>
 
         <TabsContent value="source" className="flex flex-col flex-1 min-h-0 mt-2">
@@ -177,6 +179,13 @@ export default function ScriptDetailPage() {
             source={selectedVersion?.source ?? ""}
             typeDefs={typeDefs}
             className="min-h-[320px] flex-1 lg:min-h-0 lg:flex-[3]"
+          />
+        </TabsContent>
+
+        <TabsContent value="api" className="flex flex-col flex-1 min-h-0 mt-2">
+          <ScriptApiTab
+            scriptId={script.id}
+            ownerAgentId={script.scopeId ?? script.createdByAgentId}
           />
         </TabsContent>
       </Tabs>

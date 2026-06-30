@@ -1,0 +1,128 @@
+---
+title: Scripts as external APIs
+description: Expose a saved swarm script as a public, JSON-in/JSON-out HTTP endpoint — POST /api/x/script/<id> — with optional bearer auth, typed input validation, and per-endpoint usage tracking.
+---
+
+Any saved script can be opted in to a public HTTP endpoint:
+`POST /api/x/script/<endpointId>`. This is the first asset type under the
+`/api/x/*` namespace — a general prefix reserved for swarm-created assets the
+swarm exposes to the outside world. Calls run the script synchronously and
+return a JSON envelope; no swarm API key is required to call the endpoint
+itself.
+
+## Creating an endpoint
+
+Either:
+
+- Open the script in the dashboard and use its **API** tab — create, reveal
+  the bearer token, copy a ready-made curl command, enable/disable, rotate,
+  or delete.
+- Use the `script-apis` MCP tool (`list` / `create` / `update` / `rotate` /
+  `delete`) to manage endpoints programmatically. It's deferred — load it
+  with `ToolSearch("select:script-apis")` first.
+
+Creating an endpoint requires a **run-as agent** — external calls execute the
+script under that agent's identity, so its egress secrets and API connections
+resolve normally. This defaults to the script's owning agent; scripts with no
+owner (global scripts created by no one in particular) must specify one
+explicitly.
+
+## Auth modes
+
+- `none` — anyone with the URL can call the endpoint.
+- `bearer` — an auto-generated token (`xsk_...`) is required in the
+  `Authorization: Bearer <token>` header. The token is stored
+  **AES-256-GCM-encrypted** at rest (same cipher and key as the swarm secrets
+  store) in a dedicated column — not as a `swarm_config` row, so it never
+  shows up in the Secrets UI.
+
+The token is shown in full only right after `create` or `rotate`. Listing
+endpoints afterward masks it (`********`) unless you explicitly ask to reveal
+it — see [Listing and revealing tokens](#listing-and-revealing-tokens) below.
+
+## Calling the endpoint
+
+```bash
+curl -X POST https://your-swarm-host/api/x/script/kRxMfQaBnTwL \
+  -H 'Authorization: Bearer xsk_...' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Swarm-Timeout-Ms: 90000' \
+  -d '{"...args..."}'
+```
+
+- **Input**: a JSON body, validated against the script's stored
+  `argsJsonSchema` when one exists (scripts predating that column skip this
+  step — the in-sandbox Zod check still applies if the script declares
+  `argsSchema`).
+- **Timeout**: `X-Swarm-Timeout-Ms`, default 60s, clamped to 1–300s.
+- **CORS**: any origin is allowed by default, inherited from the global CORS
+  handler — no per-endpoint configuration in v1.
+
+### Response envelope
+
+Every request that reaches execution returns HTTP 200 with a wrapped
+envelope:
+
+```json
+{ "ok": true, "result": { "...": "..." }, "error": null, "durationMs": 842 }
+```
+
+```json
+{
+  "ok": false,
+  "result": null,
+  "error": { "type": "args_validation", "message": "..." },
+  "durationMs": 4
+}
+```
+
+`error.type` is one of `args_validation`, `invalid_json`, `runtime_error`,
+`timeout`, or `import_violation`. `stdout`/`stderr` are never exposed to
+external callers.
+
+Auth and routing failures short-circuit before execution and use plain HTTP
+status codes instead of the envelope: `401` (missing/invalid bearer token),
+`404` (unknown or disabled endpoint — the same response either way, so a
+disabled endpoint's existence isn't leaked), `501` (`workspace-rw` scripts
+aren't supported here, same as `/api/scripts/run`).
+
+## Listing and revealing tokens
+
+`script-apis` with `action: "list"` returns endpoints with bearer tokens
+masked as `********`, mirroring how `get-config` masks secret config values.
+Pass `includeSecrets: true` to reveal the real tokens (each reveal is
+registered with the log scrubber so it never leaks into telemetry):
+
+```jsonc
+// action: "list", scriptId: "...", includeSecrets: false (default)
+{ "id": "kRxMfQaBnTwL", "authMode": "bearer", "token": "********", "enabled": true, ... }
+
+// action: "list", scriptId: "...", includeSecrets: true
+{ "id": "kRxMfQaBnTwL", "authMode": "bearer", "token": "xsk_...", "enabled": true, ... }
+```
+
+## Usage tracking
+
+Each call increments the endpoint's `callCount` and updates `lastUsedAt`. The
+underlying script run is also recorded with `apiEndpointId` set, so external
+invocations show up alongside agent-triggered runs in the
+[Script Runs](/docs/api-reference/script-runs) dashboard.
+
+## Known limitations
+
+- No rate limiting in v1 — each call spawns a sandboxed subprocess held open
+  up to the configured timeout.
+- `argsJsonSchema` is only populated for scripts saved after the schema
+  extraction was added; older scripts skip request-time validation.
+
+## Related docs
+
+- [Scripts runtime](/docs/guides/scripts-runtime) — what the script sandbox
+  exposes and how the typecheck stays aligned with it.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker) — how a
+  script authenticates its own outbound `fetch` calls (separate from the
+  bearer token an external caller uses to reach the script).
+- [External APIs reference](/docs/api-reference/external-apis) — the
+  generated OpenAPI reference for `POST /api/x/script/{endpointId}`.
+- [Scripts API reference](/docs/api-reference/scripts) — the authenticated
+  dashboard routes for creating, listing, and rotating endpoints.

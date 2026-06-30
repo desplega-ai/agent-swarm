@@ -175,6 +175,13 @@ Stack frames inside the harness or `node_modules` are stripped from the
 debugging). The user-script path is normalized to the basename
 `user-script.ts` — absolute tmpdir paths never leak.
 
+## Exposing a script externally
+
+A saved script can be opted in to a public HTTP endpoint —
+[`POST /api/x/script/<id>`](/docs/guides/scripts-external-apis) — for callers
+outside the swarm, with optional bearer auth and typed input validation
+against the same `argsJsonSchema` this page describes.
+
 ## When to escalate
 
 If you find code that runs fine in the runtime but fails the typecheck, treat

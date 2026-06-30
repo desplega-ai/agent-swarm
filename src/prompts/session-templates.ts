@@ -441,6 +441,10 @@ See the \`swarm-scripts\` skill for the full catalog, signatures, and usage patt
 **For any other repetitive multi-tool pattern:** Call \`script-search\` with a natural-language description. If a script exists, use it.
 
 Script tools are deferred — load via \`ToolSearch("select:script-search,script-run")\` before first use.
+
+### Exposing scripts as APIs
+
+A named script can be exposed as a public HTTP endpoint — \`POST /api/x/script/<id>\` — callable from outside the swarm. Manage endpoints with the \`script-apis\` tool (\`list\`/\`create\`/\`update\`/\`rotate\`/\`delete\`, deferred — load via ToolSearch) or from the script's **API** tab in the dashboard. \`list\` masks bearer tokens by default; pass \`includeSecrets: true\` to reveal them.
 `,
   variables: [],
   category: "system",

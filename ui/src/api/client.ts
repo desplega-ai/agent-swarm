@@ -52,6 +52,9 @@ import type {
   ResolveUnmappedInput,
   ScheduledTask,
   ScheduledTasksResponse,
+  ScriptApiAuthMode,
+  ScriptApiRecord,
+  ScriptApiWithSecret,
   ScriptDetail,
   ScriptRunStatus,
   ScriptRunsResponse,
@@ -991,6 +994,69 @@ class ApiClient {
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch script type defs: ${res.status}`);
     return res.json();
+  }
+
+  // ── External script API endpoints (script_apis) ──
+
+  async fetchScriptApis(scriptId: string): Promise<ScriptApiRecord[]> {
+    const url = `${this.getBaseUrl()}/api/scripts/${scriptId}/apis`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch script APIs: ${res.status}`);
+    const data = (await res.json()) as { apis: ScriptApiRecord[] };
+    return data.apis;
+  }
+
+  async createScriptApi(
+    scriptId: string,
+    data: { authMode: ScriptApiAuthMode; label?: string; agentId?: string },
+  ): Promise<ScriptApiWithSecret> {
+    const url = `${this.getBaseUrl()}/api/scripts/${scriptId}/apis`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to create endpoint" }));
+      throw new Error(error.error || `Failed to create endpoint: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async revealScriptApiSecret(scriptId: string, endpointId: string): Promise<string | null> {
+    const url = `${this.getBaseUrl()}/api/scripts/${scriptId}/apis/${endpointId}/secret`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to reveal token: ${res.status}`);
+    const data = (await res.json()) as { token: string | null };
+    return data.token;
+  }
+
+  async updateScriptApi(
+    scriptId: string,
+    endpointId: string,
+    data: { enabled?: boolean; label?: string | null },
+  ): Promise<ScriptApiRecord> {
+    const url = `${this.getBaseUrl()}/api/scripts/${scriptId}/apis/${endpointId}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to update endpoint: ${res.status}`);
+    return res.json();
+  }
+
+  async rotateScriptApiSecret(scriptId: string, endpointId: string): Promise<ScriptApiWithSecret> {
+    const url = `${this.getBaseUrl()}/api/scripts/${scriptId}/apis/${endpointId}/rotate`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to rotate token: ${res.status}`);
+    return res.json();
+  }
+
+  async deleteScriptApi(scriptId: string, endpointId: string): Promise<void> {
+    const url = `${this.getBaseUrl()}/api/scripts/${scriptId}/apis/${endpointId}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to delete endpoint: ${res.status}`);
   }
 
   async fetchExecutorTypes(): Promise<ExecutorTypeInfo[]> {

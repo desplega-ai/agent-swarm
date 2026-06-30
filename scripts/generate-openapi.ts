@@ -42,6 +42,7 @@ import "../src/http/users";
 import "../src/http/webhooks";
 import "../src/http/workflow-events";
 import "../src/http/workflows";
+import "../src/http/x";
 
 const version = (await Bun.file("package.json").json()).version;
 const spec = generateOpenApiSpec({ version, serverUrl: "http://localhost:3013" });

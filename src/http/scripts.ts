@@ -6,11 +6,18 @@ import { createEvent } from "../be/events";
 import { getScriptApiConnectionDescriptors, getScriptApiTypes } from "../be/script-connections";
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import {
+  createScriptApi,
   deleteScript,
+  deleteScriptApi,
   getScript,
+  getScriptApiById,
+  getScriptApiSecret,
   getScriptById,
+  listScriptApisForScript,
   listScripts,
   listScriptVersions,
+  rotateScriptApiSecret,
+  updateScriptApi,
   upsertScriptByName,
 } from "../be/scripts/db";
 import { searchScripts } from "../be/scripts/embeddings";
@@ -23,6 +30,7 @@ import {
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { runScript } from "../scripts-runtime/loader";
 import {
+  ScriptApiAuthModeSchema,
   type ScriptDetail,
   ScriptFsModeSchema,
   type ScriptListItem,
@@ -219,6 +227,115 @@ const listVersionsRoute = route({
   responses: {
     200: { description: "Script versions" },
     404: { description: "Script not found" },
+  },
+});
+
+// ─── External API endpoint management (script_apis) ──────────────────────────
+// These authenticated dashboard routes create/manage the public endpoints that
+// `POST /api/x/script/<id>` (src/http/x.ts) serves.
+
+const apiEndpointParamsSchema = z.object({
+  id: z.string().uuid(),
+  endpointId: z.string(),
+});
+
+const createScriptApiBodySchema = z.object({
+  authMode: ScriptApiAuthModeSchema.default("bearer"),
+  label: z.string().max(200).optional(),
+  agentId: z.string().optional(),
+});
+
+const patchScriptApiBodySchema = z.object({
+  enabled: z.boolean().optional(),
+  label: z.string().max(200).nullable().optional(),
+});
+
+const createScriptApiRoute = route({
+  method: "post",
+  path: "/api/scripts/{id}/apis",
+  pattern: ["api", "scripts", null, "apis"],
+  operationId: "scripts_api_create",
+  summary: "Expose a script as an external HTTP API endpoint",
+  description: "Returns the endpoint plus the plaintext bearer token (when authMode is 'bearer').",
+  tags: ["Scripts"],
+  params: idParamsSchema,
+  body: createScriptApiBodySchema,
+  responses: {
+    201: { description: "Endpoint created" },
+    400: { description: "Validation error or script has no owning agent" },
+    404: { description: "Script not found" },
+  },
+});
+
+const listScriptApisRoute = route({
+  method: "get",
+  path: "/api/scripts/{id}/apis",
+  pattern: ["api", "scripts", null, "apis"],
+  operationId: "scripts_api_list",
+  summary: "List external API endpoints for a script",
+  tags: ["Scripts"],
+  params: idParamsSchema,
+  responses: {
+    200: { description: "Endpoints (without secrets)" },
+    404: { description: "Script not found" },
+  },
+});
+
+const revealScriptApiSecretRoute = route({
+  method: "get",
+  path: "/api/scripts/{id}/apis/{endpointId}/secret",
+  pattern: ["api", "scripts", null, "apis", null, "secret"],
+  operationId: "scripts_api_reveal_secret",
+  summary: "Reveal an endpoint's bearer token",
+  tags: ["Scripts"],
+  params: apiEndpointParamsSchema,
+  responses: {
+    200: { description: "Decrypted token (null when authMode is 'none')" },
+    404: { description: "Endpoint not found" },
+  },
+});
+
+const patchScriptApiRoute = route({
+  method: "patch",
+  path: "/api/scripts/{id}/apis/{endpointId}",
+  pattern: ["api", "scripts", null, "apis", null],
+  operationId: "scripts_api_update",
+  summary: "Enable/disable or relabel an external API endpoint",
+  tags: ["Scripts"],
+  params: apiEndpointParamsSchema,
+  body: patchScriptApiBodySchema,
+  responses: {
+    200: { description: "Updated endpoint" },
+    404: { description: "Endpoint not found" },
+  },
+});
+
+const rotateScriptApiRoute = route({
+  method: "post",
+  path: "/api/scripts/{id}/apis/{endpointId}/rotate",
+  pattern: ["api", "scripts", null, "apis", null, "rotate"],
+  operationId: "scripts_api_rotate",
+  summary: "Rotate an endpoint's bearer token",
+  tags: ["Scripts"],
+  params: apiEndpointParamsSchema,
+  responses: {
+    200: { description: "Endpoint with new plaintext token" },
+    400: { description: "Endpoint uses 'none' auth — nothing to rotate" },
+    404: { description: "Endpoint not found" },
+  },
+});
+
+const deleteScriptApiRoute = route({
+  method: "delete",
+  path: "/api/scripts/{id}/apis/{endpointId}",
+  pattern: ["api", "scripts", null, "apis", null],
+  operationId: "scripts_api_delete",
+  summary: "Delete an external API endpoint",
+  tags: ["Scripts"],
+  params: apiEndpointParamsSchema,
+  responses: {
+    200: { description: "Deleted" },
+    404: { description: "Endpoint not found" },
   },
 });
 
@@ -601,6 +718,102 @@ export async function handleScripts(
       scopeId: parsed.query.scope === "agent" ? agent.id : null,
     });
     json(res, { deleted });
+    return true;
+  }
+
+  // ── External API endpoint management (script_apis) ──
+  if (createScriptApiRoute.match(req.method, pathSegments)) {
+    const parsed = await createScriptApiRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const script = getScriptById(parsed.params.id);
+    if (!script) {
+      jsonError(res, "Script not found", 404);
+      return true;
+    }
+    // Run external calls as the script's owning agent (so its egress secrets +
+    // API connections resolve). Global scripts with no owner must name one.
+    const runAsAgentId = parsed.body.agentId ?? script.scopeId ?? script.createdByAgentId;
+    if (!runAsAgentId) {
+      jsonError(res, "agentId is required: this script has no owning agent to run as", 400);
+      return true;
+    }
+    const endpoint = createScriptApi({
+      scriptId: script.id,
+      agentId: runAsAgentId,
+      authMode: parsed.body.authMode,
+      label: parsed.body.label ?? null,
+      createdBy: resolveHttpAuditUserId(req, agentId),
+    });
+    json(res, endpoint, 201);
+    return true;
+  }
+
+  if (listScriptApisRoute.match(req.method, pathSegments)) {
+    const parsed = await listScriptApisRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getScriptById(parsed.params.id)) {
+      jsonError(res, "Script not found", 404);
+      return true;
+    }
+    json(res, { apis: listScriptApisForScript(parsed.params.id) });
+    return true;
+  }
+
+  if (revealScriptApiSecretRoute.match(req.method, pathSegments)) {
+    const parsed = await revealScriptApiSecretRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const endpoint = getScriptApiById(parsed.params.endpointId);
+    if (!endpoint || endpoint.scriptId !== parsed.params.id) {
+      jsonError(res, "Endpoint not found", 404);
+      return true;
+    }
+    json(res, { token: getScriptApiSecret(endpoint.id) });
+    return true;
+  }
+
+  if (rotateScriptApiRoute.match(req.method, pathSegments)) {
+    const parsed = await rotateScriptApiRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const endpoint = getScriptApiById(parsed.params.endpointId);
+    if (!endpoint || endpoint.scriptId !== parsed.params.id) {
+      jsonError(res, "Endpoint not found", 404);
+      return true;
+    }
+    const rotated = rotateScriptApiSecret(endpoint.id, resolveHttpAuditUserId(req, agentId));
+    if (!rotated) {
+      jsonError(res, "Cannot rotate a token on a 'none' auth endpoint", 400);
+      return true;
+    }
+    json(res, rotated);
+    return true;
+  }
+
+  if (patchScriptApiRoute.match(req.method, pathSegments)) {
+    const parsed = await patchScriptApiRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const endpoint = getScriptApiById(parsed.params.endpointId);
+    if (!endpoint || endpoint.scriptId !== parsed.params.id) {
+      jsonError(res, "Endpoint not found", 404);
+      return true;
+    }
+    const updated = updateScriptApi(endpoint.id, {
+      enabled: parsed.body.enabled,
+      label: parsed.body.label,
+      updatedBy: resolveHttpAuditUserId(req, agentId),
+    });
+    json(res, updated);
+    return true;
+  }
+
+  if (deleteScriptApiRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteScriptApiRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const endpoint = getScriptApiById(parsed.params.endpointId);
+    if (!endpoint || endpoint.scriptId !== parsed.params.id) {
+      jsonError(res, "Endpoint not found", 404);
+      return true;
+    }
+    json(res, { deleted: deleteScriptApi(endpoint.id) });
     return true;
   }
 

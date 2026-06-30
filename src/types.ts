@@ -1973,6 +1973,32 @@ export type ScriptDetail = Omit<ScriptRecord, "argsJsonSchema"> & {
   argsJsonSchema: unknown;
 };
 
+// ─── External script APIs (POST /api/x/script/<id>) ──────────────────────────
+
+export const ScriptApiAuthModeSchema = z.enum(["none", "bearer"]);
+export type ScriptApiAuthMode = z.infer<typeof ScriptApiAuthModeSchema>;
+
+/** A script exposed as an externally-callable HTTP endpoint. Never carries the token. */
+export const ScriptApiRecordSchema = z.object({
+  id: z.string(),
+  scriptId: z.string(),
+  agentId: z.string(),
+  authMode: ScriptApiAuthModeSchema,
+  enabled: z.boolean(),
+  label: z.string().nullable(),
+  callCount: z.number(),
+  lastUsedAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type ScriptApiRecord = z.infer<typeof ScriptApiRecordSchema>;
+
+/**
+ * Returned once on create / rotate / reveal — includes the plaintext bearer
+ * token (`null` for `authMode: 'none'`). The token is stored encrypted and only
+ * materialized here for the dashboard's reveal + curl UX.
+ */
+export type ScriptApiWithSecret = ScriptApiRecord & { token: string | null };
+
 // ============================================================================
 // Skill Types
 // ============================================================================

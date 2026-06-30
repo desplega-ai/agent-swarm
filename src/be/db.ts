@@ -12138,6 +12138,8 @@ export function recordInlineScriptRun(data: {
   finishedAt: string;
   requestedByUserId?: string;
   createdBy?: string;
+  /** Set when this run originated from an external API endpoint (POST /api/x/script/<id>). */
+  apiEndpointId?: string | null;
 }): ScriptRun {
   const row = getDb()
     .prepare<
@@ -12156,12 +12158,13 @@ export function recordInlineScriptRun(data: {
         string | null,
         string | null,
         string | null,
+        string | null,
       ]
     >(
       `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, kind, status, output, error,
-         startedAt, finishedAt, requestedByUserId, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?)
+         startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId)
+       VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     )
     .get(
@@ -12178,6 +12181,7 @@ export function recordInlineScriptRun(data: {
       data.requestedByUserId ?? null,
       data.createdBy ?? null,
       data.createdBy ?? null,
+      data.apiEndpointId ?? null,
     );
   if (!row) throw new Error("Failed to record inline script run");
   return rowToScriptRun(row);
