@@ -126,6 +126,12 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   __resetEncryptionKeyForTests();
   await removeDbFiles(TEST_DB_PATH);
+  // initDb() no-ops and returns the existing shared `db` singleton if one is
+  // already open — closeDb() first guarantees a fresh connection against
+  // TEST_DB_PATH and forces resolveEncryptionKey() to actually run, instead of
+  // silently reusing whatever connection (and cached key) the previous test
+  // file in the run left open.
+  closeDb();
   initDb(TEST_DB_PATH);
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
