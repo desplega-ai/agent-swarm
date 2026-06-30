@@ -37,7 +37,7 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
   },
   "claude-managed": {
     smol: "claude-haiku-4-5",
-    regular: "claude-sonnet-4-6",
+    regular: "claude-sonnet-5",
     smart: "claude-opus-4-8",
     ultra: "claude-fable-5",
   },

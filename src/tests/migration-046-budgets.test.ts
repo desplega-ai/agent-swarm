@@ -206,6 +206,38 @@ describe("migration 046 — budgets and pricing", () => {
     }
   });
 
+  test("models.dev seed includes Claude Sonnet 5 pricing rows", () => {
+    const db = getDb();
+    const result = seedPricingFromModelsDev({ quiet: true });
+    expect(result.modelsdevFound).toBe(true);
+
+    const expectedPrices = {
+      input: 3,
+      cached_input: 0.3,
+      cache_write: 3.75,
+      output: 15,
+    } as const;
+    const seededKeys = [
+      ["claude", "claude-sonnet-5"],
+      ["claude-managed", "claude-sonnet-5"],
+      ["claude", "sonnet"],
+      ["claude-managed", "sonnet"],
+      ["pi", "sonnet"],
+    ] as const;
+
+    for (const [provider, model] of seededKeys) {
+      for (const [tokenClass, price] of Object.entries(expectedPrices)) {
+        const row = db
+          .prepare<PricingRow, [string, string, string]>(
+            `SELECT * FROM pricing
+             WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = 0`,
+          )
+          .get(provider, model, tokenClass);
+        expect(row?.price_per_million_usd).toBe(price);
+      }
+    }
+  });
+
   test("idx_pricing_lookup index exists", () => {
     const db = getDb();
     const idx = db

@@ -64,7 +64,7 @@ export type ClaudeManagedSetupResult = {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const DEFAULT_AGENT_MODEL = "claude-sonnet-4-6";
+const DEFAULT_AGENT_MODEL = "claude-sonnet-5";
 const SKILLS_DIR_RELATIVE = "plugin/commands";
 const SKILLS_BETA_HEADER = "skills-2025-10-02";
 

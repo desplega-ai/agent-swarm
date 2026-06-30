@@ -23,6 +23,7 @@ describe("getContextWindowSize", () => {
   });
 
   test("returns 1M for sonnet models", () => {
+    expect(getContextWindowSize("claude-sonnet-5")).toBe(1_000_000);
     expect(getContextWindowSize("claude-sonnet-4-6")).toBe(1_000_000);
     expect(getContextWindowSize("sonnet")).toBe(1_000_000);
   });

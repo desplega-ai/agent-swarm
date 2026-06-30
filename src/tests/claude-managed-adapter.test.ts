@@ -770,6 +770,14 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
     expect(cost).toBeCloseTo(4.5, 10);
   });
 
+  test("computeClaudeManagedCostUsd returns expected USD for sonnet-5 against list rate", () => {
+    // 1M input tokens × $3.00/Mtok = $3.00
+    // 100k output tokens × $15.00/Mtok = $1.50
+    // total = $4.50. Intro $2/$10 pricing is intentionally not used here.
+    const cost = computeClaudeManagedCostUsd("claude-sonnet-5", 1_000_000, 100_000, 0, 0);
+    expect(cost).toBeCloseTo(4.5, 10);
+  });
+
   test("computeClaudeManagedCostUsd factors cache-read and cache-write at correct rates", () => {
     // Sonnet rates: cache-read $0.30/Mtok, cache-write $3.75/Mtok
     // 1M cache-read = $0.30; 1M cache-write = $3.75; total = $4.05
@@ -805,6 +813,12 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
       outputPerMillion: 50.0,
       cacheReadPerMillion: 1.0,
       cacheWritePerMillion: 12.5,
+    });
+    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-sonnet-5"]).toEqual({
+      inputPerMillion: 3.0,
+      outputPerMillion: 15.0,
+      cacheReadPerMillion: 0.3,
+      cacheWritePerMillion: 3.75,
     });
     expect(CLAUDE_MANAGED_MODEL_PRICING["claude-sonnet-4-6"]).toBeDefined();
     expect(CLAUDE_MANAGED_MODEL_PRICING["claude-opus-4-7"]).toBeDefined();

@@ -136,6 +136,7 @@ export const CONFIG_AA_ROWS: Record<string, { sourceRow: string; matchedVariant:
       matchedVariant:
         "(max) — pinned concrete Sonnet 4.6; same reasoning row as the moving sonnet alias.",
     },
+    // claude-sonnet-5 → UNMATCHED (announced after the frozen 2026-06-12 TSV snapshot).
     // [II 61] — spec-pinned; the alias `opus` resolves to claude-opus-4-8 today.
     "claude-opus": {
       sourceRow: "Claude Opus 4.8 (max)",
@@ -388,6 +389,7 @@ export const CONFIG_AA_ROWS: Record<string, { sourceRow: string; matchedVariant:
  */
 export const AA_UNMATCHED_CONFIG_IDS: Record<string, string> = {
   "claude-opus-4.6": "no Claude Opus 4.6 row in the 2026-06-12 snapshot",
+  "claude-sonnet-5": "no Claude Sonnet 5 row in the 2026-06-12 snapshot",
   "pi-glm-flash": "TSV has only GLM-5.x rows — no GLM 4.7 Flash",
   "opencode-glm-flash": "TSV has only GLM-5.x rows — no GLM 4.7 Flash",
   "pi-minimax-m2.5": "TSV has MiniMax-M3 and M2.7 only — no M2.5",

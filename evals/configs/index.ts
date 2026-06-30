@@ -59,6 +59,12 @@ export const configs: HarnessConfig[] = [
     model: "claude-sonnet-4-6",
   },
   {
+    id: "claude-sonnet-5",
+    label: "Claude Code / sonnet 5",
+    provider: "claude",
+    model: "claude-sonnet-5",
+  },
+  {
     id: "claude-fable",
     label: "Claude Code / fable 5",
     provider: "claude",

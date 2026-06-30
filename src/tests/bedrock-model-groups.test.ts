@@ -32,6 +32,9 @@ describe("modelGroupsForHarness — Bedrock group for pi harness", () => {
     for (const m of bedrockGroup!.models) {
       expect(m.id.startsWith("amazon-bedrock/")).toBe(true);
     }
+    expect(bedrockGroup!.models.map((m) => m.id)).toContain(
+      "amazon-bedrock/anthropic.claude-sonnet-5",
+    );
   });
 
   test("pi harness with no live report → Bedrock group disabled (auth state unknown)", () => {

@@ -136,6 +136,7 @@ describe("normalizeModelKey()", () => {
     expect(normalizeModelKey("claude", "claude-opus-4-7")).toBe("claude-opus-4-7");
     expect(normalizeModelKey("claude", "claude-fable-5")).toBe("claude-fable-5");
     expect(normalizeModelKey("claude", "claude-mythos-5")).toBe("claude-mythos-5");
+    expect(normalizeModelKey("claude", "claude-sonnet-5")).toBe("claude-sonnet-5");
   });
 
   test("is idempotent", () => {

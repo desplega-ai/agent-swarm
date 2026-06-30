@@ -37,7 +37,7 @@ const baseConfig = {
   apiKey: "123123",
   anthropicApiKey: "sk-ant-test",
   mcpBaseUrl: "https://swarm.example.com",
-  agentModel: "claude-sonnet-4-6",
+  agentModel: "claude-sonnet-5",
   force: false,
 };
 
@@ -95,7 +95,7 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
       mcp_servers: Array<{ name: string; type: string; url: string }>;
     };
     expect(agentCallArgs.name).toBe("swarm-worker");
-    expect(agentCallArgs.model).toBe("claude-sonnet-4-6");
+    expect(agentCallArgs.model).toBe("claude-sonnet-5");
     expect(agentCallArgs.tools[0]?.type).toBe("agent_toolset_20260401");
     // Headless workers can't approve interactively — both toolsets must be
     // configured with `always_allow` so the sandbox executes tool calls
@@ -240,7 +240,7 @@ describe("resolveClaudeManagedSetupConfig", () => {
     expect(result.mcpBaseUrl).toBe("https://example.com");
     expect(result.apiKey).toBe("key123");
     expect(result.apiUrl).toBe("https://example.com");
-    expect(result.agentModel).toBe("claude-sonnet-4-6");
+    expect(result.agentModel).toBe("claude-sonnet-5");
     expect(promptSecret).not.toHaveBeenCalled();
   });
 

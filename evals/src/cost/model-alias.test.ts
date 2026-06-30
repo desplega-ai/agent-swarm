@@ -23,8 +23,9 @@ describe("buildClaudeAliasMap (frozen rule, synthetic fixtures)", () => {
       { id: "claude-3-5-sonnet-20240620", releaseDate: "2024-06-20" }, // dated → excluded
       { id: "claude-sonnet-4-0", releaseDate: "2025-05-22" },
       { id: "claude-sonnet-4-6", releaseDate: "2026-02-17" },
+      { id: "claude-sonnet-5", releaseDate: "2026-06-30" },
     ]);
-    expect(map.sonnet).toBe("claude-sonnet-4-6");
+    expect(map.sonnet).toBe("claude-sonnet-5");
   });
 
   test("release_date ties break by lexicographically greatest id", () => {
@@ -84,5 +85,8 @@ describe("against the committed models.dev snapshot", () => {
     expect(fable?.inputPerM).not.toBeNull();
     const haiku = await lookupModelCost("claude", "haiku");
     expect(haiku?.id).toBe("claude-haiku-4-5");
+    const sonnet = await lookupModelCost("claude", "sonnet");
+    expect(sonnet?.id).toBe("claude-sonnet-5");
+    expect(sonnet?.inputPerM).toBe(3);
   });
 });

@@ -54,5 +54,10 @@ describe("agents list model display", () => {
       provider: "Anthropic",
       providerId: "anthropic",
     });
+    expect(getAgentModelPresentation("sonnet")).toMatchObject({
+      label: "Claude Sonnet 5",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
   });
 });

@@ -72,7 +72,7 @@ const ANTHROPIC_SHORTNAME_TO_MODELSDEV: Record<string, string> = {
   fable: "claude-fable-5",
   mythos: "claude-mythos-5",
   opus: "claude-opus-4-8",
-  sonnet: "claude-sonnet-4-6",
+  sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
 };
 

@@ -16,7 +16,11 @@ const CACHE_PATH = path.join(process.cwd(), "src", "be", "modelsdev-cache.json")
 const MODELSDEV_URL = "https://models.dev/api.json";
 // Limited-availability models that are intentionally vendored even when models.dev
 // does not list them yet. Add future manual pins as "provider/model-id".
-const PINNED_ENTRIES = ["anthropic/claude-mythos-5"] as const;
+const PINNED_ENTRIES = [
+  "anthropic/claude-mythos-5",
+  "anthropic/claude-sonnet-5",
+  "amazon-bedrock/anthropic.claude-sonnet-5",
+] as const;
 
 interface CostBlock {
   input?: number;
