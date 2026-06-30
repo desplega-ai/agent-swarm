@@ -125,7 +125,6 @@ pre {
 }
 
 .theme-toggle {
-  margin-left: auto;
   background: none;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -137,6 +136,24 @@ pre {
 }
 
 .theme-toggle:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.logout-button {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.logout-button:hover {
   color: var(--text);
   background: var(--panel-2);
 }
@@ -166,8 +183,19 @@ pre {
   border-radius: 8px;
 }
 
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.auth-brand img {
+  display: block;
+}
+
 .auth-panel h1 {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 21px;
   line-height: 1.15;
 }

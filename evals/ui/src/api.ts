@@ -15,12 +15,19 @@ import type {
   TranscriptResponse,
 } from "./types.ts";
 
-export const API_KEY_STORAGE_KEY = "evals-api-key";
+export const API_KEY_STORAGE_KEY = "EVALS_API_KEY";
+const LEGACY_API_KEY_STORAGE_KEY = "evals-api-key";
 
 let onUnauthorized: (() => void) | null = null;
 
 export function getStoredApiKey(): string | null {
-  return localStorage.getItem(API_KEY_STORAGE_KEY);
+  const key = localStorage.getItem(API_KEY_STORAGE_KEY);
+  if (key) return key;
+  const legacyKey = localStorage.getItem(LEGACY_API_KEY_STORAGE_KEY);
+  if (!legacyKey) return null;
+  localStorage.setItem(API_KEY_STORAGE_KEY, legacyKey);
+  localStorage.removeItem(LEGACY_API_KEY_STORAGE_KEY);
+  return legacyKey;
 }
 
 export function setStoredApiKey(key: string): void {
@@ -29,6 +36,7 @@ export function setStoredApiKey(key: string): void {
 
 export function clearStoredApiKey(): void {
   localStorage.removeItem(API_KEY_STORAGE_KEY);
+  localStorage.removeItem(LEGACY_API_KEY_STORAGE_KEY);
 }
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
