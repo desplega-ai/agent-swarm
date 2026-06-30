@@ -183,7 +183,10 @@ export default function ScriptDetailPage() {
         </TabsContent>
 
         <TabsContent value="api" className="flex flex-col flex-1 min-h-0 mt-2">
-          <ScriptApiTab scriptId={script.id} />
+          <ScriptApiTab
+            scriptId={script.id}
+            ownerAgentId={script.scopeId ?? script.createdByAgentId}
+          />
         </TabsContent>
       </Tabs>
     </div>

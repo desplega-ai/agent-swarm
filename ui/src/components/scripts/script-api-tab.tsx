@@ -2,6 +2,7 @@ import { Globe, KeyRound, Plus, RotateCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
+import { useAgents } from "@/api/hooks/use-agents";
 import {
   useCreateScriptApi,
   useDeleteScriptApi,
@@ -172,20 +173,36 @@ function EndpointCard({ scriptId, endpoint }: { scriptId: string; endpoint: Scri
   );
 }
 
-export function ScriptApiTab({ scriptId }: { scriptId: string }) {
+export function ScriptApiTab({
+  scriptId,
+  ownerAgentId,
+}: {
+  scriptId: string;
+  ownerAgentId: string | null;
+}) {
   const { data: apis, isLoading } = useScriptApis(scriptId);
+  const { data: agentsData } = useAgents();
+  const agents = agentsData ?? [];
   const [dialogOpen, setDialogOpen] = useState(false);
   const [authMode, setAuthMode] = useState<ScriptApiAuthMode>("bearer");
   const [label, setLabel] = useState("");
+  // External calls run under an agent's identity (for its egress secrets + API
+  // connections). Default to the script's owner; required when it has none.
+  const [agentId, setAgentId] = useState(ownerAgentId ?? "");
   const create = useCreateScriptApi(scriptId);
 
   async function handleCreate() {
     try {
-      await create.mutateAsync({ authMode, label: label.trim() || undefined });
+      await create.mutateAsync({
+        authMode,
+        label: label.trim() || undefined,
+        agentId: agentId || undefined,
+      });
       toast.success("Endpoint created");
       setDialogOpen(false);
       setLabel("");
       setAuthMode("bearer");
+      setAgentId(ownerAgentId ?? "");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create endpoint");
     }
@@ -227,6 +244,24 @@ export function ScriptApiTab({ scriptId }: { scriptId: string }) {
                 </Select>
               </div>
               <div className="space-y-1.5">
+                <Label htmlFor="api-run-as">Run as agent</Label>
+                <Select value={agentId} onValueChange={setAgentId}>
+                  <SelectTrigger id="api-run-as">
+                    <SelectValue placeholder="Select an agent" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {agents.map((agent) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        {agent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Calls use this agent's credentials (egress secrets + API connections).
+                </p>
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="api-label">Label (optional)</Label>
                 <Input
                   id="api-label"
@@ -240,7 +275,7 @@ export function ScriptApiTab({ scriptId }: { scriptId: string }) {
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleCreate} disabled={create.isPending}>
+              <Button onClick={handleCreate} disabled={create.isPending || !agentId}>
                 Create
               </Button>
             </DialogFooter>
