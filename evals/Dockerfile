@@ -2,6 +2,8 @@ FROM oven/bun:latest
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
 ENV EVALS_PORT=4801 \
     BUN_INSTALL_CACHE_DIR=/tmp/bun-cache
 
