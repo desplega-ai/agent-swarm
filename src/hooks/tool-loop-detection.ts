@@ -10,6 +10,7 @@ interface ToolCallRecord {
   toolName: string;
   argsHash: string;
   timestamp: number;
+  codexEnvelope?: boolean;
 }
 
 interface LoopDetectionResult {
@@ -19,12 +20,13 @@ interface LoopDetectionResult {
 }
 
 const HISTORY_DIR = "/tmp/agent-swarm-tool-history";
-const MAX_HISTORY = 30; // Sliding window size
+const MAX_HISTORY = 50; // Sliding window size
 const REPEAT_WARNING_THRESHOLD = 8;
 const REPEAT_CRITICAL_THRESHOLD = 15;
 const LOW_CARDINALITY_FILE_CHANGE_CRITICAL_THRESHOLD = 24;
 const PINGPONG_WARNING_THRESHOLD = 6;
 const PINGPONG_CRITICAL_THRESHOLD = 12;
+const CODEX_PINGPONG_CRITICAL_THRESHOLD = 24;
 
 /**
  * Simple hash of tool arguments for comparison.
@@ -73,6 +75,19 @@ function isCodexFileChangeArgs(toolName: string, toolInput: Record<string, unkno
   });
 }
 
+function isCodexEnvelopeArgs(toolName: string, toolInput: Record<string, unknown>): boolean {
+  if (isCodexFileChangeArgs(toolName, toolInput)) return true;
+
+  // Codex MCP tool call envelope: the codex adapter wraps MCP tool args
+  // in {server, tool, arguments}. This shape only appears on the codex
+  // harness — claude hooks see raw MCP tool input instead. The arguments
+  // field may be absent/empty at item.started, making all calls to the
+  // same tool hash identically (same root cause as file_change).
+  if ("server" in toolInput && "tool" in toolInput) return true;
+
+  return false;
+}
+
 /**
  * Load tool call history for a session.
  */
@@ -115,7 +130,8 @@ export async function checkToolLoop(
   const history = await loadHistory(sessionKey);
 
   // Add current call to history
-  history.push({ toolName, argsHash, timestamp: Date.now() });
+  const codexEnvelope = isCodexEnvelopeArgs(toolName, toolInput) || undefined;
+  history.push({ toolName, argsHash, timestamp: Date.now(), codexEnvelope });
   await saveHistory(sessionKey, history);
 
   // Only check if we have enough history
@@ -143,8 +159,11 @@ export async function checkToolLoop(
     };
   }
 
+  // Defer repeat warnings — let the ping-pong detector run first since it
+  // may produce a higher-severity critical result.
+  let pendingWarning: LoopDetectionResult | undefined;
   if (repeatCount >= REPEAT_WARNING_THRESHOLD) {
-    return {
+    pendingWarning = {
       blocked: false,
       severity: "warning",
       reason: `Tool "${toolName}" has been called ${repeatCount} times with identical arguments. Consider trying a different approach.`,
@@ -153,7 +172,16 @@ export async function checkToolLoop(
 
   // Strategy 2: Ping-pong between two tool call patterns
   if (history.length >= PINGPONG_WARNING_THRESHOLD) {
-    const recent = history.slice(-PINGPONG_CRITICAL_THRESHOLD);
+    // On codex, tool args are low-cardinality (file_change has only path+kind,
+    // MCP calls are wrapped in a {server,tool,arguments} envelope). Genuinely
+    // different edits/runs hash identically, so a productive edit→test cycle
+    // looks like a stuck loop. Use a higher threshold for codex sessions.
+    const isCodexSession = history.some((r) => r.codexEnvelope === true);
+    const effectiveCriticalThreshold = isCodexSession
+      ? CODEX_PINGPONG_CRITICAL_THRESHOLD
+      : PINGPONG_CRITICAL_THRESHOLD;
+
+    const recent = history.slice(-effectiveCriticalThreshold);
     const patterns = new Map<string, number>();
     for (const r of recent) {
       const p = `${r.toolName}:${r.argsHash}`;
@@ -168,7 +196,7 @@ export async function checkToolLoop(
         const dominance = first[1] + second[1];
         if (dominance >= recent.length * 0.8) {
           const totalPingPong = first[1] + second[1];
-          if (totalPingPong >= PINGPONG_CRITICAL_THRESHOLD) {
+          if (totalPingPong >= effectiveCriticalThreshold) {
             return {
               blocked: true,
               severity: "critical",
@@ -188,7 +216,7 @@ export async function checkToolLoop(
     }
   }
 
-  return { blocked: false };
+  return pendingWarning ?? { blocked: false };
 }
 
 /**

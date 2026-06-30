@@ -117,9 +117,9 @@ describe("tool-loop-detection", () => {
   });
 
   describe("checkToolLoop — ping-pong detection", () => {
-    test("detects alternating two-tool pattern at critical threshold", async () => {
+    test("detects alternating two-tool pattern at critical threshold (non-codex)", async () => {
       let result: Awaited<ReturnType<typeof checkToolLoop>> | undefined;
-      // Alternate between two patterns for 12+ calls
+      // Alternate between two patterns for 12+ calls (non-codex args)
       for (let i = 0; i < 14; i++) {
         if (i % 2 === 0) {
           result = await checkToolLoop(SESSION_KEY, "Read", { file_path: "/a.ts" });
@@ -153,6 +153,61 @@ describe("tool-loop-detection", () => {
       // Should be at least warning (might be critical at 8 since >= 6 warning)
       expect(result!.severity).toBeDefined();
       expect(["warning", "critical"]).toContain(result!.severity!);
+    });
+
+    test("does not block codex file_change ping-pong at 14 calls (false-positive fix)", async () => {
+      let result: Awaited<ReturnType<typeof checkToolLoop>> | undefined;
+      // Codex Edit→bash alternation: Edit has file_change shape (low-cardinality),
+      // bash has identical command. 14 calls should NOT block on codex — the
+      // threshold is raised to 24.
+      for (let i = 0; i < 14; i++) {
+        if (i % 2 === 0) {
+          result = await checkToolLoop(SESSION_KEY, "Edit", {
+            changes: [{ path: "src/app.ts", kind: "update" }],
+          });
+        } else {
+          result = await checkToolLoop(SESSION_KEY, "Bash", { command: "bun test" });
+        }
+      }
+      expect(result!.blocked).toBe(false);
+    });
+
+    test("does not block codex MCP envelope ping-pong at 14 calls (false-positive fix)", async () => {
+      let result: Awaited<ReturnType<typeof checkToolLoop>> | undefined;
+      // Codex script-upsert→script-run alternation: MCP calls are wrapped in
+      // {server, tool, arguments} envelope. 14 calls should NOT block.
+      for (let i = 0; i < 14; i++) {
+        if (i % 2 === 0) {
+          result = await checkToolLoop(SESSION_KEY, "script-upsert", {
+            server: "agent-swarm",
+            tool: "script-upsert",
+            arguments: { name: "my-script", source: "export default () => {}" },
+          });
+        } else {
+          result = await checkToolLoop(SESSION_KEY, "script-run", {
+            server: "agent-swarm",
+            tool: "script-run",
+            arguments: { name: "my-script" },
+          });
+        }
+      }
+      expect(result!.blocked).toBe(false);
+    });
+
+    test("blocks codex ping-pong at 24 calls (genuinely stuck)", async () => {
+      let result: Awaited<ReturnType<typeof checkToolLoop>> | undefined;
+      for (let i = 0; i < 26; i++) {
+        if (i % 2 === 0) {
+          result = await checkToolLoop(SESSION_KEY, "Edit", {
+            changes: [{ path: "src/app.ts", kind: "update" }],
+          });
+        } else {
+          result = await checkToolLoop(SESSION_KEY, "Bash", { command: "bun test" });
+        }
+      }
+      expect(result!.blocked).toBe(true);
+      expect(result!.severity).toBe("critical");
+      expect(result!.reason).toContain("ping-pong");
     });
   });
 
