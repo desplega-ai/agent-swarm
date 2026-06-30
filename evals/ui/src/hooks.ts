@@ -87,17 +87,25 @@ export function usePoll<T>(
   return { data, error, loading, refresh };
 }
 
-// ---- models.dev catalog (one fetch per session, shared by every ModelChip) ----
+const CATALOG_CACHE_TTL_MS = 60_000;
+
+function isCatalogCacheStale(lastFetchedAt: number): boolean {
+  return lastFetchedAt === 0 || Date.now() - lastFetchedAt > CATALOG_CACHE_TTL_MS;
+}
+
+// ---- models.dev catalog (stale-while-revalidate cache, shared by every ModelChip) ----
 
 let modelsCache: ModelsResponse | null = null;
 let modelsPromise: Promise<ModelsResponse> | null = null;
+let modelsFetchedAt = 0;
+const modelsSubscribers = new Set<(data: ModelsResponse) => void>();
 
 export interface ModelLookup {
   models: ModelJson[];
   defaultJudgeModel: string | null;
   /** Resolve any observed model-id shape to a catalog entry (null when unknown). */
   resolve: (id: string | null) => ModelJson | null;
-  /** False while the one-shot fetch is still in flight. */
+  /** False while the first fetch is still in flight. */
   loaded: boolean;
 }
 
@@ -113,25 +121,46 @@ function modelIdCandidates(id: string): string[] {
   return out;
 }
 
-/** Cached models.dev catalog + resolver. Fetches `/api/models` once per session. */
+function refreshModelsCache(): Promise<ModelsResponse> {
+  modelsPromise ??= getModels()
+    .then((res) => {
+      modelsCache = res;
+      modelsFetchedAt = Date.now();
+      for (const notify of modelsSubscribers) notify(res);
+      return res;
+    })
+    .finally(() => {
+      modelsPromise = null;
+    });
+  return modelsPromise;
+}
+
+function revalidateModelsCache(): void {
+  if (modelsCache !== null && !isCatalogCacheStale(modelsFetchedAt)) return;
+  void refreshModelsCache().catch(() => {
+    // Keep the last good cache; a later mount/focus will retry.
+  });
+}
+
+/** Cached models.dev catalog + resolver. Revalidates stale `/api/models` data in the background. */
 export function useModels(): ModelLookup {
   const [data, setData] = useState<ModelsResponse | null>(modelsCache);
   useEffect(() => {
-    if (modelsCache !== null) return;
     let cancelled = false;
-    modelsPromise ??= getModels().then((res) => {
-      modelsCache = res;
-      return res;
-    });
-    modelsPromise
-      .then((res) => {
-        if (!cancelled) setData(res);
-      })
-      .catch(() => {
-        modelsPromise = null; // allow a retry on next mount
-      });
+    const notify = (res: ModelsResponse) => {
+      if (!cancelled) setData(res);
+    };
+    const onVisibilityChange = () => {
+      if (!document.hidden) revalidateModelsCache();
+    };
+
+    modelsSubscribers.add(notify);
+    revalidateModelsCache();
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
+      modelsSubscribers.delete(notify);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
@@ -165,38 +194,61 @@ export function useModels(): ModelLookup {
   }, [data]);
 }
 
-// ---- config catalog (one fetch per session, shared by every ConfigChip) ----
+// ---- config catalog (stale-while-revalidate cache, shared by every ConfigChip) ----
 
 let configsCache: ConfigJson[] | null = null;
 let configsPromise: Promise<ConfigJson[]> | null = null;
+let configsFetchedAt = 0;
+const configsSubscribers = new Set<(data: ConfigJson[]) => void>();
 
 export interface ConfigLookup {
   configs: ConfigJson[];
   /** Resolve a config id to its registry entry (null when unknown/removed). */
   byId: (id: string | null) => ConfigJson | null;
-  /** False while the one-shot fetch is still in flight. */
+  /** False while the first fetch is still in flight. */
   loaded: boolean;
 }
 
-/** Cached config catalog. Fetches `/api/configs` once per session (like useModels). */
+function refreshConfigsCache(): Promise<ConfigJson[]> {
+  configsPromise ??= listConfigs()
+    .then((res) => {
+      configsCache = res;
+      configsFetchedAt = Date.now();
+      for (const notify of configsSubscribers) notify(res);
+      return res;
+    })
+    .finally(() => {
+      configsPromise = null;
+    });
+  return configsPromise;
+}
+
+function revalidateConfigsCache(): void {
+  if (configsCache !== null && !isCatalogCacheStale(configsFetchedAt)) return;
+  void refreshConfigsCache().catch(() => {
+    // Keep the last good cache; a later mount/focus will retry.
+  });
+}
+
+/** Cached config catalog. Revalidates stale `/api/configs` data in the background. */
 export function useConfigs(): ConfigLookup {
   const [data, setData] = useState<ConfigJson[] | null>(configsCache);
   useEffect(() => {
-    if (configsCache !== null) return;
     let cancelled = false;
-    configsPromise ??= listConfigs().then((res) => {
-      configsCache = res;
-      return res;
-    });
-    configsPromise
-      .then((res) => {
-        if (!cancelled) setData(res);
-      })
-      .catch(() => {
-        configsPromise = null; // allow a retry on next mount
-      });
+    const notify = (res: ConfigJson[]) => {
+      if (!cancelled) setData(res);
+    };
+    const onVisibilityChange = () => {
+      if (!document.hidden) revalidateConfigsCache();
+    };
+
+    configsSubscribers.add(notify);
+    revalidateConfigsCache();
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
+      configsSubscribers.delete(notify);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
