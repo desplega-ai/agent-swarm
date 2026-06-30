@@ -146,7 +146,7 @@ distractors / harder graded subgoals / red herrings) and re-swept. Borderline sc
 
 ## Recorded baselines
 
-Pinned frontier model: `claude-opus-4.8`. Fill in after the sweep.
+Pinned frontier model: `claude-opus-4.8`. Fill in after the full calibration sweep.
 
 | Scenario               | frontierAvg | budgetAvg | gap | verdict (PASS / FAIL / BORDERLINE) | runId |
 |------------------------|-------------|-----------|-----|-------------------------------------|-------|
@@ -156,6 +156,101 @@ Pinned frontier model: `claude-opus-4.8`. Fill in after the sweep.
 | `relay-pipeline`       |             |           |     |                                     |       |
 | `distributed-audit`    |             |           |     |                                     |       |
 | `delegation-probe`     |             |           |     |                                     |       |
+
+## Budget-tier reference baselines (2026-06-30)
+
+First recorded baselines from two bounded runs on the deployed evals service (`evals.agent-swarm.dev`).
+These are **budget-tier configs only** — frontier anchors (`claude-opus-4.8`, `codex-5.5`) have not been
+run yet, so the full ship-gate table above remains unfilled. These numbers establish the budget floor.
+
+### Run: `run-202606301420-392be1` (baseline-sweep-bounded-v1)
+
+Date: 2026-06-30. Matrix: 2 scenarios × 4 configs × 1 attempt = 8 cells. Judge: default (deepseek-v4-pro).
+
+| Scenario    | Config                 | Score | Passed | Correctness | Cost (USD) | Duration (s) |
+|-------------|------------------------|-------|--------|-------------|------------|--------------|
+| `sql-audit` | `claude-haiku`         | 0.50  | no     | 0.33        | $0.131     | 241          |
+| `sql-audit` | `pi-deepseek-flash`    | 1.00  | yes    | 1.00        | $0.008     | 126          |
+| `sql-audit` | `pi-grok-build-0.1`    | 0.50  | no     | 0.33        | $0.120     | 227          |
+| `sql-audit` | `opencode-gemini-flash` | 0.50  | no     | 0.33        | $0.068     | 212          |
+| `bug-ladder` | `claude-haiku`         | 1.00  | yes    | 1.00        | $0.214     | 254          |
+| `bug-ladder` | `pi-deepseek-flash`    | 1.00  | yes    | 1.00        | $0.009     | 112          |
+| `bug-ladder` | `pi-grok-build-0.1`    | 1.00  | yes    | 1.00        | $0.229     | 137          |
+| `bug-ladder` | `opencode-gemini-flash` | 1.00  | yes    | 1.00        | $0.138     | 191          |
+
+**Totals:** $0.917 harness + $0.055 judge = **$0.972** total. 5/8 cells passed.
+
+### Reference run: `run-202606301401-afe8ab`
+
+Date: 2026-06-30 (earlier same day). Matrix: sql-audit × 4 configs × 1 attempt = 4 cells.
+
+| Scenario    | Config                 | Score | Passed | Cost (USD) | Duration (s) |
+|-------------|------------------------|-------|--------|------------|--------------|
+| `sql-audit` | `claude-haiku`         | 0.50  | no     | $0.129     | 219          |
+| `sql-audit` | `pi-deepseek-flash`    | 0.50  | no     | $0.007     | 148          |
+| `sql-audit` | `pi-grok-build-0.1`    | 0.50  | no     | $0.116     | 111          |
+| `sql-audit` | `opencode-gemini-flash` | 0.50  | no     | $0.043     | 157          |
+
+**Totals:** $0.296 harness + $0.035 judge = **$0.331** total. 0/4 cells passed.
+
+### Observations
+
+1. **`bug-ladder` is saturated at n=1 for budget configs.** All 4 budget-tier configs score 1.0 — the scenario
+   does not discriminate within the budget tier. It may still discriminate frontier vs budget if frontier
+   achieves higher correctness depth, but at 1 attempt the floor is already at 1.0.
+
+2. **`sql-audit` shows run-to-run variance.** `pi-deepseek-flash` scored 1.0 in `run-392be1` but 0.5 in
+   `run-afe8ab`. The correctness dimension (weight 3) drives the score: 3/3 findings vs 1/3 findings.
+   With n=1 the noise is too high to rank budget configs reliably.
+
+3. **Cost efficiency varies 10–30×.** `pi-deepseek-flash` costs ~$0.008/attempt while `pi-grok-build-0.1`
+   costs ~$0.12 and `claude-haiku` ~$0.13. For weekly monitoring, the cheapest config per tier is the
+   pragmatic choice.
+
+4. **Communication and gates are universally passed.** All attempts pass the binary gates and the
+   communication dimension — the discrimination signal lives entirely in the correctness dimension.
+
+### Recommended next step
+
+Run the **full calibration sweep** (6 scenarios × 4 anchors × 3 attempts = 72 cells) to fill the ship-gate
+table above. Estimated cost: **$35–100** depending on deep-scenario retry rates. This requires frontier
+anchors (`claude-opus-4.8`, `codex-5.5`) and at least n=3 attempts to reduce the variance observed in
+`sql-audit`. See the "Running the sweep" section above for the exact CLI command.
+
+## Metrics we can share
+
+The harness computes these metrics deterministically. LLMs are used **only** for judging individual
+dimensions (correctness, communication) — aggregation, scoring, and the ship-gate verdict are pure math.
+
+### Per-scenario metrics (shareable as-is)
+
+| Metric | Formula | What it measures |
+|--------|---------|------------------|
+| **Pass rate** | `passed / finished` | Fraction of attempts that pass (score ≥ 0.75 AND all gates) |
+| **Mean score** | `Σ scores / n` | Average weighted-dimension score across attempts (0–1) |
+| **Score CI (95%)** | Bootstrap percentile, 2000 iters, seed 0xC0FFEE | Confidence interval — tightens ~1/√n |
+| **Pass-rate CI** | Wilson score interval (z=1.96) | Well-behaved at 0/n and n/n |
+| **Avg cost (USD)** | `Σ costUsd / n` | Mean harness cost per attempt |
+| **Avg duration (s)** | `Σ durationMs / n / 1000` | Mean wall-clock time per attempt |
+
+### Cross-tier metrics (shareable after full calibration)
+
+| Metric | Formula | What it measures |
+|--------|---------|------------------|
+| **Frontier avg** | Mean score over frontier anchors | How well the best models do |
+| **Budget avg** | Mean score over budget anchors | How well cheap models do |
+| **Gap** | `frontierAvg − budgetAvg` | Discrimination power of the scenario |
+| **Gap CI** | Bootstrap CI of difference of cohort means | Statistical significance |
+| **Ship-gate** | gap ≥ 0.2 → PASS, < 0.1 → FAIL, else BORDERLINE | Should this scenario stay in the suite? |
+
+### Per-model analytics (dashboard-ready)
+
+| Metric | Scope | Description |
+|--------|-------|-------------|
+| **Model pass rate** | Cross-scenario | Overall pass rate across all scenarios |
+| **Model avg score** | Cross-scenario | Mean score across all scenarios |
+| **Cost per minute** | Per-model | `avgCostUsd / (avgDurationMs / 60000)` |
+| **Accuracy vs efficiency scatter** | Per-model | Leaderboard chart: passRate vs avgTotalTokens |
 
 ## Swarm-mechanics scenarios — finding (2026-06-14, ACCEPTED) → PRUNED (2026-06-17, Plan A)
 
