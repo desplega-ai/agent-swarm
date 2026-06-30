@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react";
+import { getStoredApiKey, listRuns, setStoredApiKey, setUnauthorizedHandler } from "./api.ts";
 import { navigate, useHashRoute } from "./hooks.ts";
 import AnalyticsPage from "./pages/AnalyticsPage.tsx";
 import ConfigsPage from "./pages/ConfigsPage.tsx";
@@ -26,8 +27,59 @@ function ThemeToggle(): ReactNode {
   );
 }
 
+function LoginScreen({ onUnlock }: { onUnlock: () => void }): ReactNode {
+  const [key, setKey] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = key.trim();
+    if (!trimmed) {
+      setError("Paste the evals API key.");
+      return;
+    }
+    setStoredApiKey(trimmed);
+    onUnlock();
+  };
+  return (
+    <main className="auth-shell">
+      <form className="auth-panel" onSubmit={submit}>
+        <img src="/logo.png" width={28} height={28} alt="swarm logo" />
+        <h1>swarm evals</h1>
+        <label htmlFor="evals-api-key">API key</label>
+        <input
+          id="evals-api-key"
+          type="password"
+          autoComplete="current-password"
+          value={key}
+          onChange={(event) => {
+            setKey(event.target.value);
+            setError(null);
+          }}
+        />
+        {error ? <p className="auth-error">{error}</p> : null}
+        <button type="submit">Continue</button>
+      </form>
+    </main>
+  );
+}
+
 export default function App(): ReactNode {
   const { parts } = useHashRoute();
+  const [unlocked, setUnlocked] = useState(() => Boolean(getStoredApiKey()));
+  const [checkingAuth, setCheckingAuth] = useState(() => !getStoredApiKey());
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => setUnlocked(false));
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  useEffect(() => {
+    if (!checkingAuth) return;
+    void listRuns()
+      .then(() => setUnlocked(true))
+      .catch(() => setUnlocked(false))
+      .finally(() => setCheckingAuth(false));
+  }, [checkingAuth]);
 
   // Legacy redirect: #/runs/:id/cells/:scenarioId/:configId → first attempt of the cell
   // (attempt ids are deterministic `${runId}_${scenarioId}_${configId}_${index}`).
@@ -42,6 +94,14 @@ export default function App(): ReactNode {
       );
     }
   }, [legacyCell]);
+
+  if (checkingAuth) {
+    return <main className="auth-shell" />;
+  }
+
+  if (!unlocked) {
+    return <LoginScreen onUnlock={() => setUnlocked(true)} />;
+  }
 
   let page: ReactNode;
   if (parts[0] === "scenarios") {

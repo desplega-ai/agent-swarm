@@ -60,6 +60,55 @@ Local-first dashboard + API; **runs can be triggered, resumed, and cancelled fro
 
 Key endpoints: `GET/POST /api/runs`, `POST /api/runs/:id/{resume,cancel}`, `GET /api/runs/:id`, `GET /api/attempts/:id{,/transcript}`, `GET /api/scenarios{,/:id}`, `GET /api/configs`, `GET /api/artifacts/:id`.
 
+When `EVALS_API_KEY` is set, every `/api/*` endpoint requires `Authorization: Bearer <key>`.
+Static UI assets and `/health` stay public. Browser users open the URL, paste the same key once,
+and the UI stores it in `localStorage`; a 401 clears the stored key and shows the prompt again.
+When `EVALS_API_KEY` is unset, the server logs a warning and leaves `/api/*` open for local dev
+and tests.
+
+`POST /api/runs` and `POST /api/runs/:id/resume` are also guarded by
+`EVALS_MAX_CONCURRENT_RUNS` (default `1`). The cap counts runs actively executing inside the
+serve process; when the cap is reached, the API returns HTTP 429.
+
+## Deploying the eval service
+
+Build the standalone service image from the repo root so the Dockerfile can copy both `evals/`
+and the small root helpers it imports:
+
+```bash
+docker build -f evals/Dockerfile .
+```
+
+The container runs `bun src/cli.ts serve`, serves the built SPA and `/api/*` on one origin, and
+listens on `EVALS_PORT` (default `4801`). Caddy, HTTPS, and the public domain are Taras's layer on
+top. A human opens the deployed URL and pastes `EVALS_API_KEY` once; swarm/CLI callers send the
+same key as `Authorization: Bearer <key>`.
+
+Required Dokploy env/secrets:
+
+| Var | Required | Purpose |
+|---|---:|---|
+| `EVALS_API_KEY` | yes | Static master key for every `/api/*` route. Leave unset only for local dev/tests. |
+| `EVALS_PORT` | no | Serve port; defaults to `4801`. |
+| `EVALS_MAX_CONCURRENT_RUNS` | no | Max active runs in the service process; defaults to `1`. |
+| `EVALS_DB_SYNC_URL` | yes | Turso remote primary sync URL for the embedded replica. |
+| `EVALS_DB_AUTH_TOKEN` | yes | Turso auth token for `EVALS_DB_SYNC_URL`. |
+| `E2B_API_KEY` | yes | E2B sandbox creation. |
+| `OPENROUTER_API_KEY` | yes | Judges and pi/opencode workers. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | yes for claude configs | Claude Code OAuth workers. |
+| `ANTHROPIC_API_KEY` | yes for Anthropic API configs | Anthropic-backed claude workers when used. |
+| `OPENAI_API_KEY` | yes for codex configs | Codex workers. |
+| `EMBEDDING_API_KEY` | yes for memory-seeded scenarios | API-sandbox memory embeddings; `OPENAI_API_KEY` is not a fallback. |
+| `EMBEDDING_MODEL` | no | Optional embedding model override passed to the API sandbox. |
+| `EMBEDDING_API_BASE_URL` | no | Optional embedding API base URL passed to the API sandbox. |
+| `EVAL_JUDGE_MODEL` | no | Default judge model override. |
+| `EVALS_E2B_TEMPLATE_API` | no | API sandbox template override. |
+| `EVALS_E2B_TEMPLATE_WORKER` | no | Worker sandbox template override. |
+
+Do not use `EVALS_DB_PATH` for Dokploy unless intentionally running an offline disposable DB; the
+container filesystem can be replaced on redeploy, so persisted history should use the Turso
+remote primary via `EVALS_DB_SYNC_URL` + `EVALS_DB_AUTH_TOKEN`.
+
 ## Defining scenarios and configs
 
 - Scenarios live in `scenarios/*.ts` (`Scenario` type): description, optional seeding, initial task(s), and an `outcome` (deterministic `checks`, `llmJudge` and/or `agenticJudge` rubrics, `passThreshold`). Register in `scenarios/index.ts` — every scenario is shape-validated at registry load (`validateScenario`; bad definitions fail CLI/server startup with the full violation list).
@@ -140,6 +189,8 @@ The old `evals/evals.db` (+ `-wal`/`-shm`) is a **frozen backup** of the pre-Tur
 | `EVAL_JUDGE_MODEL` | default judge model |
 | `EVALS_DB_SYNC_URL` + `EVALS_DB_AUTH_TOKEN` | Turso embedded replica (DB of record — see [Database](#database)) |
 | `EVALS_DB_PATH` | plain local DB file instead (offline/dev escape hatch) |
+| `EVALS_API_KEY` | static master key for deployed `/api/*`; when unset the API is open for local dev/tests |
+| `EVALS_MAX_CONCURRENT_RUNS` | max active runs accepted by `serve` (default `1`; over-cap creates/resumes return 429) |
 | `EVALS_PORT` | serve port override |
 | `EVALS_E2B_TEMPLATE_API` / `EVALS_E2B_TEMPLATE_WORKER` | template overrides (default `agent-swarm-{api,worker}-latest`) |
 

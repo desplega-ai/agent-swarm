@@ -147,6 +147,63 @@ pre {
   padding: 16px;
 }
 
+/* ---- auth ---- */
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  width: min(100%, 360px);
+  display: grid;
+  gap: 10px;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.auth-panel h1 {
+  margin: 0 0 4px;
+  font-size: 21px;
+  line-height: 1.15;
+}
+
+.auth-panel label {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.auth-panel input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.auth-panel button {
+  min-height: 34px;
+  color: #171717;
+  background: var(--accent);
+  border: 0;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
+}
+
 /* ---- layout / panels ---- */
 
 .layout-30-70 {

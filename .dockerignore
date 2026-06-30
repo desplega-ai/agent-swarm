@@ -61,5 +61,16 @@ docker-compose.yml
 docker-compose.*.yml
 !docker-compose.worker.yml
 
-# Eval harness sub-project (own package, never part of images)
+# Eval harness sub-project (included for evals/Dockerfile only; the root
+# Dockerfiles do not COPY it, so this does not change their images).
 evals/
+!evals/
+!evals/**
+evals/**/*.test.ts
+evals/**/*.spec.ts
+evals/**/node_modules/
+evals/ui/dist/
+evals/evals.db
+evals/evals.db-shm
+evals/evals.db-wal
+evals/evals-replica.db*

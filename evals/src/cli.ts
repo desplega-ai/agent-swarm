@@ -45,8 +45,10 @@ Presets (--preset, repeatable; see run --help): ${CONFIG_PRESETS.map((p) => p.id
 
 Env: E2B_API_KEY (required), OPENROUTER_API_KEY (judge + pi/opencode workers),
      CLAUDE_CODE_OAUTH_TOKEN (claude workers), OPENAI_API_KEY (codex workers),
-     EVAL_JUDGE_MODEL, EVALS_DB_SYNC_URL + EVALS_DB_AUTH_TOKEN (Turso embedded
-     replica — required unless EVALS_DB_PATH names a plain local file)`;
+     EVAL_JUDGE_MODEL, EVALS_API_KEY (deployed /api auth),
+     EVALS_MAX_CONCURRENT_RUNS (serve trigger cap, default 1),
+     EVALS_DB_SYNC_URL + EVALS_DB_AUTH_TOKEN (Turso embedded replica — required
+     unless EVALS_DB_PATH names a plain local file)`;
 
 const RUN_HELP = `Usage: bun src/cli.ts run [options]
 
