@@ -1,4 +1,30 @@
+import { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
 import { closeDb, getDb, initDb } from "../be/db";
+
+// macOS ships a system libsqlite3 compiled WITHOUT dynamic extension loading, so
+// `require("sqlite-vec").load(db)` throws and the hybrid-search vector arm is
+// silently disabled — the memory-hybrid tests then see retrievalSource "fts"
+// instead of "hybrid" and fail. Homebrew's sqlite IS built with extension
+// support, so point bun:sqlite at it before the first Database opens
+// (setCustomSQLite must run exactly once, before any connection). Guarded to
+// darwin + file-exists, so this is a no-op on Linux CI and on machines without
+// Homebrew sqlite (which keep the existing in-memory-cosine fallback behavior).
+if (process.platform === "darwin") {
+  for (const candidate of [
+    "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
+    "/usr/local/opt/sqlite/lib/libsqlite3.dylib",
+  ]) {
+    if (existsSync(candidate)) {
+      try {
+        Database.setCustomSQLite(candidate);
+      } catch {
+        // Already loaded or unavailable — fall back to in-memory cosine.
+      }
+      break;
+    }
+  }
+}
 
 const testTemplateGlobals = globalThis as typeof globalThis & {
   __testMigrationTemplate?: Uint8Array;

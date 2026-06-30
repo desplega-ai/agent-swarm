@@ -30,6 +30,6 @@ ENV NODE_ENV=production
 
 EXPOSE 4801
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD bun -e "const port = process.env.EVALS_PORT || '4801'; const res = await fetch(`http://127.0.0.1:${port}/health`); if (!res.ok) process.exit(1)"
+  CMD bun -e "const port = process.env.EVALS_PORT || '4801'; const res = await fetch('http://127.0.0.1:' + port + '/health'); if (!res.ok) process.exit(1)"
 
 CMD ["bun", "src/cli.ts", "serve"]

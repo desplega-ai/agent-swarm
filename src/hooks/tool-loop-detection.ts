@@ -10,6 +10,7 @@ interface ToolCallRecord {
   toolName: string;
   argsHash: string;
   timestamp: number;
+  isLowCardinality?: boolean;
 }
 
 interface LoopDetectionResult {
@@ -19,19 +20,42 @@ interface LoopDetectionResult {
 }
 
 const HISTORY_DIR = "/tmp/agent-swarm-tool-history";
-const MAX_HISTORY = 30; // Sliding window size
+const MAX_HISTORY = 40; // Sliding window — must exceed LOW_CARDINALITY_PINGPONG_CRITICAL_THRESHOLD (24)
 const REPEAT_WARNING_THRESHOLD = 8;
 const REPEAT_CRITICAL_THRESHOLD = 15;
 const LOW_CARDINALITY_FILE_CHANGE_CRITICAL_THRESHOLD = 24;
 const PINGPONG_WARNING_THRESHOLD = 6;
 const PINGPONG_CRITICAL_THRESHOLD = 12;
+const LOW_CARDINALITY_PINGPONG_WARNING_THRESHOLD = 12;
+const LOW_CARDINALITY_PINGPONG_CRITICAL_THRESHOLD = 24;
+
+/**
+ * Recursively sort object keys so serialization is deterministic regardless
+ * of insertion order. Array elements are preserved in order (positional).
+ */
+function deepSortKeys(val: unknown): unknown {
+  if (val === null || val === undefined || typeof val !== "object") return val;
+  if (Array.isArray(val)) return val.map(deepSortKeys);
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(val as Record<string, unknown>).sort()) {
+    sorted[key] = deepSortKeys((val as Record<string, unknown>)[key]);
+  }
+  return sorted;
+}
 
 /**
  * Simple hash of tool arguments for comparison.
- * Uses JSON.stringify + a basic hash to avoid storing full args.
+ * Uses deep-sorted JSON.stringify + a basic hash to avoid storing full args.
+ *
+ * NOTE: the previous implementation used `JSON.stringify(args, Object.keys(args).sort())`
+ * which passed the top-level keys as a replacer array. This inadvertently stripped
+ * nested keys whose names didn't appear in the top-level key list — e.g. for
+ * `{server, tool, arguments: {name, source}}`, the replacer `["arguments","server","tool"]`
+ * would drop "name" and "source" at the nested level, making ALL MCP calls to the
+ * same tool hash identically regardless of their actual arguments.
  */
 function hashArgs(args: Record<string, unknown>): string {
-  const str = JSON.stringify(args, Object.keys(args).sort());
+  const str = JSON.stringify(deepSortKeys(args));
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
@@ -112,10 +136,16 @@ export async function checkToolLoop(
   toolInput: Record<string, unknown>,
 ): Promise<LoopDetectionResult> {
   const argsHash = hashArgs(toolInput);
+  const lowCardinality = isCodexFileChangeArgs(toolName, toolInput);
   const history = await loadHistory(sessionKey);
 
   // Add current call to history
-  history.push({ toolName, argsHash, timestamp: Date.now() });
+  history.push({
+    toolName,
+    argsHash,
+    timestamp: Date.now(),
+    isLowCardinality: lowCardinality || undefined,
+  });
   await saveHistory(sessionKey, history);
 
   // Only check if we have enough history
@@ -143,8 +173,10 @@ export async function checkToolLoop(
     };
   }
 
+  // Stash repeat warning — a ping-pong critical result takes priority
+  let pendingWarning: LoopDetectionResult | undefined;
   if (repeatCount >= REPEAT_WARNING_THRESHOLD) {
-    return {
+    pendingWarning = {
       blocked: false,
       severity: "warning",
       reason: `Tool "${toolName}" has been called ${repeatCount} times with identical arguments. Consider trying a different approach.`,
@@ -152,8 +184,19 @@ export async function checkToolLoop(
   }
 
   // Strategy 2: Ping-pong between two tool call patterns
+  // Use higher thresholds when either dominant pattern involves low-cardinality
+  // args (e.g. codex file_change where edits to the same file hash identically
+  // because the args carry {path, kind} but no content/diff).
   if (history.length >= PINGPONG_WARNING_THRESHOLD) {
-    const recent = history.slice(-PINGPONG_CRITICAL_THRESHOLD);
+    const hasLowCardinality = history.some((r) => r.isLowCardinality);
+    const ppCritical = hasLowCardinality
+      ? LOW_CARDINALITY_PINGPONG_CRITICAL_THRESHOLD
+      : PINGPONG_CRITICAL_THRESHOLD;
+    const ppWarning = hasLowCardinality
+      ? LOW_CARDINALITY_PINGPONG_WARNING_THRESHOLD
+      : PINGPONG_WARNING_THRESHOLD;
+
+    const recent = history.slice(-ppCritical);
     const patterns = new Map<string, number>();
     for (const r of recent) {
       const p = `${r.toolName}:${r.argsHash}`;
@@ -168,15 +211,15 @@ export async function checkToolLoop(
         const dominance = first[1] + second[1];
         if (dominance >= recent.length * 0.8) {
           const totalPingPong = first[1] + second[1];
-          if (totalPingPong >= PINGPONG_CRITICAL_THRESHOLD) {
+          if (totalPingPong >= ppCritical) {
             return {
               blocked: true,
               severity: "critical",
               reason: `Detected ping-pong loop: alternating between "${first[0].split(":")[0]}" and "${second[0].split(":")[0]}" for ${totalPingPong} calls. Break out of this pattern.`,
             };
           }
-          if (totalPingPong >= PINGPONG_WARNING_THRESHOLD) {
-            return {
+          if (totalPingPong >= ppWarning) {
+            pendingWarning ??= {
               blocked: false,
               severity: "warning",
               reason:
@@ -188,7 +231,7 @@ export async function checkToolLoop(
     }
   }
 
-  return { blocked: false };
+  return pendingWarning ?? { blocked: false };
 }
 
 /**
