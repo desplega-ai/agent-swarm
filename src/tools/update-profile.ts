@@ -1,8 +1,52 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, updateAgentName, updateAgentProfile } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { type Agent, AgentSchema } from "@/types";
+
+async function validateSetupScriptSyntax(setupScript: string): Promise<string | null> {
+  const proc = Bun.spawn(["bash", "-n", "-c", setupScript], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+
+  if (exitCode === 0) return null;
+  return stderr.trim() || `bash -n exited with code ${exitCode}`;
+}
+
+async function computeSetupScriptDiff(before: string, after: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "setup-script-diff-"));
+  const beforePath = join(dir, "before.sh");
+  const afterPath = join(dir, "after.sh");
+
+  try {
+    await Bun.write(beforePath, before);
+    await Bun.write(afterPath, after);
+
+    const proc = Bun.spawn(
+      ["diff", "-u", "--label", "before", "--label", "after", beforePath, afterPath],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+
+    if (exitCode === 0) return "(no changes)";
+    if (exitCode === 1) return stdout.trimEnd();
+    return `diff failed with code ${exitCode}: ${stderr.trim()}`;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
 export const registerUpdateProfileTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -60,7 +104,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .max(65536)
           .optional()
           .describe(
-            "Setup script content (bash). Runs at container start to install tools, configure environment. Persists across sessions. Also written to /workspace/start-up.sh.",
+            "Setup script content (bash). Runs at container start as the worker user after privilege drop. Persists across sessions. Also written to /workspace/start-up.sh.",
           ),
         toolsMd: z
           .string()
@@ -190,6 +234,22 @@ export const registerUpdateProfileTool = (server: McpServer) => {
 
       try {
         let agent: Agent | null = null;
+        const previousSetupScript =
+          setupScript !== undefined ? (getAgentById(targetAgentId)?.setupScript ?? "") : undefined;
+
+        if (setupScript !== undefined) {
+          const syntaxError = await validateSetupScriptSyntax(setupScript);
+          if (syntaxError) {
+            return {
+              content: [{ type: "text", text: `Invalid setupScript: ${syntaxError}` }],
+              structuredContent: {
+                yourAgentId: requestInfo.agentId,
+                success: false,
+                message: `Invalid setupScript: ${syntaxError}`,
+              },
+            };
+          }
+        }
 
         // Update name if provided
         if (name !== undefined) {
@@ -225,6 +285,29 @@ export const registerUpdateProfileTool = (server: McpServer) => {
             changedByAgentId: requestInfo.agentId,
           },
         );
+
+        if (setupScript !== undefined && previousSetupScript !== undefined) {
+          try {
+            const diff = await computeSetupScriptDiff(previousSetupScript, setupScript);
+            console.warn(
+              [
+                "[audit] setupScript updated via update-profile",
+                `targetAgentId=${targetAgentId}`,
+                `changedByAgentId=${requestInfo.agentId}`,
+                `changeSource=${isUpdatingSelf ? "self_edit" : "lead_coaching"}`,
+                `beforeBytes=${Buffer.byteLength(previousSetupScript, "utf8")}`,
+                `afterBytes=${Buffer.byteLength(setupScript, "utf8")}`,
+                "diff:",
+                diff,
+              ].join("\n"),
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(
+              `[audit] setupScript updated via update-profile but diff logging failed targetAgentId=${targetAgentId} changedByAgentId=${requestInfo.agentId}: ${message}`,
+            );
+          }
+        }
 
         // Write updated files to workspace only when updating self AND the caller
         // matches the real running agent (process.env.AGENT_ID). This guards against

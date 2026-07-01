@@ -717,21 +717,38 @@ if [ -n "$AGENT_ID" ]; then
         GLOBAL_SCRIPT=$(jq -r '.globalSetupScript // empty' /tmp/setup_scripts.json 2>/dev/null)
         AGENT_SCRIPT=$(jq -r '.setupScript // empty' /tmp/setup_scripts.json 2>/dev/null)
 
+        if [ -n "$GLOBAL_SCRIPT" ]; then
+            echo "Executing global setup script as root..."
+            GLOBAL_TEMP_FILE=$(mktemp)
+            echo "#!/bin/bash" > "$GLOBAL_TEMP_FILE"
+            echo "$GLOBAL_SCRIPT" >> "$GLOBAL_TEMP_FILE"
+            chmod +x "$GLOBAL_TEMP_FILE"
+            GLOBAL_EXIT_CODE=0
+            "$GLOBAL_TEMP_FILE" || GLOBAL_EXIT_CODE=$?
+            rm -f "$GLOBAL_TEMP_FILE"
+            if [ "$GLOBAL_EXIT_CODE" -ne 0 ]; then
+                echo ""
+                echo "ERROR: Global setup script failed with exit code $GLOBAL_EXIT_CODE"
+                if [ "${STARTUP_SCRIPT_STRICT:-true}" = "true" ]; then
+                    echo "STARTUP_SCRIPT_STRICT=true - Exiting..."
+                    exit "$GLOBAL_EXIT_CODE"
+                else
+                    echo "STARTUP_SCRIPT_STRICT=false - Continuing despite global setup error..."
+                fi
+            fi
+        fi
+
         if [ -n "$GLOBAL_SCRIPT" ] || [ -n "$AGENT_SCRIPT" ]; then
             EXISTING_STARTUP=$(find_startup_script) || true
 
             if [ -n "$EXISTING_STARTUP" ]; then
                 # Prepend to existing file (preserve operator content)
-                echo "Prepending DB setup script to existing ${EXISTING_STARTUP}..."
+                echo "Prepending agent setup script to existing ${EXISTING_STARTUP}..."
                 TEMP_FILE=$(mktemp)
                 echo "#!/bin/bash" > "$TEMP_FILE"
-                # Global script goes outside markers (not synced back to agent DB)
-                if [ -n "$GLOBAL_SCRIPT" ]; then
-                    echo "# --- Global setup script ---" >> "$TEMP_FILE"
-                    echo "$GLOBAL_SCRIPT" >> "$TEMP_FILE"
-                    echo "" >> "$TEMP_FILE"
-                fi
-                # Agent script goes between markers (synced back to DB by hooks)
+                # Agent script goes between markers (synced back to DB by hooks).
+                # Global setup is executed separately as root above and must not
+                # be included in the worker-executed startup file.
                 if [ -n "$AGENT_SCRIPT" ]; then
                     echo "# === Agent-managed setup (from DB) ===" >> "$TEMP_FILE"
                     echo "$AGENT_SCRIPT" >> "$TEMP_FILE"
@@ -745,23 +762,16 @@ if [ -n "$AGENT_ID" ]; then
                     >> "$TEMP_FILE"
                 mv "$TEMP_FILE" "$EXISTING_STARTUP"
                 chmod +x "$EXISTING_STARTUP"
-            else
+            elif [ -n "$AGENT_SCRIPT" ]; then
                 # Create new start-up.sh
-                echo "Creating /workspace/start-up.sh from DB setup script..."
+                echo "Creating /workspace/start-up.sh from agent setup script..."
                 echo "#!/bin/bash" > /workspace/start-up.sh
-                if [ -n "$GLOBAL_SCRIPT" ]; then
-                    echo "# --- Global setup script ---" >> /workspace/start-up.sh
-                    echo "$GLOBAL_SCRIPT" >> /workspace/start-up.sh
-                    echo "" >> /workspace/start-up.sh
-                fi
-                if [ -n "$AGENT_SCRIPT" ]; then
-                    echo "# === Agent-managed setup (from DB) ===" >> /workspace/start-up.sh
-                    echo "$AGENT_SCRIPT" >> /workspace/start-up.sh
-                    echo "# === End agent-managed setup ===" >> /workspace/start-up.sh
-                fi
+                echo "# === Agent-managed setup (from DB) ===" >> /workspace/start-up.sh
+                echo "$AGENT_SCRIPT" >> /workspace/start-up.sh
+                echo "# === End agent-managed setup ===" >> /workspace/start-up.sh
                 chmod +x /workspace/start-up.sh
             fi
-            echo "Setup scripts composed (global: $([ -n "$GLOBAL_SCRIPT" ] && echo "yes" || echo "no"), agent: $([ -n "$AGENT_SCRIPT" ] && echo "yes" || echo "no"))"
+            echo "Setup scripts prepared (global root hook: $([ -n "$GLOBAL_SCRIPT" ] && echo "yes" || echo "no"), agent worker hook: $([ -n "$AGENT_SCRIPT" ] && echo "yes" || echo "no"))"
         else
             echo "No setup scripts configured"
         fi
@@ -773,99 +783,6 @@ if [ -n "$AGENT_ID" ]; then
 fi
 # ---- End setup script fetch ----
 
-
-# Execute startup script if found
-STARTUP_SCRIPT_STRICT="${STARTUP_SCRIPT_STRICT:-true}"
-echo ""
-echo "=== Startup Script Detection (${ROLE}) ==="
-
-# Find startup script matching /workspace/start-up.* pattern
-STARTUP_SCRIPT=$(find_startup_script) || true
-
-if [ -n "$STARTUP_SCRIPT" ]; then
-    echo "Found startup script: $STARTUP_SCRIPT"
-
-    # Check if file is executable
-    if [ ! -x "$STARTUP_SCRIPT" ]; then
-        echo "Script is not executable, checking for shebang..."
-    fi
-
-    # Read first line to check for shebang
-    FIRST_LINE=$(head -n 1 "$STARTUP_SCRIPT")
-
-    if [[ "$FIRST_LINE" =~ ^#! ]]; then
-        # Has shebang - extract interpreter
-        INTERPRETER="${FIRST_LINE#\#!}"
-        # Trim whitespace
-        INTERPRETER=$(echo "$INTERPRETER" | xargs)
-        echo "Detected shebang interpreter: $INTERPRETER"
-
-        # Check if it's an env-based shebang (#!/usr/bin/env bash)
-        if [[ "$INTERPRETER" =~ ^/usr/bin/env ]]; then
-            ACTUAL_INTERPRETER=$(echo "$INTERPRETER" | awk '{print $2}')
-            echo "Using env interpreter: $ACTUAL_INTERPRETER"
-            INTERPRETER="$ACTUAL_INTERPRETER"
-        fi
-
-        echo "Executing startup script with interpreter: $INTERPRETER"
-        # Always use the interpreter explicitly to avoid permission issues
-        # Use || true to prevent set -e from exiting before we can handle the error
-        $INTERPRETER "$STARTUP_SCRIPT" || EXIT_CODE=$?
-        EXIT_CODE=${EXIT_CODE:-0}
-    else
-        # No shebang, try to infer from extension
-        EXTENSION="${STARTUP_SCRIPT##*.}"
-        echo "No shebang found, inferring from extension: .$EXTENSION"
-
-        case "$EXTENSION" in
-            sh|bash)
-                echo "Executing with bash..."
-                bash "$STARTUP_SCRIPT" || EXIT_CODE=$?
-                ;;
-            js)
-                echo "Executing with node..."
-                node "$STARTUP_SCRIPT" || EXIT_CODE=$?
-                ;;
-            ts)
-                echo "Executing with bun (TypeScript)..."
-                bun run "$STARTUP_SCRIPT" || EXIT_CODE=$?
-                ;;
-            bun)
-                echo "Executing with bun..."
-                bun run "$STARTUP_SCRIPT" || EXIT_CODE=$?
-                ;;
-            *)
-                # Try to execute directly if executable
-                if [ -x "$STARTUP_SCRIPT" ]; then
-                    echo "Executing directly (executable bit set)..."
-                    "$STARTUP_SCRIPT" || EXIT_CODE=$?
-                else
-                    echo "WARNING: Unknown extension and not executable, trying bash..."
-                    bash "$STARTUP_SCRIPT" || EXIT_CODE=$?
-                fi
-                ;;
-        esac
-        EXIT_CODE=${EXIT_CODE:-0}
-    fi
-
-    # Handle exit code
-    if [ $EXIT_CODE -ne 0 ]; then
-        echo ""
-        echo "ERROR: Startup script failed with exit code $EXIT_CODE"
-
-        if [ "$STARTUP_SCRIPT_STRICT" = "true" ]; then
-            echo "STARTUP_SCRIPT_STRICT=true - Exiting..."
-            exit $EXIT_CODE
-        else
-            echo "STARTUP_SCRIPT_STRICT=false - Continuing despite error..."
-        fi
-    else
-        echo "Startup script completed successfully"
-    fi
-else
-    echo "No startup script found (looked for /workspace/start-up.*)"
-    echo "Skipping startup script execution"
-fi
 
 echo ""
 echo "=== Workspace Initialization ==="
@@ -1022,6 +939,121 @@ if [ "${SWARM_DEP_REDIS_ENABLED:-false}" = "true" ]; then
   /usr/local/bin/init-local-redis.sh
 fi
 
+WORKER_BOOTSTRAP="/tmp/agent-swarm-worker-entrypoint.sh"
+cat > "$WORKER_BOOTSTRAP" <<'EOF'
+#!/bin/bash
+set -e
+
+find_startup_script() {
+    for pattern in start-up.sh start-up.bash start-up.js start-up.ts start-up.bun start-up; do
+        if [ -f "/workspace/${pattern}" ]; then
+            echo "/workspace/${pattern}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+run_startup_script() {
+    local role="${AGENT_ROLE:-worker}"
+    local startup_script_strict="${STARTUP_SCRIPT_STRICT:-true}"
+    local startup_script=""
+    local exit_code=0
+
+    echo ""
+    echo "=== Startup Script Detection (${role}) ==="
+
+    startup_script=$(find_startup_script) || true
+
+    if [ -z "$startup_script" ]; then
+        echo "No startup script found (looked for /workspace/start-up.*)"
+        echo "Skipping startup script execution"
+        return 0
+    fi
+
+    echo "Found startup script: $startup_script"
+    echo "Executing startup script as user: $(id -un) (uid $(id -u))"
+
+    if [ ! -x "$startup_script" ]; then
+        echo "Script is not executable, checking for shebang..."
+    fi
+
+    local first_line
+    first_line=$(head -n 1 "$startup_script")
+
+    if [[ "$first_line" =~ ^#! ]]; then
+        local interpreter
+        interpreter="${first_line#\#!}"
+        interpreter=$(echo "$interpreter" | xargs)
+        echo "Detected shebang interpreter: $interpreter"
+
+        if [[ "$interpreter" =~ ^/usr/bin/env ]]; then
+            local actual_interpreter
+            actual_interpreter=$(echo "$interpreter" | awk '{print $2}')
+            echo "Using env interpreter: $actual_interpreter"
+            interpreter="$actual_interpreter"
+        fi
+
+        echo "Executing startup script with interpreter: $interpreter"
+        $interpreter "$startup_script" || exit_code=$?
+    else
+        local extension
+        extension="${startup_script##*.}"
+        echo "No shebang found, inferring from extension: .$extension"
+
+        case "$extension" in
+            sh|bash)
+                echo "Executing with bash..."
+                bash "$startup_script" || exit_code=$?
+                ;;
+            js)
+                echo "Executing with node..."
+                node "$startup_script" || exit_code=$?
+                ;;
+            ts)
+                echo "Executing with bun (TypeScript)..."
+                bun run "$startup_script" || exit_code=$?
+                ;;
+            bun)
+                echo "Executing with bun..."
+                bun run "$startup_script" || exit_code=$?
+                ;;
+            *)
+                if [ -x "$startup_script" ]; then
+                    echo "Executing directly (executable bit set)..."
+                    "$startup_script" || exit_code=$?
+                else
+                    echo "WARNING: Unknown extension and not executable, trying bash..."
+                    bash "$startup_script" || exit_code=$?
+                fi
+                ;;
+        esac
+    fi
+
+    if [ "$exit_code" -ne 0 ]; then
+        echo ""
+        echo "ERROR: Startup script failed with exit code $exit_code"
+
+        if [ "$startup_script_strict" = "true" ]; then
+            echo "STARTUP_SCRIPT_STRICT=true - Exiting..."
+            exit "$exit_code"
+        else
+            echo "STARTUP_SCRIPT_STRICT=false - Continuing despite error..."
+        fi
+    else
+        echo "Startup script completed successfully"
+    fi
+}
+
+run_startup_script
+
+role="${AGENT_ROLE:-worker}"
+echo "Starting $role..."
+exec /usr/local/bin/agent-swarm "$role" "$@"
+EOF
+chmod 755 "$WORKER_BOOTSTRAP"
+chown worker:worker "$WORKER_BOOTSTRAP" 2>/dev/null || true
+
 # Run the agent using compiled binary.
 #
 # `tini` is prepended so PID 1 is a real init. The agent-swarm process spawns
@@ -1032,5 +1064,4 @@ fi
 # PID 1, those orphans become unreaped zombies that accumulate for the life of
 # the container (one per orphaned grandchild, unbounded over uptime). tini
 # calls waitpid(-1) and reaps every orphan, and forwards signals to the worker.
-echo "Starting $ROLE..."
-exec tini -- gosu worker /usr/local/bin/agent-swarm "$ROLE" "$@"
+exec tini -- gosu worker "$WORKER_BOOTSTRAP" "$@"

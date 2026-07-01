@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getAgentById, getLatestContextVersion, initDb } from "../be/db";
@@ -192,5 +192,39 @@ describe("update-profile authorization", () => {
     const version = getLatestContextVersion(WORKER_ID, "identityMd");
     expect(version).not.toBeNull();
     expect(version!.changeSource).toBe("self_edit");
+  });
+
+  test("rejects setupScript with invalid bash syntax before updating DB", async () => {
+    const before = getAgentById(WORKER_ID)?.setupScript;
+
+    const result = await callUpdateProfile(server, WORKER_ID, {
+      setupScript: "if true; then\n  echo missing-fi\n",
+    });
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("Invalid setupScript");
+
+    const agent = getAgentById(WORKER_ID);
+    expect(agent?.setupScript).toBe(before);
+  });
+
+  test("logs setupScript audit diff for accepted updates", async () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const result = await callUpdateProfile(server, WORKER_ID, {
+        setupScript: "echo audit-test\n",
+      });
+
+      expect(result.structuredContent.success).toBe(true);
+      expect(warnSpy).toHaveBeenCalled();
+      const log = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(log).toContain("[audit] setupScript updated via update-profile");
+      expect(log).toContain(`targetAgentId=${WORKER_ID}`);
+      expect(log).toContain(`changedByAgentId=${WORKER_ID}`);
+      expect(log).toContain("+echo audit-test");
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
