@@ -7,7 +7,15 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { closeDb, createTaskExtended, createUser, getDb, getTaskById, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  getDb,
+  getTaskById,
+  initDb,
+} from "../be/db";
 import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleMcp } from "../http/mcp";
@@ -44,12 +52,13 @@ async function listen(server: Server): Promise<number> {
 function createTestServer(): Server {
   const transports: Record<string, StreamableHTTPServerTransport> = {};
   const transportsUser: Record<string, StreamableHTTPServerTransport> = {};
+  const mcpSessionAgents: Record<string, string> = {};
   const sessionUsers: Record<string, string> = {};
 
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const myAgentId = req.headers["x-agent-id"] as string | undefined;
     if (await handleCore(req, res, myAgentId, API_KEY)) return;
-    if (await handleMcp(req, res, transports)) return;
+    if (await handleMcp(req, res, transports, {}, mcpSessionAgents)) return;
     if (await handleMcpUser(req, res, transportsUser, sessionUsers)) return;
     res.writeHead(404);
     res.end("Not Found");
@@ -304,14 +313,70 @@ describe("/mcp-user auth and tool surface", () => {
     expect(listResult.result.structuredContent.tasks).toHaveLength(1);
   });
 
-  test("owner /mcp path still initializes with swarm API key", async () => {
-    const ownerHeaders = { "X-Agent-ID": "00000000-0000-4000-8000-000000000001" };
+  test("owner /mcp initialize requires a known X-Agent-ID", async () => {
+    const missing = await mcpPost(
+      API_KEY,
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          clientInfo: { name: "test", version: "1" },
+          capabilities: {},
+        },
+      },
+      undefined,
+      "/mcp",
+    );
+    expect(missing.response.status).toBe(401);
+
+    const unknown = await mcpPost(
+      API_KEY,
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          clientInfo: { name: "test", version: "1" },
+          capabilities: {},
+        },
+      },
+      undefined,
+      "/mcp",
+      { "X-Agent-ID": "00000000-0000-4000-8000-000000000001" },
+    );
+    expect(unknown.response.status).toBe(401);
+  });
+
+  test("owner /mcp path initializes with a known agent and rejects a different X-Agent-ID on the session", async () => {
+    const owner = createAgent({ name: "Owner MCP Agent", isLead: false, status: "idle" });
+    const other = createAgent({ name: "Other MCP Agent", isLead: false, status: "idle" });
+    const ownerHeaders = { "X-Agent-ID": owner.id };
     const sessionId = await initialize(API_KEY, "/mcp", ownerHeaders);
     await notifyInitialized(API_KEY, sessionId, "/mcp", ownerHeaders);
 
-    const { response, payload } = await mcpPost(
+    const mismatch = await mcpPost(
       API_KEY,
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      sessionId,
+      "/mcp",
+      { "X-Agent-ID": other.id },
+    );
+    expect(mismatch.response.status).toBe(401);
+
+    const missing = await mcpPost(
+      API_KEY,
+      { jsonrpc: "2.0", id: 3, method: "tools/list", params: {} },
+      sessionId,
+      "/mcp",
+    );
+    expect(missing.response.status).toBe(401);
+
+    const { response, payload } = await mcpPost(
+      API_KEY,
+      { jsonrpc: "2.0", id: 4, method: "tools/list", params: {} },
       sessionId,
       "/mcp",
       ownerHeaders,
