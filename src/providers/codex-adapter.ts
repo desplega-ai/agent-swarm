@@ -186,9 +186,27 @@ interface InstalledMcpServersResponse {
 export async function resolveCodexAuthMode(
   config: ProviderSessionConfig,
   emit: (event: ProviderEvent) => void,
+  deps: {
+    homedir?: () => string;
+    fs?: {
+      readFile: (path: string, encoding: "utf-8") => Promise<string>;
+      mkdir: (
+        path: string,
+        opts: { recursive: boolean; mode: number },
+      ) => Promise<string | undefined>;
+      writeFile: (path: string, data: string, opts: { mode: number }) => Promise<void>;
+    };
+  } = {},
 ): Promise<string | null> {
-  const fs = await import("node:fs/promises");
-  const authJsonPath = join(os.homedir(), ".codex", "auth.json");
+  const fsModule = await import("node:fs/promises");
+  const homedir = deps.homedir ?? os.homedir.bind(os);
+  const fs = deps.fs ?? {
+    readFile: (path: string, encoding: "utf-8") => fsModule.readFile(path, encoding),
+    mkdir: (path: string, opts: { recursive: boolean; mode: number }) => fsModule.mkdir(path, opts),
+    writeFile: (path: string, data: string, opts: { mode: number }) =>
+      fsModule.writeFile(path, data, opts),
+  };
+  const authJsonPath = join(homedir(), ".codex", "auth.json");
 
   const readAuthMode = async (): Promise<string | null> => {
     try {
@@ -225,7 +243,7 @@ export async function resolveCodexAuthMode(
     if (oauthCreds) {
       try {
         const authJson = credentialsToAuthJson(oauthCreds);
-        await fs.mkdir(join(os.homedir(), ".codex"), { recursive: true, mode: 0o700 });
+        await fs.mkdir(join(homedir(), ".codex"), { recursive: true, mode: 0o700 });
         await fs.writeFile(authJsonPath, JSON.stringify(authJson, null, 2), { mode: 0o600 });
         const verb =
           currentMode === null
