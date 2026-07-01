@@ -40,6 +40,7 @@ import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
+import { handleHarnessOAuth } from "./harness-oauth";
 import { handleHeartbeat } from "./heartbeat";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
@@ -302,6 +303,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleWorkflowEvents(req, res, pathSegments, queryParams),
         () => handleApprovalRequests(req, res, pathSegments, queryParams),
         () => handleConfig(req, res, pathSegments, queryParams),
+        () => handleHarnessOAuth(req, res, pathSegments, queryParams),
         () => handleKv(req, res, pathSegments, queryParams),
         () => handleIntegrations(req, res, pathSegments),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),

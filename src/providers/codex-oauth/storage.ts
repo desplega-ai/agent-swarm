@@ -13,7 +13,7 @@ import { refreshAccessToken } from "./flow.js";
 import type { CodexOAuthCredentials } from "./types.js";
 
 /** Legacy single-credential key — kept for backwards-compat fallback reads. */
-const CODEX_OAUTH_KEY_LEGACY = "codex_oauth";
+export const CODEX_OAUTH_KEY_LEGACY = "codex_oauth";
 
 /** Derive the swarm_config key for a given slot index. */
 export function codexOAuthKeyForSlot(slot: number): string {
@@ -170,6 +170,10 @@ export async function getValidCodexOAuth(
   apiKey: string,
   slot = 0,
 ): Promise<CodexOAuthCredentials | null> {
+  const serverResult = await refreshCodexOAuthViaServer(apiUrl, apiKey, slot);
+  if (serverResult.type === "success") return serverResult.credentials;
+  if (serverResult.type === "failed") return null;
+
   const creds = await loadCodexOAuth(apiUrl, apiKey, slot);
   if (!creds) return null;
 
@@ -199,4 +203,43 @@ export async function getValidCodexOAuth(
   }
 
   return refreshed;
+}
+
+async function refreshCodexOAuthViaServer(
+  apiUrl: string,
+  apiKey: string,
+  slot: number,
+): Promise<
+  | { type: "success"; credentials: CodexOAuthCredentials }
+  | { type: "unavailable" }
+  | { type: "failed" }
+> {
+  try {
+    const res = await fetch(`${apiUrl}/api/harness/oauth/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ provider: "codex", slot }),
+    });
+
+    if (res.status === 404) return { type: "unavailable" };
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error(`[codex-oauth] Server-side OAuth refresh failed: HTTP ${res.status} ${text}`);
+      return { type: "failed" };
+    }
+
+    const data = (await res.json()) as {
+      credentials?: CodexOAuthCredentials;
+      configs?: Array<unknown>;
+    };
+    if (!data.credentials && Array.isArray(data.configs)) return { type: "unavailable" };
+    if (!data.credentials) return { type: "failed" };
+    return { type: "success", credentials: data.credentials };
+  } catch (err) {
+    console.error("[codex-oauth] Server-side OAuth refresh request failed:", err);
+    return { type: "failed" };
+  }
 }
