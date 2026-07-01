@@ -10,6 +10,7 @@ import {
 import {
   artifactUrl,
   cancelRun,
+  getArtifactText,
   getAttempt,
   getAttemptProgress,
   getAttemptTasks,
@@ -2141,11 +2142,7 @@ function useArtifactText(id: string | null): {
     }
     let cancelled = false;
     setState({ id, text: null, error: null, loading: true });
-    fetch(artifactUrl(id))
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        return res.text();
-      })
+    getArtifactText(id)
       .then((text) => {
         artifactTextCache.set(id, text);
         if (!cancelled) setState({ id, text, error: null, loading: false });

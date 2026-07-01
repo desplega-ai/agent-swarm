@@ -74,6 +74,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function requestText(path: string, init?: RequestInit): Promise<string> {
+  const headers = new Headers(init?.headers);
+  const apiKey = getStoredApiKey();
+  if (apiKey && path.startsWith("/api/") && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${apiKey}`);
+  }
+  const res = await fetch(path, { ...init, headers });
+  if (res.status === 401) {
+    clearStoredApiKey();
+    onUnauthorized?.();
+  }
+  if (!res.ok) {
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
+  return res.text();
+}
+
 export function listRuns(): Promise<RunListItem[]> {
   return request("/api/runs");
 }
@@ -191,4 +208,8 @@ export function getAnalytics(filter?: {
 
 export function artifactUrl(id: string, opts?: { download?: boolean }): string {
   return `/api/artifacts/${encodeURIComponent(id)}${opts?.download ? "?download=1" : ""}`;
+}
+
+export function getArtifactText(id: string): Promise<string> {
+  return requestText(artifactUrl(id));
 }
